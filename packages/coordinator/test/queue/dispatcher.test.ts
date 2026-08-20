@@ -1180,3 +1180,20 @@ describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () =
     h.queue.dispose();
   });
 });
+
+describe("pre-allocated idempotency keys (SPEC-024 D2, R-19)", () => {
+  it("re-enqueueing a key that already journalled a job returns that job, never a second spend", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const key = "01J8E0000000000000000000K1";
+    const first = await h.queue.enqueue({ ...INPUT, idempotencyKey: key });
+    assert.equal(first.idempotencyKey, key, "the caller's key is the journalled key");
+    // The crash window this exists for: a plan recorded pass-materialised, enqueued, and died
+    // before recording the jobId — the reopened driver re-enqueues the same key.
+    const second = await h.queue.enqueue({ ...INPUT, idempotencyKey: key });
+    assert.equal(second.id, first.id, "one key, one job");
+    assert.equal(h.queue.listJobs().filter((job) => job.idempotencyKey === key).length, 1);
+    h.queue.dispose();
+  });
+});

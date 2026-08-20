@@ -24,6 +24,7 @@ import {
   promptFor,
   STANDARD_ASPECTS,
   type CompiledPass,
+  type PlanState,
   worldSheets,
   type Scene,
   type Sheet,
@@ -80,9 +81,15 @@ import {
   placeOverlay,
   removeOverlay,
   uploadArtifacts,
+  dispatchScenePlanned,
+  listPlans,
+  planCancel,
+  planContinue,
+  planReconfirm,
   setProductionAspect,
   setPromptOverride,
   setShotTrim,
+  subscribePlanStates,
   useExports,
   useStore,
   useWorld,
@@ -1646,6 +1653,76 @@ function GeneratePromptEditor({
 
 // ---- Dispatch + voice-line dialogs ----------------------------------------
 
+/**
+ * The production's durable dispatch plans (SPEC-024): folded server-side from disk and the
+ * queue, requested on mount and refreshed by push — never a timer. Blocked and awaiting states
+ * are named, and the awaits are buttons, because they are the user's acts by definition.
+ */
+function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
+  const [states, setStates] = useState<PlanState[] | null>(null);
+  useEffect(() => {
+    const unsubscribe = subscribePlanStates((event) => {
+      if (event.productionId === prodId) setStates(event.states);
+    });
+    listPlans(worldId, prodId);
+    return unsubscribe;
+  }, [worldId, prodId]);
+  if (!states || states.length === 0) return null;
+  const passLine = (state: PlanState, pass: PlanState["passes"][number]): string => {
+    const label = `pass ${pass.passIndex}`;
+    if (pass.state === "blocked") return `${label} · blocked — ${pass.reason ?? "extraction failed"}`;
+    if (pass.state === "failed") return `${label} · failed — ${pass.reason ?? "the job failed"}`;
+    if (pass.state === "halted") return `${label} · will not run — ${pass.reason ?? state.haltReason ?? ""}`;
+    return `${label} · ${pass.state}`;
+  };
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="fy-listhead">Plans</div>
+      {states.map((state) => (
+        <div key={state.planId} className="fy-boardcard" style={{ marginTop: 8 }}>
+          <div className="fy-boardcard__head">
+            {state.policy === "review-gated" ? "Review-gated" : "Pre-authorized"} · {state.status} · cap{" "}
+            {usd(state.capMicroUsd)}
+          </div>
+          <div className="fy-boardcard__mono">
+            {state.passes.map((pass) => (
+              <span key={pass.passIndex}>
+                {passLine(state, pass)}
+                {"\n"}
+              </span>
+            ))}
+            {state.haltReason !== undefined && `halted: ${state.haltReason}`}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            {state.next.kind === "await-continue" && (
+              <Button
+                variant="primary"
+                onClick={() => planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+              >
+                Continue · pass {state.next.passIndex} ·{" "}
+                {usd(state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0)}
+              </Button>
+            )}
+            {state.next.kind === "await-reconfirm" && (
+              <Button
+                variant="primary"
+                onClick={() => planReconfirm(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+              >
+                Reconfirm · pass {state.next.passIndex} runs past the {usd(state.capMicroUsd)} cap
+              </Button>
+            )}
+            {state.status !== "completed" && state.status !== "cancelled" && (
+              <Button variant="ghost" onClick={() => planCancel(worldId, prodId, state.planId)}>
+                Cancel plan
+              </Button>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DispatchDialogScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -1961,7 +2038,7 @@ export function DispatchDialogScreen() {
                       </span>
                     ))}
                   </div>
-                  <div style={{ marginTop: 12 }}>
+                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                     <Button
                       variant="primary"
                       onClick={() => {
@@ -1973,6 +2050,32 @@ export function DispatchDialogScreen() {
                     >
                       Dispatch whole scene · {usd(plans.wholeScene.totalEstimatedMicroUsd)}
                     </Button>
+                    {/* SPEC-024: a plan chains each pass behind the previous pass's boundary
+                        frame — offered exactly where a route exists to receive one. */}
+                    {model && frameDispatchFor(model, 1) !== null && plans.wholeScene.pack.passes.length > 1 && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId && prodId && sceneFile && model) {
+                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "review-gated", resolution, choice.tier);
+                            }
+                          }}
+                        >
+                          Plan · continuity chain · ask before each pass
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => {
+                            if (worldId && prodId && sceneFile && model) {
+                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "pre-authorized", resolution, choice.tier);
+                            }
+                          }}
+                        >
+                          Plan · continuity chain · pre-authorize {usd(plans.wholeScene.totalEstimatedMicroUsd)}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </>
               ) : (
@@ -1984,6 +2087,7 @@ export function DispatchDialogScreen() {
             </div>
           </div>
         )}
+        {worldId && prodId && <PlansPanel worldId={worldId} prodId={prodId} />}
       </div>
     </div>
   );

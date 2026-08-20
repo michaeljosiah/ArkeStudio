@@ -1362,6 +1362,58 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       aspect: z.string().min(1).max(20),
     })
     .strict(),
+  /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z
+    .object({
+      kind: z.literal("dispatch-scene-planned"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      mode: z.enum(["per-shot", "whole-scene"]),
+      modelId: z.string().min(1),
+      policy: z.enum(["review-gated", "pre-authorized"]),
+      resolution: z.string().min(1).optional(),
+      tier: SizeTierSchema.optional(),
+    })
+    .strict(),
+  /** SPEC-024 R-16: the visible act a review-gated plan requires before its next pass. */
+  z
+    .object({
+      kind: z.literal("plan-continue"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+      passIndex: z.number().int().min(0),
+    })
+    .strict(),
+  /** SPEC-024 R-17: the fresh act that covers an estimate the authorization did not. */
+  z
+    .object({
+      kind: z.literal("plan-reconfirm"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+      passIndex: z.number().int().min(0),
+    })
+    .strict(),
+  /** SPEC-024 R-25: stop all future materialisation; landed work is untouched. */
+  z
+    .object({
+      kind: z.literal("plan-cancel"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      planId: z.string().min(1),
+    })
+    .strict(),
+  /** SPEC-024 R-10: ask for the folded states of a production's plans. */
+  z
+    .object({
+      kind: z.literal("list-plans"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
   /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
   z
     .object({

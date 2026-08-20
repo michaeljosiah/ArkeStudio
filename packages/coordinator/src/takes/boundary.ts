@@ -94,6 +94,97 @@ export type BoundaryChainResult =
   | { ok: true; artifactId: string; followingShotId: string }
   | { ok: false; reason: string };
 
+export type BoundaryExtractResult =
+  | { ok: true; artifactId: string; hash: string; file: string }
+  | { ok: false; reason: string };
+
+/**
+ * Cut a take's boundary still and file it durably — the extraction half alone (SPEC-024 R-18):
+ * dispatch plans gate passes on this artifact without touching any shot's selection. Total,
+ * named failures, no provider money anywhere near it.
+ */
+export async function extractBoundaryArtifact(
+  store: WorldStore,
+  production: ProductionBundle,
+  input: {
+    take: Take;
+    /** Lands in the artifact's filename, so two consumers never collide on a name. */
+    label: string;
+    maker: BoundaryFrameMaker | undefined;
+    clock: () => string;
+  },
+): Promise<BoundaryExtractResult> {
+  const { take, label, maker, clock } = input;
+  if (maker === undefined) return { ok: false, reason: "not-configured" };
+
+  const mediaTakeId = take.segment?.passTakeId ?? take.id;
+  const mediaTake = take.segment !== undefined ? production.takes.find((t) => t.id === mediaTakeId) : take;
+  const media = mediaTake?.media;
+  if (media === undefined) return { ok: false, reason: `take ${mediaTakeId} has no media to cut a frame from` };
+  if (!isVideoMedia(media)) return { ok: false, reason: `take ${mediaTakeId}'s media is not footage` };
+  const atSec = take.segment?.outSec ?? null;
+
+  const inputPath = join(store.dir, "productions", production.meta.id, "takes", mediaTakeId, media);
+  const stagingDir = join(store.dir, ".cache", "boundary");
+  const stagingPath = join(stagingDir, `${ulid()}.png`);
+  try {
+    await mkdir(toExtendedLength(stagingDir), { recursive: true });
+  } catch {
+    return { ok: false, reason: "could not stage the extraction" };
+  }
+  try {
+    const outcome = await maker.write(toExtendedLength(inputPath), toExtendedLength(stagingPath), atSec);
+    if (!outcome.ok) return { ok: false, reason: `extraction from take ${mediaTakeId} failed: ${outcome.reason}` };
+
+    let png: Buffer;
+    try {
+      png = await readFile(toExtendedLength(stagingPath));
+    } catch {
+      return { ok: false, reason: `extraction from take ${mediaTakeId} wrote nothing` };
+    }
+    if (png.byteLength === 0) return { ok: false, reason: `extraction from take ${mediaTakeId} wrote an empty file` };
+
+    const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
+    const file = `boundary-${label}-${stamp}.png`;
+    const sidecar: ArtifactSidecar = {
+      id: `ar_${ulid()}`,
+      kind: "image",
+      file,
+      hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
+      origin: { by: "system", producedBy: `boundary-frame:${take.id}` },
+      links: [production.meta.id, take.id],
+      production: production.meta.id,
+      boundaryExtraction: {
+        sourceTakeId: take.id,
+        mediaTakeId,
+        atSec,
+        method: BOUNDARY_METHOD,
+      },
+      created: clock(),
+    };
+    await store.gateOp(async () => {
+      await atomicWriteFile(join(store.dir, "artifacts", file), png);
+      await store.commitUnserialised({
+        kind: "boundary-frame",
+        source: `boundary-frame:${take.id}`,
+        files: [
+          {
+            path: `artifacts/${file}.json`,
+            action: "create",
+            content: JSON.stringify(sidecar, null, 2) + "\n",
+            baseHash: null,
+          },
+        ],
+      });
+    });
+    return { ok: true, artifactId: sidecar.id, hash: sidecar.hash, file };
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  } finally {
+    await rm(toExtendedLength(stagingPath), { force: true }).catch(() => {});
+  }
+}
+
 /**
  * Cut the boundary frame an accepted take seeds the following shot with, file it durably, and
  * point the following shot's selection at it — one artifact plus one selection write, in one

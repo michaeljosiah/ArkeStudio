@@ -136,9 +136,22 @@ export {
   type TakePosterUnavailableReason,
 } from "./takes/poster.js";
 export {
+  advanceAllPlans,
+  advancePlan,
+  appendPlanEvents,
+  createDispatchPlan,
+  listPlans,
+  planState,
+  readPlanEvents,
+  type CreatePlanInput,
+  type PlanDriverDeps,
+} from "./productions/plans.js";
+export {
   boundaryFrameArgs,
   chainBoundaryFrame,
   createBoundaryFrameMaker,
+  extractBoundaryArtifact,
+  type BoundaryExtractResult,
   BOUNDARY_MAX_OUTPUT_BYTES,
   BOUNDARY_METHOD,
   BOUNDARY_TIMEOUT_MS,

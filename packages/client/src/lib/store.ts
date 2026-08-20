@@ -309,6 +309,19 @@ export function subscribeProductionCreateResults(listener: (result: ProductionCr
   return () => productionCreateListeners.delete(listener);
 }
 
+export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
+export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
+const planResultListeners = new Set<(result: PlanResult) => void>();
+const planStateListeners = new Set<(event: PlanStateEvent) => void>();
+export function subscribePlanResults(listener: (result: PlanResult) => void): () => void {
+  planResultListeners.add(listener);
+  return () => planResultListeners.delete(listener);
+}
+export function subscribePlanStates(listener: (event: PlanStateEvent) => void): () => void {
+  planStateListeners.add(listener);
+  return () => planStateListeners.delete(listener);
+}
+
 export function subscribeJobReady(listener: (job: Job) => void): () => void {
   jobReadyListeners.add(listener);
   return () => jobReadyListeners.delete(listener);
@@ -570,6 +583,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "production.plan-result") {
+      for (const listener of planResultListeners) listener(event);
+    }
+    if (event.type === "production.plan-state") {
+      for (const listener of planStateListeners) listener(event);
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
@@ -2259,6 +2278,56 @@ export function reorderScenes(worldId: string, productionId: string, orderedIds:
 /** Change the aspect a production delivers in (issue 389) — validated and normalized server-side. */
 export function setProductionAspect(worldId: string, productionId: string, aspect: string): void {
   send({ kind: "set-production-aspect", worldId, productionId, aspect });
+}
+
+/**
+ * Dispatch a scene under a durable plan (SPEC-024): the aggregate is written and authorized
+ * before any pass reaches a provider. Returns the requestId the plan-result answers to.
+ */
+export function dispatchScenePlanned(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  mode: "per-shot" | "whole-scene",
+  modelId: string,
+  policy: "review-gated" | "pre-authorized",
+  resolution?: string,
+  tier?: SizeTier,
+): string {
+  const requestId = ulid();
+  send({
+    kind: "dispatch-scene-planned",
+    requestId,
+    worldId,
+    productionId,
+    sceneFile,
+    mode,
+    modelId,
+    policy,
+    ...(resolution !== undefined ? { resolution } : {}),
+    ...(tier !== undefined ? { tier } : {}),
+  });
+  return requestId;
+}
+
+/** The visible act a review-gated plan requires before its next pass (SPEC-024 R-16). */
+export function planContinue(worldId: string, productionId: string, planId: string, passIndex: number): void {
+  send({ kind: "plan-continue", worldId, productionId, planId, passIndex });
+}
+
+/** The fresh act that covers an estimate the authorization did not (SPEC-024 R-17). */
+export function planReconfirm(worldId: string, productionId: string, planId: string, passIndex: number): void {
+  send({ kind: "plan-reconfirm", worldId, productionId, planId, passIndex });
+}
+
+/** Stop all future materialisation; landed work is untouched (SPEC-024 R-25). */
+export function planCancel(worldId: string, productionId: string, planId: string): void {
+  send({ kind: "plan-cancel", worldId, productionId, planId });
+}
+
+/** Ask for the folded states of a production's plans — also the restart reconciliation. */
+export function listPlans(worldId: string, productionId: string): void {
+  send({ kind: "list-plans", worldId, productionId });
 }
 
 export function setPromptOverride(

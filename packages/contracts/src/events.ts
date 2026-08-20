@@ -131,6 +131,31 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** A durable dispatch plan was created — or refused, in the compiler's words (SPEC-024 R-12). */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.plan-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["created", "failed"]),
+      planId: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** The folded states of a production's dispatch plans (SPEC-024 R-10) — disk truth, no timer. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.plan-state"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      states: z.array(z.custom<import("./dispatch-plan.js").PlanState>()),
+    })
+    .strict(),
+
   /** The world canon revision advanced (accepting any canon change increments once, §2.4). */
   z
     .object({

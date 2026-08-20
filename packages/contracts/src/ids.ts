@@ -69,6 +69,8 @@ export const ID_PREFIXES = {
   marker: "mk",
   /** One artifact placed over the picture at a time the author chose (82a). */
   overlay: "ov",
+  /** One durable scene-dispatch plan (SPEC-024 R-1). */
+  dispatchPlan: "pl",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -82,6 +84,7 @@ export function prefixedIdSchema(prefix: IdPrefix): z.ZodString {
 }
 
 export const TakeIdSchema = prefixedIdSchema("tk");
+export const PlanIdSchema = prefixedIdSchema("pl");
 export const JobIdSchema = prefixedIdSchema("jb");
 export const PassIdSchema = prefixedIdSchema("ps");
 export const ProposalIdSchema = prefixedIdSchema("pr");

@@ -4,6 +4,7 @@ import {
   boundFiles,
   composePrompt,
   passStructure,
+  START_FRAME_PREAMBLE,
   type BoundaryFramePlan,
   type ScenePlan,
   type ShotPlanEntry,
@@ -201,6 +202,15 @@ export interface CompilePassesInput {
   plan: ScenePlan;
   model: ManifestModel;
   world: Pick<WorldBundle, "meta" | "sheets" | "artDirection">;
+  /**
+   * Compile every whole-scene pass after the first as a frame-routed continuation (SPEC-024
+   * R-6): the pass opens on a boundary still cut from the previous pass's clip, which does not
+   * exist yet — so the route, the preamble and the price commit to the first-frame route now,
+   * and the frame fields are bound at materialisation. Requires a model with a first-frame
+   * route; ignored otherwise, because a chain no route can honour is just today's independent
+   * passes wearing a promise.
+   */
+  chainWholeSceneFrames?: boolean;
 }
 
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
@@ -312,11 +322,20 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   }
 
   if (!plan.pack.ok) return [];
-  return plan.pack.passes.map((pass) => {
+  const chainFrameRoute = input.chainWholeSceneFrames === true ? frameDispatchFor(model, 1) : null;
+  return plan.pack.passes.map((pass, position) => {
     const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
-    const references = boundFiles(passReferencePlan.bound);
-    const route: CompiledRoute = references.length > 0 ? { kind: "reference" } : { kind: "text" };
+    // A chained continuation pass (SPEC-024 R-6): opens on the previous pass's boundary still,
+    // which does not exist yet. The first-frame route takes one image, so the sheet references
+    // step aside now — named — and the frame fields are bound at materialisation.
+    const chained = chainFrameRoute !== null && model.capability === "video" && position > 0;
+    const references = chained ? [] : boundFiles(passReferencePlan.bound);
+    const route: CompiledRoute = chained
+      ? { kind: "frame", mode: chainFrameRoute.mode, endpoint: chainFrameRoute.route }
+      : references.length > 0
+        ? { kind: "reference" }
+        : { kind: "text" };
     const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`, route);
     if (references.length > model.accepts.referenceImages) {
       throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
@@ -368,7 +387,9 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             // prompt's stated shape must be the shape the parameters ask for.
             aspect: plan.aspect,
           }),
-          preamble: bindingPreamble(passReferencePlan.bound),
+          // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
+          // numbers its assets. Never both — the route carries one or the other.
+          preamble: chained ? START_FRAME_PREAMBLE : bindingPreamble(passReferencePlan.bound),
           body: passBody,
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
           // be the same request (R-9).
@@ -383,13 +404,22 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         shotPlan: coverPlan(pass.plan, passSeconds),
         provenance,
       },
-      references: compiledReferences(passReferencePlan.bound, world.sheets),
+      references: chained ? [] : compiledReferences(passReferencePlan.bound, world.sheets),
       askedSec: passSeconds,
       // Priced at the same size and the same length the job runs at. Recomputing it without
       // either queued a 1080p pass carrying a 720p figure, priced a pass of stills as if it
       // were footage, and used the seconds planned rather than the seconds asked for.
       estimatedMicroUsd: passEstimate(model, plan, passSeconds, references.length),
-      dropped: droppedOf(passReferencePlan.budget),
+      dropped: droppedOf(
+        passReferencePlan.budget,
+        chained
+          ? [...new Set(passReferencePlan.bound.map((reference) => reference.sheetId))].map((sheetId) => ({
+              sheetId,
+              role: "primary",
+              reason: "the frame route takes one image — the previous pass's boundary frame rides instead",
+            }))
+          : [],
+      ),
       sources: sourcesFor(provenance.sheets),
       landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
     };

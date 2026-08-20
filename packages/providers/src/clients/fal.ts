@@ -225,6 +225,10 @@ export class FalClient implements ProviderClient {
       // itself already travelled as the mode's image field.
       "startFrame",
       "frameArtifact",
+      // Ours, not fal's: which authorization spent this (SPEC-024 R-26) — recorded on the take,
+      // never sent to a provider.
+      "planId",
+      "passIndex",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.

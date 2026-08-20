@@ -93,6 +93,15 @@ import {
   setProductionAspect,
   setPromptOverride,
 } from "./productions/ops.js";
+import {
+  advancePlan,
+  advanceAllPlans,
+  appendPlanEvents,
+  createDispatchPlan,
+  listPlans,
+  planState,
+  type PlanDriverDeps,
+} from "./productions/plans.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
 import { ProviderToolService, type ToolProbe } from "./providers/tool.js";
 import { ProviderCallStore } from "./providers/call-store.js";
@@ -728,7 +737,19 @@ export class Coordinator {
             clients: opts.dispatchClients,
             getKey: async (provider) =>
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
-            emit: (event) => this.emit(event),
+            emit: (event) => {
+              this.emit(event);
+              // A plan job settling is what unblocks its dependents (SPEC-024 R-18): advance is
+              // a fold plus one durable act, so firing it here costs nothing when nothing moved.
+              if (
+                event.type === "job.updated" &&
+                (event.job.status === "succeeded" ||
+                  event.job.status === "failed" ||
+                  event.job.status === "cancelled")
+              ) {
+                void this.advancePlansForJob(event.job).catch(() => {});
+              }
+            },
             ledger: {
               readJobIds: () => this.ledger!.readJobIds(),
               has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
@@ -3507,6 +3528,136 @@ export class Coordinator {
         if (!store) return;
         await reorderScenes(store, msg.productionId, msg.orderedIds).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "dispatch-scene-planned": {
+        const fail = (reason: string): void =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.plan-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            disposition: "failed",
+            reason,
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || !this.opts.manifest) {
+          fail("The scene could not be prepared for a plan.");
+          return;
+        }
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const scene = production?.scenes.find((s) => production.sceneFiles[s.id] === msg.sceneFile);
+        const model = this.opts.manifest.models.find((m) => m.id === msg.modelId);
+        if (!production || !scene || !model) {
+          fail("The scene or selected model is no longer available.");
+          return;
+        }
+        const audioDesign = await audioDesignFor(store, production.meta.id);
+        // The same plan the dialog reviewed, recomputed server-side — then compiled and made
+        // durable BEFORE any pass may reach a provider (SPEC-024 R-12).
+        const scenePlan = planScene(
+          {
+            world: bundle.meta,
+            artDirection: bundle.artDirection,
+            productionId: production.meta.id,
+            production: {
+              ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+              failureModes: production.meta.failureModes,
+            },
+            sheets: bundle.sheets,
+            kits: bundle.referenceKits,
+            scene,
+            selections: production.selections,
+            model,
+            audioDesign,
+            artifacts: bundle.artifacts,
+            ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
+            ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
+            ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
+          },
+          msg.mode,
+        );
+        try {
+          const aggregate = await createDispatchPlan(store, {
+            worldId: msg.worldId,
+            productionId: production.meta.id,
+            scene,
+            plan: scenePlan,
+            model,
+            world: bundle,
+            policy: msg.policy,
+            requestId: msg.requestId,
+            clock: () => new Date().toISOString(),
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.plan-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: production.meta.id,
+            disposition: "created",
+            planId: aggregate.planId,
+          });
+          await advancePlan(store, production, bundle, aggregate, this.planDriverDeps());
+          await this.emitPlanStates(store, msg.worldId, production.meta.id);
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+        }
+        return;
+      }
+      case "plan-continue":
+      case "plan-reconfirm": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
+        if (!production || !plan) return;
+        // The visible act, recorded before anything moves (SPEC-024 R-16/R-17). Appending twice
+        // is harmless — the fold reads presence, not count.
+        await appendPlanEvents(store, msg.productionId, msg.planId, [
+          {
+            kind: msg.kind === "plan-continue" ? "continue-approved" : "reconfirmed",
+            ts: new Date().toISOString(),
+            planId: msg.planId,
+            passIndex: msg.passIndex,
+          },
+        ]);
+        await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "plan-cancel": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
+        if (!plan) return;
+        const state = await planState(store, plan, this.planDriverDeps());
+        await appendPlanEvents(store, msg.productionId, msg.planId, [
+          { kind: "cancelled", ts: new Date().toISOString(), planId: msg.planId },
+        ]);
+        // Future spend stops here; in-flight jobs are asked to stop through SPEC-009, which
+        // owes no promise about work already running at a provider (R-25).
+        for (const pass of state.passes) {
+          if (pass.state === "enqueued" && pass.jobId !== undefined) {
+            await this.jobQueue?.cancel(pass.jobId).catch(() => {});
+          }
+        }
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
+        return;
+      }
+      case "list-plans": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        const bundle = store.getBundle();
+        const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
+        if (!production) return;
+        // Recovery on request (T-19): advancing is a fold plus at most one durable act per pass,
+        // so the first screen that asks after a restart is the reconciliation.
+        await advanceAllPlans(store, production, bundle, this.planDriverDeps()).catch(() => {});
+        await this.emitPlanStates(store, msg.worldId, msg.productionId);
         return;
       }
       case "set-production-aspect": {
@@ -6766,6 +6917,59 @@ export class Coordinator {
 
   private nowIso(): string {
     return new Date().toISOString();
+  }
+
+  /** What a plan driver needs (SPEC-024): the queue, the queue's facts, and the extractor. */
+  private planDriverDeps(): PlanDriverDeps {
+    return {
+      enqueue: (input) => {
+        if (!this.jobQueue) throw new Error("the queue is not available");
+        return this.jobQueue.enqueue(input);
+      },
+      jobFacts: (jobIds) => {
+        const wanted = new Set(jobIds);
+        return (this.jobQueue?.listJobs() ?? [])
+          .filter((job) => wanted.has(job.id))
+          .map((job) => ({ id: job.id, status: job.status }));
+      },
+      boundaryFrameMaker: this.opts.boundaryFrameMaker,
+      clock: () => new Date().toISOString(),
+      onRefused: (planId, reason) => {
+        void this.appLog?.append({ kind: "plan.enqueue-refused", planId, reason });
+      },
+    };
+  }
+
+  /** The folded states of a production's plans, pushed as one event — disk truth, no timer. */
+  private async emitPlanStates(store: WorldStore, worldId: string, productionId: string): Promise<void> {
+    const plans = await listPlans(store, productionId);
+    const deps = this.planDriverDeps();
+    const states = [];
+    for (const plan of plans) states.push(await planState(store, plan, deps));
+    this.emit({
+      at: new Date().toISOString(),
+      type: "production.plan-state",
+      worldId,
+      productionId,
+      states,
+    });
+  }
+
+  /** A settled plan job unblocks its dependents (SPEC-024 R-18): refresh, advance, push state. */
+  private async advancePlansForJob(job: Job): Promise<void> {
+    const planId = job.params["planId"];
+    if (typeof planId !== "string" || job.productionId === undefined) return;
+    const store = this.opts.provider.openStore?.();
+    if (!store || store.worldId !== job.worldId) return;
+    // The landed take must be visible to the bundle before extraction can find it.
+    await this.refreshWorldSnapshot(job.worldId).catch(() => {});
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((p) => p.meta.id === job.productionId);
+    if (!production) return;
+    const plan = (await listPlans(store, job.productionId)).find((p) => p.planId === planId);
+    if (!plan) return;
+    await advancePlan(store, production, bundle, plan, this.planDriverDeps()).catch(() => {});
+    await this.emitPlanStates(store, job.worldId, job.productionId).catch(() => {});
   }
 
   /** The open world's bench session by id, or null — a closed world answers no bench command. */
