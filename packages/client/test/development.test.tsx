@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ClientState, Episode } from "@arke-studio/contracts";
+import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { StoryScreen } from "../src/screens/production.js";
+import { ProductionChatScreen, StoryScreen } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen } from "../src/screens/development.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -197,5 +197,149 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /Talk it through/);
     assert.match(html, /← Season/);
     assert.match(html, /every change is a proposal/);
+  });
+});
+
+/** A proposal staged against one path, with the gate's own reading of what it would change. */
+function stagedAgainst(path: string, fields: Array<[string, string]>, summary: string): StagedProposal {
+  return {
+    proposal: {
+      id: "pr_01J8H0000000000000000000T9",
+      kind: "episode-edit",
+      summary,
+      targets: [{ path, baseVersion: null, baseHash: null }],
+      baseCanonRevision: 42,
+      reservedCanonIds: [],
+      source: "form",
+      created: "2026-08-20T18:00:00Z",
+      draftRevision: 1,
+    },
+    ripple: null,
+    review: {
+      targets: [
+        {
+          path,
+          label: summary,
+          kind: "episode · v1",
+          action: "create",
+          fields: fields.map(([field, proposed]) => ({ field, before: null, proposed })),
+        },
+      ],
+    },
+  };
+}
+
+function withProposal(state: ClientState, staged: StagedProposal): ClientState {
+  return { ...state, world: { ...state.world!, proposals: [staged] } };
+}
+
+describe("a press that stages something says so where it was pressed (design turn 92)", () => {
+  const PROD = "bell-watch-season-1";
+
+  it("an episode staged and not yet written is a tile on the board, not a gap", () => {
+    // The press staged the episode correctly and the board did not change by one character; the
+    // only mark was an unlabelled dot in the far corner of the chrome.
+    const staged = stagedAgainst(
+      `productions/${PROD}/episodes/episode-04.json`,
+      [["Title", "Episode 04"], ["Order", "4"]],
+      "New episode · Episode 04",
+    );
+    const html = render(
+      withProposal(withMicrodrama([ONE]), staged),
+      SEASON(PROD),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    assert.match(html, /STAGED · NOT WRITTEN YET/, "the tile says what happened to it");
+    assert.match(html, /Started\. Waiting on the gate\./);
+    assert.match(html, /1 started and waiting on the gate/, "and the board counts it");
+    // Seven promised, one written, one started — five untouched, not six.
+    assert.match(html, /5 of 7 promised by the season and not started/);
+  });
+
+  it("the gate's own labels are what the board reads, whatever their case", () => {
+    // The review labels fields for reading — "Title", "Order" — not by the record's key names,
+    // and a lowercase lookup silently produced an unnumbered tile carrying a summary for a title.
+    const staged = stagedAgainst(
+      `productions/${PROD}/episodes/episode-04.json`,
+      [["Title", "The answering hour"], ["Order", "4"]],
+      "New episode · Episode 04",
+    );
+    const html = render(
+      withProposal(withMicrodrama([ONE]), staged),
+      SEASON(PROD),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    assert.match(html, /The answering hour/, "the staged title, not the proposal's summary");
+    assert.doesNotMatch(html, />··</, "and its number, not a placeholder");
+  });
+});
+
+describe("one control, one destination (design turn 92)", () => {
+  it("every episode tile opens the episode's page, written or not", () => {
+    // This branched on whether anything was written, so the same click landed in two places
+    // according to state a person cannot see before clicking.
+    const html = render(
+      withMicrodrama([
+        episode("ep_written", 1, { promise: { opens: "The page is gone." } }),
+        episode("ep_blank", 2),
+      ]),
+      SEASON("bell-watch-season-1"),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    // Both tiles are links, so where each leads is in the markup and readable. This assertion is
+    // the reason they are links: with onClick the destination never reached the HTML at all, and
+    // the test passed just as happily with the branch still in place.
+    for (const id of ["ep_written", "ep_blank"]) {
+      assert.match(html, new RegExp(`href="[^"]*/p/bell-watch-season-1/episodes/${id}"`), `${id} opens its page`);
+    }
+    assert.doesNotMatch(html, /href="[^"]*\/story\/episodes\//, "and neither opens a chat");
+  });
+});
+
+describe("the season level has a wrap-up and an accept (design turn 92)", () => {
+  const CHAT = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/story`;
+  const chat = (state: ClientState) =>
+    render(state, CHAT, <ProductionChatScreen />, "/w/:worldId/p/:prodId/story");
+
+  it("offers the wrap-up 89a draws, and says why it cannot be pressed yet", () => {
+    // Production Chat had a link to Season and nothing else: no way to stage what had been said,
+    // no way to accept it. The first hop anybody walks was the one place the pattern was missing.
+    const html = chat(withMicrodrama([ONE]));
+    assert.match(html, /Wrap up · stage what is settled/);
+    assert.match(html, /nothing is settled yet · save a point above to make it ready/);
+  });
+
+  it("becomes the staged season under one Accept once wrap-up has run", () => {
+    const staged = stagedAgainst(
+      "productions/bell-watch-season-1/season.json",
+      [["Question", "Who is ringing the drowned bell?"], ["Ending", "She rings to be found."]],
+      "The season, as it stands",
+    );
+    const html = chat(withProposal(withMicrodrama([ONE]), staged));
+    assert.match(html, /Ready to accept/);
+    assert.match(html, /Accept Proposal/);
+    assert.match(html, /She rings to be found\./, "the field the gate says would change");
+    assert.match(html, /the gate writes season\.json · nothing else moves/);
+    // The rail has two states and never both at once (turns 89, 91).
+    assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
+  });
+
+  it("a production with no season stages its overview instead", () => {
+    const staged = stagedAgainst(
+      "productions/saltlight/story.json",
+      [["Logline", "One night on the Vigil."]],
+      "The story, as it stands",
+    );
+    const html = render(
+      withProposal(withMicrodrama([]), staged),
+      `/w/${FIXTURE_WORLD_ID}/p/saltlight/story`,
+      <ProductionChatScreen />,
+      "/w/:worldId/p/:prodId/story",
+    );
+    assert.match(html, /the gate writes story\.json · nothing else moves/);
+    assert.match(html, /the overview/, "named as what it is, not as a season");
   });
 });

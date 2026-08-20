@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import type { WorldChatContext, WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { StagedProposal, WorldChatContext, WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
+  acceptProposal,
   cancelWorldChat,
   createWorldChat,
   rejectWorldChatPoint,
@@ -11,9 +12,11 @@ import {
   sendWorldChat,
   useStore,
   useWorldChatProgress,
+  useWorldChatWrapUpRefusal,
+  wrapUpWorldChat,
 } from "../lib/store.js";
 import { Working } from "./working.js";
-import { Button, cx } from "./ui.js";
+import { Badge, Button, cx } from "./ui.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -270,6 +273,7 @@ export function ProductionConversation({
     );
   }
   if (pointsEmpty === undefined) return pane;
+  const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   return (
     <>
       {pane}
@@ -293,6 +297,142 @@ export function ProductionConversation({
         <div className="fy-mono" style={{ marginTop: 10 }}>
           still soft · saying more changes them · wrap-up is what stages them
         </div>
+        {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
+            nowhere, which left the season — the first hop anybody walks — with no way to turn a
+            conversation into anything at all. */}
+        <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null} carried={carried} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * Wrap-up: the end of a conversation, in one press (design turns 89, 92).
+ *
+ * What is settled gets staged together, as one proposal, at the gate. Nothing is written by this
+ * button — the accept that follows does that, and it lives in this same rail once there is
+ * something to accept.
+ */
+function WrapUp({
+  worldId,
+  conversationId,
+  seq,
+  carried,
+}: {
+  worldId: string | undefined;
+  conversationId: string | null;
+  seq: number | null;
+  carried: number;
+}) {
+  const [wrapping, setWrapping] = useState(false);
+  const asked = useRef<string | null>(null);
+  const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
+  const refusedMine = refusal !== null && refusal.requestId === asked.current;
+  useEffect(() => {
+    if (wrapping && refusedMine) setWrapping(false);
+  }, [wrapping, refusedMine]);
+  // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+      <Button
+        variant="primary"
+        size="lg"
+        disabled={carried === 0 || !worldId || conversationId === null || seq === null || wrapping}
+        onClick={() => {
+          if (!worldId || conversationId === null || seq === null) return;
+          const attempt = wrapUpWorldChat(worldId, conversationId, seq);
+          if (!attempt) return;
+          asked.current = attempt;
+          setWrapping(true);
+        }}
+      >
+        {wrapping ? "Staging them…" : `Wrap up · stage what is settled${carried > 0 ? ` · ${carried}` : ""}`}
+      </Button>
+      {/* A refused wrap-up wrote nothing, so the panel above is unchanged and says nothing about
+          it. Without this line the press leaves no trace at all. */}
+      {refusal && !wrapping && (
+        <div className="fy-panel__refused" role="status">
+          {refusal.detail}
+        </div>
+      )}
+      <div className="fy-mono">
+        {carried === 0
+          ? "nothing is settled yet · save a point above to make it ready"
+          : "talking changes nothing · the gate writes it"}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The rail in its second state: what one conversation settled, staged and waiting on a yes
+ * (design turns 91, 92).
+ *
+ * One component for every level, because the decision is the same one at every level and drawing
+ * it twice is how two versions of it drift. `Turn this into a proposal` is retired: by the time a
+ * person is reading what the conversation settled it already is one, and a button converting a
+ * noun into another noun names an implementation step rather than the decision being made. The
+ * fields come from the gate's own per-target review, so this cannot claim a change the gate would
+ * not make.
+ */
+export function StagedDecision({
+  worldId,
+  subject,
+  staged,
+  writes,
+  onAccepted,
+}: {
+  worldId: string | undefined;
+  /** What is being decided, in the words of the level — "season", "episode 03". */
+  subject: string;
+  staged: StagedProposal;
+  /** What accepting does, said plainly under the button. */
+  writes: string;
+  onAccepted: () => void;
+}) {
+  const fields = staged.review?.targets.flatMap((t) => t.fields) ?? [];
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <div style={{ font: "600 15px var(--font-sans)" }}>Ready to accept</div>
+        <span className="fy-mono">{subject}</span>
+      </div>
+      <div className="fy-mono" style={{ marginTop: 6 }}>
+        this is the proposal · nothing above it has been written
+      </div>
+      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        {fields.map((field) => (
+          <div key={field.field} className="fy-draftcard">
+            <div className="fy-draftcard__head">
+              <span className="fy-eyebrow-sm">{field.field}</span>
+              <Badge tone="warning">would change</Badge>
+            </div>
+            <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>{field.proposed ?? "(removed)"}</div>
+            {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
+          </div>
+        ))}
+        {fields.length === 0 && (
+          <div className="fy-emptycard">
+            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+              A proposal is staged and the gate reports no field-by-field review for it. Read it
+              whole in Proposals before accepting.
+            </div>
+          </div>
+        )}
+        <Button
+          variant="primary"
+          size="lg"
+          disabled={!worldId}
+          onClick={() => {
+            if (!worldId) return;
+            acceptProposal(worldId, staged.proposal.id);
+            // Accepting lands you on the thing you accepted (turn 91).
+            onAccepted();
+          }}
+        >
+          Accept Proposal
+        </Button>
+        <div className="fy-mono">{writes}</div>
       </div>
     </>
   );

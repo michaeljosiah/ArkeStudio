@@ -54,7 +54,7 @@ import {
 } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Composer } from "../components/composer.js";
-import { ProductionConversation } from "../components/conversation.js";
+import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton, clock } from "../components/player.js";
@@ -897,9 +897,21 @@ function DayOne({
 export function ProductionChatScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const details = shape?.isEpisodic ? "Season" : "Overview";
+  const detailsPath = `/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`;
+  /*
+   * What this conversation has already staged (turn 92). The season's own file for an episodic
+   * production, the overview's for one without a season — a production has one of the two, never
+   * both, so a single match is the whole answer.
+   */
+  const file = shape?.isEpisodic ? "season.json" : "story.json";
+  const staged =
+    (world?.proposals ?? []).find((sp) =>
+      sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
+    ) ?? null;
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -929,6 +941,19 @@ export function ProductionChatScreen() {
             </div>
           }
           pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
+          {...(staged
+            ? {
+                side: (
+                  <StagedDecision
+                    worldId={worldId}
+                    subject={shape?.isEpisodic ? "the season" : "the overview"}
+                    staged={staged}
+                    writes={`the gate writes ${file} · nothing else moves`}
+                    onAccepted={() => navigate(detailsPath)}
+                  />
+                ),
+              }
+            : {})}
         />
     </div>
   );

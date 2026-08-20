@@ -5,13 +5,12 @@ import {
   sortScenes,
   type Episode,
   type SeasonFinding,
-  type StagedProposal,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Badge, Button, cx } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
-import { ProductionConversation } from "../components/conversation.js";
-import { acceptProposal, proposeEpisode, reorderEpisodes } from "../lib/store.js";
+import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
 
 /**
  * The season page (design turn 91; supersedes turn 48's four-view strip).
@@ -133,12 +132,47 @@ export function DevelopmentWorkspace() {
 function EpisodesBoard() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
+  /*
+   * The press is answered before the round trip is. Staging goes to the coordinator and comes
+   * back as a proposal a moment later; until it does, the tile that was pressed says so itself
+   * rather than leaving the board looking untouched (turn 92).
+   */
+  const [starting, setStarting] = useState<Set<number>>(() => new Set());
   const episodes = production?.episodes ?? [];
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
   const declared = Math.max(production?.season?.defaults?.episodeCount ?? 0, episodes.length);
+  /*
+   * Episodes that have been started and are waiting on the gate (turn 92). A staged proposal
+   * against a file that is not yet an episode on disk is a started one: it has a name and an
+   * order and no record, so it belongs on the board between the written and the untouched.
+   * Without this the press that staged it changed nothing anybody could see.
+   */
+  const stems = new Set(Object.values(production?.episodeFiles ?? {}));
+  const startedByPress = starting;
+  const started = (world?.proposals ?? []).flatMap((sp) =>
+    sp.proposal.targets.flatMap((t) => {
+      // Prefix and suffix rather than a built pattern: a production id interpolated into a
+      // regular expression is a pattern the caller did not write, and `\.` inside a template
+      // literal is just a dot, so the escape that looked like it was there never was.
+      const prefix = `productions/${prodId}/episodes/`;
+      if (!t.path.startsWith(prefix) || !t.path.endsWith(".json")) return [];
+      const stem = t.path.slice(prefix.length, -".json".length);
+      if (stem.length === 0 || stem.includes("/") || stems.has(stem)) return [];
+      // The gate labels its review fields for reading — "Title", "Order" — so they are matched
+      // case-insensitively rather than by the record's own key names.
+      const fields = sp.review?.targets.flatMap((rt) => rt.fields) ?? [];
+      const field = (name: string) => fields.find((f) => f.field.toLowerCase() === name)?.proposed;
+      const title = field("title") ?? sp.proposal.summary;
+      const order = Number(field("order") ?? Number.NaN);
+      return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
+    }),
+  );
   /** The episodes the season promised and nobody has started (turn 87). */
-  const blanks = Array.from({ length: Math.max(0, declared - episodes.length) }, (_, i) => episodes.length + i + 1);
+  const untouched = Math.max(0, declared - episodes.length - started.length);
+  const firstBlank = episodes.length + started.length + 1;
+  const blanks = Array.from({ length: untouched }, (_, i) => firstBlank + i).filter(
+    (order) => !startedByPress.has(order),
+  );
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
     const ids = episodes.map((e) => e.id);
@@ -154,25 +188,22 @@ function EpisodesBoard() {
           <div key={episode.id} className="fy-draftcard" style={{ cursor: "pointer" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
               <span className="fy-mono">{pad(episode.order)}</span>
-              <button
-                type="button"
+              {/*
+                One control, one destination (turn 92). This branched on whether anything was
+                written, which reads as thoughtful and is unpredictable: the same click landed in
+                two places according to state a person cannot see before clicking. The page says
+                what is written, or that nothing is, and offers the one way into the thread.
+
+                A link rather than a button, because it goes somewhere: middle-click, copy link
+                and keyboard all work, and where a tile leads becomes a thing a test can read.
+              */}
+              <NavLink
+                to={`/w/${worldId}/p/${prodId}/episodes/${episode.id}`}
                 className="fy-linkbtn"
                 style={{ font: "600 14px var(--font-sans)", textAlign: "left" }}
-                /*
-                 * An episode with nothing written opens its chat, because there is nothing yet to
-                 * look at; one that has a promise opens its page, which carries a way back into
-                 * the same thread. Day one's rule, one level down (turns 53b, 91).
-                 */
-                onClick={() =>
-                  navigate(
-                    episode.promise?.opens || episode.promise?.closes
-                      ? `/w/${worldId}/p/${prodId}/episodes/${episode.id}`
-                      : `/w/${worldId}/p/${prodId}/story/episodes/${episode.id}`,
-                  )
-                }
               >
                 {episode.title}
-              </button>
+              </NavLink>
               <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
                 <button type="button" className="fy-linkbtn" aria-label="Move earlier" onClick={() => move(index, -1)}>
                   ↑
@@ -196,6 +227,30 @@ function EpisodesBoard() {
             </div>
           </div>
         ))}
+        {/* Started, and waiting on the gate (turn 92): the tile the press changed. */}
+        {started.map((one) => (
+          <div key={one.id} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
+            <span className="fy-mono">{one.order === null ? "··" : pad(one.order)}</span>
+            <span style={{ font: "600 13.5px var(--font-sans)" }}>{one.title}</span>
+            <span style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
+              Started. Waiting on the gate.
+            </span>
+            <span style={{ flex: 1 }} />
+            <span className="fy-mono" style={{ color: "var(--warning)" }}>
+              STAGED · NOT WRITTEN YET
+            </span>
+          </div>
+        ))}
+        {[...starting]
+          .filter((order) => !started.some((one) => one.order === order))
+          .map((order) => (
+            <div key={`starting-${order}`} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
+              <span className="fy-mono">{pad(order)}</span>
+              <span style={{ font: "600 13.5px var(--font-sans)" }}>Episode {pad(order)}</span>
+              <span style={{ flex: 1 }} />
+              <span className="fy-mono">STARTING…</span>
+            </div>
+          ))}
         {/*
           Making an episode happens in the grid, where the others already are (turn 87): no screen
           asks for a title before there is anything to title, so opening a blank tile stages the
@@ -210,6 +265,7 @@ function EpisodesBoard() {
             onClick={() => {
               if (!worldId || !prodId) return;
               proposeEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
+              setStarting((prev) => new Set(prev).add(order));
             }}
           >
             <span className="fy-mono">{pad(order)}</span>
@@ -220,8 +276,10 @@ function EpisodesBoard() {
           </button>
         ))}
       </div>
-      {blanks.length > 0 && (
+      {(blanks.length > 0 || started.length > 0) && (
         <div className="fy-mono">
+          {started.length > 0 &&
+            `${started.length} started and waiting on the gate — accept them in Proposals · `}
           {blanks.length} of {declared} promised by the season and not started · starting one stages it for the gate
         </div>
       )}
@@ -336,6 +394,7 @@ function ArcsView() {
 export function EpisodeChatScreen() {
   const { worldId, prodId, episodeId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
   const episode = production?.episodes.find((e) => e.id === episodeId);
   if (!production || !episode || !prodId || !episodeId) {
     return (
@@ -364,79 +423,23 @@ export function EpisodeChatScreen() {
         emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
         placeholder="Keep shaping the episode…"
         {...(staged
-          ? { side: <StagedEpisode worldId={worldId} episode={episode} staged={staged} /> }
+          ? {
+              side: (
+                <StagedDecision
+                  worldId={worldId}
+                  subject={`episode ${pad(episode.order)}`}
+                  staged={staged}
+                  writes="the gate writes this episode and its scenes · nothing else moves"
+                  onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`)}
+                />
+              ),
+            }
           : {
               pointsEmpty:
                 "Nothing understood yet. As you talk, what the studio takes from it appears here — how this episode opens, where it turns, the scenes it needs — so you can see it thinking rather than wait for the end.",
             })}
       />
     </div>
-  );
-}
-
-/**
- * The rail in its second state: the staged proposal, field by field, under one action.
- *
- * “Turn this into a proposal” is retired (turn 91) — by the time a person is reading what the
- * conversation settled it already is one, and a button converting a noun into another noun names
- * an implementation step rather than the decision being made. The fields come from the gate's own
- * per-target review, so this screen cannot claim a change the gate would not make.
- */
-function StagedEpisode({
-  worldId,
-  episode,
-  staged,
-}: {
-  worldId: string | undefined;
-  episode: Episode;
-  staged: StagedProposal;
-}) {
-  const navigate = useNavigate();
-  const { prodId } = useParams();
-  const fields = staged.review?.targets.flatMap((t) => t.fields) ?? [];
-  return (
-    <>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <div style={{ font: "600 15px var(--font-sans)" }}>Ready to accept</div>
-        <span className="fy-mono">episode {pad(episode.order)}</span>
-      </div>
-      <div className="fy-mono" style={{ marginTop: 6 }}>
-        this is the proposal · nothing above it has been written
-      </div>
-      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-        {fields.map((field) => (
-          <div key={field.field} className="fy-draftcard">
-            <div className="fy-draftcard__head">
-              <span className="fy-eyebrow-sm">{field.field}</span>
-              <Badge tone="warning">would change</Badge>
-            </div>
-            <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>{field.proposed ?? "(removed)"}</div>
-            {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
-          </div>
-        ))}
-        {fields.length === 0 && (
-          <div className="fy-emptycard">
-            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              A proposal is staged for this episode and the gate reports no field-by-field review
-              for it. Read it whole in Proposals before accepting.
-            </div>
-          </div>
-        )}
-        <Button
-          variant="primary"
-          disabled={!worldId}
-          onClick={() => {
-            if (!worldId) return;
-            acceptProposal(worldId, staged.proposal.id);
-            // Accepting lands you on the thing you accepted (turn 91).
-            navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`);
-          }}
-        >
-          Accept Proposal
-        </Button>
-        <div className="fy-mono">the gate writes it · nothing else moves</div>
-      </div>
-    </>
   );
 }
 
