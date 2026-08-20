@@ -74,7 +74,7 @@ function render(state: ClientState, path: string, element: React.ReactElement, r
   ).replace(/<!-- -->/g, "");
 }
 
-const P = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/story`;
+const P = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 
 describe("the Development workspace (issue 397)", () => {
   it("an episodic production shows four views, and the board says its gaps in words", () => {
@@ -84,7 +84,7 @@ describe("the Development workspace (issue 397)", () => {
       ]),
       P("bell-watch-season-1"),
       <StoryScreen />,
-      "/w/:worldId/p/:prodId/story",
+      "/w/:worldId/p/:prodId/season",
     );
     for (const tab of ["Season", "Episodes · 1", "Arcs", "Direction"]) {
       assert.ok(html.includes(tab), `the ${tab} tab is present`);
@@ -99,7 +99,7 @@ describe("the Development workspace (issue 397)", () => {
       withMicrodrama([]),
       P("bell-watch-season-1"),
       <StoryScreen />,
-      "/w/:worldId/p/:prodId/story",
+      "/w/:worldId/p/:prodId/season",
     );
     assert.ok(html.includes("Season"), "Season is there");
     assert.ok(html.includes("Arcs"), "Arcs is there");
@@ -112,9 +112,9 @@ describe("the Development workspace (issue 397)", () => {
       withMicrodrama([]),
       P("saltlight"),
       <StoryScreen />,
-      "/w/:worldId/p/:prodId/story",
+      "/w/:worldId/p/:prodId/season",
     );
-    assert.match(html, /DEVELOPMENT ·/, "the overview screen renders");
+    assert.match(html, /OVERVIEW ·/, "the details screen renders, not the conversation");
     assert.ok(!html.includes("Season findings"), "no fake season intelligence for a film");
     assert.ok(!html.includes("SERIES ENGINE"), "no fake series card for a film");
   });

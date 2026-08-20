@@ -32,19 +32,23 @@ function render(state: ClientState, path: string): string {
 }
 
 const prodId = FIXTURE_STATE.world!.productions[0]!.meta.id;
+/** Development is the conversation (turn 88); the details it settles are next door. */
 const DEV = `/w/${FIXTURE_WORLD_ID}/p/${prodId}/story`;
+const DETAILS = `/w/${FIXTURE_WORLD_ID}/p/${prodId}/overview`;
 
 describe("Development authors through its conversation (design turn 86)", () => {
   it("puts a composer in the view rather than a button to another screen", () => {
     const html = render(FIXTURE_STATE, DEV);
     assert.match(html, /role="textbox"/, "the conversation is here");
-    assert.doesNotMatch(html, /Talk it through/, "not a door to somewhere else");
+    // The control, not the phrase — prose may legitimately say "talk it through".
+    assert.doesNotMatch(html, />Talk it through</, "not a door to somewhere else");
   });
 
   it("offers no second way to author the same file", () => {
     const html = render(FIXTURE_STATE, DEV);
     for (const editor of ["Start the overview", "Edit the overview", "Propose overview"]) {
       assert.doesNotMatch(html, new RegExp(editor), `${editor} is retired`);
+      assert.doesNotMatch(render(FIXTURE_STATE, DETAILS), new RegExp(editor), `${editor} is not next door either`);
     }
   });
 
@@ -81,10 +85,13 @@ describe("an episodic Development keeps turn 48's layout", () => {
     } as ClientState;
   }
 
-  it("Season authors one object, so the conversation keeps a column beside the draft", () => {
-    const html = render(episodic(), DEV);
-    assert.match(html, /What is this season about\?/, "the view asks its own question");
-    assert.match(html, /role="textbox"/, "and the conversation is in it");
+  it("an episodic production's conversation asks about its season", () => {
+    assert.match(render(episodic(), DEV), /What is this season\?/, "the thread knows what it is shaping");
+  });
+
+  it("the details screen shows what was settled, and holds no conversation of its own", () => {
+    const html = render(episodic(), `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`);
+    assert.doesNotMatch(html, /role="textbox"/, "one thread, one place — not a composer per view");
     assert.doesNotMatch(html, /Start the season|Edit the season|Propose season change/, "the form editor is retired");
   });
 

@@ -64,7 +64,9 @@ export const SCREENS: ScreenEntry[] = [
   // Production
   { id: "production-dashboard", samplePath: P },
   { id: "production-cast", samplePath: `${P}/cast` },
-  { id: "story-overview", samplePath: `${P}/story` },
+  // Talking and looking are two screens (turn 88): the thread, then what it settled.
+  { id: "development-chat", samplePath: `${P}/story` },
+  { id: "story-overview", samplePath: `${P}/overview` },
   { id: "chapter-tree", samplePath: `${P}/story/chapters` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },

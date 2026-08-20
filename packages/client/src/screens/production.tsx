@@ -259,17 +259,23 @@ export function ProductionLayout() {
           {item("cast", "Cast", String(guestCount))}
           {isStory ? (
             <>
-              {/* Development ends where Chapters begins, so the two never light together. */}
-              {item("story", "Development", production?.story ? `v${production.story.version}` : "—", true)}
+              {/* Development is the conversation; the details it sets up are their own item
+                  (turn 88). Development ends where Chapters begins, so they never light together. */}
+              {item("story", "Development", "chat", true)}
+              {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
               {item("audio", "Audio", String(audioCount))}
               {item("exports", "Exports", String(exportCount))}
             </>
           ) : (
             <>
-              {/* The rail item reads Development; Story stays a family in the picker (turn 78).
-                  The route keeps its name — the rename is display text, never wiring. */}
-              {item("story", "Development", production?.story ? `v${production.story.version}` : "—")}
+              {/* Development is the conversation and nothing else (turn 88); what it sets up is
+                  read next door. The rail item reads Development; Story stays a family in the
+                  picker (turn 78), and the route keeps its name — a rename is display, not wiring. */}
+              {item("story", "Development", "chat", true)}
+              {shape?.isEpisodic
+                ? item("season", "Season", production?.season ? `v${production.season.version}` : "—")
+                : item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
               {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
               {shape?.isBranching &&
@@ -866,6 +872,55 @@ function DayOne({
   );
 }
 
+/**
+ * Development: the conversation, and nothing else (design turn 88).
+ *
+ * Turn 48 hung a conversation on each of four views, so one thread — R-20 says a production has
+ * exactly one — wore four costumes, and every screen was half a place to make something and half
+ * a place to read it. This screen is only the first half. What it sets up is read next door, on
+ * Season or Overview, which is the other thing a person does and now has its own name on the rail.
+ */
+export function DevelopmentChatScreen() {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const shape = production ? productionShape(production.meta) : null;
+  const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
+  const details = shape?.isEpisodic ? "Season" : "Overview";
+  return (
+    <div className="fy-prodmain" data-screen="development-chat">
+      <div style={{ display: "grid", gridTemplateRows: "1fr", height: "100%", minHeight: 0 }}>
+        <ProductionConversation
+          worldId={worldId}
+          productionId={prodId}
+          eyebrow={`DEVELOPMENT · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
+          heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
+          placeholder="Say what this is — what happens, who it costs, how it ends…"
+          emptyLine={
+            shape?.isEpisodic
+              ? "Nothing decided yet. Say what this season answers, how it ends, and what its episodes are — everything you settle here lands in Season."
+              : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
+          }
+          footer={
+            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="fy-mono">in context:</span>
+              <span className="fy-pill">
+                all {production?.scenes.length ?? 0} scene{(production?.scenes.length ?? 0) === 1 ? "" : "s"}
+              </span>
+              <span className="fy-pill">{cast} cast sheets</span>
+              {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
+              <span style={{ flex: 1 }} />
+              {/* Where what is being said ends up, named and reachable from where it is said. */}
+              <NavLink to={`/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`} className="fy-linkbtn">
+                {details} &rarr;
+              </NavLink>
+            </div>
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 // ---- Story (10b) -----------------------------------------------------------
 
 export function StoryScreen() {
@@ -896,52 +951,78 @@ function OverviewStoryScreen() {
   /** Every field the staged proposal would change, flattened out of its per-target review. */
   const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
   const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  // What drafting can actually reach: the world's cast plus this production's guests, and not
-  // another production's one-offs (SPEC-020 R-7).
-  const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   return (
     <div className="fy-story" data-screen="story-overview">
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        eyebrow={`DEVELOPMENT · ${production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}`}
-        heading="Find the spine together."
-        placeholder="Keep shaping the story…"
-        emptyLine={
-          production?.treatment ??
-          story?.logline ??
-          "No story yet. Say what this is about — the spine, the acts, what it costs — and the overview builds beside this."
-        }
-        footer={
-          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span className="fy-mono">in context:</span>
-            <span className="fy-pill">
-              all {production?.scenes.length ?? 0} scene{(production?.scenes.length ?? 0) === 1 ? "" : "s"}
-            </span>
-            <span className="fy-pill">{cast} cast sheets</span>
-            {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
+      {/* The details, not a conversation (turn 88): what the thread settled, read and worked
+          with. Changing any of it is done next door, where it was decided. */}
+      <div className="fy-story__chat">
+        <div className="fy-story__chathead">
+          <div className="fy-eyebrow-sm">
+            OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
           </div>
-        }
-      />
-      {/* The draft rail (turn 86): the accepted overview, with what is staged against it marked
-          on the field it would change and the accepted text beneath. Derived from the staged
-          proposal's own review, never a second copy kept beside it, so what this promises and
-          what the gate would write cannot disagree. */}
+          <h1 className="fy-story__h1">{story ? "The story, as it stands" : "Nothing settled yet"}</h1>
+        </div>
+        <div className="fy-story__log">
+          {story ? (
+            <div style={{ display: "grid", gap: 14 }}>
+              <div className="fy-draftcard">
+                <div className="fy-eyebrow-sm">LOGLINE</div>
+                <div className="fy-draftcard__logline">“{story.logline}”</div>
+              </div>
+              {spineLines.length > 0 && (
+                <div className="fy-draftcard">
+                  <div className="fy-eyebrow-sm">SPINE</div>
+                  {spineLines.map((line) => (
+                    <div key={line} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(story.acts ?? []).length > 0 && (
+                <div className="fy-draftcard">
+                  <div className="fy-eyebrow-sm">ACTS</div>
+                  {(story.acts ?? []).map((act, i) => (
+                    <div key={act.title} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
+                      {i + 1}. {act.title}
+                      {act.summary ? ` — ${act.summary}` : ""}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {production?.treatment && (
+                <div className="fy-draftcard">
+                  <div className="fy-eyebrow-sm">TREATMENT</div>
+                  <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                    {production.treatment}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <EmptyState
+              title="Nothing settled yet"
+              hint="Development is where this gets decided — say what the thing is, and what you settle lands here."
+            />
+          )}
+        </div>
+        <div style={{ flex: "none", padding: "14px 36px 22px", display: "flex", gap: 10, alignItems: "center" }}>
+          <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
+            &larr; Development
+          </NavLink>
+          <span className="fy-mono">the overview steers scene and chapter drafting · it never overwrites a scene you have locked</span>
+        </div>
+      </div>
+      {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
+          object itself is the screen, so repeating it here would be two copies of one thing. */}
       <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>The overview, as it stands</div>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
           <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
-            {story ? `v${story.version}` : "not started"}
-            {staged ? ` · ${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}` : ""}
+            {staged ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}` : "nothing staged"}
           </span>
         </div>
-        {!story && !staged ? (
-          <div className="fy-emptycard">
-            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              Nothing accepted yet. Say what this is about in the conversation, and the draft builds here.
-            </div>
-          </div>
-        ) : (
+        {staged ? (
           <div style={{ display: "grid", gap: 12 }}>
             {stagedFields.map((field) => (
               <div key={field.field} className="fy-draftcard">
@@ -953,31 +1034,15 @@ function OverviewStoryScreen() {
                 {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
               </div>
             ))}
-            {story && (
-              <div className="fy-draftcard">
-                <div className="fy-eyebrow-sm">LOGLINE</div>
-                <div className="fy-draftcard__logline">“{story.logline}”</div>
-                {spineLines.length > 0 && (
-                  <>
-                    <div className="fy-eyebrow-sm" style={{ marginTop: 14 }}>
-                      SPINE
-                    </div>
-                    {spineLines.map((line) => (
-                      <div key={line} style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-                        {line}
-                      </div>
-                    ))}
-                  </>
-                )}
-              </div>
-            )}
+            <div className="fy-mono">the conversation staged it · the gate writes it, in Proposals</div>
+          </div>
+        ) : (
+          <div className="fy-emptycard">
+            <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+              Nothing waiting. What Development settles arrives here to be accepted before it lands.
+            </div>
           </div>
         )}
-        <div className="fy-mono" style={{ marginTop: 12 }}>
-          {staged
-            ? "waiting on you in Proposals · the conversation staged it, the gate writes it"
-            : "the overview steers scene and chapter drafting · it never overwrites a scene you have locked"}
-        </div>
       </div>
     </div>
   );

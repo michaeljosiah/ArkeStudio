@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { seasonFindings, sortScenes, type Episode, type SeasonFinding } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { ProductionConversation } from "../components/conversation.js";
 import { Badge, Button, Input, cx } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
@@ -43,7 +42,7 @@ export function DevelopmentWorkspace() {
   return (
     <div className="fy-prodmain" data-screen="development">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Development</h1>
+        <h1 className="fy-h1">Season</h1>
         <span className="fy-h1row__meta">
           {production.season ? `season v${production.season.version}` : "no season record yet"}
         </span>
@@ -78,14 +77,6 @@ function SeasonView() {
   const defaults = season?.defaults;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        eyebrow="DEVELOPMENT · SEASON"
-        heading="What is this season about?"
-        placeholder="Keep shaping the season…"
-        emptyLine="Nothing decided yet. Say what this season is about and how it ends, and the draft builds beside this."
-      />
       <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
         {/* Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
             editing it is the Series' own accept — never a side effect of a season edit. */}
@@ -202,13 +193,6 @@ function EpisodesBoard() {
         ))}
       </div>
       <FindingsPanel findings={findings} />
-      {/* A comparison keeps the surface; the conversation becomes a row at its foot (turn 48). */}
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        placeholder="This episode needs a reason to exist…"
-        emptyLine="No episodes yet. Say what the season breaks into and the tiles build beside it."
-      />
     </div>
   );
 }
@@ -296,13 +280,6 @@ function ArcsView() {
           </table>
         </div>
       )}
-      {/* A comparison keeps the surface; the conversation becomes a row at its foot (turn 48). */}
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        placeholder="A lane needs to land somewhere…"
-        emptyLine="No lanes yet. Say what changes across this season and the grid builds beside it."
-      />
     </div>
   );
 }
@@ -314,14 +291,6 @@ function DirectionView() {
   const look = world?.artDirection ?? null;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        eyebrow="DEVELOPMENT · DIRECTION"
-        heading="What this season does differently."
-        placeholder="Keep shaping the direction…"
-        emptyLine="Nothing narrowed yet. This season inherits the world's look; say what it does differently and the lines build beside this."
-      />
       <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
         {/* The world look first, always (turn 48): a season narrows it and never replaces it, so
             what is being narrowed has to be on the screen doing the narrowing. */}
