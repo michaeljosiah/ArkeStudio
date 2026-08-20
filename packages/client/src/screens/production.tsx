@@ -580,7 +580,7 @@ export function ProductionDashboardScreen() {
           </div>
           <div className="fy-threadcard__actions">
             <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-              {chapters.length === 0 ? "Open Development" : "Continue in Development"}
+              {chapters.length === 0 ? "Open Production Chat" : "Continue in Production Chat"}
             </Button>
           </div>
         </div>
@@ -802,7 +802,7 @@ function DeliveryAspect({
  * plain path has been used and found wanting.
  *
  * So: a heading, a box to type in, and two ways in. Typing changes nothing — the line beneath the
- * composer is the promise, and sending it opens the Development thread rather than writing a word.
+ * composer is the promise, and sending it opens the Production Chat thread rather than writing a word.
  */
 function DayOne({
   worldId,
@@ -821,8 +821,8 @@ function DayOne({
     const text = message.trim();
     if (!text) return;
     /*
-     * The first thing said about a production is the opening line of its Development thread, not
-     * a note that lands nowhere. It is created here and read on Development, which is where the
+     * The first thing said about a production is the opening line of its Production Chat thread,
+     * not a note that lands nowhere. It is created here and read in the chat, which is where the
      * conversation belongs and where this send lands.
      */
     createWorldChat(worldId, text, crypto.randomUUID(), { kind: "production", productionId: prodId });
@@ -926,7 +926,7 @@ export function ProductionChatScreen() {
 export function StoryScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
-  // An episodic production's Development is the four-view workspace (turn 48; issue 397); a
+  // An episodic production's details are the four-view workspace (turn 48; issue 397); a
   // non-episodic one keeps the single overview — no fake episode or season controls. The
   // branch is a component boundary, not an early return: returning before the overview's own
   // hooks broke the Rules of Hooks the moment a production's shape settled after first render.

@@ -41,7 +41,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       // The production records are not reachable through the world-query tools, so the current
       // state travels in the entry narration — the same reasoning as the world look.
       const lines = [
-        `This is the Development thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit.`,
+        `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit.`,
       ];
       if (production?.story) {
         lines.push(

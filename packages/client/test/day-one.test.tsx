@@ -93,7 +93,7 @@ describe("day one is a place to start writing (design turn 53b)", () => {
 });
 
 describe("what was said on day one is visible where it lands", () => {
-  it("Development shows the production thread's opening line", () => {
+  it("Production Chat shows the thread's opening line", () => {
     const base = dayOneState();
     const world = base.world!;
     const prodId = world.productions[0]!.meta.id;
@@ -115,6 +115,6 @@ describe("what was said on day one is visible where it lands", () => {
       "a send that lands on a screen with no trace of it reads as a lost message",
     );
     // Until the workspace loads, the opening line is what the summary already knows.
-    assert.match(html, /the Development thread · opening…/);
+    assert.match(html, /Production Chat · opening…/);
   });
 });

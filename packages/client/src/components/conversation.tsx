@@ -19,7 +19,7 @@ import { Button, cx } from "./ui.js";
  * One conversation, drawn once (design turn 86).
  *
  * World Chat has a screen built around a conversation — a history rail, a points panel, wrap-up.
- * Development has a *view* built around one, where the same turns sit beside the draft they are
+ * Production Chat has a *view* built around one, where the same turns sit beside what they are
  * shaping. Both need the transcript itself to look and behave identically, and two renderings of
  * one conversation drift the moment either is touched: a receipt style fixed here, a failure
  * that offers a retry there.
@@ -128,7 +128,7 @@ export function failureLine(failure: { status: string; detail?: string }): strin
 }
 
 /**
- * The production's own Development thread, in the view that is shaping it (design turn 86).
+ * The production's own thread — Production Chat, and its episode and scene kin (turns 86, 89).
  *
  * One continuous conversation per production (SPEC-023 R-20), so every view here enters the same
  * thread with its own subject in focus. The first message creates it — a person should not have
@@ -214,7 +214,7 @@ export function ProductionConversation({
             thread ? (
               <div className="fy-bubble--user">
                 {thread.title}
-                <div className="fy-bubble__note">the Development thread · opening…</div>
+                <div className="fy-bubble__note">Production Chat · opening…</div>
               </div>
             ) : (
               <div className="fy-bubble--gate">{emptyLine}</div>

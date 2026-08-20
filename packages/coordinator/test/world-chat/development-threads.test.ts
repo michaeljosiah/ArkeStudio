@@ -123,7 +123,7 @@ describe("production-scoped threads (issue 400)", () => {
     const { store } = await world();
     const bundle = store.getBundle();
     const production = describeEntryContext({ kind: "production", productionId: "saltlight" }, bundle);
-    assert.match(production, /Development thread for the production "Saltlight"/);
+    assert.match(production, /Production Chat thread for the production "Saltlight"/);
     assert.match(production, /The overview is v\d/, "the current overview travels in the narration");
     const scene = describeEntryContext(
       { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },

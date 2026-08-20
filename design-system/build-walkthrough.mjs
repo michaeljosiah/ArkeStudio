@@ -53,7 +53,7 @@ const STEPS = [
     built: { status: "built", route: "#/w/:worldId/p/:prodId",
       notes: ["<b>Built to the drawing (turn 53b).</b> The production's own name, the line saying nothing is written yet, a box to type in, the promise <code>talking writes nothing · you accept what you keep</code>, and both ways in — all as drawn.",
               "<b>What stood here is gone:</b> frame 43b's world inventory and its rail of canon seeds, which turn 53 cut and turn 83 superseded in whole. Turn 83 leaves seeds a way back, but only once the plain path has been used and found wanting — a decision to take deliberately rather than by leaving the old screen up.",
-              "<b>Sending lands on Development.</b> What you type becomes the opening line of the production's own Development thread, and Development shows it back with a way to keep going — a send that landed on a screen with no trace of it would read as a lost message.",
+              "<b>Sending lands in Production Chat.</b> What you type becomes the opening line of the production's own thread, and the chat shows it back with a way to keep going — a send that landed on a screen with no trace of it would read as a lost message.",
               "The composer carries attach and voice, which the house binds every composer to since turn 41; a file dropped here is filed as the production's own artifact, since there is no conversation yet to attach it to.",
               "Beyond the drawing: the Delivery aspect selector (issue 389) sits <i>below</i> the two cards, so it stays reachable without interrupting the opening the frame draws.",
               "A Story production keeps its own day one (frame 54a) — this frame is drawn for a Video production and only that branch changed."] },
@@ -81,7 +81,7 @@ const STEPS = [
   {
     id: "45b", step: "Episodes · the whole season at once",
     actions: [{ match: "Turn this into proposals", to: "48b", hint: "propose the episodes" }],
-    built: { status: "drifted", route: "Development → Episodes tab",
+    built: { status: "drifted", route: "Season → Episodes tab",
       notes: ["The tab appears only when episodes exist ✓ — the rule is honoured in code, not by greying a tab.",
               "Cards ship with <code>HOOK ·</code> / <code>CLIFF ·</code> and the <code>NO ENDING YET</code> wording ✓.",
               "Missing: per-episode <b>runtime seconds</b>, the logline line, the dashed unwritten tile, and the composer row.",
@@ -91,7 +91,7 @@ const STEPS = [
   {
     id: "48b", step: "Arcs · lanes across the season",
     actions: [{ match: "Turn this into proposals", to: "48c", hint: "propose the arcs" }],
-    built: { status: "drifted", route: "Development → Arcs tab",
+    built: { status: "drifted", route: "Season → Arcs tab",
       notes: ["The stalled-lane callout ships (<code>\"{arc}\" has no payoff</code>) ✓.",
               "Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>—</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.",
               "<code>Add a lane</code> and the composer row are absent."] },
@@ -99,7 +99,7 @@ const STEPS = [
   {
     id: "48c", step: "Direction · the season against the world look",
     actions: [{ match: "Turn this into a proposal", to: "53c", hint: "propose the direction" }],
-    built: { status: "built", route: "Development → Direction tab",
+    built: { status: "built", route: "Season → Direction tab",
       notes: ["<b>Turn 48's binding is now met (turn 86).</b> The world's master look is shown first, marked inherited; then the lines this season narrows against it; then a block stating plainly that the world look is unchanged and no other production moves.",
               "The form editor behind <code>Edit the direction</code> is retired, and the conversation lives in Production Chat rather than in this view (turn 88).",
               "What is still not built: the drawn <i>3 lines · would change</i> badge on the narrowing, which needs a staged season proposal to mark against."] },
@@ -167,7 +167,7 @@ const STEPS = [
       notes: ["<b>Matches.</b> Header template, <code>Watch from top</code>, <code>Export cut…</code>, the scene band over a <code>V</code> lane, both gap cards, the <code>A</code> lane and the trim strip with <code>TRIM IN</code> − / + all ship ✓.",
               "The rail folds on this route ✓ and the artifacts panel opens (82a) — though its <code>Filter</code> control is missing and rows show a basename rather than <code>WAV · 2:14</code>.",
               "<b>Music-video clock (80a): the section band (<code>INTRO | VERSE 1 | CHORUS…</code>) is not rendered at all</b>, though turns 80 and 81 both bind it. The anchored-shot count is missing from the header too, and there is no Spine screen to author any of it.",
-              "Drift <i>inside the master</i>, visible above: this frame's rail still reads <code>Story v3</code>, though turn 78 — earlier — bound that sweep to <b>Development</b>. The app is right and the drawing is stale."] },
+              "Drift <i>inside the master</i>, visible above: this frame's rail still reads <code>Story v3</code>, though turn 78 — earlier — bound that sweep, and turn 89 has since swept every rail to <b>Production Chat</b>. This frame is the one the sweep could not reach without redrawing it."] },
   },
   {
     id: "25b", step: "Exports · the deliverable",

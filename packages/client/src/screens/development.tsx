@@ -8,7 +8,7 @@ import { useTalkItThrough } from "../lib/talk-it-through.js";
 import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
 
 /**
- * The Development workspace for an episodic production (turns 48, 53, 78; SPEC-023; issue 397).
+ * The Season details for an episodic production (turns 48, 53, 88; SPEC-023; issue 397).
  *
  * Four views, one tab strip — Season, Episodes, Arcs, Direction — and three tabs, not four
  * greyed, while no episodes exist (turn 48). Season and Direction author one object each and
@@ -26,7 +26,7 @@ export function DevelopmentWorkspace() {
   if (!production) {
     return (
       <div className="fy-prodmain" data-screen="development">
-        <EmptyState title="Opening Development…" />
+        <EmptyState title="Opening the season…" />
       </div>
     );
   }
