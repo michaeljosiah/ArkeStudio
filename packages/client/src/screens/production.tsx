@@ -208,7 +208,14 @@ export function ProductionLayout() {
     audio: Waveform,
     exports: Archive,
   };
-  const item = (slug: string, label: string, count?: string, end?: boolean) => {
+  /*
+   * An episode is reached by drilling into the season, and both of its screens live outside the
+   * `season` path — the chat under `story/episodes/:id`, the page under `episodes/:id` (turn 91).
+   * Neither lights any rail item on its own, so the rail goes blank exactly when somebody is two
+   * levels deep and most wants to know where they are. Season owns them: it is the level above.
+   */
+  const inEpisode = /\/episodes\//.test(location.pathname);
+  const item = (slug: string, label: string, count?: string, end?: boolean, also?: boolean) => {
     const Mark = MARKS[slug];
     return (
       <NavLink
@@ -216,7 +223,7 @@ export function ProductionLayout() {
         to={`${base}${slug ? `/${slug}` : ""}`}
         end={end ?? slug === ""}
         title={folded ? label : undefined}
-        className={({ isActive }) => cx("fy-prodrail__item", isActive && "fy-prodrail__item--active")}
+        className={({ isActive }) => cx("fy-prodrail__item", (isActive || also) && "fy-prodrail__item--active")}
       >
         {Mark !== undefined && (
           <span className="fy-prodrail__mark" aria-hidden={!folded}>
@@ -275,7 +282,13 @@ export function ProductionLayout() {
                   the route keeps its name — a rename is display, never wiring. */}
               {item("story", "Production Chat", "chat", true)}
               {shape?.isEpisodic
-                ? item("season", "Season", production?.season ? `v${production.season.version}` : "—")
+                ? item(
+                    "season",
+                    "Season",
+                    production?.season ? `v${production.season.version}` : "—",
+                    false,
+                    inEpisode,
+                  )
                 : item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
               {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
@@ -1002,13 +1015,13 @@ function OverviewStoryScreen() {
           ) : (
             <EmptyState
               title="Nothing settled yet"
-              hint="Development is where this gets decided — say what the thing is, and what you settle lands here."
+              hint="Production Chat is where this gets decided — say what the thing is, and what you settle lands here."
             />
           )}
         </div>
         <div style={{ flex: "none", padding: "14px 36px 22px", display: "flex", gap: 10, alignItems: "center" }}>
           <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
-            &larr; Development
+            &larr; Production Chat
           </NavLink>
           <span className="fy-mono">the overview steers scene and chapter drafting · it never overwrites a scene you have locked</span>
         </div>
@@ -1039,7 +1052,7 @@ function OverviewStoryScreen() {
         ) : (
           <div className="fy-emptycard">
             <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-              Nothing waiting. What Development settles arrives here to be accepted before it lands.
+              Nothing waiting. What Production Chat settles arrives here to be accepted before it lands.
             </div>
           </div>
         )}

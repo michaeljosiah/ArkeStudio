@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
+import type { WorldChatContext, WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
@@ -144,6 +144,9 @@ export function ProductionConversation({
   emptyLine,
   footer,
   pointsEmpty,
+  entry,
+  openingNote,
+  side,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -155,15 +158,31 @@ export function ProductionConversation({
   footer?: React.ReactNode;
   /** What the understanding rail says before there is any. */
   pointsEmpty?: string;
+  /**
+   * Which thread this view enters. The production's own by default; an episode or a scene names
+   * itself, because the coordinator gives each context its own briefing (R-20) and a message about
+   * episode 3 sent into the season's thread arrives with the wrong thing in focus.
+   */
+  entry?: WorldChatContext;
+  /** What the placeholder bubble calls this thread while its workspace loads. */
+  openingNote?: string;
+  /**
+   * What sits beside the transcript instead of the points. The rail has two states and never both
+   * at once (turn 91): while talking it is what the conversation understood; once a proposal is
+   * staged it is that proposal, under one Accept. A screen showing both would be claiming a point
+   * is a proposal, which is the promise the gate exists to keep.
+   */
+  side?: React.ReactNode;
 }) {
   const { state } = useStore();
   const [message, setMessage] = useState("");
+  const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
+  const contextKey = JSON.stringify(context);
   const thread = useMemo(() => {
-    const rows = (state?.world?.conversations ?? []).filter(
-      (c) => c.entryContext?.kind === "production" && c.entryContext.productionId === productionId,
-    );
+    const wanted = JSON.parse(contextKey) as WorldChatContext;
+    const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
     return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
-  }, [state?.world?.conversations, productionId]);
+  }, [state?.world?.conversations, contextKey]);
   const conversationId = thread?.id ?? null;
 
   useEffect(() => {
@@ -184,7 +203,7 @@ export function ProductionConversation({
     setMessage("");
     // No thread yet: the first thing said opens it, with that line as its opening.
     if (!conversationId) {
-      createWorldChat(worldId, text, crypto.randomUUID(), { kind: "production", productionId });
+      createWorldChat(worldId, text, crypto.randomUUID(), context);
       return;
     }
     sendWorldChat(worldId, conversationId, text);
@@ -214,7 +233,7 @@ export function ProductionConversation({
             thread ? (
               <div className="fy-bubble--user">
                 {thread.title}
-                <div className="fy-bubble__note">Production Chat · opening…</div>
+                <div className="fy-bubble__note">{openingNote ?? "Production Chat · opening…"}</div>
               </div>
             ) : (
               <div className="fy-bubble--gate">{emptyLine}</div>
@@ -241,6 +260,15 @@ export function ProductionConversation({
     </div>
   );
 
+  // A staged proposal takes the rail from the points; the two are never up together (turn 91).
+  if (side !== undefined) {
+    return (
+      <>
+        {pane}
+        <div className="fy-story__side">{side}</div>
+      </>
+    );
+  }
   if (pointsEmpty === undefined) return pane;
   return (
     <>
@@ -268,6 +296,22 @@ export function ProductionConversation({
       </div>
     </>
   );
+}
+
+/**
+ * Whether two entry contexts name the same thread. Compared field by field rather than by
+ * identity: the context is rebuilt on every render from route params, so `===` never matches.
+ */
+function sameContext(a: WorldChatContext | undefined, b: WorldChatContext): boolean {
+  if (!a || a.kind !== b.kind) return false;
+  const key = (c: WorldChatContext) =>
+    JSON.stringify([
+      c.kind,
+      "productionId" in c ? c.productionId : null,
+      "episodeId" in c ? c.episodeId : null,
+      "sceneId" in c ? c.sceneId : null,
+    ]);
+  return key(a) === key(b);
 }
 
 /**

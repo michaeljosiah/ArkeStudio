@@ -50,7 +50,7 @@ import {
   WorldLayout,
   WorldOverviewScreen,
 } from "./screens/world.js";
-import { EpisodeDetailScreen } from "./screens/development.js";
+import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
 import {
   AudioScreen,
   ChapterTreeScreen,
@@ -180,7 +180,10 @@ export function App() {
           <Route path="story" element={<ProductionChatScreen />} />
           <Route path="season" element={<StoryScreen />} />
           <Route path="overview" element={<StoryScreen />} />
-          <Route path="story/episodes/:episodeId" element={<EpisodeDetailScreen />} />
+          {/* The same pair one level down (turn 91): the episode's chat lives under `story`
+              beside the production's own, and the page it lands on sits at production level. */}
+          <Route path="story/episodes/:episodeId" element={<EpisodeChatScreen />} />
+          <Route path="episodes/:episodeId" element={<EpisodeDetailScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />
