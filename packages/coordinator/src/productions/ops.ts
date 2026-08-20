@@ -2,22 +2,14 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  assemblePassBlocks,
-  bindingPreamble,
-  boundFiles,
-  composePrompt,
-  dispatchDuration,
-  estimateMicroUsd,
-  frameDispatchFor,
+  compilePasses,
   normalizeAspect,
   parseMentions,
-  passStructure,
   legacyFormatFor,
   planScene,
   pickableSheets,
   productionShape,
   resolveMedium,
-  sceneImageOutput,
   SceneSchema,
   ulid,
   type ArtifactSidecar,
@@ -36,7 +28,6 @@ import {
   type Series,
   type StoryOverview,
   type Shot,
-  type ShotPlanEntry,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
@@ -791,86 +782,11 @@ export async function setProductionAspect(
 // ---------------------------------------------------------------------------
 
 /**
- * How a chosen size travels to the provider, which is not one answer.
- *
- * Video routes read a top-level `resolution` word. Image routes size from `output.width/height`
- * and ignore that word entirely — and fal forwards any top-level field it does not recognise, so
- * sending `resolution: "4MP"` beside `image_size` would put a field in an image request that the
- * character-image path never sends.
+ * The plan's compiled passes, as queue requests (issue 398). Composition is a field mapping and
+ * nothing else: the compiler owns the route, the prompt, the wire parameters, the estimate and
+ * the refusals, so the object the dialog reviewed, the durable plan (#391) will persist, and the
+ * job the queue runs are one object rather than three derivations that can drift.
  */
-function sizeParams(model: ManifestModel, plan: ScenePlan): Record<string, unknown> {
-  if (model.capability === "image") {
-    // Shaped by the plan's aspect (issue 389) — the same call the estimate priced, so the
-    // dimensions billed and the dimensions requested are one spec.
-    return plan.tier !== undefined || plan.aspect !== undefined
-      ? { output: sceneImageOutput(model, plan.tier, plan.aspect) }
-      : {};
-  }
-  return {
-    ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
-    // The delivery aspect, in the studio's own key (issue 389) — each transport maps it to its
-    // route's spelling (fal video says aspect_ratio) or drops it where a mode locks it.
-    ...(plan.aspect !== undefined ? { aspect: plan.aspect } : {}),
-  };
-}
-
-/** A whole-scene pass, priced the way its capability is actually billed. */
-function passEstimate(
-  model: ManifestModel,
-  plan: ScenePlan,
-  durationSec: number,
-  referenceImages: number,
-): number {
-  if (model.capability !== "image") {
-    return estimateMicroUsd(model, {
-      durationSec,
-      ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
-    });
-  }
-  const output = sceneImageOutput(model, plan.tier, plan.aspect);
-  return estimateMicroUsd(model, {
-    images: 1,
-    referenceImages,
-    megapixels: (output.width * output.height) / 1_000_000,
-    ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
-  });
-}
-
-/**
- * The seconds a video job may ask for. Refused rather than clamped when the request is longer
- * than anything the route offers: a 22s shot dispatched as a 15s clip is paid-for footage that
- * cannot cover what was asked for, and the dialog already names the shot before anyone presses.
- */
-function askedSeconds(
-  model: ManifestModel,
-  requestedSec: number,
-  what: string,
-  opts?: { withReferences?: boolean },
-): number {
-  // The route the dispatch will actually take (issue #390): references can shorten the ceiling,
-  // and asking with the text route's numbers is how a plan succeeds and the provider refuses.
-  const choice = dispatchDuration(model, requestedSec, opts);
-  if (choice.kind === "over-cap") {
-    throw new Error(
-      `${what} runs ${requestedSec}s — longer than the ${choice.longest}s ${model.displayName} can make${
-        choice.becauseReferences ? " on the reference route it will take" : ""
-      }`,
-    );
-  }
-  return choice.kind === "asked" ? choice.seconds : requestedSec;
-}
-
-/**
- * The shot plan stretched to the clip that was actually asked for. Segmentation and the
- * per-shot charge split both read these boundaries, so a plan that stops short of the clip
- * hides the tail from review and prorates the money over the wrong total.
- */
-function coverPlan(plan: ShotPlanEntry[], seconds: number): ShotPlanEntry[] {
-  const last = plan[plan.length - 1];
-  if (!last || last.endSec >= seconds) return plan;
-  return [...plan.slice(0, -1), { ...last, endSec: seconds }];
-}
-
 export function composeDispatches(
   worldId: string,
   productionId: string,
@@ -879,165 +795,17 @@ export function composeDispatches(
   model: ManifestModel,
   world: WorldBundle,
 ): EnqueueInput[] {
-  // Provenance frozen at dispatch (SPEC-013 R-2): canon revision and every cited sheet version.
-  const provenanceFor = (
-    sheetIds: string[],
-  ): { canonRevision: number; sheets: Record<string, number>; artDirectionVersion: number } => ({
-    canonRevision: world.meta.canonRevision,
-    artDirectionVersion: world.artDirection.version,
-    sheets: Object.fromEntries(
-      sheetIds
-        .map((id) => world.sheets.find((s) => s.id === id))
-        .filter((s): s is NonNullable<typeof s> => s !== undefined)
-        .map((s) => [s.id, s.version]),
-    ),
-  });
-  // An impossible delivery shape cannot dispatch in either mode (issue 389): the refusal names
-  // the model and what it does offer, before any job exists to fail.
-  if (plan.warnings.aspectUnsupported !== null) {
-    const bad = plan.warnings.aspectUnsupported;
-    throw new Error(
-      `${bad.model} cannot deliver ${bad.aspect} — it offers ${bad.supported.join(", ")}`,
-    );
-  }
-  if (plan.mode === "per-shot") {
-    // A stale frame selection cannot dispatch (issue 154): the plan named it, and composing the
-    // request anyway would send a shot to open on an artifact this world cannot produce.
-    const stale = plan.warnings.staleFrames;
-    if (stale.length > 0) {
-      const worst = stale[0]!;
-      throw new Error(`shot ${worst.number}'s start frame is unusable: ${worst.detail}`);
-    }
-    return plan.shots.map((entry) => {
-      // The strict frame dispatch (issue 154): the boundary still is the one image the
-      // first-frame route takes, resolved by the same authority the plan and the picker read.
-      const frameRoute = entry.frame !== undefined ? frameDispatchFor(model, 1) : null;
-      const framed = entry.frame !== undefined && frameRoute !== null;
-      // A frame mode may lock the aspect (issue 389): the picture decides the shape, and
-      // sending a chosen ratio beside it puts a field on the wire the route never declared.
-      const size = Object.fromEntries(
-        Object.entries(sizeParams(model, plan)).filter(
-          ([key]) => !(framed && key === "aspect" && frameRoute!.locked.includes("aspect")),
-        ),
-      );
-      return {
-        worldId,
-        productionId,
-        target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
-        capability: model.capability,
-        provider: model.provider,
-        model: model.id,
-        params: {
-          // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array below
-          // comes from the same bound records the preamble numbers, so the stated order and the
-          // sent order are one structure rather than two that can drift (R-2, D2).
-          prompt: composePrompt(entry.parts),
-          references: framed ? [entry.frame!.file] : boundFiles(entry.bound),
-          ...(framed
-            ? {
-                taskMode: frameRoute!.mode,
-                ...(frameRoute!.route !== null ? { route: frameRoute!.route } : {}),
-                // The durable identity of what was sent (issue 154): the take records the frame
-                // it opened on, and the job can be audited against the exact bytes by hash.
-                startFrame: entry.frame!.file,
-                frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
-              }
-            : {}),
-          // The length the plan priced, which is the length the route can actually be asked for.
-          // Sending the raw shot seconds meant the job asked for something no route accepts, and
-          // the client then had nothing to translate.
-          ...(entry.shot.durationSec !== undefined
-            ? {
-                durationSec: askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, {
-                  withReferences: entry.bound.length > 0,
-                }),
-              }
-            : {}),
-          ...size,
-          provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
-        },
-        estimatedMicroUsd: entry.estimatedMicroUsd,
-        landing: { dir: `productions/${productionId}/incoming/${entry.shot.id}` },
-      };
-    });
-  }
-  if (!plan.pack.ok) return [];
-  return plan.pack.passes.map((pass) => {
-    const shotsInPass = pass.plan.map((p) => plan.shots.find((s) => s.shot.id === p.shotId)!);
-    const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
-    const references = boundFiles(passReferencePlan.bound);
-    const passSeconds = askedSeconds(model, pass.durationSec, `scene pass ${pass.index}`, {
-      withReferences: references.length > 0,
-    });
-    if (references.length > model.accepts.referenceImages) {
-      throw new Error(`scene pass ${pass.index} exceeds ${model.displayName}'s reference limit`);
-    }
-    // One clip, composed once (SPEC-019 R-5, R-6). Joining each shot's whole prompt restated the
-    // world's art direction twice per shot; the summary, the standing description and the
-    // persistent constraint now belong to the pass, and a shot contributes only its beat.
-    const passBlocks = assemblePassBlocks({
-      world: world.meta,
-      sheets: world.sheets,
-      scene,
-      entries: shotsInPass.map((entry) => ({ shot: entry.shot, prompt: entry.prompt })),
-      ...(world.artDirection.description !== undefined
-        ? { artDirection: world.artDirection.description }
-        : {}),
-      carriedSheetIds: new Set(passReferencePlan.bound.map((reference) => reference.sheetId)),
-      capability: model.capability,
-    });
-    const passBody = [
-      passBlocks.summary,
-      passBlocks.standing,
-      passBlocks.spatial,
-      passBlocks.beats
-        .map((beat) => `[shot ${beat.shot.number} · ${beat.shot.durationSec ?? 4}s] ${beat.text}`)
-        .join("\n"),
-      passBlocks.persistent,
-    ]
-      .map((block) => block.trim())
-      .filter((block) => block.length > 0)
-      .join("\n\n");
-    return {
-      worldId,
-      productionId,
-      target: { kind: "scene-pass", id: scene.id, coversShots: pass.plan.map((p) => p.shotId) },
-      capability: model.capability,
-      provider: model.provider,
-      model: model.id,
-      params: {
-        prompt: composePrompt({
-          // The shape of the clip, said in the prompt and not only in the parameters — the cuts
-          // below are only where we say they are if the model divides the clip where we do.
-          structure: passStructure({
-            shotCount: pass.plan.length,
-            askedSec: passSeconds,
-            // From the plan, not re-looked-up (issue 389): the dialog showed this plan, and the
-            // prompt's stated shape must be the shape the parameters ask for.
-            aspect: plan.aspect,
-          }),
-          preamble: bindingPreamble(passReferencePlan.bound),
-          body: passBody,
-          // From the plan, not recomputed here: the dialog showed these and the dispatch has to
-          // be the same request (R-9).
-          negatives: passReferencePlan.negatives,
-        }),
-        references,
-        durationSec: passSeconds,
-        ...sizeParams(model, plan),
-        // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses — which is
-        // why it has to describe the clip that was actually asked for. A pass snapped from 5s to
-        // 6s left a second nobody reviewed and nobody could cut from.
-        shotPlan: coverPlan(pass.plan, passSeconds),
-        provenance: provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId)),
-      },
-      // Priced at the same size and the same length the job runs at. Recomputing it without
-      // either queued a 1080p pass carrying a 720p figure, priced a pass of stills as if it
-      // were footage, and used the seconds planned rather than the seconds asked for.
-      estimatedMicroUsd: passEstimate(model, plan, passSeconds, references.length),
-      landing: { dir: `productions/${productionId}/incoming/${scene.id}-pass-${pass.index}` },
-    };
-  });
+  return compilePasses({ productionId, scene, plan, model, world }).map((pass) => ({
+    worldId,
+    productionId,
+    target: pass.target,
+    capability: pass.model.capability,
+    provider: pass.model.provider,
+    model: pass.model.id,
+    params: pass.params,
+    estimatedMicroUsd: pass.estimatedMicroUsd,
+    landing: pass.landing,
+  }));
 }
 
 export { planScene };

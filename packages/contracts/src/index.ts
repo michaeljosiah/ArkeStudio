@@ -12,6 +12,7 @@ export * from "./job.js";
 export * from "./change.js";
 export * from "./events.js";
 export * from "./client-state.js";
+export * from "./pass-compiler.js";
 export * from "./frames.js";
 export * from "./world-chat.js";
 export * from "./adapter.js";

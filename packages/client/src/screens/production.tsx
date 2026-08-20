@@ -16,12 +16,14 @@ import {
   nativeResolution,
   overrideStaleAgainst,
   pickableSheets,
+  compilePasses,
   planScene,
   PRESETS,
   productionAspect,
   productionShape,
   promptFor,
   STANDARD_ASPECTS,
+  type CompiledPass,
   worldSheets,
   type Scene,
   type Sheet,
@@ -1695,6 +1697,32 @@ export function DispatchDialogScreen() {
     return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
   }, [world, production, scene, model, resolution, choice.tier]);
 
+  // The compiled passes (issue 398): the same object the coordinator maps into queue requests,
+  // so the rows below ARE the dispatch — route, length, references, estimate — not a summary
+  // that can drift from it. Compilation refuses what dispatch would refuse; the warning rows
+  // already say why, so a refusal here just leaves no rows to show.
+  const compiled = useMemo(() => {
+    if (!world || !production || !scene || !model || !plans) return null;
+    const compile = (plan: typeof plans.perShot) => {
+      try {
+        return compilePasses({ productionId: production.meta.id, scene, plan, model, world });
+      } catch {
+        return null;
+      }
+    };
+    return { perShot: compile(plans.perShot), wholeScene: compile(plans.wholeScene) };
+  }, [world, production, scene, model, plans]);
+  const passRow = (pass: CompiledPass): string => {
+    const route =
+      pass.route.kind === "frame"
+        ? "first-frame route"
+        : pass.route.kind === "reference"
+          ? `reference route · refs ×${pass.references.length}`
+          : "text route";
+    const length = pass.askedSec !== undefined ? ` · ${seconds(pass.askedSec)}` : "";
+    return `${route}${length} · ${usd(pass.estimatedMicroUsd)}`;
+  };
+
   const sceneFile = scene ? sceneFileOf(production, scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
   // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,
@@ -1887,7 +1915,16 @@ export function DispatchDialogScreen() {
               <div className="fy-boardcard__body">
                 One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per shot.
               </div>
-              <div className="fy-boardcard__mono">est. {usd(plans.perShot.totalEstimatedMicroUsd)}</div>
+              <div className="fy-boardcard__mono">
+                est. {usd(plans.perShot.totalEstimatedMicroUsd)}
+                {compiled?.perShot?.map((pass) => (
+                  <span key={pass.target.coversShots.join("-")}>
+                    {"\n"}
+                    {pass.target.kind === "shot" ? `shot ${pass.target.coversShots[0]!.replace("sh_", "")}` : "pass"} ·{" "}
+                    {passRow(pass)}
+                  </span>
+                ))}
+              </div>
               <div style={{ marginTop: 12 }}>
                 <Button
                   variant="primary"
@@ -1917,9 +1954,10 @@ export function DispatchDialogScreen() {
                   <div className="fy-boardcard__mono">
                     {plans.wholeScene.pack.passes.length} pass{plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}
                     {model!.limits.maxDurationSec ?? "∞"}s cap
-                    {plans.wholeScene.pack.passes.map((p) => (
+                    {plans.wholeScene.pack.passes.map((p, i) => (
                       <span key={p.index}>
-                        {"\n"}pass {p.index} · {seconds(p.durationSec)} · shots {p.plan.map((e) => e.number).join(", ")}
+                        {"\n"}pass {p.index} · shots {p.plan.map((e) => e.number).join(", ")}
+                        {compiled?.wholeScene?.[i] ? ` · ${passRow(compiled.wholeScene[i]!)}` : ` · ${seconds(p.durationSec)}`}
                       </span>
                     ))}
                   </div>
