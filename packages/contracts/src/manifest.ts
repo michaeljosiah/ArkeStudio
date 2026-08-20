@@ -451,6 +451,20 @@ export function parseAspect(aspect: string): number | null {
   return width > 0 && height > 0 ? width / height : null;
 }
 
+/**
+ * The one spelling an aspect is stored and compared in (issue 389): the two numbers around a
+ * colon, no whitespace. Everything that writes an aspect normalizes through here, so " 9 : 16 "
+ * and "9:16" cannot become two different productions' shapes. Null is a refusal — the caller
+ * names the input rather than storing something no route will ever match.
+ */
+export function normalizeAspect(aspect: string): string | null {
+  const parts = /^\s*([0-9]+(?:\.[0-9]+)?)\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*$/.exec(aspect);
+  if (!parts) return null;
+  const width = Number.parseFloat(parts[1]!);
+  const height = Number.parseFloat(parts[2]!);
+  return width > 0 && height > 0 ? `${parts[1]!}:${parts[2]!}` : null;
+}
+
 /** Which way round the work wants to be, for the workflows whose shape is not the author's. */
 export function isLandscapeWorkflow(workflow: CharacterImageWorkflow): boolean {
   return workflow === "character-sheet" || workflow === "location-view";
@@ -536,13 +550,63 @@ export function aspectOffered(model: ManifestModel, aspect: string): boolean {
 }
 
 /**
- * A still frame from a scene: landscape, and sized by the same tier vocabulary. Scene dispatch
- * needs this because the image clients size a request from `output.width`/`height` and ignore a
- * bare resolution string — a tier that never became dimensions moved the control and nothing
- * else.
+ * A row that curates nothing and declares no range has no opinion about shape (issue 389): the
+ * routes behind it take real dimensions, and treating silence as refusal would unshape a
+ * production's stills on exactly the models that could honour them. An unverified row is not
+ * opinion-less — it has not earned a guess.
  */
-export function sceneImageOutput(model: ManifestModel, tier?: SizeTier): ImageOutputSpec {
-  return imageOutputFor(model, { landscape: true, ...(tier !== undefined ? { tier } : {}) });
+function aspectOpinionless(model: ManifestModel): boolean {
+  const enumerated = model.limits.aspects;
+  return (
+    (enumerated === undefined || enumerated.length === 0) &&
+    model.aspectRange === undefined &&
+    model.unverified !== true
+  );
+}
+
+/**
+ * Whether this model's selected route can deliver that shape, and what it offers instead
+ * (issue 389). Three vocabularies, kept apart: a curated `limits.aspects` list is the offer, a
+ * continuous `aspectRange` is a capability, and a row declaring neither has no opinion — which
+ * is a pass, not a refusal, because refusing on silence would block routes that take anything.
+ * The verdict is computed before enqueue so an impossible shape is a named refusal, never a
+ * provider failure after the estimate was accepted.
+ */
+export function aspectSupport(
+  model: ManifestModel,
+  aspect: string,
+): { ok: true } | { ok: false; supported: readonly string[] } {
+  const canonical = normalizeAspect(aspect);
+  const enumerated = model.limits.aspects;
+  const offers = enumerated !== undefined && enumerated.length > 0 ? enumerated : STANDARD_ASPECTS;
+  if (canonical === null) return { ok: false, supported: offers };
+  if (enumerated !== undefined && enumerated.length > 0) {
+    return enumerated.includes(canonical) ? { ok: true } : { ok: false, supported: enumerated };
+  }
+  const range = model.aspectRange;
+  if (range) {
+    const ratio = parseAspect(canonical)!;
+    return ratio >= range.min && ratio <= range.max
+      ? { ok: true }
+      : { ok: false, supported: STANDARD_ASPECTS.filter((a) => aspectAllowed(model, parseAspect(a)!)) };
+  }
+  return { ok: true };
+}
+
+/**
+ * A still frame from a scene, shaped by the production's delivery aspect (issue 389) — and by
+ * the old landscape habit where no aspect was ever chosen, which is the documented default for
+ * every production created before aspect existed. Scene dispatch needs this because the image
+ * clients size a request from `output.width`/`height` and ignore a bare resolution string — a
+ * tier that never became dimensions moved the control and nothing else.
+ */
+export function sceneImageOutput(model: ManifestModel, tier?: SizeTier, aspect?: string): ImageOutputSpec {
+  const ratio = aspect !== undefined ? parseAspect(aspect) : null;
+  return imageOutputFor(model, {
+    landscape: ratio === null ? true : ratio >= 1,
+    ...(tier !== undefined ? { tier } : {}),
+    ...(aspect !== undefined ? { aspect } : {}),
+  });
 }
 
 /**
@@ -563,8 +627,14 @@ export function imageOutputFor(
 ): ImageOutputSpec {
   const landscape = options.landscape ?? false;
   const tier = options.tier;
+  // Offered, or asked of a row with no opinion to refuse with (issue 389) — either way the
+  // shape is one the request can carry, because these routes size from real dimensions.
   const chosen =
-    options.aspect !== undefined && aspectOffered(model, options.aspect) ? options.aspect : undefined;
+    options.aspect !== undefined &&
+    (aspectOffered(model, options.aspect) ||
+      (aspectOpinionless(model) && parseAspect(options.aspect) !== null))
+      ? options.aspect
+      : undefined;
   const dimensions =
     model.provider === "openai"
       ? landscape

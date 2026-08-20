@@ -8,6 +8,7 @@ import {
   durationOptions,
   pricedDuration,
   estimateCharacterImageMicroUsd,
+  aspectSupport,
   estimateMicroUsd,
   formatMicroUsd,
   frameDispatchFor,
@@ -90,6 +91,21 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
       assert.equal(video.accepts.startFrame, false, `${video.id} claims no start frame`);
       assert.equal(video.accepts.endFrame, false, `${video.id} claims no end frame`);
+    }
+  });
+
+  it("every curated shape passes the aspect verdict, and anything else refuses with the offers named (issue 389)", () => {
+    for (const video of SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.provider === "fal")) {
+      const offers = video.limits.aspects ?? [];
+      for (const aspect of offers) {
+        assert.ok(aspectSupport(video, aspect).ok, `${video.id} accepts its own curated ${aspect}`);
+      }
+      if (offers.length > 0) {
+        const refused = aspectSupport(video, "13:37");
+        assert.ok(!refused.ok, `${video.id} refuses a shape it never offered`);
+        assert.deepEqual(refused.supported, offers, "the refusal names exactly what the row offers");
+      }
+      assert.ok(!aspectSupport(video, "vertical").ok, `${video.id} refuses a malformed shape`);
     }
   });
 

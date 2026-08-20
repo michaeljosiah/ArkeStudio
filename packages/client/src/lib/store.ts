@@ -2256,6 +2256,11 @@ export function reorderScenes(worldId: string, productionId: string, orderedIds:
   send({ kind: "reorder-scenes", worldId, productionId, orderedIds });
 }
 
+/** Change the aspect a production delivers in (issue 389) — validated and normalized server-side. */
+export function setProductionAspect(worldId: string, productionId: string, aspect: string): void {
+  send({ kind: "set-production-aspect", worldId, productionId, aspect });
+}
+
 export function setPromptOverride(
   worldId: string,
   productionId: string,

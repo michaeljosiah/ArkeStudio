@@ -14,6 +14,7 @@ import {
   type PayloadVerdict,
 } from "./reference-budget.js";
 import {
+  aspectSupport,
   dispatchDuration,
   durationOptions,
   estimateMicroUsd,
@@ -1002,6 +1003,12 @@ export interface DispatchWarnings {
    * refuses, so the dialog must not let it be committed.
    */
   payloadOverflow: PayloadVerdict | null;
+  /**
+   * The production's delivery aspect is one the selected route cannot make (issue 389). A
+   * refusal, not a warning: the supported shapes are named beside the model, and composition
+   * throws rather than letting money move toward footage in the wrong shape.
+   */
+  aspectUnsupported: { aspect: string; model: string; supported: readonly string[] } | null;
   /** Subjects past the model's stated reliable range — carried anyway, and said so (R-42). */
   subjectsOverRange: BudgetResult["subjectsOverRange"];
 }
@@ -1039,6 +1046,12 @@ export interface ScenePlanInput {
   resolution?: string;
   /** Stills: the chosen size tier, which becomes real output dimensions at dispatch. */
   tier?: SizeTier;
+  /**
+   * The production's delivery aspect (issue 389), shaping still dimensions, video payloads and
+   * the pass prompt alike. Absent means the documented default behaviour — landscape stills and
+   * no aspect on the wire — exactly what every production made before aspect existed got.
+   */
+  aspect?: string;
   productionId?: string;
   artDirection?: ResolvedArtDirection;
   /**
@@ -1119,6 +1132,8 @@ export interface ScenePlan {
   resolution?: string;
   /** Stills: the tier those estimates assumed, for the output spec the jobs carry. */
   tier?: SizeTier;
+  /** The delivery aspect these estimates were shaped at (issue 389), carried for the same reason. */
+  aspect?: string;
   totalEstimatedMicroUsd: number;
   /**
    * Which pictures steer this dispatch, and why (SPEC-019 R-26). Stated rather than offered as a
@@ -1274,7 +1289,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         : (() => {
             // Priced from the frame that will actually be asked for. Without the megapixels a
             // per-megapixel model came out at zero, which is not an estimate.
-            const output = sceneImageOutput(model, input.tier);
+            // Shaped by the production's delivery aspect (issue 389): a 9:16 still has
+            // different pixels, and therefore a different per-megapixel price, than the old
+            // landscape habit.
+            const output = sceneImageOutput(model, input.tier, input.aspect);
             return estimateMicroUsd(model, {
               images: 1,
               referenceImages: references.filter((reference) => reference.file !== null).length,
@@ -1517,6 +1535,16 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     overriddenStale: scene.shots
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),
+    // Refused by name before enqueue (issue 389): the shape, the model, and what it does offer.
+    // Stills are exempt — imageOutputFor's backstop already falls back to the nearest honest
+    // orientation, and a still in a fallback shape is recoverable where paid footage is not.
+    aspectUnsupported: (() => {
+      if (input.aspect === undefined || model.capability !== "video") return null;
+      const verdict = aspectSupport(model, input.aspect);
+      return verdict.ok
+        ? null
+        : { aspect: input.aspect, model: model.displayName, supported: verdict.supported };
+    })(),
   };
 
   return {
@@ -1526,8 +1554,14 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     pack,
     ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
     ...(input.tier !== undefined ? { tier: input.tier } : {}),
+    ...(input.aspect !== undefined ? { aspect: input.aspect } : {}),
     totalEstimatedMicroUsd: mode === "whole-scene" ? wholeSceneTotal : perShotTotal,
-    steering: chooseReferenceSteering({ scene, selections, model }),
+    steering: chooseReferenceSteering({
+      scene,
+      selections,
+      model,
+      ...(input.aspect !== undefined ? { aspect: input.aspect } : {}),
+    }),
     warnings,
   };
 }

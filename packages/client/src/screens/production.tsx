@@ -18,8 +18,10 @@ import {
   pickableSheets,
   planScene,
   PRESETS,
+  productionAspect,
   productionShape,
   promptFor,
+  STANDARD_ASPECTS,
   worldSheets,
   type Scene,
   type Sheet,
@@ -76,6 +78,7 @@ import {
   placeOverlay,
   removeOverlay,
   uploadArtifacts,
+  setProductionAspect,
   setPromptOverride,
   setShotTrim,
   useExports,
@@ -607,6 +610,31 @@ export function ProductionDashboardScreen() {
             ? `${world.sheets.length} sheets · ${world.canon.length} canon entries · tone came along`
             : `${acceptedShots} of ${shots.length} shots covered · ${pending.length} need you`}
         </span>
+      </div>
+      {/* The one editable delivery-profile field (issue 389): validated and normalized
+          server-side, refused per route at dispatch, and every planning surface reads it. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="fy-mono">Delivery</span>
+        <select
+          aria-label="Delivery aspect"
+          value={productionAspect(production.meta)}
+          onChange={(e) => worldId && prodId && setProductionAspect(worldId, prodId, e.target.value)}
+          style={{
+            font: "500 12px var(--font-sans)",
+            padding: "4px 8px",
+            borderRadius: 8,
+            border: "1px solid var(--border)",
+            background: "var(--background)",
+            color: "inherit",
+          }}
+        >
+          {STANDARD_ASPECTS.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+        {production.meta.aspect === undefined && <span className="fy-mono">default</span>}
       </div>
       {dayOne ? (
         <>
@@ -1417,7 +1445,8 @@ export function GenerateScreen() {
           <GeneratePromptEditor world={world} production={production} scene={scene} shot={shot} worldId={worldId!} prodId={prodId!} />
         )}
         <div className="fy-paramrow">
-          <span className="fy-param">16:9</span>
+          {/* The production's delivery aspect (issue 389), never a hard-coded landscape. */}
+          <span className="fy-param">{production ? productionAspect(production.meta) : "16:9"}</span>
           <span className="fy-param">720p</span>
           {shot && <span className="fy-param">{seconds(shot.durationSec)}</span>}
           {frameRoute !== null && boundaryFrame && <span className="fy-param">opens on its boundary frame</span>}
@@ -1658,6 +1687,8 @@ export function DispatchDialogScreen() {
       // The world's shelf, so a durable boundary frame resolves here exactly as it will at the
       // coordinator (issue 154) — the dialog's claim is that it runs the same function.
       artifacts: world.artifacts,
+      // The production's delivery aspect (issue 389), on the same same-function claim.
+      ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
       ...(resolution !== undefined ? { resolution } : {}),
       ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
     };
@@ -1688,6 +1719,15 @@ export function DispatchDialogScreen() {
         key: `sf-${f.shotId}`,
         text: `shot ${f.number}'s start frame is unusable: ${f.detail} — this blocks dispatch`,
       });
+    // Issue 389: an impossible delivery shape refuses, consistently — composition throws the
+    // same refusal server-side, so this row is the dialog saying it first.
+    if (warnings.aspectUnsupported) {
+      const a = warnings.aspectUnsupported;
+      warningRows.push({
+        key: "aspect",
+        text: `${a.model} cannot deliver ${a.aspect} — it offers ${a.supported.join(", ")} — this blocks dispatch`,
+      });
+    }
     for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
     for (const d of warnings.droppedReferences) {
       warningRows.push({

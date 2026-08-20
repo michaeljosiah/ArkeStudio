@@ -83,3 +83,17 @@ export function productionShape(meta: {
     displayLabel: kind === DEFAULT_KIND[medium] ? mediumLabel : kindLabel,
   };
 }
+
+/**
+ * The documented default delivery aspect (issue 389): landscape 16:9, because that is what
+ * every production made before aspect existed actually rendered — stills came out landscape
+ * and every video route's first offered shape is 16:9. Stated once, here, rather than as a
+ * hidden fallback scattered through call sites; there is deliberately no world-level default
+ * to consult, because a world routinely holds a 16:9 film and a 9:16 cut of the same material.
+ */
+export const DEFAULT_PRODUCTION_ASPECT = "16:9";
+
+/** The aspect this production delivers in (SPEC-019 R-36; issue 389) — never silently absent. */
+export function productionAspect(meta: { aspect?: string }): string {
+  return meta.aspect ?? DEFAULT_PRODUCTION_ASPECT;
+}

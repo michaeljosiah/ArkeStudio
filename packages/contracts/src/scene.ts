@@ -99,6 +99,12 @@ export const SceneStoryboardSchema = z
     sceneVersion: z.number().int().min(1),
     /** The shots this board actually covers, in order — the excess over the cap is not drawn. */
     panels: z.array(ShotIdSchema),
+    /**
+     * The delivery aspect the panels were drawn at (issue 389). Absent means drawn before
+     * aspect reached storyboards — which was always landscape, so staleness against a vertical
+     * production is computable for those boards too.
+     */
+    aspect: z.string().min(1).optional(),
     drawnAt: IsoDateTimeSchema,
     /** The job that drew it, so its cost is findable in the ledger (R-25). */
     sourceJobId: z.string().min(1),

@@ -229,6 +229,10 @@ export class FalClient implements ProviderClient {
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.
       "durationSec",
+      // Ours, not fal's: the video routes spell the shape `aspect_ratio` (issue 389). Passed
+      // through bare it was a field no route ever declared, which fal silently ignored — the
+      // chosen ratio never reached the model at all.
+      "aspect",
     ]);
     const { output, ...params } = Object.fromEntries(
       Object.entries(request.params).filter(([key]) => !internal.has(key)),
@@ -252,6 +256,12 @@ export class FalClient implements ProviderClient {
         ...params,
         ...(typeof request.params["sound"] === "boolean" ? { generate_audio: request.params["sound"] } : {}),
         ...durationParam(request.model, request.params),
+        // The shape, in the video routes' own vocabulary (issue 389). Image requests carry
+        // theirs inside `output` above; a mode that locks the ratio never sends one here,
+        // because the planner already dropped it.
+        ...(request.capability === "video" && typeof request.params["aspect"] === "string"
+          ? { aspect_ratio: request.params["aspect"] }
+          : {}),
         ...imageOutput,
         ...imagePayload,
       }),

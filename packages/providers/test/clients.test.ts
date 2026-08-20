@@ -790,6 +790,30 @@ describe("fal frame task modes (issue 305 §3; SPEC-019 T-1)", () => {
     );
   });
 
+  it("a video dispatch speaks the routes' own word for the shape, for every family that offers one (issue 389)", async () => {
+    // The failure this ends: the studio's `aspect` key passed through verbatim, a field no fal
+    // route ever declared, so the chosen ratio never reached the model at all.
+    const families = SHIPPED_MANIFEST.models.filter(
+      (m) => m.capability === "video" && m.provider === "fal" && (m.limits.aspects?.length ?? 0) > 0,
+    );
+    assert.ok(families.length >= 6, "seedance ×2, veo ×2, minimax, ltx ×2, wan, kling ×2 curate shapes");
+    for (const row of families) {
+      let sent: Record<string, unknown> = {};
+      const client = new FalClient(async (_u, init) => {
+        sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return new Response(JSON.stringify({ request_id: "req-1" }), { status: 200 });
+      });
+      const aspect = row.limits.aspects!.includes("9:16") ? "9:16" : row.limits.aspects![0]!;
+      await client.submit("k", { model: row.id, capability: "video", params: { prompt: "x", aspect } });
+      assert.equal(sent["aspect_ratio"], aspect, `${row.id} receives the shape as aspect_ratio`);
+      assert.ok(!("aspect" in sent), `${row.id}: our key never rides the wire`);
+
+      // And a dispatch that chose no shape sends none — the route's own default runs.
+      await client.submit("k", { model: row.id, capability: "video", params: { prompt: "x" } });
+      assert.ok(!("aspect_ratio" in sent) && !("aspect" in sent), `${row.id} sends no shape unasked`);
+    }
+  });
+
   it("every shipped frame family dispatches no-frame, first-frame and first-and-last on its own routes (issue 154)", async () => {
     // Driven from the manifest itself, so a family the sync adds is covered the day it lands and
     // a family it drops fails here by name rather than silently losing coverage.

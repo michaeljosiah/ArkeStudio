@@ -1353,6 +1353,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       orderedIds: z.array(SceneIdSchema).min(1),
     })
     .strict(),
+  /** issue 389: change the aspect a production delivers in — normalized and refused by name. */
+  z
+    .object({
+      kind: z.literal("set-production-aspect"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      aspect: z.string().min(1).max(20),
+    })
+    .strict(),
   /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
   z
     .object({

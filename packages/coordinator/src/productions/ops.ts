@@ -9,6 +9,7 @@ import {
   dispatchDuration,
   estimateMicroUsd,
   frameDispatchFor,
+  normalizeAspect,
   parseMentions,
   passStructure,
   legacyFormatFor,
@@ -94,6 +95,12 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
   const bundle = store.getBundle();
   const taken = bundle.productions.map((p) => p.meta.id);
   const slug = uniqueSlug(input.title, "production", taken);
+  // Normalized at the single write boundary (issue 389): " 9 : 16 " and "9:16" must be one
+  // shape, and a string no route can parse is refused here rather than stored to fail later.
+  const aspect = input.aspect !== undefined ? normalizeAspect(input.aspect) : undefined;
+  if (input.aspect !== undefined && aspect === null) {
+    throw new Error(`"${input.aspect}" is not an aspect — two numbers around a colon, like 9:16`);
+  }
   const medium: ProductionMedium =
     input.medium ?? resolveMedium({ format: input.format ?? "video" });
   const legacyFormat: ProductionFormat = input.medium === undefined ? (input.format ?? "video") : legacyFormatFor(medium);
@@ -112,7 +119,7 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     title: input.title,
     ...(input.logline !== undefined ? { logline: input.logline } : {}),
     status: "in-progress",
-    ...(input.aspect !== undefined ? { aspect: input.aspect } : {}),
+    ...(aspect !== undefined && aspect !== null ? { aspect } : {}),
     created: store.now(),
     updated: store.now(),
   };
@@ -749,9 +756,34 @@ export async function referenceByteSizes(store: WorldStore, files: readonly stri
   return sizes;
 }
 
-/** The aspect this production delivers in, falling back to the world's default (R-36, D29). */
-export function productionAspect(production: ProductionBundle, worldDefault?: string): string | undefined {
-  return production.meta.aspect ?? worldDefault;
+export { productionAspect, DEFAULT_PRODUCTION_ASPECT } from "@arke-studio/contracts";
+
+/**
+ * Change the aspect a production delivers in (issue 389) — the one editable delivery-profile
+ * field, through the same commit machinery everything else uses. Production meta is unversioned
+ * (§2.4.1): the change history is the commit's change line, and `updated` moves so the record
+ * says when. Validation is the same normalize-or-refuse the create path applies; there is no
+ * silent fallback, because a stored shape no route can parse fails at the worst possible time.
+ */
+export async function setProductionAspect(
+  store: WorldStore,
+  productionId: string,
+  aspect: string,
+): Promise<string> {
+  const canonical = normalizeAspect(aspect);
+  if (canonical === null) {
+    throw new Error(`"${aspect}" is not an aspect — two numbers around a colon, like 9:16`);
+  }
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  doc.set({ aspect: canonical, updated: store.now() });
+  await store.commit({
+    kind: "production-edit",
+    source: "form",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+  });
+  return canonical;
 }
 
 // ---------------------------------------------------------------------------
@@ -768,9 +800,18 @@ export function productionAspect(production: ProductionBundle, worldDefault?: st
  */
 function sizeParams(model: ManifestModel, plan: ScenePlan): Record<string, unknown> {
   if (model.capability === "image") {
-    return plan.tier !== undefined ? { output: sceneImageOutput(model, plan.tier) } : {};
+    // Shaped by the plan's aspect (issue 389) — the same call the estimate priced, so the
+    // dimensions billed and the dimensions requested are one spec.
+    return plan.tier !== undefined || plan.aspect !== undefined
+      ? { output: sceneImageOutput(model, plan.tier, plan.aspect) }
+      : {};
   }
-  return plan.resolution !== undefined ? { resolution: plan.resolution } : {};
+  return {
+    ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
+    // The delivery aspect, in the studio's own key (issue 389) — each transport maps it to its
+    // route's spelling (fal video says aspect_ratio) or drops it where a mode locks it.
+    ...(plan.aspect !== undefined ? { aspect: plan.aspect } : {}),
+  };
 }
 
 /** A whole-scene pass, priced the way its capability is actually billed. */
@@ -786,7 +827,7 @@ function passEstimate(
       ...(plan.resolution !== undefined ? { resolution: plan.resolution } : {}),
     });
   }
-  const output = sceneImageOutput(model, plan.tier);
+  const output = sceneImageOutput(model, plan.tier, plan.aspect);
   return estimateMicroUsd(model, {
     images: 1,
     referenceImages,
@@ -851,6 +892,14 @@ export function composeDispatches(
         .map((s) => [s.id, s.version]),
     ),
   });
+  // An impossible delivery shape cannot dispatch in either mode (issue 389): the refusal names
+  // the model and what it does offer, before any job exists to fail.
+  if (plan.warnings.aspectUnsupported !== null) {
+    const bad = plan.warnings.aspectUnsupported;
+    throw new Error(
+      `${bad.model} cannot deliver ${bad.aspect} — it offers ${bad.supported.join(", ")}`,
+    );
+  }
   if (plan.mode === "per-shot") {
     // A stale frame selection cannot dispatch (issue 154): the plan named it, and composing the
     // request anyway would send a shot to open on an artifact this world cannot produce.
@@ -864,6 +913,13 @@ export function composeDispatches(
       // first-frame route takes, resolved by the same authority the plan and the picker read.
       const frameRoute = entry.frame !== undefined ? frameDispatchFor(model, 1) : null;
       const framed = entry.frame !== undefined && frameRoute !== null;
+      // A frame mode may lock the aspect (issue 389): the picture decides the shape, and
+      // sending a chosen ratio beside it puts a field on the wire the route never declared.
+      const size = Object.fromEntries(
+        Object.entries(sizeParams(model, plan)).filter(
+          ([key]) => !(framed && key === "aspect" && frameRoute!.locked.includes("aspect")),
+        ),
+      );
       return {
         worldId,
         productionId,
@@ -897,7 +953,7 @@ export function composeDispatches(
                 }),
               }
             : {}),
-          ...sizeParams(model, plan),
+          ...size,
           provenance: provenanceFor(entry.budget.carried.map((c) => c.sheetId)),
         },
         estimatedMicroUsd: entry.estimatedMicroUsd,
@@ -956,7 +1012,9 @@ export function composeDispatches(
           structure: passStructure({
             shotCount: pass.plan.length,
             askedSec: passSeconds,
-            aspect: world.productions.find((p) => p.meta.id === productionId)?.meta.aspect,
+            // From the plan, not re-looked-up (issue 389): the dialog showed this plan, and the
+            // prompt's stated shape must be the shape the parameters ask for.
+            aspect: plan.aspect,
           }),
           preamble: bindingPreamble(passReferencePlan.bound),
           body: passBody,

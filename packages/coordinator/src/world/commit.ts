@@ -371,6 +371,22 @@ export class Committer {
         versions[f.path] = toVersion;
       }
       // production-meta and unversioned: change-logged only, no history, no stamps (§2.4.1).
+      // production.json is unversioned, so the change line IS its entire history — it has to
+      // say which fields moved (issue 389), or an edited aspect leaves an audit line that
+      // records only that something happened. `updated` is excluded: every edit moves it, and
+      // a field that always changes says nothing.
+      if (kind.track === "production-meta" && f.action === "replace" && live !== null && newContent !== null) {
+        try {
+          const before = JSON.parse(live) as Record<string, unknown>;
+          const after = JSON.parse(newContent) as Record<string, unknown>;
+          const moved = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+            (key) => key !== "updated" && JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+          );
+          if (moved.length > 0) fieldsChanged = moved;
+        } catch {
+          /* an unparseable side leaves the line fieldless, as before */
+        }
+      }
 
       changes.push({
         ts: at,

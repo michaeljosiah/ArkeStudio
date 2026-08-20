@@ -90,6 +90,7 @@ import {
   reorderEpisodes,
   reorderScenes,
   saveChapter,
+  setProductionAspect,
   setPromptOverride,
 } from "./productions/ops.js";
 import { ProviderService, type KeyValidator } from "./providers/service.js";
@@ -3508,6 +3509,23 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "set-production-aspect": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await setProductionAspect(store, msg.productionId, msg.aspect);
+        } catch (err) {
+          // A malformed shape is refused by name (issue 389) — logged rather than stored, and
+          // the snapshot below shows the production unchanged.
+          void this.appLog?.append({
+            kind: "production-edit.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId, aspect: msg.aspect },
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "set-prompt-override": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -3584,6 +3602,9 @@ export class Coordinator {
             audioDesign,
             // The world's shelf, for resolving durable boundary frames (issue 154).
             artifacts: bundle.artifacts,
+            // The production's delivery aspect (issue 389): stills shape to it, video routes
+            // receive it, and an impossible shape is refused by composition below.
+            ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
           },
