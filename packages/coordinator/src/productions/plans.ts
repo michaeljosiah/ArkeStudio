@@ -178,6 +178,11 @@ export interface PlanDriverDeps {
   boundaryFrameMaker?: BoundaryFrameMaker | undefined;
   clock: () => string;
   onRefused?: (planId: string, reason: string) => void;
+  /**
+   * The current bundle, re-read per loop iteration when provided: a long advance holding its
+   * caller's snapshot kept enqueueing against sources that moved after the fold began (R-24).
+   */
+  fresh?: () => WorldBundle | undefined;
 }
 
 /** The folded state of one plan, from disk and the queue — never from memory (R-10). */
@@ -233,8 +238,16 @@ export async function advancePlan(
   for (let guard = 0; guard < plan.passes.length * 4 + 4; guard++) {
     const state = await planState(store, plan, deps);
     if (state.status === "cancelled" || state.status === "stale" || state.status === "completed") return state;
-    // Staleness gates every forward act (R-24): once, durably, then the fold answers everyone.
-    const drift = sourceDrift(plan, production, world);
+    // Staleness gates every forward act (R-24), against the freshest sources the caller can
+    // give — a snapshot held across a long advance is exactly how a moved scene keeps spending.
+    // Without a fresh reader, the caller's own snapshot is the truth; overriding it from an
+    // older bundle would un-move the very sources the caller just saw move.
+    const refreshed = deps.fresh?.();
+    const currentWorld = refreshed ?? world;
+    const currentProduction = refreshed
+      ? (refreshed.productions.find((candidate) => candidate.meta.id === plan.productionId) ?? production)
+      : production;
+    const drift = sourceDrift(plan, currentProduction, currentWorld);
     if (drift !== null) {
       await appendPlanEvents(store, plan.productionId, plan.planId, [
         { kind: "stale", ts: deps.clock(), planId: plan.planId, reason: drift },
@@ -267,22 +280,16 @@ export async function advancePlan(
     const pass = plan.passes[next.kind === "extract-boundary" ? next.passIndex : next.passIndex]!;
 
     if (next.kind === "extract-boundary") {
-      const dependency = plan.passes[next.fromPassIndex]!;
       const dependencyState = state.passes[next.fromPassIndex]!;
-      const sourceTake = findPrimaryTake(production, dependencyState.jobId, dependency.compiled.target.coversShots);
+      const sourceTake = findPrimaryTake(currentProduction, dependencyState.jobId);
       if (sourceTake === null) {
-        await appendPlanEvents(store, plan.productionId, plan.planId, [
-          {
-            kind: "boundary-failed",
-            ts: deps.clock(),
-            planId: plan.planId,
-            passIndex: next.passIndex,
-            reason: `pass ${next.fromPassIndex}'s landed take is not in the bundle yet`,
-          },
-        ]);
-        return planState(store, plan, deps);
+        // The queue says succeeded but the scan has not surfaced the take yet — a transient
+        // window, not a failure. Appending boundary-failed here wrote durable noise on every
+        // race; waiting costs nothing, because the next trigger (job settle, world open, a
+        // plan frame) advances again.
+        return state;
       }
-      const extracted = await extractBoundaryArtifact(store, production, {
+      const extracted = await extractBoundaryArtifact(store, currentProduction, {
         take: sourceTake,
         label: `${plan.planId}-pass-${next.passIndex}`,
         maker: deps.boundaryFrameMaker,
@@ -364,24 +371,14 @@ export async function advancePlan(
   return planState(store, plan, deps);
 }
 
-/** The primary take a pass landed, resolved job-first so segments never shadow the pass clip. */
-function findPrimaryTake(
-  production: ProductionBundle,
-  jobId: string | undefined,
-  coversShots: readonly string[],
-): Take | null {
-  if (jobId !== undefined) {
-    const byJob = production.takes.find((take) => take.jobId === jobId && take.segment === undefined);
-    if (byJob !== undefined) return byJob;
-  }
-  return (
-    production.takes.find(
-      (take) =>
-        take.segment === undefined &&
-        take.media !== undefined &&
-        coversShots.every((shot) => take.coversShots.includes(shot)),
-    ) ?? null
-  );
+/**
+ * The primary take THIS plan's job landed — by jobId alone. A covers-shots fallback picked up
+ * a previous dispatch's footage for the same scene, permanently chaining the next pass off a
+ * clip nobody just paid for; a take not visible yet is a wait, never a guess.
+ */
+function findPrimaryTake(production: ProductionBundle, jobId: string | undefined): Take | null {
+  if (jobId === undefined) return null;
+  return production.takes.find((take) => take.jobId === jobId && take.segment === undefined) ?? null;
 }
 
 /** Advance every plan in a production that can move — world open's reconciliation (T-19). */

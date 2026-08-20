@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { ClientStateSchema } from "./client-state.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, ConversationIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1223,9 +1223,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
               id: SlugSchema,
               title: z.string().min(1).max(200),
               note: z.string().max(500).optional(),
-              setup: z.string().optional(),
-              turn: z.string().optional(),
-              payoff: z.string().optional(),
+              // Episode ids, as SeasonSchema requires (ep_<slug>): a free string here parsed at
+              // the transport and then failed the gate's season lane — refused far from the
+              // field that caused it. The frame now speaks the schema's own vocabulary.
+              setup: EpisodeIdSchema.optional(),
+              turn: EpisodeIdSchema.optional(),
+              payoff: EpisodeIdSchema.optional(),
             })
             .strict(),
         )

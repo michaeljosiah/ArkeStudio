@@ -1,4 +1,5 @@
 import type { ProductionBundle } from "./client-state.js";
+import { DEFAULT_SHOT_SEC } from "./planning.js";
 import type { Sheet } from "./world.js";
 
 /**
@@ -71,11 +72,18 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
   }
   for (const [sceneId, episodeIds] of owners) {
     if (episodeIds.length > 1) {
+      // Distinct owners and a double listing inside one episode are different sentences: the
+      // evidence naming the same episode twice while the message counted "2 episodes" was a
+      // finding lying about its own evidence.
+      const distinct = [...new Set(episodeIds)];
       findings.push({
         kind: "continuity-contradiction",
         about: sceneId,
-        message: `${sceneId} belongs to ${episodeIds.length} episodes; a scene belongs to exactly one.`,
-        evidence: episodeIds,
+        message:
+          distinct.length > 1
+            ? `${sceneId} belongs to ${distinct.length} episodes; a scene belongs to exactly one.`
+            : `${distinct[0]!} lists ${sceneId} ${episodeIds.length} times; a scene is listed exactly once.`,
+        evidence: distinct,
       });
     }
   }
@@ -146,8 +154,13 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
   }
 
   // --- cast presence ---------------------------------------------------------------------------
+  // Only scenes an episode actually lists count: the message says "appears in no episode's
+  // shots", and a lead mentioned solely in an orphaned scene ships in no deliverable — the
+  // orphan gets its own finding above, and this one must still tell the truth about the lead.
+  const inEpisodes = new Set(episodes.flatMap((episode) => episode.scenes));
   const mentioned = new Set<string>();
   for (const scene of production.scenes) {
+    if (!inEpisodes.has(scene.id)) continue;
     for (const shot of scene.shots) for (const slug of mentionsOf(shot.description)) mentioned.add(slug);
   }
   for (const sheet of sheets) {
@@ -193,9 +206,11 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
     for (const episode of episodes) {
       const seconds = episode.scenes.reduce((sum, sceneId) => {
         const scene = scenesById.get(sceneId);
-        return sum + (scene?.shots.reduce((s, shot) => s + (shot.durationSec ?? 0), 0) ?? 0);
+        // The same default every other module bills at (DEFAULT_SHOT_SEC): summing unauthored
+        // shots as zero made a 120s episode of default-length shots read "nothing planned".
+        return sum + (scene?.shots.reduce((s, shot) => s + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0) ?? 0);
       }, 0);
-      if (seconds === 0) continue; // nothing planned yet is not a cost finding
+      if (seconds === 0) continue; // an episode with no shots at all is not a cost finding
       const min = defaults.episodeSecondsMin;
       const max = defaults.episodeSecondsMax;
       if ((min !== undefined && seconds < min) || (max !== undefined && seconds > max)) {

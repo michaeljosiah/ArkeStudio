@@ -428,7 +428,7 @@ export type PackResult =
   | { ok: true; passes: Pass[]; totalSec: number }
   | { ok: false; oversizeShot: { shotId: string; number: number; durationSec: number; capSec: number } };
 
-const DEFAULT_SHOT_SEC = 4;
+export const DEFAULT_SHOT_SEC = 4;
 
 /**
  * Greedy, order-preserving; a shot is never split (D9). Oversize disables whole-scene (D10).

@@ -45,7 +45,24 @@ export const RoutingSchema = z
         .strict(),
     ),
   })
-  .strict();
+  .strict()
+  // Identity is what evidence and edits key on: two choices sharing an id would let one
+  // traversal vouch for an edge nobody previewed, and one "remove" delete both. Refused at
+  // parse, so the shape cannot exist on disk.
+  .superRefine((routing, ctx) => {
+    const duplicate = routing.choices.find(
+      (choice, index) => routing.choices.findIndex((other) => other.id === choice.id) !== index,
+    );
+    if (duplicate !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `choice id ${duplicate.id} is used twice` });
+    }
+    const ending = routing.endings.find(
+      (entry, index) => routing.endings.findIndex((other) => other.sceneId === entry.sceneId) !== index,
+    );
+    if (ending !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${ending.sceneId} is designated an ending twice` });
+    }
+  });
 export type Routing = z.infer<typeof RoutingSchema>;
 
 /** One preview traversal, durable (brief §4): counts only while its choice matches from/to. */
@@ -182,11 +199,24 @@ export function routingFindings(
     });
   }
   // The trapped set's cycles are the unintended loops: a cycle an ending escapes is a feature;
-  // one nothing escapes is the trap, named as the cycle rather than scene by scene.
+  // one nothing escapes is the trap, named as the cycle rather than scene by scene. Trimmed to
+  // the actual cycle — a trapped CHAIN into a dead end is not a loop, and calling it one sent
+  // the author hunting for a cycle that does not exist. Peeling nodes with no in-trap successor
+  // until nothing peels leaves exactly the nodes that sit on cycles.
   if (trapped.length > 0) {
     const inTrap = new Set(trapped);
-    const cycle = trapped.filter((id) => (forward.get(id) ?? []).some((next) => inTrap.has(next)));
-    if (cycle.length > 0) {
+    let peeled = true;
+    while (peeled) {
+      peeled = false;
+      for (const id of inTrap) {
+        if (!(forward.get(id) ?? []).some((next) => inTrap.has(next))) {
+          inTrap.delete(id);
+          peeled = true;
+        }
+      }
+    }
+    if (inTrap.size > 0) {
+      const cycle = trapped.filter((id) => inTrap.has(id));
       findings.push({
         kind: "unintended-loop",
         severity: "blocks",
@@ -319,12 +349,15 @@ export function layoutRouting(routing: Routing, scenes: ReadonlyArray<{ id: stri
   routing.choices.forEach((choice, index) => {
     if (!order.has(choice.to)) order.set(choice.to, index);
   });
-  const layers: string[][] = [];
+  // Built dense, never sparse: assigning by layer index leaves holes Array.prototype.map skips,
+  // so `?? []` never ran and consumers met undefined layers.
+  const deepest = Math.max(0, ...depth.values());
+  const layers: string[][] = Array.from({ length: deepest + 1 }, () => []);
   for (const [id, layer] of depth) {
-    (layers[layer] ??= []).push(id);
+    layers[layer]!.push(id);
   }
   for (const layer of layers) {
-    layer?.sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1) || (a < b ? -1 : a > b ? 1 : 0));
+    layer.sort((a, b) => (order.get(a) ?? -1) - (order.get(b) ?? -1) || (a < b ? -1 : a > b ? 1 : 0));
   }
   const placed = new Set(depth.keys());
   const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
@@ -332,5 +365,5 @@ export function layoutRouting(routing: Routing, scenes: ReadonlyArray<{ id: stri
     .map((scene) => scene.id)
     .filter((id) => !placed.has(id) && !excluded.has(id))
     .sort();
-  return { layers: layers.map((layer) => layer ?? []), unplaced };
+  return { layers, unplaced };
 }

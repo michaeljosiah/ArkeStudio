@@ -662,12 +662,32 @@ export class ProposalManager {
         return { status: "needs-reconfirm", authoritative, signature };
       }
 
+      // Any accepted new-model entity crosses the schema boundary (SPEC-023 R-23): a season,
+      // episode, series or routing record landing in a version-1 world must fence it, or an
+      // older build opens the world and silently drops what was just accepted. Scenes cross it
+      // too when their accepted content carries the new fields (script, explicit order).
+      const crossesBoundary = files.some((file) => {
+        const track = classify(file.path).track;
+        if (track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story") {
+          return true;
+        }
+        if (track === "scene" && file.content !== undefined) {
+          try {
+            const scene = JSON.parse(file.content) as Record<string, unknown>;
+            return scene["script"] !== undefined || scene["order"] !== undefined;
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      });
       // Exactly one commit (R-11); versions derive inside the primitive (R-12, D7).
       const result = await this.store.commitUnserialised({
         kind: proposal.kind,
         source: proposal.source,
         proposalId: proposal.id,
         files,
+        ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
       await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
       return { status: "accepted", result };
@@ -809,8 +829,23 @@ export class ProposalManager {
           continue;
         }
 
+        if (base === null && target.baseHash === null) {
+          // This proposal CREATES the file — and someone else created it first. Refreshing the
+          // base hash here would let accept overwrite their file wholesale with a draft written
+          // against nothing; that is a conflict a person resolves, not bookkeeping.
+          conflicts.push({
+            path: target.path,
+            field: "whole file",
+            base: "",
+            mine,
+            theirs: live,
+          });
+          targets.push({ path: target.path, baseVersion: readVersion(target.path, live), baseHash: sha256(live) });
+          continue;
+        }
         if (base === null || sha256(live) === target.baseHash) {
-          // Created by this proposal, or not stale: rebase just refreshes the base record.
+          // Not stale (or the base snapshot is missing, which only the create case above can
+          // make meaningful): rebase just refreshes the base record.
           targets.push({
             path: target.path,
             baseVersion: readVersion(target.path, live),
@@ -822,7 +857,13 @@ export class ProposalManager {
         // JSON tracks merge in the JSON lane (SPEC-023 R-18): mergeMarkdown would re-serialise
         // them with frontmatter fences, leaving files that no longer parse.
         const track = classify(target.path).track;
-        const jsonTrack = track === "scene" || track === "story" || track === "season" || track === "episode" || track === "series";
+        const jsonTrack =
+          track === "scene" ||
+          track === "story" ||
+          track === "routing" ||
+          track === "season" ||
+          track === "episode" ||
+          track === "series";
         const merge = jsonTrack
           ? mergeJson(target.path, base, mine, live)
           : mergeMarkdown(target.path, base, mine, live);

@@ -189,9 +189,12 @@ async function buildAndStage(input: {
   // Everything is built and validated before a single proposal directory exists, so a malformed
   // candidate fails without leaving one behind (§11.2).
   const built = [];
+  // Sibling identities, shared across the batch: the scanned bundle cannot see what this same
+  // wrap-up is about to create (issue #400 round 2).
+  const claimed = { episodeIds: new Set<string>(), episodeStems: new Set<string>(), episodeOrders: new Set<number>() };
   try {
     for (const candidate of carried) {
-      built.push(materialiseCandidate(candidate, identities, bundle, at));
+      built.push(materialiseCandidate(candidate, identities, bundle, at, claimed));
     }
   } catch (err) {
     // Nothing was staged yet — this fails before the first gate call — so there is nothing that

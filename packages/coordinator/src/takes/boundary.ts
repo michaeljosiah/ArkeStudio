@@ -144,10 +144,13 @@ export async function extractBoundaryArtifact(
     }
     if (png.byteLength === 0) return { ok: false, reason: `extraction from take ${mediaTakeId} wrote an empty file` };
 
-    const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
-    const file = `boundary-${label}-${stamp}.png`;
+    // Unique by construction: a second-resolution stamp let a re-extract within one second
+    // overwrite an existing artifact's bytes before its create-commit refused, leaving the
+    // first sidecar's hash naming different bytes.
+    const artifactId = `ar_${ulid()}`;
+    const file = `boundary-${label}-${artifactId.slice(-8).toLowerCase()}.png`;
     const sidecar: ArtifactSidecar = {
-      id: `ar_${ulid()}`,
+      id: artifactId,
       kind: "image",
       file,
       hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
@@ -175,9 +178,14 @@ export async function extractBoundaryArtifact(
             baseHash: null,
           },
         ],
+        // The sidecar's boundaryExtraction field is a version-2 shape (SPEC-023 R-23): an older
+        // build's strict artifact schema would silently drop this artifact from the shelf.
+        raiseSchemaVersion: 2,
       });
     });
-    return { ok: true, artifactId: sidecar.id, hash: sidecar.hash, file };
+    // World-relative, the shape every dispatched reference path travels as — a bare basename
+    // here failed reference preparation on every chained pass after money was already spent.
+    return { ok: true, artifactId: sidecar.id, hash: sidecar.hash, file: `artifacts/${file}` };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   } finally {
@@ -239,10 +247,12 @@ export async function chainBoundaryFrame(
     }
     if (png.byteLength === 0) return { ok: false, reason: `extraction from take ${mediaTakeId} wrote an empty file` };
 
-    const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
-    const file = `boundary-${followingShotId}-${stamp}.png`;
+    // Unique by construction, not by clock: a re-accept within one second overwrote the
+    // previous boundary artifact's bytes before the sidecar commit refused.
+    const chainArtifactId = `ar_${ulid()}`;
+    const file = `boundary-${followingShotId}-${chainArtifactId.slice(-8).toLowerCase()}.png`;
     const sidecar: ArtifactSidecar = {
-      id: `ar_${ulid()}`,
+      id: chainArtifactId,
       kind: "image",
       file,
       hash: `sha256:${createHash("sha256").update(png).digest("hex").slice(0, 16)}`,
@@ -292,6 +302,10 @@ export async function chainBoundaryFrame(
             baseHash: existed ? sha256(selectionsRaw) : null,
           },
         ],
+        // startFrameArtifactId in selections and boundaryExtraction on the sidecar are
+        // version-2 shapes (SPEC-023 R-23): an older build's strict schemas would silently
+        // drop the selection map and the artifact rather than refuse the world by name.
+        raiseSchemaVersion: 2,
       });
     });
     return { ok: true, artifactId: sidecar.id, followingShotId };

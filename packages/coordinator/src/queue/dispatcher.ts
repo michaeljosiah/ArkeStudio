@@ -344,11 +344,25 @@ export class JobQueue {
     if (!this.accepting) throw new Error("the queue is not accepting work yet (recovery first, R-18)");
     // A pre-allocated key that already journalled a job is a redelivery, not a request
     // (SPEC-024 R-19): the crash between a plan's materialised event and this call must land on
-    // the same job, never a second spend.
+    // the same job, never a second spend. Serialised per key — the map check alone was
+    // check-then-act across the admit and journal awaits, so two concurrent enqueues with one
+    // key both missed it and both journalled.
     if (input.idempotencyKey !== undefined) {
-      const existing = [...this.jobs.values()].find((job) => job.idempotencyKey === input.idempotencyKey);
+      const key = input.idempotencyKey;
+      const existing = [...this.jobs.values()].find((job) => job.idempotencyKey === key);
       if (existing !== undefined) return existing;
+      const inFlight = this.enqueueingByKey.get(key);
+      if (inFlight !== undefined) return inFlight;
+      const promise = this.enqueueNew(input).finally(() => this.enqueueingByKey.delete(key));
+      this.enqueueingByKey.set(key, promise);
+      return promise;
     }
+    return this.enqueueNew(input);
+  }
+
+  private readonly enqueueingByKey = new Map<string, Promise<Job>>();
+
+  private async enqueueNew(input: EnqueueInput): Promise<Job> {
     // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
     // is refused with the readiness reason, and nothing is journalled for it.
     const admitted = await this.opts.admit?.(input);

@@ -3,6 +3,7 @@ import {
   ArtDirectionRecordSchema,
   CanonEntrySchema,
   EpisodeSchema,
+  RoutingSchema,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
@@ -100,7 +101,16 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       if (season.question !== undefined) fields.set("Question", season.question);
       if (season.ending !== undefined) fields.set("Ending", season.ending);
       if (season.direction !== undefined) fields.set("Direction", season.direction);
-      for (const arc of season.arcs ?? []) fields.set(`Arc · ${arc.title}`, arc.note ?? "—");
+      // Lanes included: an arc's setup/turn/payoff placements are exactly what a bad merge
+      // loses, and a review that omits them cannot show the loss it exists to catch.
+      for (const arc of season.arcs ?? []) {
+        const lanes = [
+          arc.setup !== undefined ? `setup ${arc.setup}` : null,
+          arc.turn !== undefined ? `turn ${arc.turn}` : null,
+          arc.payoff !== undefined ? `payoff ${arc.payoff}` : null,
+        ].filter((lane): lane is string => lane !== null);
+        fields.set(`Arc · ${arc.title}`, [arc.note, ...lanes].filter(Boolean).join(" · ") || "—");
+      }
       if (season.defaults !== undefined) fields.set("Defaults", JSON.stringify(season.defaults));
       return { label: `Season v${season.version}`, kind: "season", fields };
     } catch {
@@ -119,6 +129,19 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       fields.set("Scenes", episode.scenes.length > 0 ? episode.scenes.join(", ") : "none yet");
       if (episode.release !== undefined) fields.set("Release", JSON.stringify(episode.release));
       return { label: `${episode.title} (${episode.id})`, kind: `episode · v${episode.version}`, fields };
+    } catch {
+      return null;
+    }
+  }
+  if (/^productions\/[a-z0-9-]+\/routing\.json$/.test(path)) {
+    try {
+      const routing = RoutingSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      fields.set("Start", routing.start);
+      for (const choice of routing.choices) fields.set(`Choice · ${choice.id}`, `${choice.from} → "${choice.label}" → ${choice.to}`);
+      for (const ending of routing.endings) fields.set(`Ending · ${ending.sceneId}`, ending.title);
+      for (const entry of routing.excluded) fields.set(`Excluded · ${entry.sceneId}`, entry.reason);
+      return { label: `Routing v${routing.version}`, kind: "routing", fields };
     } catch {
       return null;
     }

@@ -394,6 +394,9 @@ export async function createChapter(
   );
   await store.commit({
     kind: "chapter-create",
+    // A chapter born with `order` and no legacy `number` is a version-2 shape (SPEC-023 R-23):
+    // an older build's scanner silently drops it rather than refusing the world by name.
+    raiseSchemaVersion: 2,
     source: "form",
     files: [
       { path: `productions/${productionId}/chapters/${slug}.md`, action: "create", content: doc.serialize(), baseHash: null },
@@ -440,7 +443,8 @@ export async function reorderChapters(
     files.push({ path, action: "replace" as const, content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
   }
   if (files.length === 0) return;
-  await store.commit({ kind: "chapter-reorder", source: "form", files });
+  // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
+  await store.commit({ kind: "chapter-reorder", source: "form", files, raiseSchemaVersion: 2 });
 }
 
 /**
@@ -464,7 +468,8 @@ export async function reorderScenes(store: WorldStore, productionId: string, ord
     files.push({ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
   }
   if (files.length === 0) return;
-  await store.commit({ kind: "scene-reorder", source: "form", files });
+  // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
+  await store.commit({ kind: "scene-reorder", source: "form", files, raiseSchemaVersion: 2 });
 }
 
 // ---------------------------------------------------------------------------

@@ -590,6 +590,11 @@ export function aspectSupport(
       ? { ok: true }
       : { ok: false, supported: STANDARD_ASPECTS.filter((a) => aspectAllowed(model, parseAspect(a)!)) };
   }
+  // An unverified row's silence is not an opinion — it has not earned a guess (the same rule
+  // aspectOpinionless applies to stills). Passing here would put a shape on a route nobody
+  // checked, fal would silently ignore the field, and the user would pay for default-shape
+  // footage a reviewed 9:16 plan never mentioned.
+  if (model.unverified === true) return { ok: false, supported: [] };
   return { ok: true };
 }
 

@@ -691,6 +691,8 @@ export class Coordinator {
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
   private readonly creatingProductions = new Set<string>();
+  /** In-flight dispatch-scene-planned requestIds (SPEC-024 R-12): the same redelivery guard. */
+  private readonly creatingPlans = new Set<string>();
   private readonly activeMessages = new Set<Promise<void>>();
   private readonly backgroundWork = new Set<Promise<unknown>>();
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
@@ -3214,9 +3216,6 @@ export class Coordinator {
       case "create-production": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names
-        // neither is malformed and creates nothing.
-        if (msg.medium === undefined && msg.format === undefined) return;
         const requestId = msg.requestId;
         const answer = (result: { disposition: "created"; slug: string } | { disposition: "failed"; reason: string }) => {
           // Only a correlated request gets a correlated answer; a legacy frame keeps the old
@@ -3230,18 +3229,28 @@ export class Coordinator {
             ...result,
           });
         };
+        // The frame names a medium or the legacy format (SPEC-023 R-1); one that names neither
+        // is malformed — refused with its correlated answer, never dropped into a dialog that
+        // waits forever.
+        if (msg.medium === undefined && msg.format === undefined) {
+          answer({ disposition: "failed", reason: "the request names neither a medium nor a format" });
+          return;
+        }
         if (requestId) {
           // Redelivery of a request that is still running: its result will broadcast once.
+          // Marked BEFORE any await — frames are handled concurrently, and a check-then-add
+          // across the change-log read let two deliveries of one requestId both create.
           if (this.creatingProductions.has(requestId)) return;
+          this.creatingProductions.add(requestId);
           // Redelivery of a request whose commit already landed: same slug, no second
           // production, no title-2 (#384). The whole change log is consulted, not the
           // bundle's windowed tail, so the answer survives restart and later work.
-          const prior = await productionCreatedBy(store.dir, requestId);
+          const prior = await productionCreatedBy(store.dir, requestId).catch(() => null);
           if (prior) {
+            this.creatingProductions.delete(requestId);
             answer({ disposition: "created", slug: prior });
             return;
           }
-          this.creatingProductions.add(requestId);
         }
         try {
           const slug = await createProduction(store, {
@@ -3587,6 +3596,11 @@ export class Coordinator {
           },
           msg.mode,
         );
+        // In-flight guard, marked before any await (#384's lesson): frames are handled
+        // concurrently, and a redelivered requestId racing the directory-scan idempotency check
+        // in createDispatchPlan would authorize the same scene twice.
+        if (this.creatingPlans.has(msg.requestId)) return;
+        this.creatingPlans.add(msg.requestId);
         try {
           const aggregate = await createDispatchPlan(store, {
             worldId: msg.worldId,
@@ -3608,10 +3622,22 @@ export class Coordinator {
             disposition: "created",
             planId: aggregate.planId,
           });
-          await advancePlan(store, production, bundle, aggregate, this.planDriverDeps());
-          await this.emitPlanStates(store, msg.worldId, production.meta.id);
+          // The plan is durably created — a hiccup advancing it is a log line and a later
+          // trigger's job, never a second, contradictory result for the same requestId.
+          try {
+            await advancePlan(store, production, bundle, aggregate, this.planDriverDeps());
+            await this.emitPlanStates(store, msg.worldId, production.meta.id);
+          } catch (err) {
+            void this.appLog?.append({
+              kind: "plan.advance-failed",
+              planId: aggregate.planId,
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
         } catch (err) {
           fail(err instanceof Error ? err.message : String(err));
+        } finally {
+          this.creatingPlans.delete(msg.requestId);
         }
         return;
       }
@@ -3642,14 +3668,17 @@ export class Coordinator {
         if (!store) return;
         const plan = (await listPlans(store, msg.productionId)).find((p) => p.planId === msg.planId);
         if (!plan) return;
-        const state = await planState(store, plan, this.planDriverDeps());
+        // The mark first, durably — then the fold: cancelling from a pre-cancel snapshot missed
+        // any job a racing advance enqueued in the gap, and every non-terminal job deserves the
+        // ask, waiting-reconciliation included.
         await appendPlanEvents(store, msg.productionId, msg.planId, [
           { kind: "cancelled", ts: new Date().toISOString(), planId: msg.planId },
         ]);
+        const state = await planState(store, plan, this.planDriverDeps());
         // Future spend stops here; in-flight jobs are asked to stop through SPEC-009, which
         // owes no promise about work already running at a provider (R-25).
         for (const pass of state.passes) {
-          if (pass.state === "enqueued" && pass.jobId !== undefined) {
+          if (pass.jobId !== undefined && pass.state !== "succeeded" && pass.state !== "failed") {
             await this.jobQueue?.cancel(pass.jobId).catch(() => {});
           }
         }
@@ -7024,6 +7053,12 @@ export class Coordinator {
       clock: () => new Date().toISOString(),
       onRefused: (planId, reason) => {
         void this.appLog?.append({ kind: "plan.enqueue-refused", planId, reason });
+      },
+      // Freshness per loop (SPEC-024 R-24): the driver re-checks sources against the store's
+      // current bundle rather than the snapshot its caller happened to hold.
+      fresh: () => {
+        const store = this.opts.provider.openStore?.();
+        return store ? store.getBundle() : undefined;
       },
     };
   }

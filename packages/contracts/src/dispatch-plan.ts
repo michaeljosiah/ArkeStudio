@@ -346,6 +346,11 @@ export function foldPlan(
     if (job?.status === "needs-reconciliation") {
       return { ...base, state: "waiting-reconciliation" as const, reason: "landed work awaits finalization" };
     }
+    if (jobId !== undefined && job === undefined) {
+      // The journalled job is gone — deleted from Activity's history. Its pre-allocated key must
+      // never become a fresh spend, so the pass ends here rather than re-enqueueing.
+      return { ...base, state: "failed" as const, reason: `job ${jobId} is gone from the queue's history` };
+    }
     if (jobId !== undefined) return { ...base, state: "enqueued" as const };
     if (has("pass-materialised")) return { ...base, state: "materialised" as const };
     if (has("boundary-failed") && boundFrame === undefined) {
@@ -369,7 +374,15 @@ export function foldPlan(
     for (const pass of plan.passes) {
       const state = stateOf.get(pass.passIndex)!;
       if (state.state === "materialised") {
-        next = { kind: "enqueue", passIndex: pass.passIndex };
+        // Money gates outrank mechanics even here: a reconfirmation outstanding on an
+        // already-materialised pass must stop the enqueue, not be skipped past by it.
+        const its = byPass.get(pass.passIndex)?.events ?? [];
+        const gated =
+          its.some((event) => event.kind === "reconfirm-required") &&
+          !its.some((event) => event.kind === "reconfirmed");
+        next = gated
+          ? { kind: "await-reconfirm", passIndex: pass.passIndex }
+          : { kind: "enqueue", passIndex: pass.passIndex };
         break;
       }
       // Blocked is user-recoverable (R-18): the next advance retries extraction rather than

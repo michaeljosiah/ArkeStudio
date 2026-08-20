@@ -3,6 +3,7 @@ import {
   bindingPreamble,
   boundFiles,
   composePrompt,
+  DEFAULT_SHOT_SEC,
   passStructure,
   START_FRAME_PREAMBLE,
   type BoundaryFramePlan,
@@ -267,10 +268,16 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           ([key]) => !(framed && key === "aspect" && frameRoute!.locked.includes("aspect")),
         ),
       );
+      // Video is always asked, even for a shot with no authored length: the plan priced the
+      // default (DEFAULT_SHOT_SEC, route-rounded), so leaving the wire empty would run the
+      // provider's own default at the provider's own price — the estimate and the bill for two
+      // different requests, inside the object whose whole contract is that they are one.
       const askedSec =
-        entry.shot.durationSec !== undefined
-          ? askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, route)
-          : undefined;
+        model.capability === "video"
+          ? askedSeconds(model, entry.shot.durationSec ?? DEFAULT_SHOT_SEC, `shot ${entry.shot.number}`, route)
+          : entry.shot.durationSec !== undefined
+            ? askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, route)
+            : undefined;
       const provenance = provenanceFor(entry.budget.carried.map((c) => c.sheetId));
       return {
         target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
@@ -384,8 +391,11 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             shotCount: pass.plan.length,
             askedSec: passSeconds,
             // From the plan, not re-looked-up (issue 389): the dialog showed this plan, and the
-            // prompt's stated shape must be the shape the parameters ask for.
-            aspect: plan.aspect,
+            // prompt's stated shape must be the shape the parameters ask for. A chained pass
+            // whose frame route locks the ratio states none — the boundary image decides the
+            // shape, and words claiming otherwise are the two-authorities drift in prose.
+            aspect:
+              chained && chainFrameRoute!.locked.includes("aspect") ? undefined : plan.aspect,
           }),
           // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
           // numbers its assets. Never both — the route carries one or the other.
@@ -397,7 +407,14 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         }),
         references,
         durationSec: passSeconds,
-        ...sizeParams(model, plan),
+        // A chained pass's frame mode may lock the aspect (issue 389) — the picture decides the
+        // shape, exactly as the per-shot framed branch already enforces. Spreading unfiltered
+        // put a chosen ratio on a route that never declared the field.
+        ...Object.fromEntries(
+          Object.entries(sizeParams(model, plan)).filter(
+            ([key]) => !(chained && key === "aspect" && chainFrameRoute!.locked.includes("aspect")),
+          ),
+        ),
         // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses — which is
         // why it has to describe the clip that was actually asked for. A pass snapped from 5s to
         // 6s left a second nobody reviewed and nobody could cut from.

@@ -230,6 +230,12 @@ export function materialiseCandidate(
   bundle: WorldBundle,
   /** The whole instant, not the day: the world-look record stamps a full timestamp. */
   at: string,
+  /**
+   * Identities already claimed by SIBLING candidates in this same wrap-up (issue #400 round 2):
+   * the scanned bundle cannot see them, so two new episodes in one batch would otherwise take
+   * one stem and one order between them.
+   */
+  claimed?: { episodeIds: Set<string>; episodeStems: Set<string>; episodeOrders: Set<number> },
 ): Materialised {
   /** The id planned for this entry, so nothing depends on the order materialise is walked in. */
   const nextCanonId = (): string => {
@@ -459,7 +465,20 @@ export function materialiseCandidate(
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
       const live = production.season ?? { version: 1 };
-      const content = jsonContent(candidate.id, SeasonSchema, { ...live, ...candidate.draft });
+      // Arcs merge by id, not wholesale (issue #397 round 2): a conversational draft restating
+      // an arc's note must not silently delete the setup/turn/payoff placements the board
+      // authored — a lane the draft does not mention is a lane it did not change.
+      const liveArcs = "arcs" in live ? (live.arcs ?? []) : [];
+      const draftArcs = candidate.draft.arcs;
+      const mergedArcs =
+        draftArcs !== undefined
+          ? draftArcs.map((arc) => ({ ...liveArcs.find((existing) => existing.id === arc.id), ...arc }))
+          : undefined;
+      const content = jsonContent(candidate.id, SeasonSchema, {
+        ...live,
+        ...candidate.draft,
+        ...(mergedArcs !== undefined ? { arcs: mergedArcs } : {}),
+      });
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/season.json`, content }],
@@ -491,18 +510,24 @@ export function materialiseCandidate(
       const title = candidate.draft.title;
       if (title === undefined) throw new MaterialiseError(candidate.id, "a new episode needs a title");
       const slug = slugify(title).slice(0, 60) || "episode";
-      const takenIds = new Set(production.episodes.map((e) => e.id));
-      const takenStems = new Set(Object.values(production.episodeFiles));
+      const takenIds = new Set([...production.episodes.map((e) => e.id), ...(claimed?.episodeIds ?? [])]);
+      const takenStems = new Set([...Object.values(production.episodeFiles), ...(claimed?.episodeStems ?? [])]);
       let id = `ep_${slug}`;
       let stem = slug;
       for (let n = 2; takenIds.has(id) || takenStems.has(stem); n++) {
         id = `ep_${slug}-${n}`;
         stem = `${slug}-${n}`;
       }
+      const takenOrders = new Set([...production.episodes.map((e) => e.order), ...(claimed?.episodeOrders ?? [])]);
+      let order = candidate.draft.order ?? production.episodes.length + 1;
+      while (candidate.draft.order === undefined && takenOrders.has(order)) order += 1;
+      claimed?.episodeIds.add(id);
+      claimed?.episodeStems.add(stem);
+      claimed?.episodeOrders.add(order);
       const content = jsonContent(candidate.id, EpisodeSchema, {
         id,
         version: 1,
-        order: candidate.draft.order ?? production.episodes.length + 1,
+        order,
         title,
         ...(candidate.draft.promise !== undefined ? { promise: candidate.draft.promise } : {}),
         scenes: candidate.draft.scenes ?? [],

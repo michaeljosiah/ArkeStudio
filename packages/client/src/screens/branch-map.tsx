@@ -46,6 +46,11 @@ export function BranchMapScreen() {
 
   useEffect(() => {
     if (!worldId || !prodId) return;
+    // A fresh production starts from nothing: keeping the previous production's findings,
+    // export note and preview showed A's state gating B until B's first event arrived.
+    setServed(null);
+    setExportNote(null);
+    setPreview(null);
     const offFindings = subscribeRoutingFindings((event) => {
       if (event.productionId === prodId) setServed(event.findings);
     });
@@ -259,12 +264,14 @@ export function BranchMapScreen() {
           disabled={draft.from === "" || draft.to === "" || draft.label.trim() === ""}
           onClick={() => {
             const slug = draft.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "choice";
+            // Unique by suffix, not by count: after a removal, length+1 repeats an id already
+            // in use, and the per-edge "remove" then deletes both edges at once.
+            const taken = new Set(routing.choices.map((choice) => choice.id));
+            let id = `ch_${slug}`;
+            for (let n = 2; taken.has(id); n++) id = `ch_${slug}-${n}`;
             commit({
               ...routing,
-              choices: [
-                ...routing.choices,
-                { id: `ch_${slug}-${routing.choices.length + 1}`, from: draft.from, label: draft.label.trim(), to: draft.to },
-              ],
+              choices: [...routing.choices, { id, from: draft.from, label: draft.label.trim(), to: draft.to }],
             });
             setDraft({ from: "", label: "", to: "" });
           }}
@@ -307,13 +314,13 @@ export function BranchMapScreen() {
                 <Button
                   key={choice.id}
                   onClick={() => {
+                    // The route is SCENE ids — the evidence schema's vocabulary. Accumulating
+                    // choice ids here made the second click send a frame the wire refused.
+                    const walked = [...preview.route, preview.sceneId];
                     if (worldId && prodId) {
-                      recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, [
-                        ...preview.route,
-                        preview.sceneId,
-                      ]);
+                      recordTraversal(worldId, prodId, choice.id, choice.from, choice.to, walked);
                     }
-                    setPreview({ sceneId: choice.to, route: [...preview.route, choice.id] });
+                    setPreview({ sceneId: choice.to, route: walked });
                   }}
                 >
                   {choice.label}

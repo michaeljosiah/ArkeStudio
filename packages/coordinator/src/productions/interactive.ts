@@ -121,11 +121,14 @@ export async function proposeBranchCanon(
   input: { productionId: string; sceneId: string; route: readonly string[]; title: string; body: string },
 ): Promise<{ proposalId: string; canonId: string }> {
   const [canonId] = await store.allocateCanonIds(1, `branch-promotion:${input.productionId}`);
+  // YAML-safe: a raw user title carrying a newline or a colon broke — or injected — frontmatter
+  // fields in the staged canon file. Quoted and escaped, with line breaks flattened.
+  const safeTitle = JSON.stringify(input.title.replace(/[\r\n]+/g, " ").trim());
   const content = [
     "---",
     `id: ${canonId}`,
     "type: lore",
-    `title: ${input.title}`,
+    `title: ${safeTitle}`,
     "status: open",
     "links: []",
     "---",
@@ -233,23 +236,41 @@ export async function exportInteractive(
   const findings = await interactiveFindings(store, production);
   const blockers = publicationBlockers(findings).map((finding) => finding.detail);
 
-  // Every routed, unexcluded scene ships footage: the accepted take's media, by selection.
+  // Every routed, unexcluded scene ships ONE file that covers the whole scene: a pass take, or
+  // the single shot's accepted clip. A multi-shot scene with only per-shot takes is refused by
+  // name — silently shipping the first shot's clip was a package missing most of its scene.
   const excluded = new Set(routing.excluded.map((entry) => entry.sceneId));
   const shipped = production.scenes.filter((scene) => !excluded.has(scene.id));
   const media: Array<{ sceneId: string; source: string; file: string }> = [];
   for (const scene of shipped) {
-    const accepted = scene.shots
-      .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
-      .find((takeId) => takeId !== null);
-    const take = accepted != null ? production.takes.find((t) => t.id === accepted) : undefined;
-    if (take?.media === undefined) {
-      blockers.push(`${scene.id} has no accepted footage to ship`);
+    const acceptedIds = new Set(
+      scene.shots
+        .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
+        .filter((takeId): takeId is string => takeId !== null),
+    );
+    // Segments resolve to the pass clip that actually holds the pixels.
+    const resolved = [...acceptedIds].map((takeId) => {
+      const take = production.takes.find((t) => t.id === takeId);
+      return take?.segment !== undefined
+        ? production.takes.find((t) => t.id === take.segment!.passTakeId)
+        : take;
+    });
+    const covering = resolved.find(
+      (take) =>
+        take?.media !== undefined && scene.shots.every((shot) => take.coversShots.includes(shot.id)),
+    );
+    if (covering?.media === undefined) {
+      blockers.push(
+        scene.shots.length > 1 && acceptedIds.size > 0
+          ? `${scene.id} spans ${scene.shots.length} shots with no single clip covering them — cut a whole-scene pass before export`
+          : `${scene.id} has no accepted footage to ship`,
+      );
       continue;
     }
     media.push({
       sceneId: scene.id,
-      source: join(store.dir, "productions", production.meta.id, "takes", take.id, take.media),
-      file: `media/${scene.id}${take.media.slice(take.media.lastIndexOf("."))}`,
+      source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),
+      file: `media/${scene.id}${covering.media.slice(covering.media.lastIndexOf("."))}`,
     });
   }
   if (blockers.length > 0) return { ok: false, blockers };
@@ -295,6 +316,11 @@ export async function exportInteractive(
     }
   }
   const shippedIds = new Set(written.media.map((entry) => entry.sceneId));
+  // The start scene is where every viewer lands — a package whose start shipped nothing
+  // validated clean and opened on undefined media.
+  if (!shippedIds.has(written.routing.start)) {
+    problems.push(`the start scene ${written.routing.start} shipped no media`);
+  }
   for (const choice of written.routing.choices) {
     if (!shippedIds.has(choice.to)) problems.push(`choice ${choice.id} points at ${choice.to}, which shipped no media`);
   }

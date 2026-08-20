@@ -150,6 +150,12 @@ export function episodeExportRefusals(
     };
   }
   if (episode.scenes.length === 0) return { detail: `${episode.title} has no scenes yet` };
+  // A scene listed twice inside ONE episode passed every other refusal and rendered twice in
+  // the encoded file — the same double-ownership problem wearing a single episode's name.
+  const doubled = episode.scenes.find((id, index) => episode.scenes.indexOf(id) !== index);
+  if (doubled !== undefined) {
+    return { detail: `${episode.title} lists ${doubled} more than once; a scene is listed exactly once` };
+  }
   const known = new Set(production.scenes.map((s) => s.id));
   const dangling = episode.scenes.filter((id) => !known.has(id));
   if (dangling.length > 0) {

@@ -89,6 +89,7 @@ import {
   setProductionAspect,
   setPromptOverride,
   setShotTrim,
+  subscribePlanResults,
   subscribePlanStates,
   useExports,
   useStore,
@@ -776,12 +777,20 @@ export function ProductionDashboardScreen() {
 
 export function StoryScreen() {
   const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  // An episodic production's Development is the four-view workspace (turn 48; issue 397); a
+  // non-episodic one keeps the single overview — no fake episode or season controls. The
+  // branch is a component boundary, not an early return: returning before the overview's own
+  // hooks broke the Rules of Hooks the moment a production's shape settled after first render.
+  if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
+  return <OverviewStoryScreen />;
+}
+
+function OverviewStoryScreen() {
+  const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const { talk, starting: talkStarting } = useTalkItThrough(worldId);
-  // An episodic production's Development is the four-view workspace (turn 48; issue 397); a
-  // non-episodic one keeps the single overview — no fake episode or season controls.
-  if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
   const story = production?.story ?? null;
   // The direct overview editor (issue 385): fields staged through the gate, never written live.
   const [editing, setEditing] = useState(false);
@@ -1663,14 +1672,29 @@ function GeneratePromptEditor({
  */
 function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
   const [states, setStates] = useState<PlanState[] | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
   useEffect(() => {
-    const unsubscribe = subscribePlanStates((event) => {
+    // A fresh production starts from nothing — keeping the previous production's states showed
+    // A's plans gating B until B's first event arrived.
+    setStates(null);
+    setRefused(null);
+    const offStates = subscribePlanStates((event) => {
       if (event.productionId === prodId) setStates(event.states);
     });
+    // A refused plan creation must be visible where the buttons live: the coordinator answers
+    // with production.plan-result, and a failure nobody renders is a button that fails silently.
+    const offResults = subscribePlanResults((event) => {
+      if (event.productionId === prodId && event.disposition === "failed") {
+        setRefused(event.reason ?? "the plan could not be created");
+      }
+    });
     listPlans(worldId, prodId);
-    return unsubscribe;
+    return () => {
+      offStates();
+      offResults();
+    };
   }, [worldId, prodId]);
-  if (!states || states.length === 0) return null;
+  if ((!states || states.length === 0) && refused === null) return null;
   const passLine = (state: PlanState, pass: PlanState["passes"][number]): string => {
     const label = `pass ${pass.passIndex}`;
     if (pass.state === "blocked") return `${label} · blocked — ${pass.reason ?? "extraction failed"}`;
@@ -1681,7 +1705,12 @@ function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
   return (
     <div style={{ marginTop: 14 }}>
       <div className="fy-listhead">Plans</div>
-      {states.map((state) => (
+      {refused !== null && (
+        <Callout tone="warning" title="Plan refused">
+          {refused}
+        </Callout>
+      )}
+      {(states ?? []).map((state) => (
         <div key={state.planId} className="fy-boardcard" style={{ marginTop: 8 }}>
           <div className="fy-boardcard__head">
             {state.policy === "review-gated" ? "Review-gated" : "Pre-authorized"} · {state.status} · cap{" "}
@@ -1783,14 +1812,20 @@ export function DispatchDialogScreen() {
   // already say why, so a refusal here just leaves no rows to show.
   const compiled = useMemo(() => {
     if (!world || !production || !scene || !model || !plans) return null;
-    const compile = (plan: typeof plans.perShot) => {
+    const compile = (plan: typeof plans.perShot, chainWholeSceneFrames = false) => {
       try {
-        return compilePasses({ productionId: production.meta.id, scene, plan, model, world });
+        return compilePasses({ productionId: production.meta.id, scene, plan, model, world, chainWholeSceneFrames });
       } catch {
         return null;
       }
     };
-    return { perShot: compile(plans.perShot), wholeScene: compile(plans.wholeScene) };
+    return {
+      perShot: compile(plans.perShot),
+      wholeScene: compile(plans.wholeScene),
+      // What the durable plan will actually authorize (SPEC-024): the server compiles the
+      // continuity chain, so the plan buttons must price the chained passes, not the plain ones.
+      chained: compile(plans.wholeScene, true),
+    };
   }, [world, production, scene, model, plans]);
   const passRow = (pass: CompiledPass): string => {
     const route =
@@ -2054,9 +2089,17 @@ export function DispatchDialogScreen() {
                       Dispatch whole scene · {usd(plans.wholeScene.totalEstimatedMicroUsd)}
                     </Button>
                     {/* SPEC-024: a plan chains each pass behind the previous pass's boundary
-                        frame — offered exactly where a route exists to receive one. */}
-                    {model && frameDispatchFor(model, 1) !== null && plans.wholeScene.pack.passes.length > 1 && (
+                        frame — offered exactly where a route exists to receive one, priced from
+                        the CHAINED compile, because that is what the plan authorizes. */}
+                    {model && frameDispatchFor(model, 1) !== null && plans.wholeScene.pack.passes.length > 1 && compiled?.chained && (
                       <>
+                        <div className="fy-boardcard__mono">
+                          {compiled.chained.map((pass, i) => (
+                            <span key={pass.target.coversShots.join("-")}>
+                              {"\n"}plan pass {i} · {passRow(pass)}
+                            </span>
+                          ))}
+                        </div>
                         <Button
                           variant="ghost"
                           onClick={() => {
@@ -2075,7 +2118,8 @@ export function DispatchDialogScreen() {
                             }
                           }}
                         >
-                          Plan · continuity chain · pre-authorize {usd(plans.wholeScene.totalEstimatedMicroUsd)}
+                          Plan · continuity chain · pre-authorize{" "}
+                          {usd(compiled.chained.reduce((sum, pass) => sum + pass.estimatedMicroUsd, 0))}
                         </Button>
                       </>
                     )}
