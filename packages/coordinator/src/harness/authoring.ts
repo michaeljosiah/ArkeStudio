@@ -52,6 +52,23 @@ const DEFAULT_WALL_CLOCK_MS = 15 * 60_000;
  */
 const FALLBACK_TOKEN_BUDGET = 200_000;
 
+/**
+ * How many times a completed turn may be sent back to repair what it wrote.
+ *
+ * Two, because the first repair is the common case — a missing comma, a field written as prose
+ * where the schema wants an object — and an agent that has failed the same check twice with the
+ * error in front of it is not going to be talked into passing it a third time. Past that the
+ * proposal stands as it is and the gate refuses it to the person, which is the outcome this
+ * exists to make rare rather than to make impossible.
+ */
+const MAX_REPAIR_TURNS = 2;
+
+/** What the agent is told when what it wrote would be refused. */
+function repairInstruction(problems: Array<{ path: string; message: string }>): string {
+  const lines = problems.map((p) => `- ${p.path}: ${p.message}`).join("\n");
+  return `The file you just wrote cannot be accepted as it stands:\n${lines}\n\nOpen it, fix exactly what is named above, and leave everything else as you wrote it. Do not restructure the draft, do not touch any other file, and reply with nothing but what you changed.`;
+}
+
 export class AuthoringService {
   private readonly runs = new Map<string, ActiveRun>();
   /**
@@ -60,6 +77,12 @@ export class AuthoringService {
    * badly, and released when the proposal settles.
    */
   private readonly sessions = new Map<string, string>();
+  /**
+   * Proposal → repair turns already spent. Counted per proposal rather than per run because the
+   * budget belongs to the draft: a second instruction on the same proposal is the same
+   * conversation, and letting it reset the count would make the bound meaningless.
+   */
+  private readonly repairs = new Map<string, number>();
 
   constructor(
     private readonly adapter: HarnessAdapter,
@@ -94,6 +117,7 @@ export class AuthoringService {
   /** The proposal settled (accepted or discarded) — its conversation is over. */
   release(proposalId: string): void {
     this.sessions.delete(proposalId);
+    this.repairs.delete(proposalId);
   }
 
   /**
@@ -257,6 +281,32 @@ export class AuthoringService {
         role: "gate",
         text: replyText.trim(),
       });
+    }
+
+    /*
+     * What the agent wrote, read by the gate before the person is offered it.
+     *
+     * The agent edits its target with raw file tools, so nothing between its last keystroke and
+     * the Accept press ever looked at the result: a missing comma or a field written as prose
+     * reached review looking finished, and the refusal arrived at the one moment the session that
+     * could have fixed it was gone. Asking here costs one round trip in the case that used to
+     * cost the person a discarded draft.
+     *
+     * Only after a clean ending, because that is the only ending that keeps the session alive —
+     * a cancelled or timed-out turn has nobody left to ask, and its half-written file is
+     * explicitly the proposal's to keep (R-12).
+     */
+    if (final.state === "completed") {
+      const spent = this.repairs.get(input.proposalId) ?? 0;
+      if (spent < MAX_REPAIR_TURNS) {
+        const problems = await gate.recordProblems(input.proposalId).catch(() => []);
+        if (problems.length > 0) {
+          this.repairs.set(input.proposalId, spent + 1);
+          progress(`checking what was written — ${problems[0]!.message}`);
+          await this.run(store, gate, { ...input, instruction: repairInstruction(problems) }, worldQueryUrl);
+          return;
+        }
+      }
     }
     status(final.state, final.detail);
   }

@@ -752,6 +752,30 @@ export class ProposalManager {
     return problems;
   }
 
+  /**
+   * What accept would refuse about this proposal's own files, asked without accepting.
+   *
+   * The drafting agent writes its target with raw file tools, so the first thing that reads what
+   * it wrote used to be the accept the person pressed. This lets the still-open session be told
+   * instead — in the gate's own words, from the gate's own schemas, so what the agent is asked to
+   * repair is exactly what would otherwise be refused. An empty array means accept would not
+   * refuse on these grounds; it promises nothing about staleness or ripples, which are about the
+   * world moving rather than about what was written.
+   */
+  async recordProblems(proposalId: string): Promise<Array<{ path: string; message: string }>> {
+    const proposal = await this.readManifest(proposalId);
+    const files: CommitFileInput[] = [];
+    for (const target of proposal.targets) {
+      const content = await this.readProposalFile(proposalId, target.path);
+      // A target that cannot be read is accept's problem to name, not this one's: it refuses by
+      // a different route, and reporting it here as a record problem would ask the agent to
+      // repair a file it may never have been asked to write.
+      if (content === null) continue;
+      files.push({ path: target.path, action: "replace", content, baseHash: target.baseHash });
+    }
+    return this.checkAuthoredBounds(files);
+  }
+
   // ---- rebase --------------------------------------------------------------
 
   /** Field-level three-way rebase (R-6, R-7): new bases, merged files, recomputed preview. */

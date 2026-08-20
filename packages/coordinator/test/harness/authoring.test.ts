@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MockHarnessAdapter } from "@arke-studio/adapter-opencode";
 import {
@@ -14,6 +14,7 @@ import { AuthoringService } from "../../src/harness/authoring.js";
 import { GrantStore } from "../../src/harness/grants.js";
 import { settlePermission } from "../../src/harness/authoring.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
+import { draftSceneSkeleton } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -100,6 +101,66 @@ function neverendingAdapter(): HarnessAdapter & { interrupted: string[] } {
   return adapter;
 }
 
+/**
+ * An adapter that writes a file each turn — the drafting agent's actual behaviour, which the
+ * mock adapter does not have: it edits its target with raw file tools and says it is done.
+ * Each dispatch takes the next body in the list, so a turn can be made to write something the
+ * gate refuses and the turn after it to write the repair.
+ */
+function writingAdapter(target: string, bodies: string[], written: string[]): HarnessAdapter {
+  const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+  const push = (event: HarnessEvent) => {
+    for (const sub of subscribers) {
+      sub.queue.push(event);
+      sub.wake?.();
+      sub.wake = null;
+    }
+  };
+  return {
+    id: "writer",
+    capabilities: () => new Set(),
+    readiness: () => ({ ready: true }),
+    async createSession() {
+      return { sessionId: "ses_writer" };
+    },
+    async sendMessage(input) {
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    async dispatchAsync(input) {
+      const body = bodies[written.length] ?? bodies.at(-1)!;
+      written.push(body);
+      await writeFile(target, body, "utf8");
+      push({ type: "message.completed", sessionId: input.sessionId, text: "done" });
+      return { sessionId: input.sessionId, correlationId: "c" };
+    },
+    streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
+      const sub: { queue: HarnessEvent[]; wake: (() => void) | null } = { queue: [], wake: null };
+      subscribers.add(sub);
+      return {
+        [Symbol.asyncIterator]() {
+          return (async function* () {
+            try {
+              while (!signal?.aborted) {
+                const next = sub.queue.shift();
+                if (next) {
+                  yield next;
+                  continue;
+                }
+                await new Promise<void>((resolve) => {
+                  signal?.addEventListener("abort", () => resolve(), { once: true });
+                  sub.wake = resolve;
+                });
+              }
+            } finally {
+              subscribers.delete(sub);
+            }
+          })();
+        },
+      };
+    },
+  };
+}
+
 describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
   it("writes the session config into the proposal, runs, and ends completed with the work kept", async () => {
     const { dir, store, gate, proposal } = await setup();
@@ -172,6 +233,80 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
       "http://127.0.0.1:1/mcp",
     );
     assert.equal(created, 2, "a released conversation does not haunt the next one");
+    await store.close();
+  });
+
+  it("what the agent wrote is read back, and a record the gate would refuse is sent back to be repaired", async () => {
+    // The drafting agent writes its target with raw file tools, so until this check the first
+    // thing to read the result was the Accept the person pressed — and by then the session that
+    // could have fixed it was gone. Live on 0.5.30 the agent dropped a comma after `inherits`.
+    const { dir, store } = await setup();
+    const gate = new ProposalManager(store);
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The chalk circle waits.",
+    });
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const written: string[] = [];
+    const adapter = writingAdapter(target, [
+      // Turn one: the shape the agent actually produced — a scene, but not a readable one.
+      '{ "id": "sc_x", "number": 1, "order": 1, "slug": "x", "title": "X" "status": "draft", "version": 1, "shots": [] }',
+      // Turn two: the repair.
+      JSON.stringify(
+        { id: "sc_x", number: 1, order: 1, slug: "x", title: "X", status: "draft", version: 1, shots: [] },
+        null,
+        2,
+      ),
+    ], written);
+    const events: DomainEvent[] = [];
+    const authoring = service(adapter, events);
+
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: draft.proposalId,
+      purpose: "drafting",
+      instruction: draft.instruction,
+    });
+
+    assert.equal(written.length, 2, "the turn that wrote something unreadable was sent back once");
+    const instructions = events
+      .filter((e) => e.type === "authoring.turn" && e.role === "user")
+      .map((e) => (e.type === "authoring.turn" ? e.text : ""));
+    assert.equal(instructions.length, 2, "the repair is a turn on the record, not a hidden retry");
+    assert.match(instructions[1]!, /cannot be accepted as it stands/, "and it says why");
+    assert.match(instructions[1]!, /not a scene/, "in the gate's own words");
+    assert.deepEqual(await gate.recordProblems(draft.proposalId), [], "what stands would now be accepted");
+    const statuses = events
+      .filter((e) => e.type === "authoring.status")
+      .map((e) => (e.type === "authoring.status" ? e.status : ""));
+    assert.equal(statuses.at(-1), "completed", "the run is only called done once the file is one");
+    await store.close();
+  });
+
+  it("an agent that cannot repair its own file is not asked forever; the draft stands and the gate refuses it", async () => {
+    const { dir, store } = await setup();
+    const gate = new ProposalManager(store);
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The chalk circle waits again.",
+    });
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const written: string[] = [];
+    // Every turn writes the same unreadable file: the agent is not going to be talked into it.
+    const adapter = writingAdapter(target, Array(6).fill('{ "id": "sc_x" "broken": true }'), written);
+    const events: DomainEvent[] = [];
+    const authoring = service(adapter, events);
+
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: draft.proposalId,
+      purpose: "drafting",
+      instruction: draft.instruction,
+    });
+
+    assert.equal(written.length, 3, "the first turn plus two repairs, then it stops asking");
+    const outcome = await gate.accept(draft.proposalId);
+    assert.equal(outcome.status, "invalid", "and the gate still refuses it rather than writing it");
     await store.close();
   });
 
