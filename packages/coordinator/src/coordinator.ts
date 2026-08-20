@@ -7055,10 +7055,11 @@ export class Coordinator {
         void this.appLog?.append({ kind: "plan.enqueue-refused", planId, reason });
       },
       // Freshness per loop (SPEC-024 R-24): the driver re-checks sources against the store's
-      // current bundle rather than the snapshot its caller happened to hold.
-      fresh: () => {
+      // current bundle rather than the snapshot its caller happened to hold. World-checked —
+      // a world switched mid-advance must never be compared against another plan's sources.
+      fresh: (worldId) => {
         const store = this.opts.provider.openStore?.();
-        return store ? store.getBundle() : undefined;
+        return store && store.worldId === worldId ? store.getBundle() : undefined;
       },
     };
   }

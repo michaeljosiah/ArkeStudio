@@ -945,10 +945,20 @@ export class ProposalManager {
           );
         }
         resolved = chosen;
+      } else if (conflict.field === "whole file") {
+        // The create-vs-create conflict is all-or-nothing: mine keeps the staged draft, theirs
+        // takes the live file wholesale. Feeding it to the field appliers nested one document
+        // inside the other under a literal "whole file" key.
+        resolved = choice === "mine" ? current : (conflict.theirs ?? current);
       } else {
         const track = classify(path).track;
         resolved =
-          track === "scene" || track === "story" || track === "season" || track === "episode" || track === "series"
+          track === "scene" ||
+          track === "story" ||
+          track === "routing" ||
+          track === "season" ||
+          track === "episode" ||
+          track === "series"
             ? applyJsonResolution(current, conflict, choice)
             : applyResolution(path, current, conflict, choice);
       }
@@ -1152,7 +1162,14 @@ function readVersion(path: string, raw: string): number | null {
         (data["amendedAt"] as number | undefined) ?? 0,
       );
     }
-    if (kind.track === "scene" || kind.track === "story" || kind.track === "season" || kind.track === "episode" || kind.track === "series") {
+    if (
+      kind.track === "scene" ||
+      kind.track === "story" ||
+      kind.track === "routing" ||
+      kind.track === "season" ||
+      kind.track === "episode" ||
+      kind.track === "series"
+    ) {
       return ((JSON.parse(raw) as { version?: number }).version ?? 1);
     }
     if (kind.track === "art-direction") return ArtDirectionRecordSchema.parse(JSON.parse(raw)).version;

@@ -347,8 +347,10 @@ export function foldPlan(
       return { ...base, state: "waiting-reconciliation" as const, reason: "landed work awaits finalization" };
     }
     if (jobId !== undefined && job === undefined) {
-      // The journalled job is gone — deleted from Activity's history. Its pre-allocated key must
-      // never become a fresh spend, so the pass ends here rather than re-enqueueing.
+      // The journalled job is gone — deleted from Activity's history. A durable pass-succeeded
+      // was checked FIRST above, so tidying a finished plan's jobs never rewrites its outcomes;
+      // without one, the pass ends here rather than letting its pre-allocated key become a
+      // fresh spend.
       return { ...base, state: "failed" as const, reason: `job ${jobId} is gone from the queue's history` };
     }
     if (jobId !== undefined) return { ...base, state: "enqueued" as const };

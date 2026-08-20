@@ -267,6 +267,23 @@ export async function exportInteractive(
       );
       continue;
     }
+    // Every shot's accepted take must BE the covering clip (directly or as its segment): a
+    // covering pass silently overriding a newer per-shot accept would ship footage the screen
+    // says was replaced.
+    const outsideCovering = scene.shots.filter((shot) => {
+      const acceptedId = production.selections[shot.id]?.acceptedTakeId ?? null;
+      if (acceptedId === null) return true;
+      const accepted = production.takes.find((t) => t.id === acceptedId);
+      return accepted === undefined || (accepted.segment?.passTakeId ?? accepted.id) !== covering.id;
+    });
+    if (outsideCovering.length > 0) {
+      blockers.push(
+        `${scene.id}'s accepted takes for ${outsideCovering
+          .map((shot) => shot.id)
+          .join(", ")} are not part of the covering clip — re-cut the pass or accept its takes before export`,
+      );
+      continue;
+    }
     media.push({
       sceneId: scene.id,
       source: join(store.dir, "productions", production.meta.id, "takes", covering.id, covering.media),

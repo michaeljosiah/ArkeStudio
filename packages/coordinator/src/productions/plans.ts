@@ -179,10 +179,12 @@ export interface PlanDriverDeps {
   clock: () => string;
   onRefused?: (planId: string, reason: string) => void;
   /**
-   * The current bundle, re-read per loop iteration when provided: a long advance holding its
-   * caller's snapshot kept enqueueing against sources that moved after the fold began (R-24).
+   * The current bundle FOR THE NAMED WORLD, re-read per loop iteration when provided: a long
+   * advance holding its caller's snapshot kept enqueueing against sources that moved after the
+   * fold began (R-24). Callers must answer undefined for any other world — a world switched
+   * mid-advance must never have its bundle compared against this plan's sources.
    */
-  fresh?: () => WorldBundle | undefined;
+  fresh?: (worldId: string) => WorldBundle | undefined;
 }
 
 /** The folded state of one plan, from disk and the queue — never from memory (R-10). */
@@ -242,12 +244,30 @@ export async function advancePlan(
     // give — a snapshot held across a long advance is exactly how a moved scene keeps spending.
     // Without a fresh reader, the caller's own snapshot is the truth; overriding it from an
     // older bundle would un-move the very sources the caller just saw move.
-    const refreshed = deps.fresh?.();
+    const refreshed = deps.fresh?.(plan.worldId);
     const currentWorld = refreshed ?? world;
     const currentProduction = refreshed
       ? (refreshed.productions.find((candidate) => candidate.meta.id === plan.productionId) ?? production)
       : production;
     const drift = sourceDrift(plan, currentProduction, currentWorld);
+    // Success made durable (SPEC-024 R-11): the fold knows a pass succeeded only through the
+    // queue join, and a succeeded job later deleted from Activity would otherwise rewrite the
+    // pass as failed. One idempotent line per pass, appended the first time the join says so.
+    for (const passState of state.passes) {
+      if (passState.state !== "succeeded" || passState.takeId !== undefined) continue;
+      const take = findPrimaryTake(currentProduction, passState.jobId);
+      if (take !== null) {
+        await appendPlanEvents(store, plan.productionId, plan.planId, [
+          {
+            kind: "pass-succeeded",
+            ts: deps.clock(),
+            planId: plan.planId,
+            passIndex: passState.passIndex,
+            takeId: take.id,
+          },
+        ]);
+      }
+    }
     if (drift !== null) {
       await appendPlanEvents(store, plan.productionId, plan.planId, [
         { kind: "stale", ts: deps.clock(), planId: plan.planId, reason: drift },

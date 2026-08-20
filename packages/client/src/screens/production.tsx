@@ -1684,9 +1684,10 @@ function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
     // A refused plan creation must be visible where the buttons live: the coordinator answers
     // with production.plan-result, and a failure nobody renders is a button that fails silently.
     const offResults = subscribePlanResults((event) => {
-      if (event.productionId === prodId && event.disposition === "failed") {
-        setRefused(event.reason ?? "the plan could not be created");
-      }
+      if (event.productionId !== prodId) return;
+      // A later successful creation clears the warning — a refusal callout standing over a
+      // live, healthy plan asserts two contradictory things at once.
+      setRefused(event.disposition === "failed" ? (event.reason ?? "the plan could not be created") : null);
     });
     listPlans(worldId, prodId);
     return () => {
