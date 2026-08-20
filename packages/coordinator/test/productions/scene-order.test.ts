@@ -72,6 +72,37 @@ describe("scene identity and explicit order (issue 387)", () => {
     );
   });
 
+  it("an agent-mangled scene draft is refused at accept, never committed for the scanner to drop", async () => {
+    // The drafting agent edits its staged target with raw file tools, so nothing checks the
+    // shape between staging and accept. Live 0.5.29 wrote prose where a slug belongs and a
+    // sentence where the audio object belongs; accept committed it, and the scanner — which
+    // reads with the same SceneSchema — silently dropped the scene from the bundle. The gate
+    // must refuse by name instead.
+    const { dir, store, gate } = await open();
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The chalk circle waits for someone to step in.",
+    });
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const staged = JSON.parse(await readFile(target, "utf8")) as Record<string, unknown>;
+    staged["shots"] = [
+      {
+        id: "sh_1",
+        number: 1,
+        title: "Spotlight snaps on",
+        description: "the spotlight snaps on over the chalk circle",
+        audio: "light click and focus hum",
+        durationSec: 3,
+      },
+    ];
+    staged["inherits"] = { location: "rehearsal hall", timeOfDay: "dawn", tone: "playful" };
+    await writeFile(target, JSON.stringify(staged, null, 2) + "\n");
+
+    const outcome = await gate.accept(draft.proposalId);
+    assert.equal(outcome.status, "invalid", "accept refuses rather than committing");
+    assert.ok(outcome.status === "invalid" && /not a scene/.test(outcome.problems[0]!.message), "the refusal names the record");
+  });
+
   it("reorder rewrites order fields only: no rename, no version cut, and the cut follows", async () => {
     const { dir, store } = await open();
     const sceneDir = join(dir, "productions", "saltlight", "scenes");
