@@ -121,8 +121,19 @@ export function ConversationTranscript({
   );
 }
 
-/** Why a turn ended without a reply, in the words the screen can say out loud. */
+/**
+ * Why a turn ended without a reply, in the words the screen can say out loud.
+ *
+ * A rejected answer is not a failed request, and telling somebody "that did not go through" when
+ * the studio answered and the gate refused the answer sends them to press retry against a
+ * refusal that will repeat. Found by driving (2026-08-21): two season turns died on an
+ * unverifiable quotation and the screen offered nothing but "try again".
+ */
 export function failureLine(failure: { status: string; detail?: string }): string {
+  const rejected = failure.detail?.startsWith("rejected: ") === true;
+  if (rejected) {
+    return `The studio answered and the answer was refused — ${failure.detail!.slice("rejected: ".length)}. Your message is still here; asking a different way usually gets past it.`;
+  }
   const opening =
     failure.status === "timeout"
       ? "That took too long and stopped."

@@ -539,7 +539,17 @@ export class WorldChatRunner {
           runId,
           cause: `answer rejected: ${outcome.problems.map((p) => p.safeMessage || p.code).join(" · ")}`,
         });
-        await this.finish(store, run, "failed", "the studio's answer could not be used");
+        /*
+         * The same words the log gets, because the person is the one who has to do
+         * something about it. "The answer could not be used" tells them a turn failed and
+         * leaves them pressing retry against a rejection that will repeat.
+         */
+        await this.finish(
+          store,
+          run,
+          "failed",
+          `rejected: ${outcome.problems.map((p) => p.safeMessage || p.code).join(" · ")}`,
+        );
         return { status: "failed", reason: "the answer could not be used", problems: outcome.problems };
       }
       return { status: "completed", reply: outcome.reply };
