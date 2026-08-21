@@ -118,10 +118,12 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /0 written/);
   });
 
-  it("says where the season was decided, and that nothing here writes", () => {
+  it("says where the season was decided", () => {
+    // Turn 95 cut the caption beside this link. It claimed opening an episode opens its chat,
+    // which turn 92 had already made false, and then repeated the pills.
     const html = seasonPage([ONE]);
-    assert.match(html, /Production Chat/, "one way back into the thread");
-    assert.match(html, /every change is a proposal/);
+    assert.match(html, /&larr; Production Chat|← Production Chat/, "one way back into the thread");
+    assert.doesNotMatch(html, /opening an episode opens its own chat/, "the stale caption is gone");
   });
 
   it("a non-episodic production keeps the single overview and no season controls", () => {
@@ -197,7 +199,7 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     const html = render(state, PAGE, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
     assert.match(html, /Talk it through/);
     assert.match(html, /← Season/);
-    assert.match(html, /every change is a proposal/);
+    assert.doesNotMatch(html, /opening a scene opens its own chat/, "turn 95 cut the stale caption");
   });
 });
 
@@ -310,7 +312,10 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     // no way to accept it. The first hop anybody walks was the one place the pattern was missing.
     const html = chat(withMicrodrama([ONE]));
     assert.match(html, /Wrap up · stage what is settled/);
-    assert.match(html, /nothing is settled yet · save a point above to make it ready/);
+    // Turn 95: no caption under it. The panel above already shows what is settled and what is
+    // still a maybe, and the button's disabled state is that same fact.
+    assert.doesNotMatch(html, /save a point above to make it ready/);
+    assert.doesNotMatch(html, /still soft · saying more changes them/);
   });
 
   it("becomes the staged season under one Accept once wrap-up has run", () => {

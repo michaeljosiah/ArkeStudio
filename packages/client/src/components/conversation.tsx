@@ -131,6 +131,23 @@ export function failureLine(failure: { status: string; detail?: string }): strin
 }
 
 /**
+ * A conversation's title, from the first thing said in it (design turn 95).
+ *
+ * The wire caps a title at 200 characters, and a frame that breaks its schema is dropped without
+ * a word — so an opening message longer than that vanished: composer cleared, no conversation, no
+ * error, nothing on disk. Anything a person types is a plausible opening, and 200 characters is
+ * about two sentences, so this was reachable by saying one ordinary paragraph.
+ */
+export function conversationTitle(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= 200) return flat;
+  // Break at a word so the label reads as a clipped sentence rather than a severed one.
+  const cut = flat.slice(0, 199);
+  const space = cut.lastIndexOf(" ");
+  return (space > 120 ? cut.slice(0, space) : cut) + "…";
+}
+
+/**
  * The production's own thread — Production Chat, and its episode and scene kin (turns 86, 89).
  *
  * One continuous conversation per production (SPEC-023 R-20), so every view here enters the same
@@ -150,6 +167,7 @@ export function ProductionConversation({
   entry,
   openingNote,
   side,
+  openWith,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -176,9 +194,17 @@ export function ProductionConversation({
    * is a proposal, which is the promise the gate exists to keep.
    */
   side?: React.ReactNode;
+  /**
+   * An opening line typed somewhere else — day one's box — handed over to be said here. It is
+   * said rather than merely titled: creating a conversation does not take a turn, so a screen
+   * that only creates leaves the first thing a person said unanswered (turn 95).
+   */
+  openWith?: string;
 }) {
   const { state } = useStore();
   const [message, setMessage] = useState("");
+  /** An opening message waiting for the conversation it opened to arrive. */
+  const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
   const thread = useMemo(() => {
@@ -195,18 +221,49 @@ export function ProductionConversation({
   }, [worldId, conversationId]);
 
   const workspace = state?.worldChat ?? null;
+  useEffect(() => {
+    if (!opening || !worldId) return;
+    const opened = workspace?.conversationId ?? null;
+    if (!opened || opened === opening.was) return;
+    sendWorldChat(worldId, opened, opening.text);
+    setOpening(null);
+  }, [opening, worldId, workspace?.conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure ?? null;
 
+  /*
+   * The handover fires once. `openWith` survives a re-render and a reload of this screen, so
+   * without the latch a returning visit would say the same line again.
+   */
+  const handedOver = useRef(false);
+  useEffect(() => {
+    if (!openWith || handedOver.current || !worldId || !productionId) return;
+    handedOver.current = true;
+    if (conversationId) {
+      sendWorldChat(worldId, conversationId, openWith);
+      return;
+    }
+    setOpening({ text: openWith, was: workspace?.conversationId ?? null });
+    createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
+    // context is derived from route params and rebuilt each render; the latch above is what
+    // makes this safe to leave out of the dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openWith, worldId, productionId, conversationId]);
+
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !productionId) return;
     setMessage("");
-    // No thread yet: the first thing said opens it, with that line as its opening.
+    /*
+     * No thread yet: the first thing said opens one and is then said into it. Creating does not
+     * take a turn — it only names the conversation — so without the send that follows, the
+     * opening message became a title and the studio never answered it (turn 95).
+     */
     if (!conversationId) {
-      createWorldChat(worldId, text, crypto.randomUUID(), context);
+      setOpening({ text, was: workspace?.conversationId ?? null });
+      createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
     sendWorldChat(worldId, conversationId, text);
@@ -294,9 +351,6 @@ export function ProductionConversation({
               }
             : {})}
         />
-        <div className="fy-mono" style={{ marginTop: 10 }}>
-          still soft · saying more changes them · wrap-up is what stages them
-        </div>
         {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
             nowhere, which left the season — the first hop anybody walks — with no way to turn a
             conversation into anything at all. */}
@@ -355,11 +409,9 @@ function WrapUp({
           {refusal.detail}
         </div>
       )}
-      <div className="fy-mono">
-        {carried === 0
-          ? "nothing is settled yet · save a point above to make it ready"
-          : "talking changes nothing · the gate writes it"}
-      </div>
+      {/* No caption under the button (turn 95). The panel above already shows what is settled and
+          what is still a maybe, and the button's own disabled state is that same fact — a line
+          restating both is one more thing to read on a screen whose whole job is the transcript. */}
     </div>
   );
 }
@@ -396,9 +448,6 @@ export function StagedDecision({
       <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
         <div style={{ font: "600 15px var(--font-sans)" }}>Ready to accept</div>
         <span className="fy-mono">{subject}</span>
-      </div>
-      <div className="fy-mono" style={{ marginTop: 6 }}>
-        this is the proposal · nothing above it has been written
       </div>
       <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
         {fields.map((field) => (

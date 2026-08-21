@@ -137,9 +137,6 @@ export function DevelopmentWorkspace() {
         <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
           &larr; Production Chat
         </NavLink>
-        <span className="fy-mono">
-          opening an episode opens its own chat · nothing here writes — every change is a proposal
-        </span>
       </div>
     </div>
   );
@@ -572,9 +569,6 @@ export function EpisodeDetailScreen() {
           ))}
         </div>
       )}
-      <div className="fy-mono">
-        opening a scene opens its own chat · a script belongs to a scene · every change is a proposal
-      </div>
     </div>
   );
 }

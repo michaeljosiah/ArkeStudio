@@ -71,7 +71,6 @@ import {
   cancelExport,
   compileSceneBoard,
   createSheetFromSentence,
-  createWorldChat,
   attachHostFiles,
   attachHostText,
   hostCanAttach,
@@ -675,7 +674,9 @@ export function ProductionDashboardScreen() {
           <DayOne
             worldId={worldId!}
             prodId={prodId!}
-            onOpen={(path) => navigate(`/w/${worldId}/p/${prodId}${path}`)}
+            onOpen={(path, opening) =>
+            navigate(`/w/${worldId}/p/${prodId}${path}`, opening ? { state: { opening } } : {})
+          }
           />
           {/* Below the frame's content, not above it: 53b opens on the production's own name and
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
@@ -844,7 +845,7 @@ function DayOne({
 }: {
   worldId: string;
   prodId: string;
-  onOpen: (path: string) => void;
+  onOpen: (path: string, opening?: string) => void;
 }) {
   const [message, setMessage] = useState("");
   // Nothing is being said to yet, so what is dropped here is filed as the production's own
@@ -855,12 +856,13 @@ function DayOne({
     if (!text) return;
     /*
      * The first thing said about a production is the opening line of its Production Chat thread,
-     * not a note that lands nowhere. It is created here and read in the chat, which is where the
-     * conversation belongs and where this send lands.
+     * not a note that lands nowhere. This screen used to create the conversation itself, which
+     * named it and nothing more: creating does not take a turn, so the studio never answered the
+     * first thing anybody said to it (turn 95). The line is handed to the chat, which opens the
+     * thread and says it, through the one path that does both.
      */
-    createWorldChat(worldId, text, crypto.randomUUID(), { kind: "production", productionId: prodId });
     setMessage("");
-    onOpen("/story");
+    onOpen("/story", text);
   };
   return (
     <>
@@ -916,6 +918,8 @@ function DayOne({
  */
 export function ProductionChatScreen() {
   const { worldId, prodId } = useParams();
+  /** A line typed on day one, carried here by the navigation that opened this screen. */
+  const opening = (useLocation().state as { opening?: string } | null)?.opening;
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const shape = production ? productionShape(production.meta) : null;
@@ -961,6 +965,7 @@ export function ProductionChatScreen() {
             </div>
           }
           pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
+          {...(opening ? { openWith: opening } : {})}
           {...(staged
             ? {
                 side: (
