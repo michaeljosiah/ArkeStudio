@@ -48,7 +48,7 @@ const STEPS = [
   },
   {
     id: "53b", step: "Day one",
-    actions: [{ match: "Write the first scene", to: "49a", hint: "straight to a scene" },
+    actions: [{ match: "Write the first scene", to: "14c", hint: "straight to a scene — the storyboard" },
               { match: "Shape the whole thing first", to: "89a", hint: "decide what it is first" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId",
       notes: ["<b>Turn 93: this frame is a one-off Video's day one, not an episodic production's.</b> A Microdrama is created saying how many episodes it has, so its empty state is already drawn — 91a with every tile dashed — and its front page is its season. What it adds when nothing is decided is one line naming Production Chat, because a board of dashed tiles says what is missing and not what to do about it.",
@@ -106,7 +106,7 @@ const STEPS = [
   },
   {
     id: "91c", step: "The episode · summary, then scenes",
-    actions: [{ match: "The hour found", to: "49a", hint: "open a scene with no script" }],
+    actions: [{ match: "The hour found", to: "14c", hint: "open a scene" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId/episodes/:id",
       notes: ["<b>Turn 92: one control, one destination.</b> A tile used to open the chat when nothing was written and the page when something was; the same click landed in two places according to state nobody could see beforehand. Every tile opens the page. The tiles are links now rather than buttons, so middle-click and copy-link work — and so where a tile leads is something a test can read, which the version with an <code>onClick</code> was not.",
               "<b>Built to the drawing (turn 91).</b> The promise in the header, <code>Scenes · in order</code> as a heading rather than a strip of one tab, and the scene cards below it.",
@@ -115,38 +115,43 @@ const STEPS = [
               "<b>Still the stopgap:</b> the <code>DRAFTED ELSEWHERE · NOT IN ANY EPISODE</code> band. Until turn 87's cascade lands, scenes are drafted somewhere else and adopted here, which runs the arrow backwards. Said out loud rather than dressed up."] },
   },
   {
-    id: "49a", step: "The script",
-    actions: [{ match: "Turn this into a proposal", to: "49b", hint: "accept the script" }],
-    built: { status: "missing", route: "— no screen —",
-      notes: ["<b>Turn 94: the scene is talked through in place now.</b> Its conversation used to open World Chat on another screen, so the shape a person had learned twice — talk here, accept here, land on the thing — stopped working at the level where the writing happens. Scene Chat is the same component with a smaller subject, and its <code>Talk it through</code> stays on this production.",
-              "<b>The script surface itself is still not built</b> — no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>. What exists is the conversation that would produce one and the accept that would land it.",
-              "<b>Read <code>Turn this into a proposal</code> here as retired</b> (turn 91). The scene frames still carry the old wording because they have not been redrawn; the button is <code>Accept Proposal</code> at every level, since by the time a person reads what a conversation settled it already is one.",
-              "<b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.",
-              "The scene screen ships a two-item strip — <code>Shots</code> and <code>Board</code> — where the drawing has four: <code>Script · Coverage · Board · Takes</code>.",
-              "The <i>data model</i> is ahead of the screens: scene records carry script blocks, and a shot can cite blocks with a digest of the text at citation time."] },
+    id: "14c", step: "Scene 4 · the storyboard",
+    actions: [{ match: "Advanced", to: "14d", hint: "the full shot, behind the card" },
+              { match: "Generate scene", to: "52a", hint: "the plan — the only thing that spends" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
+      notes: ["<b>Newly adopted (turn 97), replacing 14a.</b> The scene page is its storyboard and the storyboard is the editor: the script is written on the card itself, <code>@</code> names anything in the world and rides along as an image reference, and <code>Advanced</code> (under a card's <code>⋯</code> — scroll the strip to shot 15) opens the full shot.",
+              "<b>Everything a card states is derived, never stored</b> — <code>needs attention</code> / <code>story</code> / <code>storyboard</code> / <code>production-ready</code> from what exists, and <code>script changed · Re-read</code> from SPEC-023's coverage digests. The data model for all of it already ships.",
+              "<b>A hand edit saves where it stands</b> — the bible's model: versioned, <code>saved 2 minutes ago</code>, <code>version history</code>, a save against a moved base refused. <b>An assistant edit asks first</b>: plan cards under <code>Apply to shots</code> / <code>Discard</code> in the docked panel, and an invented shot stays <code>suggested</code> until confirmed. Scene Chat's separate screen (turn 94) is amended into this panel.",
+              "<b>What ships today is 14a's shape</b>: read-only shot cards on the scene page, Shots/Board tabs, takes and boundary frames real, <code>promptOverride</code> with cited sheet versions real. The write path — direct save, shot CRUD, the panel — is the build this frame binds.",
+              "Not adopted from the prototype: the per-shot aspect override (a route takes one aspect; a cut cannot hold two — the chip reads <code>16:9 · from the episode</code>) and invented credit pricing (prices quote the plan, turn 52)."] },
   },
   {
-    id: "49b", step: "Coverage · blocks against shots",
-    actions: [{ match: "Turn this into proposals", to: "53e", hint: "accept the coverage" }],
-    built: { status: "missing", route: "— no screen —",
-      notes: ["<b>Not built.</b> No blocks-against-shots view, no <code>5 of 7 blocks covered</code>, no <code>NO SHOT COVERS THIS</code> row.",
-              "49c (<i>covers text that changed</i> / <i>covers nothing</i> after an edit) and 50a–50c (split and merge) are not built either."] },
+    id: "14d", step: "One shot · Advanced",
+    actions: [{ match: "Confirm the shot", to: "14c", hint: "suggested until you say so" }],
+    built: { status: "missing", route: "— sheet over the storyboard —",
+      notes: ["<b>The full shot behind the card (turn 97):</b> script, the assembled prompt with <code>Rebuild</code>, cinematic intent — framing, lens and movement inferred from it, anything set by hand wins — timing beats, references, and Creative / Camera / Sound / Continuity / Technical.",
+              "<b>Camera fields inherit from the scene and say which</b>: <code>from scene</code>, or an override dot. The prompt's override-never-replacement doctrine (SPEC-012 R-15) applied to every field.",
+              "<b>Recipes are one-press coverage grammar</b> — <code>Establishing</code> / <code>Coverage · OTS</code> / <code>Reaction</code> / <code>Insert</code> / <code>Hold</code> fill size, angle, lens, movement and pace.",
+              "<b>Continuity is issue 154's boundary frame said plainly</b> — <code>opens on the last frame of shot 14</code> — and that machinery ships today: the durable still, its hash, the first-frame route. <code>keep out of frame</code> is new.",
+              "Nothing of this sheet exists in the build yet; the nearest surfaces are the dispatch dialog's prompt editor and the Generate workspace."] },
   },
   {
-    id: "53e", step: "The board · priced, nothing sent",
-    actions: [{ match: "Two-shot at the door", to: "53d", hint: "click a panel to change it" }],
-    built: { status: "missing", route: "— no board screen —",
-      notes: ["<b>Not built.</b> No priced panels, no <code>4 shots · 17s owned · 18s asked · 9:16</code> status line, no <code>Generate 4 shots · $5.46</code>.",
-              "Staleness is whole-board in the app (<code>stale — scene is at v{n}</code>), never per panel as 51b draws.",
-              "What did land, elsewhere: the <code>BEFORE YOU SPEND</code> warning bar ships in the <b>dispatch dialog</b> as <i>“{n} things worth knowing — none blocks”</i>, and <code>Export sheet</code> survives on the scene's Board tab."] },
+    id: "52a", step: "The plan · before a penny moves",
+    actions: [{ match: "Two-shot at the door", to: "52b", hint: "open one shot of the plan" }],
+    built: { status: "drifted", route: "nearest: #/w/:worldId/p/:prodId/generate/dispatch",
+      notes: ["<b>Turn 52: one screen between accepting a scene and spending on it</b> — every shot showing what it will send, what it covers and what it costs; blocks with no shot as the dashed row, quoting the lines that would go missing.",
+              "<b>The only control that spends says its price in its own label</b> — <code>Generate 4 shots · $5.46</code> — with a per-shot equivalent so a single retry never re-runs the scene.",
+              "<b>Much of it ships in the dispatch dialog</b>: route-aware estimates, planned-vs-asked seconds (<code>3s planned · 4s asked</code>), carried/dropped references, warnings that name their shot and never block, and SPEC-024's pre-authorized plans behind it — proven end to end on v0.5.30 and again on 0.5.34.",
+              "What does not ship: this scene-ordered surface itself. The dialog is a form; the drawing is the scene read left to right in cut order, coverage visible without a click."] },
   },
   {
-    id: "53d", step: "One panel selected",
+    id: "52b", step: "One shot of the plan · the prompt and its sources",
     actions: [{ match: "Generate this shot", to: "79a", hint: "spend on one shot" }],
-    built: { status: "missing", route: "— no screen — (nearest: dispatch dialog)",
-      notes: ["<b>Not built.</b> Selecting a panel does not open <code>PROMPT</code> / <code>Reset to assembled</code> / <code>MODEL</code> / <code>SIZE</code> / <code>LENGTH</code> / <code>REFERENCES</code> in place.",
-              "The promises survive in the dispatch dialog: an edited prompt says it was edited and offers the assembled one back, both prices are on screen, warnings name their shot.",
-              "Built without a frame: the whole SPEC-024 <b>plans panel</b> — <code>Review-gated</code> / <code>Pre-authorized</code> / <code>Continue · pass {i} · $x</code> / <code>Cancel plan</code>."] },
+    built: { status: "drifted", route: "nearest: dispatch dialog · prompt editor",
+      notes: ["<b>The prompt as its parts, each naming its source</b> — art direction v3, the scene, the location sheet, the shot, the mentioned sheets at their versions, the script block the line came from. Nobody typed it, so the screen says what wrote it.",
+              "<b>What travels is knowable before the money moves</b>: each reference <code>CARRIED</code> or <code>DROPPED</code> with its mode and the reason — a dropped face is the most common cause of a take that looks wrong.",
+              "<b>Writing your own prompt replaces the assembled one for this shot only</b>, and the offer states its own consequence. That ships as <code>promptOverride</code> with cited sheet versions.",
+              "The dispatch dialog shows assembled prompts and reference dispositions today; the per-source breakdown drawn here is richer than what ships."] },
   },
   {
     id: "79a", step: "Dispatched · what the notification says",
@@ -279,30 +284,30 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">3</span>
-        <span class="lvl__thread">Scene Chat</span>
+        <span class="lvl__thread">the docked assistant</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
         <div class="cards">
-          <div class="card is-built">
-            <div class="card__k">Talk, then accept</div>
-            <div class="card__d">Built (turn 94), and not drawn separately, deliberately: it is the same two screens again with a smaller subject. A rail drawn once is a rail understood everywhere.</div>
-            <div class="card__f"></div>
-          </div>
-          <div class="card is-todo" data-goto="49a">
-            <div class="card__k">Script</div>
-            <div class="card__d">Written first, in blocks that keep their ids. A script belongs to a scene and to nothing above it.</div>
+          <div class="card is-todo" data-goto="14c">
+            <div class="card__k">Storyboard</div>
+            <div class="card__d">Cards you write on (turn 97). The script lives on the card, blocks keep their ids underneath, and everything else the card states is derived.</div>
             <div class="card__f">scenes/*.json</div>
           </div>
-          <div class="card is-todo" data-goto="49b">
-            <div class="card__k">Coverage</div>
-            <div class="card__d">Which shot covers which block — and which blocks nothing covers.</div>
+          <div class="card is-todo" data-goto="14d">
+            <div class="card__k">The full shot</div>
+            <div class="card__d">Advanced: intent, recipes, a camera that inherits from the scene, continuity, model and seed.</div>
             <div class="card__f">scenes/*.json</div>
           </div>
-          <div class="card is-todo" data-goto="53e">
-            <div class="card__k">Board</div>
-            <div class="card__d">Every shot, priced, before a penny moves.</div>
-            <div class="card__f">boards/</div>
+          <div class="card is-part" data-goto="14c">
+            <div class="card__k">Talk, then apply</div>
+            <div class="card__d">The assistant docks beside the strip and follows the selection. Its changes are plan cards under <b>Apply to shots</b>; a hand edit just saves.</div>
+            <div class="card__f">.conversations/cv_*</div>
+          </div>
+          <div class="card is-part" data-goto="52a">
+            <div class="card__k">The plan</div>
+            <div class="card__d">Every shot, priced, before a penny moves. The only surface that spends.</div>
+            <div class="card__f">plans/pl_*</div>
           </div>
         </div>
       </div>
