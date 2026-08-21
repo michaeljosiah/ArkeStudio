@@ -293,9 +293,13 @@ export function ProductionLayout() {
           ) : (
             <>
               {/* World Chat with a production for a subject (turn 89): the same transcript, the
-                  same points, the same wrap-up. What it sets up is read next door (turn 88), and
-                  the route keeps its name — a rename is display, never wiring. */}
-              {item("story", "Develop", "chat", true)}
+                  same points, the same wrap-up.
+                  The item goes where the panel lands (turn 99). An episodic production carries
+                  Arke docked on its season and its episodes, so a rail entry would be a second
+                  door into the same thread; everything else still reaches it here, renamed from
+                  Production Chat, which named an implementation. The route is untouched either
+                  way — a rename is display, never wiring. */}
+              {!shape?.isEpisodic && item("story", "Develop", "chat", true)}
               {/* An episodic production's front page is its season (turn 93), so Season is the
                   rail's first item — drawn above, in place of Dashboard — and there is no second
                   entry for it here. A production without a season keeps both. */}
@@ -952,7 +956,8 @@ export function ProductionChatScreen() {
       <ProductionConversation
           worldId={worldId}
           productionId={prodId}
-          eyebrow={`PRODUCTION CHAT · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
+          openingNote="Develop · opening…"
+          eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
           heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
           placeholder="Say what this is — what happens, who it costs, how it ends…"
           emptyLine={

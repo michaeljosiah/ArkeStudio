@@ -135,9 +135,9 @@ describe("the season page (design turn 91)", () => {
     // Turn 95 cut the caption beside this link. It claimed opening an episode opens its chat,
     // which turn 92 had already made false, and then repeated the pills.
     const html = seasonPage([ONE]);
-    // Turn 99 renames it: Production Chat named an implementation, Develop names something a
-    // person does. The route is unchanged — a rename is display, never wiring.
-    assert.match(html, /&larr; Develop|← Develop/, "one way back into the thread");
+    // Turn 99 renamed it and turn 99's panel then removed the trip entirely: the thread is on
+    // this page, so there is no link back into it and nothing called Production Chat anywhere.
+    assert.match(html, /data-dock="conversation"/, "the way back into the thread is that it never left");
     assert.doesNotMatch(html, /Production Chat/, "the old name is gone from this screen");
     assert.doesNotMatch(html, /opening an episode opens its own chat/, "the stale caption is gone");
   });
@@ -185,7 +185,7 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /OPENS/, "the promise's three lines are labelled");
     assert.match(html, /The page is gone\./);
     assert.match(html, /No scenes yet\./, "an empty membership is said, not hidden");
-    assert.doesNotMatch(html, /role="textbox"/, "one thread, one place — the chat is next door");
+    assert.match(html, /data-dock="conversation"/, "the chat is docked here now (turn 100)");
     assert.doesNotMatch(html, /Edit the promise/, "authoring happens in the conversation");
   });
 
@@ -209,12 +209,14 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     }
   });
 
-  it("the page can always be talked to again, and names the level above", () => {
-    // An accept is not the end of a subject; a page that cannot be talked to again turns the
-    // accept into a one-way door.
+  it("the page can always be talked to again — without being sent anywhere (turn 100)", () => {
+    // An accept is not the end of a subject. Turn 91 met that with `Talk it through`, which sent
+    // you to a screen; turn 100 meets it by never taking the thread off the page in the first
+    // place, so the control that named the trip is gone with the trip.
     const html = render(state, PAGE, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
-    assert.match(html, /Talk it through/);
-    assert.match(html, /← Season/);
+    assert.match(html, /Ask about the episode/, "the composer is here");
+    assert.doesNotMatch(html, /Talk it through/, "there is nowhere left to be sent");
+    assert.match(html, /← Season/, "the level above is still named");
     assert.doesNotMatch(html, /opening a scene opens its own chat/, "turn 95 cut the stale caption");
   });
 });
@@ -394,8 +396,10 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.ok(labels.includes("Overview"), "and its overview beside it");
   });
 
-  it("an empty season says where it gets shaped", () => {
-    // A board of dashed tiles says what is missing and not what to do about it.
+  it("an empty season opens the conversation beside it (turn 99)", () => {
+    // A board of dashed tiles says what is missing and not what to do about it. Turn 93 answered
+    // that with a card naming Production Chat; turn 99 answers it with the panel itself, which
+    // is the same answer without the trip.
     const world = FIXTURE_STATE.world!;
     const bare = withMicrodrama([]);
     const stripped: ClientState = {
@@ -409,8 +413,8 @@ describe("an episodic production's front page is its season (design turn 93)", (
     };
     void world;
     const html = renderApp(stripped, `/w/${FIXTURE_WORLD_ID}/p/${PROD}`);
-    assert.match(html, /Nothing decided yet\./);
-    assert.match(html, /is where the season gets shaped/);
+    assert.match(html, /Let’s shape the season\. What is it about\?/, "Arke opens rather than a card explaining");
+    assert.doesNotMatch(html, /is where the season gets shaped/, "the card that pointed at a page is gone");
     assert.match(html, /OPEN TO START IT/, "beside the shape it was promised");
   });
 });
@@ -508,10 +512,67 @@ describe("story structure is off the default walk (design turn 99)", () => {
     assert.doesNotMatch(plain, /Story structure/, "a production with no season has no lanes to hold");
   });
 
-  it("the rail says Develop, not Production Chat (turn 99)", () => {
+  it("the rail carries no chat item where the panel lands (turns 99, 100)", () => {
     const html = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
-    assert.ok(labels.includes("Develop"), "a thing a person does");
     assert.ok(!labels.includes("Production Chat"), "not the name of an implementation");
+    assert.ok(!labels.includes("Develop"), "and not a second door into a thread that is on the page");
+    // A production with no season still reaches the thread the old way, under the new name.
+    const plain = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    const plainLabels = [...plain.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
+    assert.ok(plainLabels.includes("Develop"), "a thing a person does");
+    assert.ok(!plainLabels.includes("Production Chat"));
+  });
+});
+
+describe("Arke is docked on the thing it is about (design turns 99, 100)", () => {
+  const PROD = "bell-watch-season-1";
+
+  it("the season carries the panel, with the season as its subject", () => {
+    const html = render(withMicrodrama([ONE]), SEASON(PROD), <StoryScreen />, "/w/:worldId/p/:prodId/season");
+    assert.match(html, /data-dock="conversation"/);
+    assert.match(html, /Arke · Bell Watch — Season 1/, "the panel names what it is about");
+    assert.match(html, /season · v1/, "and which version of it");
+    assert.match(html, /Ask about the season/);
+  });
+
+  it("the episode carries the same panel, one level down", () => {
+    const html = render(
+      withMicrodrama([ONE]),
+      `/w/${FIXTURE_WORLD_ID}/p/${PROD}/episodes/${ONE.id}`,
+      <EpisodeDetailScreen />,
+      "/w/:worldId/p/:prodId/episodes/:episodeId",
+    );
+    assert.match(html, /data-dock="conversation"/);
+    assert.match(html, /Arke · Episode 01/, "the subject is the episode, not the season");
+    assert.match(html, /Ask about the episode/);
+  });
+
+  it("a staged change is decided in the panel, on the page it changes", () => {
+    // Before this it was decided on another screen entirely, which meant reading a list of
+    // fields to find out what had happened to the thing you were looking at.
+    const staged = stagedAgainst(
+      `productions/${PROD}/season.json`,
+      [["Question", "Who is ringing the drowned bell?"]],
+      "Season · the question",
+    );
+    const html = render(
+      withProposal(withMicrodrama([ONE]), staged),
+      SEASON(PROD),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    assert.match(html, /Accept Proposal/, "the yes is in the panel");
+    assert.match(html, /the gate writes season\.json/, "and says what it writes");
+    assert.match(html, /Who is ringing the drowned bell\?/);
+    // The two rail states are still never up together (turn 91): a point is not a proposal.
+    assert.doesNotMatch(html, /What it understood/, "the understanding gives way to the decision");
+  });
+
+  it("the panel keeps the wrap-up, and puts the understanding away rather than dropping it", () => {
+    const html = render(withMicrodrama([ONE]), SEASON(PROD), <StoryScreen />, "/w/:worldId/p/:prodId/season");
+    assert.match(html, /Wrap up/, "without it a conversation cannot become anything (turn 92)");
+    assert.match(html, /What it understood/, "still reachable, behind a disclosure");
+    assert.match(html, /talking changes nothing/, "and the promise beside the composer survives");
   });
 });

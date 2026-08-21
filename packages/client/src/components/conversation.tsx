@@ -168,6 +168,7 @@ export function ProductionConversation({
   openingNote,
   side,
   openWith,
+  dock,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -200,6 +201,14 @@ export function ProductionConversation({
    * that only creates leaves the first thing a person said unanswered (turn 95).
    */
   openWith?: string;
+  /**
+   * Docked beside the thing it is about, rather than filling a screen of its own (turns 99, 100).
+   * The subject goes in the panel's head, the transcript takes the height, and what would be the
+   * side rail — a staged proposal, or the understanding and its wrap-up — sits in a strip above
+   * the composer. There is no room for a rail beside a 360px column, and no need for one: the
+   * change a proposal makes is drawn on the page beside it.
+   */
+  dock?: { title: string; subject: string };
 }) {
   const { state } = useStore();
   const [message, setMessage] = useState("");
@@ -270,6 +279,94 @@ export function ProductionConversation({
   };
 
   const points = loaded?.points ?? [];
+  const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
+  const transcript = (
+    <ConversationTranscript
+      workspace={loaded}
+      running={running}
+      progress={progress}
+      failure={failure && !running ? failure : null}
+      canRetry
+      {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
+      {...(worldId && conversationId
+        ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
+        : {})}
+      empty={
+        thread ? (
+          <div className="fy-bubble--user">
+            {thread.title}
+            <div className="fy-bubble__note">{openingNote ?? "opening…"}</div>
+          </div>
+        ) : (
+          <div className="fy-bubble--gate">{emptyLine}</div>
+        )
+      }
+    />
+  );
+
+  if (dock) {
+    return (
+      <aside className="fy-arke" data-dock="conversation">
+        <div className="fy-arke__head">
+          <span className="fy-arke__who">
+            <span className="fy-arke__name">{dock.title}</span>
+            <span className="fy-mono">{dock.subject}</span>
+          </span>
+        </div>
+        <div className="fy-arke__log" aria-live="polite">
+          {transcript}
+        </div>
+        <div className="fy-arke__strip">
+          {side ?? (
+            <>
+              {/* The understanding is still here, put away rather than dropped: a column this
+                  narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
+                  the only way a conversation becomes anything (turn 92). */}
+              {pointsEmpty !== undefined && (
+                <details className="fy-arke__points">
+                  <summary>
+                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
+                  </summary>
+                  <ConversationPoints
+                    points={points}
+                    empty={pointsEmpty}
+                    {...(worldId && conversationId
+                      ? {
+                          onSave: (point: WorldChatPoint) =>
+                            saveWorldChatPoint(worldId, conversationId, point.id, point.revision),
+                          onReject: (point: WorldChatPoint) =>
+                            rejectWorldChatPoint(worldId, conversationId, point.id, point.revision),
+                        }
+                      : {})}
+                  />
+                </details>
+              )}
+              <WrapUp
+                worldId={worldId}
+                conversationId={conversationId}
+                seq={loaded?.seq ?? null}
+                carried={carriedPoints}
+              />
+            </>
+          )}
+        </div>
+        <div className="fy-arke__foot">
+          <Composer
+            value={message}
+            onChange={setMessage}
+            onSubmit={submit}
+            placeholder={placeholder}
+            agentLabel="story author"
+            busy={running}
+            busyLabel="reading the world…"
+            onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+          />
+          <div className="fy-mono">talking changes nothing · a change waits for your yes</div>
+        </div>
+      </aside>
+    );
+  }
+
   const pane = (
     <div className="fy-story__chat">
       {(eyebrow || heading) && (
@@ -279,27 +376,7 @@ export function ProductionConversation({
         </div>
       )}
       <div className="fy-story__log">
-        <ConversationTranscript
-          workspace={loaded}
-          running={running}
-          progress={progress}
-          failure={failure && !running ? failure : null}
-          canRetry
-          {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
-          {...(worldId && conversationId
-            ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
-            : {})}
-          empty={
-            thread ? (
-              <div className="fy-bubble--user">
-                {thread.title}
-                <div className="fy-bubble__note">{openingNote ?? "Production Chat · opening…"}</div>
-              </div>
-            ) : (
-              <div className="fy-bubble--gate">{emptyLine}</div>
-            )
-          }
-        />
+        {transcript}
       </div>
       <div style={{ flex: "none", padding: "14px 36px 22px" }}>
         <Composer
@@ -330,7 +407,6 @@ export function ProductionConversation({
     );
   }
   if (pointsEmpty === undefined) return pane;
-  const carried = points.filter((p) => p.kind === "point" && p.settled).length;
   return (
     <>
       {pane}
@@ -354,7 +430,7 @@ export function ProductionConversation({
         {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
             nowhere, which left the season — the first hop anybody walks — with no way to turn a
             conversation into anything at all. */}
-        <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null} carried={carried} />
+        <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null} carried={carriedPoints} />
       </div>
     </>
   );
@@ -446,7 +522,11 @@ export function StagedDecision({
   staged: StagedProposal;
   /** What accepting does, said plainly under the button. */
   writes: string;
-  onAccepted: () => void;
+  /**
+   * Where accepting lands you (turn 91). Absent when this is docked beside the thing it decides
+   * (turns 99, 100): you are already on it, and the change appears where it lives.
+   */
+  onAccepted?: () => void;
 }) {
   const fields = staged.review?.targets.flatMap((t) => t.fields) ?? [];
   return (
@@ -481,8 +561,9 @@ export function StagedDecision({
           onClick={() => {
             if (!worldId) return;
             acceptProposal(worldId, staged.proposal.id);
-            // Accepting lands you on the thing you accepted (turn 91).
-            onAccepted();
+            // Accepting lands you on the thing you accepted (turn 91) — or leaves you there,
+            // when the panel is docked on it already (turns 99, 100).
+            onAccepted?.();
           }}
         >
           Accept Proposal

@@ -7,7 +7,7 @@ import {
   type SeasonFinding,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { Badge, Button } from "../components/ui.js";
+import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
@@ -51,6 +51,7 @@ export function DevelopmentWorkspace() {
   const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
   const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   return (
+    <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
@@ -98,29 +99,96 @@ export function DevelopmentWorkspace() {
         </div>
       </div>
       {/*
-        This screen is the production's front page now (turn 93), so it is also its day one. A
-        board of dashed tiles says what is missing and not what to do about it, and that is the
-        whole of the difference between an empty screen and a place to start.
+        This screen is the production's front page (turn 93), so it is also its day one — and the
+        card that used to stand here saying where the season gets shaped is gone with turn 99,
+        because the place it pointed at is now the panel on the right. A board of dashed tiles
+        says what is missing; the panel is what to do about it.
       */}
-      {season?.question === undefined && season?.ending === undefined && episodes.length === 0 && (
-        <div className="fy-emptycard">
-          <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
-            Nothing decided yet.{" "}
-            <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
-              Develop
-            </NavLink>{" "}
-            is where the season gets shaped — what it answers, how it ends, and what its episodes
-            are. What you settle there lands here.
-          </div>
-        </div>
-      )}
       <EpisodesBoard />
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
-          &larr; Develop
-        </NavLink>
-      </div>
     </div>
+      <SeasonDock />
+    </div>
+  );
+}
+
+/**
+ * Arke, docked beside the season (design turn 99). The chat stops being a place you go to: the
+ * board keeps its width, the thread takes a column beside it, and a proposal staged against
+ * `season.json` appears here under one Accept rather than on a screen you have to be sent to.
+ *
+ * The thread is the same thread — same context, same points, same wrap-up, same gate — so this
+ * is where it is shown, not what it is.
+ */
+function SeasonDock() {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const staged =
+    (world?.proposals ?? []).find((sp) =>
+      sp.proposal.targets.some((t) => t.path === `productions/${prodId}/season.json`),
+    ) ?? null;
+  const version = production?.season ? `v${production.season.version}` : "nothing decided";
+  return (
+    <ProductionConversation
+      worldId={worldId}
+      productionId={prodId}
+      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}` }}
+      openingNote="opening…"
+      emptyLine="Let’s shape the season. What is it about?"
+      placeholder="Ask about the season · @ to reference"
+      {...(staged
+        ? {
+            side: (
+              <StagedDecision
+                worldId={worldId}
+                subject="the season"
+                staged={staged}
+                writes="the gate writes season.json · nothing else moves"
+              />
+            ),
+          }
+        : {
+            pointsEmpty:
+              "Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc.",
+          })}
+    />
+  );
+}
+
+/** The same panel one level down (design turn 100), with the episode as its subject. */
+function EpisodeDock({ episode }: { episode: Episode }) {
+  const { worldId, prodId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const stem = production?.episodeFiles[episode.id];
+  const staged = stem
+    ? ((world?.proposals ?? []).find((sp) =>
+        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
+      ) ?? null)
+    : null;
+  return (
+    <ProductionConversation
+      worldId={worldId}
+      productionId={prodId}
+      entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
+      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}` }}
+      openingNote="opening…"
+      emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+      placeholder="Ask about the episode · @ to reference"
+      {...(staged
+        ? {
+            side: (
+              <StagedDecision
+                worldId={worldId}
+                subject={`episode ${pad(episode.order)}`}
+                staged={staged}
+                writes="the gate writes this episode and its scenes · nothing else moves"
+              />
+            ),
+          }
+        : {
+            pointsEmpty:
+              "Nothing understood yet. As you talk, what the studio takes from it appears here — how this episode opens, where it turns, the scenes it needs.",
+          })}
+    />
   );
 }
 
@@ -492,6 +560,7 @@ export function EpisodeDetailScreen() {
     (s) => !production.episodes.some((e) => e.scenes.includes(s.id)),
   );
   return (
+    <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="episode-detail">
       <div className="fy-h1row">
         <h1 className="fy-h1" style={{ fontSize: 32 }}>
@@ -502,9 +571,9 @@ export function EpisodeDetailScreen() {
         <NavLink to={`/w/${worldId}/p/${prodId}/season`} className="fy-linkbtn">
           &larr; Season
         </NavLink>
-        <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/episodes/${episode.id}`)}>
-          Talk it through
-        </Button>
+        {/* `Talk it through` is gone (turn 100): there is nowhere to be sent, because the thread
+            is docked on the right. It was the last control on the last level that treated a
+            conversation as a destination. */}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <span className="fy-pill">
@@ -578,6 +647,8 @@ export function EpisodeDetailScreen() {
           ))}
         </div>
       )}
+    </div>
+      <EpisodeDock episode={episode} />
     </div>
   );
 }

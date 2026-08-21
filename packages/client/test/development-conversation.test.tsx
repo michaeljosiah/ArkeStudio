@@ -89,9 +89,14 @@ describe("an episodic Development keeps turn 48's layout", () => {
     assert.match(render(episodic(), DEV), /What is this season\?/, "the thread knows what it is shaping");
   });
 
-  it("the details screen shows what was settled, and holds no conversation of its own", () => {
+  it("the season carries the thread docked beside it, and still no form editor", () => {
+    // Turn 88 took the conversation off this screen because every screen was half a place to
+    // make something and half a place to read it. Turns 99 and 100 put it back — docked, in a
+    // column of its own — which is a different thing: one artifact, one thread beside it, and
+    // never a second way to author the same file.
     const html = render(episodic(), `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`);
-    assert.doesNotMatch(html, /role="textbox"/, "one thread, one place — not a composer per view");
+    assert.match(html, /data-dock="conversation"/, "Arke is on the page it is about");
+    assert.match(html, /Ask about the season/, "and it is the composer, not a link to one");
     assert.doesNotMatch(html, /Start the season|Edit the season|Propose season change/, "the form editor is retired");
   });
 

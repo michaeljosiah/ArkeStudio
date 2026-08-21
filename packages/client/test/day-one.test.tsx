@@ -115,6 +115,6 @@ describe("what was said on day one is visible where it lands", () => {
       "a send that lands on a screen with no trace of it reads as a lost message",
     );
     // Until the workspace loads, the opening line is what the summary already knows.
-    assert.match(html, /Production Chat · opening…/);
+    assert.match(html, /Develop · opening…/, "renamed by turn 99; the route is unchanged");
   });
 });
