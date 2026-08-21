@@ -99,7 +99,7 @@ const STEPS = [
   {
     id: "14c", step: "Scene 4 · the storyboard",
     actions: [{ match: "Advanced", to: "14d", hint: "the full shot, behind the card" },
-              { match: "Generate scene", to: "101a", hint: "the plan — the only thing that spends" }],
+              { match: "Generate scene", to: "102a", hint: "review it, then spend" }],
     built: { status: "built", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
       notes: ["<b>Newly adopted (turn 97), replacing 14a.</b> The scene page is its storyboard and the storyboard is the editor: the script is written on the card itself, <code>@</code> names anything in the world and rides along as an image reference, and <code>Advanced</code> (under a card's <code>⋯</code> — scroll the strip to shot 15) opens the full shot.",
               "<b>Everything a card states is derived, never stored</b> — <code>needs attention</code> / <code>story</code> / <code>storyboard</code> / <code>production-ready</code> from what exists, and <code>script changed · Re-read</code> from SPEC-023's coverage digests. The data model for all of it already ships.",
@@ -118,33 +118,32 @@ const STEPS = [
               "<b>Built and driven:</b> recipes fill five fields in one press, the override dot appears and the card reads <code>Shot 2 · Close-up</code> after, prompt · auto → edited by you → Rebuild → auto round-trips, beats, sound and keep-out save, and the continuity line names the real previous shot. Not yet: the docked assistant and per-shot dispatch (turn 97's later phases), and the @ catalog popover — references add through a picker."] },
   },
   {
-    id: "101a", step: "Ready to generate",
-    actions: [{ match: "Generation options", to: "101b", hint: "everything the default decided" },
-              { match: "Generate scene · $5.16", to: "11b", hint: "spend, then review the takes" }],
-    built: { status: "missing", route: "nearest: #/w/:worldId/p/:prodId/generate/dispatch",
-      notes: ["<b>Turn 101 cuts turn 98's plan down to the decision.</b> <code>Ready to generate</code>, one line saying the scene was reviewed, <b>the one finding worth acting on</b>, the recommendation already chosen, and one button. Turn 98 was right that per-shot, packed and packed-plus-storyboard have different retry economics and wrong that a creator should weigh them: an AI-directed tool directs.",
-              "<b>Two things stay above the fold, and both are about money</b>: <code>4 shots · 17s</code>, because a button that spends must say what it is spending on, and <code>attempt one · retakes bill separately</code> (turn 98), because it is the one thing no estimate can cover.",
-              "<b>52a and 52c stay drawn in the master</b> as what came before &#8212; the priced shot list, the Director's three findings, the strategy row. Nothing in them is discarded; it is behind <b>Generation options</b>, one press away, drawn on 101b.",
-              "<b>What ships beneath all of it</b>: route-aware estimates, both dispatch modes (<code>per-shot</code> / <code>whole-scene</code>), storyboards-per-pass behind their accept, and SPEC-024 pre-authorization proven to the cent ($7.98 authorized, $7.98 billed). <b>The Director, the recommendation and this screen ship nowhere yet</b> &#8212; the nearest thing today is the dispatch dialog, which asks the questions this screen answers."] },
+    id: "102a", step: "The scene, reviewed",
+    actions: [{ match: "Generate scene", to: "102b", hint: "spend, without leaving the scene" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
+      notes: ["<b>Turn 102 retires the plan page one turn after turn 101 drew it.</b> <code>Review scene</code> puts the findings in a compact strip <b>above the shots they are about</b> — <code>Ready to generate</code>, <code>2 suggestions · nothing blocking</code> — and they are addressed or ignored where the work is. Turns 98 and 101 both put a whole screen between a person and their own scene.",
+              "<b>This is the three-layer rule doing its first job.</b> Layer one is the shots; layer two is Arke, docked; layer three is everything the plan page was. A costing screen reached from the creative surface is layer three standing in front of layer one, which is the test turn 102 states and this frame passes.",
+              "<b>The strip is dismissible and re-runnable</b> — <code>Re-review</code>, and an <code>×</code> — because a review is a thing you consulted, not a gate you passed.",
+              "<b>Nothing here is built.</b> The storyboard beneath it ships (turn 97, driven in 0.5.36); the strip, the Director that fills it and the recommendation are all new. <code>Review scene</code> and <code>Generate scene</code> are drawn in the header today and lead nowhere."] },
   },
   {
-    id: "101b", step: "Generation options, opened",
-    actions: [{ match: "Individual shots", to: "11b", hint: "a strategy chosen by hand" }],
+    id: "102b", step: "Generate scene · the drawer",
+    actions: [{ match: "Generate", to: "102c", hint: "the takes come back" }],
     built: { status: "missing", route: "nearest: #/w/:worldId/p/:prodId/generate/dispatch",
-      notes: ["<b>Everything turn 98 drew, kept</b> &#8212; the three strategies with their prices and what a retry re-runs, the Director's other findings and what it cost to read the scene, the route, the resolution and the floor shot 3 pays. One press away, for the person who wants it.",
-              "<b>The pick is marked rather than hidden</b>: <code>ARKE&#8217;S PICK</code> sits on packed passes, so opening the options shows what was decided and why it was cheaper, not a fresh unanswered question.",
-              "<b>Cheapest-per-attempt and cheapest-after-taste are still different orderings</b> (turn 98), and the difference is still the retry unit &#8212; which is why every row names its own.",
-              "Not built, like 101a. The pieces exist below the waterline: both dispatch modes, the estimate, the storyboard accept, the pre-authorization."] },
+      notes: ["<b>A drawer, not a screen (turn 102).</b> The model, the estimate, one button, and <code>Generation options</code>. The scene stays behind it, which is the point: spending is a moment in the middle of the work rather than a place you travel to.",
+              "<b>Everything turns 98 and 101 drew is still here</b>, behind <code>Generation options</code> — the three strategies with their retry units, the route, the resolution, the floors. 52a, 52c, 101a and 101b stay drawn in the master as the road to this drawer.",
+              "<code>retakes bill separately</code> survives (turn 98) because it is the one thing no estimate can cover, and <code>5 shots · 22.5s</code> because a button that spends must say what it is spending on.",
+              "<b>What ships beneath it</b>: route-aware estimates, both dispatch modes, storyboards-per-pass behind their accept, and SPEC-024 pre-authorization proven to the cent ($7.98 authorized, $7.98 billed). The nearest thing today is the dispatch dialog — which asks the questions this drawer answers."] },
   },
   {
-    id: "11b", step: "Generate · review the takes",
-    actions: [{ match: "Accept take", to: "81a", hint: "accept a take into the cut" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId/generate",
-      notes: ["<b>Two steps left this walk here</b> (both frames stay in the master). 52b's promises live on: what travels shows on the plan's own cards (<code>3 refs · 1 dropped</code>), the full <code>CARRIED</code>/<code>DROPPED</code> breakdown ships in the dispatch dialog, and opening a shot is the Advanced sheet everywhere. 79a's notification ships literally — <code>model · cost</code>, <code>· N queued</code> only when something is ahead, one row updated in place ✓ — its host board is the screen turns 97/98 retired.",
-              "Three columns ship as drawn: composer left with <code>Reset</code>, viewer centre, takes rail right ✓.",
-              "The seg reads <code>Shot · Scene · Contact sheet</code> — turn 55a's binding, met verbatim ✓.",
-              "Accepting is <code>Accept take</code> / <code>Reject · cite the sheet</code> with the receipt <i>rejections teach the shot · accepts lock the clip into the cut</i>.",
-              "Ergonomics worth fixing: the shot picker is a <code>&lt;select&gt;</code>, and <b>Accept take is disabled unless the selected take is the pending one</b> — easy to read as broken."] },
+    id: "102c", step: "The takes · watched",
+    actions: [{ match: "Accept take 2", to: "81a", hint: "accept a take into the cut" }],
+    built: { status: "missing", route: "#/w/:worldId/p/:prodId/generate",
+      notes: ["<b>Storyboard → takes is a real change of place (turn 102)</b>, because once something has been generated you are assessing rather than writing. So the surface is the takes themselves: a shot's takes side by side as video, the chosen one marked, every shot one chip away.",
+              "<b>Arke is the fastest control on the screen.</b> <i>Take 2 is closest, but make Aurora pause before she speaks</i> changes the shot and runs another — one sentence doing what the shot sheet, the dispatch dialog and the accept do between them.",
+              "<b>What ships today is the same job with layer three in front of it</b> (11b, still drawn in the master): three columns, composer left with <code>Reset</code>, viewer centre, takes rail right ✓, the seg reading <code>Shot · Scene · Contact sheet</code> ✓, and <code>Accept take</code> / <code>Reject · cite the sheet</code> with its receipt. It works, and it is a workbench rather than a screening.",
+              "<b>Two ergonomics this frame fixes by construction</b>: the shot picker is a <code>&lt;select&gt;</code> today, and <b>Accept take is disabled unless the selected take is the pending one</b> — easy to read as broken. Chips and a marked tile have neither problem.",
+              "79a's notification ships literally — <code>model · cost</code>, <code>· N queued</code> only when something is ahead, one row updated in place ✓."] },
   },
   {
     id: "81a", step: "The cut",
@@ -204,6 +203,14 @@ const mapHtml = `
       while the panel keeps only the count and the yes: <b>the screen shows what the conversation is
       making, while it makes it.</b> Shown is not written — a staged thing cannot be opened, counted
       as done, or dispatched until it is accepted.
+    </p>
+    <p>
+      <b>And every level is three layers</b> (turn 102). <b>One: the thing</b> — episodes, scenes,
+      shots, takes, the sequence. <b>Two: Arke</b>, docked beside it. <b>Three: Advanced</b> —
+      versions, reference kits, lens, model parameters, dispatch strategy, retry economics, audio
+      policy. The test is the first impression: <b>if what a screen shows first is layer three, the
+      screen is wrong.</b> Layer three is never deleted and never apologised for; it is behind a
+      door, and the door is called <b>Advanced</b> at every level, so it is learned once.
     </p>
   </div>
 
@@ -285,9 +292,9 @@ const mapHtml = `
             <div class="card__d">The assistant docks beside the strip and follows the selection. Its changes are plan cards under <b>Apply to shots</b>; a hand edit just saves.</div>
             <div class="card__f">.conversations/cv_*</div>
           </div>
-          <div class="card is-part" data-goto="52c">
-            <div class="card__k">The plan</div>
-            <div class="card__d">The Director's findings, then every shot priced — and the price as a choice of strategy, each naming what a retry re-runs.</div>
+          <div class="card is-todo" data-goto="102a">
+            <div class="card__k">Review, then generate</div>
+            <div class="card__d">The findings sit <b>above the shots</b>, and spending is a drawer rather than a screen (turn 102). The strategies, the retry units and the route live behind <b>Generation options</b>.</div>
             <div class="card__f">plans/pl_*</div>
           </div>
         </div>
@@ -299,8 +306,8 @@ const mapHtml = `
       <div class="lvl__body">
         <div class="lvl__title">Making it</div>
         <div class="cards">
-          <div class="card is-built" data-goto="11b"><div class="card__k">Generate</div><div class="card__d">Takes come back; accepting one locks it into the cut.</div><div class="card__f">takes/ · selections.json</div></div>
-          <div class="card is-built" data-goto="81a"><div class="card__k">Cut</div><div class="card__d">A projection over accepted takes. Nothing to assemble.</div><div class="card__f">cut.json</div></div>
+          <div class="card is-todo" data-goto="102c"><div class="card__k">Takes</div><div class="card__d">Watched, not described: the takes side by side, the chosen one marked, and Arke taking the note that makes the next one.</div><div class="card__f">takes/ · selections.json</div></div>
+          <div class="card is-built" data-goto="81a"><div class="card__k">Cut</div><div class="card__d">A projection over accepted takes. Two levels (turn 102): shots in order, trim, preview, export — and the spine, markers and precise trims behind <b>Advanced</b>. The simple side is not drawn yet.</div><div class="card__f">cut.json</div></div>
           <div class="card is-built" data-goto="25b"><div class="card__k">Exports</div><div class="card__d">A render of the cut. Local, no provider call.</div><div class="card__f">exports/*.mp4</div></div>
         </div>
       </div>
