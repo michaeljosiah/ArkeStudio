@@ -265,12 +265,13 @@ export function StoryboardStrip({
         const accepted = acceptedTakeId(production, shot.id);
         const state = cardState(shot, takes.length, accepted !== null);
         const coverage = shotCoverage(shot, digests);
-        const latest = takes[takes.length - 1];
-        const media = accepted
-          ? takeMediaPath(production.meta.id, production.takes.find((t) => t.id === accepted)!)
-          : latest
-            ? takeMediaPath(production.meta.id, latest)
-            : null;
+        // The accepted take can be a per-shot charge-split record with no media of its own —
+        // the pixels live on the pass's primary take covering the same shot. The frame follows
+        // the media, newest first, accepted preferred.
+        const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : undefined;
+        const mediaTake =
+          acceptedTake?.media !== undefined ? acceptedTake : [...takes].reverse().find((t) => t.media !== undefined);
+        const media = mediaTake ? takeMediaPath(production.meta.id, mediaTake) : null;
         const framing = effectiveFraming(scene, shot);
         const mentioned = parseMentions(shot.description);
         const refs = world.sheets.filter((s) => mentioned.some((m) => s.id === m || s.id.includes(m)));
