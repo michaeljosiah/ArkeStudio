@@ -578,7 +578,10 @@ describe("screen inventory", () => {
 
   it("names the inherited world look on the remaining visual generation surfaces", () => {
     const worldId = FIXTURE_STATE.world!.meta.worldId;
-    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate`);
+    // The workspace opens on the takes now (turn 102) and the bench is behind Advanced. The look
+    // is named where generating is configured, which is the bench and the dispatch dialog — the
+    // takes view assesses what came back and configures nothing.
+    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
     const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
     assert.ok(workspace.includes("World look · v"));
     assert.ok(workspace.includes("carries as text"));

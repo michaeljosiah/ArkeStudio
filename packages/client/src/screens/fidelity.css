@@ -5365,3 +5365,63 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   transition: var(--transition-control);
 }
 .fy-gendrawer__more:hover { color: var(--foreground); }
+
+/* ---- The takes, watched (design turn 102) --------------------------------------------------
+   Layer one on the Generate workspace is the takes themselves. The bench that used to be here —
+   composer, parameters, model picker — is behind Advanced, which is where layer three lives. */
+.fy-takes { gap: 14px; }
+.fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.fy-take {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-control);
+}
+.fy-take:hover { border-color: var(--neutral-400); }
+.fy-take--on { border: 1.5px solid var(--foreground); padding: 8.5px; }
+.fy-take__frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--neutral-100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fy-take__foot { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.fy-take__name { font: 600 12.5px var(--font-sans); }
+.fy-takechips { display: flex; gap: 9px; flex-wrap: wrap; }
+.fy-takechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--background);
+  font: 400 11.5px var(--font-sans);
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-takechip:hover { background: var(--accent); }
+.fy-takechip--on { border: 1.5px solid var(--foreground); padding: 4.5px 9.5px; }
+.dark .fy-take__frame { background: var(--neutral-800); }
+.fy-takes__foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}

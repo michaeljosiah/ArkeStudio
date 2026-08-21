@@ -1540,6 +1540,161 @@ export function NewSceneScreen() {
 
 // ---- Generate workspace (11b) ----------------------------------------------
 
+/**
+ * The takes, watched (design turn 102, frame 102c).
+ *
+ * A thing you watch is shown, not described. One shot's takes sit side by side, the chosen one is
+ * marked, every shot is a chip away, and accepting is one button at the foot. What used to be
+ * here — the composer, the parameter rail, the model picker, the select of shots — is the bench,
+ * behind Advanced: layer three, never deleted and never in front.
+ *
+ * Two ergonomics this fixes by construction. The shot picker was a select, which hides where you
+ * are in a scene; and Accept take was disabled unless the take you were looking at happened to be
+ * the pending one, which reads as broken. A marked tile and a row of chips have neither problem.
+ */
+function TakesView({
+  worldId,
+  prodId,
+  onAdvanced,
+  onContact,
+}: {
+  worldId: string | undefined;
+  prodId: string | undefined;
+  onAdvanced: () => void;
+  onContact: () => void;
+}) {
+  const { world, production } = useProduction(worldId, prodId);
+  const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const shotId = selectedShotId ?? shots[0]?.id ?? null;
+  const shot = shots.find((s) => s.id === shotId) ?? null;
+  const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
+  const takes = production && shotId ? takesForShot(production, shotId) : [];
+  const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;
+  /* What is worth looking at: the one already accepted, or the newest that came back. */
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const picked =
+    takes.find((t) => t.id === pickedId) ??
+    takes.find((t) => t.id === accepted) ??
+    takes[takes.length - 1] ??
+    null;
+  const acceptedCount = shots.filter((s) => production && acceptedTakeId(production, s.id) !== null).length;
+  if (!production || !scene || !shot) {
+    return (
+      <div className="fy-prodmain" data-screen="generate-workspace">
+        <EmptyState title="Nothing to review yet" hint="Generate a scene and its takes arrive here." />
+      </div>
+    );
+  }
+  return (
+    <div className="fy-arkewrap">
+      <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
+        <div className="fy-h1row">
+          <h1 className="fy-h1">Shot {shot.number}</h1>
+          <span className="fy-h1row__meta">
+            {shot.title} · {seconds(shot.durationSec)}
+          </span>
+          <span className="fy-h1row__push" />
+          <span className="fy-mono">{acceptedCount} of {shots.length} accepted</span>
+        </div>
+        {takes.length === 0 ? (
+          <EmptyState title="No takes yet" hint="Generate this shot and its takes arrive here, side by side." />
+        ) : (
+          <div className="fy-takegrid">
+            {takes.map((t, i) => {
+              const path = takeMediaPath(production.meta.id, t);
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={cx("fy-take", picked?.id === t.id && "fy-take--on")}
+                  onClick={() => setPickedId(t.id)}
+                >
+                  <span className="fy-take__frame">
+                    {path ? (
+                      <Portrait worldSlug={world?.meta.slug} path={path} label={`Take ${i + 1}`} radius={0} />
+                    ) : (
+                      <span className="fy-mono">running…</span>
+                    )}
+                    {path && (
+                      <span className="fy-playbtn" aria-hidden style={{ pointerEvents: "none" }}>
+                        <Play size={22} />
+                      </span>
+                    )}
+                  </span>
+                  <span className="fy-take__foot">
+                    <span className="fy-take__name">Take {i + 1}</span>
+                    <span style={{ flex: 1 }} />
+                    <span className="fy-mono">{t.id === accepted ? "✓ SELECTED" : seconds(shot.durationSec)}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {/* Every shot, one chip away — where you are in the scene, said out loud (turn 102). */}
+        <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>EVERY SHOT</div>
+        <div className="fy-takechips">
+          {shots.map((s) => {
+            const done = acceptedTakeId(production, s.id) !== null;
+            const has = takesForShot(production, s.id).length > 0;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                className={cx("fy-takechip", s.id === shotId && "fy-takechip--on")}
+                onClick={() => {
+                  setSelectedShotId(s.id);
+                  setPickedId(null);
+                }}
+              >
+                <span
+                  className="fy-dot"
+                  style={{ background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)" }}
+                />
+                Shot {s.number}
+              </button>
+            );
+          })}
+        </div>
+        <div className="fy-takes__foot">
+          <Button
+            variant="primary"
+            disabled={!picked || picked.id === accepted}
+            onClick={() => {
+              if (worldId && prodId && shotId && picked) acceptTake(worldId, prodId, picked.id, shotId);
+            }}
+          >
+            {picked ? `Accept take ${takes.indexOf(picked) + 1}` : "Accept take"}
+          </Button>
+          <span className="fy-mono">accepting locks it into the cut</span>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="fy-linkbtn" onClick={onContact}>
+            Contact sheet
+          </button>
+          <button type="button" className="fy-linkbtn" onClick={onAdvanced}>
+            Advanced
+          </button>
+        </div>
+      </div>
+      {/* Layer two, in the same column it holds everywhere else (turns 99, 100, 102). */}
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        entry={{ kind: "scene", productionId: prodId ?? "", sceneId: scene.id }}
+        dock={{
+          title: `Arke · Shot ${shot.number}`,
+          subject: `${shot.title} · ${takes.length} take${takes.length === 1 ? "" : "s"}`,
+        }}
+        openingNote="opening…"
+        emptyLine={`${takes.length} take${takes.length === 1 ? "" : "s"} back on shot ${shot.number}. Say what to change and it runs again.`}
+        placeholder="Say what to change · @ to reference"
+        pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here."
+      />
+    </div>
+  );
+}
+
 export function GenerateScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -1593,6 +1748,14 @@ export function GenerateScreen() {
       .slice(0, 2);
   })();
 
+  /*
+   * Which lens the workspace opens on (turn 102). Takes are the thing here: once something has
+   * been generated you are assessing rather than writing, so the takes themselves are the front
+   * and the three-column bench — composer, parameters, model picker — is layer three behind
+   * Advanced. Deep-linkable, so somebody who wants the bench can live in it.
+   */
+  const benchLens = searchParams.get("view") === "bench";
+
   if (contactLens) {
     return (
       <ContactSheet
@@ -1602,6 +1765,16 @@ export function GenerateScreen() {
         prodId={prodId}
         onShotLens={() => setSearchParams({}, { replace: true })}
         onScene={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+      />
+    );
+  }
+  if (!benchLens) {
+    return (
+      <TakesView
+        worldId={worldId}
+        prodId={prodId}
+        onAdvanced={() => setSearchParams({ view: "bench" }, { replace: true })}
+        onContact={() => setSearchParams({ view: "stills" }, { replace: true })}
       />
     );
   }
