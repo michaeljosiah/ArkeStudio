@@ -5289,3 +5289,79 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-madeaside:hover { background: var(--accent); }
 .fy-madeaside .fy-mono { margin-left: auto; }
+
+/* ---- The scene's review, above the shots it is about (design turn 102) --------------------
+   Not a page. Layer one is the shots; a review sits over them and can be put away. */
+.fy-review {
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--warning) 6%, var(--background));
+  animation: fy-fade-up 0.4s var(--ease-out) both;
+}
+.fy-review__what { flex: none; display: flex; flex-direction: column; gap: 1px; }
+.fy-review__title { font: 600 13px var(--font-sans); }
+.fy-review__list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fy-review__line { font: 400 12px/1.5 var(--font-sans); }
+.fy-review__close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-review__close:hover { background: var(--accent); color: var(--foreground); }
+/* ---- Generate scene: a drawer over the work, never a screen away from it (turn 102) ------- */
+.fy-gendrawer {
+  position: fixed;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  box-sizing: border-box;
+  z-index: 40;
+  border-left: 1px solid var(--border);
+  background: var(--background);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  animation: fy-fade-up 0.35s var(--ease-out) both;
+}
+.fy-gendrawer__head { flex: none; display: flex; align-items: baseline; gap: 10px; padding: 18px 20px 0; }
+.fy-gendrawer__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-gendrawer__body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.fy-gendrawer__card {
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+}
+.fy-gendrawer__model { font: 600 14px var(--font-sans); }
+.fy-gendrawer__cost { font: 650 20px var(--font-sans); letter-spacing: -0.02em; }
+.fy-gendrawer__more {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 500 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-gendrawer__more:hover { color: var(--foreground); }

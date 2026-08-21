@@ -7,6 +7,7 @@ import {
   parseMentions,
   productionAspect,
   promptFor,
+  sceneFindings,
   shotCoverage,
   type Scene,
   type Shot,
@@ -14,7 +15,7 @@ import {
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, Callout, Textarea, cx } from "../components/ui.js";
-import { Plus } from "../components/icons.js";
+import { Plus, X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
@@ -425,6 +426,49 @@ export function StoryboardStrip({
 }
 
 /** The strip's footer line: what needs a look, and the way back through versions. */
+/**
+ * The scene's own review, above the shots it is about (design turn 102).
+ *
+ * Turns 98 and 101 put this on a page of its own, and a costing page reached from the creative
+ * surface is layer three standing in front of layer one — the test turn 102 states. So it is a
+ * strip here instead: what was found, in the scene's own words, beside the shots that would fix
+ * it. Nothing blocks; a review is something you consulted, not a gate you passed.
+ *
+ * The findings are derived, not an agent's: what the scene already knows about itself. The
+ * Director turn 98 asked for would say more, and would say it here.
+ */
+export function SceneReview({ scene, onClose }: { scene: Scene; onClose: () => void }) {
+  const digests = useBlockDigests(scene);
+  const stale = (scene.shots ?? []).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
+  const found = sceneFindings(scene, stale);
+  return (
+    <div className="fy-review" data-review="scene">
+      <div className="fy-review__what">
+        <span className="fy-review__title">Ready to generate</span>
+        <span className="fy-mono">
+          {found.length === 0
+            ? "nothing to flag"
+            : `${found.length} suggestion${found.length === 1 ? "" : "s"} · nothing blocking`}
+        </span>
+      </div>
+      <div className="fy-review__list">
+        {found.length === 0 ? (
+          <span className="fy-review__line">Every shot has something to generate from.</span>
+        ) : (
+          found.map((f, i) => (
+            <span key={`${f.kind}-${f.about ?? i}`} className="fy-review__line">
+              {f.message}
+            </span>
+          ))
+        )}
+      </div>
+      <button type="button" className="fy-review__close" title="Put the review away" aria-label="Put the review away" onClick={onClose}>
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 export function StoryboardFoot({
   worldId,
   prodId,

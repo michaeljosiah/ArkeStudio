@@ -17,7 +17,7 @@ import {
   overrideStaleAgainst,
   pickableSheets,
   compilePasses,
-  planScene,
+  DEFAULT_SHOT_SEC,
   PRESETS,
   productionAspect,
   productionShape,
@@ -64,11 +64,12 @@ import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton, clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
+import { planForScene } from "../lib/scene-plan.js";
 import { mediaUrl } from "../lib/media.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { DevelopmentWorkspace } from "./development.js";
-import { SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
+import { SceneReview, SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -1346,6 +1347,9 @@ export function SceneDetailScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const [tab, setTab] = useState<"shots" | "board">("shots");
+  /* Turn 102: a review is consulted and put away, and spending is a drawer over the work. */
+  const [reviewing, setReviewing] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const scene = production?.scenes.find((s) => s.id === sceneId);
   if (!production || !scene) {
     return (
@@ -1386,7 +1390,16 @@ export function SceneDetailScreen() {
               Board
             </button>
           </span>
-          <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>Generate scene…</Button>
+          {/*
+            Review, then generate, both where the shots are (turn 102). The plan was a screen for
+            two turns, and a costing screen reached from the creative surface is layer three
+            standing in front of layer one — the test turn 102 states. `Generation options` in the
+            drawer is where the old screen went; it is the Advanced door, not the way through.
+          */}
+          <Button variant="ghost" onClick={() => setReviewing((on) => !on)}>
+            {reviewing ? "Hide review" : "Review scene"}
+          </Button>
+          <Button onClick={() => setGenerating(true)}>Generate scene</Button>
         </div>
         {/* The line under the title (turn 97, 14c): the synopsis, edited where it reads. */}
         <div style={{ marginTop: 10, maxWidth: 660 }}>
@@ -1403,8 +1416,18 @@ export function SceneDetailScreen() {
       {tab === "shots" ? (
         <>
           {/* Turn 97: the storyboard is the editor — 14a's read-only cards are superseded. */}
+          {/* Above the shots, because that is what it is about (turn 102). */}
+          {reviewing && <SceneReview scene={scene} onClose={() => setReviewing(false)} />}
           <StoryboardStrip worldId={worldId!} prodId={prodId!} scene={scene} />
           <StoryboardFoot worldId={worldId!} prodId={prodId!} scene={scene} />
+          {generating && (
+            <GenerateDrawer
+              worldId={worldId!}
+              prodId={prodId!}
+              scene={scene}
+              onClose={() => setGenerating(false)}
+            />
+          )}
         </>
       ) : (
         <div className="fy-boardsplit">
@@ -1965,6 +1988,85 @@ function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
   );
 }
 
+/**
+ * Generate scene, as a drawer over the work (design turn 102).
+ *
+ * The model and what it will cost, one button, and one way into everything else. The scene stays
+ * behind it: spending is a moment in the middle of the work rather than a place you travel to,
+ * which is what the plan screen made it for two turns. `Generation options` opens the dispatch
+ * dialog — every strategy, every route, every retry unit — which is now the Advanced door rather
+ * than the way through.
+ */
+function GenerateDrawer({
+  worldId,
+  prodId,
+  scene,
+  onClose,
+}: {
+  worldId: string;
+  prodId: string;
+  scene: Scene;
+  onClose: () => void;
+}) {
+  const { world, production } = useProduction(worldId, prodId);
+  const { state } = useStore();
+  const navigate = useNavigate();
+  const capability = production ? productionShape(production.meta).dispatchCapability : "video";
+  const resolved = resolveModel(state, capability);
+  const model = resolved.stranded === null ? resolved.model : null;
+  // The same function the coordinator executes, on the same inputs (issue 244) — so the number
+  // under the button is the number that will be spent, not a summary of one.
+  const plan = useMemo(
+    () => (world && production && model ? planForScene({ world, production, scene, model }) : null),
+    [world, production, scene, model],
+  );
+  const shots = scene.shots.length;
+  const totalSec = scene.shots.reduce((sum, sh) => sum + (sh.durationSec ?? DEFAULT_SHOT_SEC), 0);
+  return (
+    <aside className="fy-gendrawer" data-drawer="generate">
+      <div className="fy-gendrawer__head">
+        <span className="fy-gendrawer__title">Generate scene</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" className="fy-linkbtn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="fy-gendrawer__body">
+        <div className="fy-gendrawer__card">
+          <div className="fy-gendrawer__model">{model?.displayName ?? "No model available"}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
+            <span className="fy-mono">ESTIMATED</span>
+            <span className="fy-gendrawer__cost">{plan ? usd(plan.wholeScene.totalEstimatedMicroUsd) : "—"}</span>
+          </div>
+          <div className="fy-mono" style={{ marginTop: 6 }}>
+            {shots} shot{shots === 1 ? "" : "s"} · {seconds(totalSec)} · attempt one
+          </div>
+        </div>
+        <Button
+          variant="primary"
+          disabled={!plan}
+          onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+        >
+          Generate
+        </Button>
+        {/* Layer three, behind its own door. Until the drawer can dispatch on its own, this is
+            also where Generate goes — the dialog is the thing that spends, and sending somebody
+            to a button they have already pressed would be worse than one more press. */}
+        <button
+          type="button"
+          className="fy-gendrawer__more"
+          onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+        >
+          Generation options
+          <ChevronRight size={13} />
+        </button>
+        <span style={{ flex: 1 }} />
+        <div className="fy-mono">retakes bill separately</div>
+      </div>
+    </aside>
+  );
+}
+
 export function DispatchDialogScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -1988,32 +2090,16 @@ export function DispatchDialogScreen() {
   // The whole plan, computed live from the world — the same function the coordinator executes.
   const plans = useMemo(() => {
     if (!world || !production || !scene || !model) return null;
-    const input = {
-      world: world.meta,
-      artDirection: world.artDirection,
-      productionId: production.meta.id,
-      // The production's standing constraints, so the dialog plans what the coordinator executes
-      // (issue 244, round 3). Without it the preview showed a prompt missing the production's own
-      // negatives while the server sent them — and this screen's whole claim is that it runs the
-      // same function on the same inputs.
-      production: {
-        ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
-        failureModes: production.meta.failureModes,
-      },
-      sheets: world.sheets,
-      kits: world.referenceKits,
+    // The assembly moved to `planForScene` (turn 102): turn 102's drawer needs the same number
+    // under a much smaller button, and two copies of it would be two answers to what this costs.
+    return planForScene({
+      world,
+      production,
       scene,
-      selections: production.selections,
       model,
-      // The world's shelf, so a durable boundary frame resolves here exactly as it will at the
-      // coordinator (issue 154) — the dialog's claim is that it runs the same function.
-      artifacts: world.artifacts,
-      // The production's delivery aspect (issue 389), on the same same-function claim.
-      ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
       ...(resolution !== undefined ? { resolution } : {}),
       ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
-    };
-    return { perShot: planScene(input, "per-shot"), wholeScene: planScene(input, "whole-scene") };
+    });
   }, [world, production, scene, model, resolution, choice.tier]);
 
   // The compiled passes (issue 398): the same object the coordinator maps into queue requests,
