@@ -1249,6 +1249,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-prodrail__sub:hover { background: var(--accent); color: var(--foreground); }
+/* One shape for every destination (turn 101): an item under another is indented and quieter, not
+   a different element — so folding it leaves a mark rather than nothing. */
+.fy-prodrail__item--under { margin-left: 14px; font-size: 12.5px; color: var(--neutral-400); }
+.fy-prodrail--folded .fy-prodrail__item--under { margin-left: 0; }
+/* The collapse control, above the switcher so folding never moves what you were about to press. */
+.fy-prodrail__collapse {
+  align-self: flex-end;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: var(--transition-control);
+}
+.fy-prodrail__collapse:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail--folded .fy-prodrail__collapse { align-self: center; }
+.fy-prodrail--folded .fy-prodrail__foot { justify-content: center; padding: 12px 0 4px; }
 .fy-prodrail__spacer { flex: 1; }
 .fy-prodrail__foot {
   border-top: 1px solid var(--border);
@@ -5207,3 +5230,62 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-arke__points > *:not(summary) { padding: 8px 11px; }
 /* The dock is narrow, so anything inside it that was drawn for a full column has to give way. */
 .fy-arke .fy-story__side { width: auto; padding: 0; background: none; overflow: visible; animation: none; }
+
+/* ---- What Arke made, said plainly (design turn 101) --------------------------------------
+   The governance vocabulary stays in the files. On the screen: the things themselves, and two
+   ways on. The before-and-after is the exception — see .fy-made__diff. */
+.fy-made {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.fy-made__list { display: flex; flex-direction: column; }
+.fy-made__row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-made__tag { font: 400 10.5px var(--font-mono); color: var(--warning); flex: none; }
+.fy-made__name { font: 400 12px var(--font-sans); flex: 1; min-width: 0; }
+.fy-made__diff { display: grid; gap: 10px; padding: 11px; border-bottom: 1px solid var(--border); }
+.fy-made__acts { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
+.fy-made__drop {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: var(--transition-control);
+}
+.fy-made__drop:hover { background: var(--accent); color: var(--destructive); }
+.fy-made__drop:disabled { opacity: 0.4; cursor: default; }
+.fy-made + .fy-mono, .fy-made .fy-mono { }
+/* Set aside by Keep discussing: one line that says the change is still there. */
+.fy-madeaside {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  font: 500 12px var(--font-sans);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-madeaside:hover { background: var(--accent); }
+.fy-madeaside .fy-mono { margin-left: auto; }

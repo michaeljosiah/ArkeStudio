@@ -177,7 +177,7 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     const html = render(state, CHAT, <EpisodeChatScreen />, "/w/:worldId/p/:prodId/story/episodes/:episodeId");
     assert.match(html, /What it understood/);
     // The two states are one rail at two moments, so the accept is absent until there is one.
-    assert.doesNotMatch(html, /Accept Proposal/, "nothing is staged, so there is nothing to accept");
+    assert.doesNotMatch(html, /Apply changes/, "nothing is staged, so there is nothing to apply");
   });
 
   it("the page reads the promise and holds no editor", () => {
@@ -343,9 +343,14 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       "The season, as it stands",
     );
     const html = chat(withProposal(withMicrodrama([ONE]), staged));
-    assert.match(html, /Ready to accept/);
-    assert.match(html, /Accept Proposal/);
-    assert.match(html, /She rings to be found\./, "the field the gate says would change");
+    // Turn 101: the governance vocabulary comes off the screen and the things stay.
+    assert.doesNotMatch(html, /Ready to accept|Accept Proposal/, "no machinery on the surface");
+    assert.match(html, /Apply changes/);
+    assert.match(html, /Keep discussing/, "and a way on that is not destroy it");
+    // Additive: the thing itself, named, rather than its fields with a before and an after
+    // (turn 101). The field text is what the destructive case shows, tested below.
+    assert.match(html, /The season, as it stands/, "the thing the gate would make");
+    assert.match(html, /NEW/, "and what it would do to it");
     assert.match(html, /the gate writes season\.json · nothing else moves/);
     // The rail has two states and never both at once (turns 89, 91).
     assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
@@ -464,7 +469,7 @@ describe("the pattern reaches the scene (design turn 94)", () => {
     const html = render(FIXTURE_STATE, CHAT, <SceneChatScreen />, "/w/:worldId/p/:prodId/story/scenes/:sceneId");
     assert.match(html, /What it understood/, "points while nothing is staged");
     assert.match(html, /Wrap up · write what is settled/, "and the wrap-up that ends it");
-    assert.doesNotMatch(html, /Accept Proposal/, "nothing staged, so nothing to accept");
+    assert.doesNotMatch(html, /Apply changes/, "nothing staged, so nothing to apply");
   });
 
   it("a staged scene becomes the accept, and says it creates no shots", () => {
@@ -480,9 +485,10 @@ describe("the pattern reaches the scene (design turn 94)", () => {
       <SceneChatScreen />,
       "/w/:worldId/p/:prodId/story/scenes/:sceneId",
     );
-    assert.match(html, /Accept Proposal/);
-    // A script belongs to a scene and creates nothing below it (turn 53).
-    assert.match(html, /the gate writes this scene · it creates no shots/);
+    assert.match(html, /Apply changes/);
+    // A script belongs to a scene and creates nothing below it (turn 53), said without naming
+    // the gate that does it (turn 101).
+    assert.match(html, /no shots are made · nothing else changes/);
     assert.doesNotMatch(html, /What it understood/, "one rail, one state at a time");
   });
 });
@@ -506,7 +512,13 @@ describe("story structure is off the default walk (design turn 99)", () => {
 
   it("the rail carries it once, under Season, and only where there is a season", () => {
     const episodic = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
-    assert.match(episodic, /Story structure<\/a>/, "one item, indented under Season");
+    // The window is generous because the mark's SVG sits between the tag and the label — one
+    // shape for every destination means every item now carries one (turn 101).
+    assert.match(
+      episodic,
+      /fy-prodrail__item--under[\s\S]{0,900}?Story structure/,
+      "one item, indented under Season, in the same shape as every other",
+    );
     assert.equal(episodic.match(/Story structure/g)?.length, 1, "and exactly one");
     const plain = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.doesNotMatch(plain, /Story structure/, "a production with no season has no lanes to hold");
@@ -562,8 +574,8 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
       <StoryScreen />,
       "/w/:worldId/p/:prodId/season",
     );
-    assert.match(html, /Accept Proposal/, "the yes is in the panel");
-    assert.match(html, /the gate writes season\.json/, "and says what it writes");
+    assert.match(html, /Apply changes/, "the yes is in the panel");
+    assert.match(html, /nothing else changes/, "and says what it does not touch");
     assert.match(html, /Who is ringing the drowned bell\?/);
     // The two rail states are still never up together (turn 91): a point is not a proposal.
     assert.doesNotMatch(html, /What it understood/, "the understanding gives way to the decision");
@@ -574,5 +586,54 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     assert.match(html, /Wrap up/, "without it a conversation cannot become anything (turn 92)");
     assert.match(html, /What it understood/, "still reachable, behind a disclosure");
     assert.match(html, /talking changes nothing/, "and the promise beside the composer survives");
+  });
+});
+
+describe("the diff is the exception, not the default (design turn 101)", () => {
+  const PROD = "bell-watch-season-1";
+
+  /** A proposal that replaces words already on the record, which is what makes it destructive. */
+  function amending(): StagedProposal {
+    const staged = stagedAgainst(
+      `productions/${PROD}/season.json`,
+      [["Ending", "She rings to be found."]],
+      "The season, as it stands",
+    );
+    return {
+      ...staged,
+      review: {
+        targets: [
+          {
+            ...staged.review!.targets[0]!,
+            action: "amend",
+            fields: [{ field: "Ending", before: "She rings to be answered.", proposed: "She rings to be found." }],
+          },
+        ],
+      },
+    };
+  }
+
+  it("an additive change is a list of things, and no before-and-after anywhere", () => {
+    const html = render(
+      withProposal(withMicrodrama([ONE]), stagedAgainst(`productions/${PROD}/season.json`, [["Question", "Who?"]], "The season, as it stands")),
+      SEASON(PROD),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    assert.match(html, /The season, as it stands/);
+    assert.doesNotMatch(html, /replaces/, "nothing is being taken away, so nothing says so");
+    assert.doesNotMatch(html, /Now: /, "and there is no before to show");
+  });
+
+  it("a change that overwrites what somebody wrote shows what it replaces", () => {
+    const html = render(
+      withProposal(withMicrodrama([ONE]), amending()),
+      SEASON(PROD),
+      <StoryScreen />,
+      "/w/:worldId/p/:prodId/season",
+    );
+    assert.match(html, /She rings to be found\./, "the words it would put there");
+    assert.match(html, /She rings to be answered\./, "and the words it would take away");
+    assert.match(html, /replaces/, "said on the field itself");
   });
 });

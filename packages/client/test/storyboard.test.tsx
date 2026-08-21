@@ -122,7 +122,7 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     assert.ok(html.includes("Image prompt"));
     assert.ok(html.includes("Cinematic intent"));
     assert.ok(html.includes("Guides the camera · hand settings win."));
-    assert.ok(html.includes("Shot timing"));
+    assert.ok(html.includes("Timing"), "the plainest true word (turn 101)");
     assert.ok(html.includes("+ Add beat"));
     assert.ok(html.includes("References"));
     assert.ok(html.includes("+ Add a reference"));

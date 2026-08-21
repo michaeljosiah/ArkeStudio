@@ -682,7 +682,10 @@ export function ShotSheetScreen() {
           </div>
 
           <div className="fy-sheetsec">
-            <div className="fy-sheetlabel">Shot timing</div>
+            {/* A beat is a word from the craft; a section heading should be the plainest true
+                word (turn 101). The rows underneath are still beats, and still named that in
+                the record — this is the label, not the model. */}
+            <div className="fy-sheetlabel">Timing</div>
             <div className="fy-sheetbeats">
               {(shot.beats ?? []).map((beat, i) => (
                 <div key={i} className="fy-sheetbeat">

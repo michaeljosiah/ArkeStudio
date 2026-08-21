@@ -142,7 +142,7 @@ function SeasonDock() {
                 worldId={worldId}
                 subject="the season"
                 staged={staged}
-                writes="the gate writes season.json · nothing else moves"
+                writes="nothing else changes"
               />
             ),
           }
@@ -180,7 +180,7 @@ function EpisodeDock({ episode }: { episode: Episode }) {
                 worldId={worldId}
                 subject={`episode ${pad(episode.order)}`}
                 staged={staged}
-                writes="the gate writes this episode and its scenes · nothing else moves"
+                writes="the scenes come with it · nothing else changes"
               />
             ),
           }
@@ -520,7 +520,7 @@ export function EpisodeChatScreen() {
                   worldId={worldId}
                   subject={`episode ${pad(episode.order)}`}
                   staged={staged}
-                  writes="the gate writes this episode and its scenes · nothing else moves"
+                  writes="the scenes come with it · nothing else changes"
                   onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`)}
                 />
               ),

@@ -43,10 +43,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Film,
+  Folder,
   Home,
+  ListOrdered,
+  Message,
+  PanelLeft,
   PauseSolid,
   Play,
   Plus,
+  Scroll,
   Sparkle,
   Users,
   VideoMark,
@@ -58,6 +63,7 @@ import { ProductionConversation, StagedDecision } from "../components/conversati
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton, clock } from "../components/player.js";
+import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { mediaUrl } from "../lib/media.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
@@ -192,16 +198,32 @@ export function ProductionLayout() {
   const guestCount = prodId ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length : 0;
   const base = `/w/${worldId}/p/${prodId}`;
   /*
-   * Folded (82a): the Cut opens the world's artifacts beside it, and the width has to come from
-   * somewhere. It comes from the labels, never from the destinations — every place the rail
-   * reached is still one click away, as a mark with its name on the tooltip.
+   * Folded (82a, then turn 101): the Cut opens the world's artifacts beside it, and the width has
+   * to come from somewhere. It comes from the labels, never from the destinations — every place
+   * the rail reached is still one click away, as a mark with its name on the tooltip.
+   *
+   * That was route-driven, which meant the width was the app's decision and not the person's. It
+   * is a control now, remembered across sessions; the Cut is only what it does before anybody has
+   * said otherwise. `null` is "never asked", which is why this is not a plain boolean.
    */
-  const folded = location.pathname.endsWith("/cut");
+  const [railChoice, setRailChoice] = useRailCollapsed();
+  const folded = railChoice ?? location.pathname.endsWith("/cut");
+  /*
+   * A mark for every destination, without exception (turn 101). Folded, the label is the tooltip
+   * and the mark is the whole item, so a rail entry with no mark is an entry that disappears —
+   * which is what happened to `New scene` and `Story structure`, both drawn as a different shape.
+   * One shape, one mark, one count: that is the whole of "standardised".
+   */
   const MARKS: Record<string, (p: { size?: number }) => ReactNode> = {
     "": Home,
     cast: Users,
-    story: Book,
+    story: Message,
+    overview: Scroll,
+    "story/chapters": Book,
+    "story-structure": Folder,
     scenes: Film,
+    "scenes/new": Plus,
+    "branch-map": ListOrdered,
     generate: Sparkle,
     cut: VideoMark,
     audio: Waveform,
@@ -220,7 +242,14 @@ export function ProductionLayout() {
   // A scene's screens include the full shot underneath it (turn 94's ownership rule) — no `$`,
   // or the rail goes blank exactly at /scenes/:id/shots/:id, three levels deep.
   const inScene = /\/scenes\/[^/]+/.test(location.pathname);
-  const item = (slug: string, label: string, count?: string, end?: boolean, also?: boolean) => {
+  const item = (
+    slug: string,
+    label: string,
+    count?: string,
+    end?: boolean,
+    also?: boolean,
+    under?: boolean,
+  ) => {
     const Mark = MARKS[slug];
     return (
       <NavLink
@@ -228,7 +257,13 @@ export function ProductionLayout() {
         to={`${base}${slug ? `/${slug}` : ""}`}
         end={end ?? slug === ""}
         title={folded ? label : undefined}
-        className={({ isActive }) => cx("fy-prodrail__item", (isActive || also) && "fy-prodrail__item--active")}
+        className={({ isActive }) =>
+          cx(
+            "fy-prodrail__item",
+            under && "fy-prodrail__item--under",
+            (isActive || also) && "fy-prodrail__item--active",
+          )
+        }
       >
         {Mark !== undefined && (
           <span className="fy-prodrail__mark" aria-hidden={!folded}>
@@ -257,6 +292,18 @@ export function ProductionLayout() {
       />
       <div className="fy-prod">
         <div className={cx("fy-prodrail", folded && "fy-prodrail--folded")}>
+          {/* The person's own control (turn 101), where the prototype puts it. It sits above the
+              switcher so folding never moves the thing you were about to press. */}
+          <button
+            type="button"
+            className="fy-prodrail__collapse"
+            title={folded ? "Expand the rail" : "Collapse the rail"}
+            aria-label={folded ? "Expand the rail" : "Collapse the rail"}
+            aria-expanded={!folded}
+            onClick={() => setRailChoice(!folded)}
+          >
+            <PanelLeft size={14} />
+          </button>
           <button type="button" className="fy-prodrail__switch" onClick={() => navigate(`/w/${worldId}/productions`)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
@@ -270,11 +317,7 @@ export function ProductionLayout() {
           {/* Arcs, themes, setups and payoffs — one item under Season and off the default
               walk (turn 99). It was a peer tab, which taught a second vocabulary to somebody
               who did not yet have a first episode. */}
-          {shape?.isEpisodic && (
-            <NavLink to={`${base}/story-structure`} className="fy-prodrail__sub">
-              Story structure
-            </NavLink>
-          )}
+          {shape?.isEpisodic && item("story-structure", "Story structure", undefined, true, false, true)}
           {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
               video does, and the count is the guests — the number the rail can say something
               true about, since the world's cast is shared and belongs to the world's own rail. */}
@@ -309,10 +352,7 @@ export function ProductionLayout() {
               {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
               {shape?.isBranching &&
                 item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
-              <NavLink to={`${base}/scenes/new`} className="fy-prodrail__sub">
-                <Plus size={12} />
-                New scene
-              </NavLink>
+              {item("scenes/new", "New scene", undefined, true, false, true)}
               {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
               {item("generate", "Generate", String(production?.takes.length ?? 0))}
               {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
@@ -321,9 +361,14 @@ export function ProductionLayout() {
             </>
           )}
           <div className="fy-prodrail__spacer" />
-          <NavLink to={`/w/${worldId}`} className="fy-prodrail__foot">
+          <NavLink
+            to={`/w/${worldId}`}
+            className="fy-prodrail__foot"
+            title={folded ? `Part of ${world?.meta.name ?? "the world"}` : undefined}
+          >
             <ChevronLeft size={13} />
-            Part of {world?.meta.name ?? "the world"}
+            {/* The label folds with every other label; the mark and its tooltip carry it. */}
+            <span className="fy-prodrail__label">Part of {world?.meta.name ?? "the world"}</span>
           </NavLink>
         </div>
         <div className="fy-prodwrap">
@@ -1281,7 +1326,7 @@ export function SceneChatScreen() {
                   worldId={worldId}
                   subject={`scene ${scene.number}`}
                   staged={staged}
-                  writes="the gate writes this scene · it creates no shots"
+                  writes="no shots are made · nothing else changes"
                   onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}`)}
                 />
               ),
