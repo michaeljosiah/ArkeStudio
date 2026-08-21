@@ -1555,18 +1555,27 @@ export function NewSceneScreen() {
 function TakesView({
   worldId,
   prodId,
+  askedFor,
   onAdvanced,
   onContact,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
+  /** The shot the press was about, carried in the address (`?shot=`). */
+  askedFor: string | null;
   onAdvanced: () => void;
   onContact: () => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
   const all = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
-  const shotId = selectedShotId ?? all[0]?.id ?? null;
+  /*
+   * The shot the storyboard sent, if it sent one (found by driving: `Generate frame` on shot 14
+   * opened the workspace on shot 4, because the press asked for the workspace rather than for a
+   * shot). A chip pressed here still wins — the address is where you arrived, not a lock.
+   */
+  const asked = askedFor !== null && all.some((s) => s.id === askedFor) ? askedFor : null;
+  const shotId = selectedShotId ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
   const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
   /*
@@ -1794,6 +1803,7 @@ export function GenerateScreen() {
       <TakesView
         worldId={worldId}
         prodId={prodId}
+        askedFor={searchParams.get("shot")}
         onAdvanced={() => setSearchParams({ view: "bench" }, { replace: true })}
         onContact={() => setSearchParams({ view: "stills" }, { replace: true })}
       />

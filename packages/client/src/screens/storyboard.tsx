@@ -367,9 +367,14 @@ export function StoryboardStrip({
                 </div>
                 <div className="fy-sbactions">
                   {takes.length > 0 ? (
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>Regenerate</Button>
+                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
+                      Regenerate
+                    </Button>
                   ) : (
-                    <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                    <Button
+                      variant="primary"
+                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}
+                    >
                       Generate frame
                     </Button>
                   )}
@@ -991,7 +996,7 @@ export function ShotSheetScreen() {
         <Button variant="ghost" onClick={() => navigate(back)}>
           Back to the storyboard
         </Button>
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
           Generate frame
         </Button>
       </div>
