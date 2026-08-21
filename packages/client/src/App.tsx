@@ -60,7 +60,7 @@ import {
   GenerateScreen,
   NewSceneScreen,
   ProductionCastScreen,
-  ProductionDashboardScreen,
+  ProductionHomeScreen,
   ProductionLayout,
   SceneDetailScreen,
   ScenesScreen,
@@ -172,7 +172,7 @@ export function App() {
         </Route>
 
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>
-          <Route index element={<ProductionDashboardScreen />} />
+          <Route index element={<ProductionHomeScreen />} />
           <Route path="cast" element={<ProductionCastScreen />} />
           {/* Talking and looking are two screens (turn 88): `story` is the conversation that sets
               the foundations up, and the details it produced are read next door — `season` for an

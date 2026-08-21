@@ -115,6 +115,23 @@ export function DevelopmentWorkspace() {
           </div>
         </div>
       </div>
+      {/*
+        This screen is the production's front page now (turn 93), so it is also its day one. A
+        board of dashed tiles says what is missing and not what to do about it, and that is the
+        whole of the difference between an empty screen and a place to start.
+      */}
+      {season?.question === undefined && season?.ending === undefined && episodes.length === 0 && (
+        <div className="fy-emptycard">
+          <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
+            Nothing decided yet.{" "}
+            <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
+              Production Chat
+            </NavLink>{" "}
+            is where the season gets shaped — what it answers, how it ends, and what its episodes
+            are. What you settle there lands here.
+          </div>
+        </div>
+      )}
       {tab === "episodes" ? <EpisodesBoard /> : <ArcsView />}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">

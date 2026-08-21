@@ -6,6 +6,7 @@ import type { ClientState, Episode, StagedProposal } from "@arke-studio/contract
 import { App } from "../src/App.js";
 import { ProductionChatScreen, StoryScreen } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen } from "../src/screens/development.js";
+import { isDayOne } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -341,5 +342,91 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     );
     assert.match(html, /the gate writes story\.json · nothing else moves/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
+  });
+});
+
+describe("an episodic production's front page is its season (design turn 93)", () => {
+  const PROD = "bell-watch-season-1";
+  const home = (prodId: string) =>
+    renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/${prodId}`);
+
+  function renderApp(state: ClientState, path: string): string {
+    __setStateForTest(state);
+    try {
+      return renderToString(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+        </MemoryRouter>,
+      ).replace(/<!-- -->/g, "");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  }
+
+  it("the production's own address shows the season, not a second screen", () => {
+    const html = home(PROD);
+    assert.match(html, /data-screen="development"/, "the season page is the front page");
+    assert.match(html, /Episodes · 7/);
+    assert.doesNotMatch(html, /Nothing written yet/, "and never contradicts it with a day one");
+  });
+
+  it("the rail carries Season once, in the first slot", () => {
+    const html = home(PROD);
+    const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
+    assert.equal(labels[0], "Season", "Season replaces Dashboard rather than sitting beside it");
+    assert.equal(labels.filter((l) => l === "Season").length, 1, "and there is no second entry");
+    assert.ok(!labels.includes("Dashboard"), "Dashboard is gone for this medium");
+  });
+
+  it("every other medium keeps its dashboard, having no season to be", () => {
+    const html = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
+    assert.equal(labels[0], "Dashboard");
+    assert.ok(labels.includes("Overview"), "and its overview beside it");
+  });
+
+  it("an empty season says where it gets shaped", () => {
+    // A board of dashed tiles says what is missing and not what to do about it.
+    const world = FIXTURE_STATE.world!;
+    const bare = withMicrodrama([]);
+    const stripped: ClientState = {
+      ...bare,
+      world: {
+        ...bare.world!,
+        productions: bare.world!.productions.map((prod) =>
+          prod.meta.id === PROD ? { ...prod, season: { version: 1, defaults: { episodeCount: 7 } } } : prod,
+        ),
+      },
+    };
+    void world;
+    const html = renderApp(stripped, `/w/${FIXTURE_WORLD_ID}/p/${PROD}`);
+    assert.match(html, /Nothing decided yet\./);
+    assert.match(html, /is where the season gets shaped/);
+    assert.match(html, /OPEN TO START IT/, "beside the shape it was promised");
+  });
+});
+
+describe("what counts as day one (design turn 93)", () => {
+  const production = FIXTURE_STATE.world!.productions[0]!;
+  const empty = { ...production, scenes: [], takes: [], chapters: [], episodes: [], season: null };
+
+  it("an untouched production is on day one", () => {
+    assert.equal(isDayOne(empty), true);
+  });
+
+  it("a season with a question is not, though it has no scene, take or chapter", () => {
+    // This is the whole defect: the check counted three things a microdrama can be a long way
+    // into a season without having, so a written season still opened on "Nothing written yet".
+    assert.equal(isDayOne({ ...empty, season: { version: 1, question: "Who rings the bell?" } }), false);
+    assert.equal(isDayOne({ ...empty, season: { version: 1, ending: "She rings it herself." } }), false);
+  });
+
+  it("so is a season with episodes and nothing else", () => {
+    assert.equal(isDayOne({ ...empty, episodes: [episode("ep_one", 1)] }), false);
+  });
+
+  it("and a season record carrying only its defaults still is", () => {
+    // Defaults come from the create form, not from anybody deciding anything (SPEC-023 R-16).
+    assert.equal(isDayOne({ ...empty, season: { version: 1, defaults: { episodeCount: 7 } } }), true);
   });
 });

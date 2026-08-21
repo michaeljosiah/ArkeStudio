@@ -215,6 +215,8 @@ export function ProductionLayout() {
    * levels deep and most wants to know where they are. Season owns them: it is the level above.
    */
   const inEpisode = /\/episodes\//.test(location.pathname);
+  /* `/season` keeps working as an address and now lands on the same screen as the index. */
+  const inSeason = inEpisode || location.pathname.endsWith("/season");
   const item = (slug: string, label: string, count?: string, end?: boolean, also?: boolean) => {
     const Mark = MARKS[slug];
     return (
@@ -259,7 +261,9 @@ export function ProductionLayout() {
             </div>
             <ChevronRight size={14} />
           </button>
-          {item("", "Dashboard")}
+          {shape?.isEpisodic
+            ? item("", "Season", production?.season ? `v${production.season.version}` : "—", true, inSeason)
+            : item("", "Dashboard")}
           {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
               video does, and the count is the guests — the number the rail can say something
               true about, since the world's cast is shared and belongs to the world's own rail. */}
@@ -281,15 +285,11 @@ export function ProductionLayout() {
                   same points, the same wrap-up. What it sets up is read next door (turn 88), and
                   the route keeps its name — a rename is display, never wiring. */}
               {item("story", "Production Chat", "chat", true)}
-              {shape?.isEpisodic
-                ? item(
-                    "season",
-                    "Season",
-                    production?.season ? `v${production.season.version}` : "—",
-                    false,
-                    inEpisode,
-                  )
-                : item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
+              {/* An episodic production's front page is its season (turn 93), so Season is the
+                  rail's first item — drawn above, in place of Dashboard — and there is no second
+                  entry for it here. A production without a season keeps both. */}
+              {!shape?.isEpisodic &&
+                item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
               {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
               {shape?.isBranching &&
@@ -534,6 +534,25 @@ export function ProductionCastScreen() {
 }
 
 // ---- Dashboard (11a; day-one variant from 33a) -----------------------------
+
+/**
+ * The production's front page (design turn 93).
+ *
+ * An episodic production's is its season: turn 91 settled that a production is exactly one
+ * season, so the production's address and the season's are the same address, and keeping them
+ * apart is what let one screen say "nothing written yet" while the other said "3 written". Every
+ * other medium keeps the dashboard, which has no season to be.
+ *
+ * The branch is a component boundary rather than an early return — returning before the
+ * dashboard's own hooks breaks the Rules of Hooks the moment a production's shape settles after
+ * first render, which is what happens on every cold open.
+ */
+export function ProductionHomeScreen() {
+  const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  if (production && productionShape(production.meta).isEpisodic) return <DevelopmentWorkspace />;
+  return <ProductionDashboardScreen />;
+}
 
 export function ProductionDashboardScreen() {
   const { worldId, prodId } = useParams();
