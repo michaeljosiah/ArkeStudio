@@ -118,22 +118,22 @@ const STEPS = [
     id: "14c", step: "Scene 4 · the storyboard",
     actions: [{ match: "Advanced", to: "14d", hint: "the full shot, behind the card" },
               { match: "Generate scene", to: "52c", hint: "the plan — the only thing that spends" }],
-    built: { status: "missing", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
+    built: { status: "built", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
       notes: ["<b>Newly adopted (turn 97), replacing 14a.</b> The scene page is its storyboard and the storyboard is the editor: the script is written on the card itself, <code>@</code> names anything in the world and rides along as an image reference, and <code>Advanced</code> (under a card's <code>⋯</code> — scroll the strip to shot 15) opens the full shot.",
               "<b>Everything a card states is derived, never stored</b> — <code>needs attention</code> / <code>story</code> / <code>storyboard</code> / <code>production-ready</code> from what exists, and <code>script changed · Re-read</code> from SPEC-023's coverage digests. The data model for all of it already ships.",
               "<b>A hand edit saves where it stands</b> — the bible's model: versioned, <code>saved 2 minutes ago</code>, <code>version history</code>, a save against a moved base refused. <b>An assistant edit asks first</b>: plan cards under <code>Apply to shots</code> / <code>Discard</code> in the docked panel, and an invented shot stays <code>suggested</code> until confirmed. Scene Chat's separate screen (turn 94) is amended into this panel.",
-              "<b>What ships today is 14a's shape</b>: read-only shot cards on the scene page, Shots/Board tabs, takes and boundary frames real, <code>promptOverride</code> with cited sheet versions real. The write path — direct save, shot CRUD, the panel — is the build this frame binds.",
+              "<b>Built and driven in the installed app (0.5.36, 2026-08-21).</b> Direct save cuts versions with history (<code>v1 → v18</code> in one drive); add, insert-between, duplicate, drag-reorder and delete all land on disk; restore brings any version back as a new one. One defect found driving: accepted charge-split takes carry no media, so every frame read <code>no frame yet</code> — the frame now follows the covering take's media.",
               "Not adopted from the prototype: the per-shot aspect override (a route takes one aspect; a cut cannot hold two — the chip reads <code>16:9 · from the episode</code>) and invented credit pricing (prices quote the plan, turn 52)."] },
   },
   {
     id: "14d", step: "One shot · Advanced",
     actions: [{ match: "Confirm the shot", to: "14c", hint: "suggested until you say so" }],
-    built: { status: "missing", route: "— sheet over the storyboard —",
+    built: { status: "built", route: "#/w/:worldId/p/:prodId/scenes/:sceneId/shots/:shotId",
       notes: ["<b>The full shot behind the card (turn 97):</b> script, the assembled prompt with <code>Rebuild</code>, cinematic intent — framing, lens and movement inferred from it, anything set by hand wins — timing beats, references, and Creative / Camera / Sound / Continuity / Technical.",
               "<b>Camera fields inherit from the scene and say which</b>: <code>from scene</code>, or an override dot. The prompt's override-never-replacement doctrine (SPEC-012 R-15) applied to every field.",
               "<b>Recipes are one-press coverage grammar</b> — <code>Establishing</code> / <code>Coverage · OTS</code> / <code>Reaction</code> / <code>Insert</code> / <code>Hold</code> fill size, angle, lens, movement and pace.",
               "<b>Continuity is issue 154's boundary frame said plainly</b> — <code>opens on the last frame of shot 14</code> — and that machinery ships today: the durable still, its hash, the first-frame route. <code>keep out of frame</code> is new.",
-              "Nothing of this sheet exists in the build yet; the nearest surfaces are the dispatch dialog's prompt editor and the Generate workspace."] },
+              "<b>Built and driven:</b> recipes fill five fields in one press, the override dot appears and the card reads <code>Shot 2 · Close-up</code> after, prompt · auto → edited by you → Rebuild → auto round-trips, beats, sound and keep-out save, and the continuity line names the real previous shot. Not yet: the docked assistant and per-shot dispatch (turn 97's later phases), and the @ catalog popover — references add through a picker."] },
   },
   {
     id: "52c", step: "The plan · the Director, then the price as a choice",
@@ -276,12 +276,12 @@ const mapHtml = `
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
         <div class="cards">
-          <div class="card is-todo" data-goto="14c">
+          <div class="card is-built" data-goto="14c">
             <div class="card__k">Storyboard</div>
             <div class="card__d">Cards you write on (turn 97). The script lives on the card, blocks keep their ids underneath, and everything else the card states is derived.</div>
             <div class="card__f">scenes/*.json</div>
           </div>
-          <div class="card is-todo" data-goto="14d">
+          <div class="card is-built" data-goto="14d">
             <div class="card__k">The full shot</div>
             <div class="card__d">Advanced: intent, recipes, a camera that inherits from the scene, continuity, model and seed.</div>
             <div class="card__f">scenes/*.json</div>
