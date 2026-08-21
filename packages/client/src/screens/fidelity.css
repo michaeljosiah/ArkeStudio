@@ -1433,6 +1433,185 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   font: 500 12px var(--font-sans);
 }
 
+/* the storyboard (turn 97, 14c) — cards you write on */
+.fy-sbstrip { display: flex; align-items: flex-start; overflow-x: auto; padding: 2px 0 6px; animation: fy-fade-up 0.6s var(--ease-out) 0.1s both; }
+.fy-sbins {
+  width: 22px; flex: none; align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+  color: transparent; cursor: pointer; border: 0; background: transparent; padding: 0;
+  transition: var(--transition-control);
+}
+.fy-sbins:hover, .fy-sbins:focus-visible { color: var(--neutral-400); }
+.fy-sbcard {
+  width: 300px; flex: none; position: relative;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-xs); background: var(--card);
+  display: flex; flex-direction: column; overflow: hidden;
+  transition: var(--transition-control);
+}
+.fy-sbcard:hover { box-shadow: var(--shadow-md); }
+.fy-sbcard__frame { height: 158px; flex: none; position: relative; background: var(--neutral-100); }
+.fy-sbcard__noframe {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(45deg, var(--neutral-100) 0 9px, var(--neutral-50) 9px 18px);
+  color: var(--neutral-400); font: 400 10px var(--font-mono);
+}
+.fy-sbcard__tag {
+  position: absolute; top: 9px; left: 10px;
+  font: 500 10px var(--font-mono);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; cursor: grab;
+}
+.fy-sbcard__chip {
+  position: absolute; bottom: 9px; left: 10px;
+  font: 400 9.5px var(--font-mono);
+  background: color-mix(in srgb, var(--media-overlay-bg) 62%, transparent); color: var(--media-overlay-fg); border-radius: 5px; padding: 2px 6px;
+}
+.fy-sbcard__body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.fy-sbcard__head { display: flex; align-items: center; gap: 7px; }
+.fy-sbcard__titleline {
+  font: 600 12.5px var(--font-sans); letter-spacing: -0.01em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fy-sbcard__state { font: 400 9.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+.fy-sbdot { width: 6px; height: 6px; border-radius: 99px; flex: none; }
+.fy-sbstale {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid var(--warning); border-radius: 7px; background: var(--neutral-50);
+  padding: 5px 8px; font: 400 10px var(--font-mono);
+}
+.fy-sbstale__note { color: var(--warning); flex: 1; min-width: 0; }
+.fy-sblink {
+  font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+  background: transparent; border: 0; padding: 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; transition: var(--transition-control);
+}
+.fy-sblink:hover { color: var(--foreground); }
+.fy-sbscript {
+  min-height: 72px; font: 400 12.5px/1.7 var(--font-sans);
+  border-radius: 7px; padding: 4px 6px; margin: 0 -6px; cursor: text;
+  transition: var(--transition-control);
+}
+.fy-sbscript:hover { background: var(--neutral-50); }
+.fy-sbscript--blank { color: var(--neutral-400); }
+.fy-sbsynopsis { min-height: 0; color: var(--muted-foreground); font: 400 12.5px/1.6 var(--font-sans); }
+.fy-sbrefs { display: flex; flex-wrap: wrap; gap: 4px; }
+.fy-sbref {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px 2px 3px;
+  font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+}
+.fy-sbref__thumb { width: 15px; height: 15px; border-radius: 99px; overflow: hidden; flex: none; }
+.fy-sbchip {
+  border: 1px solid var(--border); border-radius: 999px; background: var(--background);
+  padding: 4px 9px; font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+  cursor: pointer; white-space: nowrap; transition: var(--transition-control);
+}
+.fy-sbchip:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbover { display: flex; flex-wrap: wrap; gap: 6px; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-sbprompt { display: flex; align-items: center; gap: 7px; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-sbactions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.fy-sbmore {
+  width: 26px; height: 26px; border-radius: 7px; border: 0; background: transparent;
+  color: var(--muted-foreground); cursor: pointer; font: 600 13px var(--font-sans);
+  transition: var(--transition-control);
+}
+.fy-sbmore:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbmenu {
+  position: absolute; right: 10px; bottom: 48px; z-index: 8; width: 170px;
+  background: var(--background); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-lg); padding: 4px;
+}
+.fy-sbmenu button {
+  display: block; width: 100%; text-align: left; padding: 7px 9px; border-radius: 7px;
+  font: 400 11.5px var(--font-sans); background: transparent; border: 0; cursor: pointer; color: inherit;
+}
+.fy-sbmenu button:hover { background: var(--accent); }
+.fy-sbmenu button:disabled { color: var(--neutral-400); cursor: default; }
+.fy-sbmenu button.fy-sbmenu--danger { color: var(--destructive); }
+.fy-sbmenu button.fy-sbmenu--danger:hover { background: var(--destructive); color: var(--destructive-foreground); }
+.fy-sbadd {
+  width: 220px; min-height: 340px; flex: none;
+  border: 1px dashed var(--border); border-radius: var(--radius-card); background: transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px;
+  color: var(--neutral-400); cursor: pointer; transition: var(--transition-control);
+}
+.fy-sbadd:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbadd__ring {
+  width: 34px; height: 34px; border-radius: 99px; border: 1px solid currentColor;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fy-sbempty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; text-align: center; animation: fy-fade-up 0.5s var(--ease-out) both; }
+.fy-sbempty h2 { margin: 0; font: 650 21px var(--font-sans); letter-spacing: -0.02em; }
+.fy-sbempty p { margin: 0; font: 400 13px/1.7 var(--font-sans); color: var(--muted-foreground); }
+.fy-sbempty__doors { display: flex; gap: 8px; margin-top: 6px; }
+.fy-sbfoot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; background: var(--background); position: relative; z-index: 2; }
+/* Ramp surfaces state their dark counterparts (R-11): the ramp itself never re-themes. */
+.dark .fy-sbcard__frame { background: var(--neutral-800); }
+.dark .fy-sbcard__noframe { background: repeating-linear-gradient(45deg, var(--neutral-800) 0 9px, var(--neutral-900) 9px 18px); }
+.dark .fy-sbstale { background: var(--neutral-900); }
+.dark .fy-sbscript:hover { background: var(--neutral-900); }
+
+/* the full shot (turn 97, 14d) — behind the card */
+.fy-sheethead { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-sheettitle {
+  font: 650 16px var(--font-sans); letter-spacing: -0.02em; color: inherit;
+  border: 0; background: transparent; padding: 3px 6px; border-radius: 6px; min-width: 120px;
+}
+.fy-sheettitle:focus { background: var(--secondary); outline: none; }
+.fy-sheet { display: flex; gap: 0; flex: 1; min-height: 0; }
+.fy-sheet__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 16px 0; overflow-y: auto; }
+.fy-sheet__side { width: 320px; flex: none; border-left: 1px solid var(--border); padding: 8px 0 16px 16px; display: flex; flex-direction: column; overflow-y: auto; }
+.fy-sheetsec { display: flex; flex-direction: column; gap: 7px; }
+.fy-sheetlabel {
+  display: flex; align-items: center; gap: 10px;
+  font: 600 10px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.fy-sheetbeats { display: flex; flex-direction: column; gap: 5px; }
+.fy-sheetbeat { display: flex; gap: 8px; }
+.fy-sheetbeat__span {
+  width: 64px; flex: none; font: 400 10px var(--font-mono); color: var(--neutral-400);
+  border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 6px 8px;
+}
+.fy-sheetbeat__text {
+  flex: 1; min-width: 0; font: 400 12px var(--font-sans); color: inherit;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 6px 9px;
+}
+.fy-sheetrefs { display: flex; flex-direction: column; gap: 6px; }
+.fy-sheetref {
+  display: flex; align-items: center; gap: 9px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--card);
+  padding: 6px 9px; box-shadow: var(--shadow-xs);
+}
+.fy-sheetaddref {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px dashed var(--border); border-radius: 9px; background: transparent;
+  padding: 7px 10px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground);
+  cursor: pointer; transition: var(--transition-control);
+}
+.fy-sheetaddref:hover { background: var(--accent); color: var(--foreground); }
+.fy-sheetside__sec { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.fy-sheetside__head { font: 600 10px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-sheetcam { display: flex; align-items: center; gap: 8px; }
+.fy-sheetcam__dot { display: inline-block; width: 4px; height: 4px; border-radius: 99px; background: var(--foreground); margin-left: 4px; vertical-align: middle; }
+.fy-sheetselect {
+  flex: 1; min-width: 0; font: 400 11.5px var(--font-sans); color: inherit;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+  padding: 6px 9px; box-shadow: var(--shadow-xs);
+}
+.fy-sheetstep {
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+  box-shadow: var(--shadow-xs); overflow: hidden;
+}
+.fy-sheetstep button {
+  width: 26px; height: 29px; border: 0; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; transition: var(--transition-control);
+}
+.fy-sheetstep button:hover { background: var(--accent); color: var(--foreground); }
+.fy-sheetstep span { flex: 1; text-align: center; font: 500 11.5px var(--font-mono); }
+
 /* board tab (14a board) */
 .fy-boardsplit { display: flex; gap: 26px; flex: 1; min-height: 320px; animation: fy-fade-up 0.5s var(--ease-out) both; }
 .fy-boardsheet {

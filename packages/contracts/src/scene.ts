@@ -32,9 +32,37 @@ export const ShotAudioSchema = z
     kind: z.string().min(1),
     speaker: SlugSchema.optional(),
     line: z.string().optional(),
+    /** Turn 97 (14d, Sound): the bed under the line and the hits beside it. Free text, optional. */
+    ambience: z.string().optional(),
+    effects: z.string().optional(),
   })
   .strict();
 export type ShotAudio = z.infer<typeof ShotAudioSchema>;
+
+/**
+ * The structured camera (turn 97, 14d). One shape serves two places: a scene's `defaults`,
+ * which every shot inherits, and a shot's `framing`, where a present field IS the override —
+ * absence inherits, so no stored flag can disagree with the value (the covers-digest rule
+ * applied to camera). Values are display vocabulary (SPEC-012 owns the words); the shape only
+ * says they are strings, so a new size or movement never needs a schema change. Every field
+ * optional and the object itself optional: a scene written before turn 97 parses unchanged —
+ * this schema is the read path, and a `.min()` here deletes scenes from worlds on disk.
+ */
+export const ShotFramingSchema = z
+  .object({
+    size: z.string().optional(),
+    angle: z.string().optional(),
+    lens: z.string().optional(),
+    focus: z.string().optional(),
+    movement: z.string().optional(),
+    pace: z.string().optional(),
+    lighting: z.string().optional(),
+    timeOfDay: z.string().optional(),
+    /** grade & texture — one free-text line, not a taxonomy. */
+    grade: z.string().optional(),
+  })
+  .strict();
+export type ShotFraming = z.infer<typeof ShotFramingSchema>;
 
 export const ShotSchema = z
   .object({
@@ -46,6 +74,26 @@ export const ShotSchema = z
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
+    /** Turn 97 (14d): how it should feel. The camera is inferred from this; hand settings win. */
+    intent: z.string().optional(),
+    /** Turn 97 (14d): timing beats — `span` is a label ("0–3s"), not a machine timeline. */
+    beats: z
+      .array(z.object({ span: z.string().min(1), text: z.string().min(1) }).strict())
+      .optional(),
+    /** Turn 97 (14d): the structured camera. A present field overrides the scene's `defaults`. */
+    framing: ShotFramingSchema.optional(),
+    /**
+     * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
+     * an authored intent — the dispatch already chains when a boundary still exists; this records
+     * that the shot *wants* it. `keepOut` is the negative half of the same promise.
+     */
+    continuity: z
+      .object({
+        openOnPrevious: z.boolean().optional(),
+        keepOut: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     /**
      * Script coverage (SPEC-023 R-13): the block ids this shot covers, each with the sha256 of
      * the block text at citation time. A digest mismatch derives "covers text that changed"; a
@@ -136,6 +184,8 @@ export const SceneSchema = z
     order: z.number().int().min(1).optional(),
     slug: SlugSchema,
     title: z.string().min(1),
+    /** Turn 97 (14c): the line under the title — edited on the page, read by prompt assembly. */
+    synopsis: z.string().optional(),
     /** Scene lifecycle vocabulary is owned by SPEC-012; the shape validates, the value displays. */
     status: z.string().min(1),
     /** Scenes are cited (shots inherit, boards compile from them) so they are versioned (§2.4.1). */
@@ -148,6 +198,8 @@ export const SceneSchema = z
       })
       .strict()
       .optional(),
+    /** Turn 97 (14d): camera defaults every shot inherits — a shot's `framing` field wins. */
+    defaults: ShotFramingSchema.optional(),
     board: SceneBoardSchema.optional(),
     /** The reference storyboard drawn for this scene, when one has been (R-22). */
     storyboard: SceneStoryboardSchema.optional(),
@@ -199,6 +251,45 @@ export function sortScenes<T extends Pick<Scene, "number" | "order" | "id">>(sce
   return [...scenes].sort(
     (a, b) => sceneOrderValue(a) - sceneOrderValue(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
+}
+
+/**
+ * The camera a shot actually shoots with (turn 97, 14d): its own `framing` over the scene's
+ * `defaults`, field by field. A field present on the shot is an override by definition —
+ * presence is the flag, so the answer can never disagree with the data.
+ */
+export function effectiveFraming(
+  scene: Pick<Scene, "defaults">,
+  shot: Pick<Shot, "framing">,
+): ShotFraming {
+  return { ...scene.defaults, ...shot.framing };
+}
+
+/**
+ * Script coverage, derived (SPEC-023 R-13; turn 97's `Re-read` chip reads this).
+ *
+ * `digests` maps block id → `sha256:<hex>` of the block's current text. Stored digests may be
+ * truncated (Sha256Schema allows 8–64 hex chars), so comparison is prefix-based on the shorter
+ * of the two. Derived every time, stored nowhere — no flag can lie.
+ */
+export type ShotCoverage = "unlinked" | "fresh" | "changed" | "uncovered";
+
+export function shotCoverage(
+  shot: Pick<Shot, "covers">,
+  digests: ReadonlyMap<string, string>,
+): ShotCoverage {
+  if (!shot.covers || shot.covers.length === 0) return "unlinked";
+  let changed = false;
+  for (const cover of shot.covers) {
+    const current = digests.get(cover.blockId);
+    // The cited block no longer exists: the shot covers nothing (R-13's second derivation).
+    if (current === undefined) return "uncovered";
+    const a = cover.textDigest.replace(/^sha256:/, "");
+    const b = current.replace(/^sha256:/, "");
+    const n = Math.min(a.length, b.length);
+    if (n === 0 || a.slice(0, n) !== b.slice(0, n)) changed = true;
+  }
+  return changed ? "changed" : "fresh";
 }
 
 // ---------------------------------------------------------------------------

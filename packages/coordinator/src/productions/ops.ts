@@ -594,6 +594,53 @@ async function readScene(store: WorldStore, productionId: string, sceneFile: str
 }
 
 /**
+ * Write a scene whole — what the storyboard's card edits call (turn 97).
+ *
+ * The bible's model (SPEC-022) applied to scenes: no proposal, no accept. What replaces the
+ * gate is the version — the committer cuts one per save with a full `.history/` snapshot, so
+ * an edit nobody wanted is one restore away. `baseVersion` is the version the storyboard had
+ * loaded; a save against a scene that has since moved is refused, not merged, in words a
+ * person can act on. Identity is not the editor's to change: id, number and slug are pinned
+ * to the file on disk, so a stray payload cannot re-key a scene through a text box.
+ */
+export async function saveScene(
+  store: WorldStore,
+  input: { productionId: string; sceneFile: string; scene: unknown; baseVersion?: number },
+): Promise<void> {
+  const proposed = SceneSchema.parse(input.scene);
+  const { scene: current, raw, path } = await readScene(store, input.productionId, input.sceneFile);
+  if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
+    throw new SceneStaleError(input.baseVersion, current.version);
+  }
+  const next = { ...proposed, id: current.id, number: current.number, slug: current.slug };
+  const doc = JsonFile.parse(raw);
+  doc.set(next as unknown as Record<string, unknown>);
+  await store.commit({
+    kind: "scene-save",
+    source: "editor",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+  });
+}
+
+/** Undo (turn 97): v<n> back as a new version; everything between it and now stays in history. */
+export async function restoreScene(
+  store: WorldStore,
+  input: { productionId: string; sceneFile: string; version: number },
+): Promise<void> {
+  await store.restoreVersion(`productions/${input.productionId}/scenes/${input.sceneFile}.json`, input.version, "editor");
+}
+
+export class SceneStaleError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly found: number,
+  ) {
+    super(`the scene moved from v${expected} to v${found} while this edit was being made — it was not overwritten`);
+    this.name = "SceneStaleError";
+  }
+}
+
+/**
  * Store or clear a prompt override (R-15): production output, not gated change — the scene's
  * version is preserved, and the recorded sheet versions make staleness computable (R-16).
  */

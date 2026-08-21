@@ -69,6 +69,7 @@ import {
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
+import { ShotSheetScreen } from "./screens/storyboard.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
@@ -191,6 +192,8 @@ export function App() {
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />
+          {/* The full shot behind the card (turn 97, 14d). */}
+          <Route path="scenes/:sceneId/shots/:shotId" element={<ShotSheetScreen />} />
           {/* Interactive video's structural authority (epic 401) — linear seasons never route here. */}
           <Route path="branch-map" element={<BranchMapScreen />} />
           <Route path="generate" element={<GenerateScreen />} />

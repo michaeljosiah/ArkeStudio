@@ -236,7 +236,11 @@ export class WorldStore {
     // The bible is ungated, so restore is not a convenience here — it is the undo that stands in
     // for the accept step every other authored file gets (SPEC-022).
     else if (kind.track === "bible") historyPath = `.history/bible/v${version}.md`;
-    else throw new CommitPlanError(`restore is defined for sheets, canon and the bible, not ${kind.track}`);
+    // Scenes joined the ungated-save club with turn 97: the storyboard writes directly, so the
+    // same undo has to stand in for the same absent accept.
+    else if (kind.track === "scene")
+      historyPath = `.history/productions/${kind.production}/scenes/${kind.file}/v${version}.json`;
+    else throw new CommitPlanError(`restore is defined for sheets, canon, the bible and scenes, not ${kind.track}`);
 
     const snapshot = await this.readEntity(historyPath);
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);

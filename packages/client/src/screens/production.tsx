@@ -62,6 +62,7 @@ import { mediaUrl } from "../lib/media.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { DevelopmentWorkspace } from "./development.js";
+import { SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -114,7 +115,7 @@ function artifactsFor<T extends { production?: string }>(artifacts: readonly T[]
 }
 
 /** Render @mentions the way the prototype does: quiet mono chips inside prose. */
-function Mentions({ text }: { text: string }) {
+export function Mentions({ text }: { text: string }) {
   const parts = text.split(/(@[A-Za-z0-9-]+)/g);
   return (
     <>
@@ -150,7 +151,7 @@ export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?:
 }
 
 /** A take's poster image, on the shared convention (lib/poster.ts). */
-function takeMediaPath(prodId: string, take: { id: string; media?: string }): string | null {
+export function takeMediaPath(prodId: string, take: { id: string; media?: string }): string | null {
   if (!take.media) return null;
   return `productions/${prodId}/takes/${take.id}/${posterNameFor(take.media)}`;
 }
@@ -160,7 +161,7 @@ function takeMediaPath(prodId: string, take: { id: string; media?: string }): st
  * reconstruction from number and slug, which goes blind the moment a file's name stops
  * matching. Null means the bundle predates the record; the senders skip rather than guess.
  */
-function sceneFileOf(production: { sceneFiles: Record<string, string> } | null | undefined, scene: Scene): string | null {
+export function sceneFileOf(production: { sceneFiles: Record<string, string> } | null | undefined, scene: Scene): string | null {
   return production?.sceneFiles[scene.id] ?? null;
 }
 
@@ -216,7 +217,9 @@ export function ProductionLayout() {
   /* `/season` keeps working as an address and now lands on the same screen as the index. */
   const inSeason = inEpisode || location.pathname.endsWith("/season");
   /* A scene's chat lives under `story/` beside the production's own, so Scenes owns it too. */
-  const inScene = /\/scenes\/[^/]+$/.test(location.pathname);
+  // A scene's screens include the full shot underneath it (turn 94's ownership rule) — no `$`,
+  // or the rail goes blank exactly at /scenes/:id/shots/:id, three levels deep.
+  const inScene = /\/scenes\/[^/]+/.test(location.pathname);
   const item = (slug: string, label: string, count?: string, end?: boolean, also?: boolean) => {
     const Mark = MARKS[slug];
     return (
@@ -1327,87 +1330,23 @@ export function SceneDetailScreen() {
           </span>
           <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>Generate scene…</Button>
         </div>
-        <div className="fy-inherits" style={{ marginTop: 12 }}>
-          <span className="fy-mono">every shot inherits:</span>
+        {/* The line under the title (turn 97, 14c): the synopsis, edited where it reads. */}
+        <div style={{ marginTop: 10, maxWidth: 660 }}>
+          <SceneSynopsis worldId={worldId!} prodId={prodId!} scene={scene} />
+        </div>
+        <div className="fy-inherits" style={{ marginTop: 8 }} title="Shots inherit these">
           {scene.inherits?.location && <span className="fy-pill">@{scene.inherits.location}{scene.inherits.timeOfDay ? `, ${scene.inherits.timeOfDay}` : ""}</span>}
           {!scene.inherits?.location && scene.inherits?.timeOfDay && <span className="fy-pill">{scene.inherits.timeOfDay}</span>}
           {scene.inherits?.tone && <span className="fy-pill">Tone · {scene.inherits.tone}</span>}
-          <span className="fy-mono">v{scene.version}</span>
+          <span className="fy-pill">{productionAspect(production.meta)} · from the production</span>
+          {model && <span className="fy-mono">{model.displayName} · max {model.limits.maxDurationSec ?? "∞"}s / clip</span>}
         </div>
       </div>
       {tab === "shots" ? (
         <>
-          <div className="fy-shotrow">
-            {scene.shots.map((shot) => {
-              const takes = takesForShot(production, shot.id);
-              const accepted = acceptedTakeId(production, shot.id);
-              const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : null;
-              const media = acceptedTake ? takeMediaPath(production.meta.id, acceptedTake) : null;
-              return (
-                <div key={shot.id} className="fy-shotcard">
-                  <div className="fy-shotcard__frame">
-                    <Portrait
-                      worldSlug={slug}
-                      path={media ?? (scene.board ? `productions/${production.meta.id}/${scene.board.image}` : "")}
-                      label={`Shot ${shot.id.replace(/^sh_0*/, "")}: ${accepted ? "frame" : "generate or drop a frame"}`}
-                      radius={0}
-                    />
-                  </div>
-                  <div className="fy-shotcard__body">
-                    <div className="fy-shotcard__head">
-                      <span className="fy-shotcard__num">{shot.id.replace(/^sh_0*/, "")}</span>
-                      <span className="fy-shotcard__title">{shot.title}</span>
-                      <span className={`fy-dot fy-dot--${accepted ? "ok" : "warn"}`} />
-                    </div>
-                    <div className="fy-shotcard__desc" title="Edited through the gate — @ references a sheet">
-                      <Mentions text={shot.description} />
-                    </div>
-                    <div className="fy-shotcard__tech">
-                      {shot.camera && <span>cam: {shot.camera}</span>}
-                      {shot.audio?.line && <span>aud: {shot.audio.speaker ? `${shot.audio.speaker}, ` : ""}“{shot.audio.line}”</span>}
-                    </div>
-                    <div className="fy-shotcard__spacer" />
-                    <span className="fy-mono">
-                      {seconds(shot.durationSec)} · {takes.length} take{takes.length === 1 ? "" : "s"}
-                    </span>
-                    <div className="fy-shotcard__actions">
-                      {takes.length > 0 ? (
-                        <>
-                          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
-                            Regenerate
-                          </Button>
-                          <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>To clip</Button>
-                        </>
-                      ) : (
-                        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
-                          Generate frame
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <button type="button" className="fy-addcol" title="New scene" onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/new`)}>
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="fy-scenefoot">
-            <span className="fy-h1row__push" />
-            {model && (
-              <span className="fy-modelchip">
-                {model.displayName}
-                <span className="fy-mono">max {model.limits.maxDurationSec ?? "∞"}s / clip</span>
-                <span
-                  style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
-                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
-                >
-                  Change
-                </span>
-              </span>
-            )}
-            <span className="fy-mono">continuity: each clip opens on the last frame before it</span>
-          </div>
+          {/* Turn 97: the storyboard is the editor — 14a's read-only cards are superseded. */}
+          <StoryboardStrip worldId={worldId!} prodId={prodId!} scene={scene} />
+          <StoryboardFoot worldId={worldId!} prodId={prodId!} scene={scene} />
         </>
       ) : (
         <div className="fy-boardsplit">

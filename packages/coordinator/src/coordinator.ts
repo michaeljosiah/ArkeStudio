@@ -89,7 +89,9 @@ import {
   reorderChapters,
   reorderEpisodes,
   reorderScenes,
+  restoreScene,
   saveChapter,
+  saveScene,
   setProductionAspect,
   setPromptOverride,
 } from "./productions/ops.js";
@@ -3340,6 +3342,31 @@ export class Coordinator {
         } catch {
           this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "save-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        // Swallowed like the bible's save: a refused write leaves the storyboard's text where
+        // it stands, and the refreshed snapshot is what tells it the version moved (turn 97).
+        await saveScene(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          scene: msg.scene,
+          ...(msg.baseVersion !== undefined ? { baseVersion: msg.baseVersion } : {}),
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await restoreScene(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          version: msg.version,
+        }).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "create-chapter": {

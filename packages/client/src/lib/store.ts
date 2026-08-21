@@ -2253,6 +2253,33 @@ export function stageSceneEdit(
 }
 
 /**
+ * Save a scene where it stands (turn 97) — the storyboard's card edits. No proposal, no accept;
+ * the version and its history snapshot stand in for both. `baseVersion` is what this screen
+ * loaded: a save against a scene that has since moved is refused, not merged.
+ */
+export function saveScene(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  scene: unknown,
+  baseVersion?: number,
+): void {
+  send({
+    kind: "save-scene",
+    worldId,
+    productionId,
+    sceneFile,
+    scene,
+    ...(baseVersion !== undefined ? { baseVersion } : {}),
+  });
+}
+
+/** Undo, at whatever depth: v<n> returns as a new version (turn 97). */
+export function restoreScene(worldId: string, productionId: string, sceneFile: string, version: number): void {
+  send({ kind: "restore-scene", worldId, productionId, sceneFile, version });
+}
+
+/**
  * Save the bible (SPEC-022). No proposal, no accept — it saves where it stands.
  *
  * `baseVersion` is the version the editor loaded. Passing it is what makes an ungated file safe
