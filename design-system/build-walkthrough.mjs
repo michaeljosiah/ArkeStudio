@@ -29,19 +29,20 @@ const STEPS = [
   },
   {
     id: "99a", step: "Step one · what are you making?",
-    actions: [{ match: "Continue · what kind of video?", to: "99b", hint: "the only way on" }],
+    actions: [{ match: "Continue · what kind of video?", to: "100a", hint: "the only way on" }],
     built: { status: "drifted", route: "#/w/:worldId/productions/new",
       notes: ["<b>Newly drawn (turn 99), lightening 43a.</b> The question is the title, the answer is a medium &#8212; <b>Video, Story, Audio</b> &#8212; and the only other thing on the screen is a name. Two clicks and a name is the whole door.",
-              "<b>The cards ship, but not these cards.</b> Today they are Story, Video and <b>Interactive video</b> (turn 84). <b>Audio is not offered as a medium at all</b>, and Interactive video sits here rather than one step down &#8212; by turn 99's own test it is a <i>kind</i> of video, not a medium, and the turn leaves the call open rather than drawing it away.",
+              "<b>The cards ship, but not these cards.</b> Today they are Story, Video and <b>Interactive video</b> (turn 84). <b>Audio is not offered as a medium at all</b>, and Interactive video sits here rather than one step down &#8212; <b>turn 100 settles that</b>: it is a <i>kind</i> of video, not a medium, and it moves to the next step. Both screens have to change together.",
               "Everything else matches: the blurred world art, the name field with <code>working titles are fine</code>, the joins line, and turn 83's <code>Continue · what kind of video?</code> when Video is chosen.",
               "The caption is halved &#8212; <code>nothing generates</code>, where the build still says <code>nothing generates · nothing is copied out of the world</code>."] },
   },
   {
-    id: "99b", step: "Step two · what kind of video?",
+    id: "100a", step: "Step two · what kind of video?",
     actions: [{ match: "Create and open it", to: "99c", hint: "create it" }],
     built: { status: "drifted", route: "#/w/:worldId/productions/new · step 2",
-      notes: ["<b>Four kinds, not three.</b> <code>Other</code> joins micro drama · series, film · short and music video, and it is the card that assumes nothing &#8212; a video that is none of the three should not have to pretend to be one of them.",
-              "<b><code>ENDING</code> is gone, and that is the point of the turn.</b> It ships today as a dropdown beside FRAME, asking somebody who has written nothing how their season ends. It is storytelling, so it moves into the conversation and arrives on the season record &#8212; drawn filled on <b>99d</b>.",
+      notes: ["<b>Five kinds (turn 100), interactive among them.</b> Turn 99 drew four and left this one open; a medium is what comes out — moving pictures, prose, sound — and interactive video is moving pictures. It has scenes, shots, takes and a cut like every other video, and what it adds is a branch map. That is what a <i>kind</i> is for.",
+              "<b>So step one keeps three cards and this step gains one.</b> The build has it the other way round: Interactive video is a medium on step one (turn 84, issue 401) and this step offers three kinds. Both screens have to move together, and the branch map itself is untouched by the change.",
+              "<b><code>ENDING</code> is gone (turn 99).</b> It ships today as a dropdown beside FRAME, asking somebody who has written nothing how their season ends. It is storytelling, so it moves into the conversation — drawn arriving on <b>99d</b>.",
               "<b>The three that stay are grouped and labelled as what they are:</b> <code>DEFAULTS · CHANGE LATER</code> over FRAME, EPISODES and LENGTH. The build has the same fields under a foot line (<code>defaults · change them here or later</code>) and shows them for a Microdrama only.",
               "<b>Verified on disk:</b> picking 90–120s lands <code>episodeSecondsMin: 90</code> / <code>episodeSecondsMax: 120</code> in <code>season.json</code>.",
               "The kind cards hold a banner area with no art yet, so the choice is still made by reading. Beyond the drawing: a <code>Series name</code> field, and a primary that reads <code>Create Series and Season 1</code> for a Microdrama."] },
@@ -58,7 +59,7 @@ const STEPS = [
   },
   {
     id: "99d", step: "Season · underway, and the panel stages a change",
-    actions: [{ match: "Her mother’s hour", to: "91b", hint: "open an episode" }],
+    actions: [{ match: "Her mother’s hour", to: "100b", hint: "open an episode" }],
     built: { status: "drifted", route: "#/w/:worldId/p/:prodId/season",
       notes: ["<b>The same screen once there is something to read</b>, and the panel holding a staged proposal under <b>Accept</b> / <b>Discard</b> &#8212; turns 92 and 96's wrap-up moved onto the page it is about. One component draws this at every level, so the season's accept and the scene's cannot drift apart.",
               "<b><code>HOW IT ENDS</code> is filled here and asked nowhere.</b> Turn 99 takes ENDING off creation; this is where it lands, put there by the thing beside it.",
@@ -67,23 +68,23 @@ const STEPS = [
               "<b>What does not:</b> the panel, <code>Story structure</code>, and the tab strip's removal &#8212; the build still shows <code>Episodes · 7</code> and <code>Arcs · 0</code> as peers."] },
   },
   {
-    id: "91b", step: "Episode Chat · and the proposal it ends in",
-    actions: [{ match: "Accept Proposal", to: "91c", hint: "accept what the conversation settled" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId/story/episodes/:id",
-      notes: ["<b>Built to the drawing (turn 91).</b> An episode's tile opens a conversation with the episode named in the eyebrow, its own thread (entry context <code>episode</code>, so the coordinator briefs it on that episode rather than the season), and the composer the house binds every chat to.",
-              "<b>The rail's two states are built as two moments.</b> With nothing staged it holds the points; with a proposal staged against this episode's file it holds that proposal field by field under <b>Accept Proposal</b>, which calls the same gate accept as the Proposals screen and then lands you on the episode.",
-              "<b>Verified in the running app</b> for the first state, and by test for both. <b>Not yet driven end to end</b>: no episode wrap-up has been run against a live provider to watch a real proposal appear in this rail.",
-              "<b>What is gone:</b> the promise editor. Three inputs behind <code>Edit the promise</code> were the second way to author one file, which is what turn 88 broke apart at season level."] },
+    id: "100b", step: "The episode · the page, and Arke on it",
+    actions: [{ match: "Fill the gaps", to: "100c", hint: "ask for what is missing" }],
+    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/episodes/:id",
+      notes: ["<b>Episode Chat is retired (turn 100).</b> It was the last level still drawn as somewhere to go: the conversation on one screen, what it produced on another, and an accept that moved you between them. Turn 97 settled this for the scene and turn 99 for the season, so it applies here unchanged — <b>one pattern at three scales, with nothing left over</b>.",
+              "<b>The page keeps what it had</b> — the promise as OPENS / TURN / CLOSES, the scenes in order, <code>← Season</code> — and loses <code>Talk it through</code>, because there is no longer anywhere to be sent. <code>Add scene</code> is new, and it is a hand edit: it writes where it stands (turn 97), the one control here that does not wait for a yes.",
+              "<b>What ships:</b> this page, at this route, close to the drawing ✓ — verified by clicking, including that the rail marks <b>Season</b> two levels deep. <b>What does not:</b> the panel. The episode's conversation is still its own screen (<code>/story/episodes/:id</code>, frame 91b), which is the screen this turn retires.",
+              "<b>Still the stopgap:</b> until turn 87's cascade lands, scenes are drafted elsewhere and adopted here, which runs the arrow backwards — the <code>DRAFTED ELSEWHERE · NOT IN ANY EPISODE</code> band. The panel is what makes the cascade natural: a scene the episode's own conversation invents belongs to it from the first second."] },
   },
   {
-    id: "91c", step: "The episode · summary, then scenes",
+    id: "100c", step: "The episode · made while it is said",
     actions: [{ match: "The hour found", to: "14c", hint: "open a scene" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId/episodes/:id",
-      notes: ["<b>Turn 92: one control, one destination.</b> A tile used to open the chat when nothing was written and the page when something was; the same click landed in two places according to state nobody could see beforehand. Every tile opens the page. The tiles are links now rather than buttons, so middle-click and copy-link work — and so where a tile leads is something a test can read, which the version with an <code>onClick</code> was not.",
-              "<b>Built to the drawing (turn 91).</b> The promise in the header, <code>Scenes · in order</code> as a heading rather than a strip of one tab, and the scene cards below it.",
-              "<b>Both directions work</b>, checked by clicking: <code>← Season</code> up, <code>Talk it through</code> back into this episode's own thread, and the rail marks <b>Season</b> on both of an episode's screens — they live outside the <code>season</code> path, so without that the rail went blank exactly two levels deep.",
-              "<b>A written episode opens here; an unwritten one opens its chat.</b> Day one's rule one level down: there is nothing to look at until something has been said.",
-              "<b>Still the stopgap:</b> the <code>DRAFTED ELSEWHERE · NOT IN ANY EPISODE</code> band. Until turn 87's cascade lands, scenes are drafted somewhere else and adopted here, which runs the arrow backwards. Said out loud rather than dressed up."] },
+    built: { status: "missing", route: "nothing ships this yet",
+      notes: ["<b>Arke's signature interaction, drawn (turn 100): the screen shows what the conversation is making, while it makes it.</b> Two scenes appear <b>in their place</b> between 03 and the bell, marked <code>NEW · NOT WRITTEN YET</code>; the promise line the conversation changed shows its new words marked <code>STAGED</code>; and the two settled scenes after them renumber, because that is what inserting does.",
+              "<b>The panel keeps only the count and the yes</b> — <code>2 scenes · 1 promise line</code>, <b>Accept</b> / <b>Discard</b>. A field-by-field diff inside a chat asks a person to read a form to find out what just happened to their story. The story is the better display, and it is already on the screen.",
+              "<b>This changes where a proposal is shown, never when it is written.</b> Nothing on this frame has reached <code>episodes/03-*.json</code>: the foot still reads <code>v4</code>, the pills read <code>5 scenes</code> beside <code>+2 staged</code> rather than <code>7 scenes</code>, and a staged scene <b>cannot be opened, counted as done, or dispatched</b> until it is accepted.",
+              "<b>The instinct already shipped once:</b> turn 92's <code>STAGED · NOT WRITTEN YET</code> tile on the season board does exactly this for one case, and it is the only place in the app that does. Everywhere else a proposal is a list of fields on another screen.",
+              "<b>Nothing here is built.</b> The staged-in-place vocabulary, the marked promise row, the count that says both — all new. What exists to build on: proposals are already durable objects with a gate that accepts them (<code>.proposals/pr_*</code>), so what is missing is the drawing of one, not the machinery."] },
   },
   {
     id: "14c", step: "Scene 4 · the storyboard",
@@ -178,10 +179,13 @@ const mapHtml = `
       One pattern, three times: <b>the thing itself on the page, and Arke docked beside it.</b> The
       season decides what the thing is; an episode decides what happens in it and <b>makes the scenes it
       needs</b>; a scene decides how it is shot. Nothing below a level exists until the level above has
-      said what it needs, which is why the arrows only point one way. <b>Turn 99 finishes the pattern
-      upwards</b>: the chat stops being a place you go to and becomes the panel on the page it is about,
-      the way turn 97 drew it beside the storyboard. A hand edit saves; a change Arke proposes is staged,
-      field by field, and waits on a yes. The episode is the level still drawn as a page of its own.
+      said what it needs, which is why the arrows only point one way. <b>Turns 99 and 100 finish the pattern</b>: at every level
+      the chat stops being a place you go to and becomes the panel on the page it is about, the way
+      turn 97 drew it beside the storyboard — season, episode, scene, with nothing left over. A hand
+      edit saves where it stands. A change Arke proposes is <b>drawn where it will live</b>, marked,
+      while the panel keeps only the count and the yes: <b>the screen shows what the conversation is
+      making, while it makes it.</b> Shown is not written — a staged thing cannot be opened, counted
+      as done, or dispatched until it is accepted.
     </p>
   </div>
 
@@ -221,20 +225,20 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">2</span>
-        <span class="lvl__thread">Episode Chat</span>
+        <span class="lvl__thread">the docked panel</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One episode · what happens in it</div>
         <div class="cards">
-          <div class="card is-built" data-goto="91b">
-            <div class="card__k">Talk, then accept</div>
-            <div class="card__d">The same two states, one level down. <b>The scenes it needs are part of its proposal</b> — turn 87's cascade — rather than drafted elsewhere and adopted from a pool.</div>
-            <div class="card__f">episodes/03-*.json · scenes/*.json</div>
-          </div>
-          <div class="card is-built" data-goto="91c">
+          <div class="card is-built" data-goto="100b">
             <div class="card__k">The episode page</div>
-            <div class="card__d">Its promise in the header; <b>Scenes</b> as the tab. <code>Talk it through</code> goes back into this episode's own thread, because an accept is not the end of a subject.</div>
+            <div class="card__d">Its promise, its scenes in order, <code>Add scene</code>. <b>Episode Chat is retired</b> (turn 100) — there is nowhere to be sent, because the thread is here.</div>
             <div class="card__f">episodes/03-*.json</div>
+          </div>
+          <div class="card is-todo" data-goto="100c">
+            <div class="card__k">Talk, and watch it appear</div>
+            <div class="card__d">A proposed scene is <b>a scene card in its place</b>, marked; the panel keeps the count and the yes. <b>The scenes it needs are part of its proposal</b> — turn 87's cascade — rather than drafted elsewhere and adopted from a pool.</div>
+            <div class="card__f">.proposals/pr_* · scenes/*.json</div>
           </div>
         </div>
       </div>
@@ -243,7 +247,7 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">3</span>
-        <span class="lvl__thread">the docked assistant</span>
+        <span class="lvl__thread">the docked panel</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
