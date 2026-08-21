@@ -23,77 +23,48 @@ const STEPS = [
   },
   {
     id: "2c", step: "Productions",
-    actions: [{ match: "New production", to: "43a", hint: "start a production" }],
+    actions: [{ match: "New production", to: "99a", hint: "start a production" }],
     built: { status: "built", route: "#/w/:worldId/productions",
       notes: ["Ships close to the drawing."] },
   },
   {
-    id: "43a", step: "Step one · what are you making?",
-    actions: [{ match: "Create and open day one", to: "53a", hint: "the drawing's primary action" }],
-    built: { status: "built", route: "#/w/:worldId/productions/new",
-      notes: ["<b>Built to the drawing (turn 85).</b> The modal now stands over the world's key art blurred back, the name field and joins line read as drawn, and the caption <code>nothing generates · nothing is copied out of the world</code> is under the buttons where the frame puts it.",
-              "<b>Turn 83's binding is now met:</b> with Video selected the primary reads <code>Continue · what kind of video?</code> and routes to step two — it no longer creates past the kind. A one-kind family (Story, Interactive video) still creates directly, from <code>Create and open day one</code>.",
-              "Third card is <b>Interactive video</b>, not the drawn <b>Stills</b> — turn 84's replacement, and turn 85 records that the drawing is the stale side here.",
-              "Card copy is 6a's rather than 43a's, settled by turn 85 in the build's favour: this page shows 43a, so read its three card bodies as retired."] },
+    id: "99a", step: "Step one · what are you making?",
+    actions: [{ match: "Continue · what kind of video?", to: "99b", hint: "the only way on" }],
+    built: { status: "drifted", route: "#/w/:worldId/productions/new",
+      notes: ["<b>Newly drawn (turn 99), lightening 43a.</b> The question is the title, the answer is a medium &#8212; <b>Video, Story, Audio</b> &#8212; and the only other thing on the screen is a name. Two clicks and a name is the whole door.",
+              "<b>The cards ship, but not these cards.</b> Today they are Story, Video and <b>Interactive video</b> (turn 84). <b>Audio is not offered as a medium at all</b>, and Interactive video sits here rather than one step down &#8212; by turn 99's own test it is a <i>kind</i> of video, not a medium, and the turn leaves the call open rather than drawing it away.",
+              "Everything else matches: the blurred world art, the name field with <code>working titles are fine</code>, the joins line, and turn 83's <code>Continue · what kind of video?</code> when Video is chosen.",
+              "The caption is halved &#8212; <code>nothing generates</code>, where the build still says <code>nothing generates · nothing is copied out of the world</code>."] },
   },
   {
-    id: "53a", step: "Step two · what kind of video?",
-    actions: [{ match: "Create and open it", to: "53b", hint: "create the production" }],
-    built: { status: "built", route: "#/w/:worldId/productions/new · step 2",
-      notes: ["<b>Built to the drawing (turn 85).</b> It is its own screen now, with <code>What kind of video?</code>, the <code>step 2 of 2</code> counter, <code>Back</code>, and the caption <code>defaults · change them here or later</code>.",
-              "<b>All three kinds are offered</b>, Music video included, in the frame's own words. A kind only sets starting numbers, so a music video is an ordinary Video production — what it still lacks is turn 60's Spine authoring, not coherence.",
-              "<b><code>EPISODE LENGTH</code> is asked at last</b>, alongside FRAME, EPISODES and ENDING in mono caps, and the chosen range is written into <code>season.json</code> — verified end to end: picking 90–120s lands <code>episodeSecondsMin: 90</code> / <code>episodeSecondsMax: 120</code> on disk.",
-              "The kind cards hold the banner area the frame draws, sized and waiting: there is no art for them yet, so the choice is still made by reading. That is the one part of 53a still outstanding.",
-              "Beyond the drawing: a <code>Series name</code> field, which a Series being created genuinely needs."] },
+    id: "99b", step: "Step two · what kind of video?",
+    actions: [{ match: "Create and open it", to: "99c", hint: "create it" }],
+    built: { status: "drifted", route: "#/w/:worldId/productions/new · step 2",
+      notes: ["<b>Four kinds, not three.</b> <code>Other</code> joins micro drama · series, film · short and music video, and it is the card that assumes nothing &#8212; a video that is none of the three should not have to pretend to be one of them.",
+              "<b><code>ENDING</code> is gone, and that is the point of the turn.</b> It ships today as a dropdown beside FRAME, asking somebody who has written nothing how their season ends. It is storytelling, so it moves into the conversation and arrives on the season record &#8212; drawn filled on <b>99d</b>.",
+              "<b>The three that stay are grouped and labelled as what they are:</b> <code>DEFAULTS · CHANGE LATER</code> over FRAME, EPISODES and LENGTH. The build has the same fields under a foot line (<code>defaults · change them here or later</code>) and shows them for a Microdrama only.",
+              "<b>Verified on disk:</b> picking 90–120s lands <code>episodeSecondsMin: 90</code> / <code>episodeSecondsMax: 120</code> in <code>season.json</code>.",
+              "The kind cards hold a banner area with no art yet, so the choice is still made by reading. Beyond the drawing: a <code>Series name</code> field, and a primary that reads <code>Create Series and Season 1</code> for a Microdrama."] },
   },
   {
-    id: "53b", step: "Day one",
-    actions: [{ match: "Write the first scene", to: "14c", hint: "straight to a scene — the storyboard" },
-              { match: "Shape the whole thing first", to: "89a", hint: "decide what it is first" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId",
-      notes: ["<b>Turn 93: this frame is a one-off Video's day one, not an episodic production's.</b> A Microdrama is created saying how many episodes it has, so its empty state is already drawn — 91a with every tile dashed — and its front page is its season. What it adds when nothing is decided is one line naming Production Chat, because a board of dashed tiles says what is missing and not what to do about it.",
-              "<b>And the check behind this frame was wrong.</b> Day one counted scenes, takes and chapters — three things a microdrama can be a long way into a season without having — so a season with a question, an ending and three written episodes still opened here, offering <code>Shape the whole thing first</code> to somebody who had just done exactly that, while Season next door said <code>3 written</code>.",
-              "<b>Built to the drawing (turn 53b).</b> The production's own name, the line saying nothing is written yet, a box to type in, the promise <code>talking writes nothing · you accept what you keep</code>, and both ways in — all as drawn.",
-              "<b>What stood here is gone:</b> frame 43b's world inventory and its rail of canon seeds, which turn 53 cut and turn 83 superseded in whole. Turn 83 leaves seeds a way back, but only once the plain path has been used and found wanting — a decision to take deliberately rather than by leaving the old screen up.",
-              "<b>Sending lands in Production Chat.</b> What you type becomes the opening line of the production's own thread, and the chat shows it back with a way to keep going — a send that landed on a screen with no trace of it would read as a lost message.",
-              "The composer carries attach and voice, which the house binds every composer to since turn 41; a file dropped here is filed as the production's own artifact, since there is no conversation yet to attach it to.",
-              "Beyond the drawing: the Delivery aspect selector (issue 389) sits <i>below</i> the two cards, so it stays reachable without interrupting the opening the frame draws.",
-              "A Story production keeps its own day one (frame 54a) — this frame is drawn for a Video production and only that branch changed."] },
+    id: "99c", step: "Season · day one, and Arke is already there",
+    actions: [{ match: "Set the question", to: "99d", hint: "say what it is about" }],
+    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/season",
+      notes: ["<b>Newly drawn (turn 99): the day one turn 93 said had no frame.</b> An episodic production is created saying how many episodes it has, so its empty state is the season with every tile dashed &#8212; not 53b's <i>nothing is written yet</i> card, which belongs to a one-off video and stays drawn for it.",
+              "<b>Arke is docked from the first second</b>, the same panel turn 97 drew beside the storyboard, one level up: the subject in its header, chips for the first move, and a way to put it away. There is nothing to read on this page yet, so the panel is the page.",
+              "<b>The board ships</b> &#8212; dashed tiles, the counts, <code>OPEN TO START IT</code>, verified against a real production on disk. <b>The panel ships nowhere.</b> The conversation is a separate page today (<code>Production Chat</code>, <code>/story</code>), and the rail still carries it as an item.",
+              "<b>The rail loses Production Chat and gains Story structure</b>, indented under Season. Neither is built: the item still reads <code>Production Chat</code>, and there is no Story structure anywhere.",
+              "The unanswered question is one muted line, not a <code>THE QUESTION IT ANSWERS</code> column with nothing under it. A label over an empty space is a form; a question is an invitation."] },
   },
   {
-    id: "89a", step: "Production Chat · the conversation",
-    actions: [{ match: "Wrap up · stage what is settled", to: "91a", hint: "write what is settled, and land on the season" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId/story",
-      notes: ["<b>Turn 96 corrects turns 91 and 92 here.</b> Wrap-up <i>writes</i> — the gate says so itself (<code>Accept all writes; it does not stage for a screen to visit afterwards</code>), and a run on 2026-08-21 moved <code>season.json</code> v1&#8594;v2 and created <code>story.json</code> on one press with no proposal left standing. The drawing still says <code>stage what is settled</code>; the build now says <code>write what is settled</code>, and the drawing is the stale side.",
-              "<b>Turn 92: the wrap-up is built.</b> It was drawn on this frame from the start and existed nowhere, so this screen had a link to Season and no way to turn a conversation into anything — the first hop anybody walks was the one place the pattern was missing. The button now stages what is settled, says <code>nothing is settled yet · save a point above to make it ready</code> while it cannot be pressed, and shows a refused wrap-up rather than swallowing it.",
-              "<b>And the rail's second state with it.</b> Once wrap-up has staged the season, the same rail becomes the staged proposal under <b>Accept Proposal</b>, and accepting lands on Season. One component draws that state at every level, so the season's and the episode's cannot drift apart.",
-              "<b>Newly drawn (turn 89).</b> Frame 44a drew this screen with a staged-proposal rail; three turns of argument later the rail beside a <i>conversation</i> holds what it understood, not what it staged. This is the frame for what ships — 44a stands as the drawing it replaced.",
-              "<b>It is called Production Chat.</b> &#8220;Development&#8221; named a phase of filmmaking rather than a thing on a screen. This is World Chat with a production for a subject — same transcript, same points, same wrap-up, same gate — and the name says so.",
-              "<b>The details moved out.</b> What the conversation settles is read next door, on <code>Season</code> or <code>Overview</code>, which is its own rail item. Every screen used to be half a place to make something and half a place to read it, and a person could not tell which they were doing.",
-              "<b>Turn 91 amends this frame on one point.</b> The rail's two states belong to two <i>moments</i>, not two screens: while talking it holds these points, and at wrap-up the same rail becomes the staged proposal under <code>Accept Proposal</code> — drawn one level down on 91b, and the same at every level. Accepting lands you on the season.",
-              "The form editor behind <code>Start the overview</code> is gone, and so is the button that used to send you to World Chat."] },
-  },
-  {
-    id: "91a", step: "Season · the overview",
-    actions: [{ match: "Her mother\u2019s hour", to: "91b", hint: "open an episode" },
-              { match: "Arcs \u00b7 4", to: "48b", hint: "the season's other tab" }],
-    built: { status: "built", route: "#/w/:worldId/p/:prodId/season",
-      notes: ["<b>Turn 92: a press that stages something says so where it was pressed.</b> Opening a blank tile staged the episode exactly as intended and changed nothing on screen — the only mark anywhere was an unlabelled dot in the far corner of the chrome. The tile now answers immediately with <code>STARTING…</code> and settles into a <code>STAGED · NOT WRITTEN YET</code> tile carrying the name and number the proposal gave it.",
-              "<b>The board reads the gate's own labels</b> — <code>Title</code>, <code>Order</code>, capitalised for reading — which a lowercase lookup missed silently, producing an unnumbered tile wearing a proposal summary for a title.",
-              "<b>Built to the drawing (turn 91).</b> The production's own title as the heading, the counts as pills, and the season record — question, ending, inherited Series engine — in the header rather than behind a tab. Two tabs: <code>Episodes · 7</code> and <code>Arcs · 0</code>.",
-              "<b>Three screens became one.</b> The Season tab, the separate episode board and the Direction tab are gone; Direction keeps its field on <code>season.json</code> and the conversation may still settle it.",
-              "<b>Dashed tiles ship</b>, seven wide from the day the season declares seven — verified against a real production on disk: 3 written, 4 reading <code>OPEN TO START IT</code>, with <code>4 of 7 promised by the season and not started</code> beneath.",
-              "<b>A missing style, found by looking.</b> <code>fy-emptycard</code> had three callers and no CSS anywhere, so the blank tiles came out in the browser's own grey-and-outset button chrome. Defined now, dashed as drawn.",
-              "Beyond the drawing: the <code>↑ ↓</code> reorder buttons and the season <b>Findings</b> panel, both of which predate turn 91 and still earn their place."] },
-  },
-  {
-    id: "48b", step: "Arcs · lanes across the season",
-    actions: [{ match: "Episodes", to: "91a", hint: "back to the episodes" }],
-    built: { status: "drifted", route: "Season \u2192 Arcs tab",
-      notes: ["<b>Read the strip around this one as retired.</b> This is the old drawing, so it still shows four tabs including Direction; turn 91 leaves the Arcs grid itself untouched and replaces everything around it with 91a.",
-              "The stalled-lane callout ships (<code>\"{arc}\" has no payoff</code>) \u2713.",
-              "Cells print the literal words <code>SETUP</code> / <code>TURN</code> / <code>PAYOFF</code> and <code>\u2014</code>, where the drawing holds a phrase per cell (<i>rings alone</i>, <i>shows Odile</i>) with the markers alongside.",
-              "<code>Add a lane</code> and the composer row are absent."] },
+    id: "99d", step: "Season · underway, and the panel stages a change",
+    actions: [{ match: "Her mother’s hour", to: "91b", hint: "open an episode" }],
+    built: { status: "drifted", route: "#/w/:worldId/p/:prodId/season",
+      notes: ["<b>The same screen once there is something to read</b>, and the panel holding a staged proposal under <b>Accept</b> / <b>Discard</b> &#8212; turns 92 and 96's wrap-up moved onto the page it is about. One component draws this at every level, so the season's accept and the scene's cannot drift apart.",
+              "<b><code>HOW IT ENDS</code> is filled here and asked nowhere.</b> Turn 99 takes ENDING off creation; this is where it lands, put there by the thing beside it.",
+              "<b>Arcs loses its tab.</b> The season is its episodes: one heading, one grid. 48b's arcs grid is undisturbed in the master and moves behind <b>Story structure</b>, off the default walk — which is why this walk no longer passes through it.",
+              "<b>What ships:</b> the season page with the record in its header, the tiles, <code>STAGED · NOT WRITTEN YET</code> answering a press immediately (turn 92), and the accept itself &#8212; on the Production Chat page rather than here, and verified: one press moved <code>season.json</code> v1&#8594;v2 and created <code>story.json</code> with no proposal left standing.",
+              "<b>What does not:</b> the panel, <code>Story structure</code>, and the tab strip's removal &#8212; the build still shows <code>Episodes · 7</code> and <code>Arcs · 0</code> as peers."] },
   },
   {
     id: "91b", step: "Episode Chat · and the proposal it ends in",
@@ -204,12 +175,13 @@ const mapHtml = `
   <div class="map__head">
     <h2>How a season becomes a film</h2>
     <p>
-      One pattern, three times: <b>a chat that makes it, and a screen that shows what it made.</b> The
+      One pattern, three times: <b>the thing itself on the page, and Arke docked beside it.</b> The
       season decides what the thing is; an episode decides what happens in it and <b>makes the scenes it
       needs</b>; a scene decides how it is shot. Nothing below a level exists until the level above has
-      said what it needs, which is why the arrows only point one way. Beside every chat is what it
-      understood so far; beside every details screen is what is staged and waiting on a yes — two
-      different things, never drawn as one.
+      said what it needs, which is why the arrows only point one way. <b>Turn 99 finishes the pattern
+      upwards</b>: the chat stops being a place you go to and becomes the panel on the page it is about,
+      the way turn 97 drew it beside the storyboard. A hand edit saves; a change Arke proposes is staged,
+      field by field, and waits on a yes. The episode is the level still drawn as a page of its own.
     </p>
   </div>
 
@@ -217,29 +189,29 @@ const mapHtml = `
     <div class="lvl">
       <div class="lvl__spine">
         <span class="lvl__n">1</span>
-        <span class="lvl__thread">Production Chat</span>
+        <span class="lvl__thread">the docked panel</span>
       </div>
       <div class="lvl__body">
         <div class="lvl__title">The season · what this whole thing is</div>
         <div class="cards">
-          <div class="card is-built" data-goto="89a">
+          <div class="card is-part" data-goto="99c">
             <div class="card__k">Talk</div>
-            <div class="card__d">One thread for the production. <b>Beside it: what it understood so far</b> — the season question, each episode, each arc — still soft, changed by saying more.</div>
+            <div class="card__d">One thread for the production, <b>docked on the page it is about</b> (turn 99). No Production Chat to visit — the same panel turn 97 drew beside the storyboard, one level up.</div>
             <div class="card__f">.conversations/cv_*</div>
           </div>
-          <div class="card is-built">
+          <div class="card is-part" data-goto="99d">
             <div class="card__k">Accept</div>
-            <div class="card__d">At the end the same rail becomes <b>the staged proposal</b>, every field with what it was and what it would become, under one action. <b>Accept Proposal</b>, not <i>turn this into a proposal</i>.</div>
+            <div class="card__d">A change arrives in the panel as <b>a staged proposal</b>, field by field, under <b>Accept</b> / <b>Discard</b>. Built, on the page it is leaving.</div>
             <div class="card__f">.proposals/pr_*</div>
           </div>
-          <div class="card is-built" data-goto="91a">
+          <div class="card is-built" data-goto="99d">
             <div class="card__k">The season page</div>
-            <div class="card__d">What it is, in the header. What is plural, as tabs: <b>Episodes</b> and <b>Arcs</b>. One season per production — another season is another production.</div>
+            <div class="card__d">What it is, in the header; its episodes below. <b>No tabs</b> — a season is its episodes. One season per production; another season is another production.</div>
             <div class="card__f">season.json</div>
           </div>
-          <div class="card is-drifted" data-goto="48b">
-            <div class="card__k">Arcs</div>
-            <div class="card__d">What changes across the season. Needs episodes first — a lane names the episode it lands in.</div>
+          <div class="card is-todo">
+            <div class="card__k">Story structure</div>
+            <div class="card__d">Arcs, themes, setups and payoffs — one rail item under Season, <b>off the default walk</b> (turn 99). Arke follows a lane without the screen teaching one.</div>
             <div class="card__f">season.json</div>
           </div>
         </div>
