@@ -361,11 +361,17 @@ export function ProductionConversation({
 }
 
 /**
- * Wrap-up: the end of a conversation, in one press (design turns 89, 92).
+ * Wrap-up: the end of a conversation, in one press (design turns 89, 92; corrected by 96).
  *
- * What is settled gets staged together, as one proposal, at the gate. Nothing is written by this
- * button — the accept that follows does that, and it lives in this same rail once there is
- * something to accept.
+ * What is settled goes to the gate together and is **written**. This said "stage what is settled"
+ * and promised an accept that would follow, which is not what happens: wrap-up commits, as the
+ * coordinator's own comment says it must — "Accept all writes; it does not stage for a screen to
+ * visit afterwards", because several changes staged against one base make the first accept
+ * staleize the second. Verified end to end on 2026-08-21: one press moved season.json v1 to v2
+ * and created story.json, with no proposal left standing.
+ *
+ * The staged rail beside a conversation is therefore for proposals something *else* staged — a
+ * dashed episode tile, a hand edit — never for what this button produces.
  */
 function WrapUp({
   worldId,
@@ -400,7 +406,7 @@ function WrapUp({
           setWrapping(true);
         }}
       >
-        {wrapping ? "Staging them…" : `Wrap up · stage what is settled${carried > 0 ? ` · ${carried}` : ""}`}
+        {wrapping ? "Writing them…" : `Wrap up · write what is settled${carried > 0 ? ` · ${carried}` : ""}`}
       </Button>
       {/* A refused wrap-up wrote nothing, so the panel above is unchanged and says nothing about
           it. Without this line the press leaves no trace at all. */}

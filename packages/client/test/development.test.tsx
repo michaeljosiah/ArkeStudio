@@ -311,7 +311,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     // Production Chat had a link to Season and nothing else: no way to stage what had been said,
     // no way to accept it. The first hop anybody walks was the one place the pattern was missing.
     const html = chat(withMicrodrama([ONE]));
-    assert.match(html, /Wrap up · stage what is settled/);
+    assert.match(html, /Wrap up · write what is settled/);
     // Turn 95: no caption under it. The panel above already shows what is settled and what is
     // still a maybe, and the button's disabled state is that same fact.
     assert.doesNotMatch(html, /save a point above to make it ready/);
@@ -455,7 +455,7 @@ describe("the pattern reaches the scene (design turn 94)", () => {
   it("its rail is the same two states as every level above", () => {
     const html = render(FIXTURE_STATE, CHAT, <SceneChatScreen />, "/w/:worldId/p/:prodId/story/scenes/:sceneId");
     assert.match(html, /What it understood/, "points while nothing is staged");
-    assert.match(html, /Wrap up · stage what is settled/, "and the wrap-up that ends it");
+    assert.match(html, /Wrap up · write what is settled/, "and the wrap-up that ends it");
     assert.doesNotMatch(html, /Accept Proposal/, "nothing staged, so nothing to accept");
   });
 
