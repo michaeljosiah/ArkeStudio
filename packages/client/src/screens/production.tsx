@@ -1564,13 +1564,32 @@ function TakesView({
   onContact: () => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
-  const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
+  const all = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
-  const shotId = selectedShotId ?? shots[0]?.id ?? null;
-  const shot = shots.find((s) => s.id === shotId) ?? null;
+  const shotId = selectedShotId ?? all[0]?.id ?? null;
+  const shot = all.find((s) => s.id === shotId) ?? null;
   const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
-  const takes = production && shotId ? takesForShot(production, shotId) : [];
-  const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;
+  /*
+   * The chips are this scene's shots, not the production's (found by driving: a production with
+   * two scenes drew three chips, two of them reading "Shot 1", because a shot's number is
+   * scene-local and flattening the production makes it ambiguous). "Every shot" means every shot
+   * of the thing you are looking at, which is what the frame draws.
+   */
+  const shots = scene?.shots ?? [];
+  /*
+   * Only takes there is something to watch. A per-shot charge-split record carries the
+   * acceptance and no media of its own — the pixels live on the pass take covering the same
+   * shot — and a grid of things you watch must not offer one, which read as `running…` for a
+   * clip that finished ten days ago. Anything still in flight has no `completedAt` and stays.
+   */
+  const takes = (production && shotId ? takesForShot(production, shotId) : []).filter(
+    (t) => t.media !== undefined || t.completedAt === undefined,
+  );
+  const acceptedId = production && shotId ? acceptedTakeId(production, shotId) : null;
+  /* And the mark goes on the take that actually holds the pixels the acceptance stands for. */
+  const accepted =
+    takes.find((t) => t.id === acceptedId)?.id ??
+    (acceptedId !== null ? [...takes].reverse().find((t) => t.media !== undefined)?.id ?? null : null);
   /* What is worth looking at: the one already accepted, or the newest that came back. */
   const [pickedId, setPickedId] = useState<string | null>(null);
   const picked =
@@ -1578,7 +1597,9 @@ function TakesView({
     takes.find((t) => t.id === accepted) ??
     takes[takes.length - 1] ??
     null;
-  const acceptedCount = shots.filter((s) => production && acceptedTakeId(production, s.id) !== null).length;
+  const acceptedCount = (scene?.shots ?? []).filter(
+    (s) => production && acceptedTakeId(production, s.id) !== null,
+  ).length;
   if (!production || !scene || !shot) {
     return (
       <div className="fy-prodmain" data-screen="generate-workspace">
