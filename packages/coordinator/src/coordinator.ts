@@ -7428,7 +7428,10 @@ export class Coordinator {
           await run(category === "sheet-search" ? "search_sheets" : "search_canon", { query });
         }
         for (const target of plan.targets) {
-          if (target.kind === "world") continue;
+          // Only the world's own entities have a tool to read them. The production records a
+          // subject may now name (turn 95's fix) have no `get_entry`/`get_sheet` equivalent, so
+          // they are skipped exactly as `world` is rather than reaching a nonexistent call.
+          if (target.kind !== "canon" && target.kind !== "sheet") continue;
           const id = target.kind === "canon" ? target.entryId : target.sheetId;
           await run(target.kind === "canon" ? "get_entry" : "get_sheet", { id });
           /*

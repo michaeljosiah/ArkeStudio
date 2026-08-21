@@ -124,11 +124,16 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
         entity = sources.bundle.canon.find((c) => c.id === entryId);
         if (!entity) return [{ kind: "world-entity-missing", ref: label }];
         current = canonObservation(entity, sources.bundle.meta.canonRevision);
-      } else {
+      } else if (evidence.ref.kind === "sheet") {
         const sheetId = evidence.ref.sheetId;
         entity = sources.bundle.sheets.find((s) => s.id === sheetId);
         if (!entity) return [{ kind: "world-entity-missing", ref: label }];
         current = sheetObservation(entity);
+      } else {
+        // A production record has no observed version or content hash to compare a citation
+        // against, so a citation naming one cannot be checked — which is a missing entity as far
+        // as this check is concerned, and is said rather than crashed on.
+        return [{ kind: "world-entity-missing", ref: label }];
       }
 
       const problems: EvidenceProblem[] = [];
