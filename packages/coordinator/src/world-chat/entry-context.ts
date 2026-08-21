@@ -1,4 +1,5 @@
-import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
+import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
+import { productionAspect, productionShape } from "@arke-studio/contracts";
 
 /**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
@@ -43,6 +44,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const lines = [
         `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit.`,
       ];
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
       if (production?.story) {
         lines.push(
           `The overview is v${production.story.version}${production.story.logline ? ` — logline: "${clip(production.story.logline)}"` : ""}${production.story.spine ? `; spine: "${clip(production.story.spine)}"` : ""}.`,
@@ -70,6 +73,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const lines = [
         `This is the episode thread for ${named} in the production ${context.productionId}. An episode is its promise and its scenes in order; a script belongs to a scene and to nothing above it.`,
       ];
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
       if (episode) {
         const promise = episode.promise;
         if (promise && (promise.opens || promise.turn || promise.closes)) {
@@ -111,6 +116,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
        * whose shots are invisible to its own thread cannot be talked about, which is what the
        * thread is for.
        */
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
       if (scene) {
         lines.push(
           scene.shots.length > 0
@@ -134,6 +141,45 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       return lines.join(" ");
     }
   }
+}
+
+/**
+ * What kind of thing is being made, and what that kind asks of an episode (design turn 99).
+ *
+ * Found by asking (2026-08-21): a season thread proposed seven excellent episodes that read like
+ * short-film beats, because nothing had told it they were forty-five-second vertical ones. The
+ * kind and its numbers were on disk from the moment the production was created — episode count,
+ * the length range, the hook window, the frame — and none of it reached the turn. A profile that
+ * only the screens can see is not a profile.
+ *
+ * The numbers are stated, never the craft: how to use three seconds is the model's job, but it
+ * cannot do that job without being told there are three.
+ */
+function describeShape(production: ProductionBundle | undefined): string | null {
+  if (!production) return null;
+  const shape = productionShape(production.meta);
+  const bits: string[] = [];
+  const defaults = production.season?.defaults;
+  if (shape.isEpisodic) {
+    const count = defaults?.episodeCount;
+    bits.push(
+      `This is a ${shape.kindLabel.toLowerCase()}: a season of ${count !== undefined ? count : "several"} episodes, each one a complete piece that also carries the next.`,
+    );
+    if (defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined) {
+      bits.push(
+        `An episode runs ${defaults.episodeSecondsMin}–${defaults.episodeSecondsMax} seconds — a handful of shots, one turn, one thing left hanging. Anything that needs a second act does not fit.`,
+      );
+    }
+    if (defaults?.hookWindowSec !== undefined) {
+      bits.push(
+        `The first ${defaults.hookWindowSec} seconds are the hook: whatever makes somebody stay has to be inside them, not built toward.`,
+      );
+    }
+  } else {
+    bits.push(`This is a ${shape.displayLabel.toLowerCase()} — one continuous piece, not episodes.`);
+  }
+  bits.push(`It delivers in ${productionAspect(production.meta)}${productionAspect(production.meta) === "9:16" ? ", so blocking is vertical: one subject, close, and the frame cannot hold a wide two-shot" : ""}.`);
+  return bits.join(" ");
 }
 
 /** Bounded quotation: enough to recognise the text, never the whole document. */

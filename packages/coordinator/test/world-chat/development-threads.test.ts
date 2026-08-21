@@ -140,6 +140,17 @@ describe("production-scoped threads (issue 400)", () => {
     assert.match(scene, /Every shot inherits:/, "with what the scene hands down to all of them");
   });
 
+  it("every thread is told what kind of thing is being made, and its numbers", async () => {
+    // Found by asking (2026-08-21): a season thread proposed seven excellent episodes that read
+    // like short-film beats, because nothing had told it they were forty-five-second vertical
+    // ones. The kind and its numbers were on disk from creation and reached no turn.
+    const { store } = await world();
+    const bundle = store.getBundle();
+    const production = describeEntryContext({ kind: "production", productionId: "saltlight" }, bundle);
+    assert.match(production, /one continuous piece, not episodes/, "a one-off says so");
+    assert.match(production, /It delivers in /, "and names the frame it delivers in");
+  });
+
   it("an overview candidate wraps up as a story-overview proposal and lands through the gate", async () => {
     const w = await world();
     const before = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.story!;

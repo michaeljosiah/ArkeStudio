@@ -95,7 +95,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
        * makes is "they said this", and `includes` is exactly that claim. `normaliseEvidence`
        * puts the offsets right before the candidate is stored, so the record stays exact.
        */
-      if (message.text.includes(evidence.quote)) return [];
+      if (locateQuote(message.text, evidence.quote) !== null) return [];
 
       if (evidence.end > message.text.length || evidence.start > evidence.end) {
         return [{ kind: "message-span-out-of-range", messageId: evidence.messageId }];
@@ -152,7 +152,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
       // report is "this moved", not a second complaint that follows from the first.
       if (problems.length === 0) {
         const haystack = quotableText(entity, evidence.field);
-        if (!haystack.includes(evidence.quote)) {
+        if (locateQuote(haystack, evidence.quote) === null) {
           problems.push({ kind: "world-quote-not-found", ref: label, quote: evidence.quote });
         }
       }
@@ -166,7 +166,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
         return [{ kind: "attachment-content-changed", attachmentId: evidence.attachmentId }];
       }
       const passages = sources.attachmentText.get(evidence.attachmentId);
-      if (passages === undefined || !passages.some((text) => text.includes(evidence.quote))) {
+      if (passages === undefined || !passages.some((text) => locateQuote(text, evidence.quote) !== null)) {
         return [
           {
             kind: "attachment-quote-not-found",
@@ -178,6 +178,58 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
       return [];
     }
   }
+}
+
+/**
+ * Where a quotation sits in a text, forgiving how the text happens to be laid out (§5.8).
+ *
+ * The claim a quotation makes is "these words, in this order, are in this entity" — not "these
+ * bytes". Canon bodies are markdown wrapped at about ninety-five columns, so a sentence quoted
+ * across a wrap arrives with a space where the file has a newline and a byte-exact `includes`
+ * can never match it. Found by driving on 2026-08-21: two well-grounded season answers were
+ * refused in a row, and the harder a model tried to quote real canon the more certainly it
+ * failed.
+ *
+ * So the comparison folds the things that are about rendering rather than content: runs of
+ * whitespace become one space, and the typographic variants of quotes and dashes become their
+ * plain forms. Nothing else is forgiven — every word must still be present, in order, which is
+ * the whole of what the citation asserts. The returned span is in the ORIGINAL text, so a
+ * verified quotation still stores offsets that point at the real words.
+ */
+export function locateQuote(haystack: string, quote: string): { start: number; end: number } | null {
+  const fold = (ch: string): string => {
+    if (/\s/.test(ch)) return " ";
+    if (ch === "\u2018" || ch === "\u2019") return "'";
+    if (ch === "\u201C" || ch === "\u201D") return '"';
+    if (ch === "\u2013" || ch === "\u2014" || ch === "\u2212") return "-";
+    if (ch === "\u00A0") return " ";
+    return ch;
+  };
+  // A projection of the text with runs of whitespace collapsed, and an index back to the
+  // original for every character kept — so a match found here can be reported as a real span.
+  const project = (text: string): { flat: string; at: number[] } => {
+    let flat = "";
+    const at: number[] = [];
+    let lastWasSpace = false;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = fold(text[i]!);
+      if (ch === " ") {
+        if (lastWasSpace || flat === "") continue;
+        lastWasSpace = true;
+      } else lastWasSpace = false;
+      flat += ch;
+      at.push(i);
+    }
+    return { flat, at };
+  };
+  const hay = project(haystack);
+  const needle = project(quote).flat.trim();
+  if (needle === "") return null;
+  const found = hay.flat.indexOf(needle);
+  if (found === -1) return null;
+  const start = hay.at[found]!;
+  const lastKept = hay.at[found + needle.length - 1]!;
+  return { start, end: lastKept + 1 };
 }
 
 export function verifyAllEvidence(
@@ -204,8 +256,8 @@ export function normaliseEvidence(
     if (e.kind !== "message") return e;
     const message = messages.find((m) => m.id === e.messageId);
     if (!message || message.text.slice(e.start, e.end) === e.quote) return e;
-    const at = message.text.indexOf(e.quote);
-    return at === -1 ? e : { ...e, start: at, end: at + e.quote.length };
+    const span = locateQuote(message.text, e.quote);
+    return span === null ? e : { ...e, start: span.start, end: span.end };
   });
 }
 
