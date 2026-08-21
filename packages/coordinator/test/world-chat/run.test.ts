@@ -401,4 +401,61 @@ describe("a turn that never answers", () => {
     const { runner, conversationId } = await setup(fakeAdapter(["x"]));
     assert.equal(runner.cancel(conversationId), false);
   });
+
+  it("says what was wrong with the answer, not that something was", async () => {
+    /*
+     * Found on 2026-08-21 driving a production thread in the installed app. Two turns failed and
+     * the only record anywhere — log line, run detail, the line the screen could have shown — was
+     * the word "schema". The comment above the code that produced it said the problems "are
+     * already worded for a person and are the whole reason this failed", and the code mapped
+     * `.code`, throwing the wording away. Unreadable in exactly the way it was written to fix.
+     */
+    const failures: string[] = [];
+    const worldPath = await tempDir("arke-cause-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+
+    // Valid JSON, wrong shape — the schema path rather than the not-json one.
+    const wrongShape = JSON.stringify({ reply: 7, propositions: "not an array" });
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([wrongShape, wrongShape]),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      now: NOW,
+      onTurnFailed: ({ cause }) => void failures.push(cause),
+    });
+
+    const outcome = await runner.send(store, conversationId, "what happened here?");
+    assert.equal(outcome.status, "failed");
+    assert.equal(failures.length, 1, "the failure is reported once");
+    const cause = failures[0]!;
+    assert.match(cause, /^answer rejected: /);
+    assert.ok(
+      cause.replace("answer rejected: ", "").trim().length > "schema".length,
+      `the cause carries the wording, not a code: ${cause}`,
+    );
+    assert.notEqual(cause, "answer rejected: schema", "which is what it used to say, every time");
+
+    // And the retry the run recorded says the same, since that is the copy that lives on disk.
+    const events = (await store.read()).events;
+    const retry = events.map((e) => e.event).find((e) => e.type === "run.retry-started");
+    assert.ok(retry, "a corrective turn was taken");
+    const detail = (retry as { run: { safeDetail?: string } }).run.safeDetail ?? "";
+    assert.notEqual(detail, "schema", "the run's own record is readable too");
+    assert.ok(detail.length > 0);
+  });
 });
