@@ -131,6 +131,13 @@ describe("production-scoped threads (issue 400)", () => {
     );
     assert.match(scene, /scene thread for "The verse rises"/);
     assert.match(scene, /no script yet/, "the scene's current state is narrated");
+    // Found by asking (2026-08-21): a person in this thread asked what happens shot by shot, and
+    // the studio could only say how many shots there were. A scene whose shots are invisible to
+    // its own thread cannot be talked about, which is what the thread is for.
+    assert.match(scene, /Its shots, in order:/, "the shots travel, not just their count");
+    assert.match(scene, /sh_12 #12/, "each one named by id and number");
+    assert.match(scene, /Maren at the rail/, "and by title, so it can be referred to");
+    assert.match(scene, /Every shot inherits:/, "with what the scene hands down to all of them");
   });
 
   it("an overview candidate wraps up as a story-overview proposal and lands through the gate", async () => {

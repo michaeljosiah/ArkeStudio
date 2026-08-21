@@ -103,7 +103,34 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
             .map((b) => `${b.id} [${b.kind}${b.speaker ? ` ${b.speaker}` : ""}] "${clip(b.text)}"`)
             .join("; ")}.`,
         );
-      } else if (scene) lines.push(`It has no script yet, and ${scene.shots.length} shot${scene.shots.length === 1 ? "" : "s"}.`);
+      } else if (scene) lines.push("It has no script yet.");
+      /*
+       * The shots themselves, always. Found by asking: a person in this thread asked what happens
+       * in the scene shot by shot, and the studio could only say how many there were — it knew the
+       * title, the production and the count, and correctly refused to invent the rest. A scene
+       * whose shots are invisible to its own thread cannot be talked about, which is what the
+       * thread is for.
+       */
+      if (scene) {
+        lines.push(
+          scene.shots.length > 0
+            ? `Its shots, in order: ${scene.shots
+                .slice(0, 30)
+                .map(
+                  (sh) =>
+                    `${sh.id} #${sh.number} "${sh.title}"${
+                      sh.durationSec !== undefined ? ` (${sh.durationSec}s)` : ""
+                    } — "${clip(sh.description)}"`,
+                )
+                .join("; ")}${scene.shots.length > 30 ? "; …" : ""}.`
+            : "It has no shots yet.",
+        );
+        if (scene.inherits) {
+          const { location, timeOfDay, tone } = scene.inherits;
+          const parts = [location ? `location ${location}` : null, timeOfDay, tone].filter(Boolean);
+          if (parts.length > 0) lines.push(`Every shot inherits: ${parts.join(", ")}.`);
+        }
+      }
       return lines.join(" ");
     }
   }
