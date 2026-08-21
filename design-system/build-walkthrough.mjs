@@ -117,7 +117,7 @@ const STEPS = [
   {
     id: "14c", step: "Scene 4 · the storyboard",
     actions: [{ match: "Advanced", to: "14d", hint: "the full shot, behind the card" },
-              { match: "Generate scene", to: "52a", hint: "the plan — the only thing that spends" }],
+              { match: "Generate scene", to: "52c", hint: "the plan — the only thing that spends" }],
     built: { status: "missing", route: "#/w/:worldId/p/:prodId/scenes/:sceneId",
       notes: ["<b>Newly adopted (turn 97), replacing 14a.</b> The scene page is its storyboard and the storyboard is the editor: the script is written on the card itself, <code>@</code> names anything in the world and rides along as an image reference, and <code>Advanced</code> (under a card's <code>⋯</code> — scroll the strip to shot 15) opens the full shot.",
               "<b>Everything a card states is derived, never stored</b> — <code>needs attention</code> / <code>story</code> / <code>storyboard</code> / <code>production-ready</code> from what exists, and <code>script changed · Re-read</code> from SPEC-023's coverage digests. The data model for all of it already ships.",
@@ -136,13 +136,15 @@ const STEPS = [
               "Nothing of this sheet exists in the build yet; the nearest surfaces are the dispatch dialog's prompt editor and the Generate workspace."] },
   },
   {
-    id: "52a", step: "The plan · before a penny moves",
-    actions: [{ match: "Two-shot at the door", to: "52b", hint: "open one shot of the plan" }],
-    built: { status: "drifted", route: "nearest: #/w/:worldId/p/:prodId/generate/dispatch",
-      notes: ["<b>Turn 52: one screen between accepting a scene and spending on it</b> — every shot showing what it will send, what it covers and what it costs; blocks with no shot as the dashed row, quoting the lines that would go missing.",
-              "<b>The only control that spends says its price in its own label</b> — <code>Generate 4 shots · $5.46</code> — with a per-shot equivalent so a single retry never re-runs the scene.",
-              "<b>Much of it ships in the dispatch dialog</b>: route-aware estimates, planned-vs-asked seconds (<code>3s planned · 4s asked</code>), carried/dropped references, warnings that name their shot and never block, and SPEC-024's pre-authorized plans behind it — proven end to end on v0.5.30 and again on 0.5.34.",
-              "What does not ship: this scene-ordered surface itself. The dialog is a form; the drawing is the scene read left to right in cut order, coverage visible without a click."] },
+    id: "52c", step: "The plan · the Director, then the price as a choice",
+    actions: [{ match: "Two-shot at the door", to: "52b", hint: "open one shot of the plan" },
+              { match: "Generate 2 passes · $5.16", to: "79a", hint: "spend on the strategy you picked" }],
+    built: { status: "missing", route: "nearest: #/w/:worldId/p/:prodId/generate/dispatch",
+      notes: ["<b>Turn 98 evolves turn 52's plan in place</b> (52a stays drawn in the master as what came before): the warning bar becomes a <b>Director's review</b> — an agent that read the scene, its findings in the words of the specific thing wrong, never blocking, <b>priced in its own header</b> (<code>$0.02</code>) because an agent reading a scene is a provider call like any other.",
+              "<b>The review ends in a recommendation in the scene's own terms</b> — <i>the action carries across both joins; nothing here needs a shot retried alone</i> — because choosing a dispatch strategy is a directorial judgment about this scene, not a preference about scenes.",
+              "<b>The price is a choice of strategy and every option names its retry unit</b>: per shot (every shot pays the route's floor — <code>3s planned · 4s asked</code>), packed passes (the floor disappears, junctions pinned on boundary frames), packed + storyboard (the board is its own priced generation and its own accept before it steers, R-25). Cheapest-per-attempt and cheapest-after-taste are different orderings; the difference is the retry unit.",
+              "<b>The spend control's label follows the selection</b> — <code>Generate 2 passes · $5.16</code> — and <code>every price is attempt one · retakes bill as they happen</code> says the one thing no estimate can cover.",
+              "<b>What ships beneath it</b>: route-aware estimates, both dispatch modes (<code>per-shot</code> / <code>whole-scene</code>), storyboards-per-pass behind their accept, and SPEC-024 pre-authorization proven to the cent ($7.98 authorized, $7.98 billed). The Director and the strategy row ship nowhere yet."] },
   },
   {
     id: "52b", step: "One shot of the plan · the prompt and its sources",
@@ -304,9 +306,9 @@ const mapHtml = `
             <div class="card__d">The assistant docks beside the strip and follows the selection. Its changes are plan cards under <b>Apply to shots</b>; a hand edit just saves.</div>
             <div class="card__f">.conversations/cv_*</div>
           </div>
-          <div class="card is-part" data-goto="52a">
+          <div class="card is-part" data-goto="52c">
             <div class="card__k">The plan</div>
-            <div class="card__d">Every shot, priced, before a penny moves. The only surface that spends.</div>
+            <div class="card__d">The Director's findings, then every shot priced — and the price as a choice of strategy, each naming what a retry re-runs.</div>
             <div class="card__f">plans/pl_*</div>
           </div>
         </div>
