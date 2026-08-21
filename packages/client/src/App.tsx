@@ -62,6 +62,7 @@ import {
   ProductionCastScreen,
   ProductionHomeScreen,
   ProductionLayout,
+  SceneChatScreen,
   SceneDetailScreen,
   ScenesScreen,
   ProductionChatScreen,
@@ -184,6 +185,8 @@ export function App() {
               beside the production's own, and the page it lands on sits at production level. */}
           <Route path="story/episodes/:episodeId" element={<EpisodeChatScreen />} />
           <Route path="episodes/:episodeId" element={<EpisodeDetailScreen />} />
+          {/* And once more for a scene (turn 94), the level the writing happens at. */}
+          <Route path="story/scenes/:sceneId" element={<SceneChatScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />

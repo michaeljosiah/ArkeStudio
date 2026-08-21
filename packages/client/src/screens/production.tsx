@@ -61,7 +61,6 @@ import { ClipPlayButton, clock } from "../components/player.js";
 import { mediaUrl } from "../lib/media.js";
 import { seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
-import { useTalkItThrough } from "../lib/talk-it-through.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
@@ -217,6 +216,8 @@ export function ProductionLayout() {
   const inEpisode = /\/episodes\//.test(location.pathname);
   /* `/season` keeps working as an address and now lands on the same screen as the index. */
   const inSeason = inEpisode || location.pathname.endsWith("/season");
+  /* A scene's chat lives under `story/` beside the production's own, so Scenes owns it too. */
+  const inScene = /\/scenes\/[^/]+$/.test(location.pathname);
   const item = (slug: string, label: string, count?: string, end?: boolean, also?: boolean) => {
     const Mark = MARKS[slug];
     return (
@@ -290,7 +291,7 @@ export function ProductionLayout() {
                   entry for it here. A production without a season keeps both. */}
               {!shape?.isEpisodic &&
                 item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-              {item("scenes", "Scenes", String(production?.scenes.length ?? 0))}
+              {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
               {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
               {shape?.isBranching &&
                 item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
@@ -1214,12 +1215,70 @@ export function ScenesScreen() {
 
 // ---- Scene detail (14a) ----------------------------------------------------
 
+/**
+ * Scene Chat, and the proposal it ends in (design turn 94; the shape of turns 91 and 92, one
+ * level further down).
+ *
+ * The last of the three. A scene's conversation used to open World Chat on another screen, so the
+ * pattern a person had just learned twice — talk here, accept here, land on the thing — stopped
+ * working at exactly the level where the writing happens. Same component, same two rail states,
+ * smaller subject.
+ */
+export function SceneChatScreen() {
+  const { worldId, prodId, sceneId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  const scene = production?.scenes.find((s) => s.id === sceneId);
+  if (!production || !scene || !prodId || !sceneId) {
+    return (
+      <div className="fy-story" data-screen="scene-chat">
+        <EmptyState title="Opening the scene…" />
+      </div>
+    );
+  }
+  const stem = sceneFileOf(production, scene);
+  const staged = stem
+    ? ((world?.proposals ?? []).find((sp) =>
+        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/scenes/${stem}.json`),
+      ) ?? null)
+    : null;
+  return (
+    <div className="fy-story" data-screen="scene-chat">
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        entry={{ kind: "scene", productionId: prodId, sceneId }}
+        openingNote={`Scene Chat · ${scene.number} · opening…`}
+        eyebrow={`SCENE CHAT · ${scene.number}`}
+        heading="How does this one go?"
+        emptyLine={`Nothing written for ${scene.title} yet. Say what happens in it — the script comes back in blocks that keep their ids.`}
+        placeholder="Keep shaping the scene…"
+        {...(staged
+          ? {
+              side: (
+                <StagedDecision
+                  worldId={worldId}
+                  subject={`scene ${scene.number}`}
+                  staged={staged}
+                  writes="the gate writes this scene · it creates no shots"
+                  onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}`)}
+                />
+              ),
+            }
+          : {
+              pointsEmpty:
+                "Nothing understood yet. As you talk, what the studio takes from it appears here — what happens, who is in it, what it has to establish — so you can see it thinking rather than wait for the end.",
+            })}
+      />
+    </div>
+  );
+}
+
 export function SceneDetailScreen() {
   const { worldId, prodId, sceneId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
-  const { talk, starting: talkStarting } = useTalkItThrough(worldId);
   const [tab, setTab] = useState<"shots" | "board">("shots");
   const scene = production?.scenes.find((s) => s.id === sceneId);
   if (!production || !scene) {
@@ -1247,13 +1306,11 @@ export function SceneDetailScreen() {
           </span>
           <span className="fy-h1row__push" />
           {/* The durable scene thread (SPEC-023 R-20, issue 400): script blocks are proposed
-              here and land through the same gate as everything else. */}
-          <Button
-            variant="ghost"
-            disabled={talkStarting || !prodId}
-            onClick={() => prodId && talk(`Scene · ${scene.title}`, { kind: "scene", productionId: prodId, sceneId: scene.id })}
-          >
-            {talkStarting ? "Opening…" : "Talk it through"}
+              there and land through the same gate as everything else. It opens in place now
+              rather than on World Chat (turn 94) — a pattern a person has learned twice already
+              should not stop working at the level where the writing happens. */}
+          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/scenes/${scene.id}`)}>
+            Talk it through
           </Button>
           <span className="fy-seg">
             <button type="button" className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")} onClick={() => setTab("shots")}>

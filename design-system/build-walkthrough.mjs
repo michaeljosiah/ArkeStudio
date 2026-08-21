@@ -117,7 +117,9 @@ const STEPS = [
     id: "49a", step: "The script",
     actions: [{ match: "Turn this into a proposal", to: "49b", hint: "accept the script" }],
     built: { status: "missing", route: "— no screen —",
-      notes: ["<b>Read <code>Turn this into a proposal</code> here as retired</b> (turn 91). The scene frames still carry the old wording because they have not been redrawn; the button is <code>Accept Proposal</code> at every level, since by the time a person reads what a conversation settled it already is one.",
+      notes: ["<b>Turn 94: the scene is talked through in place now.</b> Its conversation used to open World Chat on another screen, so the shape a person had learned twice — talk here, accept here, land on the thing — stopped working at the level where the writing happens. Scene Chat is the same component with a smaller subject, and its <code>Talk it through</code> stays on this production.",
+              "<b>The script surface itself is still not built</b> — no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>. What exists is the conversation that would produce one and the accept that would land it.",
+              "<b>Read <code>Turn this into a proposal</code> here as retired</b> (turn 91). The scene frames still carry the old wording because they have not been redrawn; the button is <code>Accept Proposal</code> at every level, since by the time a person reads what a conversation settled it already is one.",
               "<b>Not built.</b> There is no script surface: no block ids in the margin, no <code>S01</code> / <code>A01</code> / <code>D01</code>, no <code>accepting writes the script and creates no shots</code>.",
               "The scene screen ships a two-item strip — <code>Shots</code> and <code>Board</code> — where the drawing has four: <code>Script · Coverage · Board · Takes</code>.",
               "The <i>data model</i> is ahead of the screens: scene records carry script blocks, and a shot can cite blocks with a digest of the text at citation time."] },
@@ -281,9 +283,9 @@ const mapHtml = `
       <div class="lvl__body">
         <div class="lvl__title">One scene · how it is shot</div>
         <div class="cards">
-          <div class="card is-todo">
+          <div class="card is-built">
             <div class="card__k">Talk, then accept</div>
-            <div class="card__d">Not drawn separately, and deliberately: it is the same two screens again with a smaller subject.</div>
+            <div class="card__d">Built (turn 94), and not drawn separately, deliberately: it is the same two screens again with a smaller subject. A rail drawn once is a rail understood everywhere.</div>
             <div class="card__f"></div>
           </div>
           <div class="card is-todo" data-goto="49a">
