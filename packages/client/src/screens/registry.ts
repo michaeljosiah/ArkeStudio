@@ -67,6 +67,8 @@ export const SCREENS: ScreenEntry[] = [
   // Talking and looking are two screens (turn 88): the thread, then what it settled.
   { id: "production-chat", samplePath: `${P}/story` },
   { id: "story-overview", samplePath: `${P}/overview` },
+  // Arcs, themes, setups and payoffs — off the season and under one rail item (turn 99).
+  { id: "story-structure", samplePath: `${P}/story-structure` },
   { id: "chapter-tree", samplePath: `${P}/story/chapters` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },

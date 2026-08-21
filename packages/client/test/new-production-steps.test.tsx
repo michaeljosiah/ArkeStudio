@@ -32,30 +32,36 @@ function render(path: string): string {
   }
 }
 
-describe("creating a production is two steps (design turns 43, 53, 83)", () => {
+describe("creating a production is two steps (design turns 43, 53, 83, 99, 100)", () => {
   const NEW = `/w/${FIXTURE_WORLD_ID}/productions/new`;
 
   it("step one continues to step two rather than creating, and says which it will do", () => {
     const html = render(NEW);
-    // Video is selected by default and has three kinds, so this family cannot create from here.
+    // Video is selected by default and has five kinds, so this family cannot create from here.
     assert.match(html, /Continue · what kind of video\?/, "the action names its destination");
     assert.doesNotMatch(html, /Create production/, "and does not offer to create past the kind");
   });
 
-  it("step one promises that pressing it spends nothing", () => {
-    assert.match(
-      render(NEW),
-      /nothing generates · nothing is copied out of the world/,
-      "the caption the frame puts under the buttons",
-    );
+  it("step one asks the question rather than naming the dialog, and counts the steps it has", () => {
+    const html = render(NEW);
+    assert.match(html, /What are you making\?/, "the question is the title (turn 99)");
+    assert.doesNotMatch(html, /New production<\/div>/, "the old title is gone");
+    assert.match(html, /step 1 of 2/, "Video has a second step, so the counter is true");
   });
 
-  it("step one holds the format decision only — the kinds belong to step two", () => {
+  it("step one promises that pressing it spends nothing, in half the words", () => {
     const html = render(NEW);
-    assert.match(html, /New production/);
-    for (const medium of ["Story", "Video", "Interactive video"]) {
+    assert.match(html, /nothing generates/, "the caption the frame puts under the buttons");
+    assert.doesNotMatch(html, /nothing is copied out of the world/, "the joins line already says it");
+  });
+
+  it("step one holds the medium decision only — kinds, and interactive, belong to step two", () => {
+    const html = render(NEW);
+    for (const medium of ["Story", "Video"]) {
       assert.match(html, new RegExp(medium), `${medium} is offered`);
     }
+    // Turn 100: interactive video is a kind, so its name must not appear on the first question.
+    assert.doesNotMatch(html, /Interactive/, "interactive is a kind now, not a medium");
     assert.doesNotMatch(html, /Music video/, "kinds are not on step one");
     assert.doesNotMatch(html, /step 2 of 2/, "and neither is step two's counter");
   });
@@ -67,14 +73,30 @@ describe("creating a production is two steps (design turns 43, 53, 83)", () => {
 });
 
 describe("step two offers every kind and every default (design turn 53)", () => {
-  it("all three kinds are offered, Music video among them, in the frame's own words", () => {
+  it("five kinds are offered, interactive and other among them, in the drawn order", () => {
     assert.deepEqual(
       VIDEO_KIND_CHOICES.map((k) => k.label),
-      ["Short film", "Music video", "Microdrama series"],
-      "three kinds, in the drawn order",
+      ["Micro drama · series", "Film · short", "Music video", "Interactive", "Other"],
+      "five kinds, in the drawn order (turns 99, 100)",
     );
-    assert.equal(VIDEO_KIND_CHOICES[0]!.body, "One linear work, scenes into a cut.");
-    assert.equal(VIDEO_KIND_CHOICES[1]!.body, "Music-led timing, motifs, performance.");
+    assert.equal(VIDEO_KIND_CHOICES[0]!.body, "Episodes, vertical.");
+    assert.equal(VIDEO_KIND_CHOICES[3]!.body, "The viewer chooses.");
+  });
+
+  it("each kind carries the frame it delivers in, and only a micro drama is vertical", () => {
+    // Before turn 99 the aspect travelled for a micro drama alone, so a film could not be made
+    // vertical until after it existed — and the state defaulted to 9:16 for everything.
+    const byId = new Map(VIDEO_KIND_CHOICES.map((k) => [k.id, k.aspect]));
+    assert.equal(byId.get("microdrama"), "9:16");
+    for (const id of ["film", "music-video", "interactive", "other"] as const) {
+      assert.equal(byId.get(id), "16:9", `${id} delivers landscape unless told otherwise`);
+    }
+  });
+
+  it("how a season ends is not a default the door can ask (turn 99)", () => {
+    const html = render(`/w/${FIXTURE_WORLD_ID}/productions/new`);
+    assert.doesNotMatch(html, /ENDING/, "ending is storytelling, and belongs in the conversation");
+    assert.doesNotMatch(html, /Cliffhanger/);
   });
 
   it("episode length is a range a season can be written from", () => {

@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { ProductionChatScreen, SceneChatScreen, StoryScreen } from "../src/screens/production.js";
-import { EpisodeChatScreen, EpisodeDetailScreen } from "../src/screens/development.js";
+import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { isDayOne } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -82,6 +82,20 @@ function render(state: ClientState, path: string, element: React.ReactElement, r
   }
 }
 
+/** The whole app at a path — the rail included, which is what the rail assertions read. */
+function renderApp(state: ClientState, path: string): string {
+  __setStateForTest(state);
+  try {
+    return renderToString(
+      <MemoryRouter initialEntries={[path]}>
+        <App />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+  } finally {
+    __setStateForTest(FIXTURE_STATE);
+  }
+}
+
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
 
@@ -89,13 +103,12 @@ describe("the season page (design turn 91)", () => {
   const seasonPage = (episodes: Episode[]) =>
     render(withMicrodrama(episodes), SEASON("bell-watch-season-1"), <StoryScreen />, "/w/:worldId/p/:prodId/season");
 
-  it("has two tabs, and the season itself is the header rather than one of them", () => {
+  it("has no tabs at all: a season is its episodes (turn 99)", () => {
     const html = seasonPage([ONE]);
-    assert.match(html, /Episodes · 7/, "the plural things are the tabs");
-    assert.match(html, /Arcs · 0/);
-    // A view you always land on is not a tab; a tab nobody can explain is worse.
-    assert.doesNotMatch(html, /fy-seg__item[^>]*>Season</, "the Season tab is retired");
-    assert.doesNotMatch(html, /fy-seg__item[^>]*>Direction</, "and so is Direction's");
+    // Arcs was a peer tab, which taught a second vocabulary to somebody who did not yet have a
+    // first episode. The grid is unchanged and lives behind Story structure.
+    assert.doesNotMatch(html, /Arcs · 0/, "the Arcs tab is retired");
+    assert.doesNotMatch(html, /fy-seg__item/, "and with it the strip that held it");
     assert.match(html, /THE QUESTION IT ANSWERS/, "what the season is sits in the header");
     assert.match(html, /Who is ringing the drowned bell\?/);
     assert.match(html, /HOW IT ENDS/);
@@ -112,9 +125,9 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /OPEN TO START IT/, "the unwritten ones are a place to start, not a gap");
   });
 
-  it("shows the Episodes tab with nothing written, because that is when it is looked for", () => {
+  it("shows the board with nothing written, because that is when it is looked for", () => {
     const html = seasonPage([]);
-    assert.match(html, /Episodes · 7/, "the tab is not hidden until an episode exists");
+    assert.match(html, /7 episodes/, "the board is not hidden until an episode exists");
     assert.match(html, /0 written/);
   });
 
@@ -122,7 +135,10 @@ describe("the season page (design turn 91)", () => {
     // Turn 95 cut the caption beside this link. It claimed opening an episode opens its chat,
     // which turn 92 had already made false, and then repeated the pills.
     const html = seasonPage([ONE]);
-    assert.match(html, /&larr; Production Chat|← Production Chat/, "one way back into the thread");
+    // Turn 99 renames it: Production Chat named an implementation, Develop names something a
+    // person does. The route is unchanged — a rename is display, never wiring.
+    assert.match(html, /&larr; Develop|← Develop/, "one way back into the thread");
+    assert.doesNotMatch(html, /Production Chat/, "the old name is gone from this screen");
     assert.doesNotMatch(html, /opening an episode opens its own chat/, "the stale caption is gone");
   });
 
@@ -355,23 +371,11 @@ describe("an episodic production's front page is its season (design turn 93)", (
   const home = (prodId: string) =>
     renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/${prodId}`);
 
-  function renderApp(state: ClientState, path: string): string {
-    __setStateForTest(state);
-    try {
-      return renderToString(
-        <MemoryRouter initialEntries={[path]}>
-          <App />
-        </MemoryRouter>,
-      ).replace(/<!-- -->/g, "");
-    } finally {
-      __setStateForTest(FIXTURE_STATE);
-    }
-  }
 
   it("the production's own address shows the season, not a second screen", () => {
     const html = home(PROD);
     assert.match(html, /data-screen="development"/, "the season page is the front page");
-    assert.match(html, /Episodes · 7/);
+    assert.match(html, /7 episodes/);
     assert.doesNotMatch(html, /Nothing written yet/, "and never contradicts it with a day one");
   });
 
@@ -476,5 +480,38 @@ describe("the pattern reaches the scene (design turn 94)", () => {
     // A script belongs to a scene and creates nothing below it (turn 53).
     assert.match(html, /the gate writes this scene · it creates no shots/);
     assert.doesNotMatch(html, /What it understood/, "one rail, one state at a time");
+  });
+});
+
+describe("story structure is off the default walk (design turn 99)", () => {
+  const STRUCTURE = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/story-structure`;
+
+  it("the arcs grid is intact, on a screen of its own", () => {
+    const html = render(
+      withMicrodrama([ONE]),
+      STRUCTURE("bell-watch-season-1"),
+      <StoryStructureScreen />,
+      "/w/:worldId/p/:prodId/story-structure",
+    );
+    assert.match(html, /data-screen="story-structure"/);
+    assert.match(html, /Story structure/, "it says what it is");
+    // Nothing about the grid changed — only where it is reached from.
+    assert.match(html, /No arcs yet/, "the empty state the season used to hold behind a tab");
+    assert.match(html, /Develop is where they get decided/, "and it points at the renamed thread");
+  });
+
+  it("the rail carries it once, under Season, and only where there is a season", () => {
+    const episodic = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
+    assert.match(episodic, /Story structure<\/a>/, "one item, indented under Season");
+    assert.equal(episodic.match(/Story structure/g)?.length, 1, "and exactly one");
+    const plain = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    assert.doesNotMatch(plain, /Story structure/, "a production with no season has no lanes to hold");
+  });
+
+  it("the rail says Develop, not Production Chat (turn 99)", () => {
+    const html = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
+    const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
+    assert.ok(labels.includes("Develop"), "a thing a person does");
+    assert.ok(!labels.includes("Production Chat"), "not the name of an implementation");
   });
 });

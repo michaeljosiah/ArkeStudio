@@ -7,7 +7,7 @@ import {
   type SeasonFinding,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { Badge, Button, cx } from "../components/ui.js";
+import { Badge, Button } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
@@ -17,16 +17,17 @@ import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
  *
  * A production is exactly one season — another season is another production — so there is
  * nothing to navigate between, and the Season view whose job was to say which season you were
- * in has become this page's own header. What is left as tabs are the two things that are
- * plural: Episodes and Arcs. Direction has lost its tab and kept its field, because nobody has
- * yet been able to say what it decides that the world's look and a scene's own description do
- * not, and a tab that cannot be explained is a tab that gets filled in wrongly.
+ * in has become this page's own header.
+ *
+ * There are no tabs left (turn 99): a season is its episodes. Arcs was a peer tab, which taught
+ * a second vocabulary to somebody who did not yet have a first episode; the grid is unchanged
+ * and lives behind Story structure, one rail item under Season and off the default walk.
+ * Direction lost its tab two turns earlier and kept its field, because nobody has yet been able
+ * to say what it decides that the world's look and a scene's own description do not.
  *
  * Everything here proposes through the gate; reorder is the one direct act, and it rewrites
  * order fields alone.
  */
-
-type Tab = "episodes" | "arcs";
 
 /** Two digits, so the board reads as an ordered season rather than a list. */
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -34,7 +35,6 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const [tab, setTab] = useState<Tab>("episodes");
   if (!production) {
     return (
       <div className="fy-prodmain" data-screen="development">
@@ -44,35 +44,17 @@ export function DevelopmentWorkspace() {
   }
   const season = production.season ?? null;
   const episodes = production.episodes;
-  const arcs = season?.arcs ?? [];
   const defaults = season?.defaults;
   // The season promises a number of episodes on the day it is made (turn 87), so the board is
   // that many wide from the start — never however many happen to exist.
   const declared = Math.max(defaults?.episodeCount ?? 0, episodes.length);
   const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
   const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
-  const tabs: Array<{ id: Tab; label: string }> = [
-    { id: "episodes", label: `Episodes · ${declared}` },
-    { id: "arcs", label: `Arcs · ${arcs.length}` },
-  ];
   return (
     <div className="fy-prodmain" data-screen="development">
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
         <span className="fy-h1row__meta">{season ? `season v${season.version}` : "no season record yet"}</span>
-        <span className="fy-h1row__push" />
-        <span className="fy-seg">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={cx("fy-seg__item", tab === t.id && "fy-seg__item--active")}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </span>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <span className="fy-pill">{declared} episodes</span>
@@ -125,17 +107,17 @@ export function DevelopmentWorkspace() {
           <div style={{ font: "400 13px/1.7 var(--font-sans)" }}>
             Nothing decided yet.{" "}
             <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
-              Production Chat
+              Develop
             </NavLink>{" "}
             is where the season gets shaped — what it answers, how it ends, and what its episodes
             are. What you settle there lands here.
           </div>
         </div>
       )}
-      {tab === "episodes" ? <EpisodesBoard /> : <ArcsView />}
+      <EpisodesBoard />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
-          &larr; Production Chat
+          &larr; Develop
         </NavLink>
       </div>
     </div>
@@ -322,7 +304,34 @@ function FindingsPanel({ findings }: { findings: SeasonFinding[] }) {
   );
 }
 
-/** Arc lanes are things that change, not characters (turn 48): SETUP, TURN, PAYOFF in words. */
+/**
+ * Story structure (turn 99): arcs, and in time themes and setups/payoffs. Off the default walk,
+ * because a season is its episodes — reached from one rail item under Season by somebody who has
+ * gone looking for it, which is the only person the vocabulary helps.
+ *
+ * Arc lanes are things that change, not characters (turn 48): SETUP, TURN, PAYOFF in words.
+ */
+export function StoryStructureScreen() {
+  const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  if (!production) {
+    return (
+      <div className="fy-prodmain" data-screen="story-structure">
+        <EmptyState title="Opening the season…" />
+      </div>
+    );
+  }
+  return (
+    <div className="fy-prodmain" data-screen="story-structure">
+      <div className="fy-h1row">
+        <h1 className="fy-h1">Story structure</h1>
+        <span className="fy-h1row__meta">{production.meta.title}</span>
+      </div>
+      <ArcsView />
+    </div>
+  );
+}
+
 function ArcsView() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
@@ -339,7 +348,7 @@ function ArcsView() {
       {arcs.length === 0 ? (
         <EmptyState
           title="No arcs yet"
-          hint="An arc lane names the episode it lands in, so episodes come first. Production Chat is where they get decided."
+          hint="An arc lane names the episode it lands in, so episodes come first. Develop is where they get decided."
         />
       ) : (
         <div style={{ overflowX: "auto" }}>

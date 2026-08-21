@@ -70,6 +70,7 @@ import {
   VoiceLineDialogScreen,
 } from "./screens/production.js";
 import { ShotSheetScreen } from "./screens/storyboard.js";
+import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
@@ -189,6 +190,9 @@ export function App() {
           {/* And once more for a scene (turn 94), the level the writing happens at. */}
           <Route path="story/scenes/:sceneId" element={<SceneChatScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
+          {/* Arcs, themes, setups and payoffs — off the season, under one rail item
+              (turn 99): a season is its episodes. */}
+          <Route path="story-structure" element={<StoryStructureScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />

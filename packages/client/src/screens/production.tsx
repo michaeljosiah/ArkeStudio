@@ -267,6 +267,14 @@ export function ProductionLayout() {
           {shape?.isEpisodic
             ? item("", "Season", production?.season ? `v${production.season.version}` : "—", true, inSeason)
             : item("", "Dashboard")}
+          {/* Arcs, themes, setups and payoffs — one item under Season and off the default
+              walk (turn 99). It was a peer tab, which taught a second vocabulary to somebody
+              who did not yet have a first episode. */}
+          {shape?.isEpisodic && (
+            <NavLink to={`${base}/story-structure`} className="fy-prodrail__sub">
+              Story structure
+            </NavLink>
+          )}
           {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
               video does, and the count is the guests — the number the rail can say something
               true about, since the world's cast is shared and belongs to the world's own rail. */}
@@ -276,7 +284,7 @@ export function ProductionLayout() {
               {/* World Chat with a production for a subject (turn 89) — the name teaches the
                   model. Its details are their own item (turn 88), and it ends where Chapters
                   begins so the two never light together. */}
-              {item("story", "Production Chat", "chat", true)}
+              {item("story", "Develop", "chat", true)}
               {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
               {item("audio", "Audio", String(audioCount))}
@@ -287,7 +295,7 @@ export function ProductionLayout() {
               {/* World Chat with a production for a subject (turn 89): the same transcript, the
                   same points, the same wrap-up. What it sets up is read next door (turn 88), and
                   the route keeps its name — a rename is display, never wiring. */}
-              {item("story", "Production Chat", "chat", true)}
+              {item("story", "Develop", "chat", true)}
               {/* An episodic production's front page is its season (turn 93), so Season is the
                   rail's first item — drawn above, in place of Dashboard — and there is no second
                   entry for it here. A production without a season keeps both. */}
