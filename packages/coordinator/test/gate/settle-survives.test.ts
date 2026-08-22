@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -61,16 +61,13 @@ async function stageOne(gate: ProposalManager) {
 
 describe("an accepted proposal is over, whatever is left on disk", () => {
   it("survives a directory that cannot be deleted, and never comes back as open", async () => {
-    const { dir, store, gate } = await open();
+    const { dir, gate } = await open();
     const staged = await stageOne(gate);
 
     // Stand in for the busy handle: something inside the directory that refuses to go.
     const locked = join(dir, ".proposals", staged.id, "held-open");
     await mkdir(locked, { recursive: true });
     await writeFile(join(locked, "session.lock"), "held", "utf8");
-    const realRm = rm;
-    void realRm;
-
     const outcome = await gate.accept(staged.id);
     assert.equal(outcome.status, "accepted", "the commit is the decision");
 
@@ -86,7 +83,7 @@ describe("an accepted proposal is over, whatever is left on disk", () => {
   });
 
   it("a tombstone alone retires it, even if the delete never succeeds", async () => {
-    const { dir, store, gate } = await open();
+    const { dir, gate } = await open();
     const staged = await stageOne(gate);
     const accepted = await gate.accept(staged.id);
     assert.equal(accepted.status, "accepted");
@@ -109,7 +106,7 @@ describe("an accepted proposal is over, whatever is left on disk", () => {
   });
 
   it("an ordinary accept still clears its directory completely", async () => {
-    const { dir, store, gate } = await open();
+    const { dir, gate } = await open();
     const staged = await stageOne(gate);
     assert.equal((await gate.accept(staged.id)).status, "accepted");
     await assert.rejects(
