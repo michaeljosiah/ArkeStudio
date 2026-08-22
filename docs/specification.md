@@ -38,7 +38,7 @@ Three mechanics carry the product. Everything else is surface.
 
 ## 0.2 What v1 is
 
-A free, MIT-licensed, local-first desktop application. Worlds are folders of readable files
+A free, AGPL-3.0-licensed, local-first desktop application. Worlds are folders of readable files
 on the user's own disk. Provider keys live in an app-owned encrypted file protected by the OS
 key store and a user-only ACL (§14.2). Nothing leaves the machine except approved dispatches.
 
@@ -1855,7 +1855,7 @@ across restarts and are revocable, reusing Arke's `grant-store`.
 - **N-4 · Index rebuild.** A full rebuild of the same world completes in under ten seconds.
 - **N-5 · Privacy.** No telemetry in v1. Diagnostics are user-initiated and contain no world
   content and no keys.
-- **N-6 · Licence.** MIT. Third-party licences are enumerated in-app; the espeak-ng phonemizer
+- **N-6 · Licence.** AGPL-3.0-only. Third-party licences are enumerated in-app; the espeak-ng phonemizer
   Voxa uses is GPL and must remain a separate executable, never linked.
 - **N-7 · Installer.** NSIS, currently unsigned; signing is required before v1. OpenCode and Voxa
   are included only when their external build resources are staged; models are downloaded rather

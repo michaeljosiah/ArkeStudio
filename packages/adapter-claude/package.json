@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/adapter-claude",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "The bring-your-own Claude Code harness. Discovery over the user's own installation, plus the behavioural confinement probe that decides whether it may be offered at all.",
   "type": "module",

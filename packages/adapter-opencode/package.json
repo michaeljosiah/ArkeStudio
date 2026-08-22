@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/adapter-opencode",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "The harness adapter for OpenCode v2 headless. In SPEC-001 it ships as the contract plus a scripted mock; SPEC-005 adds the live server backing with OpenAPI capability probing.",
   "type": "module",

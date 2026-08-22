@@ -1,6 +1,6 @@
 # Third-party notices
 
-Arke Studio is MIT-licensed. The packaged application bundles the following third-party
+Arke Studio is licensed AGPL-3.0-only. The packaged application bundles the following third-party
 components. Each entry records the licence verification SPEC-016 R-9 requires **before**
 bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying complete.
 

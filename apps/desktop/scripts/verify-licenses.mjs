@@ -22,6 +22,44 @@ const REQUIRED_ROW = {
 const notices = readFileSync(noticesPath, "utf8");
 const failures = [];
 
+// Arke's OWN licence, checked before anybody else's. Every place that names it must name the
+// same thing: the SPDX id in package.json, the prose in the notices file, the spec's N-6, and
+// the About screen the user actually reads. These drifted once already — the repository moved
+// MIT → AGPL and four of the five kept saying MIT, including the shipped About screen, which
+// told users they had rights they did not have. A licence claim nobody verifies is a licence
+// claim that goes stale, so it is verified here beside every other obligation.
+const SELF_LICENCE = "AGPL-3.0-only";
+const repoRoot = resolve(here, "../../..");
+const selfClaims = [
+  ["package.json", "package.json", (t) => JSON.parse(t).license === SELF_LICENCE],
+  ["THIRD-PARTY-NOTICES.md", "THIRD-PARTY-NOTICES.md", (t) => t.includes(`Arke Studio is licensed ${SELF_LICENCE}`)],
+  ["the master spec (N-6)", "docs/specification.md", (t) => t.includes(`**N-6 · Licence.** ${SELF_LICENCE}`)],
+  ["the About screen", "packages/client/src/screens/shell.tsx", (t) => t.includes("AGPL-3.0 licence ·")],
+];
+for (const [what, path, holds] of selfClaims) {
+  let text;
+  try {
+    text = readFileSync(join(repoRoot, path), "utf8");
+  } catch {
+    failures.push(`${what}: ${path} could not be read to verify Arke's own licence`);
+    continue;
+  }
+  let ok = false;
+  try {
+    ok = holds(text);
+  } catch (error) {
+    failures.push(`${what}: could not be parsed to verify Arke's own licence (${String(error)})`);
+    continue;
+  }
+  if (!ok) failures.push(`${what} does not state Arke Studio's licence as ${SELF_LICENCE} — it has drifted from LICENSE`);
+}
+
+// The CLA is what keeps relicensing possible; a contribution merged without one cannot be
+// undone. Its absence is a packaging failure for the same reason a missing notice row is.
+for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
+  if (!existsSync(join(repoRoot, required))) failures.push(`${required} is absent — the contributor licence position is unrecorded`);
+}
+
 // Components always in the bundle regardless of build-resources.
 for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);

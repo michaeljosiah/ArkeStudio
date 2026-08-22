@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/coordinator",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "The application's domain layer, embedded in the Electron main process: WebSocket transport with sequenced frames, read model, append-only change log, world provider, and the generic child-process supervisor (SPEC-001 §2.6).",
   "type": "module",

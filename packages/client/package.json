@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/client",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "The React client: the SpecOne design baseline over the coordinator's snapshot/event stream, every v1 screen reachable (SPEC-001 R-7).",
   "type": "module",
