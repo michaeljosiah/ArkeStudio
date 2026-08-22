@@ -1895,6 +1895,10 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-019 | Long-form video, bound references, skills and locked-parameter tasks | 005, 008, 009, 010, 012, 013, 017 · amends 010, 012 |
 | SPEC-020 | Production-scoped casts and artifacts — the guest cast | 002, 003, 004, 007, 012, 015 · amends 007, 012, 015 |
 | SPEC-021 | Local image and video generation — a curated recipe catalogue over ComfyUI | 008, 009, 016 |
+| SPEC-022 | Local cloned voice — IndexTTS as a recipe, and the world's voice library | 011, 021 · amends 011 |
+| SPEC-023 | The narrative domain — medium, format, Series, Season, Episode, Scene script | 002, 004, 012 · amends 012 |
+| SPEC-024 | Durable scene dispatch plans | 009, 012, 013, 019 |
+| SPEC-025 | The host ports — identity, entitlement, content policy, release targets | 004, 005, 008, 009, 012, 013, 014, 024 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.
