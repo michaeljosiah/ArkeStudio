@@ -7,6 +7,7 @@ import {
   createWorldChat,
   discardProposal,
   rejectWorldChatPoint,
+  restoreBible,
   saveWorldChatPoint,
   openWorldChat,
   retryWorldChatTurn,
@@ -14,6 +15,7 @@ import {
   useStore,
   useWorldChatProgress,
   useWorldChatWrapUpRefusal,
+  worldChatAttachFiles,
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { Working } from "./working.js";
@@ -153,6 +155,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
  */
 export function conversationTitle(text: string): string {
   const flat = text.replace(/\s+/g, " ").trim();
+  // The wire refuses an empty title and drops the frame without a word, so this function is
+  // total (review 2026-08-22): whitespace in, a real name out.
+  if (flat === "") return "New conversation";
   if (flat.length <= 200) return flat;
   // Break at a word so the label reads as a clipped sentence rather than a severed one.
   const cut = flat.slice(0, 199);
@@ -225,10 +230,25 @@ export function ProductionConversation({
 }) {
   const { state } = useStore();
   const [message, setMessage] = useState("");
+  /*
+   * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
+   * saying something again, so it is held back while a wrap-up commits — a condition the
+   * transcript needs and a child's local state could not express.
+   */
+  const [wrapping, setWrapping] = useState(false);
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
+  /*
+   * Navigating between subjects reuses this mounted component (episode 3 → episode 4), and an
+   * unsent draft typed against one subject must not be sent into the other's thread
+   * (review 2026-08-22). The handover latch resets with it, for the same reason.
+   */
+  useEffect(() => {
+    setMessage("");
+    setOpening(null);
+  }, [contextKey]);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
@@ -262,6 +282,17 @@ export function ProductionConversation({
   const handedOver = useRef(false);
   useEffect(() => {
     if (!openWith || handedOver.current || !worldId || !productionId) return;
+    /*
+     * The latch is a per-mount ref, but `openWith` rides in history state, which outlives the
+     * mount — so Back onto this screen replayed the opening line as a fresh paid turn
+     * (review 2026-08-22). A line already visible in the thread has been handed over, whatever
+     * the ref remembers.
+     */
+    const alreadySaid = (loaded?.messages ?? []).some((m) => m.role === "user" && m.text === openWith);
+    if (alreadySaid || thread?.title === conversationTitle(openWith)) {
+      handedOver.current = true;
+      return;
+    }
     handedOver.current = true;
     if (conversationId) {
       sendWorldChat(worldId, conversationId, openWith);
@@ -293,16 +324,41 @@ export function ProductionConversation({
 
   const points = loaded?.points ?? [];
   const carriedPoints = points.filter((p) => p.kind === "point" && p.settled).length;
+  /*
+   * Every composer carries attach (turn 41's binding; review 2026-08-22 found this one did
+   * not). Same wiring as World Chat: chips from the workspace, upload through the picker.
+   * There is no held-attachment path here — a production thread exists before anything can be
+   * dropped on it, and the first message creates it if not.
+   */
+  const attachChips = (loaded?.attachments ?? []).map((a) => ({
+    id: a.id,
+    file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
+    kind: a.kind,
+  }));
+  const attachProps = {
+    attachments: attachChips,
+    ...(worldId && conversationId
+      ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+      : {}),
+  };
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
       running={running}
       progress={progress}
       failure={failure && !running ? failure : null}
-      canRetry
+      canRetry={!wrapping}
       {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
       {...(worldId && conversationId
         ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
+        : {})}
+      {...(worldId
+        ? {
+            /* The bible card's Undo did nothing on every production-side thread (review
+               2026-08-22): the button rendered unconditionally and this wrapper never passed
+               the handler World Chat passes. */
+            onUndoBible: (fromVersion: number) => restoreBible(worldId, fromVersion),
+          }
         : {})}
       empty={
         thread ? (
@@ -359,6 +415,8 @@ export function ProductionConversation({
                 conversationId={conversationId}
                 seq={loaded?.seq ?? null}
                 carried={carriedPoints}
+                wrapping={wrapping}
+                onWrappingChange={setWrapping}
               />
             </>
           )}
@@ -373,6 +431,7 @@ export function ProductionConversation({
             busy={running}
             busyLabel="reading the world…"
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+            {...attachProps}
           />
           <div className="fy-mono">talking changes nothing · a change waits for your yes</div>
         </div>
@@ -401,6 +460,7 @@ export function ProductionConversation({
           busy={running}
           busyLabel="reading the world…"
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
+          {...attachProps}
         />
         <div className="fy-mono" style={{ marginTop: 8 }}>
           talking changes nothing · wrap-up stages what you keep
@@ -443,7 +503,14 @@ export function ProductionConversation({
         {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
             nowhere, which left the season — the first hop anybody walks — with no way to turn a
             conversation into anything at all. */}
-        <WrapUp worldId={worldId} conversationId={conversationId} seq={loaded?.seq ?? null} carried={carriedPoints} />
+        <WrapUp
+          worldId={worldId}
+          conversationId={conversationId}
+          seq={loaded?.seq ?? null}
+          carried={carriedPoints}
+          wrapping={wrapping}
+          onWrappingChange={setWrapping}
+        />
       </div>
     </>
   );
@@ -467,13 +534,18 @@ function WrapUp({
   conversationId,
   seq,
   carried,
+  wrapping,
+  onWrappingChange,
 }: {
   worldId: string | undefined;
   conversationId: string | null;
   seq: number | null;
   carried: number;
+  /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
+  wrapping: boolean;
+  onWrappingChange: (next: boolean) => void;
 }) {
-  const [wrapping, setWrapping] = useState(false);
+  const setWrapping = onWrappingChange;
   const asked = useRef<string | null>(null);
   const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
   const refusedMine = refusal !== null && refusal.requestId === asked.current;
@@ -577,16 +649,28 @@ export function StagedDecision({
       */}
       {overwrites ? (
         <div className="fy-made__diff">
-          {fields.map((field) => (
-            <div key={field.field} className="fy-draftcard">
-              <div className="fy-draftcard__head">
-                <span className="fy-eyebrow-sm">{field.field}</span>
-                <Badge tone="warning">replaces</Badge>
-              </div>
-              <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
-                {field.proposed ?? "(removed)"}
-              </div>
-              {field.before !== null && <div className="fy-draftcard__was">Now: “{field.before}”</div>}
+          {/* Grouped under the thing each field changes (review 2026-08-22): a wrap-up amending
+              three episodes rendered three cards all reading "Opens" with duplicate keys and
+              nothing saying which episode each replacement belonged to. */}
+          {targets.map((t) => (
+            <div key={t.path}>
+              {targets.length > 1 && (
+                <div className="fy-mono" style={{ marginBottom: 6 }}>
+                  {t.label}
+                </div>
+              )}
+              {t.fields.map((field) => (
+                <div key={`${t.path}:${field.field}`} className="fy-draftcard">
+                  <div className="fy-draftcard__head">
+                    <span className="fy-eyebrow-sm">{field.field}</span>
+                    <Badge tone="warning">replaces</Badge>
+                  </div>
+                  <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
+                    {field.proposed ?? "(removed)"}
+                  </div>
+                  {field.before !== null && <div className="fy-draftcard__was">Now: “{field.before}”</div>}
+                </div>
+              ))}
             </div>
           ))}
         </div>

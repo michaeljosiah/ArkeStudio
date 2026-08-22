@@ -204,8 +204,9 @@ export function ProductionLayout() {
    * the rail reached is still one click away, as a mark with its name on the tooltip.
    *
    * That was route-driven, which meant the width was the app's decision and not the person's. It
-   * is a control now, remembered across sessions; the Cut is only what it does before anybody has
-   * said otherwise. `null` is "never asked", which is why this is not a plain boolean.
+   * is a control now, remembered for the session — the module variable behind useRailCollapsed
+   * says why it is not longer-lived; the Cut is only what it does before anybody has said
+   * otherwise. `null` is "never asked", which is why this is not a plain boolean.
    */
   const [railChoice, setRailChoice] = useRailCollapsed();
   const folded = railChoice ?? location.pathname.endsWith("/cut");
@@ -1002,7 +1003,7 @@ export function ProductionChatScreen() {
       <ProductionConversation
           worldId={worldId}
           productionId={prodId}
-          openingNote="Develop · opening…"
+          openingNote="Develop · opening…"
           eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
           heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
           placeholder="Say what this is — what happens, who it costs, how it ends…"
@@ -1563,10 +1564,13 @@ function TakesView({
   prodId: string | undefined;
   /** The shot the press was about, carried in the address (`?shot=`). */
   askedFor: string | null;
-  onAdvanced: () => void;
-  onContact: () => void;
+  /* Both doors carry the shot with them (review 2026-08-22): pressing Advanced used to replace
+     the whole query string, losing the shot one click after the address recovered it. */
+  onAdvanced: (shotId: string | null) => void;
+  onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
   const all = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   /*
@@ -1585,6 +1589,9 @@ function TakesView({
    * of the thing you are looking at, which is what the frame draws.
    */
   const shots = scene?.shots ?? [];
+  /* Every scene, one chip away (review 2026-08-22): the first cut could only reach the first
+     scene's shots from the rail, and a three-scene production had no way to its second. */
+  const scenes = production?.scenes ?? [];
   /*
    * Only takes there is something to watch. A per-shot charge-split record carries the
    * acceptance and no media of its own — the pixels live on the pass take covering the same
@@ -1595,10 +1602,16 @@ function TakesView({
     (t) => t.media !== undefined || t.completedAt === undefined,
   );
   const acceptedId = production && shotId ? acceptedTakeId(production, shotId) : null;
-  /* And the mark goes on the take that actually holds the pixels the acceptance stands for. */
-  const accepted =
-    takes.find((t) => t.id === acceptedId)?.id ??
-    (acceptedId !== null ? [...takes].reverse().find((t) => t.media !== undefined)?.id ?? null : null);
+  /*
+   * The mark tells no lies (review 2026-08-22). The first cut of this view guessed: when the
+   * acceptance sat on a filtered charge-split record it re-pointed ✓ at the newest take with
+   * media — which marked takes that were never accepted, disabled Accept on them, and disagreed
+   * with the cut, the chips and the exporter all at once. Now ✓ appears only on the take that
+   * is literally accepted; when that record has no preview, the foot says so instead, and one
+   * press of Accept on a visible take moves the selection somewhere honest.
+   */
+  const accepted = takes.find((t) => t.id === acceptedId)?.id ?? null;
+  const acceptedHidden = acceptedId !== null && accepted === null;
   /* What is worth looking at: the one already accepted, or the newest that came back. */
   const [pickedId, setPickedId] = useState<string | null>(null);
   const picked =
@@ -1609,6 +1622,12 @@ function TakesView({
   const acceptedCount = (scene?.shots ?? []).filter(
     (s) => production && acceptedTakeId(production, s.id) !== null,
   ).length;
+  /* One pass over the takes for the chip dots, not one filter per chip (review 2026-08-22). */
+  const coveredShotIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of production?.takes ?? []) for (const sid of t.coversShots) ids.add(sid);
+    return ids;
+  }, [production?.takes]);
   if (!production || !scene || !shot) {
     return (
       <div className="fy-prodmain" data-screen="generate-workspace">
@@ -1662,12 +1681,32 @@ function TakesView({
             })}
           </div>
         )}
+        {scenes.length > 1 && (
+          <>
+            <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>SCENES</div>
+            <div className="fy-takechips">
+              {scenes.map((sc) => (
+                <button
+                  key={sc.id}
+                  type="button"
+                  className={cx("fy-takechip", sc.id === scene.id && "fy-takechip--on")}
+                  onClick={() => {
+                    setSelectedShotId(sc.shots[0]?.id ?? null);
+                    setPickedId(null);
+                  }}
+                >
+                  Scene {sc.number}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         {/* Every shot, one chip away — where you are in the scene, said out loud (turn 102). */}
         <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>EVERY SHOT</div>
         <div className="fy-takechips">
           {shots.map((s) => {
             const done = acceptedTakeId(production, s.id) !== null;
-            const has = takesForShot(production, s.id).length > 0;
+            const has = coveredShotIds.has(s.id);
             return (
               <button
                 key={s.id}
@@ -1688,8 +1727,14 @@ function TakesView({
           })}
         </div>
         <div className="fy-takes__foot">
+          {/* The two verdicts and the one thing that spends (review 2026-08-22): the first cut
+              of this view had no way to generate and no way to reject, so "Generate frame" from
+              the storyboard landed on a screen that told you to generate and offered nothing to
+              press, and a drifted take could only be ignored — never taught from. */}
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
+            Generate
+          </Button>
           <Button
-            variant="primary"
             disabled={!picked || picked.id === accepted}
             onClick={() => {
               if (worldId && prodId && shotId && picked) acceptTake(worldId, prodId, picked.id, shotId);
@@ -1697,12 +1742,28 @@ function TakesView({
           >
             {picked ? `Accept take ${takes.indexOf(picked) + 1}` : "Accept take"}
           </Button>
-          <span className="fy-mono">accepting locks it into the cut</span>
+          <Button
+            variant="ghost"
+            disabled={!picked || Object.keys(picked.provenance.sheets).length === 0}
+            title="A rejection cites the sheet the take drifted from"
+            onClick={() => {
+              const sheet = picked ? Object.keys(picked.provenance.sheets)[0] : undefined;
+              if (worldId && prodId && picked && sheet)
+                rejectTake(worldId, prodId, picked.id, { sheet, field: "appearance", note: "rejected in review" }, shotId ?? undefined);
+            }}
+          >
+            Reject
+          </Button>
+          <span className="fy-mono">
+            {acceptedHidden
+              ? "accepted take holds no preview — accepting a visible one replaces it"
+              : "accepting locks it into the cut · rejections teach the shot"}
+          </span>
           <span style={{ flex: 1 }} />
-          <button type="button" className="fy-linkbtn" onClick={onContact}>
+          <button type="button" className="fy-linkbtn" onClick={() => onContact(shotId)}>
             Contact sheet
           </button>
-          <button type="button" className="fy-linkbtn" onClick={onAdvanced}>
+          <button type="button" className="fy-linkbtn" onClick={() => onAdvanced(shotId)}>
             Advanced
           </button>
         </div>
@@ -1737,7 +1798,13 @@ export function GenerateScreen() {
   const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedTakeId, setSelectedTakeId] = useState<string | null>(null);
-  const shotId = selectedShotId ?? shots[0]?.id ?? null;
+  /* The bench honours the address the same way the takes view does (review 2026-08-22). */
+  const benchAsked = searchParams.get("shot");
+  const shotId =
+    selectedShotId ??
+    (benchAsked !== null && shots.some((s) => s.id === benchAsked) ? benchAsked : null) ??
+    shots[0]?.id ??
+    null;
   const shot = shots.find((s) => s.id === shotId) ?? null;
   const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
   const takes = production && shotId ? takesForShot(production, shotId) : [];
@@ -1751,32 +1818,6 @@ export function GenerateScreen() {
   const slug = world?.meta.slug;
   const model = (state?.app.manifest?.models ?? []).find((m) => m.id === state?.app.routing.defaults["video"]) ??
     (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ?? null;
-
-  const prevShot = (() => {
-    if (!scene || !shot) return null;
-    const i = scene.shots.findIndex((s) => s.id === shot.id);
-    return i > 0 ? scene.shots[i - 1]! : null;
-  })();
-  const prevAccepted = prevShot && production ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id)) : null;
-  const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
-  // Strict frame behaviour is promised exactly where the route supports and receives it (issue
-  // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
-  // steering, and the copy says so instead of promising what the dispatch cannot send.
-  const frameRoute = model ? frameDispatchFor(model, 1) : null;
-  const boundaryFrame = (() => {
-    if (!shot || !production || !world) return null;
-    const id = production.selections[shot.id]?.startFrameArtifactId ?? null;
-    return id !== null ? (world.artifacts.find((a) => a.id === id) ?? null) : null;
-  })();
-
-  const citedSheets = (() => {
-    if (!shot || !world) return [];
-    const mentions = [...shot.description.matchAll(/@([A-Za-z0-9-]+)/g)].map((m) => m[1]!.toLowerCase());
-    return world.sheets
-      .filter((s) => s.type === "character")
-      .filter((s) => mentions.some((m) => s.id.includes(m) || s.name.toLowerCase().includes(m)))
-      .slice(0, 2);
-  })();
 
   /*
    * Which lens the workspace opens on (turn 102). Takes are the thing here: once something has
@@ -1804,11 +1845,48 @@ export function GenerateScreen() {
         worldId={worldId}
         prodId={prodId}
         askedFor={searchParams.get("shot")}
-        onAdvanced={() => setSearchParams({ view: "bench" }, { replace: true })}
-        onContact={() => setSearchParams({ view: "stills" }, { replace: true })}
+        onAdvanced={(shotId) =>
+          setSearchParams(shotId ? { view: "bench", shot: shotId } : { view: "bench" }, { replace: true })
+        }
+        onContact={(shotId) =>
+          setSearchParams(shotId ? { view: "stills", shot: shotId } : { view: "stills" }, { replace: true })
+        }
       />
     );
   }
+
+  /*
+   * Bench-only derivations live below the lens branch (review 2026-08-22): the previous frame,
+   * the frame route, the boundary still and the cited sheets are the bench's furniture, and
+   * computing them above the branch made every takes-view render pay for a bench nobody was
+   * looking at. Plain consts, so they may sit under the returns; the hooks stay above.
+   */
+  const prevShot = (() => {
+    if (!scene || !shot) return null;
+    const i = scene.shots.findIndex((s) => s.id === shot.id);
+    return i > 0 ? scene.shots[i - 1]! : null;
+  })();
+  const prevAccepted = prevShot && production ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id)) : null;
+  const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
+  // Strict frame behaviour is promised exactly where the route supports and receives it (issue
+  // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
+  // steering, and the copy says so instead of promising what the dispatch cannot send.
+  const frameRoute = model ? frameDispatchFor(model, 1) : null;
+  const boundaryFrame = (() => {
+    if (!shot || !production || !world) return null;
+    const id = production.selections[shot.id]?.startFrameArtifactId ?? null;
+    return id !== null ? (world.artifacts.find((a) => a.id === id) ?? null) : null;
+  })();
+
+  const citedSheets = (() => {
+    if (!shot || !world) return [];
+    const mentions = [...shot.description.matchAll(/@([A-Za-z0-9-]+)/g)].map((m) => m[1]!.toLowerCase());
+    return world.sheets
+      .filter((s) => s.type === "character")
+      .filter((s) => mentions.some((m) => s.id.includes(m) || s.name.toLowerCase().includes(m)))
+      .slice(0, 2);
+  })();
+
   return (
     <div className="fy-gen" data-screen="generate-workspace">
       <div className="fy-gen__left">
@@ -2221,7 +2299,7 @@ function GenerateDrawer({
   // The same function the coordinator executes, on the same inputs (issue 244) — so the number
   // under the button is the number that will be spent, not a summary of one.
   const plan = useMemo(
-    () => (world && production && model ? planForScene({ world, production, scene, model }) : null),
+    () => (world && production && model ? planForScene({ world, production, scene, model }, "whole-scene") : null),
     [world, production, scene, model],
   );
   const shots = scene.shots.length;

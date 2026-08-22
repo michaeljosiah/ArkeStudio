@@ -19,7 +19,17 @@ export interface ScenePlanInput {
   tier?: SizeTier;
 }
 
-export function planForScene(input: ScenePlanInput) {
+type ScenePlans = { perShot: ReturnType<typeof planScene>; wholeScene: ReturnType<typeof planScene> };
+
+export function planForScene(input: ScenePlanInput): ScenePlans;
+export function planForScene(input: ScenePlanInput, mode: "whole-scene"): Pick<ScenePlans, "wholeScene">;
+export function planForScene(input: ScenePlanInput, mode: "per-shot"): Pick<ScenePlans, "perShot">;
+/**
+ * `mode` narrows the work (review 2026-08-22): planning a mode assembles every shot's prompt,
+ * and the Generate drawer reads only the whole-scene number — so computing both there priced
+ * a dispatch nobody was looking at on every keystroke that re-rendered the drawer.
+ */
+export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-scene"): Partial<ScenePlans> {
   const { world, production, scene, model, resolution, tier } = input;
   const planInput = {
     world: world.meta,
@@ -45,5 +55,8 @@ export function planForScene(input: ScenePlanInput) {
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
   };
-  return { perShot: planScene(planInput, "per-shot"), wholeScene: planScene(planInput, "whole-scene") };
+  return {
+    ...(mode !== "whole-scene" ? { perShot: planScene(planInput, "per-shot") } : {}),
+    ...(mode !== "per-shot" ? { wholeScene: planScene(planInput, "whole-scene") } : {}),
+  };
 }

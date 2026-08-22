@@ -107,7 +107,51 @@ describe("the storyboard is the editor (turn 97, 14c)", () => {
         { id: "sh_15", number: 15 },
       ],
     };
-    assert.deepEqual(nextShotId(scene as never), { id: "sh_16", number: 16 });
+    assert.deepEqual(nextShotId(scene as never, scene.shots as never), { id: "sh_16", number: 16 });
+  });
+
+  it("mints an id past every scene in the production, not just this one (review 2026-08-22)", () => {
+    // Takes and selections key by bare shot id with no scene, so an id reused across scenes
+    // makes one scene's takes render on the other's card and one accept mark both.
+    const scene = { shots: [{ id: "sh_04", number: 4 }] };
+    const all = [
+      { id: "sh_04", number: 4 },
+      { id: "sh_12", number: 12 },
+    ];
+    const minted = nextShotId(scene as never, all as never);
+    assert.equal(minted.id, "sh_13", "the id clears the other scene's shots");
+    assert.equal(minted.number, 5, "the number stays scene-local — it is the card's label");
+  });
+
+  it("the foot counts what the review counts (review 2026-08-22): an override is something to generate from", () => {
+    // The foot used its own rule — empty description or stale — so a shot whose whole prompt
+    // was hand-written read "1 to review" under a review strip saying nothing to flag.
+    const html = render(
+      withScene((s) => ({
+        shots: (s as { shots: Array<{ id: string }> }).shots.map((sh) =>
+          sh.id === "sh_12"
+            ? { ...sh, description: "", promptOverride: { text: "hand-tuned wording", sheetVersions: {} } }
+            : sh,
+        ),
+      })),
+      SCENE_PATH,
+      <SceneDetailScreen />,
+      "/w/:worldId/p/:prodId/scenes/:sceneId",
+    );
+    assert.ok(html.includes("Ready to generate"), "an override counts as written");
+    assert.ok(!html.includes("1 to review"), "the foot and the review agree");
+  });
+
+  it("and a genuinely empty shot still counts", () => {
+    const html = render(
+      withScene((s) => ({
+        shots: (s as { shots: Array<{ id: string }> }).shots.map((sh) => ({ ...sh, description: "" })),
+      })),
+      SCENE_PATH,
+      <SceneDetailScreen />,
+      "/w/:worldId/p/:prodId/scenes/:sceneId",
+    );
+    assert.ok(html.includes("2 to review"), "one finding per empty shot");
   });
 });
 

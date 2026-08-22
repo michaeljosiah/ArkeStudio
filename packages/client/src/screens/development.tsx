@@ -203,6 +203,10 @@ function EpisodesBoard() {
    */
   const [starting, setStarting] = useState<Set<number>>(() => new Set());
   const episodes = production?.episodes ?? [];
+  /* A pressed tile yields to the episode it became (review 2026-08-22): nothing removed a
+     number from `starting` once the proposal was accepted, so a phantom STARTING tile stood
+     beside the real episode forever. */
+  const startingOpen = new Set([...starting].filter((n) => !episodes.some((e) => e.order === n)));
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
   const declared = Math.max(production?.season?.defaults?.episodeCount ?? 0, episodes.length);
   /*
@@ -305,7 +309,7 @@ function EpisodesBoard() {
             </span>
           </div>
         ))}
-        {[...starting]
+        {[...startingOpen]
           .filter((order) => !started.some((one) => one.order === order))
           .map((order) => (
             <div key={`starting-${order}`} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>

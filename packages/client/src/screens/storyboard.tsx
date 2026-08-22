@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
+  DEFAULT_SHOT_SEC,
   assemblePrompt,
   effectiveFraming,
   overrideStaleAgainst,
@@ -87,7 +88,32 @@ function cardState(shot: Shot, takeCount: number, accepted: boolean): CardState 
  * compares a shot's citations against. WebCrypto is async, so the map arrives a beat after
  * the scene; until it does (and in environments without subtle crypto) nothing shows stale,
  * which errs on the quiet side.
+ *
+ * Cached by the blocks array itself (review 2026-08-22): the strip, the review and the foot
+ * each call this hook, and each instance was hashing the whole script again — same bytes,
+ * three sweeps per render tree. The store hands every subscriber the same array reference per
+ * frame, so a WeakMap on it makes the second and third callers free without changing anyone's
+ * signature.
  */
+const blockDigestCache = new WeakMap<readonly { id: string; text: string }[], Promise<Map<string, string>>>();
+
+function digestBlocks(blocks: readonly { id: string; text: string }[]): Promise<Map<string, string>> {
+  let hit = blockDigestCache.get(blocks);
+  if (!hit) {
+    hit = (async () => {
+      const next = new Map<string, string>();
+      for (const block of blocks) {
+        const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(block.text));
+        const hex = [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+        next.set(block.id, `sha256:${hex}`);
+      }
+      return next;
+    })();
+    blockDigestCache.set(blocks, hit);
+  }
+  return hit;
+}
+
 function useBlockDigests(scene: Scene): Map<string, string> {
   const [digests, setDigests] = useState<Map<string, string>>(() => new Map());
   const blocks = scene.script?.blocks;
@@ -97,15 +123,9 @@ function useBlockDigests(scene: Scene): Map<string, string> {
       return;
     }
     let cancelled = false;
-    void (async () => {
-      const next = new Map<string, string>();
-      for (const block of blocks) {
-        const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(block.text));
-        const hex = [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
-        next.set(block.id, `sha256:${hex}`);
-      }
+    void digestBlocks(blocks).then((next) => {
       if (!cancelled) setDigests(next);
-    })();
+    });
     return () => {
       cancelled = true;
     };
@@ -113,18 +133,25 @@ function useBlockDigests(scene: Scene): Map<string, string> {
   return digests;
 }
 
-function nextShotId(scene: Scene): { id: string; number: number } {
-  let max = 0;
-  for (const shot of scene.shots) {
+/**
+ * The next free shot id, minted against the whole production (review 2026-08-22). Takes,
+ * selections and the Generate workspace all key by bare shot id with no scene, so an id reused
+ * across two scenes makes one scene's takes render on the other's card and one accept mark
+ * both. The number stays scene-local — it is the card's label — but the id must not collide.
+ */
+function nextShotId(scene: Scene, allShots: readonly Shot[]): { id: string; number: number } {
+  let maxId = 0;
+  for (const shot of allShots) {
     const n = Number(shot.id.replace(/^sh_0*/, ""));
-    if (Number.isFinite(n)) max = Math.max(max, n);
-    max = Math.max(max, shot.number);
+    if (Number.isFinite(n)) maxId = Math.max(maxId, n);
   }
-  return { id: `sh_${max + 1}`, number: max + 1 };
+  let maxNumber = 0;
+  for (const shot of scene.shots) maxNumber = Math.max(maxNumber, shot.number);
+  return { id: `sh_${maxId + 1}`, number: maxNumber + 1 };
 }
 
-function blankShot(scene: Scene): Shot {
-  const { id, number } = nextShotId(scene);
+function blankShot(scene: Scene, allShots: readonly Shot[]): Shot {
+  const { id, number } = nextShotId(scene, allShots);
   return { id, number, title: "Untitled shot", description: "" };
 }
 
@@ -210,12 +237,12 @@ export function StoryboardStrip({
 
   const insertAt = (index: number) =>
     mutateShots((shots) => {
-      shots.splice(index, 0, blankShot(scene));
+      shots.splice(index, 0, blankShot(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots));
       return shots;
     });
   const duplicate = (shot: Shot) =>
     mutateShots((shots) => {
-      const { id, number } = nextShotId(scene);
+      const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots);
       const at = shots.findIndex((s) => s.id === shot.id);
       // A duplicate is the authored shot again, not its output: no takes ride along, and a
       // fresh id means no selections or covers point at it by accident.
@@ -488,9 +515,13 @@ export function StoryboardFoot({
   const [historyOpen, setHistoryOpen] = useState(false);
   if (!production) return null;
   const stem = sceneFileOf(production, scene);
-  const attention = scene.shots.filter(
-    (s) => s.description.trim() === "" || shotCoverage(s, digests) === "changed",
-  ).length;
+  /*
+   * The same arithmetic as SceneReview (review 2026-08-22): this line counted by its own rule —
+   * empty description or stale, promptOverride ignored — so the foot could say "1 to review"
+   * over a review strip saying "nothing to flag". One place decides what needs a look.
+   */
+  const stale = scene.shots.filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
+  const attention = sceneFindings(scene, stale).length;
   return (
     <div className="fy-sbfoot" data-testid="storyboard-foot">
       <span className="fy-sbdot" style={{ background: attention === 0 ? "var(--success)" : "var(--warning)" }} />
@@ -642,7 +673,7 @@ export function ShotSheetScreen() {
         <Button
           variant="ghost"
           onClick={() => {
-            const { id, number } = nextShotId(scene);
+            const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots);
             const at = scene.shots.findIndex((s) => s.id === shot.id);
             const shots = [...scene.shots];
             const copy = { ...shot, id, number };
@@ -736,14 +767,22 @@ export function ShotSheetScreen() {
                 the record — this is the label, not the model. */}
             <div className="fy-sheetlabel">Timing</div>
             <div className="fy-sheetbeats">
+              {/* Keyed by list shape as well as index (review 2026-08-22): the inputs are
+                  uncontrolled, so after a splice React's index reuse left a deleted beat's
+                  text on screen and the next blur wrote it onto the survivor. A key that
+                  changes with the length remounts every row against the real record. */}
               {(shot.beats ?? []).map((beat, i) => (
-                <div key={i} className="fy-sheetbeat">
+                <div key={`${(shot.beats ?? []).length}:${i}`} className="fy-sheetbeat">
+                  {/* A blur that changed nothing writes nothing (review 2026-08-22): these
+                      patched on every tab-through, and each patch is a saved scene version. */}
                   <input
                     className="fy-sheetbeat__span"
                     defaultValue={beat.span}
                     onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (next === "" || next === beat.span) return;
                       const beats = [...(shot.beats ?? [])];
-                      beats[i] = { ...beats[i]!, span: e.target.value.trim() || beat.span };
+                      beats[i] = { ...beats[i]!, span: next };
                       patch({ beats });
                     }}
                   />
@@ -752,6 +791,7 @@ export function ShotSheetScreen() {
                     defaultValue={beat.text}
                     onBlur={(e) => {
                       const next = e.target.value.trim();
+                      if (next === beat.text) return;
                       const beats = [...(shot.beats ?? [])];
                       if (next === "") beats.splice(i, 1);
                       else beats[i] = { ...beats[i]!, text: next };
@@ -859,15 +899,18 @@ export function ShotSheetScreen() {
                   <button
                     type="button"
                     aria-label="Shorter"
-                    onClick={() => patch({ durationSec: Math.max(0.5, (shot.durationSec ?? 3) - 0.5) })}
+                    onClick={() => patch({ durationSec: Math.max(0.5, (shot.durationSec ?? DEFAULT_SHOT_SEC) - 0.5) })}
                   >
                     −
                   </button>
-                  <span>{(shot.durationSec ?? 3).toFixed(1)}s</span>
+                  {/* The planner's default, not a third number (review 2026-08-22): the sheet
+                      said 3.0s while every estimate and dispatch used 4s, so the first press of
+                      + silently shortened the shot. */}
+                  <span>{(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s</span>
                   <button
                     type="button"
                     aria-label="Longer"
-                    onClick={() => patch({ durationSec: Math.min(15, (shot.durationSec ?? 3) + 0.5) })}
+                    onClick={() => patch({ durationSec: Math.min(15, (shot.durationSec ?? DEFAULT_SHOT_SEC) + 0.5) })}
                   >
                     +
                   </button>
@@ -914,7 +957,11 @@ export function ShotSheetScreen() {
                 className="fy-sheetselect"
                 defaultValue={shot.framing?.grade ?? ""}
                 placeholder={scene.defaults?.grade ?? "—"}
-                onBlur={(e) => framingSet("grade", e.target.value.trim() === "" ? undefined : e.target.value.trim())}
+                onBlur={(e) => {
+                  const next = e.target.value.trim();
+                  if (next === (shot.framing?.grade ?? "")) return;
+                  framingSet("grade", next === "" ? undefined : next);
+                }}
               />
             </div>
           </div>
@@ -938,8 +985,14 @@ export function ShotSheetScreen() {
                     if (next === value) return;
                     const audio = { kind: shot.audio?.kind ?? "sfx", ...shot.audio, [key]: next === "" ? undefined : next };
                     if (next === "") delete (audio as Record<string, unknown>)[key];
+                    /*
+                     * The kind survives a cleared field (review 2026-08-22). `kind` is the one
+                     * required field and the one this test forgot, so emptying the last text box
+                     * deleted an authored `silence` or `dialogue` outright — and retyping seeded
+                     * it back as "sfx". Only a shot that never had audio collapses to none.
+                     */
                     const has = audio.line || audio.ambience || audio.effects || audio.speaker;
-                    patch({ audio: has ? audio : undefined });
+                    patch({ audio: has || shot.audio?.kind !== undefined ? audio : undefined });
                   }}
                 />
               </div>
@@ -974,6 +1027,7 @@ export function ShotSheetScreen() {
                 placeholder="Modern boats, text, lens flare"
                 onBlur={(e) => {
                   const next = e.target.value.trim();
+                  if (next === (shot.continuity?.keepOut ?? "")) return;
                   patch({
                     continuity:
                       next !== "" || shot.continuity?.openOnPrevious

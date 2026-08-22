@@ -49,4 +49,13 @@ describe("a conversation's title is derived, never the whole message", () => {
     // min(1) on the same field: a title of "" is dropped exactly as silently as one of 201.
     assert.ok(conversationTitle("x").length >= 1);
   });
+
+  it("a whitespace-only opening still gets a real name (review 2026-08-22)", () => {
+    // A message of spaces and newlines flattened to "" — under the wire's min(1), the create
+    // frame vanished as silently as the 245-character one this file is about. Total function:
+    // whitespace in, a name out.
+    for (const said of ["   ", "\n\n", " \t \n "]) {
+      assert.equal(conversationTitle(said), "New conversation");
+    }
+  });
 });
