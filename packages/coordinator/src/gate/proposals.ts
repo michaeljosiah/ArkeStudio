@@ -736,7 +736,10 @@ export class ProposalManager {
             path: file.path,
             message: `not a ${JSON_TRACK_LABELS[classify(file.path).track] ?? "valid record"}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
           });
+          continue;
         }
+        const collision = this.collidingShotIds(file.path, file.content);
+        if (collision) problems.push({ path: file.path, message: collision });
         continue;
       }
       if (!file.path.startsWith("characters/") || file.content === undefined) continue;
@@ -750,6 +753,47 @@ export class ProposalManager {
       });
     }
     return problems;
+  }
+
+  /**
+   * A scene whose shot ids are already another scene's, said in words the agent can act on.
+   *
+   * Takes, selections and the Generate workspace all key by bare shot id with no scene, so an id
+   * reused across two scenes makes one scene's takes render on the other's card and one accept
+   * mark both. The storyboard's own Add shot mints against the whole production for exactly this
+   * reason; a drafting agent numbers from one per scene and cannot see the others, so the gate
+   * is where it is caught — and being a record problem, the still-open session is asked to fix
+   * it before anybody presses Accept (round 3, 2026-08-22, driven: "Generate frame" on one
+   * scene's shot 1 opened another scene's shot 1).
+   */
+  private collidingShotIds(path: string, content: string): string | null {
+    const match = /^productions\/([^/]+)\/scenes\/([^/]+)\.json$/.exec(path);
+    if (!match) return null;
+    const [, productionId, stem] = match;
+    let scene: { id?: unknown; shots?: Array<{ id?: unknown }> };
+    try {
+      scene = JSON.parse(content) as typeof scene;
+    } catch {
+      return null; // the schema check above already said so
+    }
+    const mine = (scene.shots ?? []).map((s) => String(s.id)).filter((id) => id !== "undefined");
+    if (mine.length === 0) return null;
+    const production = this.store.getBundle().productions.find((p) => p.meta.id === productionId);
+    if (!production) return null;
+    const taken = new Map<string, string>();
+    for (const other of production.scenes) {
+      // The scene this file IS, matched by stem as well as id: a redraft of the same file keeps
+      // its own ids, and calling that a collision would make every second draft unacceptable.
+      if (other.id === scene.id || production.sceneFiles[other.id] === stem) continue;
+      for (const shot of other.shots) taken.set(shot.id, other.title || other.id);
+    }
+    const clashes = mine.filter((id) => taken.has(id));
+    if (clashes.length === 0) return null;
+    const next = [...taken.keys()]
+      .map((id) => Number(id.replace(/^sh_0*/, "")))
+      .filter((n) => Number.isFinite(n))
+      .reduce((a, b) => Math.max(a, b), 0) + 1;
+    return `shot ${clashes.length === 1 ? "id" : "ids"} ${clashes.join(", ")} already belong to "${taken.get(clashes[0]!)}" in this production — every shot id must be unique across the whole production, because takes and selections key by shot id alone. Renumber this scene's shots from sh_${next} upward, keeping each shot's own \`number\` as it is.`;
   }
 
   /**

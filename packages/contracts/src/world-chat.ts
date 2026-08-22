@@ -275,6 +275,12 @@ export const CheckToolSchema = z.enum([
   "list-entities",
   "related",
   "get-attachment-text",
+  /*
+   * The production read (round 3, 2026-08-22): an episode thread asked for its season and got
+   * nothing back, because no tool served production records at all — the model was briefed on
+   * the shape and blind to the direction. Widening the enum keeps every stored receipt readable.
+   */
+  "get-production",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */

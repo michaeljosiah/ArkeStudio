@@ -115,6 +115,7 @@ const WORKING_LABELS: Record<string, string> = {
   list_entities: "Looking over the world",
   related: "Checking what references it",
   get_attachment_text: "Reading what you attached",
+  get_production: "Reading the production",
   /*
    * The harness's own read-only tools. The world-builder agent is allowed read, glob, grep, list
    * and the todo pair (adapter-opencode/config.ts READ_ONLY_PERMISSION), and it does reach for

@@ -39,10 +39,11 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
     case "production": {
       const production = bundle.productions.find((p) => p.meta.id === context.productionId);
       const named = production ? `"${production.meta.title}" (${context.productionId})` : context.productionId;
-      // The production records are not reachable through the world-query tools, so the current
-      // state travels in the entry narration — the same reasoning as the world look.
+      // The narration is orientation; the record is the read. `get_production` serves the whole
+      // thing — story, season direction, episodes, scenes — since round 3 (2026-08-22) found a
+      // thread deciding against a season it could not see.
       const lines = [
-        `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit.`,
+        `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit. Read the full records with get_production(${context.productionId}) before deciding against them.`,
       ];
       const shape = describeShape(production);
       if (shape) lines.push(shape);
@@ -71,7 +72,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const episode = production?.episodes.find((e) => e.id === context.episodeId);
       const named = episode ? `"${episode.title}" (${context.episodeId})` : context.episodeId;
       const lines = [
-        `This is the episode thread for ${named} in the production ${context.productionId}. An episode is its promise and its scenes in order; a script belongs to a scene and to nothing above it.`,
+        `This is the episode thread for ${named} in the production ${context.productionId}. An episode is its promise and its scenes in order; a script belongs to a scene and to nothing above it. Read the season and the sibling episodes with get_production(${context.productionId}) before deciding against them; an episode's scenes list may only name scenes that already exist.`,
       ];
       const shape = describeShape(production);
       if (shape) lines.push(shape);
@@ -99,7 +100,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const scene = production?.scenes.find((s) => s.id === context.sceneId);
       const named = scene ? `"${scene.title}" (${context.sceneId})` : context.sceneId;
       const lines = [
-        `This is the scene thread for ${named} in the production ${context.productionId}. Its script is ordered blocks that shots cite; propose the whole block list as it should read, keeping an existing block's id when only its text changes.`,
+        `This is the scene thread for ${named} in the production ${context.productionId}. Its script is ordered blocks that shots cite; propose the whole block list as it should read, keeping an existing block's id when only its text changes. Read the season and the episode this scene serves with get_production(${context.productionId}) before deciding against them.`,
       ];
       if (scene?.script && scene.script.blocks.length > 0) {
         lines.push(

@@ -195,6 +195,16 @@ describe("normalising the SDK's messages", () => {
     assert.equal(normalizeClaude("not an object", "s1", state).kind, "dead-letter");
     assert.equal(normalizeClaude({ type: "system", subtype: "init" }, "s1", state).kind, "ignore");
   });
+
+  it("a rate limit is said, not dead-lettered (round 3, 2026-08-22)", () => {
+    // The SDK grew rate_limit_event after this adapter was written, and a draft crawling
+    // through one looked stuck — the only trace was a log line nobody watches.
+    const outcome = normalizeClaude({ type: "rate_limit_event" }, "s1", createNormalizeState());
+    assert.equal(outcome.kind, "events");
+    const event = outcome.kind === "events" ? outcome.events[0]! : null;
+    assert.equal(event?.type, "tool.activity");
+    assert.equal(event?.type === "tool.activity" ? event.summary : "", "Waiting out a rate limit");
+  });
 });
 
 describe("the session lifecycle", () => {

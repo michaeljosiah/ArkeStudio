@@ -252,6 +252,67 @@ describe("production-scoped threads (issue 400)", () => {
     assert.equal(episode.order, 3);
   });
 
+  it("an episode may only list scenes that exist — a guessed membership is refused (round 3)", async () => {
+    // Driven live 2026-08-22: a wrap-up decided "this episode has two scenes" and wrote their
+    // guessed ids straight into the membership list. Nothing had created them and nothing ever
+    // would — scene records are made from the episode page — so the board promised scenes it
+    // could not open.
+    const w = await world();
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "development.episode",
+        target: { kind: "episode", productionId: "saltlight" },
+        title: "Episode four, with invented scenes",
+        draft: {
+          title: "The invented pair",
+          order: 4,
+          scenes: ["sc_the-wrong-shape", "sc_the-true-answer"],
+        },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+    const outcome = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-scenes",
+      expectedConversationSeq: seq,
+      now: NOW,
+    }).catch((err: unknown) => err);
+    // Whether the wrap-up throws whole or degrades per candidate, the invented episode must
+    // never stage: its path is derived from its title, so its absence is the refusal.
+    const staged = (await w.gate.listOpen()).filter((p) => p.kind === "episode-edit");
+    assert.ok(
+      !staged.some((p) => p.targets.some((t) => t.path.includes("the-invented-pair"))),
+      `the guessed membership never reaches a proposal (outcome: ${outcome instanceof Error ? outcome.message : "settled"})`,
+    );
+  });
+
+  it("a membership naming a real scene stages normally", async () => {
+    // A fresh world: the refused candidate above stays undecided in its conversation, and a
+    // second wrap there would re-materialise it and refuse again — correctly.
+    const w = await world();
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "development.episode",
+        target: { kind: "episode", productionId: "saltlight" },
+        title: "Episode five, honest membership",
+        draft: { title: "The honest one", order: 5, scenes: ["sc_04"] },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+    await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-scenes-2",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+    const ok = (await w.gate.listOpen()).find(
+      (p) => p.kind === "episode-edit" && p.targets[0]!.path.includes("the-honest-one"),
+    );
+    assert.ok(ok, "a membership naming a real scene stages normally");
+  });
+
   it("a production change cannot land together with world changes", async () => {
     const w = await world();
     const groupId = newId("grp");

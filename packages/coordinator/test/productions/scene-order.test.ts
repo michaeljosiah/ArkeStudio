@@ -50,6 +50,83 @@ describe("scene identity and explicit order (issue 387)", () => {
     );
   });
 
+  it("a drafted scene is told where the production's shot ids start, and the gate refuses a clash", async () => {
+    /*
+     * Driven live 2026-08-22: two agent-drafted scenes each numbered their shots from sh_1, and
+     * "Generate frame" on one scene's shot 1 opened the other scene's. Takes and selections key
+     * by bare shot id, so the collision is not cosmetic.
+     */
+    const { dir, store, gate } = await open();
+    const onDisk = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    const highest = onDisk.scenes
+      .flatMap((s) => s.shots)
+      .reduce((a, shot) => Math.max(a, Number(shot.id.replace(/^sh_0*/, "")) || 0), 0);
+
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The lamps hold their line.",
+    });
+    assert.match(
+      draft.instruction,
+      new RegExp(`number this scene's shots sh_${highest + 1}\\b`),
+      "the agent is told the first free id in the whole production",
+    );
+    assert.match(draft.instruction, /unique across the WHOLE production/);
+
+    // An agent that numbers from one anyway is refused in words it can act on.
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const staged = SceneSchema.parse(JSON.parse(await readFile(target, "utf8")));
+    const taken = onDisk.scenes[0]!.shots[0]!.id;
+    await writeFile(
+      target,
+      JSON.stringify(
+        { ...staged, shots: [{ id: taken, number: 1, title: "Collides", description: "Something happens." }] },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    const problems = await gate.recordProblems(draft.proposalId);
+    assert.equal(problems.length, 1, "the clash is a record problem, so the open session is asked to fix it");
+    assert.match(problems[0]!.message, new RegExp(taken));
+    assert.match(problems[0]!.message, /unique across the whole production/);
+    const outcome = await gate.accept(draft.proposalId);
+    assert.equal(outcome.status, "invalid", "and accept refuses rather than writing the collision");
+  });
+
+  it("a staged draft has claimed its number too, not only its stem (round 3, 2026-08-22)", async () => {
+    // Driven live: drafting two scenes back to back — the ordinary way to build an episode —
+    // gave both the same number and the same order, because only what was on disk was counted.
+    // Three scenes then called themselves Scene 1, in an order nothing had decided.
+    const { dir, store, gate } = await open();
+    const read = async (d: { proposalId: string; path: string }) =>
+      JSON.parse(await readFile(join(dir, ".proposals", d.proposalId, ...d.path.split("/")), "utf8")) as {
+        number: number;
+        order: number;
+      };
+    const onDisk = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes;
+    const highest = onDisk.reduce((a, s) => Math.max(a, s.number), 0);
+
+    const first = await read(
+      await draftSceneSkeleton(store, gate, { productionId: "saltlight", brief: "The first new one." }),
+    );
+    const second = await read(
+      await draftSceneSkeleton(store, gate, { productionId: "saltlight", brief: "The second new one." }),
+    );
+    const third = await read(
+      await draftSceneSkeleton(store, gate, { productionId: "saltlight", brief: "The third new one." }),
+    );
+
+    assert.equal(first.number, highest + 1);
+    assert.equal(second.number, highest + 2, "the second draft sees the first one waiting");
+    assert.equal(third.number, highest + 3);
+    assert.deepEqual(
+      [first.order, second.order, third.order],
+      [highest + 1, highest + 2, highest + 3],
+      "and order follows number, so nothing lands unplaced",
+    );
+  });
+
   it("a draft shaped by a registry skill stages a readable manifest, recording only the triple", async () => {
     // The desktop wires the contracts registry's skillFor straight into the coordinator, so at
     // runtime the "triple" arriving here is the full Skill — purpose and the whole guidance body
