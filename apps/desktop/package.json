@@ -1,6 +1,6 @@
 {
   "name": "@arke-studio/desktop",
-  "version": "0.5.42",
+  "version": "0.5.43",
   "private": true,
   "description": "Electron desktop shell: embeds the coordinator in main, supervises OpenCode and Voxa, and serves the React client as one app (SPEC-001 §2.2).",
   "type": "module",
