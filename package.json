@@ -1,6 +1,6 @@
 {
   "name": "arke-studio",
-  "version": "0.5.22",
+  "version": "0.5.41",
   "private": true,
   "description": "Arke Studio — a local-first worldbuilding and production studio. The world lives in a folder; the app is a lens over it.",
   "license": "AGPL-3.0-only",
