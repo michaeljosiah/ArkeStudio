@@ -160,3 +160,31 @@ describe("the rendered guide", () => {
     assert.match(guide, /Never invent one/, "an invented receipt is refused as foreign");
   });
 });
+
+/**
+ * A nested field says its type, not just its name (driven 2026-08-22).
+ *
+ * `continuity ({openOnPrevious, keepOut}, optional)` told the story author what the key is called
+ * and nothing about what goes in it. Writing a season, it filled the boolean with a sentence
+ * describing what the shot opens on — and the whole turn was refused after all the work was done,
+ * with no way for the model to have known better from the guide it was given.
+ */
+describe("nested shapes in the guide", () => {
+  const guide = worldChatResultShapeGuide();
+
+  it("gives every key in a nested object a type", () => {
+    assert.match(guide, /continuity \(\{openOnPrevious: boolean\?, keepOut: string\?\}/);
+    assert.match(guide, /beats \(array of \{span: string, text: string\}/);
+  });
+
+  it("leaves no nested object rendered as bare names", () => {
+    // The failure this protects against is a shape that reads as a list of words. Any brace group
+    // holding two or more comma-separated bare identifiers is that shape coming back.
+    const bare = [...guide.matchAll(/\{([a-zA-Z]+(?:, [a-zA-Z]+)+)\}/g)].map((m) => m[0]);
+    assert.deepEqual(bare, [], `these say names without types: ${bare.join(" | ")}`);
+  });
+
+  it("stays a guide rather than becoming a schema dump", () => {
+    assert.ok(guide.length < 26_000, `the shape guide is ${guide.length} characters`);
+  });
+});

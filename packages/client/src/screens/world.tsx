@@ -242,6 +242,25 @@ export function WorldOverviewScreen() {
   const authoring = useAuthoring();
   /** The title is editable in place; the folder underneath never moves. */
   const [renaming, setRenaming] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  /*
+    Arming and focusing are one action (driven 2026-08-22). The click that made the title
+    editable left no caret in it, so the title looked ready to type into and swallowed the first
+    keystroke; a second click nobody knows to make was the difference between renaming a world
+    and thinking the feature was broken. The caret goes to the end, not the start — the name is
+    usually being extended or corrected, not replaced from the front.
+  */
+  useEffect(() => {
+    const el = titleRef.current;
+    if (!renaming || !el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, [renaming]);
   if (!world) {
     return (
       <Screen id="world-overview">
@@ -289,6 +308,7 @@ export function WorldOverviewScreen() {
           synopsis: the folder underneath never moves.
         */}
         <h1
+          ref={titleRef}
           className="fy-hero__title"
           data-testid="world-name"
           role="textbox"

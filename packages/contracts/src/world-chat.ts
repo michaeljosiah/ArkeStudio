@@ -1884,12 +1884,30 @@ function draftObject(schema: z.ZodTypeAny): z.ZodObject<z.ZodRawShape> | null {
 }
 
 /** An object shape as a short signature: `{kind:"canon", entryId}`. */
-function shapeSignature(schema: z.ZodTypeAny): string {
+/**
+ * A nested object's shape, with each key's type (2026-08-22).
+ *
+ * This used to render key names alone — `{openOnPrevious, keepOut}` — which told a model what a
+ * field is called and nothing about what may go in it. Driven against a real season: the story
+ * author wrote `continuity.openOnPrevious` as a sentence describing what the shot opens on, a
+ * boolean field took a string, and the whole turn was refused after the model had done all the
+ * work. That is the same whole-turn rejection `describeField` exists to prevent, one level
+ * further in, and the fix is the same: say the type.
+ *
+ * `depth` stops the recursion paying for itself twice over. Three levels reaches the deepest
+ * shape here — a link’s pending-entity `ref` — and anything past that renders as bare names
+ * rather than growing the prompt without bound.
+ */
+function shapeSignature(schema: z.ZodTypeAny, depth = 0): string {
   const object = draftObject(schema);
   if (!object) return "value";
-  const keys = Object.entries(object.shape).map(([key, field]) =>
-    field instanceof z.ZodLiteral ? `${key}:${JSON.stringify(field.value)}` : key,
-  );
+  const keys = Object.entries(object.shape).map(([key, field]) => {
+    if (field instanceof z.ZodLiteral) return `${key}:${JSON.stringify(field.value)}`;
+    if (depth >= 2) return key;
+    const { inner, optional } = unwrapField(field as z.ZodTypeAny);
+    const type = inner instanceof z.ZodObject ? shapeSignature(inner, depth + 1) : fieldType(field as z.ZodTypeAny);
+    return `${key}: ${type}${optional ? "?" : ""}`;
+  });
   return `{${keys.join(", ")}}`;
 }
 
@@ -1931,7 +1949,10 @@ function fieldType(schema: z.ZodTypeAny): string {
   if (inner instanceof z.ZodBoolean) return "boolean";
   if (inner instanceof z.ZodArray) return `array of ${fieldType(inner.element)}`;
   if (inner instanceof z.ZodUnion) {
-    return (inner.options as z.ZodTypeAny[]).map(shapeSignature).join(" or ");
+    // Called, not passed: `map(shapeSignature)` hands it the element's index as its second
+    // argument, which is the depth counter — so every branch after the first rendered as bare
+    // names while the first was typed.
+    return (inner.options as z.ZodTypeAny[]).map((option) => shapeSignature(option)).join(" or ");
   }
   if (inner instanceof z.ZodObject) return shapeSignature(inner);
   return "value";
