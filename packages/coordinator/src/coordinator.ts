@@ -89,6 +89,7 @@ import {
   reorderChapters,
   reorderEpisodes,
   reorderScenes,
+  deleteScene,
   restoreScene,
   saveChapter,
   saveScene,
@@ -3389,6 +3390,25 @@ export class Coordinator {
             reason: err instanceof Error ? err.message : "the restore could not be applied",
           });
         });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "delete-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await deleteScene(store, { productionId: msg.productionId, sceneFile: msg.sceneFile }).catch(
+          (err: unknown) => {
+            // The refusal carries what stands in the way, which is the whole value of refusing.
+            this.emit({
+              at: new Date().toISOString(),
+              type: "scene.write-refused",
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              sceneFile: msg.sceneFile,
+              reason: err instanceof Error ? err.message : "the scene could not be deleted",
+            });
+          },
+        );
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

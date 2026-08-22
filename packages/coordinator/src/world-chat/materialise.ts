@@ -9,6 +9,7 @@ import {
   SheetSchema,
   StoryOverviewSchema,
   type Sheet,
+  type Shot,
   type WorldBundle,
   type WorldChangeCandidate,
   type WorldChatLinkRef,
@@ -235,7 +236,13 @@ export function materialiseCandidate(
    * the scanned bundle cannot see them, so two new episodes in one batch would otherwise take
    * one stem and one order between them.
    */
-  claimed?: { episodeIds: Set<string>; episodeStems: Set<string>; episodeOrders: Set<number> },
+  claimed?: {
+    episodeIds: Set<string>;
+    episodeStems: Set<string>;
+    episodeOrders: Set<number>;
+    /** New shot ids, so two shots added to one scene in one wrap-up do not share an id. */
+    shotIds: Set<string>;
+  },
 ): Materialised {
   /** The id planned for this entry, so nothing depends on the order materialise is walked in. */
   const nextCanonId = (): string => {
@@ -572,6 +579,70 @@ export function materialiseCandidate(
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
         fields: ["script"],
+        reservedCanonIds: [],
+      };
+    }
+
+    case "development.shot": {
+      /*
+       * A shot proposal is a scene edit, because a shot has no file of its own — which is also
+       * why it can never be materialised from the draft alone: the whole scene has to come back
+       * out with one shot changed inside it.
+       *
+       * An amendment is a patch, not a rewrite. The draft carries only what the conversation
+       * settled, and every field it omits is left exactly as the shot has it — including the
+       * ones a conversation may not touch at all (id, number, covers, promptOverride). Writing
+       * the draft over the shot wholesale would silently clear a hand-tuned prompt because
+       * nobody mentioned it.
+       */
+      const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
+      if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      const scene = production.scenes.find((s) => s.id === candidate.target.sceneId);
+      const stem = production.sceneFiles[candidate.target.sceneId];
+      if (!scene || stem === undefined) {
+        throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
+      }
+      const draft = candidate.draft;
+      const shotId = candidate.target.shotId;
+      let shots: Shot[];
+      if (shotId !== undefined) {
+        const live = scene.shots.find((s) => s.id === shotId);
+        if (!live) {
+          throw new MaterialiseError(
+            candidate.id,
+            `shot ${shotId} is not in ${candidate.target.sceneId} — name a shot the scene has, or leave shotId out to add one`,
+          );
+        }
+        shots = scene.shots.map((s) => (s.id === shotId ? { ...s, ...draft } : s));
+      } else {
+        // A new shot needs enough to be one. The storyboard already has a button for a blank.
+        if (draft.title === undefined || draft.description === undefined) {
+          throw new MaterialiseError(
+            candidate.id,
+            "a new shot needs both a title and a description — amend an existing shot to change one field",
+          );
+        }
+        /*
+         * Identity is minted here, never by the model: the id clears every shot in the whole
+         * production (takes and selections key by bare shot id), and the number is this scene's
+         * next. The same rule the storyboard's Add shot follows, and the gate refuses a
+         * collision either way.
+         */
+        const highestId = production.scenes
+          .flatMap((s) => s.shots)
+          .reduce((a, shot) => Math.max(a, Number(shot.id.replace(/^sh_0*/, "")) || 0), 0);
+        const claimedIds = claimed?.shotIds ?? new Set<string>();
+        let n = highestId + 1;
+        while (claimedIds.has(`sh_${n}`)) n += 1;
+        claimedIds.add(`sh_${n}`);
+        const number = scene.shots.reduce((a, s) => Math.max(a, s.number), 0) + 1;
+        shots = [...scene.shots, { ...draft, id: `sh_${n}`, number, title: draft.title, description: draft.description }];
+      }
+      const content = jsonContent(candidate.id, SceneSchema, { ...scene, shots });
+      return {
+        candidate,
+        targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
+        fields: shotId === undefined ? ["shots"] : Object.keys(draft),
         reservedCanonIds: [],
       };
     }

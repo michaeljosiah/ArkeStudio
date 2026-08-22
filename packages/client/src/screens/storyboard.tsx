@@ -8,6 +8,7 @@ import {
   parseMentions,
   productionAspect,
   promptFor,
+  sceneDeleteBlockers,
   sceneFindings,
   shotCoverage,
   type Scene,
@@ -20,7 +21,7 @@ import { Plus, X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
-import { restoreScene, saveScene, setPromptOverride } from "../lib/store.js";
+import { deleteScene, restoreScene, saveScene, setPromptOverride } from "../lib/store.js";
 import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
 
 /**
@@ -511,10 +512,19 @@ export function StoryboardFoot({
   scene: Scene;
 }) {
   const { production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
   const digests = useBlockDigests(scene);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** Asked once, in the same place, before anything goes (the delete is a version away back). */
+  const [confirming, setConfirming] = useState(false);
   if (!production) return null;
   const stem = sceneFileOf(production, scene);
+  /*
+   * What deletion would take with it, said before it is pressed rather than after. The
+   * coordinator refuses on exactly these grounds and its refusal reaches the toaster; saying it
+   * here as well means the person never has to press a button to find out they cannot.
+   */
+  const blockers = sceneDeleteBlockers(production, scene);
   /*
    * The same arithmetic as SceneReview (review 2026-08-22): this line counted by its own rule —
    * empty description or stale, promptOverride ignored — so the foot could say "1 to review"
@@ -529,6 +539,34 @@ export function StoryboardFoot({
         {attention === 0 ? "Ready to generate" : `${attention} to review`}
       </span>
       <span style={{ flex: 1 }} />
+      {/* Delete sits beside the history, because the history is what makes it survivable. */}
+      <span className="fy-mono" style={{ position: "relative" }} data-testid="scene-delete">
+        {confirming ? (
+          <>
+            Delete scene {scene.number}?{" "}
+            <button
+              type="button"
+              className="fy-sblink"
+              onClick={() => {
+                if (stem) deleteScene(worldId, prodId, stem);
+                setConfirming(false);
+                navigate(`/w/${worldId}/p/${prodId}/scenes`);
+              }}
+            >
+              Delete
+            </button>{" "}
+            <button type="button" className="fy-sblink" onClick={() => setConfirming(false)}>
+              Keep
+            </button>
+          </>
+        ) : blockers.length > 0 ? (
+          <span title={blockers.join(" · ")}>cannot delete · {blockers[0]}</span>
+        ) : (
+          <button type="button" className="fy-sblink" onClick={() => setConfirming(true)}>
+            Delete scene
+          </button>
+        )}
+      </span>
       <span className="fy-mono" style={{ position: "relative" }}>
         scene {scene.number} · v{scene.version} ·{" "}
         <button type="button" className="fy-sblink" onClick={() => setHistoryOpen((v) => !v)}>

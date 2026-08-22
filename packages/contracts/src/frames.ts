@@ -1318,6 +1318,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       version: z.number().int().min(1),
     })
     .strict(),
+  /**
+   * Remove a scene. Refused in words while accepted footage or a branch-map edge still depends
+   * on it; otherwise the file goes, and the episode memberships and shot selections that were
+   * only bookkeeping about it go in the same commit. History keeps the file.
+   */
+  z
+    .object({
+      kind: z.literal("delete-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /** The same stem-only rule as save-scene, for the same reason. */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("create-chapter"),

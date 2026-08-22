@@ -2313,6 +2313,14 @@ export function restoreScene(worldId: string, productionId: string, sceneFile: s
 }
 
 /**
+ * Remove a scene. Refused with its reasons while accepted footage or a branch-map edge depends
+ * on it — the refusal arrives as `scene.write-refused` and the toaster says it.
+ */
+export function deleteScene(worldId: string, productionId: string, sceneFile: string): void {
+  send({ kind: "delete-scene", worldId, productionId, sceneFile });
+}
+
+/**
  * Save the bible (SPEC-022). No proposal, no accept — it saves where it stands.
  *
  * `baseVersion` is the version the editor loaded. Passing it is what makes an ungated file safe

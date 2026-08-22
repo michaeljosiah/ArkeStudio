@@ -34,6 +34,9 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
     return candidate.target.episodeId === undefined ? "new episode" : `episode · ${candidate.target.episodeId}`;
   }
   if (candidate.classification === "development.scene-script") return `scene script · ${candidate.target.sceneId}`;
+  if (candidate.classification === "development.shot") {
+    return candidate.target.shotId === undefined ? "new shot" : `shot · ${candidate.target.shotId}`;
+  }
   if (candidate.classification === "development.series") return `series · ${candidate.target.seriesId}`;
   const subject = candidate.subject;
   if (subject.kind === "new") {
@@ -66,6 +69,8 @@ function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: stri
     return candidate.target.productionId;
   }
   if (candidate.classification === "development.scene-script") return candidate.target.sceneId;
+  // A shot is named by the scene it lives in — "sh_12" alone says nothing about where it is.
+  if (candidate.classification === "development.shot") return candidate.target.sceneId;
   if (candidate.classification === "development.series") return candidate.target.seriesId;
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
