@@ -28,7 +28,7 @@ const PAGE = `<!doctype html><html><head><title>Lagos</title>
 <p>Eleven and a half kilometres over the lagoon &mdash; the longest in the city.</p>
 <p>Opened in 1990.</p></body></html>`;
 
-async function harness(options: { allowed?: boolean; fetch?: typeof globalThis.fetch } = {}) {
+async function harness(options: { allowed?: boolean | (() => boolean); fetch?: typeof globalThis.fetch } = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
   const index = WorldIndex.open(worldDir, bundle);
@@ -49,7 +49,7 @@ async function harness(options: { allowed?: boolean; fetch?: typeof globalThis.f
     findAttachment: async (lease, id) =>
       (await new (await import("../../src/world-chat/service.js")).WorldChatService(worldPath).load(lease.conversationId))
         ?.attachments.find((a) => a.id === id) ?? null,
-    researchAllowed: () => options.allowed === true,
+    researchAllowed: () => (typeof options.allowed === "function" ? options.allowed() : options.allowed === true),
     ...(options.fetch ? { fetch: options.fetch } : {}),
     now: NOW,
   });
@@ -132,5 +132,33 @@ describe("turning a page into text", () => {
   it("decodes the entities a quotation would otherwise never match", () => {
     assert.equal(readableText("<p>salt &amp; light</p>"), "salt & light");
     assert.equal(readableText("<p>&quot;quoted&quot;</p>"), '"quoted"');
+  });
+});
+
+/**
+ * The setting is asked at the moment the tool runs (driven 2026-08-22).
+ *
+ * The coordinator used to mirror `research.web` into a field assigned only inside a method the
+ * World Chat path never calls, so the answer was `false` for the life of the process however the
+ * settings read. Driving it: research on in settings, and the Studio still refused — naming the
+ * setting the author had already turned on. A permission that is read once and never again is a
+ * permission that cannot be granted.
+ */
+describe("permission is read, not remembered", () => {
+  it("follows the setting when it changes mid-session", async () => {
+    let allowed = false;
+    const h = await harness({ allowed: () => allowed, fetch: servePage() });
+
+    const off = await h.retrieval.call(h.token, "fetch_url", { url: "https://example.com/craft" });
+    assert.equal((off.result as { refused?: boolean }).refused, true, "refused while it is off");
+
+    allowed = true;
+    const on = await h.retrieval.call(h.token, "fetch_url", { url: "https://example.com/craft" });
+    assert.notEqual(
+      (on.result as { refused?: boolean }).refused,
+      true,
+      "and allowed once it is on, without restarting anything",
+    );
+    h.index?.close();
   });
 });

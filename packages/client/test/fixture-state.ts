@@ -97,6 +97,7 @@ const state: ClientState = {
       alerted: false,
     },
     backgroundNotifications: "issues-only",
+    research: { web: false },
     narrator: null,
     appearance: { theme: "system" },
     runtime: null,

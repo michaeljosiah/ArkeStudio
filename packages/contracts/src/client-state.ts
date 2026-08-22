@@ -390,6 +390,8 @@ export const ClientStateSchema = z
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+        /** Whether the Studio may read a page online when a conversation asks it to (SPEC-022). */
+        research: z.object({ web: z.boolean() }).strict().default({ web: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),

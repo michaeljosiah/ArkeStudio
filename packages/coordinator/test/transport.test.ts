@@ -22,6 +22,7 @@ const STATE: ClientState = {
     presets: [],
     spend: null,
     backgroundNotifications: "issues-only",
+    research: { web: false },
   narrator: null,
     appearance: { theme: "system" },
     runtime: null,

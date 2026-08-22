@@ -35,6 +35,7 @@ export class ReadModel {
         presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
+        research: { web: false },
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
@@ -74,6 +75,7 @@ export class ReadModel {
         | "presets"
         | "spend"
         | "backgroundNotifications"
+        | "research"
         | "appearance"
         | "narrator"
         | "runtime"
