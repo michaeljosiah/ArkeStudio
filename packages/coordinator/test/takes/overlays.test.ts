@@ -3,7 +3,13 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CutFileSchema } from "@arke-studio/contracts";
-import { moveOverlay, placeOverlay, removeOverlay, splitOverlayAudio } from "../../src/takes/review.js";
+import {
+  moveOverlay,
+  placeOverlay,
+  rejoinOverlayAudio,
+  removeOverlay,
+  splitOverlayAudio,
+} from "../../src/takes/review.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -149,17 +155,25 @@ describe("splitting a clip's sound onto the lane below (lanes)", () => {
    * evidence for, and a split whose sound half never reached the mix would pass a test that
    * checked only the placement.
    */
-  async function fileVideo(store: WorldStore): Promise<string> {
+  async function fileVideo(
+    store: WorldStore,
+    measured: { hasAudio: boolean } | null = { hasAudio: true },
+  ): Promise<string> {
     const source = join(await tempDir("arke-insert-"), "insert.mp4");
     await writeFile(source, "not a real encode, and never decoded here", "utf8");
     // A probe is a pair of measuring functions, not a measurement: this one answers for the file
-    // it is handed without an ffprobe to run, which is the whole point of the seam.
+    // it is handed without an ffprobe to run, which is the whole point of the seam. `null` files
+    // it unmeasured, which is the real window between an upload and its probe landing.
     const filed = await fileArtifact(store, {
       sourcePath: source,
-      mediaProbe: {
-        durationSec: async () => 12,
-        info: async () => ({ durationSec: 12, hasAudio: true }),
-      },
+      ...(measured === null
+        ? {}
+        : {
+            mediaProbe: {
+              durationSec: async () => 12,
+              info: async () => ({ durationSec: 12, hasAudio: measured.hasAudio }),
+            },
+          }),
     });
     assert.equal(filed.outcome, "filed", "the split's own test proves nothing without a video to split");
     assert.equal(filed.artifact.kind, "video", "an .mp4 files as video, which is what has both");
@@ -170,7 +184,7 @@ describe("splitting a clip's sound onto the lane below (lanes)", () => {
      * premise here, because the exporter refuses to name an audio input it has no evidence for.
      */
     const stored = store.getBundle().artifacts.find((a) => a.id === filed.artifact.id);
-    assert.equal(stored?.mediaInfo?.hasAudio, true, "the probe reached the sidecar");
+    assert.equal(stored?.mediaInfo?.hasAudio, measured?.hasAudio, "the measurement reached the sidecar");
     return filed.artifact.id;
   }
 
@@ -229,7 +243,7 @@ describe("splitting a clip's sound onto the lane below (lanes)", () => {
       assert.equal((await cutOf(dir)).overlays.length, 2);
     }));
 
-  it("removes one half without touching the other, so a split is undoable", async () =>
+  it("removes one half without touching the other", async () =>
     withWorld(async ({ dir, store }) => {
       const video = await fileVideo(store);
       const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 1, endSec: 5, lane: 1 });
@@ -238,6 +252,85 @@ describe("splitting a clip's sound onto the lane below (lanes)", () => {
       const left = (await cutOf(dir)).overlays;
       assert.equal(left.length, 1);
       assert.equal(left[0]?.id, placed.id, "the picture is what is left");
-      assert.equal(left[0]?.audio, "mute", "and it is still muted, because that is what was chosen");
+      // Deleting the sound is not the same act as rejoining it — the person threw that sound
+      // away, so the picture stays as they left it. `rejoinOverlayAudio` is the way back, and
+      // an earlier version of this test asserted the mute with no way back to assert against.
+      assert.equal(left[0]?.audio, "mute");
+    }));
+
+  it("refuses to split what was measured silent, rather than muting it for good", async () =>
+    withWorld(async ({ dir, store }) => {
+      const silent = await fileVideo(store, { hasAudio: false });
+      const placed = await placeOverlay(store, "saltlight", { artifactId: silent, startSec: 0, endSec: 4 });
+      await assert.rejects(() => splitOverlayAudio(store, "saltlight", placed.id), /measured as silent/);
+      // The refusal has to leave the clip alone: a mute written before the throw would be a clip
+      // silent for ever, from an action that reported itself as refused.
+      const after = (await cutOf(dir)).overlays;
+      assert.equal(after.length, 1, "no sound half was filed");
+      assert.equal(after[0]?.audio, "keep", "and the picture still carries its own sound");
+    }));
+
+  it("refuses to split a video nothing has measured yet", async () =>
+    withWorld(async ({ store }) => {
+      const unprobed = await fileVideo(store, null);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: unprobed, startSec: 0, endSec: 4 });
+      // Different from measured-silent, and says so: this one becomes splittable once the probe
+      // lands, so telling somebody to try again is true here and would be a lie above.
+      await assert.rejects(() => splitOverlayAudio(store, "saltlight", placed.id), /has not been measured yet/);
+    }));
+});
+
+describe("rejoining a split (lanes)", () => {
+  const withWorld = async (body: (ctx: Awaited<ReturnType<typeof open>>) => Promise<void>) => {
+    const ctx = await open();
+    try {
+      await body(ctx);
+    } finally {
+      await ctx.store.close();
+    }
+  };
+
+  async function fileVideo(store: WorldStore): Promise<string> {
+    const source = join(await tempDir("arke-insert-"), "insert.mp4");
+    await writeFile(source, "not a real encode, and never decoded here", "utf8");
+    const filed = await fileArtifact(store, {
+      sourcePath: source,
+      mediaProbe: { durationSec: async () => 12, info: async () => ({ durationSec: 12, hasAudio: true }) },
+    });
+    assert.equal(filed.outcome, "filed");
+    return filed.artifact.id;
+  }
+
+  it("gives the picture its sound back and takes the twin away", async () =>
+    withWorld(async ({ dir, store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 1, endSec: 5, lane: 2 });
+      await splitOverlayAudio(store, "saltlight", placed.id);
+      const rejoined = await rejoinOverlayAudio(store, "saltlight", placed.id);
+      assert.equal(rejoined.audio, "keep");
+      const left = (await cutOf(dir)).overlays;
+      assert.equal(left.length, 1, "the sound half is gone, or the mix would count it twice");
+      assert.equal(left[0]?.id, placed.id);
+      assert.equal(left[0]?.lane, 2, "and the picture never moved");
+    }));
+
+  it("leaves a sound clip somebody has since made their own", async () =>
+    withWorld(async ({ dir, store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 1, endSec: 5, lane: 2 });
+      const sound = await splitOverlayAudio(store, "saltlight", placed.id);
+      // Dragged somewhere of its own: it is an edit now, not the other half of a split.
+      await moveOverlay(store, "saltlight", { overlayId: sound.id, startSec: 9, endSec: 13 });
+      await rejoinOverlayAudio(store, "saltlight", placed.id);
+      const left = (await cutOf(dir)).overlays;
+      assert.equal(left.length, 2, "taking it away would be taking their edit");
+      assert.equal(left.find((o) => o.id === sound.id)?.startSec, 9);
+    }));
+
+  it("refuses a clip that was never split", async () =>
+    withWorld(async ({ store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 0, endSec: 3 });
+      await assert.rejects(() => rejoinOverlayAudio(store, "saltlight", placed.id), /is not a split picture/);
     }));
 });

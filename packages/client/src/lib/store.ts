@@ -2555,6 +2555,11 @@ export function splitOverlayAudio(worldId: string, productionId: string, overlay
   send({ kind: "split-overlay-audio", worldId, productionId, overlayId });
 }
 
+/** The inverse, so a split is not a one-way door: the picture sounds again and the twin goes. */
+export function rejoinOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
+  send({ kind: "rejoin-overlay-audio", worldId, productionId, overlayId });
+}
+
 export function removeOverlay(worldId: string, productionId: string, overlayId: string): void {
   send({ kind: "remove-overlay", worldId, productionId, overlayId });
 }

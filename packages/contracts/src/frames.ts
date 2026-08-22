@@ -2,7 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
-import { ClipAudioModeSchema, MAX_CLIP_LANE } from "./cut.js";
+import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -1631,7 +1631,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       endSec: z.number().positive().finite(),
       /** Which lane received the drop; absent lands it on the bottom one. */
       lane: z.number().int().min(0).max(MAX_CLIP_LANE).optional(),
-      audio: ClipAudioModeSchema.optional(),
     })
     .strict(),
   /** 82a, lanes: move a clip already placed, which is the same act as placing it. */
@@ -1651,6 +1650,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("split-overlay-audio"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
+    })
+    .strict(),
+  /** Lanes: the exact inverse — the picture carries its own sound again and the twin goes. */
+  z
+    .object({
+      kind: z.literal("rejoin-overlay-audio"),
       worldId: UlidSchema,
       productionId: SlugSchema,
       overlayId: prefixedIdSchema("ov"),

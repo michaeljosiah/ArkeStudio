@@ -1896,20 +1896,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-trim__step:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 .fy-trim__step:disabled { opacity: 0.35; cursor: default; }
-.fy-audioseg {
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--muted);
-  display: flex;
-  align-items: center;
-  padding: 0 9px;
-  gap: 8px;
-  overflow: hidden;
-  font: 400 9px var(--font-mono);
-  color: var(--neutral-400);
-  white-space: nowrap;
-}
 .fy-cutfoot { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .fy-warnchip { display: inline-flex; align-items: center; gap: 6px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 

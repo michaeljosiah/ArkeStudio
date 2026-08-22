@@ -351,6 +351,22 @@ export async function splitOverlayAudio(
     if (artifact.kind !== "video") {
       throw new Error(`a ${artifact.kind} has no sound to split from its picture`);
     }
+    /*
+     * Being a video is not evidence of a soundtrack, and this function's promise is that it never
+     * produces a half that can never sound. The exporter takes a video's audio only when the
+     * measurement says it has some, so splitting one measured silent would mute the picture for
+     * good and file a sound half every encode then discards.
+     *
+     * The two silences are different facts and say so: measured-and-empty is settled, while
+     * not-yet-measured is the window between filing a video and its probe landing, and telling
+     * somebody to try again is only useful if it is true.
+     */
+    if (artifact.mediaInfo === undefined) {
+      throw new Error(`${artifact.file} has not been measured yet — its sound cannot be split until it has`);
+    }
+    if (!artifact.mediaInfo.hasAudio) {
+      throw new Error(`${artifact.file} was measured as silent, so there is no sound to split off`);
+    }
     // The lane below, floored at zero: splitting the bottom clip leaves both halves sharing a
     // lane, which mixes and composites exactly the same and is one fewer surprise than refusing.
     const lane = Math.max(0, (found.lane ?? 0) - 1);
@@ -358,6 +374,44 @@ export async function splitOverlayAudio(
     return [...current.map((o) => (o.id === overlayId ? { ...o, audio: "mute" as const } : o)), sound];
   });
   return sound!;
+}
+
+/**
+ * Put a split back together (lanes).
+ *
+ * Splitting is otherwise a one-way door: `audio` has no other writer, so a picture muted by a
+ * split stays muted for the life of the clip and the only escape is deleting it and dropping the
+ * file again, losing the window and the lane it was placed in.
+ *
+ * Rejoining is the exact inverse and nothing more — the picture carries its own sound again, and
+ * the sound half the split created is removed. Removing it is what keeps the mix honest: leaving
+ * both would count the same sound twice, once from the picture and once from its twin.
+ */
+export async function rejoinOverlayAudio(store: WorldStore, productionId: string, overlayId: string): Promise<CutOverlay> {
+  let rejoined: CutOverlay | null = null;
+  await editOverlays(store, productionId, (current) => {
+    const found = current.find((o) => o.id === overlayId);
+    if (found === undefined) throw new Error(`clip ${overlayId} is not on this cut`);
+    if (found.audio !== "mute") throw new Error(`clip ${overlayId} is not a split picture`);
+    rejoined = { ...found, audio: "keep" };
+    /*
+     * The twin is the sound half over the same file and the same window. Matched rather than
+     * recorded, because an id pointing at a clip somebody may have deleted or dragged elsewhere
+     * is a reference that goes stale silently; a window that no longer matches is a clip the
+     * person has since made their own, and taking it away would be taking their edit.
+     */
+    return current.filter(
+      (o) =>
+        !(
+          o.id !== overlayId &&
+          o.audio === "only" &&
+          o.artifactId === found.artifactId &&
+          o.startSec === found.startSec &&
+          o.endSec === found.endSec
+        ),
+    ).map((o) => (o.id === overlayId ? rejoined! : o));
+  });
+  return rejoined!;
 }
 
 /** Remove the placement. The artifact is untouched: it was only ever cited (82a). */

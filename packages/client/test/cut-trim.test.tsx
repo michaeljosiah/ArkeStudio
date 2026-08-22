@@ -179,6 +179,36 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.equal((html.match(/fy-track__label">L\d/g) ?? []).length, 5, "L4 down to L0, so nothing is hidden");
   });
 
+  it("counts what was placed, not what a split filed", () => {
+    // Splitting files a second record over the same file. Counting both reports two clips for
+    // one piece of media the person dropped once and still sees as one run on the timeline.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    production.cut = {
+      audio: [],
+      overlays: [
+        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 1, audio: "mute" },
+        { id: "ov_01J8G0000000000000000000A2", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 0, audio: "only" },
+      ],
+    } as typeof production.cut;
+    const html = renderCut(ClientStateSchema.parse(state));
+    assert.match(html, /1 clip/);
+    assert.doesNotMatch(html, /2 clips/);
+  });
+
+  it("pluralises the count, because two clips are not 2 clip", () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    production.cut = {
+      audio: [],
+      overlays: [
+        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 1, audio: "keep" },
+        { id: "ov_01J8G0000000000000000000A2", artifactId: "ar_01J8G0000000000000000000R1", startSec: 5, endSec: 7, lane: 0, audio: "keep" },
+      ],
+    } as typeof production.cut;
+    assert.match(renderCut(ClientStateSchema.parse(state)), /2 clips/);
+  });
+
   it("marks the sound half of a split, and lays no picture for it", () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
@@ -207,7 +237,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.match(html, /harbour-bells\.wav/);
     // An overlay is never coverage: the shot count is untouched and the overlay is its own clause.
     assert.match(html, /shots covered/);
-    assert.match(html, /1 overlay/);
+    assert.match(html, /1 clip/);
     assert.doesNotMatch(html, /14 of 15/, "placing something over the picture covers no shot");
   });
 });

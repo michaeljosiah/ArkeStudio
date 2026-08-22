@@ -93,6 +93,7 @@ import {
   placeOverlay,
   removeOverlay,
   moveOverlay,
+  rejoinOverlayAudio,
   splitOverlayAudio,
   uploadArtifacts,
   dispatchScenePlanned,
@@ -2822,6 +2823,10 @@ const CLIP_DEFAULT_SEC = 4;
 /** One lane row plus the gap under it, which is what a drag has to cross to change lane. */
 const LANE_PITCH_PX = 50;
 
+/** The clip menu's own box, so a right-click near an edge opens somewhere it can be read. */
+const CLIP_MENU_WIDTH_PX = 216;
+const CLIP_MENU_HEIGHT_PX = 96;
+
 /**
  * The world's artifacts, beside the cut (82a).
  *
@@ -2896,7 +2901,6 @@ function ClipView({
   totalSec,
   maxLane,
   snapPoints,
-  onDismissMenu,
   onMenu,
 }: {
   worldId: string;
@@ -2907,7 +2911,6 @@ function ClipView({
   totalSec: number;
   maxLane: number;
   snapPoints: readonly number[];
-  onDismissMenu: () => void;
   onMenu: (clip: CutOverlay, at: { x: number; y: number }) => void;
 }) {
   const [draft, setDraft] = useState<ClipPlacement | null>(null);
@@ -2917,7 +2920,6 @@ function ClipView({
     if (e.button !== 0 || totalSec <= 0) return;
     e.preventDefault();
     e.stopPropagation();
-    onDismissMenu();
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
     /*
@@ -2963,6 +2965,15 @@ function ClipView({
       style={{
         left: `${(shown.startSec / totalSec) * 100}%`,
         width: `${Math.max(((shown.endSec - shown.startSec) / totalSec) * 100, 1.5)}%`,
+        /*
+         * The row a clip is drawn in is decided by its *committed* lane, so a cross-lane drag
+         * would otherwise slide along its old row and only jump after the round-trip — no
+         * confirmation the lane even registered until it was too late to change your mind.
+         * Lanes are drawn highest-first, so a higher target lane is one row up.
+         */
+        ...(draft && draft.lane !== (clip.lane ?? 0)
+          ? { transform: `translateY(${((clip.lane ?? 0) - draft.lane) * LANE_PITCH_PX}px)` }
+          : {}),
       }}
       title={`${name} · ${shown.startSec.toFixed(1)}s → ${shown.endSec.toFixed(1)}s${mode === "keep" ? "" : ` · ${mode === "only" ? "sound only" : "muted"}`}`}
       onPointerDown={begin("move")}
@@ -3037,6 +3048,31 @@ function ClipLanes({
   const [added, setAdded] = useState(0);
   const [menu, setMenu] = useState<{ clip: CutOverlay; x: number; y: number } | null>(null);
 
+  /*
+   * Dismissed from anywhere, not only from inside the lanes (review). A menu whose only escape
+   * was a press on the column it came from stayed painted over whatever the person moved on to,
+   * with its buttons still live against a clip they were no longer looking at.
+   */
+  useEffect(() => {
+    if (menu === null) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    // Capture, so a press that a clip's own handler stops still closes the menu above it.
+    window.addEventListener("pointerdown", close, { capture: true });
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    // `position: fixed` is viewport-anchored, so a scroll detaches the menu from its clip.
+    window.addEventListener("scroll", close, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", close, { capture: true });
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, { capture: true });
+    };
+  }, [menu]);
+
   // Two lanes at rest: one to drop a picture on and one under it for the sound, which is the
   // shape every split leaves behind and the one people arrive expecting.
   const used = clips.reduce((high, c) => Math.max(high, c.lane ?? 0), 0);
@@ -3065,10 +3101,24 @@ function ClipLanes({
     );
   };
 
-  const splittable =
-    menu !== null &&
-    (menu.clip.audio ?? "keep") === "keep" &&
-    artifacts.find((a) => a.id === menu.clip.artifactId)?.kind === "video";
+  /*
+   * Why a split is or is not on offer, in the same words the coordinator refuses in — the menu
+   * used to offer it for any video and let the write fail into the app log, which is a refusal
+   * nobody reading the screen ever sees.
+   */
+  const splitState = ((): { ok: boolean; why: string } => {
+    if (menu === null) return { ok: false, why: "" };
+    const mode = menu.clip.audio ?? "keep";
+    if (mode === "only") return { ok: false, why: "this is already the sound half" };
+    if (mode === "mute") return { ok: false, why: "already split" };
+    const artifact = artifacts.find((a) => a.id === menu.clip.artifactId);
+    if (artifact === undefined) return { ok: false, why: "this clip cites nothing this world has" };
+    if (artifact.kind !== "video") return { ok: false, why: `a ${artifact.kind} has no sound to split` };
+    if (artifact.mediaInfo === undefined) return { ok: false, why: "not measured yet — try again shortly" };
+    if (!artifact.mediaInfo.hasAudio) return { ok: false, why: "measured as silent, so there is nothing to split" };
+    return { ok: true, why: "" };
+  })();
+  const rejoinable = menu !== null && (menu.clip.audio ?? "keep") === "mute";
 
   return (
     <div className="fy-clanes" onPointerDown={() => setMenu(null)}>
@@ -3105,7 +3155,6 @@ function ClipLanes({
                   totalSec={totalSec}
                   maxLane={maxLane}
                   snapPoints={snapPoints}
-                  onDismissMenu={() => setMenu(null)}
                   onMenu={(clip, at) => setMenu({ clip, x: at.x, y: at.y })}
                 />
               ))}
@@ -3128,20 +3177,38 @@ function ClipLanes({
       {menu && (
         <div
           className="fy-clipmenu"
-          style={{ left: menu.x, top: menu.y }}
+          /* Kept inside the viewport: a right-click near an edge would otherwise open the menu
+             off the side of the window, where it can be neither read nor reached. */
+          style={{
+            left: Math.min(menu.x, Math.max(0, window.innerWidth - CLIP_MENU_WIDTH_PX - 8)),
+            top: Math.min(menu.y, Math.max(0, window.innerHeight - CLIP_MENU_HEIGHT_PX - 8)),
+          }}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            className="fy-clipmenu__item"
-            disabled={!splittable}
-            onClick={() => {
-              splitOverlayAudio(worldId, prodId, menu.clip.id);
-              setMenu(null);
-            }}
-          >
-            Split audio to the lane below
-          </button>
+          {rejoinable ? (
+            <button
+              type="button"
+              className="fy-clipmenu__item"
+              onClick={() => {
+                rejoinOverlayAudio(worldId, prodId, menu.clip.id);
+                setMenu(null);
+              }}
+            >
+              Rejoin its sound
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="fy-clipmenu__item"
+              disabled={!splitState.ok}
+              onClick={() => {
+                splitOverlayAudio(worldId, prodId, menu.clip.id);
+                setMenu(null);
+              }}
+            >
+              Split audio to the lane below
+            </button>
+          )}
           <button
             type="button"
             className="fy-clipmenu__item"
@@ -3152,11 +3219,7 @@ function ClipLanes({
           >
             Remove clip
           </button>
-          {!splittable && (
-            <span className="fy-clipmenu__note">
-              {(menu.clip.audio ?? "keep") !== "keep" ? "already split" : "only a video has sound to split"}
-            </span>
-          )}
+          {!rejoinable && !splitState.ok && <span className="fy-clipmenu__note">{splitState.why}</span>}
         </div>
       )}
     </div>
@@ -3673,6 +3736,13 @@ export function CutScreen() {
   // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
   // LTX port has always offered and nothing had yet asked for.
   const spans = spineCut ? spineSpans(spineCut) : cut ? storySpans(cut) : [];
+  /*
+   * What a person placed, which a split does not add to: splitting files a second record over the
+   * same file, and counting both would report two clips for one piece of media still drawn as one
+   * run on the timeline. The sound half is the half that is not counted, because the picture is
+   * the one they dropped.
+   */
+  const clipCount = (production?.cut.overlays ?? []).filter((o) => (o.audio ?? "keep") !== "only").length;
   const snapPoints = snapPointsFor(
     spans.map((s) => s.startSec),
     totalSec,
@@ -3691,7 +3761,7 @@ export function CutScreen() {
             : cut
               ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
               : ""}
-          {(production?.cut.overlays.length ?? 0) > 0 && ` · ${production!.cut.overlays.length} overlay`}
+          {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
         </span>
         <span className="fy-h1row__push" />
         <Button onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>

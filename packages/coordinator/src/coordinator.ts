@@ -146,6 +146,7 @@ import {
   moveOverlay,
   placeOverlay,
   rejectTake,
+  rejoinOverlayAudio,
   removeOverlay,
   splitOverlayAudio,
   saveAudioTracks,
@@ -4085,6 +4086,7 @@ export class Coordinator {
       case "place-overlay":
       case "move-overlay":
       case "split-overlay-audio":
+      case "rejoin-overlay-audio":
       case "remove-overlay": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -4097,7 +4099,6 @@ export class Coordinator {
               startSec: msg.startSec,
               endSec: msg.endSec,
               ...(msg.lane !== undefined ? { lane: msg.lane } : {}),
-              ...(msg.audio !== undefined ? { audio: msg.audio } : {}),
             });
           } else if (msg.kind === "move-overlay") {
             await moveOverlay(store, msg.productionId, {
@@ -4108,6 +4109,8 @@ export class Coordinator {
             });
           } else if (msg.kind === "split-overlay-audio") {
             await splitOverlayAudio(store, msg.productionId, msg.overlayId);
+          } else if (msg.kind === "rejoin-overlay-audio") {
+            await rejoinOverlayAudio(store, msg.productionId, msg.overlayId);
           } else {
             await removeOverlay(store, msg.productionId, msg.overlayId);
           }

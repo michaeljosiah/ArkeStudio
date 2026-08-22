@@ -52,6 +52,26 @@ describe("dragging a clip's edges", () => {
   it("does not let the tail leave the film", () => {
     assert.equal(applyClipDrag(at(2, 6), "trim-end", 99, 0, bounds).endSec, 20);
   });
+
+  /*
+   * The film can shrink under a clip that is already placed — a shot deleted, a take un-accepted,
+   * a shorter master track assigned. The clamp's floor then sits above its ceiling, and a crossed
+   * clamp returns the ceiling rather than refusing, which is an end before its own start.
+   */
+  it("refuses both edges when the film is shorter than the clip's own start", () => {
+    const shrunk = { ...bounds, totalSec: 40 };
+    const stranded = at(50, 55);
+    const tail = applyClipDrag(stranded, "trim-end", 1, 0, shrunk);
+    assert.deepEqual(tail, stranded, "there is no honest tail to offer, so the gesture does nothing");
+    assert.ok(tail.endSec > tail.startSec, "and never an end before its own start");
+  });
+
+  it("never drags a head below zero, whatever the clip's length", () => {
+    const sliver = { startSec: 0, endSec: 0.05, lane: 0 };
+    const head = applyClipDrag(sliver, "trim-start", -1, 0, bounds);
+    assert.deepEqual(head, sliver, "a clip already shorter than the minimum has no head to move");
+    assert.ok(head.startSec >= 0, "a negative start is not something to file");
+  });
 });
 
 describe("snapping to the cuts", () => {

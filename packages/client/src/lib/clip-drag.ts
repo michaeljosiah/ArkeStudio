@@ -50,13 +50,28 @@ export function applyClipDrag(
     const startSec = clamp(wanted, 0, Math.max(0, bounds.totalSec - span));
     return { startSec: tidy(startSec), endSec: tidy(startSec + span), lane };
   }
+  /*
+   * Both edge gestures clamp between a floor and a ceiling that can cross each other, and a
+   * crossed clamp does not refuse — it returns the ceiling. `clamp(v, 50.1, 40)` is 40, which is
+   * an end before its own start.
+   *
+   * It is reachable without anybody dragging anything strange: the film shrinks under a clip that
+   * is already placed whenever a shot is deleted, a take is un-accepted, or a shorter master track
+   * is assigned. The window is then outside a film that has no room for it, and there is no
+   * honest edge to offer — so the gesture returns the clip unchanged rather than filing a window
+   * the coordinator would refuse and the lane would draw as a sliver.
+   */
   if (gesture === "trim-start") {
+    const ceiling = origin.endSec - MIN_CLIP_SEC;
+    if (ceiling < 0) return { ...origin, lane };
     const wanted = snapToPoints(origin.startSec + deltaSec, bounds.snapPoints);
-    const startSec = clamp(wanted, 0, origin.endSec - MIN_CLIP_SEC);
+    const startSec = clamp(wanted, 0, ceiling);
     return { startSec: tidy(startSec), endSec: tidy(origin.endSec), lane };
   }
+  const floor = origin.startSec + MIN_CLIP_SEC;
+  if (floor > bounds.totalSec) return { ...origin, lane };
   const wanted = snapToPoints(origin.endSec + deltaSec, bounds.snapPoints);
-  const endSec = clamp(wanted, origin.startSec + MIN_CLIP_SEC, bounds.totalSec);
+  const endSec = clamp(wanted, floor, bounds.totalSec);
   return { startSec: tidy(origin.startSec), endSec: tidy(endSec), lane };
 }
 
