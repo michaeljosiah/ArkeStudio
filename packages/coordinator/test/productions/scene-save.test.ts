@@ -122,4 +122,42 @@ describe("scene direct save (turn 97)", () => {
     );
     assert.equal((await readSceneFile(dir)).version, before.version);
   });
+
+  it("a save is a replacement, not a merge: a cleared field stays cleared (review 2026-08-22)", async () => {
+    // JsonFile.set is a shallow merge, so a save that REMOVED a field resurrected it from the
+    // old document — clearing the synopsis put the old sentence straight back, forever.
+    const { dir, store } = await open();
+    const base = await readSceneFile(dir);
+    await saveScene(store, {
+      productionId: "saltlight",
+      sceneFile: STEM,
+      scene: { ...base, synopsis: "a line to be regretted" },
+      baseVersion: base.version,
+    });
+    const withSynopsis = await readSceneFile(dir);
+    const { synopsis: _cleared, ...cleared } = withSynopsis;
+    await saveScene(store, {
+      productionId: "saltlight",
+      sceneFile: STEM,
+      scene: cleared,
+      baseVersion: withSynopsis.version,
+    });
+    const after = await readSceneFile(dir);
+    assert.equal(after.synopsis, undefined, "what the person deleted stays deleted");
+    assert.equal(after.version, withSynopsis.version + 1);
+  });
+
+  it("a scene file name that walks out of the scenes directory is refused by name", async () => {
+    // The stem lands in a path join on a loopback socket any local process can reach — so
+    // "..\\..\\meta" was a world-wide write primitive until the guard (review 2026-08-22).
+    const { dir, store } = await open();
+    const before = await readSceneFile(dir);
+    for (const stem of ["../meta", "..\\..\\bible", "a/b", "a\\b", ".hidden", ""]) {
+      await assert.rejects(
+        saveScene(store, { productionId: "saltlight", sceneFile: stem, scene: before, baseVersion: before.version }),
+        /scene file|refused|not a scene file/i,
+      );
+      await assert.rejects(restoreScene(store, { productionId: "saltlight", sceneFile: stem, version: 1 }));
+    }
+  });
 });

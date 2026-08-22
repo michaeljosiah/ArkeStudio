@@ -115,6 +115,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * A direct scene write was refused (review 2026-08-22). The storyboard's editors are
+   * uncontrolled, so a swallowed refusal threw the typed text away and repainted the old scene
+   * with nothing said — the exact silence `SceneStaleError`'s own message was written to
+   * prevent. The reason is the error's message, already worded for a person.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("scene.write-refused"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().min(1),
+      reason: z.string().min(1),
+    })
+    .strict(),
+
+  /**
    * The correlated answer to one create-production request (issue #384): success carries the
    * actual slug only after the commit is durable; failure names its reason and navigates
    * nowhere. A redelivered request id receives the same slug it got the first time.

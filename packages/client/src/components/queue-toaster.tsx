@@ -6,6 +6,7 @@ import {
   acknowledgeUpdate,
   subscribeJobReady,
   subscribeQueueResults,
+  subscribeSceneRefusals,
   useStore,
   useUpdateStatus,
   type QueueEnqueueResult,
@@ -143,6 +144,31 @@ export function QueueToaster() {
     });
     acknowledgeUpdate();
   }, [update]);
+
+  useEffect(
+    () =>
+      /*
+       * A refused scene save was silent (review 2026-08-22): the coordinator emits
+       * scene.write-refused, and until now nothing listened — an edit could quietly not land
+       * and the storyboard kept showing the text the person typed. Raised here rather than on
+       * the storyboard because every screen that saves scenes should say the same thing the
+       * same way.
+       */
+      subscribeSceneRefusals((event) => {
+        const note: QueueNote = {
+          id: `scene-refusal:${event.productionId}/${event.sceneFile}`,
+          tone: "refused",
+          title: "That edit was not saved",
+          meta: `scene ${event.sceneFile}`,
+          reason: event.reason,
+        };
+        toast.custom(
+          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: duration(note) },
+        );
+      }),
+    [],
+  );
 
   useEffect(() => {
     const act = (note: QueueNote, id: string | number) => {

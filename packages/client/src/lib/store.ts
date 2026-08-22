@@ -303,6 +303,18 @@ export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => 
 
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
+/** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
+const sceneRefusalListeners = new Set<
+  (event: { productionId: string; sceneFile: string; reason: string }) => void
+>();
+
+export function subscribeSceneRefusals(
+  listener: (event: { productionId: string; sceneFile: string; reason: string }) => void,
+): () => void {
+  sceneRefusalListeners.add(listener);
+  return () => sceneRefusalListeners.delete(listener);
+}
+
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
 export function subscribeProductionCreateResults(listener: (result: ProductionCreateResult) => void): () => void {
   productionCreateListeners.add(listener);
@@ -596,6 +608,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "scene.write-refused") {
+      for (const listener of sceneRefusalListeners) listener(event);
     }
     if (event.type === "production.plan-result") {
       for (const listener of planResultListeners) listener(event);

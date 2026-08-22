@@ -1296,7 +1296,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("save-scene"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      sceneFile: z.string().min(1),
+      /*
+       * A file stem, never a path (review 2026-08-22): this frame writes directly with no
+       * accept step, and an unconstrained string joined into the world directory admitted
+       * `..` and backslashes. The pattern is the scanner's own naming for scene files.
+       */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       scene: z.unknown(),
       baseVersion: z.number().int().min(1).optional(),
     })
@@ -1307,7 +1312,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("restore-scene"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      sceneFile: z.string().min(1),
+      /** The same stem-only rule as save-scene, for the same reason. */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       version: z.number().int().min(1),
     })
     .strict(),
