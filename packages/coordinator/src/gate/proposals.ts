@@ -664,7 +664,18 @@ export class ProposalManager {
           baseHash: target.baseHash,
         });
       }
-      if (files.length === 0) return { status: "no-op" };
+      if (files.length === 0) {
+        // Every target already reads exactly as proposed, so there is no decision left to make —
+        // and a card that cannot be accepted, cannot be usefully discarded, and says nothing when
+        // pressed is worse than no card. Driven 2026-08-22: eight sheets from a world door whose
+        // commits had landed but whose directories survived sat in Needs you permanently, and
+        // Accept all did nothing, visibly or in any log.
+        //
+        // Retiring rather than refusing is safe precisely because nothing would change: the
+        // world already says what this proposal says. What is thrown away is the offer, not work.
+        await this.retire(proposalId, null);
+        return { status: "no-op" };
+      }
 
       const problems = await this.checkAuthoredBounds(files);
       if (problems.length > 0) return { status: "invalid", problems };
@@ -727,7 +738,8 @@ export class ProposalManager {
    * what `listOpen` reads, so a proposal whose change has landed never appears open again even
    * if its bytes linger until the next sweep.
    */
-  private async retire(proposalId: string, commitId: string): Promise<void> {
+  /** `commitId` is null when the proposal was retired without one — nothing differed to commit. */
+  private async retire(proposalId: string, commitId: string | null): Promise<void> {
     const dir = this.proposalDir(proposalId);
     try {
       await atomicWriteFile(

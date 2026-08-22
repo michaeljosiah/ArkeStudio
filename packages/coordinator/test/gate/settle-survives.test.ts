@@ -115,3 +115,44 @@ describe("an accepted proposal is over, whatever is left on disk", () => {
     );
   });
 });
+
+/**
+ * The other half of the same bug (driven 2026-08-22).
+ *
+ * When the delete after a commit failed, the proposal came back as open over a world that already
+ * had its change. Accepting it again found every target identical, which the gate answered with
+ * `no-op` — and left the proposal exactly where it was. Eight of them sat in Needs you across
+ * two builds; Accept all did nothing, said nothing, and logged nothing. A decision nobody can
+ * make and nobody can clear is not a decision.
+ */
+describe("a proposal the world already agrees with", () => {
+  it("retires instead of asking forever", async () => {
+    const { gate } = await open();
+    const staged = await stageOne(gate);
+    assert.equal((await gate.accept(staged.id)).status, "accepted");
+
+    // Stage the identical sheet again: every target now reads exactly as proposed.
+    const again = await stageOne(gate);
+    const outcome = await gate.accept(again.id);
+    assert.equal(outcome.status, "no-op", "there is genuinely nothing to write");
+
+    assert.ok(
+      !(await gate.listOpen()).some((p) => p.id === again.id),
+      "and it stops being offered, rather than sitting there unacceptable",
+    );
+  });
+
+  it("leaves the world exactly as it was", async () => {
+    const { dir, gate } = await open();
+    const first = await gate.accept((await stageOne(gate)).id);
+    assert.equal(first.status, "accepted");
+    const after = await readFile(join(dir, "characters", "ife.md"), "utf8");
+
+    await gate.accept((await stageOne(gate)).id);
+    assert.equal(
+      await readFile(join(dir, "characters", "ife.md"), "utf8"),
+      after,
+      "retiring the offer is not a write",
+    );
+  });
+});
