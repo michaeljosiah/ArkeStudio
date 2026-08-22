@@ -2528,12 +2528,31 @@ export function uploadArtifacts(worldId: string): void {
  * Overlays (82a): the one stored position on the cut. Placing, moving and removing are one act —
  * where a thing sits — and none of them touch the artifact, which is only ever cited.
  */
-export function placeOverlay(worldId: string, productionId: string, artifactId: string, startSec: number, endSec: number): void {
-  send({ kind: "place-overlay", worldId, productionId, artifactId, startSec, endSec });
+export function placeOverlay(
+  worldId: string,
+  productionId: string,
+  artifactId: string,
+  startSec: number,
+  endSec: number,
+  lane?: number,
+): void {
+  send({ kind: "place-overlay", worldId, productionId, artifactId, startSec, endSec, ...(lane !== undefined ? { lane } : {}) });
 }
 
-export function moveOverlay(worldId: string, productionId: string, overlayId: string, startSec: number, endSec: number): void {
-  send({ kind: "move-overlay", worldId, productionId, overlayId, startSec, endSec });
+export function moveOverlay(
+  worldId: string,
+  productionId: string,
+  overlayId: string,
+  startSec: number,
+  endSec: number,
+  lane?: number,
+): void {
+  send({ kind: "move-overlay", worldId, productionId, overlayId, startSec, endSec, ...(lane !== undefined ? { lane } : {}) });
+}
+
+/** Two clips over one file: the picture stays put and stops sounding, the sound drops a lane. */
+export function splitOverlayAudio(worldId: string, productionId: string, overlayId: string): void {
+  send({ kind: "split-overlay-audio", worldId, productionId, overlayId });
 }
 
 export function removeOverlay(worldId: string, productionId: string, overlayId: string): void {

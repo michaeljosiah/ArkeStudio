@@ -45,29 +45,63 @@ export const AudioTrackSchema = z
 export type AudioTrack = z.infer<typeof AudioTrackSchema>;
 
 // ---------------------------------------------------------------------------
-// Overlays (82a) — the one thing on the cut whose position a person chooses
+// Placed clips (82a, then lanes) — the part of the cut whose position a person chooses
 // ---------------------------------------------------------------------------
 
 /**
- * An artifact laid over the picture for a window you placed it in (82a).
+ * An artifact placed on a lane for a window you dropped it in (82a, extended to lanes).
  *
- * It is deliberately four fields. An overlay cites an artifact and says when; it carries no
- * provenance, no canon revision, no cost and no review, because nothing about it was dispatched
- * or judged — it is not a take and never becomes one. Deleting it removes the placement and
- * never the artifact.
+ * It is deliberately small. A clip cites an artifact and says when, where and what to do with its
+ * sound; it carries no provenance, no canon revision, no cost and no review, because nothing
+ * about it was dispatched or judged — it is not a take and never becomes one. Deleting it removes
+ * the placement and never the artifact.
  *
- * This is the only stored *position* on the cut, and it is why it lives on its own lane: the
- * picture stays derived (R-14), so there is still exactly one answer to where a shot sits.
+ * The kind is never stored, because the artifact already knows it. A lane therefore has no type
+ * of its own: what a clip does at export time is read from the artifact it cites, which is why
+ * one lane can hold a picture and the lane under it the sound split out of that same file.
+ *
+ * These are the only stored *positions* on the cut, and that is why they live on lanes of their
+ * own: the picture stays derived (R-14), so there is still exactly one answer to where a shot
+ * sits. `overlays` is the name the file has always used and keeps, so a cut.json written before
+ * lanes existed still parses.
  */
+/**
+ * What a placed clip does with the sound its own file carries.
+ *
+ * `keep` is the default because a dropped artifact is something a person chose, unlike a
+ * generated take — the spine exporter mutes those by default precisely because "the sound is the
+ * model's invention", and that reasoning does not reach a file somebody filed and placed
+ * themselves. `mute` and `only` are the two halves a split leaves behind: the picture stays where
+ * it was and the sound becomes its own clip on the next lane down.
+ */
+export const ClipAudioModeSchema = z.enum(["keep", "mute", "only"]);
+export type ClipAudioMode = z.infer<typeof ClipAudioModeSchema>;
+
+/** Enough lanes to edit in and few enough that a bad number is refused rather than drawn. */
+export const MAX_CLIP_LANE = 15;
+
 export const CutOverlaySchema = z
   .object({
     id: prefixedIdSchema("ov"),
     artifactId: ArtifactIdSchema,
     startSec: z.number().min(0),
     endSec: z.number().positive(),
+    /**
+     * Which lane holds it, and so what composites over what: a higher lane is nearer the viewer,
+     * the same convention every editor this cut can be handed to already uses.
+     *
+     * Defaulted, because every overlay filed before lanes existed was on the only lane there was.
+     * Sound ignores it — mixed audio has no stacking — so a lane is a picture decision that
+     * audio clips are merely organised by.
+     */
+    lane: z.number().int().min(0).max(MAX_CLIP_LANE).default(0),
+    audio: ClipAudioModeSchema.default("keep"),
   })
   .strict()
-  .refine((v) => v.endSec > v.startSec, { message: "endSec must be greater than startSec", path: ["endSec"] });
+  .refine((v) => v.endSec > v.startSec, {
+    message: "endSec must be greater than startSec",
+    path: ["endSec"],
+  });
 export type CutOverlay = z.infer<typeof CutOverlaySchema>;
 
 /**
@@ -278,26 +312,54 @@ export interface ExportPlan {
   items: ExportItem[];
   /** Laid over the assembled picture, in order; each covers only its own window. */
   overlays: ExportOverlay[];
+  /** Mixed under the whole film, each delayed to its own window. */
+  audio: ExportAudioClip[];
   totalSec: number;
 }
 
-/** Which artifact kinds are picture. Audio belongs on its own track; a document is not a frame. */
+/** Which artifact kinds are picture. A document is not a frame; audio has no picture to lay. */
 const OVERLAY_STILL_KINDS: ReadonlySet<string> = new Set(["image", "board"]);
 
+/** One clip's sound, in the exporter's terms: a file, a window, and how loud. */
+export interface ExportAudioClip {
+  path: string;
+  startSec: number;
+  endSec: number;
+  gainDb: number;
+}
+
+/** What resolving a clip needs to know about the artifact it cites. */
+type ClipArtifact = { id: string; file: string; kind: string; mediaInfo?: { hasAudio: boolean } };
+
 /**
- * Resolve filed overlays against the world's artifacts (82a).
+ * Lane first, then time.
  *
- * An overlay citing an artifact this world does not have is dropped rather than guessed at, and
- * one citing something that is not picture — an audio file, a document — is dropped too: the OV
- * lane accepts anything draggable, and the exporter is where "over the picture" has to mean
- * something. Both are silent here and counted by the caller, never rendered as an absence.
+ * Both resolvers walk in this order so the picture composites bottom lane upward — a higher lane
+ * is nearer the viewer — and two clips sharing a lane fall back to the order they play in. Audio
+ * is merely organised by it: a mix has no stacking, so the lane changes nothing about how a sound
+ * comes out, only where its clip is drawn.
+ */
+function byLaneThenStart(a: CutOverlay, b: CutOverlay): number {
+  return (a.lane ?? 0) - (b.lane ?? 0) || a.startSec - b.startSec;
+}
+
+/**
+ * Resolve the picture of each filed clip against the world's artifacts (82a).
+ *
+ * A clip citing an artifact this world does not have is dropped rather than guessed at, and one
+ * citing something that is not picture — an audio file, a document — has no picture to lay, so
+ * nothing is laid. A clip whose sound was split out keeps its picture here and is skipped only
+ * when it is the sound half. All of it is silent and counted by the caller, never rendered as an
+ * absence.
  */
 export function exportOverlays(
   overlays: readonly CutOverlay[],
-  artifacts: readonly { id: string; file: string; kind: string }[],
+  artifacts: readonly ClipArtifact[],
 ): ExportOverlay[] {
   const resolved: ExportOverlay[] = [];
-  for (const overlay of [...overlays].sort((a, b) => a.startSec - b.startSec)) {
+  for (const overlay of [...overlays].sort(byLaneThenStart)) {
+    // The sound half of a split carries no picture, even though it cites a file that has one.
+    if ((overlay.audio ?? "keep") === "only") continue;
     const artifact = artifacts.find((a) => a.id === overlay.artifactId);
     if (artifact === undefined) continue;
     const still = OVERLAY_STILL_KINDS.has(artifact.kind);
@@ -307,8 +369,43 @@ export function exportOverlays(
   return resolved;
 }
 
+/**
+ * Resolve the sound of each filed clip (lanes).
+ *
+ * The mirror of `exportOverlays`, and deliberately a separate walk: picture composites and sound
+ * mixes, which are different operations on different streams, so a single list that meant both
+ * would have to be re-split by every caller anyway.
+ *
+ * A video contributes sound only when it is *known* to carry a stream. This is the same rule the
+ * spine exporter learned the hard way: naming an audio input that is not there fails the whole
+ * encode rather than the one clip, and an unprobed file is not evidence of audio. An artifact
+ * filed as audio needs no probe — its kind is the evidence — so a machine with no ffprobe can
+ * still lay a music bed.
+ */
+export function exportAudioClips(
+  overlays: readonly CutOverlay[],
+  artifacts: readonly ClipArtifact[],
+): ExportAudioClip[] {
+  const resolved: ExportAudioClip[] = [];
+  for (const overlay of [...overlays].sort(byLaneThenStart)) {
+    if ((overlay.audio ?? "keep") === "mute") continue;
+    const artifact = artifacts.find((a) => a.id === overlay.artifactId);
+    if (artifact === undefined) continue;
+    const carries =
+      artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
+    if (!carries) continue;
+    resolved.push({ path: artifact.file, startSec: overlay.startSec, endSec: overlay.endSec, gainDb: 0 });
+  }
+  return resolved;
+}
+
 /** Assemble from the derived cut: accepted material as clips, gaps as slates (D10, D11). */
-export function buildExportPlan(cut: DerivedCut, preset: ExportPreset, overlays: readonly ExportOverlay[] = []): ExportPlan {
+export function buildExportPlan(
+  cut: DerivedCut,
+  preset: ExportPreset,
+  overlays: readonly ExportOverlay[] = [],
+  audio: readonly ExportAudioClip[] = [],
+): ExportPlan {
   const items: ExportItem[] = cut.entries.map((entry) => {
     if (entry.media) {
       return {
@@ -323,7 +420,7 @@ export function buildExportPlan(cut: DerivedCut, preset: ExportPreset, overlays:
     // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
     return { type: "slate" as const, label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec };
   });
-  return { preset, items, overlays: [...overlays], totalSec: cut.totalSec };
+  return { preset, items, overlays: [...overlays], audio: [...audio], totalSec: cut.totalSec };
 }
 
 /**
@@ -379,6 +476,48 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     last = next;
   });
 
-  args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`, "-crf", String(PRESETS[plan.preset].crf), outFile);
+  /*
+   * Sound (lanes). Every clip that carries any is delayed to where it was placed and mixed under
+   * the whole film; nothing else on the story clock makes a sound, so a cut with no placed audio
+   * emits exactly the arguments it always did — the same promise trim makes about an untrimmed
+   * export.
+   *
+   * `normalize=0` is load-bearing and is the one thing to be careful about here: amix divides
+   * every input by the number of inputs by default, so laying a second sound anywhere would
+   * quietly duck the first for its whole duration — an automatic mix nobody asked for.
+   *
+   * Each clip is conformed before it is delayed. `apad` then `atrim` yields exactly the window's
+   * length whether the file runs long or short, so a bed that is thirty seconds of a four-minute
+   * track occupies thirty seconds rather than the rest of the film.
+   */
+  const audioLabels: string[] = [];
+  plan.audio.forEach((clip, i) => {
+    const index = plan.items.length + plan.overlays.length + i;
+    args.push("-i", `${worldDir}/${clip.path}`);
+    const d = Math.max(clip.endSec - clip.startSec, 0);
+    const delayMs = Math.round(clip.startSec * 1000);
+    filters.push(
+      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,volume=${clip.gainDb}dB[ac${i}]`,
+    );
+    audioLabels.push(`[ac${i}]`);
+  });
+  if (audioLabels.length > 0) {
+    // One clip needs no mixer; asking amix for a single input is a filter that does nothing.
+    const mixed = audioLabels.length === 1 ? audioLabels[0]! : "[amix]";
+    if (audioLabels.length > 1) {
+      filters.push(
+        `${audioLabels.join("")}amix=inputs=${audioLabels.length}:normalize=0:duration=longest[amix]`,
+      );
+    }
+    // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
+    // early does not shorten it.
+    filters.push(
+      `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS[aout]`,
+    );
+  }
+
+  args.push("-filter_complex", filters.join(";"), "-map", `[${last}]`);
+  if (audioLabels.length > 0) args.push("-map", "[aout]", "-c:a", "aac", "-b:a", "192k");
+  args.push("-crf", String(PRESETS[plan.preset].crf), outFile);
   return args;
 }

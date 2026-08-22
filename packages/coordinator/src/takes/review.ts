@@ -11,6 +11,7 @@ import {
   type ReviewDecision,
   type Selections,
   type CutFile,
+  type ClipAudioMode,
   type CutOverlay,
   type ShotSelection,
 } from "@arke-studio/contracts";
@@ -264,17 +265,17 @@ async function editOverlays(
   return next;
 }
 
-/** Lay an artifact over the picture for a window (82a). Returns the overlay as filed. */
+/** Place an artifact on a lane for a window (82a, lanes). Returns the clip as filed. */
 export async function placeOverlay(
   store: WorldStore,
   productionId: string,
-  input: { artifactId: string; startSec: number; endSec: number },
+  input: { artifactId: string; startSec: number; endSec: number; lane?: number; audio?: ClipAudioMode },
 ): Promise<CutOverlay> {
   if (input.endSec <= input.startSec) {
-    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+    throw new Error(`a clip ending at ${input.endSec}s cannot start at ${input.startSec}s`);
   }
-  // An overlay cites an artifact; citing one the world does not have would file a placement
-  // pointing at nothing, which the cut would then have to render as an absence it cannot explain.
+  // A clip cites an artifact; citing one the world does not have would file a placement pointing
+  // at nothing, which the cut would then have to render as an absence it cannot explain.
   const known = store.getBundle().artifacts.some((a) => a.id === input.artifactId);
   if (!known) throw new Error(`artifact ${input.artifactId} is not in this world`);
 
@@ -283,28 +284,80 @@ export async function placeOverlay(
     artifactId: input.artifactId,
     startSec: input.startSec,
     endSec: input.endSec,
+    ...(input.lane !== undefined ? { lane: input.lane } : {}),
+    ...(input.audio !== undefined ? { audio: input.audio } : {}),
   });
   await editOverlays(store, productionId, (current) => [...current, overlay]);
   return overlay;
 }
 
-/** Move one that is already placed — the same act as placing it, against the same bounds. */
+/**
+ * Move one that is already placed — the same act as placing it, against the same bounds.
+ *
+ * The lane travels with the move because dragging a clip up a lane and dragging it along the
+ * ruler are one gesture to the person doing it; omitting it leaves the clip where it was, so a
+ * pure trim does not have to restate which lane it is on.
+ */
 export async function moveOverlay(
   store: WorldStore,
   productionId: string,
-  input: { overlayId: string; startSec: number; endSec: number },
+  input: { overlayId: string; startSec: number; endSec: number; lane?: number },
 ): Promise<CutOverlay> {
   if (input.endSec <= input.startSec) {
-    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+    throw new Error(`a clip ending at ${input.endSec}s cannot start at ${input.startSec}s`);
   }
   let moved: CutOverlay | null = null;
   await editOverlays(store, productionId, (current) => {
     const found = current.find((o) => o.id === input.overlayId);
-    if (found === undefined) throw new Error(`overlay ${input.overlayId} is not on this cut`);
-    moved = { ...found, startSec: input.startSec, endSec: input.endSec };
+    if (found === undefined) throw new Error(`clip ${input.overlayId} is not on this cut`);
+    moved = CutOverlaySchema.parse({
+      ...found,
+      startSec: input.startSec,
+      endSec: input.endSec,
+      ...(input.lane !== undefined ? { lane: input.lane } : {}),
+    });
     return current.map((o) => (o.id === input.overlayId ? moved! : o));
   });
   return moved!;
+}
+
+/**
+ * Split a clip's sound onto the lane below it (lanes).
+ *
+ * Two clips over one file, which is what every editor means by the word: the picture stays
+ * exactly where it was and stops carrying sound, and the sound becomes its own clip on the next
+ * lane down, over the same window. Nothing is copied and nothing is transcoded — both halves
+ * still cite the one artifact, and undoing the split is deleting one of them.
+ *
+ * It refuses rather than producing a half that can never sound. A still has no audio track to
+ * separate, and a clip already split is not split again — the second call would file a third
+ * placement over the same seconds and the mix would count the same sound twice.
+ */
+export async function splitOverlayAudio(
+  store: WorldStore,
+  productionId: string,
+  overlayId: string,
+): Promise<CutOverlay> {
+  const bundle = store.getBundle();
+  let sound: CutOverlay | null = null;
+  await editOverlays(store, productionId, (current) => {
+    const found = current.find((o) => o.id === overlayId);
+    if (found === undefined) throw new Error(`clip ${overlayId} is not on this cut`);
+    if (found.audio !== "keep") {
+      throw new Error(`clip ${overlayId} has already been split`);
+    }
+    const artifact = bundle.artifacts.find((a) => a.id === found.artifactId);
+    if (artifact === undefined) throw new Error(`artifact ${found.artifactId} is not in this world`);
+    if (artifact.kind !== "video") {
+      throw new Error(`a ${artifact.kind} has no sound to split from its picture`);
+    }
+    // The lane below, floored at zero: splitting the bottom clip leaves both halves sharing a
+    // lane, which mixes and composites exactly the same and is one fewer surprise than refusing.
+    const lane = Math.max(0, (found.lane ?? 0) - 1);
+    sound = CutOverlaySchema.parse({ ...found, id: newId("ov"), lane, audio: "only" });
+    return [...current.map((o) => (o.id === overlayId ? { ...o, audio: "mute" as const } : o)), sound];
+  });
+  return sound!;
 }
 
 /** Remove the placement. The artifact is untouched: it was only ever cited (82a). */

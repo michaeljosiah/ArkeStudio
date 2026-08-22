@@ -29,6 +29,7 @@ import {
   type Scene,
   type Sheet,
   type ArtifactSidecar,
+  MAX_CLIP_LANE,
   type CutEntry,
   type CutOverlay,
   type Shot,
@@ -74,6 +75,7 @@ import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
 import { mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { MIN_CLIP_SEC, applyClipDrag, snapPointsFor, type ClipGesture, type ClipPlacement } from "../lib/clip-drag.js";
 import {
   acceptTake,
   cancelExport,
@@ -90,6 +92,8 @@ import {
   rejectTake,
   placeOverlay,
   removeOverlay,
+  moveOverlay,
+  splitOverlayAudio,
   uploadArtifacts,
   dispatchScenePlanned,
   listPlans,
@@ -2813,7 +2817,10 @@ const TRIM_STEP_SEC = 0.1;
  * of holding the previous frame.
  */
 /** What a dropped artifact covers when nothing says otherwise: about a shot's worth. */
-const OVERLAY_DEFAULT_SEC = 4;
+const CLIP_DEFAULT_SEC = 4;
+
+/** One lane row plus the gap under it, which is what a drag has to cross to change lane. */
+const LANE_PITCH_PX = 50;
 
 /**
  * The world's artifacts, beside the cut (82a).
@@ -2867,82 +2874,291 @@ function ArtifactPanel({
       </div>
       <div className="fy-artpanel__foot">
         <span className="fy-dot" />
-        <span className="fy-mono">drag onto the OV lane to place</span>
+        <span className="fy-mono">drag onto a lane to place</span>
       </div>
     </div>
   );
 }
 
 /**
- * The overlay lane (82a): the one place on the cut where position is the author's.
+ * One placed clip, with the three gestures a clip has (lanes).
  *
- * A drop reads its own x, which is why the lane computes the time rather than the panel — and
- * why `V` can stay derived while this one is stored.
+ * The draft is local and the commit is on release, which is the same shape the trim gesture
+ * already uses: a drag that wrote on every pointer move would file a hundred placements for one
+ * movement of the hand, and every one of them would be a commit in the world's history.
  */
-function OverlayLane({
+function ClipView({
   worldId,
   prodId,
+  clip,
+  artifact,
+  slug,
   totalSec,
-  overlays,
-  artifacts,
+  maxLane,
+  snapPoints,
+  onDismissMenu,
+  onMenu,
 }: {
   worldId: string;
   prodId: string;
+  clip: CutOverlay;
+  artifact: ArtifactSidecar | undefined;
+  slug: string | undefined;
   totalSec: number;
-  overlays: readonly CutOverlay[];
-  artifacts: readonly ArtifactSidecar[];
+  maxLane: number;
+  snapPoints: readonly number[];
+  onDismissMenu: () => void;
+  onMenu: (clip: CutOverlay, at: { x: number; y: number }) => void;
 }) {
-  const [over, setOver] = useState(false);
-  const drop = (e: React.DragEvent) => {
+  const [draft, setDraft] = useState<ClipPlacement | null>(null);
+  const shown = draft ?? { startSec: clip.startSec, endSec: clip.endSec, lane: clip.lane ?? 0 };
+
+  const begin = (gesture: ClipGesture) => (e: React.PointerEvent) => {
+    if (e.button !== 0 || totalSec <= 0) return;
     e.preventDefault();
-    setOver(false);
+    e.stopPropagation();
+    onDismissMenu();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    /*
+     * Seconds per pixel come from the lane the clip sits in, never from the column of lanes: the
+     * column also carries the label gutter, so measuring that makes every drag fall behind the
+     * pointer by exactly the gutter's share of the width.
+     */
+    const laneWidth = el.closest(".fy-track__lane")?.getBoundingClientRect().width ?? 0;
+    if (laneWidth <= 0) return;
+    const originX = e.clientX;
+    const originY = e.clientY;
+    const origin: ClipPlacement = { startSec: clip.startSec, endSec: clip.endSec, lane: clip.lane ?? 0 };
+    let last = origin;
+    const move = (ev: PointerEvent) => {
+      // Lanes are drawn highest-first, so dragging upward is dragging to a nearer lane.
+      const lanes = gesture === "move" ? -Math.round((ev.clientY - originY) / LANE_PITCH_PX) : 0;
+      const seconds = ((ev.clientX - originX) / laneWidth) * totalSec;
+      last = applyClipDrag(origin, gesture, seconds, lanes, { totalSec, maxLane, snapPoints });
+      setDraft(last);
+    };
+    const up = (ev: PointerEvent) => {
+      el.releasePointerCapture(ev.pointerId);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      setDraft(null);
+      // Nothing moved is nothing to file: a click that selects should not write history.
+      if (last.startSec !== origin.startSec || last.endSec !== origin.endSec || last.lane !== origin.lane) {
+        moveOverlay(worldId, prodId, clip.id, last.startSec, last.endSec, last.lane);
+      }
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+
+  const name = artifact?.file.split("/").pop() ?? "missing artifact";
+  const mode = clip.audio ?? "keep";
+  const sound = mode === "only";
+  return (
+    <div
+      className={cx("fy-ovclip", sound && "fy-ovclip--sound", draft && "fy-ovclip--dragging")}
+      style={{
+        left: `${(shown.startSec / totalSec) * 100}%`,
+        width: `${Math.max(((shown.endSec - shown.startSec) / totalSec) * 100, 1.5)}%`,
+      }}
+      title={`${name} · ${shown.startSec.toFixed(1)}s → ${shown.endSec.toFixed(1)}s${mode === "keep" ? "" : ` · ${mode === "only" ? "sound only" : "muted"}`}`}
+      onPointerDown={begin("move")}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(clip, { x: e.clientX, y: e.clientY });
+      }}
+    >
+      <span
+        className="fy-ovclip__grip fy-ovclip__grip--start"
+        onPointerDown={begin("trim-start")}
+        aria-label="trim the head"
+      />
+      {artifact?.kind === "image" || artifact?.kind === "board" ? (
+        <span className="fy-ovclip__swatch">
+          <Portrait worldSlug={slug} path={artifact.file} label="" radius={3} />
+        </span>
+      ) : sound || artifact?.kind === "audio" ? (
+        <span className="fy-ovclip__swatch fy-ovclip__swatch--wave">
+          <Wave seed={name} width={34} height={12} />
+        </span>
+      ) : null}
+      <span className="fy-ovclip__name">{name}</span>
+      {mode !== "keep" && <span className="fy-ovclip__badge">{sound ? "A" : "MUTE"}</span>}
+      <button
+        type="button"
+        className="fy-ovclip__x"
+        aria-label="Remove clip"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => removeOverlay(worldId, prodId, clip.id)}
+      >
+        ×
+      </button>
+      <span
+        className="fy-ovclip__grip fy-ovclip__grip--end"
+        onPointerDown={begin("trim-end")}
+        aria-label="trim the tail"
+      />
+    </div>
+  );
+}
+
+/**
+ * The lanes (82a, extended).
+ *
+ * A lane has no type. What a clip does is read from the artifact it cites, so the same row holds
+ * a plate, an insert and a music bed — and splitting a video's sound puts two clips over one file
+ * on two lanes rather than inventing an audio track that only audio may enter.
+ *
+ * Drawn highest-first, because a higher lane composites nearer the viewer and every editor this
+ * cut can be handed to already draws it that way round. That is also what makes "split the sound
+ * to the lane below" mean the row the eye expects.
+ */
+function ClipLanes({
+  worldId,
+  prodId,
+  slug,
+  totalSec,
+  clips,
+  artifacts,
+  snapPoints,
+}: {
+  worldId: string;
+  prodId: string;
+  slug: string | undefined;
+  totalSec: number;
+  clips: readonly CutOverlay[];
+  artifacts: readonly ArtifactSidecar[];
+  snapPoints: readonly number[];
+}) {
+  const [over, setOver] = useState<number | null>(null);
+  const [added, setAdded] = useState(0);
+  const [menu, setMenu] = useState<{ clip: CutOverlay; x: number; y: number } | null>(null);
+
+  // Two lanes at rest: one to drop a picture on and one under it for the sound, which is the
+  // shape every split leaves behind and the one people arrive expecting.
+  const used = clips.reduce((high, c) => Math.max(high, c.lane ?? 0), 0);
+  const laneCount = Math.min(Math.max(2, used + 1, added), MAX_CLIP_LANE + 1);
+  const maxLane = laneCount - 1;
+
+  const drop = (lane: number) => (e: React.DragEvent) => {
+    e.preventDefault();
+    setOver(null);
     const artifactId = e.dataTransfer.getData("application/x-arke-artifact");
     if (!artifactId || totalSec <= 0) return;
     const box = e.currentTarget.getBoundingClientRect();
-    const at = Math.max(0, Math.min(((e.clientX - box.left) / box.width) * totalSec, Math.max(0, totalSec - 0.1)));
-    const end = Math.min(at + OVERLAY_DEFAULT_SEC, totalSec);
+    const at = Math.max(
+      0,
+      Math.min(((e.clientX - box.left) / box.width) * totalSec, Math.max(0, totalSec - MIN_CLIP_SEC)),
+    );
+    const end = Math.min(at + CLIP_DEFAULT_SEC, totalSec);
     // A drop at the very end would ask for a window with no length; give it what is left.
-    placeOverlay(worldId, prodId, artifactId, Math.round(at * 1000) / 1000, Math.round(Math.max(end, at + 0.1) * 1000) / 1000);
+    placeOverlay(
+      worldId,
+      prodId,
+      artifactId,
+      Math.round(at * 1000) / 1000,
+      Math.round(Math.max(end, at + MIN_CLIP_SEC) * 1000) / 1000,
+      lane,
+    );
   };
+
+  const splittable =
+    menu !== null &&
+    (menu.clip.audio ?? "keep") === "keep" &&
+    artifacts.find((a) => a.id === menu.clip.artifactId)?.kind === "video";
+
   return (
-    <div className="fy-track">
-      <span className="fy-track__label">OV</span>
-      <div
-        className={cx("fy-track__lane", "fy-ovlane", over && "fy-ovlane--over")}
-        onDragOver={(e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-          setOver(true);
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={drop}
-      >
-        {overlays.length === 0 && <span className="fy-ovlane__empty">drop an artifact to lay it over the picture</span>}
-        {overlays.map((o) => {
-          const file = artifacts.find((a) => a.id === o.artifactId)?.file;
-          return (
-            <div
-              key={o.id}
-              className="fy-ovclip"
-              style={{
-                left: `${(o.startSec / totalSec) * 100}%`,
-                width: `${Math.max(((o.endSec - o.startSec) / totalSec) * 100, 1.5)}%`,
-              }}
-              title={`${file ?? o.artifactId} · ${o.startSec.toFixed(1)}s → ${o.endSec.toFixed(1)}s`}
-            >
-              <span className="fy-ovclip__name">{file?.split("/").pop() ?? "missing artifact"}</span>
-              <button
-                type="button"
-                className="fy-ovclip__x"
-                aria-label="Remove overlay"
-                onClick={() => removeOverlay(worldId, prodId, o.id)}
-              >
-                ×
-              </button>
-            </div>
-          );
-        })}
+    <div className="fy-clanes" onPointerDown={() => setMenu(null)}>
+      {Array.from({ length: laneCount }, (_, i) => maxLane - i).map((lane) => (
+        <div className="fy-track" key={lane}>
+          <span className="fy-track__label">L{lane}</span>
+          <div
+            className={cx("fy-track__lane", "fy-ovlane", over === lane && "fy-ovlane--over")}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "copy";
+              setOver(lane);
+            }}
+            onDragLeave={() => setOver((l) => (l === lane ? null : l))}
+            onDrop={drop(lane)}
+          >
+            {clips.every((c) => (c.lane ?? 0) !== lane) && (
+              <span className="fy-ovlane__empty">
+                {lane === 0
+                  ? "drop a bed here, or split a clip's sound down to it"
+                  : "drop an artifact to place it"}
+              </span>
+            )}
+            {clips
+              .filter((c) => (c.lane ?? 0) === lane)
+              .map((c) => (
+                <ClipView
+                  key={c.id}
+                  worldId={worldId}
+                  prodId={prodId}
+                  clip={c}
+                  artifact={artifacts.find((a) => a.id === c.artifactId)}
+                  slug={slug}
+                  totalSec={totalSec}
+                  maxLane={maxLane}
+                  snapPoints={snapPoints}
+                  onDismissMenu={() => setMenu(null)}
+                  onMenu={(clip, at) => setMenu({ clip, x: at.x, y: at.y })}
+                />
+              ))}
+          </div>
+        </div>
+      ))}
+      <div className="fy-clanes__foot">
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={laneCount > MAX_CLIP_LANE}
+          onClick={() => setAdded(laneCount + 1)}
+        >
+          Add lane
+        </Button>
+        <span className="fy-mono">
+          a higher lane sits nearer the viewer · right-click a clip to split its sound
+        </span>
       </div>
+      {menu && (
+        <div
+          className="fy-clipmenu"
+          style={{ left: menu.x, top: menu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="fy-clipmenu__item"
+            disabled={!splittable}
+            onClick={() => {
+              splitOverlayAudio(worldId, prodId, menu.clip.id);
+              setMenu(null);
+            }}
+          >
+            Split audio to the lane below
+          </button>
+          <button
+            type="button"
+            className="fy-clipmenu__item"
+            onClick={() => {
+              removeOverlay(worldId, prodId, menu.clip.id);
+              setMenu(null);
+            }}
+          >
+            Remove clip
+          </button>
+          {!splittable && (
+            <span className="fy-clipmenu__note">
+              {(menu.clip.audio ?? "keep") !== "keep" ? "already split" : "only a video has sound to split"}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3454,7 +3670,13 @@ export function CutScreen() {
   const [watchToken, setWatchToken] = useState(0);
   const totalSec = spineCut ? spineCut.trackDurationSec : (cut?.totalSec ?? 0);
   const transport = useCutTransport(totalSec);
-  const audioBeds = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
+  // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
+  // LTX port has always offered and nothing had yet asked for.
+  const spans = spineCut ? spineSpans(spineCut) : cut ? storySpans(cut) : [];
+  const snapPoints = snapPointsFor(
+    spans.map((s) => s.startSec),
+    totalSec,
+  );
 
 
   return (
@@ -3479,7 +3701,7 @@ export function CutScreen() {
       </div>
       <CutPreview
         slug={slug}
-        spans={spineCut ? spineSpans(spineCut) : cut ? storySpans(cut) : []}
+        spans={spans}
         totalSec={totalSec}
         restartToken={watchToken}
         transport={transport}
@@ -3497,34 +3719,22 @@ export function CutScreen() {
             <StoryCutTrack worldId={worldId} prodId={prodId} slug={slug} cut={cut} production={production} />
           )
         ) : null}
+        {/*
+          * The A row that used to sit here listed the world's audio artifacts and could do
+          * nothing with them — audio now lands on a lane like everything else, so a row that
+          * only ever described the inventory would be repeating the panel beside it.
+          */}
         {worldId && prodId && (
-          <OverlayLane
+          <ClipLanes
             worldId={worldId}
             prodId={prodId}
+            slug={slug}
             totalSec={totalSec}
-            overlays={production?.cut.overlays ?? []}
+            clips={production?.cut.overlays ?? []}
             artifacts={world?.artifacts ?? []}
+            snapPoints={snapPoints}
           />
         )}
-        <div className="fy-track">
-          <span className="fy-track__label">A</span>
-          <div className="fy-track__lane">
-            {audioBeds.length > 0 ? (
-              audioBeds.slice(0, 2).map((a) => (
-                <div key={a.id} className="fy-audioseg" style={{ flex: 1 }}>
-                  <span style={{ flex: "none", display: "inline-flex" }}>
-                    <Wave seed={a.file} width={120} height={14} />
-                  </span>
-                  {a.file.split("/").pop()}
-                </div>
-              ))
-            ) : (
-              <div className="fy-audioseg" style={{ flex: 1 }}>
-                no beds yet · audio artifacts land here
-              </div>
-            )}
-          </div>
-        </div>
         </div>
         <div className="fy-cutfoot">
           <span className="fy-mono">

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
+import { ClipAudioModeSchema, MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -1628,9 +1629,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       artifactId: ArtifactIdSchema,
       startSec: z.number().min(0).finite(),
       endSec: z.number().positive().finite(),
+      /** Which lane received the drop; absent lands it on the bottom one. */
+      lane: z.number().int().min(0).max(MAX_CLIP_LANE).optional(),
+      audio: ClipAudioModeSchema.optional(),
     })
     .strict(),
-  /** 82a: move an overlay already placed, which is the same act as placing it. */
+  /** 82a, lanes: move a clip already placed, which is the same act as placing it. */
   z
     .object({
       kind: z.literal("move-overlay"),
@@ -1639,6 +1643,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       overlayId: prefixedIdSchema("ov"),
       startSec: z.number().min(0).finite(),
       endSec: z.number().positive().finite(),
+      /** Absent leaves it on the lane it is on, so trimming need not restate that. */
+      lane: z.number().int().min(0).max(MAX_CLIP_LANE).optional(),
+    })
+    .strict(),
+  /** Lanes: separate a clip's sound onto the lane below, as two clips over one file. */
+  z
+    .object({
+      kind: z.literal("split-overlay-audio"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
     })
     .strict(),
   /** 82a: remove the placement. The artifact is untouched — it was only ever cited. */

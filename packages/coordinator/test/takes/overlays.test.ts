@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CutFileSchema } from "@arke-studio/contracts";
-import { moveOverlay, placeOverlay, removeOverlay } from "../../src/takes/review.js";
+import { moveOverlay, placeOverlay, removeOverlay, splitOverlayAudio } from "../../src/takes/review.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { tempDir } from "../tmp.js";
 
 /**
  * Overlays (82a): the one stored position on the cut. Everything else about the picture is
@@ -32,7 +34,7 @@ describe("overlays on the cut (82a)", () => {
     const overlay = await placeOverlay(store, "saltlight", { artifactId, startSec: 48, endSec: 62 });
     assert.match(overlay.id, /^ov_[0-9A-HJKMNP-TV-Z]{26}$/);
     const cut = await cutOf(dir);
-    assert.deepEqual(cut.overlays, [{ id: overlay.id, artifactId, startSec: 48, endSec: 62 }]);
+    assert.deepEqual(cut.overlays, [{ id: overlay.id, artifactId, startSec: 48, endSec: 62, lane: 0, audio: "keep" }]);
     await store.close();
   });
 
@@ -78,7 +80,9 @@ describe("overlays on the cut (82a)", () => {
     const moved = await moveOverlay(store, "saltlight", { overlayId: overlay.id, startSec: 90, endSec: 104 });
     assert.deepEqual([moved.startSec, moved.endSec], [90, 104]);
     assert.equal(moved.artifactId, artifactId, "moving changes when, never what");
-    assert.deepEqual((await cutOf(dir)).overlays, [{ id: overlay.id, artifactId, startSec: 90, endSec: 104 }]);
+    assert.deepEqual((await cutOf(dir)).overlays, [
+      { id: overlay.id, artifactId, startSec: 90, endSec: 104, lane: 0, audio: "keep" },
+    ]);
     await assert.rejects(
       () => moveOverlay(store, "saltlight", { overlayId: "ov_01J8G0000000000000000000ZZ", startSec: 0, endSec: 1 }),
       /is not on this cut/,
@@ -124,4 +128,116 @@ describe("overlays on the cut (82a)", () => {
     );
     await store.close();
   });
+
+  it("keeps a clip on its lane when a move does not name one", async () => {
+    // Trimming an edge is a move, and a trim that silently reset the lane would drop the clip.
+    const { store, artifactId } = await open();
+    const placed = await placeOverlay(store, "saltlight", { artifactId, startSec: 1, endSec: 5, lane: 3 });
+    const moved = await moveOverlay(store, "saltlight", { overlayId: placed.id, startSec: 2, endSec: 5 });
+    assert.equal(moved.lane, 3);
+    await store.close();
+  });
+});
+
+describe("splitting a clip's sound onto the lane below (lanes)", () => {
+  /**
+   * The fixture world files a board, a bed and a document — no video, which is the only kind that
+   * has a picture and a sound to separate. So one is filed properly, through the same path a
+   * person's upload takes, rather than leaving the split's own test asserting nothing.
+   *
+   * `mediaProbe` says it carries audio: the exporter refuses to name an audio input it has no
+   * evidence for, and a split whose sound half never reached the mix would pass a test that
+   * checked only the placement.
+   */
+  async function fileVideo(store: WorldStore): Promise<string> {
+    const source = join(await tempDir("arke-insert-"), "insert.mp4");
+    await writeFile(source, "not a real encode, and never decoded here", "utf8");
+    // A probe is a pair of measuring functions, not a measurement: this one answers for the file
+    // it is handed without an ffprobe to run, which is the whole point of the seam.
+    const filed = await fileArtifact(store, {
+      sourcePath: source,
+      mediaProbe: {
+        durationSec: async () => 12,
+        info: async () => ({ durationSec: 12, hasAudio: true }),
+      },
+    });
+    assert.equal(filed.outcome, "filed", "the split's own test proves nothing without a video to split");
+    assert.equal(filed.artifact.kind, "video", "an .mp4 files as video, which is what has both");
+    /*
+     * Read back from the world rather than from the return value. Filing measures *after* it has
+     * committed the sidecar and hands back the record it wrote first, so `filed.artifact` never
+     * carries the measurement even though the file on disk does — and the measurement is the
+     * premise here, because the exporter refuses to name an audio input it has no evidence for.
+     */
+    const stored = store.getBundle().artifacts.find((a) => a.id === filed.artifact.id);
+    assert.equal(stored?.mediaInfo?.hasAudio, true, "the probe reached the sidecar");
+    return filed.artifact.id;
+  }
+
+  /*
+   * `finally`, unlike the placement tests above, because these were written watching a failing
+   * assert leave the store open and hang the whole run: a broken split then reads as a timeout
+   * with no failure named, which is the least useful way for a test to tell you something.
+   */
+  const withWorld = async (body: (ctx: Awaited<ReturnType<typeof open>>) => Promise<void>) => {
+    const ctx = await open();
+    try {
+      await body(ctx);
+    } finally {
+      await ctx.store.close();
+    }
+  };
+
+  it("refuses what has no sound to separate", async () =>
+    withWorld(async ({ store }) => {
+      const audio = store.getBundle().artifacts.find((a) => a.kind === "audio");
+      assert.ok(audio, "the fixture world files an audio artifact");
+      const placed = await placeOverlay(store, "saltlight", { artifactId: audio.id, startSec: 0, endSec: 4 });
+      await assert.rejects(() => splitOverlayAudio(store, "saltlight", placed.id), /no sound to split/);
+    }));
+
+  it("refuses a clip that is not on this cut", async () =>
+    withWorld(async ({ store }) => {
+      await assert.rejects(
+        () => splitOverlayAudio(store, "saltlight", "ov_01J8G0000000000000000000ZZ"),
+        /is not on this cut/,
+      );
+    }));
+
+  it("splits a video into a muted picture and a sound clip one lane down", async () =>
+    withWorld(async ({ dir, store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 2, endSec: 6, lane: 2 });
+      const sound = await splitOverlayAudio(store, "saltlight", placed.id);
+      assert.equal(sound.audio, "only");
+      assert.equal(sound.lane, 1, "the lane below the picture");
+      assert.deepEqual([sound.startSec, sound.endSec], [2, 6], "over the same window");
+      assert.equal(sound.artifactId, video, "both halves still cite the one file");
+      assert.notEqual(sound.id, placed.id, "two clips, so either can be deleted on its own");
+      const overlays = (await cutOf(dir)).overlays;
+      assert.equal(overlays.length, 2);
+      assert.equal(overlays.find((o) => o.id === placed.id)?.audio, "mute", "the picture stops sounding");
+      await assert.rejects(() => splitOverlayAudio(store, "saltlight", placed.id), /already been split/);
+    }));
+
+  it("leaves both halves on the bottom lane when there is no lane below", async () =>
+    withWorld(async ({ dir, store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 0, endSec: 3, lane: 0 });
+      const sound = await splitOverlayAudio(store, "saltlight", placed.id);
+      assert.equal(sound.lane, 0, "a picture-only and a sound-only clip share a lane without fighting");
+      assert.equal((await cutOf(dir)).overlays.length, 2);
+    }));
+
+  it("removes one half without touching the other, so a split is undoable", async () =>
+    withWorld(async ({ dir, store }) => {
+      const video = await fileVideo(store);
+      const placed = await placeOverlay(store, "saltlight", { artifactId: video, startSec: 1, endSec: 5, lane: 1 });
+      const sound = await splitOverlayAudio(store, "saltlight", placed.id);
+      await removeOverlay(store, "saltlight", sound.id);
+      const left = (await cutOf(dir)).overlays;
+      assert.equal(left.length, 1);
+      assert.equal(left[0]?.id, placed.id, "the picture is what is left");
+      assert.equal(left[0]?.audio, "mute", "and it is still muted, because that is what was chosen");
+    }));
 });

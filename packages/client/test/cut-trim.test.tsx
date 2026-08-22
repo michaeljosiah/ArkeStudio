@@ -77,14 +77,19 @@ describe("the Cut on the song clock (80a)", () => {
     assert.match(html, /cut to the track/, "the header states which clock this is");
   });
 
-  it("opens with a clip selected and offers exactly one authored edit", () => {
+  it("opens with a clip selected and offers exactly one authored edit on the picture", () => {
     const html = renderCut(spineState());
     assert.match(html, /fy-cutsel/, "the selected-clip strip is present");
     assert.match(html, /TRIM IN/);
     assert.match(html, /budget 8\.0s/, "the anchor's window, not the take's length");
     assert.match(html, /0\.0s/, "the in-point starts at zero");
-    // No reorder, no drag, no split: the cut follows the story, not drag order.
-    assert.doesNotMatch(html, /reorder|Split|Ripple/i);
+    /*
+     * The derived picture still offers trim and nothing else: no reorder and no ripple, because
+     * the cut follows the story rather than drag order (R-14). Lanes did not change that — what
+     * a person may drag and split is a clip they placed, which is never a shot.
+     */
+    assert.doesNotMatch(html, /reorder|Ripple/i);
+    assert.doesNotMatch(html, /fy-cutseg--pick[^>]*draggable/, "a shot is not draggable");
   });
 
   it("shows the in-point a selection already carries", () => {
@@ -141,16 +146,51 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.match(html, /fy-artpanel/);
     assert.match(html, /harbour-bells\.wav/, "the fixture world's one artifact");
     assert.match(html, /draggable="true"/, "rows are drag sources");
-    assert.match(html, /drag onto the OV lane to place/);
+    assert.match(html, /drag onto a lane to place/);
     // Upload is live now: the host opens the picker and the renderer never sees the bytes.
     assert.match(html, /Upload/);
     assert.doesNotMatch(html, /Filing arrives with/, "no longer a promise of a later screen");
   });
 
-  it("draws an empty OV lane, because a lane that is not there cannot be dropped on", () => {
+  it("draws empty lanes, because a lane that is not there cannot be dropped on", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.match(html, /fy-ovlane/);
-    assert.match(html, /drop an artifact to lay it over the picture/);
+    assert.match(html, /drop an artifact to place it/);
+  });
+
+  it("rests at two lanes: one to place a picture on and one under it for the sound", () => {
+    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
+    assert.equal((html.match(/fy-track__label">L\d/g) ?? []).length, 2);
+    assert.match(html, /L1[\s\S]*L0/, "the higher lane is drawn first, because it sits nearer the viewer");
+    // React escapes the apostrophe on the way out, so the bottom lane is matched by its words.
+    assert.match(html, /drop a bed here, or split a clip.{1,8}s sound down to it/, "and the bottom one says so");
+  });
+
+  it("draws a lane for the highest one a clip actually uses", () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    production.cut = {
+      audio: [],
+      overlays: [
+        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 4, audio: "keep" },
+      ],
+    } as typeof production.cut;
+    const html = renderCut(ClientStateSchema.parse(state));
+    assert.equal((html.match(/fy-track__label">L\d/g) ?? []).length, 5, "L4 down to L0, so nothing is hidden");
+  });
+
+  it("marks the sound half of a split, and lays no picture for it", () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    production.cut = {
+      audio: [],
+      overlays: [
+        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 1, endSec: 3, lane: 0, audio: "only" },
+      ],
+    } as typeof production.cut;
+    const html = renderCut(ClientStateSchema.parse(state));
+    assert.match(html, /fy-ovclip--sound/, "the sound half reads as sound");
+    assert.match(html, /sound only/, "and says so where a person can read it");
   });
 
   it("places a filed overlay by its own window, and counts it apart from coverage", () => {
@@ -159,7 +199,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     production.cut = {
       audio: [],
       overlays: [
-        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 2, endSec: 6 },
+        { id: "ov_01J8G0000000000000000000A1", artifactId: "ar_01J8G0000000000000000000R1", startSec: 2, endSec: 6, lane: 0, audio: "keep" },
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));

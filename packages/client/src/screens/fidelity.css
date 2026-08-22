@@ -5186,6 +5186,27 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-ovclip__x { border: 0; background: none; color: var(--neutral-400); font: 400 13px var(--font-sans); line-height: 1; padding: 2px 4px; cursor: pointer; flex: none; transition: var(--transition-control); }
 .fy-ovclip__x:hover { color: var(--destructive); }
 
+/* Lanes: a stack of rows that hold clips, plus the gestures on a clip and its menu. */
+.fy-clanes { position: relative; }
+.fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
+.fy-ovclip { cursor: grab; user-select: none; touch-action: none; }
+.fy-ovclip:active { cursor: grabbing; }
+.fy-ovclip--dragging { border-color: var(--foreground); box-shadow: var(--shadow-sm); z-index: 3; }
+.fy-ovclip--sound { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+.fy-ovclip__swatch { width: 34px; height: 22px; border-radius: 3px; overflow: hidden; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.fy-ovclip__swatch--wave { background: none; color: var(--neutral-400); }
+.fy-ovclip__badge { font: 500 7.5px var(--font-mono); letter-spacing: 0.06em; color: var(--neutral-400); border: 1px solid var(--border); border-radius: 3px; padding: 1px 3px; flex: none; }
+/* Wide enough to grab, narrow enough that the body is still the move gesture. */
+.fy-ovclip__grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; touch-action: none; }
+.fy-ovclip__grip--start { left: 0; }
+.fy-ovclip__grip--end { right: 0; }
+.fy-ovclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.fy-clipmenu { position: fixed; z-index: 40; min-width: 216px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; }
+.fy-clipmenu__item { text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 9px; font: 400 12px var(--font-sans); color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-clipmenu__item:hover:not(:disabled) { background: var(--accent); }
+.fy-clipmenu__item:disabled { color: var(--neutral-400); cursor: default; }
+.fy-clipmenu__note { font: 400 9px var(--font-mono); color: var(--neutral-400); padding: 3px 9px 5px; }
+
 /* ---- Arke, docked beside the thing it is about (design turns 97, 99, 100) ----------------
    The chat stops being a place you go to. The artifact keeps the width it had; the panel takes
    a fixed column beside it, and what would have been a side rail on a full screen becomes one
