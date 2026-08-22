@@ -92,6 +92,38 @@ describe("leased retrieval", () => {
     h.index?.close();
   });
 
+  it("reads a production whole: season direction, episodes with promises, the scene index", async () => {
+    // Round 3 (2026-08-22): an episode thread asked for its season and got nothing — no tool
+    // served production records at all, and the model said so out loud mid-draft.
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "get_production", { id: "saltlight" });
+    assert.equal(receipt.tool, "get-production");
+    assert.equal(receipt.status, "complete");
+    const record = result as { id: string; episodes: unknown[]; scenes: { id: string; shots: number }[] };
+    assert.equal(record.id, "saltlight");
+    assert.ok(Array.isArray(record.episodes));
+    assert.ok(record.scenes.some((s) => s.id === "sc_04" && s.shots > 0), "the scene index counts shots");
+    assert.equal(receipt.consulted.length, 0, "context, not evidence — nothing here is quotable");
+    h.index?.close();
+  });
+
+  it("a production that is not there is an honest empty, not a failure", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "get_production", { id: "nope" });
+    assert.equal(receipt.status, "empty");
+    assert.deepEqual(result, { found: false, id: "nope" });
+    h.index?.close();
+  });
+
+  it("lists productions — the arm round 3 found missing from the leased surface", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "list_entities", { kind: "production" });
+    assert.equal(receipt.status, "complete");
+    const rows = (result as { entities: { id: string }[] }).entities;
+    assert.ok(rows.some((r) => r.id === "saltlight"), "the fixture production is on the page");
+    h.index?.close();
+  });
+
   it("records an honest empty when a search runs and finds nothing", async () => {
     const h = await harness();
     const { receipt } = await h.retrieval.call(h.mint().token, "search_sheets", {
@@ -269,7 +301,7 @@ describe("the served surface", () => {
     return { h, server, receipts };
   }
 
-  it("offers the world-chat tools on a leased path and the original five on the ambient one", async () => {
+  it("offers the world-chat tools on a leased path and the ambient set on the plain one", async () => {
     const { h, server } = await serve(true);
     const token = h.mint().token;
 
@@ -277,13 +309,15 @@ describe("the served surface", () => {
     const names = (leased.body as { result: { tools: Array<{ name: string }> } }).result.tools.map((t) => t.name);
     assert.ok(names.includes("search_sheets"));
     assert.ok(names.includes("get_attachment_text"));
+    assert.ok(names.includes("get_production"), "the production read reaches leased callers (round 3)");
 
     const ambient = await rpc(server.url()!, "tools/list");
     const ambientNames = (ambient.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
       (t) => t.name,
     );
-    assert.ok(!ambientNames.includes("get_attachment_text"), "the authoring surface is unchanged");
-    assert.equal(ambientNames.length, 5);
+    assert.ok(!ambientNames.includes("get_attachment_text"), "attachment reads stay leased-only");
+    assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
+    assert.equal(ambientNames.length, 6, "the ambient surface: the original five plus the production read");
 
     await server.stop();
     h.index?.close();

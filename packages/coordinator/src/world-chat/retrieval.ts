@@ -7,6 +7,7 @@ import {
   type WorldChatCheckReceipt,
 } from "@arke-studio/contracts";
 import { canonObservation, sheetObservation } from "./observations.js";
+import { productionRecord } from "./production-record.js";
 import { refsForCanon, refsForSheet, searchCanon, searchSheets } from "../index-db/queries.js";
 import type { WorldIndex } from "../index-db/world-index.js";
 import { LeaseDeniedError, type QueryLease, type QueryLeaseRegistry } from "./lease.js";
@@ -46,6 +47,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   list_entities: "list-entities",
   related: "related",
   get_attachment_text: "get-attachment-text",
+  get_production: "get-production",
 };
 
 export class RetrievalError extends Error {
@@ -243,17 +245,24 @@ export class WorldChatRetrieval {
         const kind = String(args["kind"] ?? "");
         const status = args["status"] !== undefined ? String(args["status"]) : undefined;
         const limit = boundedLimit(args["limit"]);
+        /*
+         * The production arm existed on the unleased surface and not here (round 3, 2026-08-22),
+         * so a production thread asking for its own production got an empty page — the sheet
+         * filter matched nothing and said so as though the world held no productions at all.
+         */
         const rows =
           kind === "canon"
             ? bundle.canon
                 .filter((c) => c.retired !== true)
                 .filter((c) => status === undefined || c.status === status)
                 .map((c) => ({ id: c.id, title: c.title, type: c.type, status: c.status }))
-            : bundle.sheets
-                .filter((s) => s.retired !== true)
-                .filter((s) => s.type === kind)
-                .filter((s) => status === undefined || s.status === status)
-                .map((s) => ({ id: s.id, name: s.name, status: s.status, version: s.version }));
+            : kind === "production"
+              ? bundle.productions.map((p) => ({ id: p.meta.id, title: p.meta.title, status: p.meta.status }))
+              : bundle.sheets
+                  .filter((s) => s.retired !== true)
+                  .filter((s) => s.type === kind)
+                  .filter((s) => status === undefined || s.status === status)
+                  .map((s) => ({ id: s.id, name: s.name, status: s.status, version: s.version }));
         const page = rows.slice(0, limit);
         return {
           result: { entities: page, total: rows.length, truncated: rows.length > page.length },
@@ -269,6 +278,17 @@ export class WorldChatRetrieval {
         const id = String(args["id"] ?? "");
         const result = id.startsWith("CANON-") ? refsForCanon(index.db, id) : refsForSheet(index.db, id);
         return { result, receipt: receipt("complete", { querySummary: summarise(id) }) };
+      }
+
+      case "get_production": {
+        // Context, not evidence: a production record carries no observation a citation could
+        // verify against, so nothing consulted is recorded — the receipt says the read happened.
+        const id = String(args["id"] ?? "");
+        const record = productionRecord(bundle, id);
+        if (!record) {
+          return { result: { found: false, id }, receipt: receipt("empty", { querySummary: summarise(id) }) };
+        }
+        return { result: record, receipt: receipt("complete", { querySummary: summarise(id) }) };
       }
 
       case "get_attachment_text": {

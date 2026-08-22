@@ -1286,6 +1286,38 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       scene: z.unknown(),
     })
     .strict(),
+  /**
+   * Turn 97: a hand edit saves where it stands — the bible's model (SPEC-022) applied to
+   * scenes. Every save cuts a version with a `.history/` snapshot, and `baseVersion` is what
+   * the storyboard had loaded: a save against a scene that has since moved is refused, not
+   * merged. Assistant and gate writes keep their own paths; this one is the typing hand's.
+   */
+  z
+    .object({
+      kind: z.literal("save-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /*
+       * A file stem, never a path (review 2026-08-22): this frame writes directly with no
+       * accept step, and an unconstrained string joined into the world directory admitted
+       * `..` and backslashes. The pattern is the scanner's own naming for scene files.
+       */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      scene: z.unknown(),
+      baseVersion: z.number().int().min(1).optional(),
+    })
+    .strict(),
+  /** Turn 97: undo. v<n> comes back as a new version; nothing between it and now is lost. */
+  z
+    .object({
+      kind: z.literal("restore-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /** The same stem-only rule as save-scene, for the same reason. */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      version: z.number().int().min(1),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("create-chapter"),

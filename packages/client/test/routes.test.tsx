@@ -47,13 +47,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (56 screens)", () => {
+  it("covers the full screen inventory (59 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    assert.equal(SCREENS.length, 56);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 56, "screen ids are unique");
+    assert.equal(SCREENS.length, 59);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 59, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -578,7 +578,10 @@ describe("screen inventory", () => {
 
   it("names the inherited world look on the remaining visual generation surfaces", () => {
     const worldId = FIXTURE_STATE.world!.meta.worldId;
-    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate`);
+    // The workspace opens on the takes now (turn 102) and the bench is behind Advanced. The look
+    // is named where generating is configured, which is the bench and the dispatch dialog — the
+    // takes view assesses what came back and configures nothing.
+    const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
     const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
     assert.ok(workspace.includes("World look · v"));
     assert.ok(workspace.includes("carries as text"));

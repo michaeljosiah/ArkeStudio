@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
-import { Working } from "../components/working.js";
+import { ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight, More, PanelLeft, Plus } from "../components/icons.js";
@@ -680,83 +680,18 @@ export function WorldChatScreen() {
             ) : conversationId && loaded === null ? (
               <div className="fy-chat__loading">Opening this conversation…</div>
             ) : (
-              <div className="fy-chat__transcript" aria-live="polite">
-                {(loaded?.messages ?? []).map((m) => (
-                  <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
-                    <div className="fy-chat__bubble">
-                      {m.text}
-                      {m.role === "studio" && m.receipts.length > 0 && (
-                        // One tick for the row, not one per receipt: the tick means "this is what
-                        // was read", and repeating it turned a footnote into a checklist.
-                        <div className="fy-chat__receipts">{`✓ ${m.receipts.join(" · ")}`}</div>
-                      )}
-                    </div>
-                    {/*
-                      Outside the bubble, because it is not something the Studio said — it is
-                      something it did, to a file, already. The rail beside this transcript holds
-                      what is waiting for a yes; this is the opposite kind of thing, and it needs
-                      to look like it (SPEC-022).
-                    */}
-                    {m.bibleEdit && (
-                      <div className="fy-biblecard">
-                        <p className="fy-biblecard__text">
-                          <span className="fy-biblecard__what">
-                            Edited your bible · {m.bibleEdit.headings.join(", ")}
-                          </span>{" "}
-                          <span className="fy-mono">
-                            v{m.bibleEdit.fromVersion} → v{m.bibleEdit.toVersion}
-                          </span>
-                        </p>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            if (worldId) restoreBible(worldId, m.bibleEdit!.fromVersion);
-                          }}
-                        >
-                          Undo
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {/*
-                  The turn in flight, where its reply will be. In the transcript rather than on
-                  the composer because that is where the answer is going to appear, and it is
-                  where the eye already is after sending.
-                */}
-                {running && (
-                  <Working
-                    label={progress}
-                    startedAt={loaded?.runStartedAt ?? null}
-                    {...(worldId && conversationId
-                      ? { onStop: () => cancelWorldChat(worldId, conversationId) }
-                      : {})}
-                  />
-                )}
-                {/*
-                  A turn that failed says so where the reply would have been. Silence here is
-                  indistinguishable from never having asked, which is how a two-minute timeout
-                  reads as "nothing happens".
-                */}
-                {failure && !running && (
-                  <div className="fy-chat__failed" role="status">
-                    <div className="fy-chat__failedtext">{failureLine(failure)}</div>
-                    {/* Retrying a turn is saying something again, so it is held back for the same
-                        reason the composer is while a wrap-up is running. */}
-                    {!wrappingUp && (
-                      <button
-                        type="button"
-                        className="fy-chat__retry"
-                        onClick={() =>
-                          worldId && conversationId && retryWorldChatTurn(worldId, conversationId, failure.turnId)
-                        }
-                      >
-                        Try that again
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
+              <ConversationTranscript
+                workspace={loaded}
+                running={running}
+                progress={progress}
+                failure={failure && !running ? failure : null}
+                canRetry={!wrappingUp}
+                {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
+                {...(worldId && conversationId
+                  ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
+                  : {})}
+                {...(worldId ? { onUndoBible: (fromVersion: number) => restoreBible(worldId, fromVersion) } : {})}
+              />
             )}
           </div>
 
@@ -994,16 +929,6 @@ function groupBySubject<P extends { id: string; kind: string; subject: string; s
  * it is a supporting clause and never the whole sentence -- "the studio took too long to answer"
  * on its own does not tell somebody the message is still there and can be sent again.
  */
-function failureLine(failure: { status: string; detail?: string }): string {
-  const opening =
-    failure.status === "timeout"
-      ? "That took too long and stopped."
-      : failure.status === "budget-exceeded"
-        ? "That turn ran past its budget and stopped."
-        : "That did not go through.";
-  return `${opening} Nothing was lost — your message is still here.`;
-}
-
 /**
  * Why the composer cannot send, when it cannot (§2.8).
  *

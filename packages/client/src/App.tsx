@@ -50,7 +50,7 @@ import {
   WorldLayout,
   WorldOverviewScreen,
 } from "./screens/world.js";
-import { EpisodeDetailScreen } from "./screens/development.js";
+import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
 import {
   AudioScreen,
   ChapterTreeScreen,
@@ -60,13 +60,17 @@ import {
   GenerateScreen,
   NewSceneScreen,
   ProductionCastScreen,
-  ProductionDashboardScreen,
+  ProductionHomeScreen,
   ProductionLayout,
+  SceneChatScreen,
   SceneDetailScreen,
   ScenesScreen,
+  ProductionChatScreen,
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
+import { ShotSheetScreen } from "./screens/storyboard.js";
+import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
@@ -171,14 +175,29 @@ export function App() {
         </Route>
 
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>
-          <Route index element={<ProductionDashboardScreen />} />
+          <Route index element={<ProductionHomeScreen />} />
           <Route path="cast" element={<ProductionCastScreen />} />
-          <Route path="story" element={<StoryScreen />} />
-          <Route path="story/episodes/:episodeId" element={<EpisodeDetailScreen />} />
+          {/* Talking and looking are two screens (turn 88): `story` is the conversation that sets
+              the foundations up, and the details it produced are read next door — `season` for an
+              episodic production, `overview` for one without a season. */}
+          <Route path="story" element={<ProductionChatScreen />} />
+          <Route path="season" element={<StoryScreen />} />
+          <Route path="overview" element={<StoryScreen />} />
+          {/* The same pair one level down (turn 91): the episode's chat lives under `story`
+              beside the production's own, and the page it lands on sits at production level. */}
+          <Route path="story/episodes/:episodeId" element={<EpisodeChatScreen />} />
+          <Route path="episodes/:episodeId" element={<EpisodeDetailScreen />} />
+          {/* And once more for a scene (turn 94), the level the writing happens at. */}
+          <Route path="story/scenes/:sceneId" element={<SceneChatScreen />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
+          {/* Arcs, themes, setups and payoffs — off the season, under one rail item
+              (turn 99): a season is its episodes. */}
+          <Route path="story-structure" element={<StoryStructureScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
           <Route path="scenes/new" element={<NewSceneScreen />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />
+          {/* The full shot behind the card (turn 97, 14d). */}
+          <Route path="scenes/:sceneId/shots/:shotId" element={<ShotSheetScreen />} />
           {/* Interactive video's structural authority (epic 401) — linear seasons never route here. */}
           <Route path="branch-map" element={<BranchMapScreen />} />
           <Route path="generate" element={<GenerateScreen />} />

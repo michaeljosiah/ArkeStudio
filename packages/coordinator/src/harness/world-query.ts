@@ -3,6 +3,7 @@ import { once } from "node:events";
 import type { WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { refsForCanon, refsForSheet, searchCanon } from "../index-db/queries.js";
 import { LeaseDeniedError } from "../world-chat/lease.js";
+import { productionRecord } from "../world-chat/production-record.js";
 import type { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import type { WorldStore } from "../world/store.js";
 
@@ -113,6 +114,17 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: { id: { type: "string", description: "Sheet slug or canon id" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_production",
+    description:
+      "Fetch one production's records whole: story, season (question, ending, direction, defaults, arcs), episodes with their promises and scene memberships, and the scene index. Read this before deciding anything a season or episode thread should honour — the briefing carries the shape, this carries the decisions.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Production id, e.g. saltlight" } },
       required: ["id"],
       additionalProperties: false,
     },
@@ -379,6 +391,12 @@ export class WorldQueryServer {
         if (!index) throw new Error("the index is unavailable");
         const id = String(args["id"] ?? "");
         return id.startsWith("CANON-") ? refsForCanon(index.db, id) : refsForSheet(index.db, id);
+      }
+      case "get_production": {
+        const id = String(args["id"] ?? "");
+        const record = productionRecord(bundle, id);
+        if (!record) throw new Error(`no production ${id}`);
+        return record;
       }
       default:
         throw new Error(`unknown tool: ${name}`);

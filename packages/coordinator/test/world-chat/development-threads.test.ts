@@ -123,7 +123,7 @@ describe("production-scoped threads (issue 400)", () => {
     const { store } = await world();
     const bundle = store.getBundle();
     const production = describeEntryContext({ kind: "production", productionId: "saltlight" }, bundle);
-    assert.match(production, /Development thread for the production "Saltlight"/);
+    assert.match(production, /Production Chat thread for the production "Saltlight"/);
     assert.match(production, /The overview is v\d/, "the current overview travels in the narration");
     const scene = describeEntryContext(
       { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
@@ -131,6 +131,24 @@ describe("production-scoped threads (issue 400)", () => {
     );
     assert.match(scene, /scene thread for "The verse rises"/);
     assert.match(scene, /no script yet/, "the scene's current state is narrated");
+    // Found by asking (2026-08-21): a person in this thread asked what happens shot by shot, and
+    // the studio could only say how many shots there were. A scene whose shots are invisible to
+    // its own thread cannot be talked about, which is what the thread is for.
+    assert.match(scene, /Its shots, in order:/, "the shots travel, not just their count");
+    assert.match(scene, /sh_12 #12/, "each one named by id and number");
+    assert.match(scene, /Maren at the rail/, "and by title, so it can be referred to");
+    assert.match(scene, /Every shot inherits:/, "with what the scene hands down to all of them");
+  });
+
+  it("every thread is told what kind of thing is being made, and its numbers", async () => {
+    // Found by asking (2026-08-21): a season thread proposed seven excellent episodes that read
+    // like short-film beats, because nothing had told it they were forty-five-second vertical
+    // ones. The kind and its numbers were on disk from creation and reached no turn.
+    const { store } = await world();
+    const bundle = store.getBundle();
+    const production = describeEntryContext({ kind: "production", productionId: "saltlight" }, bundle);
+    assert.match(production, /one continuous piece, not episodes/, "a one-off says so");
+    assert.match(production, /It delivers in /, "and names the frame it delivers in");
   });
 
   it("an overview candidate wraps up as a story-overview proposal and lands through the gate", async () => {
@@ -232,6 +250,67 @@ describe("production-scoped threads (issue 400)", () => {
     const episode = after.bundle.productions.find((p) => p.meta.id === "saltlight")!.episodes[0]!;
     assert.equal(episode.id, "ep_the-missing-night", "identity from the slug, never the position");
     assert.equal(episode.order, 3);
+  });
+
+  it("an episode may only list scenes that exist — a guessed membership is refused (round 3)", async () => {
+    // Driven live 2026-08-22: a wrap-up decided "this episode has two scenes" and wrote their
+    // guessed ids straight into the membership list. Nothing had created them and nothing ever
+    // would — scene records are made from the episode page — so the board promised scenes it
+    // could not open.
+    const w = await world();
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "development.episode",
+        target: { kind: "episode", productionId: "saltlight" },
+        title: "Episode four, with invented scenes",
+        draft: {
+          title: "The invented pair",
+          order: 4,
+          scenes: ["sc_the-wrong-shape", "sc_the-true-answer"],
+        },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+    const outcome = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-scenes",
+      expectedConversationSeq: seq,
+      now: NOW,
+    }).catch((err: unknown) => err);
+    // Whether the wrap-up throws whole or degrades per candidate, the invented episode must
+    // never stage: its path is derived from its title, so its absence is the refusal.
+    const staged = (await w.gate.listOpen()).filter((p) => p.kind === "episode-edit");
+    assert.ok(
+      !staged.some((p) => p.targets.some((t) => t.path.includes("the-invented-pair"))),
+      `the guessed membership never reaches a proposal (outcome: ${outcome instanceof Error ? outcome.message : "settled"})`,
+    );
+  });
+
+  it("a membership naming a real scene stages normally", async () => {
+    // A fresh world: the refused candidate above stays undecided in its conversation, and a
+    // second wrap there would re-materialise it and refuse again — correctly.
+    const w = await world();
+    const seq = await withCandidates(w.log, [
+      candidate({
+        classification: "development.episode",
+        target: { kind: "episode", productionId: "saltlight" },
+        title: "Episode five, honest membership",
+        draft: { title: "The honest one", order: 5, scenes: ["sc_04"] },
+      } as Partial<WorldChangeCandidate>),
+    ]);
+    await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-scenes-2",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+    const ok = (await w.gate.listOpen()).find(
+      (p) => p.kind === "episode-edit" && p.targets[0]!.path.includes("the-honest-one"),
+    );
+    assert.ok(ok, "a membership naming a real scene stages normally");
   });
 
   it("a production change cannot land together with world changes", async () => {

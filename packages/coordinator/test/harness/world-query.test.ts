@@ -42,7 +42,9 @@ describe("the read-only world-query tool (R-11, D2, D3)", () => {
     const list = (await rpc(url, "tools/list")) as { tools: Array<{ name: string; inputSchema: unknown }> };
     assert.deepEqual(
       list.tools.map((t) => t.name).sort(),
-      ["get_entry", "get_sheet", "list_entities", "related", "search_canon"],
+      // get_production joined in round 3 (2026-08-22): a drafting agent could read the world and
+      // not the production it was drafting into.
+      ["get_entry", "get_production", "get_sheet", "list_entities", "related", "search_canon"],
     );
   });
 

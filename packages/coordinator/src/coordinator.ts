@@ -89,7 +89,9 @@ import {
   reorderChapters,
   reorderEpisodes,
   reorderScenes,
+  restoreScene,
   saveChapter,
+  saveScene,
   setProductionAspect,
   setPromptOverride,
 } from "./productions/ops.js";
@@ -872,6 +874,7 @@ export class Coordinator {
         if (!match || !this.opts.provider.serveMedia) return null;
         return this.opts.provider.serveMedia(match[1]!, match[2]!);
       },
+      log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
     });
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
     // Every session config goes through here, so a per-agent override reaches genesis,
@@ -3340,6 +3343,53 @@ export class Coordinator {
         } catch {
           this.transport.broadcastSnapshot();
         }
+        return;
+      }
+      case "save-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        /*
+         * A refusal is said, not swallowed (review 2026-08-22). The bible's editor keeps its
+         * text on a refused save; the storyboard's editors are uncontrolled and repaint from
+         * the snapshot, so a swallowed refusal threw the typed text away with nothing said.
+         */
+        await saveScene(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          scene: msg.scene,
+          ...(msg.baseVersion !== undefined ? { baseVersion: msg.baseVersion } : {}),
+        }).catch((err: unknown) => {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason: err instanceof Error ? err.message : "the save could not be applied",
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-scene": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await restoreScene(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          version: msg.version,
+        }).catch((err: unknown) => {
+          // Same surface: "Restore v1" over a scene with no v1 snapshot was a silent no-op.
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason: err instanceof Error ? err.message : "the restore could not be applied",
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "create-chapter": {
@@ -7428,7 +7478,10 @@ export class Coordinator {
           await run(category === "sheet-search" ? "search_sheets" : "search_canon", { query });
         }
         for (const target of plan.targets) {
-          if (target.kind === "world") continue;
+          // Only the world's own entities have a tool to read them. The production records a
+          // subject may now name (turn 95's fix) have no `get_entry`/`get_sheet` equivalent, so
+          // they are skipped exactly as `world` is rather than reaching a nonexistent call.
+          if (target.kind !== "canon" && target.kind !== "sheet") continue;
           const id = target.kind === "canon" ? target.entryId : target.sheetId;
           await run(target.kind === "canon" ? "get_entry" : "get_sheet", { id });
           /*

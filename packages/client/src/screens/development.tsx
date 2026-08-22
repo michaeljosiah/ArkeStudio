@@ -1,209 +1,194 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { seasonFindings, sortScenes, type Episode, type SeasonFinding } from "@arke-studio/contracts";
+import { NavLink, useNavigate, useParams } from "react-router";
+import {
+  seasonFindings,
+  sortScenes,
+  type Episode,
+  type SeasonFinding,
+} from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { Badge, Button, Input, Textarea, cx } from "../components/ui.js";
+import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
-import { useTalkItThrough } from "../lib/talk-it-through.js";
-import { proposeEpisode, proposeSeason, reorderEpisodes } from "../lib/store.js";
+import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
 
 /**
- * The Development workspace for an episodic production (turns 48, 53, 78; SPEC-023; issue 397).
+ * The season page (design turn 91; supersedes turn 48's four-view strip).
  *
- * Four views, one tab strip — Season, Episodes, Arcs, Direction — and three tabs, not four
- * greyed, while no episodes exist (turn 48). Season and Direction author one object each and
- * keep the split; Episodes and Arcs are comparisons across the season and take the full
- * surface. Everything here proposes through the gate: reorder is the one direct act, and it
- * rewrites order fields alone.
+ * A production is exactly one season — another season is another production — so there is
+ * nothing to navigate between, and the Season view whose job was to say which season you were
+ * in has become this page's own header.
+ *
+ * There are no tabs left (turn 99): a season is its episodes. Arcs was a peer tab, which taught
+ * a second vocabulary to somebody who did not yet have a first episode; the grid is unchanged
+ * and lives behind Story structure, one rail item under Season and off the default walk.
+ * Direction lost its tab two turns earlier and kept its field, because nobody has yet been able
+ * to say what it decides that the world's look and a scene's own description do not.
+ *
+ * Everything here proposes through the gate; reorder is the one direct act, and it rewrites
+ * order fields alone.
  */
 
-type Tab = "season" | "episodes" | "arcs" | "direction";
+/** Two digits, so the board reads as an ordered season rather than a list. */
+const pad = (n: number) => String(n).padStart(2, "0");
 
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
-  const { production } = useProduction(worldId, prodId);
-  const [tab, setTab] = useState<Tab>("season");
+  const { world, production } = useProduction(worldId, prodId);
   if (!production) {
     return (
       <div className="fy-prodmain" data-screen="development">
-        <EmptyState title="Opening Development…" />
+        <EmptyState title="Opening the season…" />
       </div>
     );
   }
+  const season = production.season ?? null;
   const episodes = production.episodes;
-  const hasEpisodes = episodes.length > 0;
-  const shown: Tab = tab === "episodes" && !hasEpisodes ? "season" : tab;
-  const tabs: Array<{ id: Tab; label: string }> = [
-    { id: "season", label: "Season" },
-    ...(hasEpisodes ? [{ id: "episodes" as Tab, label: `Episodes · ${episodes.length}` }] : []),
-    { id: "arcs", label: "Arcs" },
-    { id: "direction", label: "Direction" },
-  ];
+  const defaults = season?.defaults;
+  // The season promises a number of episodes on the day it is made (turn 87), so the board is
+  // that many wide from the start — never however many happen to exist.
+  const declared = Math.max(defaults?.episodeCount ?? 0, episodes.length);
+  const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
+  const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   return (
+    <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Development</h1>
-        <span className="fy-h1row__meta">
-          {production.season ? `season v${production.season.version}` : "no season record yet"}
-        </span>
-        <span className="fy-h1row__push" />
-        <span className="fy-seg">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={cx("fy-seg__item", shown === t.id && "fy-seg__item--active")}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </span>
+        <h1 className="fy-h1">{production.meta.title}</h1>
+        <span className="fy-h1row__meta">{season ? `season v${season.version}` : "no season record yet"}</span>
       </div>
-      {shown === "season" && <SeasonView />}
-      {shown === "episodes" && hasEpisodes && <EpisodesBoard />}
-      {shown === "arcs" && <ArcsView />}
-      {shown === "direction" && <DirectionView />}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <span className="fy-pill">{declared} episodes</span>
+        <span className="fy-pill">{written} written</span>
+        <span className="fy-pill">
+          {production.scenes.length} scene{production.scenes.length === 1 ? "" : "s"}
+        </span>
+        {defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined && (
+          <span className="fy-pill">
+            {defaults.episodeSecondsMin}–{defaults.episodeSecondsMax}s each
+          </span>
+        )}
+        {defaults?.hookWindowSec !== undefined && <span className="fy-pill">hook in {defaults.hookWindowSec}s</span>}
+        {defaults?.episodeEnding !== undefined && <span className="fy-pill">{defaults.episodeEnding}</span>}
+      </div>
+      {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
+          Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
+          editing it is the Series' own accept, never a side effect of a season edit. */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) 260px", gap: 24 }}>
+        <div>
+          <div className="fy-mono">THE QUESTION IT ANSWERS</div>
+          <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
+            {season?.question ?? "Not asked yet."}
+          </div>
+        </div>
+        <div>
+          <div className="fy-mono">HOW IT ENDS</div>
+          <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
+            {season?.ending ?? "Not settled yet."}
+          </div>
+        </div>
+        <div>
+          <div className="fy-mono">SERIES ENGINE · READ-ONLY</div>
+          <div
+            style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
+          >
+            {series
+              ? (series.engine ?? `${series.title} has no engine written yet.`)
+              : "This production belongs to no Series."}
+          </div>
+        </div>
+      </div>
+      {/*
+        This screen is the production's front page (turn 93), so it is also its day one — and the
+        card that used to stand here saying where the season gets shaped is gone with turn 99,
+        because the place it pointed at is now the panel on the right. A board of dashed tiles
+        says what is missing; the panel is what to do about it.
+      */}
+      <EpisodesBoard />
+    </div>
+      <SeasonDock />
     </div>
   );
 }
 
-/** Season and Direction author one object, so they keep the split (turn 48). */
-function SeasonView() {
+/**
+ * Arke, docked beside the season (design turn 99). The chat stops being a place you go to: the
+ * board keeps its width, the thread takes a column beside it, and a proposal staged against
+ * `season.json` appears here under one Accept rather than on a screen you have to be sent to.
+ *
+ * The thread is the same thread — same context, same points, same wrap-up, same gate — so this
+ * is where it is shown, not what it is.
+ */
+function SeasonDock() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const { talk, starting } = useTalkItThrough(worldId);
-  const [editing, setEditing] = useState(false);
-  const [question, setQuestion] = useState("");
-  const [ending, setEnding] = useState("");
-  const season = production?.season ?? null;
-  const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
-  const defaults = season?.defaults;
+  const staged =
+    (world?.proposals ?? []).find((sp) =>
+      sp.proposal.targets.some((t) => t.path === `productions/${prodId}/season.json`),
+    ) ?? null;
+  const version = production?.season ? `v${production.season.version}` : "nothing decided";
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-      <div style={{ display: "grid", gap: 14, alignContent: "start" }}>
-        {editing ? (
-          <>
-            <Input placeholder="The season question" value={question} onChange={(e) => setQuestion(e.target.value)} />
-            <Textarea
-              placeholder="How the season ends"
-              value={ending}
-              onChange={(e) => setEnding(e.target.value)}
-              rows={3}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={!question.trim() && !ending.trim()}
-                onClick={() => {
-                  if (!worldId || !prodId) return;
-                  proposeSeason(worldId, prodId, {
-                    ...(question.trim() ? { question: question.trim() } : {}),
-                    ...(ending.trim() ? { ending: ending.trim() } : {}),
-                  });
-                  setEditing(false);
-                }}
-              >
-                Propose season change
-              </Button>
-            </div>
-            <span className="fy-mono">stages a proposal · nothing is written until you accept</span>
-          </>
-        ) : (
-          <>
-            <div className="fy-draftcard">
-              <div className="fy-eyebrow-sm">THE SEASON QUESTION</div>
-              <div className="fy-draftcard__logline">{season?.question ?? "Not asked yet."}</div>
-              <div className="fy-eyebrow-sm" style={{ marginTop: 14 }}>
-                HOW IT ENDS
-              </div>
-              <div style={{ font: "400 13px/1.6 var(--font-sans)" }}>{season?.ending ?? "Not decided yet."}</div>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setQuestion(season?.question ?? "");
-                  setEnding(season?.ending ?? "");
-                  setEditing(true);
-                }}
-              >
-                {season?.question || season?.ending ? "Edit the season" : "Start the season"}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={starting || !prodId}
-                onClick={() =>
-                  prodId && talk(`Development · ${production?.meta.title ?? prodId}`, { kind: "production", productionId: prodId })
-                }
-              >
-                {starting ? "Opening…" : "Talk it through"}
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-      <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-        {/* Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
-            editing it is the Series' own accept — never a side effect of a season edit. */}
-        <div className="fy-draftcard">
-          <div className="fy-eyebrow-sm">SERIES ENGINE · READ-ONLY</div>
-          {series ? (
-            <>
-              <div style={{ font: "600 14px var(--font-sans)", marginTop: 6 }}>{series.title}</div>
-              <div style={{ font: "400 12.5px/1.6 var(--font-sans)", marginTop: 6 }}>
-                {series.engine ?? "The engine has not been written yet."}
-              </div>
-              <div className="fy-mono" style={{ marginTop: 10 }}>
-                governs {series.seasons.length} season{series.seasons.length === 1 ? "" : "s"} · editing it is the
-                Series’ own accept
-              </div>
-            </>
-          ) : (
-            <div style={{ font: "400 12.5px/1.6 var(--font-sans)", marginTop: 6 }}>
-              This production belongs to no Series.
-            </div>
-          )}
-        </div>
-        {defaults && (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {defaults.episodeCount !== undefined && <span className="fy-pill">{defaults.episodeCount} episodes</span>}
-            {defaults.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined && (
-              <span className="fy-pill">
-                {defaults.episodeSecondsMin}–{defaults.episodeSecondsMax}s each
-              </span>
-            )}
-            {defaults.hookWindowSec !== undefined && <span className="fy-pill">hook in {defaults.hookWindowSec}s</span>}
-            {defaults.episodeEnding !== undefined && <span className="fy-pill">{defaults.episodeEnding}</span>}
-          </div>
-        )}
-        <NewEpisodeCard />
-      </div>
-    </div>
+    <ProductionConversation
+      worldId={worldId}
+      productionId={prodId}
+      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}` }}
+      openingNote="opening…"
+      emptyLine="Let’s shape the season. What is it about?"
+      placeholder="Ask about the season · @ to reference"
+      {...(staged
+        ? {
+            side: (
+              <StagedDecision
+                worldId={worldId}
+                subject="the season"
+                staged={staged}
+                writes="nothing else changes"
+              />
+            ),
+          }
+        : {
+            pointsEmpty:
+              "Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc.",
+          })}
+    />
   );
 }
 
-function NewEpisodeCard() {
+/** The same panel one level down (design turn 100), with the episode as its subject. */
+function EpisodeDock({ episode }: { episode: Episode }) {
   const { worldId, prodId } = useParams();
-  const [title, setTitle] = useState("");
+  const { world, production } = useProduction(worldId, prodId);
+  const stem = production?.episodeFiles[episode.id];
+  const staged = stem
+    ? ((world?.proposals ?? []).find((sp) =>
+        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
+      ) ?? null)
+    : null;
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <Input placeholder="New episode · name it" value={title} onChange={(e) => setTitle(e.target.value)} />
-      <Button
-        variant="secondary"
-        disabled={title.trim().length === 0}
-        onClick={() => {
-          if (!worldId || !prodId) return;
-          proposeEpisode(worldId, prodId, { title: title.trim() });
-          setTitle("");
-        }}
-      >
-        Propose the episode
-      </Button>
-    </div>
+    <ProductionConversation
+      worldId={worldId}
+      productionId={prodId}
+      entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
+      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}` }}
+      openingNote="opening…"
+      emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+      placeholder="Ask about the episode · @ to reference"
+      {...(staged
+        ? {
+            side: (
+              <StagedDecision
+                worldId={worldId}
+                subject={`episode ${pad(episode.order)}`}
+                staged={staged}
+                writes="the scenes come with it · nothing else changes"
+              />
+            ),
+          }
+        : {
+            pointsEmpty:
+              "Nothing understood yet. As you talk, what the studio takes from it appears here — how this episode opens, where it turns, the scenes it needs.",
+          })}
+    />
   );
 }
 
@@ -211,9 +196,51 @@ function NewEpisodeCard() {
 function EpisodesBoard() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
+  /*
+   * The press is answered before the round trip is. Staging goes to the coordinator and comes
+   * back as a proposal a moment later; until it does, the tile that was pressed says so itself
+   * rather than leaving the board looking untouched (turn 92).
+   */
+  const [starting, setStarting] = useState<Set<number>>(() => new Set());
   const episodes = production?.episodes ?? [];
+  /* A pressed tile yields to the episode it became (review 2026-08-22): nothing removed a
+     number from `starting` once the proposal was accepted, so a phantom STARTING tile stood
+     beside the real episode forever. */
+  const startingOpen = new Set([...starting].filter((n) => !episodes.some((e) => e.order === n)));
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
+  const declared = Math.max(production?.season?.defaults?.episodeCount ?? 0, episodes.length);
+  /*
+   * Episodes that have been started and are waiting on the gate (turn 92). A staged proposal
+   * against a file that is not yet an episode on disk is a started one: it has a name and an
+   * order and no record, so it belongs on the board between the written and the untouched.
+   * Without this the press that staged it changed nothing anybody could see.
+   */
+  const stems = new Set(Object.values(production?.episodeFiles ?? {}));
+  const startedByPress = starting;
+  const started = (world?.proposals ?? []).flatMap((sp) =>
+    sp.proposal.targets.flatMap((t) => {
+      // Prefix and suffix rather than a built pattern: a production id interpolated into a
+      // regular expression is a pattern the caller did not write, and `\.` inside a template
+      // literal is just a dot, so the escape that looked like it was there never was.
+      const prefix = `productions/${prodId}/episodes/`;
+      if (!t.path.startsWith(prefix) || !t.path.endsWith(".json")) return [];
+      const stem = t.path.slice(prefix.length, -".json".length);
+      if (stem.length === 0 || stem.includes("/") || stems.has(stem)) return [];
+      // The gate labels its review fields for reading — "Title", "Order" — so they are matched
+      // case-insensitively rather than by the record's own key names.
+      const fields = sp.review?.targets.flatMap((rt) => rt.fields) ?? [];
+      const field = (name: string) => fields.find((f) => f.field.toLowerCase() === name)?.proposed;
+      const title = field("title") ?? sp.proposal.summary;
+      const order = Number(field("order") ?? Number.NaN);
+      return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
+    }),
+  );
+  /** The episodes the season promised and nobody has started (turn 87). */
+  const untouched = Math.max(0, declared - episodes.length - started.length);
+  const firstBlank = episodes.length + started.length + 1;
+  const blanks = Array.from({ length: untouched }, (_, i) => firstBlank + i).filter(
+    (order) => !startedByPress.has(order),
+  );
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
     const ids = episodes.map((e) => e.id);
@@ -228,15 +255,23 @@ function EpisodesBoard() {
         {episodes.map((episode, index) => (
           <div key={episode.id} className="fy-draftcard" style={{ cursor: "pointer" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
-              <button
-                type="button"
+              <span className="fy-mono">{pad(episode.order)}</span>
+              {/*
+                One control, one destination (turn 92). This branched on whether anything was
+                written, which reads as thoughtful and is unpredictable: the same click landed in
+                two places according to state a person cannot see before clicking. The page says
+                what is written, or that nothing is, and offers the one way into the thread.
+
+                A link rather than a button, because it goes somewhere: middle-click, copy link
+                and keyboard all work, and where a tile leads becomes a thing a test can read.
+              */}
+              <NavLink
+                to={`/w/${worldId}/p/${prodId}/episodes/${episode.id}`}
                 className="fy-linkbtn"
                 style={{ font: "600 14px var(--font-sans)", textAlign: "left" }}
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/episodes/${episode.id}`)}
               >
                 {episode.title}
-              </button>
+              </NavLink>
               <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
                 <button type="button" className="fy-linkbtn" aria-label="Move earlier" onClick={() => move(index, -1)}>
                   ↑
@@ -260,7 +295,62 @@ function EpisodesBoard() {
             </div>
           </div>
         ))}
+        {/* Started, and waiting on the gate (turn 92): the tile the press changed. */}
+        {started.map((one) => (
+          <div key={one.id} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
+            <span className="fy-mono">{one.order === null ? "··" : pad(one.order)}</span>
+            <span style={{ font: "600 13.5px var(--font-sans)" }}>{one.title}</span>
+            <span style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
+              Started. Waiting on the gate.
+            </span>
+            <span style={{ flex: 1 }} />
+            <span className="fy-mono" style={{ color: "var(--warning)" }}>
+              STAGED · NOT WRITTEN YET
+            </span>
+          </div>
+        ))}
+        {[...startingOpen]
+          .filter((order) => !started.some((one) => one.order === order))
+          .map((order) => (
+            <div key={`starting-${order}`} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
+              <span className="fy-mono">{pad(order)}</span>
+              <span style={{ font: "600 13.5px var(--font-sans)" }}>Episode {pad(order)}</span>
+              <span style={{ flex: 1 }} />
+              <span className="fy-mono">STARTING…</span>
+            </div>
+          ))}
+        {/*
+          Making an episode happens in the grid, where the others already are (turn 87): no screen
+          asks for a title before there is anything to title, so opening a blank tile stages the
+          episode under its number and the conversation is what names it.
+        */}
+        {blanks.map((order) => (
+          <button
+            key={`blank-${order}`}
+            type="button"
+            className="fy-emptycard"
+            style={{ display: "grid", gap: 8, textAlign: "left", cursor: "pointer", minHeight: 118 }}
+            onClick={() => {
+              if (!worldId || !prodId) return;
+              proposeEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
+              setStarting((prev) => new Set(prev).add(order));
+            }}
+          >
+            <span className="fy-mono">{pad(order)}</span>
+            <span style={{ font: "400 12.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
+              Not written yet.
+            </span>
+            <span className="fy-mono">OPEN TO START IT</span>
+          </button>
+        ))}
       </div>
+      {(blanks.length > 0 || started.length > 0) && (
+        <div className="fy-mono">
+          {started.length > 0 &&
+            `${started.length} started and waiting on the gate — accept them in Proposals · `}
+          {blanks.length} of {declared} promised by the season and not started · starting one stages it for the gate
+        </div>
+      )}
       <FindingsPanel findings={findings} />
     </div>
   );
@@ -286,7 +376,34 @@ function FindingsPanel({ findings }: { findings: SeasonFinding[] }) {
   );
 }
 
-/** Arc lanes are things that change, not characters (turn 48): SETUP, TURN, PAYOFF in words. */
+/**
+ * Story structure (turn 99): arcs, and in time themes and setups/payoffs. Off the default walk,
+ * because a season is its episodes — reached from one rail item under Season by somebody who has
+ * gone looking for it, which is the only person the vocabulary helps.
+ *
+ * Arc lanes are things that change, not characters (turn 48): SETUP, TURN, PAYOFF in words.
+ */
+export function StoryStructureScreen() {
+  const { worldId, prodId } = useParams();
+  const { production } = useProduction(worldId, prodId);
+  if (!production) {
+    return (
+      <div className="fy-prodmain" data-screen="story-structure">
+        <EmptyState title="Opening the season…" />
+      </div>
+    );
+  }
+  return (
+    <div className="fy-prodmain" data-screen="story-structure">
+      <div className="fy-h1row">
+        <h1 className="fy-h1">Story structure</h1>
+        <span className="fy-h1row__meta">{production.meta.title}</span>
+      </div>
+      <ArcsView />
+    </div>
+  );
+}
+
 function ArcsView() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
@@ -303,7 +420,7 @@ function ArcsView() {
       {arcs.length === 0 ? (
         <EmptyState
           title="No arcs yet"
-          hint="Arc lanes live on the season. Propose them from the Season view or talk them through."
+          hint="An arc lane names the episode it lands in, so episodes come first. Develop is where they get decided."
         />
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -353,78 +470,87 @@ function ArcsView() {
   );
 }
 
-function DirectionView() {
-  const { worldId, prodId } = useParams();
-  const { production } = useProduction(worldId, prodId);
-  const [editing, setEditing] = useState(false);
-  const [direction, setDirection] = useState("");
-  const season = production?.season ?? null;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-      <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-        {editing ? (
-          <>
-            <Textarea
-              placeholder="The season's direction — cast size, places, the sound of it"
-              value={direction}
-              onChange={(e) => setDirection(e.target.value)}
-              rows={6}
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={direction.trim().length === 0}
-                onClick={() => {
-                  if (!worldId || !prodId) return;
-                  proposeSeason(worldId, prodId, { direction: direction.trim() });
-                  setEditing(false);
-                }}
-              >
-                Propose direction
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="fy-draftcard">
-              <div className="fy-eyebrow-sm">DIRECTION</div>
-              <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
-                {season?.direction ?? "Not written yet."}
-              </div>
-            </div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setDirection(season?.direction ?? "");
-                setEditing(true);
-              }}
-            >
-              {season?.direction ? "Edit the direction" : "Write the direction"}
-            </Button>
-          </>
-        )}
+/*
+ * Direction had a view here until turn 91 retired its tab. The field survives on season.json and
+ * the conversation may still settle it; what went is the screen insisting on it, because nobody
+ * could say what Direction decides that the world's look and a scene's own description do not.
+ * It returns when there is a reason, which is turn 53's rule applied to something already drawn.
+ */
+
+/**
+ * Episode Chat, and the proposal it ends in (design turn 91; supersedes 53c).
+ *
+ * 53c drew an episode as a conversation and a promise editor sharing one surface — the same
+ * half-and-half screen turn 88 broke apart at season level. Here the episode is talked through
+ * and the rail is what the talking settled: points while it is still soft, and once wrap-up has
+ * staged something, the proposal itself under one Accept. Never both, because a screen showing
+ * thinking beside a decision claims a point is a proposal, which is the promise the gate keeps.
+ */
+export function EpisodeChatScreen() {
+  const { worldId, prodId, episodeId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  const episode = production?.episodes.find((e) => e.id === episodeId);
+  if (!production || !episode || !prodId || !episodeId) {
+    return (
+      <div className="fy-story" data-screen="episode-chat">
+        <EmptyState title="Opening the episode…" />
       </div>
-      <div />
+    );
+  }
+  // Every episode reachable from the board is on disk, so its stem is known and the match is
+  // exact — a looser one would show episode 4's proposal while episode 3 was open.
+  const stem = production.episodeFiles[episode.id];
+  const staged = stem
+    ? ((world?.proposals ?? []).find((sp) =>
+        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/episodes/${stem}.json`),
+      ) ?? null)
+    : null;
+  return (
+    <div className="fy-story" data-screen="episode-chat">
+      <ProductionConversation
+        worldId={worldId}
+        productionId={prodId}
+        entry={{ kind: "episode", productionId: prodId, episodeId }}
+        openingNote={`Episode Chat · ${pad(episode.order)} · opening…`}
+        eyebrow={`EPISODE CHAT · ${pad(episode.order)}`}
+        heading="What happens in this one?"
+        emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+        placeholder="Keep shaping the episode…"
+        {...(staged
+          ? {
+              side: (
+                <StagedDecision
+                  worldId={worldId}
+                  subject={`episode ${pad(episode.order)}`}
+                  staged={staged}
+                  writes="the scenes come with it · nothing else changes"
+                  onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`)}
+                />
+              ),
+            }
+          : {
+              pointsEmpty:
+                "Nothing understood yet. As you talk, what the studio takes from it appears here — how this episode opens, where it turns, the scenes it needs — so you can see it thinking rather than wait for the end.",
+            })}
+      />
     </div>
   );
 }
 
 /**
- * One episode screen where there were two (turn 53c): the conversation on the left, the promise
- * and the scenes in order on the right. A script belongs to a scene and to nothing above it.
+ * The episode page (design turn 91): what this episode is in its header, and the one plural thing
+ * below it. The same shape as the season page, one level down.
+ *
+ * There is no promise editor here. Turn 91 put authoring in the conversation and reading here, so
+ * the way to change the promise is `Talk it through`, which enters this episode's own thread — an
+ * accept is not the end of a subject, and a page that cannot be talked to again turns it into a
+ * one-way door.
  */
 export function EpisodeDetailScreen() {
   const { worldId, prodId, episodeId } = useParams();
   const { production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const { talk, starting } = useTalkItThrough(worldId);
-  const [editing, setEditing] = useState(false);
-  const [opens, setOpens] = useState("");
-  const [turn, setTurn] = useState("");
-  const [closes, setCloses] = useState("");
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
   if (!production || !episode) {
     return (
@@ -438,133 +564,95 @@ export function EpisodeDetailScreen() {
     (s) => !production.episodes.some((e) => e.scenes.includes(s.id)),
   );
   return (
+    <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="episode-detail">
       <div className="fy-h1row">
         <h1 className="fy-h1" style={{ fontSize: 32 }}>
-          {String(episode.order).padStart(2, "0")} · {episode.title}
+          {pad(episode.order)} · {episode.title}
         </h1>
         <span className="fy-h1row__meta">v{episode.version}</span>
         <span className="fy-h1row__push" />
-        <Button
-          variant="ghost"
-          disabled={starting || !prodId}
-          onClick={() =>
-            prodId && talk(`Episode · ${episode.title}`, { kind: "episode", productionId: prodId, episodeId: episode.id })
-          }
-        >
-          {starting ? "Opening…" : "Talk it through"}
-        </Button>
-        <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-          Back to the board
-        </Button>
+        <NavLink to={`/w/${worldId}/p/${prodId}/season`} className="fy-linkbtn">
+          &larr; Season
+        </NavLink>
+        {/* `Talk it through` is gone (turn 100): there is nowhere to be sent, because the thread
+            is docked on the right. It was the last control on the last level that treated a
+            conversation as a destination. */}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 470px", gap: 24 }}>
-        <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
-          {/* The promise is three lines: how it opens, where it turns, how it closes (turn 53). */}
-          {editing ? (
-            <>
-              <Input placeholder="OPENS" value={opens} onChange={(e) => setOpens(e.target.value)} />
-              <Input placeholder="TURN" value={turn} onChange={(e) => setTurn(e.target.value)} />
-              <Input placeholder="CLOSES" value={closes} onChange={(e) => setCloses(e.target.value)} />
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button variant="ghost" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    if (!worldId || !prodId) return;
-                    proposeEpisode(worldId, prodId, {
-                      episodeId: episode.id,
-                      promise: {
-                        ...(opens.trim() ? { opens: opens.trim() } : {}),
-                        ...(turn.trim() ? { turn: turn.trim() } : {}),
-                        ...(closes.trim() ? { closes: closes.trim() } : {}),
-                      },
-                    });
-                    setEditing(false);
-                  }}
-                >
-                  Propose the promise
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              {(["opens", "turn", "closes"] as const).map((part) => (
-                <div key={part} className="fy-actrow">
-                  <span className="fy-actrow__label">{part.toUpperCase()}</span>
-                  <span className="fy-actrow__text">{episode.promise?.[part] ?? "—"}</span>
-                </div>
-              ))}
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setOpens(episode.promise?.opens ?? "");
-                  setTurn(episode.promise?.turn ?? "");
-                  setCloses(episode.promise?.closes ?? "");
-                  setEditing(true);
-                }}
-              >
-                Edit the promise
-              </Button>
-            </>
-          )}
-        </div>
-        <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
-          <div className="fy-listhead">Scenes, in order</div>
-          {episode.scenes.length === 0 && <div className="fy-mono">No scenes yet.</div>}
-          {episode.scenes.map((sceneId) => {
-            const scene = scenesById.get(sceneId);
-            return (
-              <div key={sceneId} className="fy-listrow">
-                <span className="fy-mono">{sceneId}</span>
-                <span className="fy-listrow__text">{scene ? scene.title : "not a scene in this production"}</span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <span className="fy-pill">
+          {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}
+        </span>
+        <span className="fy-pill">{episode.promise?.opens ? "hook written" : "no hook yet"}</span>
+        <span className="fy-pill">{episode.promise?.closes ? "ending written" : "no ending yet"}</span>
+      </div>
+      {/* The promise is three lines: how it opens, where it turns, how it closes (turn 53). */}
+      <div style={{ maxWidth: 900 }}>
+        {(["opens", "turn", "closes"] as const).map((part) => (
+          <div key={part} className="fy-actrow">
+            <span className="fy-actrow__label">{part.toUpperCase()}</span>
+            <span className="fy-actrow__text">{episode.promise?.[part] ?? "—"}</span>
+          </div>
+        ))}
+      </div>
+      {/* One plural child, so it is a heading rather than a strip of one tab (turn 91). */}
+      <div className="fy-listhead">Scenes · in order</div>
+      {episode.scenes.length === 0 && <div className="fy-mono">No scenes yet.</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+        {episode.scenes.map((sceneId, index) => {
+          const scene = scenesById.get(sceneId);
+          return (
+            <div key={sceneId} className="fy-draftcard">
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span className="fy-mono">{pad(index + 1)}</span>
                 <button
                   type="button"
                   className="fy-linkbtn"
-                  onClick={() => {
-                    if (!worldId || !prodId) return;
-                    proposeEpisode(worldId, prodId, {
-                      episodeId: episode.id,
-                      scenes: episode.scenes.filter((id) => id !== sceneId),
-                    });
-                  }}
+                  style={{ font: "600 13px var(--font-sans)", textAlign: "left" }}
+                  disabled={!scene}
+                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${sceneId}`)}
                 >
-                  remove
+                  {scene ? scene.title : "not a scene in this production"}
                 </button>
               </div>
-            );
-          })}
-          {unassigned.length > 0 && (
-            <div style={{ marginTop: 8 }}>
-              <div className="fy-eyebrow-sm">UNASSIGNED SCENES</div>
-              {unassigned.map((scene) => (
-                <div key={scene.id} className="fy-listrow">
-                  <span className="fy-mono">{scene.id}</span>
-                  <span className="fy-listrow__text">{scene.title}</span>
-                  <button
-                    type="button"
-                    className="fy-linkbtn"
-                    onClick={() => {
-                      if (!worldId || !prodId) return;
-                      proposeEpisode(worldId, prodId, {
-                        episodeId: episode.id,
-                        scenes: [...episode.scenes, scene.id],
-                      });
-                    }}
-                  >
-                    add
-                  </button>
-                </div>
-              ))}
+              <div className="fy-mono" style={{ marginTop: 8 }}>
+                {scene ? sceneId : "MISSING"}
+              </div>
             </div>
-          )}
-          <div className="fy-mono" style={{ marginTop: 8 }}>
-            every change stages a proposal · nothing lands until you accept
-          </div>
-        </div>
+          );
+        })}
       </div>
+      {/*
+       * Until turn 87's cascade lands — an episode's own proposal creating the scenes it needs —
+       * scenes are drafted elsewhere and adopted here, which runs the arrow backwards. Said out
+       * loud rather than dressed up, so the band reads as the stopgap it is.
+       */}
+      {unassigned.length > 0 && (
+        <div>
+          <div className="fy-eyebrow-sm">DRAFTED ELSEWHERE · NOT IN ANY EPISODE</div>
+          {unassigned.map((scene) => (
+            <div key={scene.id} className="fy-listrow">
+              <span className="fy-mono">{scene.id}</span>
+              <span className="fy-listrow__text">{scene.title}</span>
+              <button
+                type="button"
+                className="fy-linkbtn"
+                onClick={() => {
+                  if (!worldId || !prodId) return;
+                  proposeEpisode(worldId, prodId, {
+                    episodeId: episode.id,
+                    scenes: [...episode.scenes, scene.id],
+                  });
+                }}
+              >
+                add to this episode
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+      <EpisodeDock episode={episode} />
     </div>
   );
 }

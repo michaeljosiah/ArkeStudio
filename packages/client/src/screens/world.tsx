@@ -3696,43 +3696,78 @@ export function ProductionsScreen() {
   );
 }
 
-/** The picker offers the three audience mediums (Scope §01; SPEC-023 R-5). */
+/**
+ * Step one asks what the audience receives (Scope §01; SPEC-023 R-5), and nothing else (turn 99).
+ * Two cards, not three: turn 100 moved Interactive video down to step two, where kinds live, and
+ * the Audio medium turn 99 draws has no production shape behind it yet — a card that created
+ * something with no screens would be worse than the card's absence.
+ */
 const MEDIUM_CHOICES = [
-  {
-    id: "story",
-    label: "Story",
-    body: "Prose and scripts, drafted inside the canon with the world as editor.",
-    kinds: "novel · script · serial",
-  },
-  {
-    id: "video",
-    label: "Video",
-    body: "Boards and shots, dispatched to video models with references attached.",
-    kinds: "short film · Microdrama · series",
-  },
-  {
-    id: "interactive-video",
-    label: "Interactive video",
-    body: "Branching video the viewer routes through — every choice picks the next scene.",
-    kinds: "direct choices · named findings",
-  },
+  { id: "video", label: "Video", body: "Scenes, shots, a cut.", kinds: "micro drama · film · music video" },
+  { id: "story", label: "Story", body: "Chapters of prose.", kinds: "novel · script · serial" },
 ] as const;
 
 /**
- * Step two: which kind, and the handful of numbers that differ between them (turn 53). Where a
- * medium has one kind, the step does not render — a question with one answer is a toll.
+ * Step two: which kind, and the handful of numbers the kind can answer (turns 53, 99, 100). Where
+ * a medium has one kind, the step does not render — a question with one answer is a toll (turn 47,
+ * restated from both sides by turn 83).
+ *
+ * A kind only sets starting numbers: every one of these is a Video production with the same
+ * scenes, shots, takes and cut. Music video accordingly needs nothing of its own to be offered —
+ * what turn 60 draws for it (the Spine, the song as the clock) is authoring that does not exist
+ * yet, and its absence makes a music video an ordinary Video production rather than a broken one.
+ * Interactive adds the branch map and nothing else, which is exactly why turn 100 makes it a kind.
  */
-const VIDEO_KIND_CHOICES = [
-  { id: "film", label: "Short film", body: "One cut, one deliverable — the plain Video production." },
-  { id: "microdrama", label: "Microdrama series", body: "Creates a Series and its Season 1 together." },
+export const VIDEO_KIND_CHOICES = [
+  { id: "microdrama", label: "Micro drama · series", body: "Episodes, vertical.", aspect: "9:16" },
+  { id: "film", label: "Film · short", body: "One linear cut.", aspect: "16:9" },
+  { id: "music-video", label: "Music video", body: "The song is the clock.", aspect: "16:9" },
+  { id: "interactive", label: "Interactive", body: "The viewer chooses.", aspect: "16:9" },
+  // Nothing assumed, and therefore nothing stored: a plain Video production, which is what
+  // "none of these" means on disk. It reads back as Video rather than as a kind called Other.
+  { id: "other", label: "Other", body: "Nothing assumed.", aspect: "16:9" },
 ] as const;
 
+/** The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2). */
+const STORED_KINDS = new Set(["microdrama", "music-video", "interactive"]);
+
+/** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
+export const EPISODE_LENGTH_CHOICES = [
+  { id: "30-45", label: "30–45s" },
+  { id: "45-75", label: "45–75s" },
+  { id: "60-90", label: "60–90s" },
+  { id: "90-120", label: "90–120s" },
+] as const;
+
+/**
+ * The chosen range as the two numbers a season record holds. Split out because the value travels
+ * from a select straight into `season.json`: a range that parsed to NaN would be written, and a
+ * season nobody could read back is a worse outcome than a refused creation.
+ */
+export function parseEpisodeLength(value: string): { min: number; max: number } | null {
+  const [min, max] = value.split("-").map(Number);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min! <= 0 || max! < min!) return null;
+  return { min: min!, max: max! };
+}
+
+type VideoKind = (typeof VIDEO_KIND_CHOICES)[number]["id"];
+
+/** Which media have more than one kind — the whole of what decides whether step two exists. */
+const KINDS_BY_MEDIUM: Record<"story" | "video", readonly { id: string }[]> = {
+  story: [],
+  video: VIDEO_KIND_CHOICES,
+};
+
+/**
+ * What a micro drama starts with. `episodeEnding` is deliberately not here (turn 99): how a
+ * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
+ * line makes it a setting. It reaches `season.ending` through the conversation instead.
+ */
 const MICRODRAMA_DEFAULTS = {
   episodeCount: 7,
   episodeSecondsMin: 45,
   episodeSecondsMax: 75,
   hookWindowSec: 3,
-  episodeEnding: "cliffhanger",
   exportPreset: "social-1080x1920",
 };
 
@@ -3740,13 +3775,24 @@ export function NewProductionScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const [medium, setMedium] = useState<"story" | "video" | "interactive-video">("video");
-  const [videoKind, setVideoKind] = useState<"film" | "microdrama">("film");
+  const [medium, setMedium] = useState<"story" | "video">("video");
+  const [videoKind, setVideoKind] = useState<VideoKind>("film");
   const [title, setTitle] = useState("");
   const [seriesTitle, setSeriesTitle] = useState("");
-  const [aspect, setAspect] = useState("9:16");
+  // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
+  // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
+  // be the exact failure the grouping is meant to prevent.
+  const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
   const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
-  const [episodeEnding, setEpisodeEnding] = useState(MICRODRAMA_DEFAULTS.episodeEnding);
+  const [episodeLength, setEpisodeLength] = useState(
+    `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
+  );
+  /*
+   * Which step is on screen (turn 83). A family with more than one kind cannot create from step
+   * one: its primary continues here and says so, because the kind and the numbers that differ
+   * between kinds are chosen before anything exists. A one-kind family never reaches this state.
+   */
+  const [step, setStep] = useState<1 | 2>(1);
   // Pending until the correlated result arrives (issue 384): success opens the created production
   // at its own workspace — never back to the list — and failure names itself in place, with
   // everything entered still here.
@@ -3766,17 +3812,175 @@ export function NewProductionScreen() {
   }, [pendingRequest, worldId, navigate]);
   const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
   const isMicrodrama = medium === "video" && videoKind === "microdrama";
-  return (
-    <div className="fy-dialogwrap" data-screen="new-production">
-      <div className="fy-dialog" style={{ maxWidth: 780 }}>
-        <div>
-          <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>New production</div>
-          <div style={{ font: "400 13px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 6 }}>
-            Pick what the audience receives. Whichever you choose, it draws from the same world: cast, canon and
-            tone come along automatically.
+  // Turn 83, both sides of it: more than one kind means step two decides; exactly one means step
+  // one creates and step two never renders.
+  const hasSecondStep = KINDS_BY_MEDIUM[medium].length > 1;
+  const lengthRange = parseEpisodeLength(episodeLength);
+
+  const create = () => {
+    if (!worldId || pendingRequest) return;
+    setFailure(null);
+    setPendingRequest(
+      createProduction(worldId, {
+        title: title.trim(),
+        medium,
+        ...(medium === "video" && STORED_KINDS.has(videoKind) ? { productionKind: videoKind } : {}),
+        // The frame a video delivers in is answerable for every kind, so it travels for every
+        // kind (turn 99): before this, a film could not be made vertical until after it existed.
+        ...(medium === "video" ? { aspect } : {}),
+        ...(isMicrodrama
+          ? {
+              seriesTitle: seriesTitle.trim() || title.trim(),
+              defaults: {
+                ...MICRODRAMA_DEFAULTS,
+                episodeCount,
+                ...(lengthRange
+                  ? { episodeSecondsMin: lengthRange.min, episodeSecondsMax: lengthRange.max }
+                  : {}),
+              },
+            }
+          : {}),
+      }),
+    );
+  };
+
+  /*
+   * Step two (turn 53a): its own screen, with the step said out loud. The kinds carry a banner
+   * area because the choice is meant to be made by looking rather than by reading — the art is
+   * not drawn yet, so the area holds its place rather than collapsing and changing the layout
+   * when it arrives.
+   */
+  if (step === 2) {
+    return (
+      <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
+        <ProductionDialogBackdrop world={world} />
+        <div className="fy-dialog" style={{ maxWidth: 980, position: "relative" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+            <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>What kind of video?</div>
+            <span style={{ flex: 1 }} />
+            <span className="fy-mono">step 2 of 2</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12 }}>
+            {VIDEO_KIND_CHOICES.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                className={cx("fy-radio", videoKind === k.id && "fy-radio--on")}
+                onClick={() => {
+                  setVideoKind(k.id);
+                  setAspect(k.aspect);
+                }}
+              >
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: 98,
+                    borderRadius: 9,
+                    border: "1px solid var(--border)",
+                    background: "var(--muted)",
+                    marginBottom: 12,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {k.id === "other" && <span className="fy-mono">no defaults</span>}
+                </div>
+                <div className="fy-radio__head">
+                  <span className="fy-radio__dot" />
+                  {k.label}
+                </div>
+                <div style={{ font: "400 12px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
+                  {k.body}
+                </div>
+              </button>
+            ))}
+          </div>
+          {isMicrodrama && (
+            <Input
+              placeholder={`Series name · ${title.trim() || "defaults to the title"} — Season 1 is created with it`}
+              value={seriesTitle}
+              onChange={(e) => setSeriesTitle(e.target.value)}
+            />
+          )}
+          {/*
+            Everything the kind can answer, under one label that says what it is (turn 99). What
+            is not here is ENDING: it sat in this row as though how a season ends were a setting,
+            asked of somebody who had not written a line. The test for the door — if the kind can
+            answer it, it is a default; if only the story can, it is not asked here.
+          */}
+          <div style={{ display: "grid", gap: 8 }}>
+            <div className="fy-mono">DEFAULTS · CHANGE LATER</div>
+            {/* Three columns whatever is in them: a lone FRAME select stretched across the whole
+                dialog reads as a form field rather than as one default among several. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <DefaultSelect label="FRAME" value={aspect} onChange={setAspect}>
+                <option value="9:16">9:16 vertical</option>
+                <option value="16:9">16:9 landscape</option>
+              </DefaultSelect>
+              {isMicrodrama && (
+                <>
+                  <DefaultSelect
+                    label="EPISODES"
+                    value={String(episodeCount)}
+                    onChange={(v) => setEpisodeCount(Number(v))}
+                  >
+                    {[5, 6, 7, 8, 10, 12].map((n) => (
+                      <option key={n} value={String(n)}>
+                        {n}
+                      </option>
+                    ))}
+                  </DefaultSelect>
+                  {/* The range a season is written to, and the reason a Microdrama is a
+                      Microdrama. It reaches season.json, where the season shows it back. */}
+                  <DefaultSelect label="LENGTH" value={episodeLength} onChange={setEpisodeLength}>
+                    {EPISODE_LENGTH_CHOICES.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </DefaultSelect>
+                </>
+              )}
+            </div>
+          </div>
+          {failure && (
+            <Callout tone="danger" title="Not created">
+              {failure}
+            </Callout>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <span style={{ flex: 1 }} />
+            <Button variant="ghost" onClick={() => setStep(1)}>
+              Back
+            </Button>
+            <Button variant="primary" disabled={pendingRequest !== null} onClick={create}>
+              {pendingRequest ? "Creating…" : isMicrodrama ? "Create Series and Season 1" : "Create and open it"}
+            </Button>
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
+      <ProductionDialogBackdrop world={world} />
+      <div className="fy-dialog" style={{ maxWidth: 780, position: "relative" }}>
+        {/* The question is the title, and the counter only appears where there is a second step
+            (turn 99): a Story creates from here, and "step 1 of 2" would be a lie to it. */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>What are you making?</div>
+          <span style={{ flex: 1 }} />
+          {hasSecondStep && <span className="fy-mono">step 1 of 2</span>}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${MEDIUM_CHOICES.length}, minmax(0, 1fr))`,
+            gap: 14,
+          }}
+        >
           {MEDIUM_CHOICES.map((f) => (
             <button
               key={f.id}
@@ -3795,65 +3999,7 @@ export function NewProductionScreen() {
             </button>
           ))}
         </div>
-        {medium === "video" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
-            {VIDEO_KIND_CHOICES.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                className={cx("fy-radio", videoKind === k.id && "fy-radio--on")}
-                onClick={() => setVideoKind(k.id)}
-              >
-                <div className="fy-radio__head">
-                  <span className="fy-radio__dot" />
-                  {k.label}
-                </div>
-                <div style={{ font: "400 12px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>{k.body}</div>
-              </button>
-            ))}
-          </div>
-        )}
         <Input placeholder="Name it · working titles are fine" value={title} onChange={(e) => setTitle(e.target.value)} />
-        {isMicrodrama && (
-          <div style={{ display: "grid", gap: 10 }}>
-            <Input
-              placeholder={`Series name · ${title.trim() || "defaults to the title"} — Season 1 is created with it`}
-              value={seriesTitle}
-              onChange={(e) => setSeriesTitle(e.target.value)}
-            />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
-                frame
-                <select style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }} value={aspect} onChange={(e) => setAspect(e.target.value)}>
-                  <option value="9:16">9:16 vertical</option>
-                  <option value="16:9">16:9 landscape</option>
-                </select>
-              </label>
-              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
-                episodes
-                <select
-                  style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }}
-                  value={String(episodeCount)}
-                  onChange={(e) => setEpisodeCount(Number(e.target.value))}
-                >
-                  {[5, 6, 7, 8, 10, 12].map((n) => (
-                    <option key={n} value={String(n)}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
-                ending
-                <select style={{ font: "400 13px var(--font-sans)", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)" }} value={episodeEnding} onChange={(e) => setEpisodeEnding(e.target.value)}>
-                  <option value="cliffhanger">Cliffhanger</option>
-                  <option value="resolved">Resolved</option>
-                </select>
-              </label>
-            </div>
-            <span className="fy-mono">defaults · change them here or later</span>
-          </div>
-        )}
         {failure && (
           <Callout tone="danger" title="Not created">
             {failure}
@@ -3861,8 +4007,7 @@ export function NewProductionScreen() {
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span className="fy-mono">
-            joins {world?.meta.name ?? "the world"} · shares all {characters} characters, every location and the whole
-            canon
+            joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
           </span>
           <span style={{ flex: 1 }} />
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/productions`)}>
@@ -3871,30 +4016,71 @@ export function NewProductionScreen() {
           <Button
             variant="primary"
             disabled={title.trim().length === 0 || pendingRequest !== null}
-            onClick={() => {
-              if (worldId && !pendingRequest) {
-                setFailure(null);
-                setPendingRequest(
-                  createProduction(worldId, {
-                    title: title.trim(),
-                    medium,
-                    ...(medium === "video" && videoKind !== "film" ? { productionKind: videoKind } : {}),
-                    ...(isMicrodrama
-                      ? {
-                          seriesTitle: seriesTitle.trim() || title.trim(),
-                          aspect,
-                          defaults: { ...MICRODRAMA_DEFAULTS, episodeCount, episodeEnding },
-                        }
-                      : {}),
-                  }),
-                );
-              }
-            }}
+            onClick={() => (hasSecondStep ? setStep(2) : create())}
           >
-            {pendingRequest ? "Creating…" : isMicrodrama ? "Create Series and Season 1" : "Create production"}
+            {pendingRequest ? "Creating…" : hasSecondStep ? "Continue · what kind of video?" : "Create and open day one"}
           </Button>
         </div>
+        {/* The promise the action needs beside it: pressing this spends nothing. The joins line
+            above already says the world is shared rather than copied (turn 99, halved). */}
+        <span className="fy-mono">nothing generates</span>
       </div>
     </div>
+  );
+}
+
+/**
+ * The world behind the decision, blurred back (turns 43a, 53a). Making something *from* a world is
+ * a moment worth lifting out of the page it was reached from, and the key art is what says which
+ * world it is without a line of text repeating the rail.
+ */
+function ProductionDialogBackdrop({ world }: { world: { meta: { slug: string }; keyArt?: string | null } | null }) {
+  const art = world?.keyArt;
+  if (!art) return null;
+  return (
+    <div aria-hidden="true" style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+      <img
+        src={mediaUrl(world.meta.slug, art)}
+        alt=""
+        style={{ width: "100%", height: "100%", objectFit: "cover", filter: "blur(7px) saturate(.8)", opacity: 0.4 }}
+      />
+      <div
+        style={{ position: "absolute", inset: 0, background: "color-mix(in srgb, var(--background) 72%, transparent)" }}
+      />
+    </div>
+  );
+}
+
+/** One of step two's defaults: a control that looks like the control it is (turn 53). */
+function DefaultSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <label className="fy-mono" style={{ display: "grid", gap: 4 }}>
+      {label}
+      <select
+        aria-label={label}
+        style={{
+          font: "400 13px var(--font-sans)",
+          padding: "8px 10px",
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: "var(--background)",
+          color: "var(--foreground)",
+        }}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {children}
+      </select>
+    </label>
   );
 }

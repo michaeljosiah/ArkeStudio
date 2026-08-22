@@ -26,6 +26,8 @@ export interface RunInput {
   proposalId: string;
   purpose: "authoring" | "drafting" | "extraction";
   instruction: string;
+  /** Set on the gate's own repair turns, so the transcript attributes them honestly. */
+  repairTurn?: boolean;
 }
 
 interface ActiveRun {
@@ -52,6 +54,23 @@ const DEFAULT_WALL_CLOCK_MS = 15 * 60_000;
  */
 const FALLBACK_TOKEN_BUDGET = 200_000;
 
+/**
+ * How many times a completed turn may be sent back to repair what it wrote.
+ *
+ * Two, because the first repair is the common case — a missing comma, a field written as prose
+ * where the schema wants an object — and an agent that has failed the same check twice with the
+ * error in front of it is not going to be talked into passing it a third time. Past that the
+ * proposal stands as it is and the gate refuses it to the person, which is the outcome this
+ * exists to make rare rather than to make impossible.
+ */
+const MAX_REPAIR_TURNS = 2;
+
+/** What the agent is told when what it wrote would be refused. */
+function repairInstruction(problems: Array<{ path: string; message: string }>): string {
+  const lines = problems.map((p) => `- ${p.path}: ${p.message}`).join("\n");
+  return `The file you just wrote cannot be accepted as it stands:\n${lines}\n\nOpen it, fix exactly what is named above, and leave everything else as you wrote it. Do not restructure the draft, do not touch any other file, and reply with nothing but what you changed.`;
+}
+
 export class AuthoringService {
   private readonly runs = new Map<string, ActiveRun>();
   /**
@@ -60,6 +79,14 @@ export class AuthoringService {
    * badly, and released when the proposal settles.
    */
   private readonly sessions = new Map<string, string>();
+  /**
+   * Proposal → repair turns already spent. Counted per proposal rather than per run because the
+   * budget belongs to the draft: a second instruction on the same proposal is the same
+   * conversation, and letting it reset the count would make the bound meaningless.
+   */
+  private readonly repairs = new Map<string, number>();
+  /** Proposals whose Stop arrived between a run ending and its repair starting. */
+  private readonly cancelledRepairs = new Set<string>();
 
   constructor(
     private readonly adapter: HarnessAdapter,
@@ -69,6 +96,9 @@ export class AuthoringService {
 
   /** Cancel the run bound to a proposal; immediate, and the proposal keeps the work (R-13). */
   async cancel(proposalId: string): Promise<void> {
+    // Even with no live run: a Stop can land in the gap between a run ending and its repair
+    // turn starting, and the repair must honour it (review 2026-08-22).
+    this.cancelledRepairs.add(proposalId);
     const run = this.runs.get(proposalId);
     if (!run) return;
     run.cancelled = true;
@@ -94,6 +124,8 @@ export class AuthoringService {
   /** The proposal settled (accepted or discarded) — its conversation is over. */
   release(proposalId: string): void {
     this.sessions.delete(proposalId);
+    this.repairs.delete(proposalId);
+    this.cancelledRepairs.delete(proposalId);
   }
 
   /**
@@ -132,6 +164,9 @@ export class AuthoringService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    // A fresh instruction supersedes a stale Stop — without this, one cancelled turn would
+    // silently disable the repair loop for the proposal's whole remaining life.
+    if (input.repairTurn !== true) this.cancelledRepairs.delete(input.proposalId);
 
     const proposalDir = join(store.dir, fromPortable(`.proposals/${input.proposalId}`));
 
@@ -155,13 +190,17 @@ export class AuthoringService {
       }
     }
 
-    // The instruction is the user's side of the conversation — on the record before dispatch.
+    /*
+     * The instruction goes on the record before dispatch. A repair turn is the gate's words,
+     * not the person's (review 2026-08-22): attributing machine-generated diagnostics to the
+     * user put a paragraph they never typed into their own transcript.
+     */
     this.emit({
       at: at(),
       type: "authoring.turn",
       worldId: input.worldId,
       proposalId: input.proposalId,
-      role: "user",
+      role: input.repairTurn === true ? "gate" : "user",
       text: input.instruction,
     });
 
@@ -257,6 +296,42 @@ export class AuthoringService {
         role: "gate",
         text: replyText.trim(),
       });
+    }
+
+    /*
+     * What the agent wrote, read by the gate before the person is offered it.
+     *
+     * The agent edits its target with raw file tools, so nothing between its last keystroke and
+     * the Accept press ever looked at the result: a missing comma or a field written as prose
+     * reached review looking finished, and the refusal arrived at the one moment the session that
+     * could have fixed it was gone. Asking here costs one round trip in the case that used to
+     * cost the person a discarded draft.
+     *
+     * Only after a clean ending, because that is the only ending that keeps the session alive —
+     * a cancelled or timed-out turn has nobody left to ask, and its half-written file is
+     * explicitly the proposal's to keep (R-12).
+     */
+    if (final.state === "completed") {
+      const spent = this.repairs.get(input.proposalId) ?? 0;
+      if (spent < MAX_REPAIR_TURNS) {
+        const problems = await gate.recordProblems(input.proposalId).catch(() => []);
+        /*
+         * The run was cleared from `this.runs` in the finally above, so a Stop pressed during
+         * these awaits found nothing to cancel and the repair started anyway (review
+         * 2026-08-22). The flag survives the clear; a cancelled proposal repairs nothing.
+         */
+        if (problems.length > 0 && !this.cancelledRepairs.has(input.proposalId)) {
+          this.repairs.set(input.proposalId, spent + 1);
+          progress(`checking what was written — ${problems[0]!.message}`);
+          await this.run(
+            store,
+            gate,
+            { ...input, instruction: repairInstruction(problems), repairTurn: true },
+            worldQueryUrl,
+          );
+          return;
+        }
+      }
     }
     status(final.state, final.detail);
   }

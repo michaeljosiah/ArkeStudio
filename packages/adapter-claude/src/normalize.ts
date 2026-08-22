@@ -123,6 +123,19 @@ export function normalizeClaude(raw: unknown, sessionId: string, state: Normaliz
     };
   }
 
+  if (message.type === "rate_limit_event") {
+    /*
+     * The SDK grew this after the adapter was written, and it dead-lettered here (round 3,
+     * 2026-08-22) — so a draft crawling through a provider rate limit looked stuck, with the
+     * only trace six identical lines in a log nobody watches. It means exactly one thing the
+     * person deserves to see: the turn is waiting, not wedged.
+     */
+    return {
+      kind: "events",
+      events: [{ type: "tool.activity", sessionId, tool: "rate-limit", summary: "Waiting out a rate limit" }],
+    };
+  }
+
   if (IGNORED.has(message.type)) return { kind: "ignore" };
   return { kind: "dead-letter", reason: `unrecognised message type ${message.type}` };
 }

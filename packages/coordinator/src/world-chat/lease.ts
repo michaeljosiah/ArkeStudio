@@ -78,6 +78,8 @@ export const LEASED_OPERATIONS = [
   "list_entities",
   "related",
   "get_attachment_text",
+  // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.
+  "get_production",
 ] as const;
 
 export type LeasedOperation = (typeof LEASED_OPERATIONS)[number];

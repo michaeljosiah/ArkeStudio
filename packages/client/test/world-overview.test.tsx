@@ -519,4 +519,35 @@ describe("the gate's over-limit refusal reaches the user (SPEC-007 R-18)", () =>
       __setStateForTest(FIXTURE_STATE);
     }
   });
+
+  it("a record the gate could not read is not announced as a field being too long", () => {
+    // `invalid` carries more than one kind of refusal, and since the structured records joined
+    // the gate's schema fences the commonest is a file the scanner would drop. The fixed title
+    // called that a length problem and offered "shorten it" — advice for a different fault.
+    __setStateForTest(FIXTURE_STATE);
+    try {
+      __applyEventForTest({
+        at: "2026-08-05T12:00:00Z",
+        type: "proposal.blocked",
+        worldId: WORLD_ID,
+        proposalId: PROPOSAL,
+        reason: "invalid",
+        detail:
+          "productions/saltlight/scenes/slack-water.json: not a scene: Expected ',' or '}' after property value in JSON at position 339",
+      });
+      const html = renderToString(
+        <MemoryRouter initialEntries={[`/w/${WORLD_ID}/proposals`]}>
+          <App />
+        </MemoryRouter>,
+      ).replace(/<!-- -->/g, "");
+      assert.doesNotMatch(html, /over its limit/, "no length claim about a parse error");
+      assert.doesNotMatch(html, /shorten it/, "and no advice to shorten what is not too long");
+      assert.match(html, /This draft cannot be written as it stands/, "the title frames the problem instead");
+      assert.match(html, /not a scene: Expected/, "and the gate's own words say what it is");
+      assert.match(html, /Ask the studio to fix it, or discard this draft/, "the exit fits the fault");
+      assert.match(html, /Nothing has landed/);
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
 });

@@ -76,3 +76,53 @@ describe("what a conversation was opened about", () => {
     assert.ok(!text.includes(maren.sections[0]!.body), "prose stays behind the tools");
   });
 });
+
+/**
+ * The shape travels as numbers, never as craft (review 2026-08-22): a microdrama thread whose
+ * briefing does not carry the episode count, the seconds and the hook window leaves the model
+ * pitching episodes for a shape it cannot see — and the numbers are the shape.
+ */
+describe("a production thread is briefed on its shape", () => {
+  async function shaped(meta: Record<string, unknown>, defaults?: Record<string, unknown>) {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const production = bundle.productions[0]!;
+    const patched = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, ...meta } as typeof production.meta,
+          season: {
+            version: production.season?.version ?? 1,
+            ...(defaults !== undefined ? { defaults } : {}),
+          } as typeof production.season,
+        },
+        ...bundle.productions.slice(1),
+      ],
+    };
+    return describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
+  }
+
+  it("a microdrama's numbers reach the model: count, seconds, hook window", async () => {
+    const text = await shaped(
+      { medium: "video", kind: "microdrama" },
+      { episodeCount: 12, episodeSecondsMin: 45, episodeSecondsMax: 90, hookWindowSec: 3 },
+    );
+    assert.match(text, /microdrama/i);
+    assert.match(text, /season of 12 episodes/);
+    assert.match(text, /45–90 seconds/);
+    assert.match(text, /first 3 seconds are the hook/);
+  });
+
+  it("an episodic production without stored defaults still says it is one", async () => {
+    const text = await shaped({ medium: "video", kind: "series" });
+    assert.match(text, /a season of several episodes/);
+    assert.ok(!text.includes("undefined"), "absent numbers are absent, not printed");
+  });
+
+  it("only a picture has a frame: a story thread never hears about aspect", async () => {
+    const text = await shaped({ format: "story", medium: "story", kind: "book" });
+    assert.ok(!/delivers in/.test(text), "prose does not deliver in 16:9");
+    assert.match(text, /one continuous piece/);
+  });
+});

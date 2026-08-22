@@ -1249,6 +1249,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-prodrail__sub:hover { background: var(--accent); color: var(--foreground); }
+/* One shape for every destination (turn 101): an item under another is indented and quieter, not
+   a different element — so folding it leaves a mark rather than nothing. */
+.fy-prodrail__item--under { margin-left: 14px; font-size: 12.5px; color: var(--neutral-400); }
+.fy-prodrail--folded .fy-prodrail__item--under { margin-left: 0; }
+/* The collapse control, above the switcher so folding never moves what you were about to press. */
+.fy-prodrail__collapse {
+  align-self: flex-end;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: var(--transition-control);
+}
+.fy-prodrail__collapse:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail--folded .fy-prodrail__collapse { align-self: center; }
+.fy-prodrail--folded .fy-prodrail__foot { justify-content: center; padding: 12px 0 4px; }
 .fy-prodrail__spacer { flex: 1; }
 .fy-prodrail__foot {
   border-top: 1px solid var(--border);
@@ -1432,6 +1455,185 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   background: var(--muted);
   font: 500 12px var(--font-sans);
 }
+
+/* the storyboard (turn 97, 14c) — cards you write on */
+.fy-sbstrip { display: flex; align-items: flex-start; overflow-x: auto; padding: 2px 0 6px; animation: fy-fade-up 0.6s var(--ease-out) 0.1s both; }
+.fy-sbins {
+  width: 22px; flex: none; align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+  color: transparent; cursor: pointer; border: 0; background: transparent; padding: 0;
+  transition: var(--transition-control);
+}
+.fy-sbins:hover, .fy-sbins:focus-visible { color: var(--neutral-400); }
+.fy-sbcard {
+  width: 300px; flex: none; position: relative;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-xs); background: var(--card);
+  display: flex; flex-direction: column; overflow: hidden;
+  transition: var(--transition-control);
+}
+.fy-sbcard:hover { box-shadow: var(--shadow-md); }
+.fy-sbcard__frame { height: 158px; flex: none; position: relative; background: var(--neutral-100); }
+.fy-sbcard__noframe {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: repeating-linear-gradient(45deg, var(--neutral-100) 0 9px, var(--neutral-50) 9px 18px);
+  color: var(--neutral-400); font: 400 10px var(--font-mono);
+}
+.fy-sbcard__tag {
+  position: absolute; top: 9px; left: 10px;
+  font: 500 10px var(--font-mono);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+  border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; cursor: grab;
+}
+.fy-sbcard__chip {
+  position: absolute; bottom: 9px; left: 10px;
+  font: 400 9.5px var(--font-mono);
+  background: color-mix(in srgb, var(--media-overlay-bg) 62%, transparent); color: var(--media-overlay-fg); border-radius: 5px; padding: 2px 6px;
+}
+.fy-sbcard__body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+.fy-sbcard__head { display: flex; align-items: center; gap: 7px; }
+.fy-sbcard__titleline {
+  font: 600 12.5px var(--font-sans); letter-spacing: -0.01em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fy-sbcard__state { font: 400 9.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+.fy-sbdot { width: 6px; height: 6px; border-radius: 99px; flex: none; }
+.fy-sbstale {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid var(--warning); border-radius: 7px; background: var(--neutral-50);
+  padding: 5px 8px; font: 400 10px var(--font-mono);
+}
+.fy-sbstale__note { color: var(--warning); flex: 1; min-width: 0; }
+.fy-sblink {
+  font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+  background: transparent; border: 0; padding: 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; transition: var(--transition-control);
+}
+.fy-sblink:hover { color: var(--foreground); }
+.fy-sbscript {
+  min-height: 72px; font: 400 12.5px/1.7 var(--font-sans);
+  border-radius: 7px; padding: 4px 6px; margin: 0 -6px; cursor: text;
+  transition: var(--transition-control);
+}
+.fy-sbscript:hover { background: var(--neutral-50); }
+.fy-sbscript--blank { color: var(--neutral-400); }
+.fy-sbsynopsis { min-height: 0; color: var(--muted-foreground); font: 400 12.5px/1.6 var(--font-sans); }
+.fy-sbrefs { display: flex; flex-wrap: wrap; gap: 4px; }
+.fy-sbref {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px 2px 3px;
+  font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+}
+.fy-sbref__thumb { width: 15px; height: 15px; border-radius: 99px; overflow: hidden; flex: none; }
+.fy-sbchip {
+  border: 1px solid var(--border); border-radius: 999px; background: var(--background);
+  padding: 4px 9px; font: 400 10.5px var(--font-sans); color: var(--muted-foreground);
+  cursor: pointer; white-space: nowrap; transition: var(--transition-control);
+}
+.fy-sbchip:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbover { display: flex; flex-wrap: wrap; gap: 6px; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-sbprompt { display: flex; align-items: center; gap: 7px; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-sbactions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.fy-sbmore {
+  width: 26px; height: 26px; border-radius: 7px; border: 0; background: transparent;
+  color: var(--muted-foreground); cursor: pointer; font: 600 13px var(--font-sans);
+  transition: var(--transition-control);
+}
+.fy-sbmore:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbmenu {
+  position: absolute; right: 10px; bottom: 48px; z-index: 8; width: 170px;
+  background: var(--background); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-lg); padding: 4px;
+}
+.fy-sbmenu button {
+  display: block; width: 100%; text-align: left; padding: 7px 9px; border-radius: 7px;
+  font: 400 11.5px var(--font-sans); background: transparent; border: 0; cursor: pointer; color: inherit;
+}
+.fy-sbmenu button:hover { background: var(--accent); }
+.fy-sbmenu button:disabled { color: var(--neutral-400); cursor: default; }
+.fy-sbmenu button.fy-sbmenu--danger { color: var(--destructive); }
+.fy-sbmenu button.fy-sbmenu--danger:hover { background: var(--destructive); color: var(--destructive-foreground); }
+.fy-sbadd {
+  width: 220px; min-height: 340px; flex: none;
+  border: 1px dashed var(--border); border-radius: var(--radius-card); background: transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px;
+  color: var(--neutral-400); cursor: pointer; transition: var(--transition-control);
+}
+.fy-sbadd:hover { background: var(--accent); color: var(--foreground); }
+.fy-sbadd__ring {
+  width: 34px; height: 34px; border-radius: 99px; border: 1px solid currentColor;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.fy-sbempty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; text-align: center; animation: fy-fade-up 0.5s var(--ease-out) both; }
+.fy-sbempty h2 { margin: 0; font: 650 21px var(--font-sans); letter-spacing: -0.02em; }
+.fy-sbempty p { margin: 0; font: 400 13px/1.7 var(--font-sans); color: var(--muted-foreground); }
+.fy-sbempty__doors { display: flex; gap: 8px; margin-top: 6px; }
+.fy-sbfoot { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; background: var(--background); position: relative; z-index: 2; }
+/* Ramp surfaces state their dark counterparts (R-11): the ramp itself never re-themes. */
+.dark .fy-sbcard__frame { background: var(--neutral-800); }
+.dark .fy-sbcard__noframe { background: repeating-linear-gradient(45deg, var(--neutral-800) 0 9px, var(--neutral-900) 9px 18px); }
+.dark .fy-sbstale { background: var(--neutral-900); }
+.dark .fy-sbscript:hover { background: var(--neutral-900); }
+
+/* the full shot (turn 97, 14d) — behind the card */
+.fy-sheethead { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-sheettitle {
+  font: 650 16px var(--font-sans); letter-spacing: -0.02em; color: inherit;
+  border: 0; background: transparent; padding: 3px 6px; border-radius: 6px; min-width: 120px;
+}
+.fy-sheettitle:focus { background: var(--secondary); outline: none; }
+.fy-sheet { display: flex; gap: 0; flex: 1; min-height: 0; }
+.fy-sheet__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 16px 0; overflow-y: auto; }
+.fy-sheet__side { width: 320px; flex: none; border-left: 1px solid var(--border); padding: 8px 0 16px 16px; display: flex; flex-direction: column; overflow-y: auto; }
+.fy-sheetsec { display: flex; flex-direction: column; gap: 7px; }
+.fy-sheetlabel {
+  display: flex; align-items: center; gap: 10px;
+  font: 600 10px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground);
+}
+.fy-sheetbeats { display: flex; flex-direction: column; gap: 5px; }
+.fy-sheetbeat { display: flex; gap: 8px; }
+.fy-sheetbeat__span {
+  width: 64px; flex: none; font: 400 10px var(--font-mono); color: var(--neutral-400);
+  border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 6px 8px;
+}
+.fy-sheetbeat__text {
+  flex: 1; min-width: 0; font: 400 12px var(--font-sans); color: inherit;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 6px 9px;
+}
+.fy-sheetrefs { display: flex; flex-direction: column; gap: 6px; }
+.fy-sheetref {
+  display: flex; align-items: center; gap: 9px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--card);
+  padding: 6px 9px; box-shadow: var(--shadow-xs);
+}
+.fy-sheetaddref {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px dashed var(--border); border-radius: 9px; background: transparent;
+  padding: 7px 10px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground);
+  cursor: pointer; transition: var(--transition-control);
+}
+.fy-sheetaddref:hover { background: var(--accent); color: var(--foreground); }
+.fy-sheetside__sec { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.fy-sheetside__head { font: 600 10px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-sheetcam { display: flex; align-items: center; gap: 8px; }
+.fy-sheetcam__dot { display: inline-block; width: 4px; height: 4px; border-radius: 99px; background: var(--foreground); margin-left: 4px; vertical-align: middle; }
+.fy-sheetselect {
+  flex: 1; min-width: 0; font: 400 11.5px var(--font-sans); color: inherit;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+  padding: 6px 9px; box-shadow: var(--shadow-xs);
+}
+.fy-sheetstep {
+  display: flex; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+  box-shadow: var(--shadow-xs); overflow: hidden;
+}
+.fy-sheetstep button {
+  width: 26px; height: 29px; border: 0; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; transition: var(--transition-control);
+}
+.fy-sheetstep button:hover { background: var(--accent); color: var(--foreground); }
+.fy-sheetstep span { flex: 1; text-align: center; font: 500 11.5px var(--font-mono); }
 
 /* board tab (14a board) */
 .fy-boardsplit { display: flex; gap: 26px; flex: 1; min-height: 320px; animation: fy-fade-up 0.5s var(--ease-out) both; }
@@ -2052,6 +2254,26 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   box-shadow: var(--shadow-xs);
   margin-top: 12px;
 }
+/*
+ * The card for a thing that is promised and not written — an unstarted episode, an empty rail.
+ * Dashed, because the shape of the season is a thing to see before it is a thing to fill (turn
+ * 87). This class had three callers and no definition, so a `<button>` wearing it came out in
+ * the browser's own grey-and-outset chrome.
+ */
+.fy-emptycard {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-top: 12px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+button.fy-emptycard { cursor: pointer; transition: var(--transition-control); }
+button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutral-400); }
+
 .fy-draftcard__logline { font: 400 13.5px/1.55 var(--font-sans); font-style: italic; color: var(--muted-foreground); }
 .fy-actrow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
 .fy-actrow:last-child { border-bottom: none; }
@@ -4963,3 +5185,243 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-ovclip__name { flex: 1; min-width: 0; font: 400 8.5px var(--font-mono); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-ovclip__x { border: 0; background: none; color: var(--neutral-400); font: 400 13px var(--font-sans); line-height: 1; padding: 2px 4px; cursor: pointer; flex: none; transition: var(--transition-control); }
 .fy-ovclip__x:hover { color: var(--destructive); }
+
+/* ---- Arke, docked beside the thing it is about (design turns 97, 99, 100) ----------------
+   The chat stops being a place you go to. The artifact keeps the width it had; the panel takes
+   a fixed column beside it, and what would have been a side rail on a full screen becomes one
+   strip above the composer, because a change a proposal makes is drawn on the page, not listed
+   in the panel. */
+.fy-arkewrap { display: flex; flex: 1; min-height: 0; }
+.fy-arkewrap > .fy-prodmain { flex: 1; min-width: 0; }
+.fy-arke {
+  width: 360px;
+  flex: none;
+  border-left: 1px solid var(--border);
+  background: var(--muted);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  animation: fy-fade-up 0.6s var(--ease-out) 0.1s both;
+}
+.fy-arke__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+.fy-arke__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fy-arke__name { font: 600 12.5px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-arke__log { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 6px; }
+.fy-arke__strip { flex: none; padding: 8px 16px 0; display: flex; flex-direction: column; gap: 8px; }
+.fy-arke__foot { flex: none; padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+.fy-arke__points { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
+.fy-arke__points > summary {
+  cursor: pointer;
+  padding: 8px 11px;
+  font: 500 12px var(--font-sans);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.fy-arke__points[open] > summary { border-bottom: 1px solid var(--border); }
+.fy-arke__points > *:not(summary) { padding: 8px 11px; }
+/* The dock is narrow, so anything inside it that was drawn for a full column has to give way. */
+.fy-arke .fy-story__side { width: auto; padding: 0; background: none; overflow: visible; animation: none; }
+
+/* ---- What Arke made, said plainly (design turn 101) --------------------------------------
+   The governance vocabulary stays in the files. On the screen: the things themselves, and two
+   ways on. The before-and-after is the exception — see .fy-made__diff. */
+.fy-made {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.fy-made__list { display: flex; flex-direction: column; }
+.fy-made__row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.fy-made__tag { font: 400 10.5px var(--font-mono); color: var(--warning); flex: none; }
+.fy-made__name { font: 400 12px var(--font-sans); flex: 1; min-width: 0; }
+.fy-made__diff { display: grid; gap: 10px; padding: 11px; border-bottom: 1px solid var(--border); }
+.fy-made__acts { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
+.fy-made__drop {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  transition: var(--transition-control);
+}
+.fy-made__drop:hover { background: var(--accent); color: var(--destructive); }
+.fy-made__drop:disabled { opacity: 0.4; cursor: default; }
+.fy-made + .fy-mono, .fy-made .fy-mono { }
+/* Set aside by Keep discussing: one line that says the change is still there. */
+.fy-madeaside {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  font: 500 12px var(--font-sans);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-madeaside:hover { background: var(--accent); }
+.fy-madeaside .fy-mono { margin-left: auto; }
+
+/* ---- The scene's review, above the shots it is about (design turn 102) --------------------
+   Not a page. Layer one is the shots; a review sits over them and can be put away. */
+.fy-review {
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--warning) 6%, var(--background));
+  animation: fy-fade-up 0.4s var(--ease-out) both;
+}
+.fy-review__what { flex: none; display: flex; flex-direction: column; gap: 1px; }
+.fy-review__title { font: 600 13px var(--font-sans); }
+.fy-review__list { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fy-review__line { font: 400 12px/1.5 var(--font-sans); }
+.fy-review__close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--neutral-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-review__close:hover { background: var(--accent); color: var(--foreground); }
+/* ---- Generate scene: a drawer over the work, never a screen away from it (turn 102) ------- */
+.fy-gendrawer {
+  position: fixed;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  box-sizing: border-box;
+  z-index: 40;
+  border-left: 1px solid var(--border);
+  background: var(--background);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  animation: fy-fade-up 0.35s var(--ease-out) both;
+}
+.fy-gendrawer__head { flex: none; display: flex; align-items: baseline; gap: 10px; padding: 18px 20px 0; }
+.fy-gendrawer__title { font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-gendrawer__body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.fy-gendrawer__card {
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+}
+.fy-gendrawer__model { font: 600 14px var(--font-sans); }
+.fy-gendrawer__cost { font: 650 20px var(--font-sans); letter-spacing: -0.02em; }
+.fy-gendrawer__more {
+  align-self: flex-start;
+  border: 0;
+  background: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 500 12.5px var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-gendrawer__more:hover { color: var(--foreground); }
+
+/* ---- The takes, watched (design turn 102) --------------------------------------------------
+   Layer one on the Generate workspace is the takes themselves. The bench that used to be here —
+   composer, parameters, model picker — is behind Advanced, which is where layer three lives. */
+.fy-takes { gap: 14px; }
+.fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.fy-take {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-control);
+}
+.fy-take:hover { border-color: var(--neutral-400); }
+.fy-take--on { border: 1.5px solid var(--foreground); padding: 8.5px; }
+.fy-take__frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--neutral-100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fy-take__foot { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.fy-take__name { font: 600 12.5px var(--font-sans); }
+.fy-takechips { display: flex; gap: 9px; flex-wrap: wrap; }
+.fy-takechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  background: var(--background);
+  font: 400 11.5px var(--font-sans);
+  color: inherit;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-takechip:hover { background: var(--accent); }
+.fy-takechip--on { border: 1.5px solid var(--foreground); padding: 4.5px 9.5px; }
+.dark .fy-take__frame { background: var(--neutral-800); }
+.fy-takes__foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}

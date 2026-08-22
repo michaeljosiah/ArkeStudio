@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   newId,
+  WorldChatEntityRefSchema,
   WorldChatTurnResultSchema,
   type BibleEdit,
   type CandidateChecks,
@@ -409,13 +410,24 @@ function lastUserMessageId(
  * Coordinator-computed, because grouping the panel by subject is what makes it readable, and a
  * model choosing its own headings would produce a different set every turn.
  */
+/**
+ * What a proposition is about, for grouping in the panel: its own target where it has one.
+ *
+ * The casts here are what let a target the subject union does not admit reach the store and fail
+ * there instead of in the compiler (2026-08-21: every `development.*` proposition, for as long as
+ * they have existed). They cannot be removed outright — the payloads are a discriminated union
+ * and `target` has a different shape in each arm — so the value is parsed instead. A target that
+ * is not a valid subject now falls back to a label rather than writing a candidate nothing can
+ * read, and the parse is the check the cast was pretending to be.
+ */
 function subjectOf(draft: ModelCandidateDraft): WorldChangeCandidate["subject"] {
   const record = draft as unknown as Record<string, unknown>;
-  const target = record["target"] as WorldChangeCandidate["subject"] | undefined;
-  if (target) return target;
   const payload = (record["draft"] ?? {}) as Record<string, unknown>;
-  if (draft.classification === "media.image-opportunity") {
-    return payload["target"] as WorldChangeCandidate["subject"];
+  const target =
+    draft.classification === "media.image-opportunity" ? payload["target"] : record["target"];
+  if (target !== undefined) {
+    const ref = WorldChatEntityRefSchema.safeParse(target);
+    if (ref.success) return ref.data;
   }
   const label = payload["name"] ?? payload["title"] ?? draft.title;
   return { kind: "new", label: String(label).slice(0, 120) };

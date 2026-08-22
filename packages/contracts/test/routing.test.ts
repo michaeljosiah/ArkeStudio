@@ -129,10 +129,16 @@ describe("routing contracts (epic 401)", () => {
   });
 
   it("IV-C4: the interactive kind is branching and never episodic", () => {
-    const shape = productionShape({ format: "video", medium: "interactive-video" });
-    assert.equal(shape.isBranching, true);
-    assert.equal(shape.isEpisodic, false, "SPEC-023 R-11's ownership rule is not inherited");
-    assert.equal(shape.kind, "interactive");
+    // Both spellings: what turn 100 writes, and what a world written before it holds.
+    for (const meta of [
+      { format: "video", medium: "video", kind: "interactive" },
+      { format: "video", medium: "interactive-video" },
+    ] as const) {
+      const shape = productionShape(meta);
+      assert.equal(shape.isBranching, true);
+      assert.equal(shape.isEpisodic, false, "SPEC-023 R-11's ownership rule is not inherited");
+      assert.equal(shape.kind, "interactive");
+    }
     assert.equal(productionShape({ format: "video" }).isBranching, false, "linear video never branches");
   });
 

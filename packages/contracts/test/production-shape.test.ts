@@ -37,8 +37,18 @@ describe("productionShape resolves the legacy discriminator", () => {
       label: "Series",
     },
     {
+      // Turn 100: what a world written between turns 84 and 100 holds. It reads as a Video
+      // production carrying the interactive kind, and keeps branching either way.
       meta: { format: "video", medium: "interactive-video" },
-      medium: "interactive-video",
+      medium: "video",
+      kind: "interactive",
+      capability: "video",
+      episodic: false,
+      label: "Interactive video",
+    },
+    {
+      meta: { format: "video", medium: "video", kind: "interactive" },
+      medium: "video",
       kind: "interactive",
       capability: "video",
       episodic: false,
@@ -56,9 +66,25 @@ describe("productionShape resolves the legacy discriminator", () => {
       assert.equal(shape.displayLabel, row.label);
       assert.equal(shape.hasChapters, row.medium === "story");
       assert.equal(shape.hasScenes, row.medium !== "story");
-      assert.equal(shape.isBranching, row.medium === "interactive-video");
+      assert.equal(shape.isBranching, row.kind === "interactive");
     });
   }
+
+  it("the retired medium and the kind that replaced it are the same production (turn 100)", () => {
+    const legacy = productionShape({ format: "video", medium: "interactive-video" });
+    const current = productionShape({ format: "video", medium: "video", kind: "interactive" });
+    assert.deepEqual(legacy, current, "a world written before turn 100 must not read differently");
+    assert.equal(resolveMedium({ format: "video", medium: "interactive-video" }), "video");
+  });
+
+  it("a stored kind still wins over the retired medium", () => {
+    // Nothing writes this pair, but a hand-edited world could: the kind is the newer field, so
+    // it decides, and the production stops branching rather than half-branching.
+    const shape = productionShape({ format: "video", medium: "interactive-video", kind: "microdrama" });
+    assert.equal(shape.kind, "microdrama");
+    assert.equal(shape.isBranching, false);
+    assert.equal(shape.isEpisodic, true);
+  });
 
   it("an unknown kind keeps its name but not its behaviour", () => {
     const shape = productionShape({ format: "video", medium: "video", kind: "docuseries" });

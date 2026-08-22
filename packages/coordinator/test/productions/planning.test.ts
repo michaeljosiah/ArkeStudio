@@ -213,8 +213,8 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
     assert.equal(promptFor(bundle.meta, bundle.sheets, scene, liveShot).overridden, true);
     assert.equal(
       bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!.version,
-      scene.version,
-      "an override is production output — no version cut (R-5 discipline)",
+      scene.version + 1,
+      "an override is authored text — it cuts a version, so the stale-token guards it (review 2026-08-22)",
     );
     assert.equal(overrideStaleAgainst(liveShot, bundle.sheets).length, 0);
 

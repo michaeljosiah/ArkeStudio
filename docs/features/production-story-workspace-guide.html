@@ -7,7 +7,7 @@
       name="description"
       content="A practical guide to the Arke Studio production development workspace: what each screen does, what it writes to disk, and a morning of using it."
     />
-    <title>Arke Studio - Production Development Workspace (guide)</title>
+    <title>Arke Studio - Production Chat and the season (guide)</title>
     <style>
       /* --- the guide's own chrome ------------------------------------- */
       :root {
@@ -114,6 +114,14 @@
       .step__see b { color: var(--ink); }
 
       .note { margin-top: 16px; padding: 13px 17px; border: 1px dashed var(--line-strong); border-radius: 12px; font-size: 13.5px; color: var(--ink-soft); }
+      /* What shipped, where it differs from the frame above it. Solid rather than dashed: a note is
+         an aside, this is the record. */
+      .built { margin-top: 16px; padding: 14px 18px; border: 1px solid var(--line); border-left: 3px solid var(--teal); border-radius: 12px; font-size: 13.5px; color: var(--ink-soft); background: var(--card); }
+      /* Only the opening label is a label; bold inside the prose stays bold. */
+      .built > b:first-child { display: block; margin-bottom: 6px; font-size: 11.5px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-faint); }
+      .built ul { margin: 8px 0 0; padding-left: 18px; }
+      .built li { margin: 4px 0; }
+      .built--none { border-left-color: var(--amber); }
 
       footer { margin: 72px 0 60px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-faint); }
 
@@ -430,6 +438,7 @@
           <a href="#season">The season</a>
           <a href="#episode">The episode</a>
           <a href="#scene">The scene</a>
+          <a href="#deliver">Getting it out</a>
           <a href="#gate">What changes things</a>
           <a href="#files">Files</a>
           <a href="#day">A day</a>
@@ -447,15 +456,23 @@
           about, breaking it into episodes and scenes, and writing the script the shots will cover.
         </p>
         <div class="status">
-          <b>Status</b>
+          <b>Status &middot; part built, and the built part now runs end to end</b>
           <p>
-            Designed, not built. The pictures below are the real frames from the design master, turns
-            43&ndash;53, so what you see is exactly what was specified &mdash; including turn 78&#8217;s
-            recorded rename (the rail item reads Development) and turn 83&#8217;s reconciliations: the
-            scene-per-episode rule applies to episodic productions, and a multi-kind family cannot create
-            past step two. The shipping app has the shells &mdash;
-            a production, a day one, a screen still labelled Story, scenes, dispatch &mdash; but not this. The companion
-            <code>production-story-workspace-brief.html</code> tracks what is actually built.
+            The pictures below are the real frames from the design master, turns 43&ndash;53, embedded
+            rather than screenshotted, so what you see is exactly what was <i>specified</i> &mdash;
+            including turn 78&#8217;s rename, since superseded by turn 89 (the rail item reads Production Chat), and turn 83&#8217;s
+            reconciliations. That is not the same as what shipped, and this document now says which is
+            which: every section that has been built carries an <b>As built</b> note naming the
+            differences, and the sections without one are still drawings.
+          </p>
+          <p>
+            The short version, verified against v0.5.30 on 2026-08-20 by driving the installed app:
+            <b>creation, day one, Production Chat and its details, scenes, dispatch, plans, the cut and export are built</b>
+            &mdash; a world now reaches a rendered film without leaving Arke, which is further than this
+            guide was originally written to go, and the last act is added at
+            <a href="#deliver">Getting it out</a>. <b>Script, Coverage and the Board are not built</b>:
+            those three frames remain the specification and nothing else. The companion
+            <code>production-story-workspace-brief.html</code> tracks build state issue by issue.
           </p>
         </div>
       </section>
@@ -646,6 +663,54 @@
           toll.
         </p>
 
+        <div class="built">
+          <b>As built &middot; v0.5.30</b>
+          Both steps ship, and both frames are now what runs. Creation was one page until 2026-08-20:
+          it revealed the kinds inline and created from step one, so the kind and the numbers that differ
+          between kinds were settled by a button that said <code>Create production</code>, and
+          <code>EPISODE LENGTH</code> was never asked at all. What follows is the small distance that is
+          left.
+          <ul>
+            <li>
+              <b>Step one continues; it no longer creates past the kind.</b> With Video selected the
+              primary reads <code>Continue &middot; what kind of video?</code> and routes here &mdash;
+              turn 83&#8217;s binding, met from both sides, because a family with one kind (Story,
+              Interactive video) still creates directly from <code>Create and open day one</code>. The
+              world&#8217;s key art stands behind the decision, blurred back, and the caption
+              <code>nothing generates &middot; nothing is copied out of the world</code> sits under the
+              buttons where the frame puts it.
+            </li>
+            <li>
+              <b>Step two is its own screen.</b> <code>What kind of video?</code>, the
+              <code>step 2 of 2</code> counter, <code>Back</code>, and all three kinds in the
+              frame&#8217;s own words &mdash; Music video included, since a kind only sets starting
+              numbers and a Video production is the same scenes, shots, takes and cut whichever is
+              picked. What a music video still lacks is turn 60&#8217;s Spine authoring, which is missing
+              authoring rather than a broken production.
+            </li>
+            <li>
+              <b>All four defaults are asked, episode length among them.</b> A Microdrama is a Microdrama
+              because of how long its episodes run, and that range had been a constant nobody could
+              reach; it is now chosen here and written into <code>season.json</code>. A
+              <code>Series name</code> field the frame never had sits above them, which a Series being
+              created genuinely needs.
+            </li>
+            <li>
+              <b>The third card is Interactive video, not Stills</b> &mdash; the drawing is the stale
+              side of that one. Stills became a lens on Generate and is not a family anything is created
+              as. Step one&#8217;s card copy is 6a&#8217;s rather than 43a&#8217;s, settled the same way:
+              design turn 85 records both, so the frames above are read for their structure and the words
+              come from the build.
+            </li>
+            <li>
+              <b>Still outstanding:</b> the kind cards hold the banner area the frame sizes, and there is
+              no art for it, so the choice is still made by reading rather than by looking. And step two
+              is not addressable by URL &mdash; its own <code>Back</code> works, but the browser&#8217;s
+              leaves the flow.
+            </li>
+          </ul>
+        </div>
+
         <h3>Step three &middot; the empty production</h3>
         <p>
           The button says where it goes &mdash; <code>Create and open it</code> &mdash; and it lands you on a
@@ -678,7 +743,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">&middot;</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">&middot;</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
@@ -723,6 +788,38 @@
           scenes another production planned but never shot. Those are gone. They guess at a way of working
           that nobody has done yet. If the plain page turns out to be too quiet, they come back.
         </div>
+
+        <div class="built">
+          <b>As built &middot; v0.5.30</b>
+          Day one ships, and it is a dashboard rather than a page you type into.
+          <ul>
+            <li>
+              <b>The two cards are one button.</b> Where the frame offers <i>Write the first scene</i> and
+              <i>Shape the whole thing first</i>, the built page opens with
+              &#8220;Day one. The world walked in with you.&#8221;, a line counting what came along
+              (&#8220;0 sheets &middot; 0 canon entries &middot; tone came along&#8221;), and a single
+              <code>Draft the first scene</code>. Shaping first is reached from the rail instead, by
+              opening Production Chat.
+            </li>
+            <li>
+              <b>The seeds are still there, and that is drift rather than a decision.</b> The built
+              dashboard carries &#8220;Seeds &mdash; open threads and loose ends&#8221; and the world
+              inventory above it &mdash; which is frame 43b, the version turn 53 cut and turn 83
+              superseded <i>in whole</i>, ruling that seeds return only once the plain path has been used
+              and found wanting. Nobody found it wanting; the screen was simply never migrated. Read the
+              note above as still standing, not as already answered.
+            </li>
+            <li>
+              <b>A control the frame never had.</b> Delivery aspect sits on the dashboard &mdash; the shape
+              every image and clip in this production is made in &mdash; because a production that will be
+              watched vertically has to say so before anything is generated, not at export.
+            </li>
+            <li>
+              <b>The rail is longer.</b> Cast sits above Production Chat; an Interactive video production also
+              gets Branch map. Everything else reads as drawn, footer included.
+            </li>
+          </ul>
+        </div>
       </section>
 
       <section class="section" id="story">
@@ -730,7 +827,7 @@
           <div class="eyebrow">The workspace</div>
           <h2>A conversation next to a draft.</h2>
           <p class="lede">
-            Development &mdash; the screen the app today labels Story &mdash; works the same way as the two
+            Production Chat &mdash; drawn here as Development, renamed by turn 89 &mdash; works the same way as the two
             conversation screens Arke already has. You talk on the left. The draft builds on the right.
             Nothing is written until you turn it into a proposal.
           </p>
@@ -752,7 +849,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v2</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v2</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">7</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;border:1px dashed var(--border);font:400 12px var(--font-sans);cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New scene</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">23</span></div>
@@ -820,7 +917,7 @@
   </div>
 </div></div>
   </div>
-  <figcaption class="shot__cap"><b>44a</b> &middot; Development for a short film. Proposed changes are marked on the fields they would change, with the accepted text underneath, so you can see what is being replaced.</figcaption>
+  <figcaption class="shot__cap"><b>44a</b> &middot; The conversation for a short film, drawn with the draft it was shaping beside it. Superseded by 89a: the rail beside a conversation now holds what it understood, not what it staged.</figcaption>
 </figure>
 
         <ul>
@@ -829,6 +926,20 @@
           <li>One button turns the draft into one proposal for one file.</li>
           <li>Accepting happens on the proposals screen, like every other change in Arke.</li>
         </ul>
+
+        <div class="built">
+          <b>As built &middot; v0.5.30</b>
+          It ships as <b>Production Chat</b> (turn 89): &#8220;Development&#8221; named a phase of filmmaking
+          rather than a thing on a screen, and this is World Chat with a production for a subject. The
+          details it settles are a separate rail item &mdash; Season for an episodic production, Overview
+          otherwise (turn 88) &mdash; whose tab strip is Season, Arcs and Direction,
+          with <b>Episodes appearing only once episodes exist</b> &mdash; exactly the rule this section
+          promises, honoured in the code rather than by a greyed-out tab. The Season view shows the Series
+          engine as a read-only card naming what it governs, and a season with nothing decided says so in
+          words: &#8220;The season question &middot; Not asked yet&#8221;, &#8220;How it ends &middot; Not
+          decided yet&#8221;. What has not been exercised is the marked-up draft panel above: a production
+          whose conversation has proposed changes to a written overview.
+        </div>
       </section>
 
       <section class="section" id="season">
@@ -857,7 +968,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0:00</span></div>
@@ -964,7 +1075,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
       <div style="flex:1"></div>
@@ -1096,7 +1207,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Season 1</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Episode 3</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
@@ -1233,7 +1344,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
@@ -1321,7 +1432,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">4</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">0</span></div>
@@ -1443,7 +1554,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
@@ -1557,7 +1668,7 @@
       </div>
       <div style="height:14px"></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Dashboard</div>
-      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Development<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v1</span></div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
       <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;margin:2px 0 0 14px;background:var(--accent);font:500 12px var(--font-sans);cursor:pointer">11 &middot; The answer from inside</div>
       <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--neutral-400);cursor:pointer">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
@@ -1690,6 +1801,269 @@
           board. Nothing on these screens blocks you: every warning names the specific block or shot and lets
           you carry on.
         </div>
+
+        <div class="built built--none">
+          <b>Not built &middot; v0.5.30</b>
+          <b>Script, Coverage and the Board do not exist as screens.</b>
+          These four frames are the longest stretch of this guide and the least real: there is no script
+          surface, no coverage surface, no board, and the <i>Takes</i> tab shown beside them is a label in
+          the drawing only. A scene in the app is a title, a status and a list of shots.
+          <ul>
+            <li>
+              <b>The data model is there ahead of the screens.</b> Scene records carry script blocks, and a
+              shot can cite the blocks it covers along with a digest of the text at citation time, so
+              &#8220;covers text that changed&#8221; is a derivation waiting for somewhere to be shown. The
+              writing surface is what is missing, not the vocabulary.
+            </li>
+            <li>
+              <b>What did get built is the money moment, elsewhere.</b> Everything this section says about
+              price before spend &mdash; a price per shot, a scene total next to the button that spends it,
+              warnings that name their shot and never block, a length that bills rounded up saying so
+              before the invoice &mdash; ships in the <b>dispatch dialog</b>, reached from Generate. It
+              offers per-shot and whole-scene prices side by side, and (since SPEC-024) a durable plan that
+              chains each pass behind the previous pass&#8217;s last frame. Same promises, different
+              address.
+            </li>
+            <li>
+              Read these four frames as the specification they are. Nothing in them has been contradicted
+              by what shipped &mdash; it simply has not been drawn in code yet.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+
+      <section class="section" id="deliver">
+        <div class="section__head">
+          <div class="eyebrow">Getting it out</div>
+          <h2>From accepted takes to something you can send.</h2>
+          <p class="lede">
+            This guide originally stopped at the first spend, because that was where the design stopped.
+            The rest of the pipeline has since been built, so it is written down here: a shot becomes a
+            take, an accepted take becomes part of the cut, and the cut becomes a file. These two frames
+            are older than the rest of this document &mdash; turns 24 and 25, drawn before the workspace
+            was &mdash; and they are what shipped.
+          </p>
+        </div>
+
+        <h3>Accepting a take is what puts it in the cut</h3>
+        <p>
+          A dispatch lands a take beside its shot, and nothing else happens: a take that arrives is a
+          candidate, not a decision. Accepting one is the act that binds that clip to that shot, and the
+          cut is a projection over those decisions &mdash; not a document you assemble.
+        </p>
+        <p>
+          Because it is a projection, there is nothing to keep in sync and nothing to rebuild. Accept a
+          better take for shot 3 and the cut simply reads differently. The screen says so at the bottom,
+          in the plainest terms it can: the cut recomputes from shot selections, so restoring an earlier
+          cut means restoring the selections that produced it.
+        </p>
+
+<figure class="shot">
+  <div class="shot__stage" style="height:625px">
+    <div class="shot__scale" style="width:1360px;height:850px;transform:scale(0.735)"><div data-screen-label="24a The cut" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">Saltlight · the cut</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;border:0;background:transparent;padding:0 6px;cursor:pointer"><span style="font:650 15px var(--font-sans);letter-spacing:-0.02em;color:var(--foreground)">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span><span style="display:inline-flex;align-items:center;gap:2px;margin-left:12px;vertical-align:middle"><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--destructive);color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Saltlight</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">short film · 2:40 cut</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">42</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">2:40</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">2</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground);transition:var(--transition-control)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:24px 36px 22px">
+      <div style="display:flex;align-items:baseline;gap:14px;flex:none;animation:fadeUp .6s var(--ease-out) both">
+        <h1 style="margin:0;font:650 28px/1.05 var(--font-sans);letter-spacing:-0.025em">The cut</h1>
+        <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">2:40 · 13 of 15 shots covered · assembled from accepted takes only</span>
+        <span style="flex:1"></span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;background:transparent;color:var(--foreground);border:1px solid var(--border);font:500 13px/13px var(--font-sans);border-radius:8px;height:32px;padding:0 14px;">Watch from top</span>
+        <span style="display:inline-flex;align-items:center;justify-content:center;background:var(--primary);color:var(--primary-foreground);font:500 13px/13px var(--font-sans);border-radius:8px;height:32px;padding:0 14px;">Export cut&hellip;</span>
+      </div>
+      <div style="flex:1;min-height:0;margin-top:14px;border:1px solid var(--border);border-radius:12px;overflow:hidden;position:relative;background:var(--neutral-950);animation:fadeUp .7s var(--ease-out) .1s both">
+        <image-slot id="cut-viewer" src="assets/board-scene4-a.png" shape="rect" placeholder="Cut preview"></image-slot>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none"><span style="width:62px;height:62px;border-radius:99px;background:var(--media-control-bg);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;pointer-events:auto;cursor:pointer;transition:transform .2s var(--ease-out)" style-hover="transform:scale(1.08)"><svg width="22" height="22" viewBox="0 0 24 24" fill="#0A0A0A" style="margin-left:3px"><path d="M7 5l12 7-12 7z"></path></svg></span></div>
+        <span style="position:absolute;left:12px;bottom:10px;font:400 10px var(--font-mono);color:color-mix(in srgb, var(--media-overlay-fg) 85%, transparent);background:color-mix(in srgb, var(--media-overlay-bg) 60%, transparent);border-radius:5px;padding:3px 8px">1:26 / 2:40 · scene 4, shot 13</span>
+      </div>
+      <div style="flex:none;margin-top:16px;animation:fadeUp .7s var(--ease-out) .2s both">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px">
+          <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">0:00</span>
+          <span style="flex:1"></span><span style="font:400 10px var(--font-mono);color:var(--neutral-400)">1:20</span><span style="flex:1"></span>
+          <span style="font:400 10px var(--font-mono);color:var(--neutral-400)">2:40</span>
+        </div>
+        <div style="position:relative">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font:500 9px var(--font-mono);color:var(--neutral-400);width:20px;flex:none">V</span>
+            <div style="flex:1;display:flex;gap:4px">
+              <div style="flex:22;min-width:0;height:58px;border-radius:7px;overflow:hidden;position:relative;border:1px solid var(--border)"><img src="assets/drowned-quarter.png" alt="SC 1" style="width:100%;height:100%;object-fit:cover"><span style="position:absolute;left:5px;bottom:4px;font:500 8.5px var(--font-mono);letter-spacing:.04em;background:color-mix(in srgb, var(--media-overlay-bg) 65%, transparent);color:var(--media-overlay-fg);border-radius:4px;padding:2px 6px;white-space:nowrap">SC 1 · 0:22</span></div>
+              <div style="flex:38;min-width:0;height:58px;border-radius:7px;overflow:hidden;position:relative;border:1px solid var(--border)"><img src="assets/world-undersong.png" alt="SC 2" style="width:100%;height:100%;object-fit:cover"><span style="position:absolute;left:5px;bottom:4px;font:500 8.5px var(--font-mono);letter-spacing:.04em;background:color-mix(in srgb, var(--media-overlay-bg) 65%, transparent);color:var(--media-overlay-fg);border-radius:4px;padding:2px 6px;white-space:nowrap">SC 2 · 0:38</span></div>
+              <div style="flex:30;min-width:0;height:58px;border-radius:7px;overflow:hidden;position:relative;border:1px solid var(--border)"><img src="assets/char-sereth.png" alt="SC 3" style="width:100%;height:100%;object-fit:cover"><span style="position:absolute;left:5px;bottom:4px;font:500 8.5px var(--font-mono);letter-spacing:.04em;background:color-mix(in srgb, var(--media-overlay-bg) 65%, transparent);color:var(--media-overlay-fg);border-radius:4px;padding:2px 6px;white-space:nowrap">SC 3 · 0:30</span></div>
+              <div style="flex:14;min-width:0;height:58px;border-radius:7px;overflow:hidden;position:relative;border:1px solid var(--border)"><img src="assets/board-scene4-a.png" alt="SC 4" style="width:100%;height:100%;object-fit:cover"><span style="position:absolute;left:5px;bottom:4px;font:500 8.5px var(--font-mono);letter-spacing:.04em;background:color-mix(in srgb, var(--media-overlay-bg) 65%, transparent);color:var(--media-overlay-fg);border-radius:4px;padding:2px 6px;white-space:nowrap">SC 4 · 0:13</span></div>
+              <div style="flex:6;min-width:0;height:58px;border-radius:7px;border:1.5px dashed var(--warning);display:flex;align-items:center;justify-content:center"><span style="font:400 9px var(--font-mono);color:var(--warning);text-align:center;padding:0 4px">shot 15</span></div>
+              <div style="flex:24;min-width:0;height:58px;border-radius:7px;border:1.5px dashed var(--neutral-300);display:flex;align-items:center;justify-content:center"><span style="font:400 9px var(--font-mono);color:var(--neutral-400);text-align:center;padding:0 4px">scene 5, no takes yet</span></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+            <span style="font:500 9px var(--font-mono);color:var(--neutral-400);width:20px;flex:none">A</span>
+            <div style="flex:1;display:flex;gap:4px">
+              <div style="flex:80;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--muted);display:flex;align-items:center;padding:0 9px;gap:8px;overflow:hidden"><svg width="220" height="14" viewBox="0 0 220 14" style="color:var(--neutral-300);flex:none"><g fill="currentColor"><rect x="0" y="6.5" width="3" height="1" rx="1"></rect><rect x="8" y="4" width="3" height="6" rx="1"></rect><rect x="16" y="4.5" width="3" height="5" rx="1"></rect><rect x="24" y="5" width="3" height="4" rx="1"></rect><rect x="32" y="5.5" width="3" height="3" rx="1"></rect><rect x="40" y="6" width="3" height="2" rx="1"></rect><rect x="48" y="6.5" width="3" height="1" rx="1"></rect><rect x="56" y="4" width="3" height="6" rx="1"></rect><rect x="64" y="4.5" width="3" height="5" rx="1"></rect><rect x="72" y="5" width="3" height="4" rx="1"></rect><rect x="80" y="5.5" width="3" height="3" rx="1"></rect><rect x="88" y="6" width="3" height="2" rx="1"></rect><rect x="96" y="6.5" width="3" height="1" rx="1"></rect><rect x="104" y="4" width="3" height="6" rx="1"></rect><rect x="112" y="4.5" width="3" height="5" rx="1"></rect><rect x="120" y="5" width="3" height="4" rx="1"></rect><rect x="128" y="5.5" width="3" height="3" rx="1"></rect><rect x="136" y="6" width="3" height="2" rx="1"></rect><rect x="144" y="6.5" width="3" height="1" rx="1"></rect><rect x="152" y="4" width="3" height="6" rx="1"></rect><rect x="160" y="4.5" width="3" height="5" rx="1"></rect><rect x="168" y="5" width="3" height="4" rx="1"></rect><rect x="176" y="5.5" width="3" height="3" rx="1"></rect><rect x="184" y="6" width="3" height="2" rx="1"></rect><rect x="192" y="6.5" width="3" height="1" rx="1"></rect><rect x="200" y="4" width="3" height="6" rx="1"></rect><rect x="208" y="4.5" width="3" height="5" rx="1"></rect><rect x="216" y="5" width="3" height="4" rx="1"></rect></g></svg><span style="font:400 9px var(--font-mono);color:var(--neutral-400);white-space:nowrap">score sketch · the verse, low</span></div>
+              <div style="flex:54;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--muted);display:flex;align-items:center;padding:0 9px;overflow:hidden"><span style="font:400 9px var(--font-mono);color:var(--neutral-400);white-space:nowrap">harbour bells · field recording</span></div>
+            </div>
+          </div>
+          <div style="position:absolute;top:-6px;bottom:-4px;left:calc(28px + (100% - 28px) * 0.54);width:1.5px;background:var(--foreground)"><span style="position:absolute;top:-4px;left:-3.5px;width:8px;height:8px;border-radius:99px;background:var(--foreground)"></span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px">
+          <span style="flex:1"></span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:99px;background:var(--warning)"></span><span style="font:400 10.5px var(--font-mono);color:var(--muted-foreground)">2 gaps · 30s uncovered</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+  </div>
+  <figcaption class="shot__cap"><b>24a</b> &middot; The cut. Scenes across the timeline, what is covered and what is not, and the gaps named in seconds rather than left to be discovered.</figcaption>
+</figure>
+
+        <p>
+          The header counts coverage the same way the coverage view does &mdash;
+          <code>13 of 15 shots covered &middot; assembled from accepted takes only</code> &mdash; and the
+          bar underneath names the gaps in seconds. A scene with no takes yet holds its place on the
+          timeline; the film is honest about its own holes before anyone watches it.
+        </p>
+
+        <h3>Export is a render, and the cut stays the source</h3>
+        <p>
+          Exporting does not consume the cut or freeze it. It renders one file at one preset and files it
+          under the production, which is why the screen is headed
+          <i>renders of the cut &mdash; the cut itself stays the source</i>. Delivered exports stay listed
+          with what they were: format, size, what was burned in, and when.
+        </p>
+
+<figure class="shot">
+  <div class="shot__stage" style="height:625px">
+    <div class="shot__scale" style="width:1360px;height:850px;transform:scale(0.735)"><div data-screen-label="25b Exports" style="width:1360px;height:850px;background:var(--background);color:var(--foreground);font-family:var(--font-sans);display:flex;flex-direction:column;overflow:hidden">
+  <div style="display:flex;align-items:center;height:44px;padding:0 16px;border-bottom:1px solid var(--border);flex:none;position:relative">
+    <div style="flex:1;min-width:0"><span style="font:400 12px var(--font-mono);color:var(--muted-foreground);padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">Saltlight · exports</span></div>
+    <div style="position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:baseline;gap:7px;border:0;background:transparent;padding:0 6px;cursor:pointer"><span style="font:650 15px var(--font-sans);letter-spacing:-0.02em;color:var(--foreground)">Arke</span><span style="font:400 12px var(--font-sans);color:var(--muted-foreground)">Studio</span></div>
+    <div style="flex:1;min-width:0;text-align:right;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:2px;vertical-align:middle"><span title="Proposals" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"></polyline><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Activity" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control);position:relative" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span style="position:absolute;top:2px;right:3px;width:5px;height:5px;border-radius:99px;background:var(--warning)"></span></span><span title="Settings" style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></span></span><span style="display:inline-flex;align-items:center;gap:2px;margin-left:12px;vertical-align:middle"><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg></span><span style="width:26px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--neutral-400);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--destructive);color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></span></div>
+  </div>
+  <div style="display:flex;flex:1;min-height:0">
+    <div style="width:236px;flex:none;border-right:1px solid var(--border);padding:20px 14px;display:flex;flex-direction:column;gap:4px">
+      <div style="display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;cursor:pointer;transition:var(--transition-control);box-shadow:var(--shadow-xs)" style-hover="background:var(--accent)">
+        <div style="flex:1;min-width:0"><div style="font:600 13px var(--font-sans)">Saltlight</div><div style="font:400 10px var(--font-mono);color:var(--muted-foreground);margin-top:2px">short film · 2:40 cut</div></div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted-foreground)"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </div>
+      <div style="height:14px"></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Dashboard</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Cast<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Production Chat<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">v3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Scenes<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">5</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Generate<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">42</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Cut<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">2:40</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;font:400 13px var(--font-sans);color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)">Audio<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">3</span></div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;background:var(--secondary);font:500 13px var(--font-sans);cursor:pointer">Exports<span style="margin-left:auto;font-family:var(--font-mono);font-size:11px">2</span></div>
+      <div style="flex:1"></div>
+      <div style="border-top:1px solid var(--border);padding:12px 10px 4px;display:flex;align-items:center;gap:9px;cursor:pointer;font:400 12px var(--font-sans);color:var(--muted-foreground);transition:var(--transition-control)" style-hover="color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>Part of The Undersong</div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;padding:28px 40px 24px">
+      <div style="display:flex;align-items:baseline;gap:14px;flex:none;animation:fadeUp .6s var(--ease-out) both">
+        <h1 style="margin:0;font:650 28px/1.05 var(--font-sans);letter-spacing:-0.025em">Exports</h1>
+        <span style="font:400 11px var(--font-mono);color:var(--neutral-400)">renders of the cut · the cut itself stays the source</span>
+      </div>
+      <div style="animation:fadeUp .7s var(--ease-out) .1s both">
+      <div style="font:500 10.5px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground);margin:18px 0 2px">DELIVERED</div>
+      <div style="display:flex;align-items:center;gap:14px;padding:12px 4px;border-bottom:1px solid var(--border)">
+        <div style="width:74px;height:42px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex:none"><img src="assets/board-scene4-a.png" alt="" style="width:100%;height:100%;object-fit:cover"></div>
+        <div style="flex:1;min-width:0"><div style="font:600 13.5px var(--font-sans)">Saltlight · rough cut v2</div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">mp4 · 1080p · 2:38 · burned-in timecode</div></div>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">yesterday</span>
+        <span style="width:30px;height:30px;border-radius:8px;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;padding:12px 4px;border-bottom:1px solid var(--border)">
+        <div style="width:74px;height:42px;border-radius:6px;overflow:hidden;border:1px solid var(--border);flex:none"><img src="assets/board-scene4-a.png" alt="" style="width:100%;height:100%;object-fit:cover"></div>
+        <div style="flex:1;min-width:0"><div style="font:600 13.5px var(--font-sans)">Scenes 1–3, review reel</div><div style="font:400 10.5px var(--font-mono);color:var(--neutral-400);margin-top:2px">mp4 · 720p · watermarked · for the composer</div></div>
+        <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">last week</span>
+        <span style="width:30px;height:30px;border-radius:8px;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--muted-foreground);cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent);color:var(--foreground)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span>
+      </div>
+      </div>
+      <div style="margin-top:24px;animation:fadeUp .7s var(--ease-out) .2s both">
+        <div style="font:500 10.5px var(--font-sans);letter-spacing:.14em;color:var(--muted-foreground)">NEW EXPORT</div>
+        <div style="display:flex;gap:12px;margin-top:10px">
+          <div style="flex:1;border:1.5px solid var(--foreground);border-radius:12px;padding:14px 15px;cursor:pointer">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:13px;height:13px;border-radius:99px;border:4px solid var(--foreground);flex:none"></span><span style="font:600 13px var(--font-sans)">Review cut</span></div>
+          <div style="font:400 11px/1.55 var(--font-mono);color:var(--neutral-400);margin-top:7px">mp4 1080p · timecode · fastest</div>
+        </div>
+          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:14px 15px;cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent)">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:13px;height:13px;border-radius:99px;border:1.5px solid var(--neutral-300);flex:none"></span><span style="font:600 13px var(--font-sans)">Master</span></div>
+          <div style="font:400 11px/1.55 var(--font-mono);color:var(--neutral-400);margin-top:7px">ProRes · 4K upscale · clean</div>
+        </div>
+          <div style="flex:1;border:1px solid var(--border);border-radius:12px;padding:14px 15px;cursor:pointer;transition:var(--transition-control)" style-hover="background:var(--accent)">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:13px;height:13px;border-radius:99px;border:1.5px solid var(--neutral-300);flex:none"></span><span style="font:600 13px var(--font-sans)">Social excerpt</span></div>
+          <div style="font:400 11px/1.55 var(--font-mono);color:var(--neutral-400);margin-top:7px">9:16 · pick a scene · captions</div>
+        </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 13px;border:1px solid var(--border);border-radius:9px;background:var(--muted)">
+          <span style="width:6px;height:6px;border-radius:99px;background:var(--warning);flex:none"></span>
+          <span style="font:400 11.5px/1.5 var(--font-sans);color:var(--muted-foreground)">2 gaps (30s) &middot; exported as labelled black slates.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+          <span style="font:400 10.5px var(--font-mono);color:var(--neutral-400)">renders locally when the machine allows · est. 4 min</span>
+          <span style="flex:1"></span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;background:var(--primary);color:var(--primary-foreground);font:500 14px/14px var(--font-sans);border-radius:8px;height:38px;padding:0 18px;">Export &middot; 2:40</span>
+        </div>
+      </div>
+      <div style="flex:1"></div>
+    </div>
+  </div>
+</div></div>
+  </div>
+  <figcaption class="shot__cap"><b>25b</b> &middot; Exports. What has been delivered, and three presets that say what each one is for. Rendering is local; no provider call and no money.</figcaption>
+</figure>
+
+        <div class="built">
+          <b>As built &middot; v0.5.30</b>
+          Both screens ship, and on 2026-08-20 a scene was taken from written to rendered without leaving
+          the app: two shots dispatched as a chained plan, both takes accepted, a cut reading
+          <code>19s &middot; 3 of 3 shots covered &middot; 0 gaps</code>, and a
+          <b>1080&times;1920 h264 file</b> on disk under <code>exports/</code>. The differences from the
+          frames are in the presets, not the shape.
+          <ul>
+            <li>
+              <b>The presets name real sizes.</b> Review cut renders <code>mp4 1280&times;720</code>,
+              Master <code>1920&times;1080 &middot; clean</code>, Social excerpt
+              <code>1080&times;1920 &middot; 9:16 &middot; captions</code>. The drawing&#8217;s ProRes 4K
+              master and its &#8220;pick a scene&#8221; step are not built; a social export takes the
+              whole cut.
+            </li>
+            <li>
+              <b>Episodes became deliverables.</b> A row the frame never had sits above the presets
+              &mdash; <i>Episodes &middot; each its own deliverable</i>, with a season-wide export
+              &mdash; which is the &#8220;not designed yet&#8221; item at the foot of this guide, since
+              designed and built.
+            </li>
+            <li>
+              <b>Rendering says what it costs, and it is nothing.</b> The frame hedges with
+              &#8220;when the machine allows &middot; est. 4 min&#8221;; the built screen says
+              <i>renders locally &middot; no provider call</i>, which is the more useful fact.
+            </li>
+            <li>
+              A second button files the whole world as a folder that reopens elsewhere &mdash; history
+              kept, caches and locks left behind.
+            </li>
+          </ul>
+        </div>
       </section>
 
       <section class="section" id="gate">
@@ -1792,7 +2166,7 @@ worlds/the-undersong/
           <div class="step">
             <div class="step__time">09:39 &middot; arriving</div>
             <h4>Day one, and the world came with it.</h4>
-            <p>Six faces, three locations, the tone, art direction v3. No briefing and no seed rails &mdash; an empty production is a place to start writing (turn 53). She opens Development and starts on the season.</p>
+            <p>Six faces, three locations, the tone, art direction v3. No briefing and no seed rails &mdash; an empty production is a place to start writing (turn 53). She opens Production Chat and starts on the season.</p>
             <div class="step__see"><b>On disk:</b> nothing. Arriving only reads.</div>
           </div>
           <div class="step">
@@ -1831,12 +2205,20 @@ worlds/the-undersong/
             <p>She opens the <b>board</b> and gets the whole bill: four panels in order, a price on each, $5.46 in total. Two things are flagged and neither blocks &mdash; two blocks have no shot, and Odile is still a sketch. Shot 3 says it will bill as 4 seconds because 3 is shorter than the route makes. She clicks shot 2, reads its prompt, shortens one line, sees that one of its three references will be dropped and why, and sends all four.</p>
             <div class="step__see"><b>On disk:</b> a job in <code>queue/jobs.jsonl</code> before any network call, then the file into <code>incoming/</code>, then a take. Accepting writes <code>selections.json</code> and <code>reviews.jsonl</code> together. The scene file does not move.</div>
           </div>
+          <div class="step">
+            <div class="step__time">11:48 &middot; the film</div>
+            <h4>Two clips, one of them opening on the last frame of the other.</h4>
+            <p>She accepts the take for each shot. The cut is already there when she opens it &mdash; nothing to assemble, because it is a projection over the takes she just chose &mdash; and it reads <code>3 of 3 shots covered &middot; 0 gaps</code>. She exports the social preset and watches the file: the hall, the light coming on over the chalk circle, and then the same hall from the same angle as dust falls through the beam, because the second clip was made from the last frame of the first.</p>
+            <div class="step__see"><b>On disk:</b> a boundary frame in <code>artifacts/</code>, the second job carrying it as its first frame, then <code>exports/bell-watch-social-excerpt-&hellip;.mp4</code>. Nothing was uploaded to make the file &mdash; the render is local.</div>
+          </div>
         </div>
 
         <div class="note">
-          Three hours. One season, one episode, one scene, one clip. The world was never edited &mdash;
-          including the two moments that could have edited it, the canon thread on day one and the canon
-          checked while drafting, which both stayed reads.
+          Three hours, and this walkthrough is written as though the whole of it were built. Most of it is:
+          everything except the script, coverage and board screens &mdash; the 10:41 and 11:20 steps &mdash;
+          happened for real on v0.5.30, including the last one. The world was never edited, including the
+          two moments that could have edited it, the canon thread on day one and the canon checked while
+          drafting, which both stayed reads.
         </div>
       </section>
 
@@ -1855,10 +2237,7 @@ worlds/the-undersong/
         </p>
         <h3>Not designed yet</h3>
         <p>
-          The pass planner, and saving a plan. The plan screen works out its numbers fresh every time you open
-          it; nothing writes down what you intended to send. A Series view for when season two exists. An
-          episode-aware cut and export &mdash; seven episodes are seven deliverables and the cut is still one
-          timeline.
+          A Series view for when season two exists.
         </p>
         <p>
           There is no <i>after</i> view. You can read and edit a shot's prompt before it runs, but once a take
@@ -1867,6 +2246,27 @@ worlds/the-undersong/
           but not which reference images travelled. That cannot be worked out later, because the world has
           moved on. So the record has to start being kept before the screen can exist.
         </p>
+        <div class="built">
+          <b>Since built &middot; v0.5.30</b>
+          Two items that stood here have been designed and built, and are struck from the list rather than
+          left to mislead:
+          <ul>
+            <li>
+              <b>Saving a plan.</b> This said the numbers were worked out fresh each time and nothing wrote
+              down what you intended to send. SPEC-024 made a plan durable: an immutable record with a
+              pre-allocated key per pass, an append-only journal beside it, and a state folded from the two.
+              A review-gated plan stops at each pass and names the price of continuing; a pre-authorized one
+              runs the chain to the end. Cancelling is an event like any other and survives a restart.
+            </li>
+            <li>
+              <b>An episode-aware cut and export.</b> This said seven episodes were seven deliverables while
+              the cut was one timeline. Exports now carries an episode row and a season-wide render.
+            </li>
+          </ul>
+          The <i>after</i> view above is still missing and still worth wanting &mdash; though a dispatched
+          pass now records the route it took, the exact parameters sent and the references that were
+          dropped, so more of the record it would need is being kept than when this was written.
+        </div>
         <h3>Unresolved</h3>
         <p>
           Two step-two screens for Video existed when this was written: this feature's kind step, and an
@@ -1880,11 +2280,16 @@ worlds/the-undersong/
 
       <footer>
         Arke Studio feature guide &middot; the production development workspace. The screens are the real frames from
-        turns 43&ndash;53 of <code>design-system/Arke Studio.dc.html</code>, embedded rather than screenshotted,
-        so they scale and follow the theme. Interactive components are shown as static stand-ins. Filesystem
+        turns 43&ndash;53 of <code>design-system/Arke Studio.dc.html</code> &mdash; plus turns 24 and 25 for the
+        cut and exports &mdash; embedded rather than screenshotted,
+        so they scale and follow the theme. Interactive components are shown as static stand-ins.
+        <b>The frames are the design; the <i>As built</i> notes are the app.</b> Those notes, and the
+        &#8220;Getting it out&#8221; section, were written on 2026-08-20 against v0.5.30 by driving the
+        installed build end to end &mdash; a world to a rendered 1080&times;1920 file &mdash; so where a note
+        and a frame disagree, the note is what runs. Filesystem
         paths checked against the coordinator and <code>fixtures/worlds/the-undersong</code> on 2026-08-09.
         Aligned 2026-08-19 with the revised Vision and Scope and revision 6 of the brief: Microdrama loses its
-        hyphen, and the workspace layer is named Development while Story remains the production family in the
+        hyphen; the workspace layer was named Development at that alignment and is Production Chat since turn 89, while Story remains the production family in the
         picker &mdash; the embedded frames carry the renamed rail label, kind card, and eyebrows, matching the
         design master&#8217;s recorded rename in turn 78, and the imagery travels with this document under <code>assets/</code>. For
         what is built rather than designed, see <code>production-story-workspace-brief.html</code>.

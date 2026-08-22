@@ -91,7 +91,14 @@ describe("production classification (issue 395)", () => {
     const slug = await createProduction(store, { title: "The Answer From Inside", medium: "interactive-video" });
     const meta = JSON.parse(await readFile(join(dir, "productions", slug, "production.json"), "utf8"));
     assert.equal(meta.format, "video", "the legacy value the medium maps back to");
-    assert.equal(meta.medium, "interactive-video");
+    /*
+     * Since turn 100 the retired `interactive-video` medium means the video medium carrying
+     * the interactive kind, and a new world records the new model — never the retired name.
+     * Review 2026-08-22 found the resolve dropping the kind entirely, which silently made
+     * this creation a plain film; the kind on disk is the interactivity.
+     */
+    assert.equal(meta.medium, "video");
+    assert.equal(meta.kind, "interactive");
     const scan = await scanWorld(dir);
     assert.equal(scan.meta.schemaVersion, 2);
     assert.deepEqual(scan.problems, []);

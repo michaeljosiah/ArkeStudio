@@ -13,7 +13,7 @@ export interface ProductionShape {
   isEpisodic: boolean;
   hasChapters: boolean;
   hasScenes: boolean;
-  /** Branching belongs only to Interactive video (turn 78, binding rule 3). */
+  /** Branching belongs to the interactive kind (turn 100; was a medium of its own, turn 84). */
   isBranching: boolean;
   /** What the dispatch dialog resolves models against (legacy stills → image). */
   dispatchCapability: "image" | "video";
@@ -26,6 +26,8 @@ export interface ProductionShape {
 const MEDIUM_LABEL: Record<ProductionMedium, string> = {
   story: "Story",
   video: "Video",
+  // Retired as a medium by turn 100 and never resolved to any more; the label stays because
+  // the enum still reads the value off disk.
   "interactive-video": "Interactive video",
 };
 
@@ -39,6 +41,15 @@ const DEFAULT_KIND: Record<ProductionMedium, string> = {
 /** The kinds whose behaviour differs from their medium's default. */
 const EPISODIC_KINDS = new Set(["microdrama", "series"]);
 
+/**
+ * Branching belongs to the interactive *kind* (turn 100). It was a medium of its own for two
+ * turns, which put it beside Story and Video on the first question, where it never belonged: a
+ * medium is what the audience receives, and interactive video receives moving pictures. It has
+ * the same scenes, shots, takes and cut as every other video, and what it adds — scenes that
+ * route by choice — is exactly what a kind is.
+ */
+const BRANCHING_KIND = "interactive";
+
 const KIND_LABEL: Record<string, string> = {
   book: "Book",
   script: "Script",
@@ -47,11 +58,19 @@ const KIND_LABEL: Record<string, string> = {
   series: "Series",
   microdrama: "Microdrama",
   "promotional-short": "Promotional short",
+  // A kind of Video, not a medium of its own (turn 53): same scenes, shots, takes and cut.
+  "music-video": "Music video",
   stills: "Stills",
-  interactive: "Interactive",
+  // Reads as the whole name wherever a badge prints it; step two's card says just "Interactive",
+  // because the question above it already said video.
+  interactive: "Interactive video",
 };
 
 export function resolveMedium(meta: { format: ProductionFormat; medium?: ProductionMedium }): ProductionMedium {
+  // A world written between turns 84 and 100 stores `interactive-video` as its medium. It reads
+  // as Video from here on, carrying the interactive *kind* — the resolve widens rather than the
+  // schema narrowing, so nothing on disk stops parsing and no production changes behaviour.
+  if (meta.medium === "interactive-video") return "video";
   return meta.medium ?? (meta.format === "story" ? "story" : "video");
 }
 
@@ -66,7 +85,12 @@ export function productionShape(meta: {
   kind?: string;
 }): ProductionShape {
   const medium = resolveMedium(meta);
-  const kind = meta.kind ?? (meta.format === "stills" ? "stills" : DEFAULT_KIND[medium]);
+  // A production stored under the retired medium keeps branching without a kind on disk: the
+  // medium it was created with is the kind it now has (turn 100).
+  const legacyInteractive = meta.medium === "interactive-video";
+  const kind =
+    meta.kind ??
+    (legacyInteractive ? BRANCHING_KIND : meta.format === "stills" ? "stills" : DEFAULT_KIND[medium]);
   const isEpisodic = medium === "video" && EPISODIC_KINDS.has(kind);
   const mediumLabel = MEDIUM_LABEL[medium];
   const kindLabel = KIND_LABEL[kind] ?? kind;
@@ -76,7 +100,7 @@ export function productionShape(meta: {
     isEpisodic,
     hasChapters: medium === "story",
     hasScenes: medium !== "story",
-    isBranching: medium === "interactive-video",
+    isBranching: kind === BRANCHING_KIND,
     dispatchCapability: kind === "stills" ? "image" : "video",
     mediumLabel,
     kindLabel,

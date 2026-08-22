@@ -92,13 +92,23 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
   if (input.aspect !== undefined && aspect === null) {
     throw new Error(`"${input.aspect}" is not an aspect — two numbers around a colon, like 9:16`);
   }
-  const medium: ProductionMedium =
-    input.medium ?? resolveMedium({ format: input.format ?? "video" });
+  // Always through the resolve (review 2026-08-22): a caller still sending the retired
+  // `interactive-video` medium otherwise wrote it verbatim into a brand-new world.
+  const medium: ProductionMedium = resolveMedium({
+    format: input.format ?? "video",
+    ...(input.medium !== undefined ? { medium: input.medium } : {}),
+  });
   const legacyFormat: ProductionFormat = input.medium === undefined ? (input.format ?? "video") : legacyFormatFor(medium);
   // Write the new-model fields only where they say something the legacy field cannot
   // (SPEC-023 R-1): a plain creation keeps the world openable by builds that predate them.
   const plainShape = productionShape({ format: legacyFormat });
-  const kind = input.productionKind;
+  /*
+   * The retired medium was the interactivity (turn 100): resolving it to plain video and
+   * writing nothing else silently made the production a film — the branching a caller asked
+   * for dropped on the floor. What that input means now is the video medium carrying the
+   * interactive kind, so that is what lands on disk.
+   */
+  const kind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
   const carriesNewModel =
     medium !== plainShape.medium || (kind !== undefined && kind !== plainShape.kind);
   const shape = productionShape({ format: legacyFormat, ...(carriesNewModel ? { medium, kind } : {}) });
@@ -452,6 +462,12 @@ export async function reorderChapters(
  * (issue #387, the SPEC-012 D3 rule applied to scenes). Ids the production does not know are
  * skipped rather than failing the rest; the spine is untouched because it never reads scene
  * order (anchors order the spine).
+ *
+ * The version-free write leaves a stated race (review 2026-08-22): a save built from the
+ * pre-reorder scene passes the version check and puts the old `order` back. Accepted — the
+ * spec's trade is deliberate, an order is one drag to redo, and cutting a version per scene
+ * per drag would bury the history the versions exist for. The override case, which loses
+ * authored text, bumps instead (see setPromptOverride).
  */
 export async function reorderScenes(store: WorldStore, productionId: string, orderedIds: string[]): Promise<void> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
@@ -515,22 +531,32 @@ export async function draftSceneSkeleton(
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
-  const number = (production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0) + 1;
-  const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
   // Identity is stable at creation and independent of position (issue #387): the id comes from
   // the slug, the file stem IS the slug — no ordering prefix, ever — and both are deduplicated
   // against what exists rather than derived from a count. `number` stays as the scene's stable
   // birth name; explicit `order` places it.
   const takenIds = new Set(production?.scenes.map((s) => s.id) ?? []);
-  const takenStems = new Set(Object.values(production?.sceneFiles ?? {}));
+  const onDisk = new Set(Object.values(production?.sceneFiles ?? {}));
+  const takenStems = new Set(onDisk);
   // A staged-but-unaccepted draft occupies its stem too: two identical briefs in a row must
   // not race to one file, with the second accept silently colliding into the first.
+  const stagedStems = new Set<string>();
   for (const staged of bundle.proposals) {
     for (const target of staged.proposal.targets) {
       const m = new RegExp(`^productions/${input.productionId}/scenes/(.+)\\.json$`).exec(target.path);
-      if (m) takenStems.add(m[1]!);
+      if (m && !onDisk.has(m[1]!)) stagedStems.add(m[1]!);
     }
   }
+  for (const stem of stagedStems) takenStems.add(stem);
+  /*
+   * A staged draft has claimed its number as well as its stem (round 3, 2026-08-22). Counting
+   * only what is on disk gave every draft staged before the first accept the same number and
+   * the same order — three scenes all calling themselves Scene 1, in an order nothing decided.
+   * Driven out by drafting two scenes back to back, which is how anybody would build an episode.
+   */
+  const highest = production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0;
+  const number = highest + stagedStems.size + 1;
+  const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
   let id = `sc_${slug}`;
   let file = slug;
   for (let n = 2; takenIds.has(id) || takenStems.has(file); n++) {
@@ -579,7 +605,18 @@ export async function draftSceneSkeleton(
   const scope = `drafts with: ${bundle.meta.name} · canon v${bundle.meta.canonRevision}${
     bundle.meta.tone ? ` · tone: ${bundle.meta.tone}` : ""
   } · ${characters} character${characters === 1 ? "" : "s"} available${guidance}`;
-  const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id ("sh_" + number), number, title, description with @mentions for every character and the location, camera, audio, durationSec. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Write audio as an object, never a sentence: {"kind": "vo" | "dialogue" | "sfx" | "silence"} with optional "speaker" (a sheet slug) and "line"; a texture like a hum is {"kind": "sfx", "line": "light click and focus hum"}. Propose an inherits block (location, timeOfDay, tone) where location is a lowercase-kebab slug such as "rehearsal-hall", never prose. The file must stay a valid scene record — the gate refuses anything else at accept. Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
+  /*
+   * The first free shot id in the whole production (round 3, 2026-08-22). Ids are unique per
+   * production, never per scene — takes and selections key by bare shot id — and an agent that
+   * numbers from one cannot see the other scenes. Told here so the ordinary path is right; the
+   * gate refuses a collision either way, and the repair turn quotes the same rule.
+   */
+  const shotBase =
+    (production?.scenes ?? []).flatMap((s) => s.shots).reduce((a, shot) => {
+      const n = Number(shot.id.replace(/^sh_0*/, ""));
+      return Number.isFinite(n) ? Math.max(a, n) : a;
+    }, 0) + 1;
+  const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id, number, title, description with @mentions for every character and the location, camera, audio, durationSec. Shot ids are unique across the WHOLE production, not per scene: number this scene's shots sh_${shotBase}, sh_${shotBase + 1}, and so on upward, while each shot's own \`number\` field starts at 1 for this scene. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Write audio as an object, never a sentence: {"kind": "vo" | "dialogue" | "sfx" | "silence"} with optional "speaker" (a sheet slug) and "line"; a texture like a hum is {"kind": "sfx", "line": "light click and focus hum"}. Propose an inherits block (location, timeOfDay, tone) where location is a lowercase-kebab slug such as "rehearsal-hall", never prose. The file must stay a valid scene record — the gate refuses anything else at accept. Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
   return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
@@ -587,15 +624,89 @@ export async function draftSceneSkeleton(
 // Shots and prompt overrides (R-10, R-15, D6)
 // ---------------------------------------------------------------------------
 
+/**
+ * A scene file stem, or a refusal (review 2026-08-22). The frame schema already constrains the
+ * wire, but these functions are also called in-process, and a path decision this consequential
+ * is checked where the path is built rather than trusted to every caller. `.` and `..` are
+ * excluded by the pattern; separators of either slant never appear.
+ */
+function sceneStemOrThrow(sceneFile: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sceneFile) || sceneFile === "." || sceneFile === "..") {
+    throw new Error(`"${sceneFile}" is not a scene file name`);
+  }
+  return sceneFile;
+}
+
 async function readScene(store: WorldStore, productionId: string, sceneFile: string): Promise<{ scene: Scene; raw: string; path: string }> {
-  const path = `productions/${productionId}/scenes/${sceneFile}.json`;
+  const path = `productions/${productionId}/scenes/${sceneStemOrThrow(sceneFile)}.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   return { scene: SceneSchema.parse(JSON.parse(raw)), raw, path };
 }
 
 /**
- * Store or clear a prompt override (R-15): production output, not gated change — the scene's
- * version is preserved, and the recorded sheet versions make staleness computable (R-16).
+ * Write a scene whole — what the storyboard's card edits call (turn 97).
+ *
+ * The bible's model (SPEC-022) applied to scenes: no proposal, no accept. What replaces the
+ * gate is the version — the committer cuts one per save with a full `.history/` snapshot, so
+ * an edit nobody wanted is one restore away. `baseVersion` is the version the storyboard had
+ * loaded; a save against a scene that has since moved is refused, not merged, in words a
+ * person can act on. Identity is not the editor's to change: id, number and slug are pinned
+ * to the file on disk, so a stray payload cannot re-key a scene through a text box.
+ */
+export async function saveScene(
+  store: WorldStore,
+  input: { productionId: string; sceneFile: string; scene: unknown; baseVersion?: number },
+): Promise<void> {
+  const proposed = SceneSchema.parse(input.scene);
+  const { scene: current, raw, path } = await readScene(store, input.productionId, input.sceneFile);
+  if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
+    throw new SceneStaleError(input.baseVersion, current.version);
+  }
+  const next = { ...proposed, id: current.id, number: current.number, slug: current.slug };
+  /*
+   * Replace, never merge (review 2026-08-22). `JsonFile.set` spreads updates over the existing
+   * document, so a field the payload omitted — a cleared synopsis, a removed defaults block —
+   * survived on disk while the version bumped and the snapshot showed the deletion undone.
+   * "Write a scene whole" means the payload is the document; the parse above already proved it
+   * is a complete scene, and identity is pinned on the line before this one.
+   */
+  const doc = JsonFile.create(next as unknown as Record<string, unknown>);
+  await store.commit({
+    kind: "scene-save",
+    source: "editor",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+  });
+}
+
+/** Undo (turn 97): v<n> back as a new version; everything between it and now stays in history. */
+export async function restoreScene(
+  store: WorldStore,
+  input: { productionId: string; sceneFile: string; version: number },
+): Promise<void> {
+  await store.restoreVersion(
+    `productions/${input.productionId}/scenes/${sceneStemOrThrow(input.sceneFile)}.json`,
+    input.version,
+    "editor",
+  );
+}
+
+export class SceneStaleError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly found: number,
+  ) {
+    super(`the scene moved from v${expected} to v${found} while this edit was being made — it was not overwritten`);
+    this.name = "SceneStaleError";
+  }
+}
+
+/**
+ * Store or clear a prompt override. This wrote with `preserveVersion` citing R-15, but R-15's
+ * "production output" is the board — a compiled picture — not a paragraph a person typed into
+ * the sheet (review 2026-08-22). Preserving the version meant the scene's stale-token did not
+ * move, so a concurrent save built from the pre-override scene passed the version check and
+ * silently wiped the override. Authored text bumps the version like any other authored text;
+ * the recorded sheet versions still make staleness computable (R-16).
  */
 export async function setPromptOverride(
   store: WorldStore,
@@ -621,7 +732,7 @@ export async function setPromptOverride(
   await store.commit({
     kind: "prompt-override",
     source: "editor",
-    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw), preserveVersion: true }],
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
   });
 }
 

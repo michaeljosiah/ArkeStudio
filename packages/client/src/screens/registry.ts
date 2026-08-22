@@ -64,10 +64,15 @@ export const SCREENS: ScreenEntry[] = [
   // Production
   { id: "production-dashboard", samplePath: P },
   { id: "production-cast", samplePath: `${P}/cast` },
-  { id: "story-overview", samplePath: `${P}/story` },
+  // Talking and looking are two screens (turn 88): the thread, then what it settled.
+  { id: "production-chat", samplePath: `${P}/story` },
+  { id: "story-overview", samplePath: `${P}/overview` },
+  // Arcs, themes, setups and payoffs — off the season and under one rail item (turn 99).
+  { id: "story-structure", samplePath: `${P}/story-structure` },
   { id: "chapter-tree", samplePath: `${P}/story/chapters` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
+  { id: "shot-sheet", samplePath: `${P}/scenes/sc_04/shots/sh_12` },
   { id: "new-scene", samplePath: `${P}/scenes/new` },
   { id: "generate-workspace", samplePath: `${P}/generate` },
   { id: "dispatch-dialog", samplePath: `${P}/generate/dispatch` },

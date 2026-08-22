@@ -54,6 +54,13 @@ function refLabel(evidence: Extract<CandidateEvidence, { kind: "world" }>): stri
   const ref = evidence.ref;
   if (ref.kind === "canon") return ref.entryId;
   if (ref.kind === "sheet") return ref.sheetId;
+  // The production arms name what they are about (review 2026-08-22): these fell through to
+  // "world", so the problem sent back for a bad production citation named nothing the model
+  // could correct — it read as the category-error case instead of the thing that was missing.
+  if (ref.kind === "production") return ref.productionId;
+  if (ref.kind === "episode") return ref.episodeId ?? ref.productionId;
+  if (ref.kind === "scene") return ref.sceneId;
+  if (ref.kind === "series") return ref.seriesId;
   return "world";
 }
 
@@ -95,7 +102,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
        * makes is "they said this", and `includes` is exactly that claim. `normaliseEvidence`
        * puts the offsets right before the candidate is stored, so the record stays exact.
        */
-      if (message.text.includes(evidence.quote)) return [];
+      if (locateQuote(message.text, evidence.quote) !== null) return [];
 
       if (evidence.end > message.text.length || evidence.start > evidence.end) {
         return [{ kind: "message-span-out-of-range", messageId: evidence.messageId }];
@@ -124,11 +131,16 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
         entity = sources.bundle.canon.find((c) => c.id === entryId);
         if (!entity) return [{ kind: "world-entity-missing", ref: label }];
         current = canonObservation(entity, sources.bundle.meta.canonRevision);
-      } else {
+      } else if (evidence.ref.kind === "sheet") {
         const sheetId = evidence.ref.sheetId;
         entity = sources.bundle.sheets.find((s) => s.id === sheetId);
         if (!entity) return [{ kind: "world-entity-missing", ref: label }];
         current = sheetObservation(entity);
+      } else {
+        // A production record has no observed version or content hash to compare a citation
+        // against, so a citation naming one cannot be checked — which is a missing entity as far
+        // as this check is concerned, and is said rather than crashed on.
+        return [{ kind: "world-entity-missing", ref: label }];
       }
 
       const problems: EvidenceProblem[] = [];
@@ -147,7 +159,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
       // report is "this moved", not a second complaint that follows from the first.
       if (problems.length === 0) {
         const haystack = quotableText(entity, evidence.field);
-        if (!haystack.includes(evidence.quote)) {
+        if (locateQuote(haystack, evidence.quote) === null) {
           problems.push({ kind: "world-quote-not-found", ref: label, quote: evidence.quote });
         }
       }
@@ -161,7 +173,7 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
         return [{ kind: "attachment-content-changed", attachmentId: evidence.attachmentId }];
       }
       const passages = sources.attachmentText.get(evidence.attachmentId);
-      if (passages === undefined || !passages.some((text) => text.includes(evidence.quote))) {
+      if (passages === undefined || !passages.some((text) => locateQuote(text, evidence.quote) !== null)) {
         return [
           {
             kind: "attachment-quote-not-found",
@@ -175,6 +187,101 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
   }
 }
 
+/**
+ * Where a quotation sits in a text, forgiving how the text happens to be laid out (§5.8).
+ *
+ * The claim a quotation makes is "these words, in this order, are in this entity" — not "these
+ * bytes". Canon bodies are markdown wrapped at about ninety-five columns, so a sentence quoted
+ * across a wrap arrives with a space where the file has a newline and a byte-exact `includes`
+ * can never match it. Found by driving on 2026-08-21: two well-grounded season answers were
+ * refused in a row, and the harder a model tried to quote real canon the more certainly it
+ * failed.
+ *
+ * So the comparison folds what is about rendering: a run of whitespace becomes one space, and
+ * the typographic variants of quotes and dashes become their plain forms. Two things are NOT
+ * forgiven (review 2026-08-22). A paragraph break — a whitespace run holding more than one
+ * newline — is a hard boundary: collapsing it let a "quotation" stitch two unrelated sentences
+ * from opposite ends of an entry into one continuous claim the source never makes. And the
+ * seams `quotableText` uses to join a sheet's fields are the same boundary, which is why it now
+ * joins with a blank line rather than a bare newline. Every word must still be present, in
+ * order; the returned span is in the ORIGINAL text, so a verified quotation still stores
+ * offsets that point at the real words.
+ */
+export function locateQuote(haystack: string, quote: string): { start: number; end: number } | null {
+  // A character never present in either projection of a real quote; a boundary folds to it so
+  // nothing can match across one.
+  const BOUNDARY = "\u0000";
+  const fold = (ch: string): string => {
+    if (ch === "\u2018" || ch === "\u2019" || ch === "\u201A" || ch === "\u201B" || ch === "\u2032") return "'";
+    if (
+      ch === "\u201C" || ch === "\u201D" || ch === "\u201E" || ch === "\u201F" ||
+      ch === "\u00AB" || ch === "\u00BB" || ch === "\u2039" || ch === "\u203A" || ch === "\u2033"
+    ) return '"';
+    if (
+      ch === "\u2010" || ch === "\u2011" || ch === "\u2012" || ch === "\u2013" ||
+      ch === "\u2014" || ch === "\u2015" || ch === "\u2212"
+    ) return "-";
+    return ch;
+  };
+  const project = (text: string): { flat: string; at: number[] } => {
+    let flat = "";
+    const at: number[] = [];
+    let i = 0;
+    while (i < text.length) {
+      const ch = text[i]!;
+      if (/\s/.test(ch)) {
+        // Consume the whole run; more than one newline inside it is a paragraph boundary.
+        let j = i;
+        let newlines = 0;
+        while (j < text.length && /\s/.test(text[j]!)) {
+          if (text[j] === "\n") newlines += 1;
+          j += 1;
+        }
+        if (flat !== "" && j < text.length) {
+          flat += newlines >= 2 ? BOUNDARY : " ";
+          at.push(i);
+        }
+        i = j;
+        continue;
+      }
+      flat += fold(ch);
+      at.push(i);
+      i += 1;
+    }
+    return { flat, at };
+  };
+  const hay = projectCached(haystack, project);
+  const needle = project(quote).flat;
+  // A quote containing a paragraph boundary of its own is not one quotation; refuse it whole.
+  if (needle === "" || needle.includes(BOUNDARY)) return null;
+  const found = hay.flat.indexOf(needle);
+  if (found === -1) return null;
+  const start = hay.at[found]!;
+  const lastKept = hay.at[found + needle.length - 1]!;
+  return { start, end: lastKept + 1 };
+}
+
+/**
+ * One verification re-reads the same entity for every evidence item that cites it, so the
+ * haystack projection is cached by identity of the text. Small and bounded: entity bodies are
+ * a few kilobytes and a turn touches a handful of them.
+ */
+const projectionCache = new Map<string, { flat: string; at: number[] }>();
+function projectCached(
+  text: string,
+  project: (text: string) => { flat: string; at: number[] },
+): { flat: string; at: number[] } {
+  const hit = projectionCache.get(text);
+  if (hit) return hit;
+  const made = project(text);
+  if (projectionCache.size >= 64) {
+    const first = projectionCache.keys().next().value;
+    if (first !== undefined) projectionCache.delete(first);
+  }
+  projectionCache.set(text, made);
+  return made;
+}
+
 export function verifyAllEvidence(
   evidence: readonly CandidateEvidence[],
   sources: EvidenceSources,
@@ -186,10 +293,11 @@ export function verifyAllEvidence(
  * Put verified offsets where the quotation actually is, before it is stored (§5.8).
  *
  * Verification forgives a miscounted offset when the quoted words are really in the message;
- * this is the other half of that bargain. Storing the offsets as sent would leave a candidate
- * whose evidence points at the wrong span — checkable today only because `includes` happens to
- * be forgiving, and quietly wrong to anyone who later reads the record as exact. Anything that
- * does not resolve is left untouched: it did not verify, so the turn is not being stored.
+ * this is the other half of that bargain. The stored span points at the words the quotation
+ * matched; where the match was made through layout folding, the sliced text can differ from
+ * the quote in whitespace and typographic variants only — the words are the same, which is
+ * what the record asserts. Anything that does not resolve is left untouched: it did not
+ * verify, so the turn is not being stored.
  */
 export function normaliseEvidence(
   evidence: readonly CandidateEvidence[],
@@ -199,8 +307,8 @@ export function normaliseEvidence(
     if (e.kind !== "message") return e;
     const message = messages.find((m) => m.id === e.messageId);
     if (!message || message.text.slice(e.start, e.end) === e.quote) return e;
-    const at = message.text.indexOf(e.quote);
-    return at === -1 ? e : { ...e, start: at, end: at + e.quote.length };
+    const span = locateQuote(message.text, e.quote);
+    return span === null ? e : { ...e, start: span.start, end: span.end };
   });
 }
 

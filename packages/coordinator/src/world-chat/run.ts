@@ -493,7 +493,12 @@ export class WorldChatRunner {
         await store.append(
           {
             type: "run.retry-started",
-            run: { ...run, safeDetail: [...new Set(outcome.problems.map((p) => p.code))].join(",").slice(0, 500) },
+            // The retry record carries what was wrong, for the same reason: a retry that says only
+          // "schema" cannot be read afterwards, and this is the copy that survives on disk.
+          run: {
+            ...run,
+            safeDetail: [...new Set(outcome.problems.map((p) => p.safeMessage || p.code))].join(" · ").slice(0, 500),
+          },
           },
           { at: this.deps.now() },
         );
@@ -520,14 +525,31 @@ export class WorldChatRunner {
       }
 
       if (!outcome.ok) {
-        // The problems are already worded for a person and are the whole reason this failed;
-        // reporting only that it did is what made the same class of failure unreadable before.
+        /*
+         * The problems are already worded for a person and are the whole reason this failed;
+         * reporting only that it did is what made the same class of failure unreadable before.
+         *
+         * That is what this line said while mapping `.code`, so every schema rejection reached
+         * the log as the word "schema" and nothing else — which is exactly as unreadable as the
+         * version it replaced. Found on 2026-08-21 driving a production thread that failed twice
+         * with no way to learn what about the answer was wrong. The message is the payload.
+         */
         this.deps.onTurnFailed?.({
           conversationId,
           runId,
-          cause: `answer rejected: ${outcome.problems.map((p) => p.code).join(", ")}`,
+          cause: `answer rejected: ${outcome.problems.map((p) => p.safeMessage || p.code).join(" · ")}`,
         });
-        await this.finish(store, run, "failed", "the studio's answer could not be used");
+        /*
+         * The same words the log gets, because the person is the one who has to do
+         * something about it. "The answer could not be used" tells them a turn failed and
+         * leaves them pressing retry against a rejection that will repeat.
+         */
+        await this.finish(
+          store,
+          run,
+          "failed",
+          `rejected: ${outcome.problems.map((p) => p.safeMessage || p.code).join(" · ")}`,
+        );
         return { status: "failed", reason: "the answer could not be used", problems: outcome.problems };
       }
       return { status: "completed", reply: outcome.reply };

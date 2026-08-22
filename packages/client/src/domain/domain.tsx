@@ -207,10 +207,33 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   "pending-review": "Review the merged result",
   "unresolved-conflicts": "Conflicted fields await a choice",
   "target-retired": "The target was retired",
-  invalid: "A field is over its limit",
+  invalid: "This draft cannot be written as it stands",
   "draft-unresolved": "An edit to this proposal did not finish",
   drafting: "The studio is still drafting",
 };
+
+/**
+ * `invalid` covers everything the gate refuses by name, and that is more than one kind of thing:
+ * a character role over its limit, and — since the structured records joined the gate's schema
+ * fences — a file the scanner would drop. One fixed title announced every one of them as a field
+ * being too long, so a malformed scene was reported as a length problem and the way out it
+ * offered ("shorten it") was advice for a different fault.
+ *
+ * The detail already words the problem for a person, so the title only has to frame it and the
+ * hint only has to name the exit. A length problem keeps its own words because "shorten it" is
+ * the specific, useful thing to say when that is what happened.
+ */
+function invalidNotice(detail: string | undefined): { title: string; hint: string } {
+  return detail !== undefined && /the limit is \d+/.test(detail)
+    ? {
+        title: "A field is over its limit",
+        hint: "Ask the studio to shorten it, or discard this draft. Nothing has landed.",
+      }
+    : {
+        title: NOTICE_TITLES.invalid,
+        hint: "Ask the studio to fix it, or discard this draft. Nothing has landed.",
+      };
+}
 
 export function ProposalPanel({
   staged,
@@ -293,7 +316,8 @@ export function ProposalPanel({
       )}
       {notice && (
         <div className="dom-proposal__notice" role="alert">
-          <strong>{NOTICE_TITLES[notice.reason]}.</strong> {notice.detail}
+          <strong>{notice.reason === "invalid" ? invalidNotice(notice.detail).title : NOTICE_TITLES[notice.reason]}.</strong>{" "}
+          {notice.detail}
           {notice.reason === "stale" && onRebase && (
             <div className="dom-proposal__noticeactions">
               <Button onClick={onRebase}>Rebase onto current</Button>
@@ -308,9 +332,7 @@ export function ProposalPanel({
           )}
           {/* There is no way to hand-edit a staged proposal, so say what the way out is. */}
           {notice.reason === "invalid" && (
-            <div className="dom-proposal__noticehint">
-              Ask the studio to shorten it, or discard this draft. Nothing has landed.
-            </div>
+            <div className="dom-proposal__noticehint">{invalidNotice(notice.detail).hint}</div>
           )}
         </div>
       )}

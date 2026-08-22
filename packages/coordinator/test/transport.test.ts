@@ -186,4 +186,38 @@ describe("Transport", () => {
       await transport.stop();
     }
   });
+
+  it("drops a message this build's schema does not know, and keeps the session (review 2026-08-22)", async () => {
+    // Valid JSON that fails the schema is version skew — a renderer one build ahead sends a
+    // frame this coordinator has never heard of. Closing the socket for that made the whole app
+    // read as disconnected on one keystroke; the message is dropped, said so, and life goes on.
+    const dropped: string[] = [];
+    const seen: unknown[] = [];
+    const transport = new Transport({
+      getSnapshot: () => STATE,
+      onMessage: (m) => seen.push(m),
+      log: (line) => dropped.push(line),
+    });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello" });
+      await client.nextFrame(1);
+
+      client.send({ kind: "a-message-from-the-future", payload: { bold: true } });
+      client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
+      await new Promise((r) => setTimeout(r, 200));
+
+      assert.equal(seen.length, 1, "the message after the unknown one still arrived");
+      assert.equal(dropped.length, 1, "and the drop was said, not swallowed");
+
+      transport.broadcast(EVENT);
+      await client.nextFrame(2);
+      assert.equal(client.frames[1]!.kind, "event", "the connection is still live both ways");
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
 });

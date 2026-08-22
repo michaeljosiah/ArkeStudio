@@ -128,6 +128,24 @@ export const WorldChatEntityRefSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("world") }).strict(),
   z.object({ kind: z.literal("canon"), entryId: CanonIdSchema }).strict(),
   z.object({ kind: z.literal("sheet"), sheetKind: SheetKindSchema, sheetId: SlugSchema }).strict(),
+  /*
+   * The production records a conversation can be about (SPEC-023 R-20). A proposition's subject
+   * is its own target, so these must be exactly the `target` shapes the `development.*` payloads
+   * declare below — a season names its production, an episode names itself, a scene names itself,
+   * a series names itself.
+   *
+   * They were missing until 2026-08-21, which meant every `development.*` proposition the studio
+   * made was rejected when it was written: `subjectOf` returns the draft's target under a cast,
+   * so a target this union does not admit produced a candidate that failed its own schema. Found
+   * by driving a season conversation in the installed app — the failure was reachable no other
+   * way, because the propositions this breaks are the only ones a production thread can make.
+   */
+  z.object({ kind: z.literal("production"), productionId: SlugSchema }).strict(),
+  z
+    .object({ kind: z.literal("episode"), productionId: SlugSchema, episodeId: EpisodeIdSchema.optional() })
+    .strict(),
+  z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("series"), seriesId: SlugSchema }).strict(),
 ]);
 export type WorldChatEntityRef = z.infer<typeof WorldChatEntityRefSchema>;
 
@@ -257,6 +275,12 @@ export const CheckToolSchema = z.enum([
   "list-entities",
   "related",
   "get-attachment-text",
+  /*
+   * The production read (round 3, 2026-08-22): an episode thread asked for its season and got
+   * nothing back, because no tool served production records at all — the model was briefed on
+   * the shape and blind to the direction. Widening the enum keeps every stored receipt readable.
+   */
+  "get-production",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */

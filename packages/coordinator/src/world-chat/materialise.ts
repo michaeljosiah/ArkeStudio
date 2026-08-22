@@ -490,6 +490,25 @@ export function materialiseCandidate(
     case "development.episode": {
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
+      /*
+       * An episode lists scenes that exist (round 3, 2026-08-22). A wrap-up decided "this
+       * episode has two scenes" and wrote their guessed ids straight into the membership list —
+       * ids nothing had created and nothing ever would, since scene records are made from the
+       * episode page, not named into being. The membership is the single order authority
+       * (SPEC-023 R-12), so a dangling id there is a scene the board promises and cannot open.
+       */
+      const draftScenes = candidate.draft.scenes;
+      if (draftScenes !== undefined) {
+        const missing = draftScenes.filter(
+          (id) => !production.scenes.some((s) => s.id === id) && production.sceneFiles[id] === undefined,
+        );
+        if (missing.length > 0) {
+          throw new MaterialiseError(
+            candidate.id,
+            `the scenes list names ${missing.join(", ")}, which ${missing.length === 1 ? "is" : "are"} not in ${candidate.target.productionId} — an episode may only list scenes that already exist; leave the list alone and the scenes are made from the episode page`,
+          );
+        }
+      }
       const episodeId = candidate.target.episodeId;
       if (episodeId !== undefined) {
         const live = production.episodes.find((e) => e.id === episodeId);

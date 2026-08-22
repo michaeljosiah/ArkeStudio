@@ -1,4 +1,5 @@
-import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
+import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
+import { productionAspect, productionShape } from "@arke-studio/contracts";
 
 /**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
@@ -38,11 +39,14 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
     case "production": {
       const production = bundle.productions.find((p) => p.meta.id === context.productionId);
       const named = production ? `"${production.meta.title}" (${context.productionId})` : context.productionId;
-      // The production records are not reachable through the world-query tools, so the current
-      // state travels in the entry narration — the same reasoning as the world look.
+      // The narration is orientation; the record is the read. `get_production` serves the whole
+      // thing — story, season direction, episodes, scenes — since round 3 (2026-08-22) found a
+      // thread deciding against a season it could not see.
       const lines = [
-        `This is the Development thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit.`,
+        `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit. Read the full records with get_production(${context.productionId}) before deciding against them.`,
       ];
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
       if (production?.story) {
         lines.push(
           `The overview is v${production.story.version}${production.story.logline ? ` — logline: "${clip(production.story.logline)}"` : ""}${production.story.spine ? `; spine: "${clip(production.story.spine)}"` : ""}.`,
@@ -68,8 +72,10 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const episode = production?.episodes.find((e) => e.id === context.episodeId);
       const named = episode ? `"${episode.title}" (${context.episodeId})` : context.episodeId;
       const lines = [
-        `This is the episode thread for ${named} in the production ${context.productionId}. An episode is its promise and its scenes in order; a script belongs to a scene and to nothing above it.`,
+        `This is the episode thread for ${named} in the production ${context.productionId}. An episode is its promise and its scenes in order; a script belongs to a scene and to nothing above it. Read the season and the sibling episodes with get_production(${context.productionId}) before deciding against them; an episode's scenes list may only name scenes that already exist.`,
       ];
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
       if (episode) {
         const promise = episode.promise;
         if (promise && (promise.opens || promise.turn || promise.closes)) {
@@ -94,7 +100,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const scene = production?.scenes.find((s) => s.id === context.sceneId);
       const named = scene ? `"${scene.title}" (${context.sceneId})` : context.sceneId;
       const lines = [
-        `This is the scene thread for ${named} in the production ${context.productionId}. Its script is ordered blocks that shots cite; propose the whole block list as it should read, keeping an existing block's id when only its text changes.`,
+        `This is the scene thread for ${named} in the production ${context.productionId}. Its script is ordered blocks that shots cite; propose the whole block list as it should read, keeping an existing block's id when only its text changes. Read the season and the episode this scene serves with get_production(${context.productionId}) before deciding against them.`,
       ];
       if (scene?.script && scene.script.blocks.length > 0) {
         lines.push(
@@ -103,10 +109,88 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
             .map((b) => `${b.id} [${b.kind}${b.speaker ? ` ${b.speaker}` : ""}] "${clip(b.text)}"`)
             .join("; ")}.`,
         );
-      } else if (scene) lines.push(`It has no script yet, and ${scene.shots.length} shot${scene.shots.length === 1 ? "" : "s"}.`);
+      } else if (scene) lines.push("It has no script yet.");
+      /*
+       * The shots themselves, always. Found by asking: a person in this thread asked what happens
+       * in the scene shot by shot, and the studio could only say how many there were — it knew the
+       * title, the production and the count, and correctly refused to invent the rest. A scene
+       * whose shots are invisible to its own thread cannot be talked about, which is what the
+       * thread is for.
+       */
+      const shape = describeShape(production);
+      if (shape) lines.push(shape);
+      if (scene) {
+        lines.push(
+          scene.shots.length > 0
+            ? `Its shots, in order: ${scene.shots
+                .slice(0, 30)
+                .map(
+                  (sh) =>
+                    `${sh.id} #${sh.number} "${sh.title}"${
+                      sh.durationSec !== undefined ? ` (${sh.durationSec}s)` : ""
+                    } — "${clip(sh.description)}"`,
+                )
+                .join("; ")}${scene.shots.length > 30 ? "; …" : ""}.`
+            : "It has no shots yet.",
+        );
+        if (scene.inherits) {
+          const { location, timeOfDay, tone } = scene.inherits;
+          const parts = [location ? `location ${location}` : null, timeOfDay, tone].filter(Boolean);
+          if (parts.length > 0) lines.push(`Every shot inherits: ${parts.join(", ")}.`);
+        }
+      }
       return lines.join(" ");
     }
   }
+}
+
+/**
+ * What kind of thing is being made, and what that kind asks of an episode (design turn 99).
+ *
+ * Found by asking (2026-08-21): a season thread proposed seven excellent episodes that read like
+ * short-film beats, because nothing had told it they were forty-five-second vertical ones. The
+ * kind and its numbers were on disk from the moment the production was created — episode count,
+ * the length range, the hook window, the frame — and none of it reached the turn. A profile that
+ * only the screens can see is not a profile.
+ *
+ * The numbers are stated, never the craft: how to use three seconds is the model's job, but it
+ * cannot do that job without being told there are three.
+ */
+function describeShape(production: ProductionBundle | undefined): string | null {
+  if (!production) return null;
+  const shape = productionShape(production.meta);
+  const bits: string[] = [];
+  const defaults = production.season?.defaults;
+  if (shape.isEpisodic) {
+    const count = defaults?.episodeCount;
+    bits.push(
+      `This is a ${shape.kindLabel.toLowerCase()}: a season of ${count !== undefined ? count : "several"} episodes, each one a complete piece that also carries the next.`,
+    );
+    if (defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined) {
+      bits.push(
+        `An episode runs ${defaults.episodeSecondsMin}–${defaults.episodeSecondsMax} seconds — a handful of shots, one turn, one thing left hanging. Anything that needs a second act does not fit.`,
+      );
+    }
+    if (defaults?.hookWindowSec !== undefined) {
+      bits.push(
+        `The first ${defaults.hookWindowSec} seconds are the hook: whatever makes somebody stay has to be inside them, not built toward.`,
+      );
+    }
+  } else {
+    bits.push(`This is a ${shape.displayLabel.toLowerCase()} — one continuous piece, not episodes.`);
+  }
+  /*
+   * Only a picture has a frame (review 2026-08-22): `productionAspect` defaults to 16:9 when
+   * unset, and narrating that default to a Story thread told the model prose "delivers in
+   * 16:9" — a fabricated fact it would then honour.
+   */
+  if (shape.medium === "video") {
+    const aspect = productionAspect(production.meta);
+    bits.push(
+      `It delivers in ${aspect}${aspect === "9:16" ? ", so blocking is vertical: one subject, close, and the frame cannot hold a wide two-shot" : ""}.`,
+    );
+  }
+  return bits.join(" ");
 }
 
 /** Bounded quotation: enough to recognise the text, never the whole document. */
