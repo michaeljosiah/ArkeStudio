@@ -47,6 +47,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   list_entities: "list-entities",
   related: "related",
   get_attachment_text: "get-attachment-text",
+  fetch_url: "fetch-url",
   get_production: "get-production",
 };
 
@@ -94,6 +95,14 @@ export interface RetrievalDeps {
    * this was before it was asked of the harness rather than picked.
    */
   textBudgetChars?: () => number;
+  /**
+   * Whether the person has turned research on. Absent means off — this app reads your
+   * world off your disk, and going online is a different promise from the one it makes by
+   * default, so silence is the safe answer rather than the permissive one.
+   */
+  researchAllowed?: () => boolean;
+  /** Injectable so a test can serve a page without a network. */
+  fetch?: typeof globalThis.fetch;
   now?: () => string;
 }
 
@@ -289,6 +298,55 @@ export class WorldChatRetrieval {
           return { result: { found: false, id }, receipt: receipt("empty", { querySummary: summarise(id) }) };
         }
         return { result: record, receipt: receipt("complete", { querySummary: summarise(id) }) };
+      }
+
+      case "fetch_url": {
+        /*
+         * Reading a page, and keeping it (2026-08-22).
+         *
+         * The page becomes an attachment on this conversation, because that is the only shape in
+         * this system that a citation can be checked against later: hashed bytes the studio still
+         * holds. Verifying a quote against a live URL would pass today and fail next month for
+         * reasons that have nothing to do with the writing.
+         *
+         * The receipt is the record that the studio went out at all, and the reply's own
+         * activity line says so while it happens. Nothing is fetched that was not named.
+         */
+        if (this.deps.researchAllowed?.() !== true) {
+          return {
+            result: {
+              refused: true,
+              reason:
+                "Research is off. Turn on web research in settings and ask again — nothing is read online until you do.",
+            },
+            receipt: receipt("unavailable", { querySummary: summarise(String(args["url"] ?? "")) }),
+          };
+        }
+        const url = String(args["url"] ?? "");
+        try {
+          const attachment = await this.deps.attachments.fetchPage(
+            lease.conversationId,
+            url,
+            this.deps.fetch ? { fetch: this.deps.fetch } : {},
+          );
+          // Readable by this run from here on, the same as a document handed over by hand.
+          this.deps.leases.allowAttachment(lease, attachment.id);
+          return {
+            result: {
+              attachmentId: attachment.id,
+              url: attachment.source?.url ?? url,
+              fetchedAt: attachment.source?.fetchedAt,
+              bytes: attachment.byteLength,
+              note: "Kept on this conversation. Read it with get_attachment_text, and quote from what it returns.",
+            },
+            receipt: receipt("complete", { querySummary: summarise(url) }),
+          };
+        } catch (err) {
+          return {
+            result: { refused: true, reason: err instanceof Error ? err.message : "that page could not be read" },
+            receipt: receipt("empty", { querySummary: summarise(url) }),
+          };
+        }
       }
 
       case "get_attachment_text": {

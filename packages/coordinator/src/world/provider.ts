@@ -1,6 +1,7 @@
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
+  BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
   ulid,
   worldSheets,
@@ -13,6 +14,7 @@ import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
 import { atomicWriteFile } from "./atomic.js";
+import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { installSampleWorld } from "./sample-world.js";
@@ -33,6 +35,8 @@ export interface CreateWorldInput {
   genre?: string;
   /** The look chosen during genesis. Absent means none was chosen, not an empty one. */
   artDirection?: string;
+  /** The through-line the founding conversation wrote. Absent means the world has no bible yet. */
+  bible?: string;
 }
 
 export interface FsWorldProviderOptions {
@@ -269,8 +273,20 @@ export class FsWorldProvider implements WorldProvider {
         JSON.stringify(record, null, 2) + "\n",
       );
     }
+    // The one document that is the author's rather than the model's, written at v1 with no
+    // history behind it — the same state any other first version has. It is deliberately not
+    // a proposal: the bible is ungated everywhere else (SPEC-022), and a world cannot be
+    // asked to approve the thinking that produced it.
+    if (input.bible) {
+      await atomicWriteFile(join(dir, fromPortable(BIBLE_PATH)), initialBible(input.bible, at));
+    }
     await appendChanges(join(dir, "changes.jsonl"), [
       { ts: at, entity: "world", created: true, source: "form", canonRevisionAfter: 0 },
+      // The shape a commit would have written for the same file (`commit.ts:401`), so the
+      // history screen reads a born bible and an edited one the same way.
+      ...(input.bible
+        ? [{ ts: at, entity: "bible", fromVersion: null, toVersion: 1, source: "genesis", canonRevisionAfter: 0 }]
+        : []),
     ]);
     this.appIndex?.upsertWorld({
       worldId,

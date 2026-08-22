@@ -476,6 +476,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
       preset: "review-cut",
       items: [{ type: "slate", label: "SHOT 1 · 4.0s", durationSec: 4 }],
       overlays: [],
+      audio: [],
       totalSec: 4,
     };
     const okRunner: FfmpegRunner = {

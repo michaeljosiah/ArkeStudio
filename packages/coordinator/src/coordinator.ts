@@ -19,6 +19,7 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   buildExportPlan,
+  exportAudioClips,
   exportOverlays,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -146,7 +147,9 @@ import {
   moveOverlay,
   placeOverlay,
   rejectTake,
+  rejoinOverlayAudio,
   removeOverlay,
+  splitOverlayAudio,
   saveAudioTracks,
   setTrim,
 } from "./takes/review.js";
@@ -580,6 +583,24 @@ function worldFileReader(worldDir: string): WorldFileReader {
   };
 }
 
+/**
+ * A refusal, cut to the length its own event allows (driven 2026-08-22).
+ *
+ * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
+ * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
+ * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
+ * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
+ * word so the sentence still reads, and never silent again.
+ */
+const REFUSAL_DETAIL_MAX = 300;
+export function refusalDetail(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
+  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
+}
+
 export class Coordinator {
   private readonly readModel: ReadModel;
   private readonly transport: Transport;
@@ -674,6 +695,7 @@ export class Coordinator {
     const resolve = this.opts.authoring?.skillFor;
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    if (settings) this.researchWeb = settings.research.web === true;
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family);
   }
@@ -701,6 +723,8 @@ export class Coordinator {
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
+  /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
+  private researchWeb = false;
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
   /** One per provider whose credential is external (issue #137); empty when none are wired. */
@@ -1835,6 +1859,7 @@ export class Coordinator {
             ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
             ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
             ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
+            ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
@@ -2261,7 +2286,7 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
+                detail: refusalDetail(`${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`),
               });
               continue;
             }
@@ -2297,7 +2322,7 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
+                detail: refusalDetail(`This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`),
               });
             }
           }
@@ -2311,7 +2336,7 @@ export class Coordinator {
             requestId: msg.requestId,
             reason,
             detail:
-              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
+              refusalDetail(err instanceof WrapUpError ? err.message : "This could not be written, so nothing was."),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2339,7 +2364,7 @@ export class Coordinator {
             requestId: msg.requestId,
             reason: err instanceof WrapUpError ? err.reason : "unknown",
             detail:
-              err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone.",
+              refusalDetail(err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone."),
           });
         }
         // The list counts live points and orders by what is waiting, so it moves when one goes.
@@ -2411,9 +2436,9 @@ export class Coordinator {
             // Every WrapUpError message is already written for a person to read; anything else is
             // ours to explain and not theirs to decode.
             detail:
-              err instanceof WrapUpError
+              refusalDetail(err instanceof WrapUpError
                 ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
+                : "This did not finish. Check the proposals before trying again — some of them may already be there."),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2749,6 +2774,19 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "rename-world": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await store.renameWorld(msg.name).catch((err: unknown) => {
+          void this.appLog?.append({
+            kind: "world.rename-refused",
+            message: err instanceof Error ? err.message : "the world could not be renamed",
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshWorldList();
+        return;
+      }
       case "retire-entity": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -2807,7 +2845,12 @@ export class Coordinator {
                 worldQueryUrl,
               )
               // Settled after the draft lands, so what is settled is the written sheet and not
-              // the empty skeleton it started as.
+              // the empty skeleton it started as — but settled either way. A drafting agent
+              // that throws (no model, a dead session, a token budget spent) used to skip the
+              // settle with the rejection, and the skeleton it never filled went to Needs you
+              // asking the author to approve a decision they had already made by pressing
+              // Begin. The sentence they typed is in the file; the sketch stands without help.
+              .catch(() => {})
               .then(() => settle())
               .then(() => this.refreshWorldSnapshot(msg.worldId)));
           } else {
@@ -4102,6 +4145,8 @@ export class Coordinator {
        */
       case "place-overlay":
       case "move-overlay":
+      case "split-overlay-audio":
+      case "rejoin-overlay-audio":
       case "remove-overlay": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -4113,13 +4158,19 @@ export class Coordinator {
               artifactId: msg.artifactId,
               startSec: msg.startSec,
               endSec: msg.endSec,
+              ...(msg.lane !== undefined ? { lane: msg.lane } : {}),
             });
           } else if (msg.kind === "move-overlay") {
             await moveOverlay(store, msg.productionId, {
               overlayId: msg.overlayId,
               startSec: msg.startSec,
               endSec: msg.endSec,
+              ...(msg.lane !== undefined ? { lane: msg.lane } : {}),
             });
+          } else if (msg.kind === "split-overlay-audio") {
+            await splitOverlayAudio(store, msg.productionId, msg.overlayId);
+          } else if (msg.kind === "rejoin-overlay-audio") {
+            await rejoinOverlayAudio(store, msg.productionId, msg.overlayId);
           } else {
             await removeOverlay(store, msg.productionId, msg.overlayId);
           }
@@ -4330,11 +4381,16 @@ export class Coordinator {
             );
             return;
           }
-          // Overlays reach the export or they are decoration (82a binding 4). Resolved against
-          // the world's artifacts, so one citing something filed since — or something that is not
-          // picture at all — is dropped rather than rendered as an absence.
-          const overlays = exportOverlays(production.cut.overlays, store.getBundle().artifacts);
-          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays);
+          /*
+           * Placed clips reach the export or they are decoration (82a binding 4). Both halves are
+           * resolved against the world's artifacts, so one citing something filed since is
+           * dropped rather than rendered as an absence — and picture and sound are resolved
+           * separately because a lane holds either, and one clip can contribute both.
+           */
+          const artifacts = store.getBundle().artifacts;
+          const overlays = exportOverlays(production.cut.overlays, artifacts);
+          const audio = exportAudioClips(production.cut.overlays, artifacts);
+          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
           buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
         }
         const stamp = new Date()
@@ -7382,6 +7438,9 @@ export class Coordinator {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
         return loaded?.attachments.find((a) => a.id === id) ?? null;
       },
+      // Off unless the person turned it on. Read at call time, not at construction, so switching
+      // it off takes effect on the next tool call rather than the next restart.
+      researchAllowed: () => this.researchWeb,
     });
 
     const runner = new WorldChatRunner({

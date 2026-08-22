@@ -101,11 +101,21 @@ describe("the author's bible in context (SPEC-022)", () => {
     );
   });
 
-  it("renders nothing at all when there is no bible", () => {
-    // A world that has not started one must not be given a paragraph about the thing it lacks.
-    assert.equal(assembleContext({ ...baseInput(), bible: "" }).bible, "");
-    assert.equal(assembleContext({ ...baseInput(), bible: "   \n  " }).bible, "");
-    assert.equal(assembleContext(baseInput()).bible, "");
+  it("says a world has no bible rather than rendering nothing (2026-08-22)", () => {
+    // This asserted "" until a world that had never started one turned out to be indistinguishable
+    // from one whose bible was trimmed for room — so the Studio never mentioned the document, and
+    // authors who did not already know about it never got one. One line, and only the one.
+    const none = assembleContext({ ...baseInput(), bible: "" }).bible;
+    assert.match(none, /no bible yet/);
+    assert.match(none, /Offer; do not assume\./, "told to offer, not to start writing unasked");
+    assert.ok(none.length < 400, "a note, not a paragraph about the thing it lacks");
+    assert.equal(assembleContext({ ...baseInput(), bible: "   \n  " }).bible, none, "blank is none");
+    assert.equal(assembleContext(baseInput()).bible, none, "and so is absent");
+  });
+
+  it("keeps the empty note out of the way of a real bible", () => {
+    const real = assembleContext({ ...baseInput(), bible: BIBLE }).bible;
+    assert.ok(!real.includes("no bible yet"), "a world with a bible is never told it has none");
   });
 
   it("makes two turns that read different bibles different turns", () => {

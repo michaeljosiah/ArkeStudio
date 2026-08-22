@@ -224,8 +224,17 @@ export function applyBibleEdits(text: string, edits: readonly BibleEdit[]): Appl
  */
 export const BibleEditRecordSchema = z
   .object({
-    fromVersion: z.number().int().min(1),
-    toVersion: z.number().int().min(2),
+    /**
+     * 0 means there was no bible — this edit started one (2026-08-22).
+     *
+     * The pair used to begin at 1, on the assumption that an edit always moves a document that
+     * already exists. Starting one is an edit too, and it landed at v1 and reported "1 → 1",
+     * which this schema refused: the turn failed after writing the file, so the bible was on
+     * disk with no reply describing it and no undo card over it. Undoing a 0 empties the bible
+     * rather than restoring a version that never existed.
+     */
+    fromVersion: z.number().int().min(0),
+    toVersion: z.number().int().min(1),
     headings: z.array(z.string()),
     at: z.string().min(1),
   })

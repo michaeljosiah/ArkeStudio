@@ -75,6 +75,12 @@ export interface CommitInput {
    * instead of creating a second entity.
    */
   requestId?: string;
+  /**
+   * Fields to set on world.json in the same transaction — the world's own label, never its
+   * identity. The folder name is the address every path, artifact and lock hangs off, so
+   * nothing here may rename it (SPEC-002's stable-identity rule applied to the world itself).
+   */
+  worldFields?: Record<string, unknown>;
 }
 
 export interface CommitResult {
@@ -447,6 +453,16 @@ export class Committer {
       worldUpdates["nextCanonId"] = next + input.allocateCanonIds;
       for (const id of allocatedCanonIds) {
         changes.push({ ts: at, commitId, allocation: id, source: input.source, canonRevisionAfter: revisionTo });
+      }
+    }
+    // The caller's own fields last, so a rename cannot be undone by bookkeeping above it —
+    // and `id`, `slug` and `schemaVersion` are refused by name rather than quietly dropped.
+    if (input.worldFields) {
+      for (const [key, value] of Object.entries(input.worldFields)) {
+        if (key === "id" || key === "slug" || key === "schemaVersion" || key === "canonRevision") {
+          throw new Error(`world.${key} is not a label and cannot be set this way`);
+        }
+        worldUpdates[key] = value;
       }
     }
     worldDoc.set(worldUpdates);

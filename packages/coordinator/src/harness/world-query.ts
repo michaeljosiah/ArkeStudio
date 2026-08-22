@@ -150,6 +150,17 @@ const WORLD_CHAT_TOOLS = [
     },
   },
   {
+    name: "fetch_url",
+    description:
+      "Read a web page the person has named, and keep it as an attachment on this conversation so anything quoted from it stays checkable. Only http and https, only pages, and only when research is switched on — it answers refused otherwise. Use get_attachment_text on the id it returns to read further.",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string", description: "The address to read" } },
+      required: ["url"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_attachment_text",
     description:
       "Read a bounded range of text from a document attached to this conversation. Only attachments explicitly linked to this turn are readable, and only if they are text. Images, audio and video cannot be read.",

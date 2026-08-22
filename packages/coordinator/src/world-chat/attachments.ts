@@ -208,6 +208,52 @@ export function refuseUnreadable(fileName: string, bytes: Uint8Array): string | 
 export interface IngestInput {
   fileName: string;
   bytes: Uint8Array;
+  /** Set when the bytes came off the web rather than from the person (2026-08-22). */
+  source?: { url: string; fetchedAt: string };
+}
+
+/** Refused reads, in the words the turn can pass on. */
+export class FetchRefused extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "FetchRefused";
+  }
+}
+
+/** How much of one page is worth keeping; beyond this the read is a window, not the document. */
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Readable text out of a page, without pulling in a parser.
+ *
+ * Scripts and styles go first — their contents are not prose and would be quoted as though they
+ * were — then tags become spaces, entities are decoded, and runs of blank space collapse. This
+ * is deliberately plain: a quotation has to match what was stored, so the transformation that
+ * produces the stored text must be one anybody can reason about later.
+ */
+export function readableText(html: string): string {
+  const withoutCode = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+  const entities: Record<string, string> = {
+    "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'",
+    // The marks prose actually uses. Left raw, "&mdash;" would sit inside a stored quotation
+    // and never match what the model read on the page.
+    "&mdash;": "—", "&ndash;": "–", "&hellip;": "…", "&rsquo;": "’",
+    "&lsquo;": "‘", "&ldquo;": "“", "&rdquo;": "”", "&#8217;": "’",
+  };
+  return withoutCode
+    .replace(/<\/(p|div|h[1-6]|li|tr|section|article|br)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, (m) => entities[m.toLowerCase()] ?? m)
+    // Horizontal space only: the newlines above are the paragraph structure, and collapsing
+    // them here would join sentences that the page kept apart.
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/^[ \t]+|[ \t]+$/gm, "")
+    .trim();
 }
 
 export class WorldChatAttachmentStore {
@@ -269,6 +315,7 @@ export class WorldChatAttachmentStore {
       byteLength: input.bytes.byteLength,
       readability: detectReadability(kind, input.bytes),
       linkedMessageIds: [],
+      ...(input.source !== undefined ? { source: input.source } : {}),
       createdAt: this.now(),
     };
     await this.store(conversationId).append({ type: "attachment.created", attachment }, { at: attachment.createdAt });
@@ -289,6 +336,63 @@ export class WorldChatAttachmentStore {
     return this.ingest(conversationId, {
       fileName: fileName.endsWith(".txt") || fileName.endsWith(".md") ? fileName : `${fileName}.txt`,
       bytes: new TextEncoder().encode(text),
+    });
+  }
+
+  /**
+   * Read a page from the web and keep it, so what was read stays checkable (2026-08-22).
+   *
+   * The page becomes an ordinary attachment. That is the whole design: this system verifies a
+   * quotation against bytes it holds, and the web moves — a citation checked against a live URL
+   * would pass today and fail next month for reasons that have nothing to do with the writing.
+   * Stored, the quote is checked against what was actually read, forever.
+   *
+   * Only http and https, only a page the person's own machine can reach, and only when research
+   * is turned on. Nothing here follows a link it was not given.
+   */
+  async fetchPage(
+    conversationId: ConversationId,
+    url: string,
+    deps: { fetch?: typeof globalThis.fetch } = {},
+  ): Promise<WorldChatAttachment> {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new FetchRefused(`"${url}" is not an address this can read.`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new FetchRefused(`${parsed.protocol} is not a protocol this reads — http and https only.`);
+    }
+    const doFetch = deps.fetch ?? globalThis.fetch;
+    let response: Response;
+    try {
+      response = await doFetch(parsed.toString(), {
+        redirect: "follow",
+        headers: { accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
+      });
+    } catch (err) {
+      throw new FetchRefused(`that page could not be reached: ${err instanceof Error ? err.message : "no answer"}`);
+    }
+    if (!response.ok) throw new FetchRefused(`that page answered ${response.status}.`);
+    const type = response.headers.get("content-type") ?? "";
+    if (!/text\/html|text\/plain|application\/xhtml/i.test(type)) {
+      throw new FetchRefused(`that address is ${type || "not text"}, and this reads pages, not files.`);
+    }
+    const raw = new Uint8Array(await response.arrayBuffer());
+    if (raw.byteLength > MAX_PAGE_BYTES) throw new FetchRefused("that page is larger than this will keep.");
+    const html = new TextDecoder("utf-8", { fatal: false }).decode(raw);
+    const text = /text\/plain/i.test(type) ? html.trim() : readableText(html);
+    if (text === "") throw new FetchRefused("there was no readable text on that page.");
+
+    const fetchedAt = this.now();
+    return this.ingest(conversationId, {
+      // The address is the name, so the attachment says where it came from before it is opened.
+      fileName: `${parsed.hostname}${parsed.pathname}`.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) + ".txt",
+      bytes: new TextEncoder().encode(`${parsed.toString()}
+
+${text}`),
+      source: { url: parsed.toString(), fetchedAt },
     });
   }
 

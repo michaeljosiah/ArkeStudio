@@ -746,6 +746,10 @@ export function NewWorldScreen() {
       ...(shownTone ? { tone: shownTone.toLowerCase() } : {}),
       ...(shownGenre ? { genre: shownGenre.toLowerCase() } : {}),
       ...(artDirection && artDirection.trim().length > 0 ? { artDirection: artDirection.trim() } : {}),
+      // The conversation's own prose, kept as the world's bible. Not shown on this screen and
+      // not confirmed separately: pressing Begin is the yes, and the bible is the one file the
+      // author can rewrite immediately without asking anyone.
+      ...(draft?.bible && draft.bible.trim().length > 0 ? { bible: draft.bible.trim() } : {}),
       // Whatever was handed to the conversation follows it in. Sent always, not only when
       // something is attached: the sandbox is the source of truth for what is waiting, and the
       // screen's idea of it can lag an event behind.

@@ -25,7 +25,7 @@ import {
   type RipplePreview,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
-import { atomicWriteFile, renameWithRetry } from "../world/atomic.js";
+import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
 import { appendChanges } from "../world/change-writer.js";
 import { classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -233,6 +233,12 @@ export interface StageInput {
   /** SPEC-019 R-19: the authoring skill this draft was shaped under, when there was one. */
   skill?: ProposalSkill;
 }
+
+/**
+ * Written inside a proposal the moment its change lands, so the decision survives a
+ * directory that cannot be deleted yet (Windows busy handles). `listOpen` reads it.
+ */
+const SETTLED_FILE = "settled.json";
 
 const PROPOSALS_DIR = ".proposals";
 
@@ -701,9 +707,44 @@ export class ProposalManager {
         files,
         ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
-      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
+      await this.retire(proposalId, result.commitId);
       return { status: "accepted", result };
     });
+  }
+
+  /**
+   * The proposal is over, whether or not its directory can be deleted right now.
+   *
+   * Removing it used to be the last line of accept, unguarded — so on Windows, where the
+   * drafting agent's own session has the proposal directory as its working directory, the
+   * delete failed with a busy handle and threw AFTER the commit had landed. The caller saw a
+   * failed accept, the world had the change, and the proposal came back on the approvals screen
+   * for good: accepting it again found the file already live and answered "stale" forever.
+   * Driven 2026-08-22 on a brand-new world, where all eight sheets settled and all eight stayed.
+   *
+   * So the commit is the decision, and this is only tidying. A tombstone goes in first — writing
+   * a file inside a busy directory is allowed where deleting the directory is not — and it is
+   * what `listOpen` reads, so a proposal whose change has landed never appears open again even
+   * if its bytes linger until the next sweep.
+   */
+  private async retire(proposalId: string, commitId: string): Promise<void> {
+    const dir = this.proposalDir(proposalId);
+    try {
+      await atomicWriteFile(
+        join(dir, SETTLED_FILE),
+        JSON.stringify({ commitId, at: this.store.now() }, null, 2) + "\n",
+      );
+    } catch {
+      /* if even the tombstone cannot be written, the sweep below is the only cleanup */
+    }
+    await withTransientRetry(() => rm(toExtendedLength(dir), { recursive: true, force: true })).catch(() => {
+      /* a busy handle clears when the session does; the tombstone already hides it */
+    });
+  }
+
+  /** Bytes left behind by a retired proposal, cleared whenever the gate next lists. */
+  private async sweepSettled(id: string): Promise<void> {
+    await rm(toExtendedLength(this.proposalDir(id)), { recursive: true, force: true }).catch(() => {});
   }
 
   /**
@@ -780,6 +821,20 @@ export class ProposalManager {
     if (mine.length === 0) return null;
     const production = this.store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return null;
+    /*
+     * Only ids this edit INTRODUCES (driven 2026-08-22, and this check's own doing).
+     *
+     * Two scenes drafted before the mint was production-wide really do share sh_1 and sh_2 on
+     * disk. Judging the whole shot list made every gated edit to either scene refuse for a
+     * collision it did not cause and could not fix — the scene became permanently unwritable
+     * through the gate, and the storyboard was the only way to touch it. A pre-existing overlap
+     * is a fact about the world; what this check exists to stop is a new one being added.
+     */
+    const already = new Set(
+      (production.scenes.find((s) => s.id === scene.id || production.sceneFiles[s.id] === stem)?.shots ?? []).map(
+        (shot) => shot.id,
+      ),
+    );
     const taken = new Map<string, string>();
     for (const other of production.scenes) {
       // The scene this file IS, matched by stem as well as id: a redraft of the same file keeps
@@ -787,7 +842,7 @@ export class ProposalManager {
       if (other.id === scene.id || production.sceneFiles[other.id] === stem) continue;
       for (const shot of other.shots) taken.set(shot.id, other.title || other.id);
     }
-    const clashes = mine.filter((id) => taken.has(id));
+    const clashes = mine.filter((id) => taken.has(id) && !already.has(id));
     if (clashes.length === 0) return null;
     const next = [...taken.keys()]
       .map((id) => Number(id.replace(/^sh_0*/, "")))
@@ -1218,6 +1273,13 @@ export class ProposalManager {
       return out;
     }
     for (const id of entries) {
+      // A proposal whose change has landed is over, whatever is still on disk: its directory
+      // may have survived a busy handle, and listing it again would offer a decision that was
+      // already made — and answer "stale" to anyone who took it.
+      if (await this.isSettled(id)) {
+        void this.sweepSettled(id);
+        continue;
+      }
       try {
         out.push(await this.readManifest(id));
       } catch {
@@ -1225,6 +1287,15 @@ export class ProposalManager {
       }
     }
     return out;
+  }
+
+  private async isSettled(id: string): Promise<boolean> {
+    try {
+      await stat(toExtendedLength(join(this.proposalDir(id), SETTLED_FILE)));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -78,6 +78,8 @@ export const LEASED_OPERATIONS = [
   "list_entities",
   "related",
   "get_attachment_text",
+  // Reading a page the person named, kept as an attachment (2026-08-22).
+  "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.
   "get_production",
 ] as const;
@@ -140,6 +142,21 @@ export class QueryLeaseRegistry {
       throw new LeaseDeniedError("operation-not-allowed");
     }
     return lease;
+  }
+
+  /**
+   * Let this run read something it just made itself (2026-08-22).
+   *
+   * The allow-list exists so a run cannot reach documents belonging to another conversation. A
+   * page this same run fetched is not that: it came into being inside the run, on this
+   * conversation, at the model's own request. Without the grant the studio could read a page and
+   * then be refused its own text, which is a rule protecting nobody.
+   *
+   * Scoped to the live lease, so it dies with the run like everything else here.
+   */
+  allowAttachment(lease: QueryLease, attachmentId: string): void {
+    const allowed = lease.allowedAttachmentIds as ChatAttachmentId[];
+    if (!allowed.includes(attachmentId as ChatAttachmentId)) allowed.push(attachmentId as ChatAttachmentId);
   }
 
   /** Attachment reads are allow-listed per run, not per world (§9.1, §13.2). */

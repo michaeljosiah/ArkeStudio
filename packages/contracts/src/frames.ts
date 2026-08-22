@@ -2,6 +2,7 @@ import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
+import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -47,6 +48,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * state from having chosen, and is shown as such.
        */
       artDirection: z.string().trim().min(1).max(2000).optional(),
+      /**
+       * The bible the founding conversation wrote, born as v1 with the world (SPEC-022).
+       *
+       * Absent means no bible, which is the ordinary state of a world begun by typing a name:
+       * there was no conversation, so there is nothing of the author's to keep. Editable the
+       * moment the world opens, like every later version — this is a starting point, not a
+       * decision, and it is the only genesis field that is never inferred.
+       */
+      bible: z.string().trim().min(1).max(8000).optional(),
       /**
        * Begun from a genesis conversation: whatever was attached to it waits in that sandbox
        * and is filed into the world as it opens. Without this the files would be swept with
@@ -661,6 +671,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** SPEC-007 R-2/R-3: rename edits frontmatter only — the id and file never move. */
+  z
+    .object({
+      /**
+       * Rename the world — its label, never its folder. The directory is the address every
+       * path, artifact and lock resolves through, so a rename changes the word on the screen
+       * and nothing else.
+       */
+      kind: z.literal("rename-world"),
+      worldId: UlidSchema,
+      name: z.string().min(1).max(120),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("rename-sheet"),
@@ -1372,7 +1394,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("restore-bible"),
       worldId: UlidSchema,
-      version: z.number().int().min(1),
+      /**
+       * 0 undoes the edit that started the bible, and empties it (2026-08-22).
+       *
+       * The undo card sends back the `fromVersion` it was given, so a bound of 1 here made the
+       * button on the one edit that starts a bible unparseable — dropped at the wire, no undo,
+       * no refusal, nothing on screen. Widened rather than special-cased on the client: the
+       * card's contract is "send back what you were shown".
+       */
+      version: z.number().int().min(0),
     })
     .strict(),
   /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
@@ -1642,9 +1672,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       artifactId: ArtifactIdSchema,
       startSec: z.number().min(0).finite(),
       endSec: z.number().positive().finite(),
+      /** Which lane received the drop; absent lands it on the bottom one. */
+      lane: z.number().int().min(0).max(MAX_CLIP_LANE).optional(),
     })
     .strict(),
-  /** 82a: move an overlay already placed, which is the same act as placing it. */
+  /** 82a, lanes: move a clip already placed, which is the same act as placing it. */
   z
     .object({
       kind: z.literal("move-overlay"),
@@ -1653,6 +1685,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       overlayId: prefixedIdSchema("ov"),
       startSec: z.number().min(0).finite(),
       endSec: z.number().positive().finite(),
+      /** Absent leaves it on the lane it is on, so trimming need not restate that. */
+      lane: z.number().int().min(0).max(MAX_CLIP_LANE).optional(),
+    })
+    .strict(),
+  /** Lanes: separate a clip's sound onto the lane below, as two clips over one file. */
+  z
+    .object({
+      kind: z.literal("split-overlay-audio"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
+    })
+    .strict(),
+  /** Lanes: the exact inverse — the picture carries its own sound again and the twin goes. */
+  z
+    .object({
+      kind: z.literal("rejoin-overlay-audio"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      overlayId: prefixedIdSchema("ov"),
     })
     .strict(),
   /** 82a: remove the placement. The artifact is untouched — it was only ever cited. */

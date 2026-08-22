@@ -211,6 +211,23 @@ export class WorldStore {
     return result;
   }
 
+  /**
+   * Rename the world — the label only, never the folder.
+   *
+   * A world's name was written once at creation and read everywhere after, so a world named in
+   * the first thirty seconds of an idea was named for good. It is a label, and labels change.
+   *
+   * The directory is deliberately untouched. It is this world's address: media URLs, artifact
+   * paths, the lock and every stored reference resolve through it, and moving it would break
+   * all of them to change a word on a screen — the same rule scenes and episodes follow, where
+   * the stem is identity and the title is what a person is allowed to rewrite.
+   */
+  async renameWorld(name: string, source = "form"): Promise<CommitResult> {
+    const trimmed = name.trim();
+    if (trimmed === "") throw new CommitPlanError("a world needs a name");
+    return this.commit({ kind: "world-rename", source, files: [], worldFields: { name: trimmed } });
+  }
+
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */
   async retire(portablePath: string, source: string): Promise<CommitResult> {
     const live = await this.readEntity(portablePath);

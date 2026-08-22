@@ -120,6 +120,7 @@ const WORKING_LABELS: Record<string, string> = {
   list_entities: "Looking over the world",
   related: "Checking what references it",
   get_attachment_text: "Reading what you attached",
+  fetch_url: "Reading a page online",
   get_production: "Reading the production",
   /*
    * The harness's own read-only tools. The world-builder agent is allowed read, glob, grep, list
