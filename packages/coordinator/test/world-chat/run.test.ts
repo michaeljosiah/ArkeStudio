@@ -457,5 +457,13 @@ describe("a turn that never answers", () => {
     const detail = (retry as { run: { safeDetail?: string } }).run.safeDetail ?? "";
     assert.notEqual(detail, "schema", "the run's own record is readable too");
     assert.ok(detail.length > 0);
+
+    // The finish record is the copy the person sees; "did not go through" here is what made a
+    // repeating rejection read as a network blip (review 2026-08-22).
+    const finished = events.map((e) => e.event).findLast((e) => e.type === "run.finished");
+    assert.ok(finished, "the run finished on the record");
+    const finalDetail = (finished as { run?: { safeDetail?: string } }).run?.safeDetail ?? "";
+    assert.match(finalDetail, /^rejected: /, "the person is told it was rejected, and why");
+    assert.ok(finalDetail.length > "rejected: ".length, `and the why is present: ${finalDetail}`);
   });
 });

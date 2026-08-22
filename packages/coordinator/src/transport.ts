@@ -29,6 +29,8 @@ export interface TransportOptions {
   getSnapshot(): ClientState;
   /** Client → coordinator messages, after the hello. */
   onMessage?: (msg: ClientMessage) => void;
+  /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
+  log?: (line: string) => void;
   /**
    * Read-only media for the renderer (design-fidelity pass): resolve a GET path like
    * `/media/<world-slug>/<world-relative-file>` to an absolute file, or null to 404. The
@@ -140,11 +142,24 @@ export class Transport {
     this.connections.add(conn);
     socket.on("message", (data) => {
       let msg: ClientMessage;
+      let parsedJson: unknown;
       try {
-        msg = ClientMessageSchema.parse(JSON.parse(String(data)));
+        parsedJson = JSON.parse(String(data));
       } catch {
-        // A malformed message is a client bug; fail loudly rather than guessing.
+        // Bytes that are not JSON are a transport fault; fail loudly rather than guessing.
         socket.close(1002, "malformed client message");
+        return;
+      }
+      try {
+        msg = ClientMessageSchema.parse(parsedJson);
+      } catch {
+        /*
+         * Valid JSON that fails the schema is version skew, not corruption (review 2026-08-22):
+         * a renderer one build ahead of this coordinator sends a frame this schema has never
+         * heard of, and closing the socket made the whole app read as disconnected on one
+         * keystroke. The message is dropped and said so; everything else keeps working.
+         */
+        this.opts.log?.("dropping a client message this build does not understand");
         return;
       }
       if (msg.kind === "hello") {

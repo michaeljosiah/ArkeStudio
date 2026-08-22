@@ -26,6 +26,8 @@ export interface RunInput {
   proposalId: string;
   purpose: "authoring" | "drafting" | "extraction";
   instruction: string;
+  /** Set on the gate's own repair turns, so the transcript attributes them honestly. */
+  repairTurn?: boolean;
 }
 
 interface ActiveRun {
@@ -83,6 +85,8 @@ export class AuthoringService {
    * conversation, and letting it reset the count would make the bound meaningless.
    */
   private readonly repairs = new Map<string, number>();
+  /** Proposals whose Stop arrived between a run ending and its repair starting. */
+  private readonly cancelledRepairs = new Set<string>();
 
   constructor(
     private readonly adapter: HarnessAdapter,
@@ -92,6 +96,9 @@ export class AuthoringService {
 
   /** Cancel the run bound to a proposal; immediate, and the proposal keeps the work (R-13). */
   async cancel(proposalId: string): Promise<void> {
+    // Even with no live run: a Stop can land in the gap between a run ending and its repair
+    // turn starting, and the repair must honour it (review 2026-08-22).
+    this.cancelledRepairs.add(proposalId);
     const run = this.runs.get(proposalId);
     if (!run) return;
     run.cancelled = true;
@@ -118,6 +125,7 @@ export class AuthoringService {
   release(proposalId: string): void {
     this.sessions.delete(proposalId);
     this.repairs.delete(proposalId);
+    this.cancelledRepairs.delete(proposalId);
   }
 
   /**
@@ -156,6 +164,9 @@ export class AuthoringService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    // A fresh instruction supersedes a stale Stop — without this, one cancelled turn would
+    // silently disable the repair loop for the proposal's whole remaining life.
+    if (input.repairTurn !== true) this.cancelledRepairs.delete(input.proposalId);
 
     const proposalDir = join(store.dir, fromPortable(`.proposals/${input.proposalId}`));
 
@@ -179,13 +190,17 @@ export class AuthoringService {
       }
     }
 
-    // The instruction is the user's side of the conversation — on the record before dispatch.
+    /*
+     * The instruction goes on the record before dispatch. A repair turn is the gate's words,
+     * not the person's (review 2026-08-22): attributing machine-generated diagnostics to the
+     * user put a paragraph they never typed into their own transcript.
+     */
     this.emit({
       at: at(),
       type: "authoring.turn",
       worldId: input.worldId,
       proposalId: input.proposalId,
-      role: "user",
+      role: input.repairTurn === true ? "gate" : "user",
       text: input.instruction,
     });
 
@@ -300,10 +315,20 @@ export class AuthoringService {
       const spent = this.repairs.get(input.proposalId) ?? 0;
       if (spent < MAX_REPAIR_TURNS) {
         const problems = await gate.recordProblems(input.proposalId).catch(() => []);
-        if (problems.length > 0) {
+        /*
+         * The run was cleared from `this.runs` in the finally above, so a Stop pressed during
+         * these awaits found nothing to cancel and the repair started anyway (review
+         * 2026-08-22). The flag survives the clear; a cancelled proposal repairs nothing.
+         */
+        if (problems.length > 0 && !this.cancelledRepairs.has(input.proposalId)) {
           this.repairs.set(input.proposalId, spent + 1);
           progress(`checking what was written — ${problems[0]!.message}`);
-          await this.run(store, gate, { ...input, instruction: repairInstruction(problems) }, worldQueryUrl);
+          await this.run(
+            store,
+            gate,
+            { ...input, instruction: repairInstruction(problems), repairTurn: true },
+            worldQueryUrl,
+          );
           return;
         }
       }

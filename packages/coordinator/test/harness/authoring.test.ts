@@ -269,17 +269,94 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     });
 
     assert.equal(written.length, 2, "the turn that wrote something unreadable was sent back once");
-    const instructions = events
-      .filter((e) => e.type === "authoring.turn" && e.role === "user")
-      .map((e) => (e.type === "authoring.turn" ? e.text : ""));
-    assert.equal(instructions.length, 2, "the repair is a turn on the record, not a hidden retry");
-    assert.match(instructions[1]!, /cannot be accepted as it stands/, "and it says why");
-    assert.match(instructions[1]!, /not a scene/, "in the gate's own words");
+    const turns = events.filter((e) => e.type === "authoring.turn");
+    const theirs = turns.filter((t) => t.type === "authoring.turn" && t.role === "user");
+    assert.equal(theirs.length, 1, "only the words the person typed are attributed to them");
+    assert.equal(theirs[0]!.type === "authoring.turn" ? theirs[0]!.text : "", draft.instruction);
+    const repair = turns.find(
+      (t) => t.type === "authoring.turn" && /cannot be accepted as it stands/.test(t.text),
+    );
+    assert.ok(repair, "the repair is a turn on the record, not a hidden retry");
+    assert.equal(
+      repair.type === "authoring.turn" ? repair.role : "",
+      "gate",
+      "and it speaks in the gate's own name (review 2026-08-22), not the person's",
+    );
+    assert.match(repair.type === "authoring.turn" ? repair.text : "", /not a scene/, "in the gate's own words");
     assert.deepEqual(await gate.recordProblems(draft.proposalId), [], "what stands would now be accepted");
     const statuses = events
       .filter((e) => e.type === "authoring.status")
       .map((e) => (e.type === "authoring.status" ? e.status : ""));
     assert.equal(statuses.at(-1), "completed", "the run is only called done once the file is one");
+    await store.close();
+  });
+
+  it("a Stop that lands between the run ending and the repair starting is honoured", async () => {
+    // The run is cleared from `this.runs` before the gate reads the file back, so a Stop pressed
+    // in that window used to find nothing to cancel — and the repair turn started anyway,
+    // spending a turn on a proposal the person had just stopped (review 2026-08-22).
+    const { dir, store } = await setup();
+    const gate = new ProposalManager(store);
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The chalk circle waits, stopped.",
+    });
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const written: string[] = [];
+    const adapter = writingAdapter(target, Array(4).fill('{ "id": "sc_x" "broken": true }'), written);
+    const events: DomainEvent[] = [];
+    const authoring = service(adapter, events);
+
+    // The Stop arrives exactly in the gap: the run has ended, the gate is reading the result.
+    const readBack = gate.recordProblems.bind(gate);
+    gate.recordProblems = async (id: string) => {
+      await authoring.cancel(draft.proposalId);
+      return readBack(id);
+    };
+
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: draft.proposalId,
+      purpose: "drafting",
+      instruction: draft.instruction,
+    });
+
+    assert.equal(written.length, 1, "the refused draft was not repaired — the person said stop");
+    await store.close();
+  });
+
+  it("a fresh instruction supersedes a stale Stop; the repair loop works again", async () => {
+    const { dir, store } = await setup();
+    const gate = new ProposalManager(store);
+    const draft = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The chalk circle, resumed.",
+    });
+    const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
+    const written: string[] = [];
+    const adapter = writingAdapter(target, [
+      '{ "id": "sc_x", "number": 1, "order": 1, "slug": "x", "title": "X" "status": "draft", "version": 1, "shots": [] }',
+      JSON.stringify(
+        { id: "sc_x", number: 1, order: 1, slug: "x", title: "X", status: "draft", version: 1, shots: [] },
+        null,
+        2,
+      ),
+    ], written);
+    const events: DomainEvent[] = [];
+    const authoring = service(adapter, events);
+
+    // A Stop with nothing running marks the proposal; the next instruction must clear it —
+    // otherwise one cancelled turn would silently disable repairs for the proposal's whole life.
+    await authoring.cancel(draft.proposalId);
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: draft.proposalId,
+      purpose: "drafting",
+      instruction: draft.instruction,
+    });
+
+    assert.equal(written.length, 2, "the unreadable first draft was sent back and repaired");
+    assert.deepEqual(await gate.recordProblems(draft.proposalId), [], "what stands would now be accepted");
     await store.close();
   });
 

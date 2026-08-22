@@ -55,7 +55,10 @@ export function quotableText(entity: CanonEntry | Sheet, field?: string): string
   if ("body" in entity) {
     if (field === "title") return entity.title;
     if (field === "statement" || field === "body") return entity.body;
-    return `${entity.title}\n${entity.body}`;
+    // A blank line, not a bare newline (review 2026-08-22): the join is a seam between two
+    // fields, and the quote matcher treats a paragraph break as a boundary — so a quotation
+    // can no longer run from the title into the body as though the source wrote them as one.
+    return `${entity.title}\n\n${entity.body}`;
   }
   if (field !== undefined) {
     const section = entity.sections.find((s) => s.heading === field);
@@ -65,7 +68,9 @@ export function quotableText(entity: CanonEntry | Sheet, field?: string): string
     if (field === "region") return entity.region ?? "";
     return "";
   }
+  // The same seam rule as canon: these are separate fields, and a quotation must not read
+  // across them as though the sheet wrote them as one sentence (review 2026-08-22).
   return [entity.name, entity.role ?? "", entity.region ?? "", ...entity.sections.map((s) => s.body)].join(
-    "\n",
+    "\n\n",
   );
 }

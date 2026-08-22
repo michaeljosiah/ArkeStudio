@@ -54,6 +54,13 @@ function refLabel(evidence: Extract<CandidateEvidence, { kind: "world" }>): stri
   const ref = evidence.ref;
   if (ref.kind === "canon") return ref.entryId;
   if (ref.kind === "sheet") return ref.sheetId;
+  // The production arms name what they are about (review 2026-08-22): these fell through to
+  // "world", so the problem sent back for a bad production citation named nothing the model
+  // could correct — it read as the category-error case instead of the thing that was missing.
+  if (ref.kind === "production") return ref.productionId;
+  if (ref.kind === "episode") return ref.episodeId ?? ref.productionId;
+  if (ref.kind === "scene") return ref.sceneId;
+  if (ref.kind === "series") return ref.seriesId;
   return "world";
 }
 
@@ -190,46 +197,89 @@ export function verifyEvidence(evidence: CandidateEvidence, sources: EvidenceSou
  * refused in a row, and the harder a model tried to quote real canon the more certainly it
  * failed.
  *
- * So the comparison folds the things that are about rendering rather than content: runs of
- * whitespace become one space, and the typographic variants of quotes and dashes become their
- * plain forms. Nothing else is forgiven — every word must still be present, in order, which is
- * the whole of what the citation asserts. The returned span is in the ORIGINAL text, so a
- * verified quotation still stores offsets that point at the real words.
+ * So the comparison folds what is about rendering: a run of whitespace becomes one space, and
+ * the typographic variants of quotes and dashes become their plain forms. Two things are NOT
+ * forgiven (review 2026-08-22). A paragraph break — a whitespace run holding more than one
+ * newline — is a hard boundary: collapsing it let a "quotation" stitch two unrelated sentences
+ * from opposite ends of an entry into one continuous claim the source never makes. And the
+ * seams `quotableText` uses to join a sheet's fields are the same boundary, which is why it now
+ * joins with a blank line rather than a bare newline. Every word must still be present, in
+ * order; the returned span is in the ORIGINAL text, so a verified quotation still stores
+ * offsets that point at the real words.
  */
 export function locateQuote(haystack: string, quote: string): { start: number; end: number } | null {
+  // A character never present in either projection of a real quote; a boundary folds to it so
+  // nothing can match across one.
+  const BOUNDARY = "\u0000";
   const fold = (ch: string): string => {
-    if (/\s/.test(ch)) return " ";
-    if (ch === "\u2018" || ch === "\u2019") return "'";
-    if (ch === "\u201C" || ch === "\u201D") return '"';
-    if (ch === "\u2013" || ch === "\u2014" || ch === "\u2212") return "-";
-    if (ch === "\u00A0") return " ";
+    if (ch === "\u2018" || ch === "\u2019" || ch === "\u201A" || ch === "\u201B" || ch === "\u2032") return "'";
+    if (
+      ch === "\u201C" || ch === "\u201D" || ch === "\u201E" || ch === "\u201F" ||
+      ch === "\u00AB" || ch === "\u00BB" || ch === "\u2039" || ch === "\u203A" || ch === "\u2033"
+    ) return '"';
+    if (
+      ch === "\u2010" || ch === "\u2011" || ch === "\u2012" || ch === "\u2013" ||
+      ch === "\u2014" || ch === "\u2015" || ch === "\u2212"
+    ) return "-";
     return ch;
   };
-  // A projection of the text with runs of whitespace collapsed, and an index back to the
-  // original for every character kept — so a match found here can be reported as a real span.
   const project = (text: string): { flat: string; at: number[] } => {
     let flat = "";
     const at: number[] = [];
-    let lastWasSpace = false;
-    for (let i = 0; i < text.length; i += 1) {
-      const ch = fold(text[i]!);
-      if (ch === " ") {
-        if (lastWasSpace || flat === "") continue;
-        lastWasSpace = true;
-      } else lastWasSpace = false;
-      flat += ch;
+    let i = 0;
+    while (i < text.length) {
+      const ch = text[i]!;
+      if (/\s/.test(ch)) {
+        // Consume the whole run; more than one newline inside it is a paragraph boundary.
+        let j = i;
+        let newlines = 0;
+        while (j < text.length && /\s/.test(text[j]!)) {
+          if (text[j] === "\n") newlines += 1;
+          j += 1;
+        }
+        if (flat !== "" && j < text.length) {
+          flat += newlines >= 2 ? BOUNDARY : " ";
+          at.push(i);
+        }
+        i = j;
+        continue;
+      }
+      flat += fold(ch);
       at.push(i);
+      i += 1;
     }
     return { flat, at };
   };
-  const hay = project(haystack);
-  const needle = project(quote).flat.trim();
-  if (needle === "") return null;
+  const hay = projectCached(haystack, project);
+  const needle = project(quote).flat;
+  // A quote containing a paragraph boundary of its own is not one quotation; refuse it whole.
+  if (needle === "" || needle.includes(BOUNDARY)) return null;
   const found = hay.flat.indexOf(needle);
   if (found === -1) return null;
   const start = hay.at[found]!;
   const lastKept = hay.at[found + needle.length - 1]!;
   return { start, end: lastKept + 1 };
+}
+
+/**
+ * One verification re-reads the same entity for every evidence item that cites it, so the
+ * haystack projection is cached by identity of the text. Small and bounded: entity bodies are
+ * a few kilobytes and a turn touches a handful of them.
+ */
+const projectionCache = new Map<string, { flat: string; at: number[] }>();
+function projectCached(
+  text: string,
+  project: (text: string) => { flat: string; at: number[] },
+): { flat: string; at: number[] } {
+  const hit = projectionCache.get(text);
+  if (hit) return hit;
+  const made = project(text);
+  if (projectionCache.size >= 64) {
+    const first = projectionCache.keys().next().value;
+    if (first !== undefined) projectionCache.delete(first);
+  }
+  projectionCache.set(text, made);
+  return made;
 }
 
 export function verifyAllEvidence(
@@ -243,10 +293,11 @@ export function verifyAllEvidence(
  * Put verified offsets where the quotation actually is, before it is stored (§5.8).
  *
  * Verification forgives a miscounted offset when the quoted words are really in the message;
- * this is the other half of that bargain. Storing the offsets as sent would leave a candidate
- * whose evidence points at the wrong span — checkable today only because `includes` happens to
- * be forgiving, and quietly wrong to anyone who later reads the record as exact. Anything that
- * does not resolve is left untouched: it did not verify, so the turn is not being stored.
+ * this is the other half of that bargain. The stored span points at the words the quotation
+ * matched; where the match was made through layout folding, the sliced text can differ from
+ * the quote in whitespace and typographic variants only — the words are the same, which is
+ * what the record asserts. Anything that does not resolve is left untouched: it did not
+ * verify, so the turn is not being stored.
  */
 export function normaliseEvidence(
   evidence: readonly CandidateEvidence[],

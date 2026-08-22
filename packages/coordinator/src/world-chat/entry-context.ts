@@ -178,7 +178,17 @@ function describeShape(production: ProductionBundle | undefined): string | null 
   } else {
     bits.push(`This is a ${shape.displayLabel.toLowerCase()} — one continuous piece, not episodes.`);
   }
-  bits.push(`It delivers in ${productionAspect(production.meta)}${productionAspect(production.meta) === "9:16" ? ", so blocking is vertical: one subject, close, and the frame cannot hold a wide two-shot" : ""}.`);
+  /*
+   * Only a picture has a frame (review 2026-08-22): `productionAspect` defaults to 16:9 when
+   * unset, and narrating that default to a Story thread told the model prose "delivers in
+   * 16:9" — a fabricated fact it would then honour.
+   */
+  if (shape.medium === "video") {
+    const aspect = productionAspect(production.meta);
+    bits.push(
+      `It delivers in ${aspect}${aspect === "9:16" ? ", so blocking is vertical: one subject, close, and the frame cannot hold a wide two-shot" : ""}.`,
+    );
+  }
   return bits.join(" ");
 }
 
