@@ -663,6 +663,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-007 R-2/R-3: rename edits frontmatter only — the id and file never move. */
   z
     .object({
+      /**
+       * Rename the world — its label, never its folder. The directory is the address every
+       * path, artifact and lock resolves through, so a rename changes the word on the screen
+       * and nothing else.
+       */
+      kind: z.literal("rename-world"),
+      worldId: UlidSchema,
+      name: z.string().min(1).max(120),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("rename-sheet"),
       worldId: UlidSchema,
       path: z.string().min(1),

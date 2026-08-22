@@ -161,6 +161,15 @@ export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
 
 const AppSettingsObjectSchema = z
   .object({
+    /**
+     * Whether the studio may read a page from the web when asked to research (2026-08-22).
+     *
+     * Off, because this app runs on your machine and reads your world off your disk, and going
+     * online is a different promise from the one it makes by default. On, it may fetch a page a
+     * person names; it never searches on its own initiative, and every page it reads is kept as
+     * an attachment on that conversation so the quotes stay checkable.
+     */
+    research: z.object({ web: z.boolean().default(false) }).strict().default({ web: false }),
     routing: RoutingDefaultsSchema.default({}),
     models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),

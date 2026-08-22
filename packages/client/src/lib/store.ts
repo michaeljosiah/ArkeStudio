@@ -1496,6 +1496,14 @@ export function settleThread(
   send({ kind: "settle-thread", worldId, entryId, resolvedType, statement });
 }
 
+/**
+ * Rename the world — the label, not the folder. The directory is the address every path and
+ * artifact resolves through, so this changes the word on the screen and nothing else.
+ */
+export function renameWorld(worldId: string, name: string): void {
+  send({ kind: "rename-world", worldId, name });
+}
+
 export function retireEntity(worldId: string, path: string): void {
   send({ kind: "retire-entity", worldId, path });
 }

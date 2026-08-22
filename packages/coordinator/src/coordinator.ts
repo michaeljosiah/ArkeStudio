@@ -692,6 +692,7 @@ export class Coordinator {
     const resolve = this.opts.authoring?.skillFor;
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    if (settings) this.researchWeb = settings.research.web === true;
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family);
   }
@@ -719,6 +720,8 @@ export class Coordinator {
   /** SPEC-008: redaction registry, credential store, provider statuses, ledger, settings. */
   private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
+  /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
+  private researchWeb = false;
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
   /** One per provider whose credential is external (issue #137); empty when none are wired. */
@@ -2765,6 +2768,19 @@ export class Coordinator {
           statement: msg.statement,
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "rename-world": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await store.renameWorld(msg.name).catch((err: unknown) => {
+          void this.appLog?.append({
+            kind: "world.rename-refused",
+            message: err instanceof Error ? err.message : "the world could not be renamed",
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        await this.refreshWorldList();
         return;
       }
       case "retire-entity": {
@@ -7400,6 +7416,9 @@ export class Coordinator {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
         return loaded?.attachments.find((a) => a.id === id) ?? null;
       },
+      // Off unless the person turned it on. Read at call time, not at construction, so switching
+      // it off takes effect on the next tool call rather than the next restart.
+      researchAllowed: () => this.researchWeb,
     });
 
     const runner = new WorldChatRunner({
