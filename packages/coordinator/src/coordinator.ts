@@ -580,6 +580,24 @@ function worldFileReader(worldDir: string): WorldFileReader {
   };
 }
 
+/**
+ * A refusal, cut to the length its own event allows (driven 2026-08-22).
+ *
+ * `world-chat.wrap-up-refused` bounds `detail` at 300, and the gate's wording can be longer —
+ * so emitting the refusal verbatim threw on its own schema, the emit never reached a client,
+ * and the person who pressed Wrap up got nothing at all. A refusal that is too long to send is
+ * the worst possible thing for it to be: the button did nothing and said nothing. Trimmed at a
+ * word so the sentence still reads, and never silent again.
+ */
+const REFUSAL_DETAIL_MAX = 300;
+export function refusalDetail(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= REFUSAL_DETAIL_MAX) return flat === "" ? "This could not be written." : flat;
+  const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
+  const at = cut.lastIndexOf(" ");
+  return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
+}
+
 export class Coordinator {
   private readonly readModel: ReadModel;
   private readonly transport: Transport;
@@ -2261,7 +2279,7 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
+                detail: refusalDetail(`${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`),
               });
               continue;
             }
@@ -2297,7 +2315,7 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
+                detail: refusalDetail(`This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`),
               });
             }
           }
@@ -2311,7 +2329,7 @@ export class Coordinator {
             requestId: msg.requestId,
             reason,
             detail:
-              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
+              refusalDetail(err instanceof WrapUpError ? err.message : "This could not be written, so nothing was."),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2339,7 +2357,7 @@ export class Coordinator {
             requestId: msg.requestId,
             reason: err instanceof WrapUpError ? err.reason : "unknown",
             detail:
-              err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone.",
+              refusalDetail(err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone."),
           });
         }
         // The list counts live points and orders by what is waiting, so it moves when one goes.
@@ -2411,9 +2429,9 @@ export class Coordinator {
             // Every WrapUpError message is already written for a person to read; anything else is
             // ours to explain and not theirs to decode.
             detail:
-              err instanceof WrapUpError
+              refusalDetail(err instanceof WrapUpError
                 ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
+                : "This did not finish. Check the proposals before trying again — some of them may already be there."),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);

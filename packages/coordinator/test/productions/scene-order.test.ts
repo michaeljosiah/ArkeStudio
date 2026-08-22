@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deriveCut, deriveSpineCut, SceneSchema, skillFor, type ProductionSpine } from "@arke-studio/contracts";
@@ -92,6 +93,78 @@ describe("scene identity and explicit order (issue 387)", () => {
     assert.match(problems[0]!.message, /unique across the whole production/);
     const outcome = await gate.accept(draft.proposalId);
     assert.equal(outcome.status, "invalid", "and accept refuses rather than writing the collision");
+  });
+
+
+  it("a collision the scene already had does not block an unrelated edit to it (driven 2026-08-22)", async () => {
+    /*
+     * The check's own doing. Two scenes drafted before the mint went production-wide really do
+     * share sh_1 and sh_2 on disk, and judging the whole shot list made every gated edit to
+     * either one refuse for a collision it did not cause and could not fix — the scene became
+     * permanently unwritable through the gate. Found by talking to a scene in the installed app
+     * and watching Wrap up do nothing at all.
+     */
+    const { dir, store, gate } = await open();
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    const first = production.scenes[0]!;
+    const second = production.scenes[1]!;
+    const shared = first.shots[0]!.id;
+
+    // Put the overlap on disk, the way concurrent drafting once did.
+    const stem = (id: string) => production.sceneFiles[id]!;
+    const path = (id: string) => `productions/saltlight/scenes/${stem(id)}.json`;
+    const rawSecond = await readFile(join(dir, ...path(second.id).split("/")), "utf8");
+    await store.commit({
+      kind: "scene-save",
+      source: "editor",
+      files: [
+        {
+          path: path(second.id),
+          action: "replace",
+          content:
+            JSON.stringify(
+              { ...second, shots: [{ ...second.shots[0]!, id: shared }, ...second.shots.slice(1)] },
+              null,
+              2,
+            ) + "\n",
+          baseHash: `sha256:${createHash("sha256").update(rawSecond, "utf8").digest("hex")}`,
+        },
+      ],
+    });
+
+    // Now edit that scene for a reason that has nothing to do with ids.
+    const live = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === second.id)!;
+    const staged = await gate.stage({
+      kind: "scene-edit",
+      summary: "A synopsis, nothing to do with shot ids",
+      source: "chat:studio",
+      targets: [
+        { path: path(second.id), content: JSON.stringify({ ...live, synopsis: "The lamps hold." }, null, 2) + "\n" },
+      ],
+    });
+    assert.deepEqual(
+      await gate.recordProblems(staged.id),
+      [],
+      "a pre-existing overlap is a fact about the world, not this edit's fault",
+    );
+
+    // A NEW collision is still refused.
+    const other = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === first.id)!;
+    const introduces = await gate.stage({
+      kind: "scene-edit",
+      summary: "This one takes an id it never had",
+      source: "chat:studio",
+      targets: [
+        {
+          path: path(second.id),
+          content:
+            JSON.stringify({ ...live, shots: [...live.shots, { ...other.shots[1]!, number: 99 }] }, null, 2) + "\n",
+        },
+      ],
+    });
+    const problems = await gate.recordProblems(introduces.id);
+    assert.equal(problems.length, 1, "the id this edit adds is still a collision");
+    assert.match(problems[0]!.message, /unique across the whole production/);
   });
 
   it("a staged draft has claimed its number too, not only its stem (round 3, 2026-08-22)", async () => {

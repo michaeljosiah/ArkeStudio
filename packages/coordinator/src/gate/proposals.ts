@@ -780,6 +780,20 @@ export class ProposalManager {
     if (mine.length === 0) return null;
     const production = this.store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return null;
+    /*
+     * Only ids this edit INTRODUCES (driven 2026-08-22, and this check's own doing).
+     *
+     * Two scenes drafted before the mint was production-wide really do share sh_1 and sh_2 on
+     * disk. Judging the whole shot list made every gated edit to either scene refuse for a
+     * collision it did not cause and could not fix — the scene became permanently unwritable
+     * through the gate, and the storyboard was the only way to touch it. A pre-existing overlap
+     * is a fact about the world; what this check exists to stop is a new one being added.
+     */
+    const already = new Set(
+      (production.scenes.find((s) => s.id === scene.id || production.sceneFiles[s.id] === stem)?.shots ?? []).map(
+        (shot) => shot.id,
+      ),
+    );
     const taken = new Map<string, string>();
     for (const other of production.scenes) {
       // The scene this file IS, matched by stem as well as id: a redraft of the same file keeps
@@ -787,7 +801,7 @@ export class ProposalManager {
       if (other.id === scene.id || production.sceneFiles[other.id] === stem) continue;
       for (const shot of other.shots) taken.set(shot.id, other.title || other.id);
     }
-    const clashes = mine.filter((id) => taken.has(id));
+    const clashes = mine.filter((id) => taken.has(id) && !already.has(id));
     if (clashes.length === 0) return null;
     const next = [...taken.keys()]
       .map((id) => Number(id.replace(/^sh_0*/, "")))
