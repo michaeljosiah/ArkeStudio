@@ -171,6 +171,20 @@ export async function acceptDecided(gate: ProposalManager, proposalId: string): 
 }
 
 /**
+ * Did the world end up saying what the proposal said?
+ *
+ * Two outcomes mean yes, and every caller has to treat them alike. `accepted` wrote it; `no-op`
+ * found it already written, which is the same answer to the only question a caller is asking.
+ * Reached for by name rather than compared to a string because getting it wrong is silent and
+ * expensive: a Save point that read `no-op` as a refusal took the point off the rail, recorded a
+ * send-back that never happened, and told the person their change could not be written — over a
+ * world that already contained it.
+ */
+export function landed(outcome: AcceptOutcome): boolean {
+  return outcome.status === "accepted" || outcome.status === "no-op";
+}
+
+/**
  * Why an accept did not write, said to somebody who pressed a button expecting it to.
  *
  * The statuses are the gate's own vocabulary and no use on their own: `the gate answered "invalid"`

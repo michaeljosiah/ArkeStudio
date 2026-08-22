@@ -253,7 +253,7 @@ import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { acceptDecided, explainAcceptRefusal } from "./gate/proposals.js";
+import { acceptDecided, explainAcceptRefusal, landed } from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
@@ -2032,7 +2032,7 @@ export class Coordinator {
           // a conversation whose propositions stayed `proposed` behind a proposal that no longer
           // exists cannot be accepted, discarded, sent back, or even deleted. Recorded as
           // accepted because that is what happened to the words: the world says them.
-          if (outcome.status === "accepted" || outcome.status === "no-op") {
+          if (landed(outcome)) {
             this.authoring?.release(msg.proposalId);
             const store = this.opts.provider.openStore?.();
             if (store && acceptedFrom) {
@@ -2295,11 +2295,11 @@ export class Coordinator {
             }
             const outcome = await acceptDecided(gate, proposalId);
             const at = new Date().toISOString();
-            if (outcome.status === "accepted" && staged) {
+            if (landed(outcome) && staged) {
               // The conversation's own account of what became of its propositions (§6.5).
               await recordResolution(store, staged, "accepted", () => at);
               this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
-            } else if (outcome.status !== "accepted") {
+            } else if (!landed(outcome)) {
               /*
                * Not written, so not left proposed either — the same taking-back Accept all does.
                *
@@ -2408,7 +2408,7 @@ export class Coordinator {
               const at = new Date().toISOString();
               // The gate's own words, carried out to the rail. Discarding them left the person
               // with a count and no cause, and left this path undiagnosable from a log.
-              if (outcome.status !== "accepted") return explainAcceptRefusal(outcome);
+              if (!landed(outcome)) return explainAcceptRefusal(outcome);
               if (staged) {
                 await recordResolution(store, staged, "accepted", () => at);
                 this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ProposalManager } from "../../src/gate/proposals.js";
+import { landed, ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -153,6 +153,41 @@ describe("a proposal the world already agrees with", () => {
       await readFile(join(dir, "characters", "ife.md"), "utf8"),
       after,
       "retiring the offer is not a write",
+    );
+  });
+});
+
+/**
+ * Every caller has to agree about what "it landed" means (codex, 2026-08-22).
+ *
+ * Retiring a no-op made this urgent rather than merely untidy. World Chat's Save point and its
+ * Accept all both write through the gate and both recognised only `accepted` as success — so a
+ * point whose values already matched the live file would have had its proposal destroyed here,
+ * been taken back off the rail as if it had failed, had a send-back recorded that never happened,
+ * and told the person their change could not be written over a world that already contained it.
+ */
+describe("what counts as having landed", () => {
+  it("is accepted and no-op, and nothing else", async () => {
+    const { gate } = await open();
+    const staged = await stageOne(gate);
+    assert.equal(landed(await gate.accept(staged.id)), true, "accepted landed");
+
+    const again = await stageOne(gate);
+    const second = await gate.accept(again.id);
+    assert.equal(second.status, "no-op");
+    assert.equal(landed(second), true, "and so did the one that found it already there");
+  });
+
+  it("says no to a refusal that really did not write", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    // The world moves underneath the proposal: this is the refusal callers must keep honouring.
+    await writeFile(join(dir, "characters", "ife.md"), "---\nid: ife\ntype: character\nname: Ife\nstatus: sketch\nversion: 1\ncreated: 2026-08-22\nupdated: 2026-08-22\ncanonRules: []\nlinks: []\n---\n\n## Essence\n\nSomebody else got here first.\n", "utf8");
+    const outcome = await gate.accept(staged.id);
+    assert.equal(landed(outcome), false, `a genuine refusal is not landing: ${outcome.status}`);
+    assert.ok(
+      (await gate.listOpen()).some((p) => p.id === staged.id),
+      "and a refused proposal is still there to deal with",
     );
   });
 });
