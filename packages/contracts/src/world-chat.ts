@@ -286,6 +286,8 @@ export const CheckToolSchema = z.enum([
   "list-entities",
   "related",
   "get-attachment-text",
+  /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
+  "fetch-url",
   /*
    * The production read (round 3, 2026-08-22): an episode thread asked for its season and got
    * nothing back, because no tool served production records at all — the model was briefed on
@@ -852,6 +854,23 @@ export const WorldChatAttachmentSchema = z
     readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
     linkedMessageIds: z.array(MessageIdSchema),
     promotedArtifactId: z.string().min(1).optional(),
+    /**
+     * Where this came from, when it did not come from the person (2026-08-22).
+     *
+     * Research had to answer one question before it could exist: what IS a fetched page to a
+     * system where every citation carries an observed version and a content hash? The answer is
+     * that it is an attachment — the one thing here that is already hashed, already quotable and
+     * already checkable months later, because the bytes were kept. So a page the studio reads
+     * online is stored exactly like a document somebody dropped in, and this records the one
+     * thing that differs: the address it was read from, and when.
+     *
+     * The web moves and this does not. A quotation stays verifiable against what was actually
+     * read, not against whatever the page says today.
+     */
+    source: z
+      .object({ url: z.string().url().max(2000), fetchedAt: IsoDateTimeSchema })
+      .strict()
+      .optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();
@@ -1774,9 +1793,16 @@ const exampleOperations = {
   },
 } satisfies Record<string, ModelCandidateOperation>;
 
+/**
+ * The example is the strongest instruction in this prompt, so it demonstrates the voice rather
+ * than the shape alone: a reaction, a weighed choice with a recommendation, something offered
+ * that was not asked for, and one question that would actually unblock the next turn. An
+ * acknowledgement here — "noted", "I've recorded that" — teaches the model to file and say
+ * nothing, which is what it did (2026-08-22).
+ */
 const exampleTurnResult = {
   reply:
-    "Noted — her aunt raised her, and I've kept the question of who tends the bells open until you decide.",
+    "The aunt raising her is the better version, and it costs you nothing you had — a guardian who chose the job is sentimental, and one who inherited it resents the child in front of her without ever being a villain about it. Worth knowing which way you want the bells to go, though, because the two answers pull the story apart. If the aunt tends them, the child grows up inside the ritual and the loss is hers to carry; if the town rotates the duty, the aunt is one more person who shows up when it is her week, and the bells stay bigger than the family. I would take the second — it keeps the harbour a place rather than a household. Either way there is a scene in the first time she is left to ring them alone. Who taught her the count?",
   candidateOperations: [
     { op: "create", temporaryId: "t1", candidate: exampleDrafts["canon.create"] },
     { op: "create", temporaryId: "t2", candidate: exampleDrafts["canon.thread"] },

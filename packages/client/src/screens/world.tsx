@@ -90,7 +90,7 @@ import {
   useVoiceSidecar,
   useWorld,
   type AuthoringActivity,
-} from "../lib/store.js";
+  renameWorld,} from "../lib/store.js";
 
 /** World screens (§2.9): the world is the home, productions are lenses over it. */
 
@@ -240,6 +240,8 @@ export function WorldOverviewScreen() {
   const navigate = useNavigate();
   // Before the guard: hooks cannot run behind a return.
   const authoring = useAuthoring();
+  /** The title is editable in place; the folder underneath never moves. */
+  const [renaming, setRenaming] = useState(false);
   if (!world) {
     return (
       <Screen id="world-overview">
@@ -280,7 +282,48 @@ export function WorldOverviewScreen() {
           A world of yours · canon v{world.meta.canonRevision}
           {proposals.length > 0 ? ` · ${proposals.length} awaiting you` : ""}
         </div>
-        <h1 className="fy-hero__title">{world.meta.name}</h1>
+        {/*
+          The name is a label, and labels change. It was written once at the door — in the first
+          thirty seconds of an idea — and read everywhere after, so a world could be named for
+          good by a sentence typed before the story existed. Editing in place, like the scene
+          synopsis: the folder underneath never moves.
+        */}
+        <h1
+          className="fy-hero__title"
+          data-testid="world-name"
+          role="textbox"
+          tabIndex={0}
+          title="Rename this world"
+          suppressContentEditableWarning
+          contentEditable={renaming}
+          onClick={() => setRenaming(true)}
+          onKeyDown={(e) => {
+            if (!renaming && (e.key === "Enter" || e.key === " ")) {
+              e.preventDefault();
+              setRenaming(true);
+              return;
+            }
+            if (renaming && e.key === "Enter") {
+              e.preventDefault();
+              (e.currentTarget as HTMLElement).blur();
+            }
+            if (renaming && e.key === "Escape") {
+              e.currentTarget.textContent = world.meta.name;
+              setRenaming(false);
+            }
+          }}
+          onBlur={(e) => {
+            setRenaming(false);
+            const next = (e.currentTarget.textContent ?? "").replace(/\s+/g, " ").trim();
+            if (next === "" || next === world.meta.name) {
+              e.currentTarget.textContent = world.meta.name;
+              return;
+            }
+            if (worldId) renameWorld(worldId, next);
+          }}
+        >
+          {world.meta.name}
+        </h1>
         {world.meta.logline && <p className="fy-hero__lede">{world.meta.logline}</p>}
         {/*
           Nothing to operate (design 63a). The hero used to end in a key-art row — Generate from
