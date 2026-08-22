@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Arke Studio · the AI production studio that remembers your world</title>
-<meta name="description" content="A free desktop app for writers, filmmakers, studios and anyone with an imagination. Build one world, with its characters, canon and visual language, then produce novels, films, images and interactive stories that all draw from it.">
+<meta name="description" content="Build your world once, with its characters, locations, canon and visual language, then produce a series, a short film or a micro drama from it with AI. Every episode, scene and shot draws on the same world, so your cast, places and look stay consistent.">
 <meta property="og:title" content="Arke Studio · the AI production studio that remembers your world">
-<meta property="og:description" content="Build one world. Produce novels, films, images and interactive stories that all draw from it. Join the waitlist.">
+<meta property="og:description" content="Build the world once. Produce it everywhere. Turn one world into a series, a short film or a micro drama, with the same cast, places and look in every shot. Join the waitlist.">
 <meta property="og:image" content="assets/world-undersong.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -71,6 +71,7 @@ h1 .dim { color:rgba(255,255,255,.44); }
    design system's contract, and duplicated once so the loop has no seam. */
 .band { border-bottom:1px solid var(--border); background:var(--background); }
 .band__lbl { text-align:center; padding:34px 0 0; font:500 10px var(--font-mono); letter-spacing:.19em; text-transform:uppercase; color:var(--neutral-400); }
+.band__sub { text-align:center; margin:9px 0 0; font:400 13px/1.6 var(--font-sans); color:var(--muted-foreground); }
 .band__mask { overflow:hidden; padding:22px 0 34px; -webkit-mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent); mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent); }
 .band__track { display:flex; width:max-content; animation:slide 34s linear infinite; }
 .band__mask:hover .band__track { animation-play-state:paused; }
@@ -92,6 +93,14 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
 .build h3 { margin:0; font:600 16px/1.3 var(--font-sans); letter-spacing:-.015em; }
 .build p { margin:9px 0 0; font:400 13px/1.65 var(--font-sans); color:var(--muted-foreground); }
 .build__n { font:500 10px var(--font-mono); letter-spacing:.16em; color:var(--neutral-300); display:block; margin-bottom:12px; }
+.build h3 i { font-style:normal; font:500 9px var(--font-mono); letter-spacing:.12em; text-transform:uppercase; color:var(--neutral-400); margin-left:8px; vertical-align:2px; }
+
+/* ---- the workflow, four steps ------------------------------------------- */
+.flow { display:grid; grid-template-columns:repeat(4,1fr); gap:26px; margin:48px 0 0; }
+.flow > div { border-top:1px solid var(--border); padding:16px 0 0; }
+.flow__n { font:500 10px var(--font-mono); letter-spacing:.16em; color:var(--neutral-400); }
+.flow h3 { margin:10px 0 0; font:600 16px/1.35 var(--font-sans); letter-spacing:-.015em; }
+.flow p { margin:8px 0 0; font:400 13px/1.65 var(--font-sans); color:var(--muted-foreground); }
 
 /* ---- three mechanics ---------------------------------------------------- */
 .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:26px; margin:48px 0 0; }
@@ -118,13 +127,13 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
 .foot__l a { text-decoration:none; }
 .foot__l a:hover { color:var(--foreground); }
 
-@media (max-width:980px) { .build { grid-template-columns:repeat(2,1fr); } }
+@media (max-width:980px) { .build, .flow { grid-template-columns:repeat(2,1fr); } }
 @media (max-width:860px) {
   .grid { grid-template-columns:1fr; }
   .join__row { flex-direction:column; }
   .foot__l { margin-left:0; width:100%; }
 }
-@media (max-width:560px) { .build { grid-template-columns:1fr; } }
+@media (max-width:560px) { .build, .flow { grid-template-columns:1fr; } }
 
 @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
 .hero__in > * { animation:rise .7s var(--ease-out) both; }
@@ -155,13 +164,13 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
   <img class="hero__img" src="assets/world-undersong.png" alt="The drowned harbour of The Undersong at dusk">
   <div class="hero__wash"></div>
   <div class="wrap hero__in">
-    <div class="eyebrow">Free · open source · Windows desktop app</div>
+    <div class="eyebrow">Series · short film · micro drama</div>
     <h1>The AI production studio that <span class="dim">remembers your world.</span></h1>
     <p class="lede">
-      Arke Studio is a desktop app for writers, filmmakers, artists, independent studios and
-      anyone with an imagination. Build one world, with its characters, canon and visual
-      language, then produce novels, films, images and interactive stories that all draw
-      from it.
+      Build your world once, with its characters, locations, canon and visual language.
+      Then make a series, a short film or a micro drama out of it: shape the story with
+      Arke, work it down to episodes, scenes and shots, and generate with the models you
+      choose. Your cast, your places and your look hold from the first shot to the last.
       <b>Build the world once. Produce it everywhere.</b>
     </p>
 
@@ -179,13 +188,14 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
     </form>
 
     <div class="chips">
-      <span>Local first</span><span>Open source</span><span>Provider independent</span>
+      <span>Local first</span><span>Open source</span><span>Provider independent</span><span>Free Windows app</span>
     </div>
   </div>
 </section>
 
 <section class="band" aria-label="Supported providers and local runtimes">
   <div class="band__lbl">Bring your own models</div>
+  <p class="band__sub">Pick what writes, what draws, what moves and what speaks. Swap any of them whenever you like.</p>
   <div class="band__mask">
     <div class="band__track">
       <div class="band__set">
@@ -214,38 +224,54 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
 </section>
 
 <section class="wrap sec">
-  <div class="kicker">One studio · every medium</div>
-  <h2>What you can build.</h2>
+  <div class="kicker">How it works</div>
+  <h2>From a world to a finished cut.</h2>
   <p class="sub">
-    Start with the same characters, places, rules and visual language, then produce for any
-    medium without rebuilding the source.
+    Most AI tools start at a prompt, or at a single project. Arke starts with your world,
+    and that context follows every production, every scene and every shot you generate.
+  </p>
+  <div class="flow">
+    <div><div class="flow__n">01</div><h3>Build your world</h3>
+      <p>The characters, the locations, the rules they live under, the look. Written once, kept in one place.</p></div>
+    <div><div class="flow__n">02</div><h3>Shape your series or film</h3>
+      <p>Talk it through with Arke: the premise, the season, what each episode has to carry.</p></div>
+    <div><div class="flow__n">03</div><h3>Turn episodes into scenes and shots</h3>
+      <p>Every shot carries the cast, the place and the look it needs, so nothing is described from scratch again.</p></div>
+    <div><div class="flow__n">04</div><h3>Generate, refine, cut</h3>
+      <p>Send shots to your models, review the takes, redo what missed, and assemble the ones you keep.</p></div>
+  </div>
+</section>
+
+<section class="wrap sec">
+  <div class="kicker">Reuse, never rebuild</div>
+  <h2>One world. Many productions.</h2>
+  <p class="sub">
+    Your cast, locations, canon, references and visual language are shared by every production
+    rather than copied into it, so a change to a character reaches all of them. Video is where
+    most people start; the same world can also become books, images and interactive stories.
   </p>
   <div class="build">
-    <div><span class="build__n">01</span><h3>Stories &amp; books</h3>
-      <p>Novels, scripts, serials and treatments, with canon acting as an editor that cites what is true.</p></div>
-    <div><span class="build__n">02</span><h3>Film &amp; video</h3>
-      <p>Draft scenes and shots, generate frames, clips and dialogue, then assemble accepted takes into the cut.</p></div>
+    <div><span class="build__n">01</span><h3>Film &amp; video</h3>
+      <p>Series, short films and micro dramas, cut from the takes you keep.</p></div>
+    <div><span class="build__n">02</span><h3>Stories &amp; books</h3>
+      <p>Novels, scripts and serials, drafted with your canon as the editor that cites what is already true.</p></div>
     <div><span class="build__n">03</span><h3>Images &amp; albums</h3>
-      <p>Key art, illustrated sequences and still collections that inherit the world’s look automatically.</p></div>
-    <div><span class="build__n">04</span><h3>Interactive</h3>
+      <p>Key art, character sheets and still collections that inherit the world’s look automatically.</p></div>
+    <div><span class="build__n">04</span><h3>Interactive <i>planned</i></h3>
       <p>Branching stories and audience experiences, with every route grounded in the same world.</p></div>
   </div>
 </section>
 
 <section class="wrap sec">
   <div class="kicker">Three mechanics</div>
-  <h2>Built to remember what other tools forget.</h2>
-  <p class="sub">
-    Most creative tools are organised around projects. Arke starts one level higher, with the
-    world every project shares.
-  </p>
+  <h2>Three things you can count on.</h2>
   <div class="grid">
-    <div class="card"><div class="card__n">01</div><h3>Nothing changes until you accept.</h3>
-      <p>Every draft arrives as a proposal. Arke works out what it would affect, shows you the ripple, and then waits. The screen is the gate.</p></div>
-    <div class="card"><div class="card__n">02</div><h3>Canon that knows when to refuse.</h3>
-      <p>Ask the world anything. Every claim cites the entry behind it, and when the record is silent Arke says so instead of inventing behind your back.</p></div>
-    <div class="card"><div class="card__n">03</div><h3>Identity that travels.</h3>
-      <p>A main photo and one character sheet become the reference set, and they follow the character into every frame, on every provider that takes them.</p></div>
+    <div class="card"><div class="card__n">01</div><h3>Your world stays consistent.</h3>
+      <p>Characters, places, rules and visual identity follow the work. A character looks like themselves in episode one and in episode ten, whichever model made the frame.</p></div>
+    <div class="card"><div class="card__n">02</div><h3>Arke works with you, not over you.</h3>
+      <p>Arke can draft, suggest and rewrite, but it shows you what a change would touch and then waits. Nothing becomes true in your world until you say so.</p></div>
+    <div class="card"><div class="card__n">03</div><h3>Use the models you want.</h3>
+      <p>Nothing is baked in. Bring the providers you already use, or run a model on your own machine, and change your mind later without redoing your work.</p></div>
   </div>
 </section>
 
@@ -262,7 +288,7 @@ h2 { margin:14px 0 0; font:650 clamp(28px,3.6vw,42px)/1.1 var(--font-sans); lett
 </div></section>
 
 <footer class="wrap foot">
-  <div class="foot__m">Free · MIT licence · Windows 11 · x64 + ARM64</div>
+  <div class="foot__m">Free · AGPL-3.0 licence · Windows 11 · x64 + ARM64</div>
   <div class="foot__l">
     <a href="https://github.com/michaeljosiah/ArkeStudio" target="_blank" rel="noreferrer">GitHub ↗</a>
     <a href="#top">Join the waitlist</a>

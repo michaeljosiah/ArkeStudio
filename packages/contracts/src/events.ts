@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
+import { BibleHelperKindSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { HarnessStatusSchema } from "./harness.js";
@@ -817,6 +818,26 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       reason: z.string().optional(),
     })
     .strict(),
+  /**
+   * A bible helper's answer: the options, or null with why not (never silence).
+   *
+   * Options rather than an option, because two to compare is what makes this a choice rather
+   * than a suggestion to accept — and `ask` returns exactly one, since an answer has no
+   * alternatives. Nothing here has touched the document: the rail holds these until the author
+   * presses Replace, and an `ask` answer never carries that control at all (design turn 90).
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("bible.helper-answered"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      helper: BibleHelperKindSchema,
+      options: z.array(z.string()).nullable(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
   /**
    * The lyrics helper's answer: the draft, or null with why not (never silence).
    *

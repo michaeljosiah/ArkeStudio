@@ -275,6 +275,33 @@ export const Expand = icon(
   </>,
 );
 
+/*
+ * The two helpers that make a passage longer and shorter (design 90). Not `Expand` above, which is
+ * the fullscreen glyph and reads as "open this bigger" rather than "write more of it" — the two
+ * sitting one row apart in the same tray is exactly where that would be misread.
+ */
+export const ChevronsDown = icon(
+  <>
+    <path d="m7 6 5 5 5-5" />
+    <path d="m7 13 5 5 5-5" />
+  </>,
+);
+
+export const ChevronsUp = icon(
+  <>
+    <path d="m17 11-5-5-5 5" />
+    <path d="m17 18-5-5-5 5" />
+  </>,
+);
+
+/** Put this back where the selection was. The one control an `ask` result does not get. */
+export const Replace = icon(
+  <>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" />
+  </>,
+);
+
 /** The speaker with its waves struck out: sound is offered here, and turned off. */
 export const SpeakerOff = icon(
   <>

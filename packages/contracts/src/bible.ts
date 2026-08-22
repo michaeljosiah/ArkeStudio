@@ -232,6 +232,45 @@ export const BibleEditRecordSchema = z
   .strict();
 export type BibleEditRecord = z.infer<typeof BibleEditRecordSchema>;
 
+// ---------------------------------------------------------------------------
+// Helpers on a selection (design 90)
+// ---------------------------------------------------------------------------
+
+/**
+ * What one helper does to a passage the author has selected.
+ *
+ * Three of these return prose to put back, and one does not. `ask` answers a question about the
+ * selection and is the reason this is an enum rather than a boolean: the client withholds the
+ * Replace control for it, and the coordinator prompts it differently, so both ends need to agree
+ * on the same four words.
+ *
+ * `tighten` has no counterpart in the tools this borrows from. It earns its place from the meter:
+ * the whole document is carried on every turn, so shorter is a result worth asking for.
+ */
+export const BibleHelperKindSchema = z.enum(["rewrite", "expand", "tighten", "ask"]);
+export type BibleHelperKind = z.infer<typeof BibleHelperKindSchema>;
+
+/** Whether a helper's result can be pressed back into the document. */
+export function helperEdits(kind: BibleHelperKind): boolean {
+  return kind !== "ask";
+}
+
+export const BIBLE_HELPER_BOUNDS = {
+  /**
+   * Characters in one selection.
+   *
+   * Not a cap on the bible — the document has none and gains none here. This bounds one *request*,
+   * and it is deliberately generous: a section of a series bible can be a chapter, and the helper
+   * that cannot be run on a whole section is a helper nobody reaches for. Past this the selection
+   * is a document, not a passage, and World Chat is the surface that edits documents.
+   */
+  selection: 12_000,
+  /** How many options one run returns. Two is enough to compare; more is a page nobody reads. */
+  options: 2,
+  /** Room for an answer that cites canon back at you, not for an essay. */
+  answer: 1_200,
+} as const;
+
 /**
  * Roughly what the bible costs to carry, for the meter on the Bible screen.
  *
