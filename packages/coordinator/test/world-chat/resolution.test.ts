@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   newId,
   type CandidateId,
@@ -242,6 +244,40 @@ describe("accepting and discarding", () => {
     const view = await w.view();
     assert.equal(view.candidates[0]!.status, "accepted", "immutable history, on a closed conversation");
     assert.equal(view.status, "closed", "and accepting does not reopen it");
+    await w.store.close();
+  });
+
+  it("settles the conversation when the proposal retires as a no-op", async () => {
+    const w = await wrapped();
+    // Accepting puts the propositions in the world. A proposal directory that survives its own
+    // delete brings the same decision back, and accepting it again finds every target already
+    // identical: the gate retires it as a no-op rather than leaving a card nobody can act on.
+    assert.equal((await w.gate.accept(w.proposal.id)).status, "accepted");
+
+    // The same decision, offered again over a world that already has it — a proposal directory
+    // that outlived its own delete, restaged here from the bytes the accept wrote.
+    const target = w.proposal.targets[0]!;
+    const live = await readFile(join(w.dir, ...target.path.split("/")), "utf8");
+    const again = await w.gate.stage({
+      kind: w.proposal.kind,
+      summary: w.proposal.summary,
+      source: w.proposal.source,
+      targets: [{ path: target.path, content: live }],
+      worldChatOrigins: w.proposal.worldChatOrigins ?? [],
+    });
+    assert.equal((await w.gate.accept(again.id)).status, "no-op", "nothing left to write");
+    assert.ok(
+      !(await w.gate.listOpen()).some((x) => x.id === again.id),
+      "the gate retires it rather than offering it forever",
+    );
+
+    // The coordinator records the same resolution for `no-op` as for `accepted`. Without it the
+    // conversation keeps its propositions `proposed` against a proposal that no longer exists —
+    // unacceptable, undiscardable, unsendable-back, and blocked from deletion for good.
+    await recordResolution(w.store, w.proposal, "accepted", NOW);
+    const view = await w.view();
+    assert.equal(view.candidates[0]!.status, "accepted", "the world says the words, so they are settled");
+    assert.ok(!view.deletionBlock, `and nothing holds the conversation open: ${view.deletionBlock}`);
     await w.store.close();
   });
 

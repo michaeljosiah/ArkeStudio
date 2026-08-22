@@ -171,6 +171,20 @@ export async function acceptDecided(gate: ProposalManager, proposalId: string): 
 }
 
 /**
+ * Did the world end up saying what the proposal said?
+ *
+ * Two outcomes mean yes, and every caller has to treat them alike. `accepted` wrote it; `no-op`
+ * found it already written, which is the same answer to the only question a caller is asking.
+ * Reached for by name rather than compared to a string because getting it wrong is silent and
+ * expensive: a Save point that read `no-op` as a refusal took the point off the rail, recorded a
+ * send-back that never happened, and told the person their change could not be written — over a
+ * world that already contained it.
+ */
+export function landed(outcome: AcceptOutcome): boolean {
+  return outcome.status === "accepted" || outcome.status === "no-op";
+}
+
+/**
  * Why an accept did not write, said to somebody who pressed a button expecting it to.
  *
  * The statuses are the gate's own vocabulary and no use on their own: `the gate answered "invalid"`
@@ -644,9 +658,22 @@ export class ProposalManager {
       for (const target of proposal.targets) {
         const live = await this.readLive(target.path);
         const found = live === null ? null : sha256(live);
-        if (target.baseHash === null ? live !== null : found !== target.baseHash) {
-          stalePaths.push(target.path);
-        }
+        if (target.baseHash === null ? live === null : found === target.baseHash) continue;
+        /*
+         * The world moved — but a proposal's own landing moves it the same way, and this check
+         * cannot tell the difference from the base alone (codex, 2026-08-22). A created target
+         * records `baseHash: null` and, once accepted, has a live file; an amended one has a live
+         * hash that is no longer its pre-commit base. Both read as stale, which is why the eight
+         * sheets from a world door whose commits landed but whose directories survived could not
+         * be cleared by anything: stale on accept, and the no-op retirement below unreachable.
+         *
+         * So: only what the target proposes settles it. Identical bytes mean this proposal is
+         * what the world already says, and it falls through to be retired. Anything else is a
+         * genuine collision and is still refused, with the path named.
+         */
+        const proposed = await this.readProposalFile(proposalId, target.path);
+        if (proposed !== null && live === proposed) continue;
+        stalePaths.push(target.path);
       }
       if (stalePaths.length > 0) return { status: "stale", stalePaths };
 
@@ -664,7 +691,38 @@ export class ProposalManager {
           baseHash: target.baseHash,
         });
       }
-      if (files.length === 0) return { status: "no-op" };
+      if (files.length === 0) {
+        // Every target already reads exactly as proposed, so there is no decision left to make —
+        // and a card that cannot be accepted, cannot be usefully discarded, and says nothing when
+        // pressed is worse than no card. Driven 2026-08-22: eight sheets from a world door whose
+        // commits had landed but whose directories survived sat in Needs you permanently, and
+        // Accept all did nothing, visibly or in any log.
+        //
+        // Retiring rather than refusing is safe precisely because nothing would change: the
+        // world already says what this proposal says. What is thrown away is the offer, not work.
+        /*
+         * Written to the world's own log before the directory goes, because the tombstone dies
+         * with the directory and recovery reads the log (codex, 2026-08-22). A process that
+         * stopped between retiring and the coordinator's `proposal.resolved` would otherwise
+         * leave a leftover with no proposal, no account and no journal line — which
+         * `recoverWrapUps` reads as an intent that created nothing, and answers by returning the
+         * propositions to live. They would then be proposed a second time over a world that
+         * already holds them, which is a duplicate entry produced by a cleanup.
+         */
+        await appendChanges(join(this.store.dir, "changes.jsonl"), [
+          {
+            ts: this.store.now(),
+            entity: "proposal",
+            proposalId,
+            settled: "already-live",
+            source: proposal.source,
+          },
+        ]).catch(() => {
+          /* the retirement still stands; recovery is the only thing that loses its evidence */
+        });
+        await this.retire(proposalId, null);
+        return { status: "no-op" };
+      }
 
       const problems = await this.checkAuthoredBounds(files);
       if (problems.length > 0) return { status: "invalid", problems };
@@ -727,7 +785,8 @@ export class ProposalManager {
    * what `listOpen` reads, so a proposal whose change has landed never appears open again even
    * if its bytes linger until the next sweep.
    */
-  private async retire(proposalId: string, commitId: string): Promise<void> {
+  /** `commitId` is null when the proposal was retired without one — nothing differed to commit. */
+  private async retire(proposalId: string, commitId: string | null): Promise<void> {
     const dir = this.proposalDir(proposalId);
     try {
       await atomicWriteFile(

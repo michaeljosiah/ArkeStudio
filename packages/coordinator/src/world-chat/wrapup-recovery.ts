@@ -36,6 +36,8 @@ export interface RecoveryOutcome {
 export interface OpenIntent {
   requestId: string;
   expectedConversationSeq: number;
+  /** What the intent reserved. Recovery needs these when the log never learned their fate. */
+  plannedProposalIds: readonly string[];
 }
 
 /**
@@ -52,7 +54,11 @@ export function openIntentOf(events: ReadonlyArray<{ event: { type: string } }>)
   for (const { event } of events) {
     if (event.type === "wrapup.intent-recorded") {
       const e = event as unknown as OpenIntent;
-      open = { requestId: e.requestId, expectedConversationSeq: e.expectedConversationSeq };
+      open = {
+        requestId: e.requestId,
+        expectedConversationSeq: e.expectedConversationSeq,
+        plannedProposalIds: e.plannedProposalIds ?? [],
+      };
     } else if (event.type === "wrapup.completed" || event.type === "wrapup.failed") {
       open = null;
     }
@@ -281,11 +287,24 @@ export async function recoverWrapUps(
           e.event.type === "wrapup.intent-recorded" &&
           (e.event as { requestId?: string }).requestId === intent.requestId,
       );
-      const accepted = events
+      const recorded = events
         .slice(openedAt + 1)
         .flatMap((e) =>
           e.event.type === "proposal.resolved" && e.event.outcome === "accepted" ? [e.event.proposalId] : [],
         );
+      /*
+       * And what the world says, for the ones the log never got to (codex, 2026-08-22).
+       *
+       * The conversation's own entry is written after the gate has finished, so a stop in between
+       * leaves a proposal that is gone from the screen, present in the world, and unaccounted for
+       * here — read as "nothing was created" and closed as a failure, over changes that are
+       * live. `changes.jsonl` is the half that survives a stop, because the gate writes it inside
+       * the same operation: a commit line for an accept, a settlement line for a retired no-op.
+       */
+      const fromJournal = intent.plannedProposalIds.filter(
+        (id: string) => !recorded.includes(id as never) && landedInJournal(journal, id),
+      );
+      const accepted = [...recorded, ...fromJournal];
       if (accepted.length > 0) {
         await log.append(
           {

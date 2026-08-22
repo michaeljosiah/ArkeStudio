@@ -253,7 +253,7 @@ import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { acceptDecided, explainAcceptRefusal } from "./gate/proposals.js";
+import { acceptDecided, explainAcceptRefusal, landed } from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
@@ -2027,7 +2027,12 @@ export class Coordinator {
             msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples },
           );
           const at = new Date().toISOString();
-          if (outcome.status === "accepted") {
+          // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
+          // proposed, so there is nothing to decide. It has to settle here for the same reason —
+          // a conversation whose propositions stayed `proposed` behind a proposal that no longer
+          // exists cannot be accepted, discarded, sent back, or even deleted. Recorded as
+          // accepted because that is what happened to the words: the world says them.
+          if (landed(outcome)) {
             this.authoring?.release(msg.proposalId);
             const store = this.opts.provider.openStore?.();
             if (store && acceptedFrom) {
@@ -2047,35 +2052,33 @@ export class Coordinator {
               worldId: msg.worldId,
               proposalId: msg.proposalId,
               reason:
+                // `no-op` is not here: it settles above, because the world already says what the
+                // proposal says and there is nothing left to block on.
                 outcome.status === "needs-reconfirm"
                   ? "needs-reconfirm"
-                  : outcome.status === "no-op"
-                    ? "no-op"
-                    : outcome.status === "stale"
-                      ? "stale"
-                      : outcome.status === "pending-review"
-                        ? "pending-review"
-                        : outcome.status === "unresolved-conflicts"
-                          ? "unresolved-conflicts"
-                          : outcome.status === "invalid"
-                            ? "invalid"
-                            : outcome.status === "draft-unresolved"
-                              ? "draft-unresolved"
-                              : "target-retired",
+                  : outcome.status === "stale"
+                    ? "stale"
+                    : outcome.status === "pending-review"
+                      ? "pending-review"
+                      : outcome.status === "unresolved-conflicts"
+                        ? "unresolved-conflicts"
+                        : outcome.status === "invalid"
+                          ? "invalid"
+                          : outcome.status === "draft-unresolved"
+                            ? "draft-unresolved"
+                            : "target-retired",
               detail:
                 outcome.status === "stale"
                   ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
-                  : outcome.status === "no-op"
-                    ? "the proposal is identical to the live world — nothing to commit"
-                    : outcome.status === "unresolved-conflicts"
-                      ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
-                      : outcome.status === "target-retired"
-                        ? `retired: ${outcome.paths.join(", ")}`
-                        : outcome.status === "invalid"
-                          ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
-                          : outcome.status === "draft-unresolved"
-                            ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
-                            : undefined,
+                  : outcome.status === "unresolved-conflicts"
+                    ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
+                    : outcome.status === "target-retired"
+                      ? `retired: ${outcome.paths.join(", ")}`
+                      : outcome.status === "invalid"
+                        ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
+                        : outcome.status === "draft-unresolved"
+                          ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
+                          : undefined,
               ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
             });
           }
@@ -2292,11 +2295,11 @@ export class Coordinator {
             }
             const outcome = await acceptDecided(gate, proposalId);
             const at = new Date().toISOString();
-            if (outcome.status === "accepted" && staged) {
+            if (landed(outcome) && staged) {
               // The conversation's own account of what became of its propositions (§6.5).
               await recordResolution(store, staged, "accepted", () => at);
               this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
-            } else if (outcome.status !== "accepted") {
+            } else if (!landed(outcome)) {
               /*
                * Not written, so not left proposed either — the same taking-back Accept all does.
                *
@@ -2405,7 +2408,7 @@ export class Coordinator {
               const at = new Date().toISOString();
               // The gate's own words, carried out to the rail. Discarding them left the person
               // with a count and no cause, and left this path undiagnosable from a log.
-              if (outcome.status !== "accepted") return explainAcceptRefusal(outcome);
+              if (!landed(outcome)) return explainAcceptRefusal(outcome);
               if (staged) {
                 await recordResolution(store, staged, "accepted", () => at);
                 this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
