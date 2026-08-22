@@ -1859,6 +1859,7 @@ export class Coordinator {
             ...(msg.tone !== undefined ? { tone: msg.tone } : {}),
             ...(msg.genre !== undefined ? { genre: msg.genre } : {}),
             ...(msg.artDirection !== undefined ? { artDirection: msg.artDirection } : {}),
+            ...(msg.bible !== undefined ? { bible: msg.bible } : {}),
           });
           this.readModel.setWorlds(await this.opts.provider.listWorlds());
           await this.openWorld(worldId);
@@ -2844,7 +2845,12 @@ export class Coordinator {
                 worldQueryUrl,
               )
               // Settled after the draft lands, so what is settled is the written sheet and not
-              // the empty skeleton it started as.
+              // the empty skeleton it started as — but settled either way. A drafting agent
+              // that throws (no model, a dead session, a token budget spent) used to skip the
+              // settle with the rejection, and the skeleton it never filled went to Needs you
+              // asking the author to approve a decision they had already made by pressing
+              // Begin. The sentence they typed is in the file; the sketch stands without help.
+              .catch(() => {})
               .then(() => settle())
               .then(() => this.refreshWorldSnapshot(msg.worldId)));
           } else {

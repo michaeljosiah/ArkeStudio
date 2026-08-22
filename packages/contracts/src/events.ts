@@ -93,6 +93,16 @@ export const GenesisDraftSchema = z
       .max(8)
       .default([]),
     threads: z.array(z.string().min(1).max(300)).max(8).default([]),
+    /**
+     * The through-line, in prose, as the conversation settled it (SPEC-022, 2026-08-22).
+     *
+     * The other fields are the world's furniture — who is in it, where it happens, what is
+     * unresolved. None of them hold the reason any of it is worth telling, so a world door that
+     * talked for twenty minutes handed over a cast and lost the argument that produced it. This
+     * is the argument, and it becomes `bible.md` at v1. Longer than the rest on purpose: it is
+     * the only field meant to be read as writing rather than looked up.
+     */
+    bible: z.string().min(1).max(8000).optional(),
   })
   .strip();
 export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;

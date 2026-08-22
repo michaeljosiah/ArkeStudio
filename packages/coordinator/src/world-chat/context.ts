@@ -368,7 +368,12 @@ function renderAttachments(attachments: readonly ContextAttachment[], room?: num
  * it picks it will sound equally sure.
  */
 function renderBible(text: string): string {
-  if (text.trim() === "") return "";
+  // An absent bible used to render as nothing at all, which reads in a prompt as a section
+  // trimmed for room rather than a document that was never started — so the Studio never
+  // offered to start one, and the facility existed only for authors who already knew about it.
+  // One line, and only ever one: this is the state most worlds are in.
+  if (text.trim() === "")
+    return "This world has no bible yet — the author has not started one. If the conversation settles something worth keeping in their own words, you may begin it with a set-section or replace-document edit. Offer; do not assume.";
   return [
     "This is the author's own bible: their thinking about this world, in their words. It is context, not Canon.",
     "Nothing in it is settled unless a CANON entry says so, and no candidate may cite it as evidence.",

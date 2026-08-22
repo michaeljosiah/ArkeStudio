@@ -2057,7 +2057,7 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 ### Bible edits
 
-The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible". It is NOT canon: nothing in it is settled, nothing generates from it, and a candidate may never cite it as evidence.
+The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, nothing generates from it, and a candidate may never cite it as evidence.
 
 You may edit it, and edits land immediately — there is no accept step. Every edit cuts a version and can be undone, which is why it needs no permission; it is not a licence to tidy. Edit it when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
 
