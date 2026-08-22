@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/voice",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "Typed skeleton for the Voxa voice sidecar — local TTS/STT, supervised as a child process. The protocol client and catalogue arrive with SPEC-011; the workspace graph is settled here (SPEC-001 D9).",
   "type": "module",

@@ -38,7 +38,7 @@ Three mechanics carry the product. Everything else is surface.
 
 ## 0.2 What v1 is
 
-A free, MIT-licensed, local-first desktop application. Worlds are folders of readable files
+A free, AGPL-3.0-licensed, local-first desktop application. Worlds are folders of readable files
 on the user's own disk. Provider keys live in an app-owned encrypted file protected by the OS
 key store and a user-only ACL (§14.2). Nothing leaves the machine except approved dispatches.
 
@@ -1735,6 +1735,10 @@ selection, captions).
 Rendering is local via bundled ffmpeg. Gaps export as black slates carrying their shot labels,
 so an incomplete cut still produces a reviewable artefact.
 
+A page-based production exports a **document** rather than a render — fixed-layout PDF and EPUB
+from the derived book, with unfinished pages as labelled placeholders so pagination survives and
+an incomplete book still proofs. Same rule, different medium; SPEC-026 owns it.
+
 Worlds themselves export as readable files — which for this architecture means copying the
 folder. *"Your canon is a readable format, not a proprietary lock."*
 
@@ -1855,7 +1859,7 @@ across restarts and are revocable, reusing Arke's `grant-store`.
 - **N-4 · Index rebuild.** A full rebuild of the same world completes in under ten seconds.
 - **N-5 · Privacy.** No telemetry in v1. Diagnostics are user-initiated and contain no world
   content and no keys.
-- **N-6 · Licence.** MIT. Third-party licences are enumerated in-app; the espeak-ng phonemizer
+- **N-6 · Licence.** AGPL-3.0-only. Third-party licences are enumerated in-app; the espeak-ng phonemizer
   Voxa uses is GPL and must remain a separate executable, never linked.
 - **N-7 · Installer.** NSIS, currently unsigned; signing is required before v1. OpenCode and Voxa
   are included only when their external build resources are staged; models are downloaded rather
@@ -1895,6 +1899,11 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-019 | Long-form video, bound references, skills and locked-parameter tasks | 005, 008, 009, 010, 012, 013, 017 · amends 010, 012 |
 | SPEC-020 | Production-scoped casts and artifacts — the guest cast | 002, 003, 004, 007, 012, 015 · amends 007, 012, 015 |
 | SPEC-021 | Local image and video generation — a curated recipe catalogue over ComfyUI | 008, 009, 016 |
+| SPEC-022 | Local cloned voice — IndexTTS as a recipe, and the world's voice library | 011, 021 · amends 011 |
+| SPEC-023 | The narrative domain — medium, format, Series, Season, Episode, Scene script | 002, 004, 012 · amends 012 |
+| SPEC-024 | Durable scene dispatch plans | 009, 012, 013, 019 |
+| SPEC-025 | The host ports — identity, entitlement, content policy, release targets | 004, 005, 008, 009, 012, 013, 014, 024 |
+| SPEC-026 | The page medium — panels, pages, the derived book, and document export | 004, 010, 011, 012, 013, 017, 023 · amends 012, 023 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.

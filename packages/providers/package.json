@@ -1,6 +1,7 @@
 {
   "name": "@arke-studio/providers",
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "description": "Provider clients with capability declarations (FAL, Higgsfield, OpenAI, Anthropic, ElevenLabs, Ollama), the shipped model manifest, and local runtime detection (SPEC-008).",
   "type": "module",

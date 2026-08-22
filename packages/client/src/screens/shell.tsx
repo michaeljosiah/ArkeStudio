@@ -2877,7 +2877,7 @@ export function SettingsAboutScreen() {
       <div className="fy-set__eyebrow">ABOUT</div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginTop: 14 }}>
         <span className="fy-set__aboutname">Arke</span>
-        <span className="fy-set__aboutmeta">v{state?.app.version ?? "—"} · MIT</span>
+        <span className="fy-set__aboutmeta">v{state?.app.version ?? "—"} · AGPL-3.0</span>
       </div>
       <div className="fy-set__aboutline">The world is the asset. Author once, produce everywhere.</div>
 
@@ -2916,7 +2916,7 @@ export function SettingsAboutScreen() {
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Open source</div>
-          <div className="fy-set__caps">MIT licence · your canon is a readable format, leave any time</div>
+          <div className="fy-set__caps">AGPL-3.0 licence · your canon is a readable format, leave any time</div>
         </div>
         <a
           className="fy-set__link"
@@ -2960,11 +2960,11 @@ export function SettingsAboutScreen() {
       {showNotices && (
         <div className="fy-set__note">
           OpenCode (MIT) · Voxa (MIT) · espeak-ng (GPL, separate process, never linked) · ffmpeg
-          (LGPL build, subprocess) · better-sqlite3 (MIT) · Electron (MIT) · Geist (OFL) — full
+          (GPL build, separate process, never linked) · better-sqlite3 (MIT) · Electron (MIT) · Geist (OFL) — full
           notices in THIRD-PARTY-NOTICES.md beside the app
         </div>
       )}
-      <div className="fy-set__copyright">© 2026 Arke contributors</div>
+      <div className="fy-set__copyright">© 2026 Michael Josiah</div>
     </div>
   );
 }

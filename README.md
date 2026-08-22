@@ -146,6 +146,21 @@ and not yet written: the narrative-game graph, and recovery from the archive.
 
 This repository holds the code, the specifications and the design system.
 
+## Contributing
+
+Bug reports, fixes and specification amendments are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md) for how changes are shaped and tested.
+
+Every contributor signs the [Contributor Licence Agreement](CLA.md) before their first change is
+merged. You keep the copyright in your work; the grant is broad enough that the project can ship
+it under the AGPL and under commercial terms alongside it. That is how the work is funded, and it
+is stated plainly rather than buried.
+
 ## Licence
 
-AGPL-3.0. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE).
+
+You may use, modify and run it, including commercially. If you distribute it, or offer it to
+others over a network, AGPL §13 requires you to make your source available to those users under
+the same terms. Third-party components and their obligations are recorded in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
