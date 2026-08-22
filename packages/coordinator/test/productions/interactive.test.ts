@@ -207,4 +207,78 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.ok(!/https?:\/\//.test(player), "self-contained: the player calls no network");
     assert.ok(player.includes("localStorage"), "playback state stays with the viewer");
   });
+
+  /**
+   * What the viewer's own copy remembers, and what it must never remember (issue #411, brief §5).
+   *
+   * The rule the brief is strict about: playback state is exactly scene, position, route and a
+   * timestamp; it lives with the viewer; and it never reaches the world folder — a preview is
+   * somebody watching, not an edit to the production.
+   */
+  async function exportedPlayer(): Promise<{ dir: string; player: string }> {
+    const { dir, store, bundle } = await open();
+    const production = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    await appendTraversal(store, production.meta.id, {
+      ts: CLOCK(),
+      routingVersion: 1,
+      choiceId: "ch_on",
+      from: "sc_i1",
+      to: "sc_i2",
+      route: ["sc_i1"],
+    });
+    const result = await exportInteractive(store, production, CLOCK);
+    assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
+    return { dir: join(dir, result.dir), player: await readFile(join(dir, result.dir, "player.html"), "utf8") };
+  }
+
+  it("IV-P2: resume restores playback state, and playback state is all it is", async () => {
+    const { player } = await exportedPlayer();
+
+    // The shape, written once and never widened. Anything else in this object would be an
+    // authoring decision the viewer made by watching.
+    const initial = /let state = \{([^}]*)\}/.exec(player);
+    assert.ok(initial, "the player declares its state literally");
+    const keys = [...initial[1]!.matchAll(/(\w+)\s*:/g)].map((m) => m[1]);
+    assert.deepEqual(keys.sort(), ["positionSec", "route", "sceneId", "updatedAt"], "exactly the four");
+
+    // Viewer-local: the key is namespaced by production and routing version, so a re-cut graph
+    // never resumes into a scene the new package does not have.
+    assert.match(player, /localStorage\.setItem\(KEY/, "saved with the viewer");
+    assert.match(player, /localStorage\.getItem\(KEY/, "and read back on load");
+    assert.match(player, /KEY = "arke-iv-" \+ manifest\.provenance\.productionId \+ "-v" \+ manifest\.provenance\.routingVersion/);
+
+    // Resume: the last scene and the last position, not the start.
+    assert.match(player, /play\(state\.sceneId, state\.positionSec\)/, "the player opens where it was left");
+    assert.match(
+      player,
+      /if \(saved && media\[saved\.sceneId\]\) state = saved/,
+      "a saved scene this package does not contain is ignored rather than played blind",
+    );
+
+    // And nothing about the viewer's watching is written back to the world.
+    assert.ok(!/fetch\(|XMLHttpRequest|navigator\.sendBeacon/.test(player), "no route back to the studio");
+  });
+
+  it("IV-P2: a preview writes evidence, and the export writes no playback state into the world", async () => {
+    const { dir } = await exportedPlayer();
+    const { readdir } = await import("node:fs/promises");
+    const shipped = await readdir(dir);
+    for (const name of shipped) {
+      assert.ok(
+        !/playback|position|resume/i.test(name),
+        `the package ships no playback state of its own (${name})`,
+      );
+    }
+    assert.ok(shipped.includes("player.html") && shipped.includes("manifest.json"));
+  });
+
+  it("IV-P3: choices are untimed by default — nothing counts down, nothing chooses for you", async () => {
+    const { player } = await exportedPlayer();
+    // A timer in this path would be a choice made on the viewer's behalf. There is none: the
+    // buttons render, the first takes focus, and the player waits.
+    assert.ok(!/setTimeout|setInterval|requestAnimationFrame/.test(player), "no timer anywhere in the player");
+    assert.ok(!/countdown|autoAdvance|defaultChoice|timeoutSec/i.test(player), "and no timed-choice vocabulary");
+    assert.match(player, /Untimed by default/, "the rule is stated where the choices are built");
+    assert.match(player, /choicesEl\.querySelector\("button"\)\?\.focus\(\)/, "the keyboard lands on the first choice");
+  });
 });

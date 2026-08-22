@@ -43,6 +43,8 @@ export function BranchMapScreen() {
   const [exportNote, setExportNote] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ sceneId: string; route: string[] } | null>(null);
   const [draft, setDraft] = useState({ from: "", label: "", to: "" });
+  /** The one option the map keeps in the tab order; the arrows move it (brief §3, IV-M2). */
+  const [focused, setFocused] = useState<string | null>(null);
 
   useEffect(() => {
     if (!worldId || !prodId) return;
@@ -126,6 +128,16 @@ export function BranchMapScreen() {
   const commit = (next: Routing) => worldId && prodId && saveRouting(worldId, prodId, next);
   const blockers = findings.filter((finding) => finding.severity === "blocks");
 
+  /*
+   * The map in one flat order: layers left to right, each layer top to bottom, unplaced last —
+   * exactly the order the layout draws and the DOM renders, so the keyboard walks the picture
+   * rather than a second opinion about it (brief §3, IV-M2).
+   */
+  const walkOrder = [...layout!.layers, layout!.unplaced].flat();
+  // Before anybody has moved, the tab stop is the first option — the start scene's layer. A
+  // `focused` that no longer exists (an edge was removed under it) falls back the same way.
+  const tabStop = focused !== null && walkOrder.includes(focused) ? focused : walkOrder[0];
+
   const previewScene = preview !== null ? scenes.find((scene) => scene.id === preview.sceneId) : null;
   const previewMedia = (() => {
     if (!previewScene) return null;
@@ -168,7 +180,43 @@ export function BranchMapScreen() {
                     key={sceneId}
                     role="option"
                     aria-selected={preview?.sceneId === sceneId}
-                    tabIndex={0}
+                    data-scene={sceneId}
+                    /*
+                     * One stop for the whole map, and the arrows move within it (IV-M2). Every
+                     * option carrying tabIndex={0} put a fifty-node graph fifty presses deep in
+                     * the page's tab order, which is what a listbox exists to avoid: Tab reaches
+                     * the map, the arrows walk it, Home and End jump to the start and the last.
+                     */
+                    tabIndex={sceneId === tabStop ? 0 : -1}
+                    onFocus={() => setFocused(sceneId)}
+                    onKeyDown={(event) => {
+                      const step =
+                        event.key === "ArrowDown" || event.key === "ArrowRight"
+                          ? 1
+                          : event.key === "ArrowUp" || event.key === "ArrowLeft"
+                            ? -1
+                            : 0;
+                      let next: string | undefined;
+                      if (step !== 0) {
+                        // Clamped, not wrapped: an arrow at the end of a graph should feel like
+                        // the end of the graph.
+                        const at = walkOrder.indexOf(sceneId);
+                        next = walkOrder[Math.min(walkOrder.length - 1, Math.max(0, at + step))];
+                      } else if (event.key === "Home") next = walkOrder[0];
+                      else if (event.key === "End") next = walkOrder[walkOrder.length - 1];
+                      else if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setPreview({ sceneId, route: [] });
+                        return;
+                      }
+                      if (next === undefined || next === sceneId) return;
+                      event.preventDefault();
+                      setFocused(next);
+                      const el = event.currentTarget.closest('[role="listbox"]')?.querySelector(
+                        `[role="option"][data-scene="${CSS.escape(next)}"]`,
+                      );
+                      if (el instanceof HTMLElement) el.focus();
+                    }}
                     className="fy-boardcard"
                     style={{
                       opacity: excluded.has(sceneId) ? 0.5 : 1,
