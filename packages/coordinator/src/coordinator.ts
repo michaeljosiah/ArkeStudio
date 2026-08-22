@@ -695,7 +695,6 @@ export class Coordinator {
     const resolve = this.opts.authoring?.skillFor;
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
-    if (settings) this.researchWeb = settings.research.web === true;
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family);
   }
@@ -724,7 +723,7 @@ export class Coordinator {
   private readonly secrets: SecretRegistry;
   private readonly appLog: AppLog | null;
   /** Whether the studio may read a page online; mirrored from settings (2026-08-22). */
-  private researchWeb = false;
+
   private readonly credentials: CredentialStore | null;
   private readonly providerService: ProviderService;
   /** One per provider whose credential is external (issue #137); empty when none are wired. */
@@ -1437,6 +1436,7 @@ export class Coordinator {
       ...(settings ? { presets: settings.presets } : {}),
       ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
+      ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
@@ -3056,6 +3056,13 @@ export class Coordinator {
           routing: settings.routing,
           faults: routingFaults(settings, this.opts.manifest),
         });
+        return;
+      }
+      case "set-research-web": {
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setResearchWeb(msg.enabled);
+        this.readModel.seedAppConfig({ research: settings.research });
+        this.transport.broadcastSnapshot();
         return;
       }
       case "set-model-enabled": {
@@ -7443,7 +7450,18 @@ export class Coordinator {
       },
       // Off unless the person turned it on. Read at call time, not at construction, so switching
       // it off takes effect on the next tool call rather than the next restart.
-      researchAllowed: () => this.researchWeb,
+      /*
+       * Asked at the moment the tool runs, not mirrored from somewhere else (driven 2026-08-22).
+       *
+       * This used to read a field that was only ever assigned inside `skillForPurpose` — a method
+       * the World Chat path never calls — so the answer was `false` for the whole life of the
+       * process no matter what the settings said. Turning research on and asking again changed
+       * nothing, and the refusal named a setting that was already on.
+       */
+      researchAllowed: async () => {
+        const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
+        return settings?.research.web === true;
+      },
     });
 
     const runner = new WorldChatRunner({

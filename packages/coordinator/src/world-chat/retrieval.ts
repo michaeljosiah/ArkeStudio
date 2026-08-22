@@ -100,7 +100,7 @@ export interface RetrievalDeps {
    * world off your disk, and going online is a different promise from the one it makes by
    * default, so silence is the safe answer rather than the permissive one.
    */
-  researchAllowed?: () => boolean;
+  researchAllowed?: () => boolean | Promise<boolean>;
   /** Injectable so a test can serve a page without a network. */
   fetch?: typeof globalThis.fetch;
   now?: () => string;
@@ -312,7 +312,7 @@ export class WorldChatRetrieval {
          * The receipt is the record that the studio went out at all, and the reply's own
          * activity line says so while it happens. Nothing is fetched that was not named.
          */
-        if (this.deps.researchAllowed?.() !== true) {
+        if ((await this.deps.researchAllowed?.()) !== true) {
           return {
             result: {
               refused: true,

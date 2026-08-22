@@ -1653,6 +1653,11 @@ export function setRoutingDefault(capability: Capability, modelId: string): void
 }
 
 /** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */
+/** Let the Studio read a page online when a conversation asks it to, or stop it. */
+export function setResearchWeb(enabled: boolean): void {
+  send({ kind: "set-research-web", enabled });
+}
+
 export function setModelEnabled(modelId: string, enabled: boolean): void {
   send({ kind: "set-model-enabled", modelId, enabled });
 }

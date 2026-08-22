@@ -24,6 +24,7 @@ import {
   attachHostFiles,
   attachHostText,
   archiveWorld,
+  setResearchWeb,
   createSheetFromSentence,
   createWorld,
   deleteJob,
@@ -2418,6 +2419,7 @@ export function SettingsHarnessScreen() {
   const { state } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const harness = state?.app.harness ?? null;
+  const researchOn = state?.app.research.web === true;
 
   useEffect(() => {
     // Detection costs a subprocess, so it happens when the screen is opened rather than at boot.
@@ -2455,6 +2457,28 @@ export function SettingsHarnessScreen() {
         </div>
         <div className="fy-rt__pane">
           <HarnessPane harness={chosen} engine={engine} detected={harness !== null} claudePath={harness?.claudePath ?? null} />
+          {/*
+            The one thing the Studio does that leaves this machine, so it lives with the other
+            question about what the agent may do rather than behind a provider key. Off until
+            asked: a conversation that reads the web has fetched a page on the author's line, and
+            that is a decision, not a default.
+          */}
+          <div className="fy-rt__research">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={researchOn}
+              aria-label="Read pages online"
+              className={cx("fy-prov__switch", researchOn && "is-on")}
+              onClick={() => setResearchWeb(!researchOn)}
+            >
+              <span />
+            </button>
+            <div>
+              <strong>Read pages online</strong>
+              <p>{researchOn ? "A conversation can open a page you name." : "Nothing is read online."}</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

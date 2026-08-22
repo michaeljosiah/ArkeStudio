@@ -760,6 +760,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       enabled: z.boolean(),
     })
     .strict(),
+  /** Whether the Studio may read a page online when a conversation asks it to (SPEC-022). */
+  z
+    .object({
+      kind: z.literal("set-research-web"),
+      enabled: z.boolean(),
+    })
+    .strict(),
   /**
    * Configure one agent: which model runs it, and what it is for. Clearing a field returns
    * that half to the shipped default. The confinement rules are not addressable here.

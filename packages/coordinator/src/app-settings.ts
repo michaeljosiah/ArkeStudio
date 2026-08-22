@@ -67,6 +67,14 @@ export class AppSettingsFile {
    * pointing at it becomes a named fault instead, because choosing the replacement is a decision
    * and re-routing on someone's behalf makes it silently.
    */
+  /** Whether a conversation may read a page online. Off until the author says otherwise. */
+  async setResearchWeb(enabled: boolean): Promise<AppSettings> {
+    const current = await this.load();
+    const next: AppSettings = { ...current, research: { web: enabled } };
+    await this.persist(next);
+    return next;
+  }
+
   async setModelEnabled(modelId: string, enabled: boolean): Promise<AppSettings> {
     const current = await this.load();
     const disabled = new Set(current.models.disabled);
