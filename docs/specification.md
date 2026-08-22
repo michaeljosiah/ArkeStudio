@@ -1735,6 +1735,10 @@ selection, captions).
 Rendering is local via bundled ffmpeg. Gaps export as black slates carrying their shot labels,
 so an incomplete cut still produces a reviewable artefact.
 
+A page-based production exports a **document** rather than a render — fixed-layout PDF and EPUB
+from the derived book, with unfinished pages as labelled placeholders so pagination survives and
+an incomplete book still proofs. Same rule, different medium; SPEC-026 owns it.
+
 Worlds themselves export as readable files — which for this architecture means copying the
 folder. *"Your canon is a readable format, not a proprietary lock."*
 
@@ -1899,6 +1903,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-023 | The narrative domain — medium, format, Series, Season, Episode, Scene script | 002, 004, 012 · amends 012 |
 | SPEC-024 | Durable scene dispatch plans | 009, 012, 013, 019 |
 | SPEC-025 | The host ports — identity, entitlement, content policy, release targets | 004, 005, 008, 009, 012, 013, 014, 024 |
+| SPEC-026 | The page medium — panels, pages, the derived book, and document export | 004, 010, 011, 012, 013, 017, 023 · amends 012, 023 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.
