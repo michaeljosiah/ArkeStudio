@@ -11,6 +11,7 @@ import {
   type ReviewDecision,
   type Selections,
   type CutFile,
+  type ClipAudioMode,
   type CutOverlay,
   type ShotSelection,
 } from "@arke-studio/contracts";
@@ -264,17 +265,17 @@ async function editOverlays(
   return next;
 }
 
-/** Lay an artifact over the picture for a window (82a). Returns the overlay as filed. */
+/** Place an artifact on a lane for a window (82a, lanes). Returns the clip as filed. */
 export async function placeOverlay(
   store: WorldStore,
   productionId: string,
-  input: { artifactId: string; startSec: number; endSec: number },
+  input: { artifactId: string; startSec: number; endSec: number; lane?: number; audio?: ClipAudioMode },
 ): Promise<CutOverlay> {
   if (input.endSec <= input.startSec) {
-    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+    throw new Error(`a clip ending at ${input.endSec}s cannot start at ${input.startSec}s`);
   }
-  // An overlay cites an artifact; citing one the world does not have would file a placement
-  // pointing at nothing, which the cut would then have to render as an absence it cannot explain.
+  // A clip cites an artifact; citing one the world does not have would file a placement pointing
+  // at nothing, which the cut would then have to render as an absence it cannot explain.
   const known = store.getBundle().artifacts.some((a) => a.id === input.artifactId);
   if (!known) throw new Error(`artifact ${input.artifactId} is not in this world`);
 
@@ -283,28 +284,134 @@ export async function placeOverlay(
     artifactId: input.artifactId,
     startSec: input.startSec,
     endSec: input.endSec,
+    ...(input.lane !== undefined ? { lane: input.lane } : {}),
+    ...(input.audio !== undefined ? { audio: input.audio } : {}),
   });
   await editOverlays(store, productionId, (current) => [...current, overlay]);
   return overlay;
 }
 
-/** Move one that is already placed — the same act as placing it, against the same bounds. */
+/**
+ * Move one that is already placed — the same act as placing it, against the same bounds.
+ *
+ * The lane travels with the move because dragging a clip up a lane and dragging it along the
+ * ruler are one gesture to the person doing it; omitting it leaves the clip where it was, so a
+ * pure trim does not have to restate which lane it is on.
+ */
 export async function moveOverlay(
   store: WorldStore,
   productionId: string,
-  input: { overlayId: string; startSec: number; endSec: number },
+  input: { overlayId: string; startSec: number; endSec: number; lane?: number },
 ): Promise<CutOverlay> {
   if (input.endSec <= input.startSec) {
-    throw new Error(`an overlay ending at ${input.endSec}s cannot start at ${input.startSec}s`);
+    throw new Error(`a clip ending at ${input.endSec}s cannot start at ${input.startSec}s`);
   }
   let moved: CutOverlay | null = null;
   await editOverlays(store, productionId, (current) => {
     const found = current.find((o) => o.id === input.overlayId);
-    if (found === undefined) throw new Error(`overlay ${input.overlayId} is not on this cut`);
-    moved = { ...found, startSec: input.startSec, endSec: input.endSec };
+    if (found === undefined) throw new Error(`clip ${input.overlayId} is not on this cut`);
+    moved = CutOverlaySchema.parse({
+      ...found,
+      startSec: input.startSec,
+      endSec: input.endSec,
+      ...(input.lane !== undefined ? { lane: input.lane } : {}),
+    });
     return current.map((o) => (o.id === input.overlayId ? moved! : o));
   });
   return moved!;
+}
+
+/**
+ * Split a clip's sound onto the lane below it (lanes).
+ *
+ * Two clips over one file, which is what every editor means by the word: the picture stays
+ * exactly where it was and stops carrying sound, and the sound becomes its own clip on the next
+ * lane down, over the same window. Nothing is copied and nothing is transcoded — both halves
+ * still cite the one artifact, and undoing the split is deleting one of them.
+ *
+ * It refuses rather than producing a half that can never sound. A still has no audio track to
+ * separate, and a clip already split is not split again — the second call would file a third
+ * placement over the same seconds and the mix would count the same sound twice.
+ */
+export async function splitOverlayAudio(
+  store: WorldStore,
+  productionId: string,
+  overlayId: string,
+): Promise<CutOverlay> {
+  const bundle = store.getBundle();
+  let sound: CutOverlay | null = null;
+  await editOverlays(store, productionId, (current) => {
+    const found = current.find((o) => o.id === overlayId);
+    if (found === undefined) throw new Error(`clip ${overlayId} is not on this cut`);
+    if (found.audio !== "keep") {
+      throw new Error(`clip ${overlayId} has already been split`);
+    }
+    const artifact = bundle.artifacts.find((a) => a.id === found.artifactId);
+    if (artifact === undefined) throw new Error(`artifact ${found.artifactId} is not in this world`);
+    if (artifact.kind !== "video") {
+      throw new Error(`a ${artifact.kind} has no sound to split from its picture`);
+    }
+    /*
+     * Being a video is not evidence of a soundtrack, and this function's promise is that it never
+     * produces a half that can never sound. The exporter takes a video's audio only when the
+     * measurement says it has some, so splitting one measured silent would mute the picture for
+     * good and file a sound half every encode then discards.
+     *
+     * The two silences are different facts and say so: measured-and-empty is settled, while
+     * not-yet-measured is the window between filing a video and its probe landing, and telling
+     * somebody to try again is only useful if it is true.
+     */
+    if (artifact.mediaInfo === undefined) {
+      throw new Error(`${artifact.file} has not been measured yet — its sound cannot be split until it has`);
+    }
+    if (!artifact.mediaInfo.hasAudio) {
+      throw new Error(`${artifact.file} was measured as silent, so there is no sound to split off`);
+    }
+    // The lane below, floored at zero: splitting the bottom clip leaves both halves sharing a
+    // lane, which mixes and composites exactly the same and is one fewer surprise than refusing.
+    const lane = Math.max(0, (found.lane ?? 0) - 1);
+    sound = CutOverlaySchema.parse({ ...found, id: newId("ov"), lane, audio: "only" });
+    return [...current.map((o) => (o.id === overlayId ? { ...o, audio: "mute" as const } : o)), sound];
+  });
+  return sound!;
+}
+
+/**
+ * Put a split back together (lanes).
+ *
+ * Splitting is otherwise a one-way door: `audio` has no other writer, so a picture muted by a
+ * split stays muted for the life of the clip and the only escape is deleting it and dropping the
+ * file again, losing the window and the lane it was placed in.
+ *
+ * Rejoining is the exact inverse and nothing more — the picture carries its own sound again, and
+ * the sound half the split created is removed. Removing it is what keeps the mix honest: leaving
+ * both would count the same sound twice, once from the picture and once from its twin.
+ */
+export async function rejoinOverlayAudio(store: WorldStore, productionId: string, overlayId: string): Promise<CutOverlay> {
+  let rejoined: CutOverlay | null = null;
+  await editOverlays(store, productionId, (current) => {
+    const found = current.find((o) => o.id === overlayId);
+    if (found === undefined) throw new Error(`clip ${overlayId} is not on this cut`);
+    if (found.audio !== "mute") throw new Error(`clip ${overlayId} is not a split picture`);
+    rejoined = { ...found, audio: "keep" };
+    /*
+     * The twin is the sound half over the same file and the same window. Matched rather than
+     * recorded, because an id pointing at a clip somebody may have deleted or dragged elsewhere
+     * is a reference that goes stale silently; a window that no longer matches is a clip the
+     * person has since made their own, and taking it away would be taking their edit.
+     */
+    return current.filter(
+      (o) =>
+        !(
+          o.id !== overlayId &&
+          o.audio === "only" &&
+          o.artifactId === found.artifactId &&
+          o.startSec === found.startSec &&
+          o.endSec === found.endSec
+        ),
+    ).map((o) => (o.id === overlayId ? rejoined! : o));
+  });
+  return rejoined!;
 }
 
 /** Remove the placement. The artifact is untouched: it was only ever cited (82a). */

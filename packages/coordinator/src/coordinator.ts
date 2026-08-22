@@ -19,6 +19,7 @@ import {
   type HarnessAdapter,
   type HealthComponent,
   buildExportPlan,
+  exportAudioClips,
   exportOverlays,
   deriveEpisodeCut,
   episodeExportRefusals,
@@ -146,7 +147,9 @@ import {
   moveOverlay,
   placeOverlay,
   rejectTake,
+  rejoinOverlayAudio,
   removeOverlay,
+  splitOverlayAudio,
   saveAudioTracks,
   setTrim,
 } from "./takes/review.js";
@@ -4120,6 +4123,8 @@ export class Coordinator {
        */
       case "place-overlay":
       case "move-overlay":
+      case "split-overlay-audio":
+      case "rejoin-overlay-audio":
       case "remove-overlay": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -4131,13 +4136,19 @@ export class Coordinator {
               artifactId: msg.artifactId,
               startSec: msg.startSec,
               endSec: msg.endSec,
+              ...(msg.lane !== undefined ? { lane: msg.lane } : {}),
             });
           } else if (msg.kind === "move-overlay") {
             await moveOverlay(store, msg.productionId, {
               overlayId: msg.overlayId,
               startSec: msg.startSec,
               endSec: msg.endSec,
+              ...(msg.lane !== undefined ? { lane: msg.lane } : {}),
             });
+          } else if (msg.kind === "split-overlay-audio") {
+            await splitOverlayAudio(store, msg.productionId, msg.overlayId);
+          } else if (msg.kind === "rejoin-overlay-audio") {
+            await rejoinOverlayAudio(store, msg.productionId, msg.overlayId);
           } else {
             await removeOverlay(store, msg.productionId, msg.overlayId);
           }
@@ -4348,11 +4359,16 @@ export class Coordinator {
             );
             return;
           }
-          // Overlays reach the export or they are decoration (82a binding 4). Resolved against
-          // the world's artifacts, so one citing something filed since — or something that is not
-          // picture at all — is dropped rather than rendered as an absence.
-          const overlays = exportOverlays(production.cut.overlays, store.getBundle().artifacts);
-          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays);
+          /*
+           * Placed clips reach the export or they are decoration (82a binding 4). Both halves are
+           * resolved against the world's artifacts, so one citing something filed since is
+           * dropped rather than rendered as an absence — and picture and sound are resolved
+           * separately because a lane holds either, and one clip can contribute both.
+           */
+          const artifacts = store.getBundle().artifacts;
+          const overlays = exportOverlays(production.cut.overlays, artifacts);
+          const audio = exportAudioClips(production.cut.overlays, artifacts);
+          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
           buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
         }
         const stamp = new Date()
