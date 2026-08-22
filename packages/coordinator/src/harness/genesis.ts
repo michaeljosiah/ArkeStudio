@@ -60,7 +60,8 @@ contents as your whole message — JSON only, no prose, no code fence. Same shap
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
  "characters": [{"name": "...", "line": "one line on who they are"}],
  "locations": [{"name": "...", "line": "one line on the place"}],
- "threads": ["an open question worth pulling later"]}
+ "threads": ["an open question worth pulling later"],
+ "bible": "a few paragraphs of prose: the through-line, the shape, what it is about"}
 
 Omit anything not settled. If nothing has been settled yet, return {}.`;
 
@@ -75,10 +76,19 @@ exactly this shape, omitting fields you have not settled yet:
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
  "characters": [{"name": "...", "line": "one line on who they are"}],
  "locations": [{"name": "...", "line": "one line on the place"}],
- "threads": ["an open question worth pulling later"]}
+ "threads": ["an open question worth pulling later"],
+ "bible": "a few paragraphs of prose: the through-line, the shape, what it is about"}
 
 Everything in draft.json is proposed, not settled — keep it small and true to what was
 actually discussed.
+
+"bible" is the exception to keeping it small, and the one field written to be read rather than
+looked up. It becomes the world's bible: the document the author and everyone working on the
+world open first. Write it once the shape of the story is clear — the argument underneath it,
+the arc from where it opens to where it ends, the turn it is built around, who it is for. Use
+the author's own framing and their words where they said something well. Prose, in Markdown,
+with headings if it helps. Do not restate the cast and the places; they have their own files.
+Leave it out entirely while the conversation is still finding what the story is.
 
 The author says:`;
 

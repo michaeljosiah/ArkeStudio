@@ -1097,6 +1097,8 @@ export function createWorld(input: {
   genre?: string;
   /** The look chosen at genesis, recorded as world look v1. Absent when it was deferred. */
   artDirection?: string;
+  /** The through-line the conversation wrote, born as bible v1. Absent when it wrote none. */
+  bible?: string;
   /** Begun from a conversation: its attachments are filed into the world as it opens. */
   genesisId?: string;
 }): void {

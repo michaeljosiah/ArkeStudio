@@ -49,6 +49,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       artDirection: z.string().trim().min(1).max(2000).optional(),
       /**
+       * The bible the founding conversation wrote, born as v1 with the world (SPEC-022).
+       *
+       * Absent means no bible, which is the ordinary state of a world begun by typing a name:
+       * there was no conversation, so there is nothing of the author's to keep. Editable the
+       * moment the world opens, like every later version — this is a starting point, not a
+       * decision, and it is the only genesis field that is never inferred.
+       */
+      bible: z.string().trim().min(1).max(8000).optional(),
+      /**
        * Begun from a genesis conversation: whatever was attached to it waits in that sandbox
        * and is filed into the world as it opens. Without this the files would be swept with
        * the sandbox, and handing something over would have meant nothing.

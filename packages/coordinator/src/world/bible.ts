@@ -63,6 +63,18 @@ async function liveBible(dir: string): Promise<{ raw: string | null; hash: strin
   }
 }
 
+/**
+ * The bible a world is born with (2026-08-22).
+ *
+ * A world door that produced a cast, places and canon left the one document that is the
+ * author's own — the through-line, in their words — empty, so the thinking that made the world
+ * lived only in a conversation nobody reads twice. Genesis writes it now, and it is v1 like any
+ * other first version: editable immediately, no accept step, a restore away.
+ */
+export function initialBible(text: string, at: string): string {
+  return compose(null, text.trim(), at);
+}
+
 function compose(live: string | null, text: string, at: string): string {
   const doc = live !== null ? tryParse(live) : MarkdownFile.create({ version: 1, created: at.slice(0, 10) }, "");
   doc.setBody(text);

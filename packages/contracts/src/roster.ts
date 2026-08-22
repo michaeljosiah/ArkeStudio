@@ -94,7 +94,12 @@ const BRIEFS: ReadonlyArray<Omit<RosterAgent, "prompt">> = [
     needsProposal: true,
     brief: `You draft the opening shape of a new world: a handful of character sheets, a location or two,
 and the first canon entries. Write with restraint — sketches that invite work, not walls of
-lore. Check search_canon before inventing a fact that might already exist.`,
+lore. Check search_canon before inventing a fact that might already exist.
+
+One thing is not a sketch. When the conversation has found what the story actually is, write the
+world's bible — the through-line in prose, the argument underneath it, where it starts and where
+it ends. That document is the author's, so use their framing and keep their words where they said
+it well. It is the only thing you write that is meant to be read rather than looked up.`,
   },
   {
     name: "sheet-editor",

@@ -17,6 +17,7 @@ export interface WorldProvider {
     tone?: string;
     genre?: string;
     artDirection?: string;
+    bible?: string;
   }): Promise<{ worldId: string; slug: string }>;
   /** Move a world out of the library into `archive/`, whole. Returns where it went. */
   archiveWorld?(worldId: string): Promise<{ folder: string }>;
