@@ -658,9 +658,22 @@ export class ProposalManager {
       for (const target of proposal.targets) {
         const live = await this.readLive(target.path);
         const found = live === null ? null : sha256(live);
-        if (target.baseHash === null ? live !== null : found !== target.baseHash) {
-          stalePaths.push(target.path);
-        }
+        if (target.baseHash === null ? live === null : found === target.baseHash) continue;
+        /*
+         * The world moved — but a proposal's own landing moves it the same way, and this check
+         * cannot tell the difference from the base alone (codex, 2026-08-22). A created target
+         * records `baseHash: null` and, once accepted, has a live file; an amended one has a live
+         * hash that is no longer its pre-commit base. Both read as stale, which is why the eight
+         * sheets from a world door whose commits landed but whose directories survived could not
+         * be cleared by anything: stale on accept, and the no-op retirement below unreachable.
+         *
+         * So: only what the target proposes settles it. Identical bytes mean this proposal is
+         * what the world already says, and it falls through to be retired. Anything else is a
+         * genuine collision and is still refused, with the path named.
+         */
+        const proposed = await this.readProposalFile(proposalId, target.path);
+        if (proposed !== null && live === proposed) continue;
+        stalePaths.push(target.path);
       }
       if (stalePaths.length > 0) return { status: "stale", stalePaths };
 
@@ -687,6 +700,26 @@ export class ProposalManager {
         //
         // Retiring rather than refusing is safe precisely because nothing would change: the
         // world already says what this proposal says. What is thrown away is the offer, not work.
+        /*
+         * Written to the world's own log before the directory goes, because the tombstone dies
+         * with the directory and recovery reads the log (codex, 2026-08-22). A process that
+         * stopped between retiring and the coordinator's `proposal.resolved` would otherwise
+         * leave a leftover with no proposal, no account and no journal line — which
+         * `recoverWrapUps` reads as an intent that created nothing, and answers by returning the
+         * propositions to live. They would then be proposed a second time over a world that
+         * already holds them, which is a duplicate entry produced by a cleanup.
+         */
+        await appendChanges(join(this.store.dir, "changes.jsonl"), [
+          {
+            ts: this.store.now(),
+            entity: "proposal",
+            proposalId,
+            settled: "already-live",
+            source: proposal.source,
+          },
+        ]).catch(() => {
+          /* the retirement still stands; recovery is the only thing that loses its evidence */
+        });
         await this.retire(proposalId, null);
         return { status: "no-op" };
       }

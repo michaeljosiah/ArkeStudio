@@ -191,3 +191,61 @@ describe("what counts as having landed", () => {
     );
   });
 });
+
+/**
+ * The legacy card the whole fix is for (codex, 2026-08-22).
+ *
+ * A proposal that created a file records `baseHash: null`; once its commit lands, that file
+ * exists — and the staleness check read exactly that as the world having moved. So the eight
+ * sheets whose commits landed but whose directories survived answered `stale` on every accept,
+ * and the no-op retirement below could never be reached. Staleness now asks what the target
+ * proposes before it decides: identical bytes are this proposal's own landing, not a collision.
+ */
+describe("a proposal whose own commit is what moved the world", () => {
+  it("retires rather than answering stale forever", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    // The busy handle: the accept commits, and the directory does not go.
+    await mkdir(join(dir, ".proposals", staged.id, "held-open"), { recursive: true });
+    await writeFile(join(dir, ".proposals", staged.id, "held-open", "session.lock"), "held", "utf8");
+    assert.equal((await gate.accept(staged.id)).status, "accepted");
+
+    // Restaged from the bytes that landed — the same card, offered again.
+    const again = await gate.stage({
+      kind: "new-sheet",
+      summary: "New character: Ife",
+      source: "chat:studio",
+      targets: [{ path: "characters/ife.md", content: await readFile(join(dir, "characters", "ife.md"), "utf8") }],
+    });
+    const outcome = await gate.accept(again.id);
+    assert.equal(outcome.status, "no-op", `stale would leave it on the screen: ${outcome.status}`);
+    assert.ok(!(await gate.listOpen()).some((p) => p.id === again.id), "and it is gone");
+  });
+
+  it("still refuses when the world moved to something else", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    await writeFile(
+      join(dir, "characters", "ife.md"),
+      "---\nid: ife\ntype: character\nname: Ife\nstatus: sketch\nversion: 1\ncreated: 2026-08-22\nupdated: 2026-08-22\ncanonRules: []\nlinks: []\n---\n\n## Essence\n\nSomebody else wrote this.\n",
+      "utf8",
+    );
+    const outcome = await gate.accept(staged.id);
+    assert.equal(outcome.status, "stale", "a real collision is still a real collision");
+  });
+
+  it("leaves the world's own log able to say it settled", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    assert.equal((await gate.accept(staged.id)).status, "accepted");
+    const again = await stageOne(gate);
+    assert.equal((await gate.accept(again.id)).status, "no-op");
+
+    // Recovery reads changes.jsonl, not the proposal directory — which is gone by now.
+    const journal = await readFile(join(dir, "changes.jsonl"), "utf8");
+    assert.ok(
+      journal.split("\n").filter(Boolean).some((l) => (JSON.parse(l) as { proposalId?: string }).proposalId === again.id),
+      "a restart can tell this apart from an intent that created nothing",
+    );
+  });
+});
