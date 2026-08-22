@@ -72,13 +72,29 @@ async function liveBible(dir: string): Promise<{ raw: string | null; hash: strin
  * other first version: editable immediately, no accept step, a restore away.
  */
 export function initialBible(text: string, at: string): string {
-  return compose(null, text.trim(), at);
+  // `updated` too, not only `created`. The committer stamps it on every later write, so a bible
+  // that skipped the committer read back as unmodified since the epoch — a world made today
+  // showing a bible last touched in 1970.
+  const doc = MarkdownFile.create({ version: 1, created: at.slice(0, 10), updated: at.slice(0, 10) }, "");
+  doc.setBody(text.trim());
+  return doc.serialize();
 }
 
 function compose(live: string | null, text: string, at: string): string {
   const doc = live !== null ? tryParse(live) : MarkdownFile.create({ version: 1, created: at.slice(0, 10) }, "");
   doc.setBody(text);
   return doc.serialize();
+}
+
+/**
+ * The version an edit moved off, where 0 means the bible did not exist.
+ *
+ * `readBible` reports v1 for an absent bible so that every reader has a number to work with, but
+ * a *record* of an edit cannot use that one: "1 → 1" says nothing moved. `present` is the only
+ * thing that separates the two, so it is what this reads.
+ */
+function baseOf(current: WorldBible): number {
+  return current.present ? current.version : 0;
 }
 
 function tryParse(raw: string): MarkdownFile {
@@ -120,9 +136,10 @@ export async function saveBible(
       },
     ],
   });
+  const from = baseOf(current);
   return {
-    fromVersion: current.version,
-    toVersion: result.versions[BIBLE_PATH] ?? current.version + 1,
+    fromVersion: from,
+    toVersion: result.versions[BIBLE_PATH] ?? from + 1,
     headings: ["the whole bible"],
     at,
   };
@@ -166,9 +183,10 @@ export async function applyTurnBibleEdits(
       },
     ],
   });
+  const from = baseOf(current);
   return {
-    fromVersion: current.version,
-    toVersion: result.versions[BIBLE_PATH] ?? current.version + 1,
+    fromVersion: from,
+    toVersion: result.versions[BIBLE_PATH] ?? from + 1,
     headings: applied.headings,
     at,
   };
@@ -176,6 +194,13 @@ export async function applyTurnBibleEdits(
 
 /** Undo: put v<n> back as a new version, leaving everything between it and now in history (R-20). */
 export async function restoreBible(store: WorldStore, version: number, source: string): Promise<number> {
+  // Undoing the edit that started the bible. There is no v0 snapshot to put back — there was no
+  // document — so what goes back is the empty one. Forward, like every other restore: the text
+  // that was written stays at v1 in history, so undoing the undo is the ordinary restore of v1.
+  if (version === 0) {
+    const record = await saveBible(store, "", { source });
+    return record.toVersion;
+  }
   const result = await store.restoreVersion(BIBLE_PATH, version, source);
   return result.versions[BIBLE_PATH] ?? version;
 }

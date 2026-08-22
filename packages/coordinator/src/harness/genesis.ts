@@ -333,7 +333,11 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.genre !== undefined ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
-    draft.threads.length > 0
+    draft.threads.length > 0 ||
+    // A draft that is only a bible is the shape a long conversation about what the story means
+    // arrives in, before anyone has named a single character. Left off this list, the recovery
+    // path threw away the one field that took the whole conversation to write.
+    draft.bible !== undefined
   );
 }
 

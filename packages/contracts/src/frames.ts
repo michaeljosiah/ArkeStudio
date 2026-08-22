@@ -1394,7 +1394,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("restore-bible"),
       worldId: UlidSchema,
-      version: z.number().int().min(1),
+      /**
+       * 0 undoes the edit that started the bible, and empties it (2026-08-22).
+       *
+       * The undo card sends back the `fromVersion` it was given, so a bound of 1 here made the
+       * button on the one edit that starts a bible unparseable — dropped at the wire, no undo,
+       * no refusal, nothing on screen. Widened rather than special-cased on the client: the
+       * card's contract is "send back what you were shown".
+       */
+      version: z.number().int().min(0),
     })
     .strict(),
   /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
