@@ -2027,7 +2027,12 @@ export class Coordinator {
             msg.confirmRipples === undefined ? {} : { confirmRipples: msg.confirmRipples },
           );
           const at = new Date().toISOString();
-          if (outcome.status === "accepted") {
+          // `no-op` retires the proposal too (gate/proposals.ts): every target already reads as
+          // proposed, so there is nothing to decide. It has to settle here for the same reason —
+          // a conversation whose propositions stayed `proposed` behind a proposal that no longer
+          // exists cannot be accepted, discarded, sent back, or even deleted. Recorded as
+          // accepted because that is what happened to the words: the world says them.
+          if (outcome.status === "accepted" || outcome.status === "no-op") {
             this.authoring?.release(msg.proposalId);
             const store = this.opts.provider.openStore?.();
             if (store && acceptedFrom) {
@@ -2047,35 +2052,33 @@ export class Coordinator {
               worldId: msg.worldId,
               proposalId: msg.proposalId,
               reason:
+                // `no-op` is not here: it settles above, because the world already says what the
+                // proposal says and there is nothing left to block on.
                 outcome.status === "needs-reconfirm"
                   ? "needs-reconfirm"
-                  : outcome.status === "no-op"
-                    ? "no-op"
-                    : outcome.status === "stale"
-                      ? "stale"
-                      : outcome.status === "pending-review"
-                        ? "pending-review"
-                        : outcome.status === "unresolved-conflicts"
-                          ? "unresolved-conflicts"
-                          : outcome.status === "invalid"
-                            ? "invalid"
-                            : outcome.status === "draft-unresolved"
-                              ? "draft-unresolved"
-                              : "target-retired",
+                  : outcome.status === "stale"
+                    ? "stale"
+                    : outcome.status === "pending-review"
+                      ? "pending-review"
+                      : outcome.status === "unresolved-conflicts"
+                        ? "unresolved-conflicts"
+                        : outcome.status === "invalid"
+                          ? "invalid"
+                          : outcome.status === "draft-unresolved"
+                            ? "draft-unresolved"
+                            : "target-retired",
               detail:
                 outcome.status === "stale"
                   ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
-                  : outcome.status === "no-op"
-                    ? "the proposal is identical to the live world — nothing to commit"
-                    : outcome.status === "unresolved-conflicts"
-                      ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
-                      : outcome.status === "target-retired"
-                        ? `retired: ${outcome.paths.join(", ")}`
-                        : outcome.status === "invalid"
-                          ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
-                          : outcome.status === "draft-unresolved"
-                            ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
-                            : undefined,
+                  : outcome.status === "unresolved-conflicts"
+                    ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
+                    : outcome.status === "target-retired"
+                      ? `retired: ${outcome.paths.join(", ")}`
+                      : outcome.status === "invalid"
+                        ? outcome.problems.map((p) => `${p.path}: ${p.message}`).join("; ")
+                        : outcome.status === "draft-unresolved"
+                          ? "an earlier edit to this proposal did not finish, and what its files now say is unknown"
+                          : undefined,
               ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
             });
           }
