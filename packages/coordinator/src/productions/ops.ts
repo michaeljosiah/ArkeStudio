@@ -9,6 +9,7 @@ import {
   planScene,
   pickableSheets,
   productionShape,
+  sceneDeleteBlockers,
   resolveMedium,
   SceneSchema,
   ulid,
@@ -676,6 +677,73 @@ export async function saveScene(
     source: "editor",
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
   });
+}
+
+/**
+ * A deletion that would take something with it, refused in the words of what stands in the way.
+ *
+ * The same discipline as the interactive export gate: the reasons are the answer, not a code —
+ * a person told "cannot delete" learns nothing, and a person told "shot 3 has an accepted take"
+ * knows exactly what to do next.
+ */
+export class SceneDeleteRefused extends Error {
+  constructor(readonly reasons: string[]) {
+    super(reasons.join(" · "));
+    this.name = "SceneDeleteRefused";
+  }
+}
+
+/**
+ * Delete a scene, and everything that was only bookkeeping about it (one commit).
+ *
+ * The file goes, the scene leaves every episode that listed it — a membership naming a scene
+ * that does not exist is the exact defect round 3 found on the other side of this — and the
+ * selections its shots carried go with it. History keeps the file, so the deletion is a version
+ * away from being undone like any other write.
+ */
+export async function deleteScene(
+  store: WorldStore,
+  input: { productionId: string; sceneFile: string },
+): Promise<void> {
+  const stem = sceneStemOrThrow(input.sceneFile);
+  const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
+  if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+  const path = `productions/${input.productionId}/scenes/${stem}.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const scene = SceneSchema.parse(JSON.parse(raw));
+
+  const blockers = sceneDeleteBlockers(production, scene);
+  if (blockers.length > 0) throw new SceneDeleteRefused(blockers);
+
+  const files: CommitFileInput[] = [{ path, action: "delete", baseHash: sha256(raw) }];
+
+  for (const episode of production.episodes) {
+    if (!episode.scenes.includes(scene.id)) continue;
+    const episodeStem = production.episodeFiles[episode.id];
+    if (episodeStem === undefined) continue;
+    const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
+    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
+    const doc = JsonFile.parse(live);
+    doc.set({ scenes: episode.scenes.filter((id) => id !== scene.id) });
+    files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
+  }
+
+  const shotIds = new Set(scene.shots.map((shot) => shot.id));
+  const remaining = Object.fromEntries(
+    Object.entries(production.selections).filter(([shotId]) => !shotIds.has(shotId)),
+  );
+  if (Object.keys(remaining).length !== Object.keys(production.selections).length) {
+    const selectionsPath = `productions/${input.productionId}/selections.json`;
+    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(selectionsPath))), "utf8");
+    files.push({
+      path: selectionsPath,
+      action: "replace",
+      content: JSON.stringify(remaining, null, 2) + "\n",
+      baseHash: sha256(live),
+    });
+  }
+
+  await store.commit({ kind: "scene-delete", source: "editor", files });
 }
 
 /** Undo (turn 97): v<n> back as a new version; everything between it and now stays in history. */

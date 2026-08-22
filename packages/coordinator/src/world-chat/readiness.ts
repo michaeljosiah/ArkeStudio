@@ -56,6 +56,7 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
     | { kind: "production"; productionId: string }
     | { kind: "episode"; productionId: string; episodeId?: string }
     | { kind: "scene"; productionId: string; sceneId: string }
+    | { kind: "shot"; productionId: string; sceneId: string; shotId?: string }
     | { kind: "series"; seriesId: string }
     | undefined;
   if (!target) return true;
@@ -79,6 +80,17 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
   if (target.kind === "scene") {
     const production = bundle.productions.find((p) => p.meta.id === target.productionId);
     return production !== undefined && production.scenes.some((s) => s.id === target.sceneId);
+  }
+  /*
+   * A shot's scene must exist, and a shot it names must be in it. `shotId` absent is a shot
+   * this proposition would add, so only the scene has to be there — the same shape as an
+   * episode target with no episodeId.
+   */
+  if (target.kind === "shot") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    const scene = production?.scenes.find((s) => s.id === target.sceneId);
+    if (!scene) return false;
+    return target.shotId === undefined || scene.shots.some((shot) => shot.id === target.shotId);
   }
   if (target.kind === "series") {
     return bundle.series.some((s) => s.id === target.seriesId);

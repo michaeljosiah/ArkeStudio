@@ -211,3 +211,38 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     assert.ok(later.includes("Open on the last frame of shot 12"));
   });
 });
+
+describe("removing a scene (round 3's other gap)", () => {
+  it("offers Delete scene, and asks once before it goes", () => {
+    const html = render(FIXTURE_STATE, SCENE_PATH, <SceneDetailScreen />, "/w/:worldId/p/:prodId/scenes/:sceneId");
+    assert.ok(html.includes('data-testid="scene-delete"'), "the control sits beside the history");
+  });
+
+  it("says what stands in the way instead of offering a button that would refuse", () => {
+    // The fixture's shot 12 has an accepted take, which is money already spent. The coordinator
+    // refuses on exactly this ground; the screen says so before anything is pressed.
+    const html = render(FIXTURE_STATE, SCENE_PATH, <SceneDetailScreen />, "/w/:worldId/p/:prodId/scenes/:sceneId");
+    assert.match(html, /cannot delete/, "the reason is on the screen");
+    assert.match(html, /accepted take/, "and it names what to undo first");
+    assert.doesNotMatch(html, />Delete scene</, "no button that only exists to say no");
+  });
+
+  it("a scene nothing depends on offers the delete plainly", () => {
+    const free = withScene((s) => ({
+      shots: (s as { shots: Array<{ id: string }> }).shots.map((sh) => ({ ...sh })),
+    }));
+    const world = free.world!;
+    const cleared: ClientState = {
+      ...free,
+      world: {
+        ...world,
+        productions: world.productions.map((p) =>
+          p.meta.id === "saltlight" ? { ...p, selections: {}, routing: null } : p,
+        ),
+      },
+    };
+    const html = render(cleared, SCENE_PATH, <SceneDetailScreen />, "/w/:worldId/p/:prodId/scenes/:sceneId");
+    assert.match(html, />Delete scene</, "nothing depends on it, so the delete is offered");
+    assert.doesNotMatch(html, /cannot delete/);
+  });
+});

@@ -1,4 +1,5 @@
 import { effectiveFraming, type Scene, type Shot } from "./scene.js";
+import type { ProductionBundle } from "./client-state.js";
 
 /**
  * What a review of one scene can say before anybody has read it (design turn 102).
@@ -96,4 +97,47 @@ export function sceneFindings(
     }
   }
   return found;
+}
+
+/**
+ * What deleting this scene would break, in words (round 3's gap: a scene made by accident had no
+ * way out, and lived in the production forever).
+ *
+ * Two things stop a deletion, and both are things the person can undo themselves first.
+ *
+ * Accepted footage, because a take is money already spent and a scene is the only thing that
+ * still says which shot it was for; deleting the scene would leave paid clips in the folder
+ * belonging to nothing. Reject the take or accept it elsewhere, then the scene is free.
+ *
+ * A routing reference, because an interactive graph names scenes by id — as its start, on either
+ * end of a choice, as an ending, as an exclusion — and a deleted scene turns the branch map into
+ * a promise the player cannot keep. Redraw the edge first.
+ *
+ * Everything else that mentions the scene is repaired in the same commit rather than refused:
+ * episode membership and the selections its shots carried. Those are bookkeeping the deletion
+ * owns, not decisions the person has to make twice.
+ */
+export function sceneDeleteBlockers(production: ProductionBundle, scene: Scene): string[] {
+  const reasons: string[] = [];
+  const accepted = scene.shots.filter((shot) => production.selections[shot.id]?.acceptedTakeId != null);
+  if (accepted.length > 0) {
+    reasons.push(
+      `${accepted.map((s) => `shot ${s.number}`).join(", ")} ${accepted.length === 1 ? "has" : "have"} an accepted take — reject it first, or the footage is left belonging to nothing`,
+    );
+  }
+  const routing = production.routing;
+  if (routing) {
+    const named: string[] = [];
+    if (routing.start === scene.id) named.push("it is where the story starts");
+    for (const choice of routing.choices) {
+      if (choice.from === scene.id) named.push(`the choice "${choice.label}" leads out of it`);
+      if (choice.to === scene.id) named.push(`the choice "${choice.label}" leads to it`);
+    }
+    if (routing.endings.some((e) => e.sceneId === scene.id)) named.push("it is marked as an ending");
+    if (routing.excluded.some((e) => e.sceneId === scene.id)) named.push("it is on the excluded list");
+    if (named.length > 0) {
+      reasons.push(`the branch map still names it: ${named.slice(0, 4).join("; ")} — redraw that first`);
+    }
+  }
+  return reasons;
 }

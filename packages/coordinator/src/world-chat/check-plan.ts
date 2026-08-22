@@ -44,6 +44,7 @@ const REQUIRED_BY_CLASSIFICATION: Record<WorldChangeClassification, readonly Che
   "development.season": [],
   "development.episode": [],
   "development.scene-script": [],
+  "development.shot": [],
   "development.series": [],
   // Undecided needs whatever each plausible action would need, and stays partial until it is
   // decided — which is why it can never become a proposal.

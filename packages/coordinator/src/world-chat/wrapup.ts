@@ -75,7 +75,9 @@ const DEVELOPMENT_PROPOSAL_KIND: Partial<Record<string, "story-overview" | "seas
   "development.overview": "story-overview",
   "development.season": "season-edit",
   "development.episode": "episode-edit",
+  // A shot lives inside its scene file, so it stages as the scene edit it is.
   "development.scene-script": "scene-edit",
+  "development.shot": "scene-edit",
   "development.series": "series-edit",
 };
 
@@ -191,7 +193,12 @@ async function buildAndStage(input: {
   const built = [];
   // Sibling identities, shared across the batch: the scanned bundle cannot see what this same
   // wrap-up is about to create (issue #400 round 2).
-  const claimed = { episodeIds: new Set<string>(), episodeStems: new Set<string>(), episodeOrders: new Set<number>() };
+  const claimed = {
+    episodeIds: new Set<string>(),
+    episodeStems: new Set<string>(),
+    episodeOrders: new Set<number>(),
+    shotIds: new Set<string>(),
+  };
   try {
     for (const candidate of carried) {
       built.push(materialiseCandidate(candidate, identities, bundle, at, claimed));

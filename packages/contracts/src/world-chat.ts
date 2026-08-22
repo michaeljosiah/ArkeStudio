@@ -14,10 +14,12 @@ import {
   RunIdSchema,
   SceneIdSchema,
   Sha256Schema,
+  ShotIdSchema,
   SlugSchema,
   TurnIdSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
+import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -145,6 +147,15 @@ export const WorldChatEntityRefSchema = z.discriminatedUnion("kind", [
     .object({ kind: z.literal("episode"), productionId: SlugSchema, episodeId: EpisodeIdSchema.optional() })
     .strict(),
   z.object({ kind: z.literal("scene"), productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  /** A shot inside a scene; `shotId` absent means the shot this proposition would add. */
+  z
+    .object({
+      kind: z.literal("shot"),
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      shotId: ShotIdSchema.optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("series"), seriesId: SlugSchema }).strict(),
 ]);
 export type WorldChatEntityRef = z.infer<typeof WorldChatEntityRefSchema>;
@@ -383,6 +394,12 @@ export const WorldChangeClassificationSchema = z.enum([
   "development.season",
   "development.episode",
   "development.scene-script",
+  /**
+   * A shot, changed by the conversation that is about it. Until this existed the scene thread
+   * could describe a shot at length and then hand the person back to the storyboard to type it
+   * in — the one place the workspace stopped being the conversation.
+   */
+  "development.shot",
   "development.series",
   "undecided",
 ]);
@@ -690,6 +707,57 @@ const DevelopmentSceneScriptPayload = {
     .strict(),
 } as const;
 
+/**
+ * A shot as the conversation would have it read (SPEC-023 R-20; epic #242's lesson 8, "the
+ * working document is the product").
+ *
+ * What is here is what a conversation legitimately settles: the words, the camera, the sound,
+ * how long it runs, how it should feel. What is deliberately absent is everything that is not a
+ * creative decision — `id` and `number` are identity and position, minted once and moved only by
+ * the storyboard's drag; `covers` is a digest computed at citation time; and `promptOverride` is
+ * production output whose whole meaning is that a person typed it in the sheet, so a proposition
+ * writing one would forge that provenance.
+ */
+const ShotDraftSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    /** `@slug` mentions are live sheet references, resolved at prompt assembly. */
+    description: z.string().max(4000).optional(),
+    camera: z.string().max(600).optional(),
+    audio: ShotAudioSchema.optional(),
+    durationSec: z.number().positive().max(600).optional(),
+    intent: z.string().max(600).optional(),
+    beats: z
+      .array(z.object({ span: z.string().min(1).max(40), text: z.string().min(1).max(400) }).strict())
+      .max(20)
+      .optional(),
+    framing: ShotFramingSchema.optional(),
+    continuity: z
+      .object({ openOnPrevious: z.boolean().optional(), keepOut: z.string().max(600).optional() })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const DevelopmentShotPayload = {
+  classification: z.literal("development.shot"),
+  target: z
+    .object({
+      kind: z.literal("shot"),
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      /** Absent to add a shot at the end of the scene; present to amend the one named. */
+      shotId: ShotIdSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A new shot needs enough to be a shot: the schema requires a title and a description at
+   * creation, because a shot with neither is a placeholder the storyboard already offers a
+   * button for. An amendment may carry one field.
+   */
+  draft: ShotDraftSchema.refine((d) => Object.keys(d).length > 0, "a shot draft must carry at least one field"),
+} as const;
+
 const DevelopmentSeriesPayload = {
   classification: z.literal("development.series"),
   target: z.object({ kind: z.literal("series"), seriesId: SlugSchema }).strict(),
@@ -714,7 +782,7 @@ const UndecidedPayload = {
     .strict(),
 } as const;
 
-/** The fourteen things a proposition can be, as the coordinator stores them. */
+/** The fifteen things a proposition can be, as the coordinator stores them. */
 export const WorldChangeCandidateSchema = z.discriminatedUnion("classification", [
   CandidateBaseSchema.extend(CanonCreatePayload).strict(),
   CandidateBaseSchema.extend(CanonAmendPayload).strict(),
@@ -728,6 +796,7 @@ export const WorldChangeCandidateSchema = z.discriminatedUnion("classification",
   CandidateBaseSchema.extend(DevelopmentSeasonPayload).strict(),
   CandidateBaseSchema.extend(DevelopmentEpisodePayload).strict(),
   CandidateBaseSchema.extend(DevelopmentSceneScriptPayload).strict(),
+  CandidateBaseSchema.extend(DevelopmentShotPayload).strict(),
   CandidateBaseSchema.extend(DevelopmentSeriesPayload).strict(),
   CandidateBaseSchema.extend(UndecidedPayload).strict(),
 ]);
@@ -1175,6 +1244,7 @@ export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", 
   ModelCandidateCommonSchema.extend(DevelopmentSeasonPayload).strict(),
   ModelCandidateCommonSchema.extend(DevelopmentEpisodePayload).strict(),
   ModelCandidateCommonSchema.extend(DevelopmentSceneScriptPayload).strict(),
+  ModelCandidateCommonSchema.extend(DevelopmentShotPayload).strict(),
   ModelCandidateCommonSchema.extend(DevelopmentSeriesPayload).strict(),
   ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
 ]);
@@ -1643,6 +1713,20 @@ const exampleDrafts = {
       ],
     },
   },
+  "development.shot": {
+    classification: "development.shot",
+    target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+    title: "Maren holds the rail a beat longer",
+    rationale: "They asked for the pause before she looks up; the rest of the shot stands.",
+    settledness: "settled",
+    evidence: [exampleMessageEvidence],
+    checkReceiptIds: [],
+    draft: {
+      description: "@maren-kest grips the rail of @the-vigil and does not look up for a long moment.",
+      durationSec: 6,
+      intent: "Held, not slow — she is deciding whether to have heard it.",
+    },
+  },
   "development.series": {
     classification: "development.series",
     target: { kind: "series", seriesId: "bell-watch" },
@@ -1761,6 +1845,7 @@ const DRAFT_PAYLOADS = {
   "development.season": DevelopmentSeasonPayload,
   "development.episode": DevelopmentEpisodePayload,
   "development.scene-script": DevelopmentSceneScriptPayload,
+  "development.shot": DevelopmentShotPayload,
   "development.series": DevelopmentSeriesPayload,
   undecided: UndecidedPayload,
 } as const satisfies Record<WorldChangeClassification, { draft: z.ZodTypeAny }>;
@@ -1916,6 +2001,9 @@ Each classification below shows one complete example, then every field its draft
 - ${draftPayloadLine("development.scene-script")}
   blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes.
   fields: ${draftFieldCatalogue("development.scene-script")}
+- ${draftPayloadLine("development.shot")}
+  One shot inside a scene. target.shotId present amends that shot; absent adds a shot at the end of the scene. Carry only the fields that change — an amendment is not a rewrite, and a field you omit is left exactly as it is. The shot's id and its number are not yours to set: identity is minted once and the storyboard's drag is what reorders. Write description with @mentions for every character and location it shows, camera as a complete value naming a fixture the location supports and what the camera faces before the size and movement, and audio as an object, never a sentence.
+  fields: ${draftFieldCatalogue("development.shot")}
 - ${draftPayloadLine("development.series")}
   The thin Series record: engine and continuity only. Recurring cast stays in world sheets — a Series that describes characters is a second world.
   fields: ${draftFieldCatalogue("development.series")}

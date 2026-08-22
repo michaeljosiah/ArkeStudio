@@ -30,6 +30,9 @@ import { makeTempWorld } from "../world/helpers.js";
 const AT = "2026-08-19T10:00:00Z";
 const NOW = () => AT;
 
+/** The gate's accept outcome as a word, so a failure reads as its status not a crash. */
+const accepted = (o: { status: string }): string => o.status;
+
 function candidate(over: Partial<WorldChangeCandidate>): WorldChangeCandidate {
   return {
     id: newId("cand") as CandidateId,
@@ -185,6 +188,147 @@ describe("production-scoped threads (issue 400)", () => {
     assert.equal(story.logline, "One night on the Vigil, the verse rises early — and answers.");
     assert.equal(story.version, before.version + 1, "acceptance versions story.json like any accept");
     StoryOverviewSchema.parse(story);
+  });
+
+  /**
+   * A shot, changed by the conversation that is about it.
+   *
+   * The seam the workspace stopped at: the scene thread was told its shots in full and could
+   * describe exactly what one should become, and then the person had to go and type it into the
+   * storyboard. A shot has no file, so this stages as the scene edit it is.
+   */
+  describe("a shot the conversation settled", () => {
+    it("amends only the fields it carries, and leaves everything else exactly as it was", async () => {
+      const w = await world();
+      const before = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+      const live = before.scenes.find((s) => s.id === "sc_04")!.shots.find((s) => s.id === "sh_12")!;
+      assert.ok(live.camera, "the fixture shot has a camera, which this amendment does not mention");
+
+      const seq = await withCandidates(w.log, [
+        candidate({
+          classification: "development.shot",
+          target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+          title: "She holds the rail a beat longer",
+          draft: { durationSec: 6, intent: "Held, not slow — she is deciding whether to have heard it." },
+        } as Partial<WorldChangeCandidate>),
+      ]);
+      await wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId: "req-shot-1",
+        expectedConversationSeq: seq,
+        now: NOW,
+      });
+      const staged = (await w.gate.listOpen()).find((p) => p.kind === "scene-edit");
+      assert.ok(staged, "a shot rides the scene-edit kind — it lives in the scene's file");
+      assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
+
+      const after = await scanWorld(w.dir);
+      const shot = after.bundle.productions
+        .find((p) => p.meta.id === "saltlight")!
+        .scenes.find((s) => s.id === "sc_04")!
+        .shots.find((s) => s.id === "sh_12")!;
+      assert.equal(shot.durationSec, 6, "what was settled landed");
+      assert.match(shot.intent ?? "", /Held, not slow/);
+      assert.equal(shot.camera, live.camera, "and what nobody mentioned is untouched");
+      assert.equal(shot.description, live.description);
+      assert.equal(shot.number, live.number, "the number is not the conversation's to move");
+      assert.equal(shot.id, live.id);
+    });
+
+    it("adds a shot at the end, with an id minted past every scene in the production", async () => {
+      const w = await world();
+      const production = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+      const highest = production.scenes
+        .flatMap((s) => s.shots)
+        .reduce((a, s) => Math.max(a, Number(s.id.replace(/^sh_0*/, "")) || 0), 0);
+      const sceneBefore = production.scenes.find((s) => s.id === "sc_04")!;
+
+      const seq = await withCandidates(w.log, [
+        candidate({
+          classification: "development.shot",
+          target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04" },
+          title: "One more, on the water",
+          draft: {
+            title: "The water answers",
+            description: "The harbour goes flat, and something under it moves.",
+            durationSec: 4,
+          },
+        } as Partial<WorldChangeCandidate>),
+      ]);
+      await wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId: "req-shot-2",
+        expectedConversationSeq: seq,
+        now: NOW,
+      });
+      const staged = (await w.gate.listOpen()).find((p) => p.kind === "scene-edit")!;
+      assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
+
+      const after = await scanWorld(w.dir);
+      const scene = after.bundle.productions
+        .find((p) => p.meta.id === "saltlight")!
+        .scenes.find((s) => s.id === "sc_04")!;
+      assert.equal(scene.shots.length, sceneBefore.shots.length + 1, "it went on the end");
+      const added = scene.shots[scene.shots.length - 1]!;
+      assert.equal(added.title, "The water answers");
+      assert.equal(
+        Number(added.id.replace(/^sh_0*/, "")),
+        highest + 1,
+        "the id clears every shot in the production — takes key by bare shot id",
+      );
+      // The same rule the storyboard's Add shot follows: one past the highest number the scene
+      // holds, not the array's length — a shot's number is its birth name, not its index.
+      const highestNumber = sceneBefore.shots.reduce((a, s) => Math.max(a, s.number), 0);
+      assert.equal(added.number, highestNumber + 1, "and the number is this scene's next");
+    });
+
+    it("refuses a new shot with nothing in it, and one naming a shot the scene does not have", async () => {
+      const w = await world();
+      const thin = await withCandidates(w.log, [
+        candidate({
+          classification: "development.shot",
+          target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04" },
+          title: "A shot with only a duration",
+          draft: { durationSec: 3 },
+        } as Partial<WorldChangeCandidate>),
+      ]);
+      await wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId: "req-shot-3",
+        expectedConversationSeq: thin,
+        now: NOW,
+      }).catch(() => undefined);
+      assert.equal(
+        (await w.gate.listOpen()).filter((p) => p.kind === "scene-edit").length,
+        0,
+        "a shot with no title and no description is a placeholder, and the storyboard has a button for that",
+      );
+
+      const w2 = await world();
+      const missing = await withCandidates(w2.log, [
+        candidate({
+          classification: "development.shot",
+          target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_404" },
+          title: "Amending a ghost",
+          draft: { intent: "whatever" },
+        } as Partial<WorldChangeCandidate>),
+      ]);
+      await wrapUp({
+        store: w2.store,
+        gate: w2.gate,
+        conversationId: w2.conversationId,
+        requestId: "req-shot-4",
+        expectedConversationSeq: missing,
+        now: NOW,
+      }).catch(() => undefined);
+      assert.equal((await w2.gate.listOpen()).filter((p) => p.kind === "scene-edit").length, 0);
+    });
   });
 
   it("a scene-script candidate rewrites the whole scene with its blocks, gated as scene-edit", async () => {

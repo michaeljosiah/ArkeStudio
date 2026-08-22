@@ -138,6 +138,15 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
           const parts = [location ? `location ${location}` : null, timeOfDay, tone].filter(Boolean);
           if (parts.length > 0) lines.push(`Every shot inherits: ${parts.join(", ")}.`);
         }
+        /*
+         * And that they can be changed here. The shots were narrated into this thread before the
+         * thread could propose one, so a conversation could describe exactly what a shot should
+         * become and then hand the person back to the storyboard to type it in — the one place
+         * the workspace stopped being the conversation.
+         */
+        lines.push(
+          "A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
+        );
       }
       return lines.join(" ");
     }
