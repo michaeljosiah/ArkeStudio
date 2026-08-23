@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle } from "@arke-studio/contracts";
 import { TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
@@ -128,11 +129,46 @@ describe("a production thread is briefed on its shape", () => {
       { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
     );
     assert.match(text, /season of 80 episodes/);
-    // Under the cap, not equal to it: the cap counts every operation, so a full run that also
-    // settles the overview would be one over and rejected for doing what it was asked to do.
+    // Room for the companions the same briefing permits: a run plus the overview, the season
+    // direction and a world fact all have to fit inside one turn's operation cap.
     const run = Number(/runs of at most (\d+) episodes/.exec(text)?.[1]);
-    assert.ok(run > 0 && run < TURN_RESULT_BOUNDS.candidateOperations, `run ${run} leaves headroom`);
+    assert.ok(run > 0, "a run size is named");
+    assert.ok(
+      run + 3 <= TURN_RESULT_BOUNDS.candidateOperations,
+      `run of ${run} leaves room for an overview, a season change and a world fact`,
+    );
     assert.match(text, /not all 80 at once/);
+    // The half that makes the loop terminate rather than pile up against the wrap-up's own cap.
+    assert.match(text, new RegExp(`at most ${MAX_PROPOSALS} changes`));
+    assert.match(text, /Wrap up each run before starting the next/);
+  });
+
+  /**
+   * It stops asking once the season is written (codex, 2026-08-23).
+   *
+   * Gated on the declared count alone, a finished sixty-episode production went on demanding runs
+   * of more episodes every turn — including in a conversation opened to change one line of the
+   * overview.
+   */
+  it("says nothing about runs once every promised episode exists", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: production.episodes.length, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
+    assert.ok(!/runs of at most/.test(text), "a season with nothing left to write asks for nothing");
   });
 
   /**

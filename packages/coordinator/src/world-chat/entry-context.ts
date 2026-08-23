@@ -1,8 +1,17 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
 import { productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { MAX_PROPOSALS } from "./wrapup.js";
 
-/** Episodes per run, kept under the operation cap so a run can travel with an overview change. */
-const EPISODE_RUN = TURN_RESULT_BOUNDS.candidateOperations - 2;
+/**
+ * Episodes per run.
+ *
+ * Not the operation cap minus a token reserve — that number got shaved twice and was still wrong,
+ * because the cap counts everything a production turn is allowed to do at once: the episodes, the
+ * overview, the season direction, and any world fact that surfaced while writing them. Eight
+ * leaves four, which is enough for all of those together, and the turn is told the real cap as
+ * well so it can reason rather than count on this number being generous.
+ */
+const EPISODE_RUN = 8;
 
 /**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
@@ -195,9 +204,25 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
      * scene threads, and telling a scene thread to write ten episodes is an invitation to propose
      * work nobody asked for while somebody is looking at one scene.
      */
-    if (writesTheSeason && count !== undefined && count > EPISODE_RUN) {
+    /*
+     * Only while there are episodes left to write. Gated on what remains rather than on what was
+     * promised, or a finished sixty-episode season would go on asking for more of them every turn
+     * — including in a conversation that opened to change one line of the overview.
+     */
+    const remaining = count === undefined ? 0 : count - (production.episodes?.length ?? 0);
+    if (writesTheSeason && remaining > EPISODE_RUN) {
       bits.push(
-        `Write it in runs of at most ${EPISODE_RUN} episodes, not all ${count} at once. Say which episodes the run covers and where the next one picks up; a season this long is built over several turns and is expected to be.`,
+        `${production.episodes.length > 0 ? `${production.episodes.length} of ${count} are written; ` : ""}write the rest in runs of at most ${EPISODE_RUN} episodes, not all ${remaining} at once. Say which episodes the run covers and where the next one picks up.`,
+      );
+      /*
+       * The half that makes the loop terminate. A run that is settled and left on the rail is
+       * still on the rail next turn, and a wrap-up refuses more than MAX_PROPOSALS at once — so an
+       * author following the runs advice for six turns on a sixty-episode season reaches Wrap up
+       * and is refused, with every episode unwritten. Wrapping each run is what turns several
+       * turns into several seasons' worth of work landing.
+       */
+      bits.push(
+        `One turn records at most ${TURN_RESULT_BOUNDS.candidateOperations} changes of any kind, episodes and everything else together, so a run leaves room for the overview, the season direction, or a world fact that surfaced while writing it. Wrap up each run before starting the next: a single wrap-up carries at most ${MAX_PROPOSALS} changes, and runs left unwritten on the rail accumulate until it refuses them all.`,
       );
     }
     if (defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined) {
