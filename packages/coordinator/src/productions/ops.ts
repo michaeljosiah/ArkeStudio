@@ -527,7 +527,7 @@ export async function draftSceneSkeleton(
      * Passed in rather than looked up here: the registry lives in the adapter package and the
      * dependency runs one way (SPEC-005 D5).
      */
-    skill?: { id: string; version: number; family: string } | null;
+    skill?: { id: string; version: number; family: string; models?: string[] } | null;
   },
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
@@ -578,7 +578,16 @@ export async function draftSceneSkeleton(
     // proposal path and lands with the scene (R-21). The proposal record (R-19) explains the
     // draft; this is what dispatch compares against months later, when the proposal is gone.
     ...(skill !== null
-      ? { draftedWith: { skillId: skill.id, version: skill.version, family: skill.family } }
+      ? {
+          draftedWith: {
+            skillId: skill.id,
+            version: skill.version,
+            family: skill.family,
+            // Carried so dispatch can tell a narrowed document from a family-wide one months
+            // later, when the proposal that explains the draft is long gone.
+            ...(skill.models !== undefined ? { models: skill.models } : {}),
+          },
+        }
       : {}),
     shots: [],
   };

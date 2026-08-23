@@ -26,6 +26,16 @@ export interface SessionConfigInput {
    * fallback rather than a failure (R-20), stated by the caller that knows it happened.
    */
   skillFamily?: string;
+  /**
+   * The routed model itself, where a skill narrows to one (2026-08-23).
+   *
+   * The family alone was enough while a family had one document. It stopped being enough the
+   * moment a version could carry its own: the coordinator resolved and recorded the narrowed
+   * skill while the session, given only the family, injected the general one — so a 2.5 scene
+   * was drafted under 2.0's guidance and its proposal said otherwise. A record of which document
+   * shaped a draft is worth nothing if it names a document the drafting never saw.
+   */
+  skillModelId?: string;
 }
 
 /**
@@ -38,7 +48,7 @@ const SKILLED_AGENTS: Record<string, Parameters<typeof skillFor>[0]> = {
 };
 
 /** The skill a given agent runs with in this session, or null. Exported for the record (R-19). */
-export function skillForAgent(agentName: string, family: string | undefined): Skill | null {
+export function skillForAgent(agentName: string, family: string | undefined, modelId?: string): Skill | null {
   const purpose = SKILLED_AGENTS[agentName];
-  return purpose === undefined ? null : skillFor(purpose, family);
+  return purpose === undefined ? null : skillFor(purpose, family, modelId);
 }

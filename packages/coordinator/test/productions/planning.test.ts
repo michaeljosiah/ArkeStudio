@@ -1691,3 +1691,166 @@ describe("standing constraints (#244, design turn 59)", () => {
     assert.equal(derivedNegatives({ capability: "video" }), "No subtitles.");
   });
 });
+
+/**
+ * Nine camera fields, a negative and two sound fields that never left the disk (2026-08-23).
+ *
+ * `framing` appeared nowhere in `planning.ts`. A director set a size, an angle, a lens, a focus,
+ * a movement, a pace, a light, a time of day and a grade on the shot sheet; all nine were
+ * versioned, shown in the UI, and dropped before the prompt was assembled. `continuity.keepOut`
+ * — documented in the schema as "the negative half of the same promise" — was read by nothing,
+ * and so were `audio.ambience` and `audio.effects`. Every one is authored intent with no effect,
+ * which is the failure this file's whole vocabulary exists to prevent.
+ */
+describe("the shot's structured camera, negatives and sound (2026-08-23)", () => {
+  const scene = (shots: Shot[]): Scene => ({
+    id: "sc_91",
+    number: 91,
+    slug: "t",
+    title: "T",
+    status: "draft",
+    version: 1,
+    inherits: { location: "the-vigil", timeOfDay: "night" },
+    shots,
+  });
+
+  it("says the framing a director set, resolved against the scene's defaults", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      framing: { size: "medium close-up", angle: "low", movement: "slow push-in" },
+    };
+    const withDefaults = { ...scene([s]), defaults: { lens: "35mm", grade: "cold, high contrast" } };
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: withDefaults,
+      shot: s,
+      capability: "video",
+    });
+    const said = `${blocks.cameraAnchor} ${blocks.direction}`;
+    for (const value of ["medium close-up", "low", "slow push-in"]) {
+      assert.ok(said.includes(value), `the shot's own ${value} reaches the model`);
+    }
+    // Presence is the override flag (turn 97), so an inherited field still has to be spoken.
+    assert.ok(said.includes("35mm"), "a lens inherited from the scene is still said");
+    assert.ok(said.includes("cold, high contrast"), "and so is the grade");
+    await store.close();
+  });
+
+  it("says nothing about a camera nobody set, rather than a default", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const bare: Shot = shot(1, 6, "@maren-kest grips the rail");
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([bare]),
+      shot: bare,
+      capability: "video",
+    });
+    // "default lens" is a real instruction to a model that reads everything it is handed.
+    assert.equal(blocks.cameraAnchor, "", "no framing and no camera is no camera block");
+    await store.close();
+  });
+
+  it("keeps the authored camera and the framing as separate sentences", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      camera: "at the rail desk, facing the harbour mouth",
+      framing: { size: "medium close-up" },
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    // Without the anchor block to separate them, "facing the harbour mouth medium close-up" is
+    // one garbled instruction rather than a placement and a size.
+    assert.ok(
+      !/harbour mouth medium close-up/.test(blocks.direction),
+      `placement and size do not run together: ${blocks.direction}`,
+    );
+    await store.close();
+  });
+
+  it("carries keepOut into the negatives, not into the description", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      continuity: { keepOut: "No wristwatch; no plastic chairs in frame." },
+    };
+    const negatives = derivedNegatives({ capability: "video", shot: s });
+    assert.ok(negatives, "there is something to say");
+    assert.ok(negatives.includes("No wristwatch"), "what must stay out of frame is said");
+    // A negative inside the prose is a noun the model has been handed.
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.ok(!blocks.body.includes("wristwatch"), "and it is not in the description");
+    await store.close();
+  });
+
+  it("puts ambience and effects beside the action that makes them", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      audio: { kind: "dialogue", line: "Count it again.", ambience: "generator two houses down", effects: "coins on tin" },
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.match(blocks.direction, /generator two houses down/);
+    assert.match(blocks.direction, /coins on tin/);
+    await store.close();
+  });
+});
+
+/**
+ * Two ways the new fields could contradict the prompt they joined (codex, 2026-08-23).
+ */
+describe("the plumbed fields do not fight the rest of the prompt", () => {
+  const scene = (shots: Shot[]): Scene => ({
+    id: "sc_92",
+    number: 92,
+    slug: "t",
+    title: "T",
+    status: "draft",
+    version: 1,
+    inherits: { location: "the-vigil", timeOfDay: "night" },
+    shots,
+  });
+
+  it("drops ambience and effects on a shot directed silent", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    // The Sound fields stay editable after a shot goes silent, so leftovers are reachable.
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      audio: { kind: "silence", ambience: "generator two houses down", effects: "coins on tin" },
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.ok(!/generator|coins/.test(blocks.direction), `silence carries no sound: ${blocks.direction}`);
+    // And the negative still says so, which is the half that would have been contradicted.
+    assert.match(derivedNegatives({ capability: "video", shot: s })!, /No audio\./);
+    await store.close();
+  });
+
+  it("turns a keep-out list into an instruction rather than a list of nouns", async () => {
+    const { store } = await open();
+    // The field's own placeholder is a noun list. Appended verbatim it names three things and
+    // forbids none — the exact failure the field exists to prevent.
+    const listed: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      continuity: { keepOut: "Modern boats, text, lens flare" },
+    };
+    const negatives = derivedNegatives({ capability: "video", shot: listed })!;
+    assert.match(negatives, /Do not show: Modern boats, text, lens flare\./);
+
+    // An author who already wrote an instruction keeps their own words.
+    for (const already of ["No wristwatch on Ife", "Never show the harbour.", "Avoid lens flare"]) {
+      const s: Shot = { ...shot(1, 6, "x"), continuity: { keepOut: already } };
+      const said = derivedNegatives({ capability: "video", shot: s })!;
+      assert.ok(!said.includes("Do not show:"), `"${already}" is left as written`);
+      assert.ok(said.includes(already.replace(/\.$/, "")), `and is still said: ${said}`);
+    }
+    await store.close();
+  });
+});

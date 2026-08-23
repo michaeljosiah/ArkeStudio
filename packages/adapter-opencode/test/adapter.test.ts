@@ -749,10 +749,21 @@ describe("SPEC-019 authoring skills (R-14..R-20)", () => {
     assert.match(storyboard.body, /at or under the cap/);
   });
 
-  it("ships Seedance scene-drafting guidance v2", () => {
+  it("ships Seedance scene-drafting guidance v3", () => {
     const drafting = skillFor("scene-drafting", "seedance")!;
     assert.equal(drafting.id, "seedance-scene-drafting");
-    assert.equal(drafting.version, 2, "the four production lessons are a body change, and a body change is a version");
+    // v3 (2026-08-23): framing, keep-outs and cuts on a shared shape, once those fields began
+    // reaching the model at all. A body change is a version, because two scenes drafted either
+    // side of it were drafted under different guidance and nothing else records which.
+    assert.equal(drafting.version, 3, "the body changed, and a body change is a version");
+  });
+
+  it("hands Seedance 2.5 its own document, and everything else the family's", () => {
+    // 2.5 runs to thirty seconds where 2.0 stops at fifteen — a sequence with movements against a
+    // shot or two — so one document cannot brief both without hedging into uselessness.
+    const family = skillFor("scene-drafting", "seedance")!;
+    assert.equal(skillFor("scene-drafting", "seedance", "seedance-2.0")!.id, family.id);
+    assert.equal(skillFor("scene-drafting", "seedance", "seedance-2.5")!.id, "seedance-2.5-scene-drafting");
   });
 
   it("leaves the Seedance storyboard skill at v1", () => {
@@ -809,7 +820,25 @@ describe("SPEC-019 authoring skills (R-14..R-20)", () => {
       assert.ok(skill.family.length > 0);
       assert.ok(skill.body.length > 0);
     }
-    const ids = SKILLS.map((s) => `${s.purpose}:${s.family}`);
-    assert.equal(new Set(ids).size, ids.length, "one document per purpose per family, so selection is total");
+    /*
+     * Selection is still total, but the key grew (2026-08-23).
+     *
+     * It was one document per purpose per family. A skill may now narrow to the models it names,
+     * so the rule is: exactly one GENERAL document per purpose per family — the one that answers
+     * for every model without an entry of its own — and no two narrowed documents claiming the
+     * same model, which would make the winner an accident of array order.
+     */
+    const general = SKILLS.filter((s) => s.models === undefined).map((s) => `${s.purpose}:${s.family}`);
+    assert.equal(new Set(general).size, general.length, "one general document per purpose per family");
+
+    const claimed = SKILLS.flatMap((s) => (s.models ?? []).map((m) => `${s.purpose}:${s.family}:${m}`));
+    assert.equal(new Set(claimed).size, claimed.length, "no model is claimed by two narrowed documents");
+
+    for (const skill of SKILLS.filter((s) => s.models !== undefined)) {
+      assert.ok(
+        general.includes(`${skill.purpose}:${skill.family}`),
+        `${skill.id} narrows a family that still has a general document to fall back to`,
+      );
+    }
   });
 });
