@@ -21,3 +21,4 @@ was settled somewhere they had no reason to look?** If so, it is an ADR.
 | ADR | Title | Date | Status |
 |---|---|---|---|
 | [001](001-one-gate-per-thing.md) | One gate per thing: the Arke/Aonik approval boundary | 2026-08-22 | Proposed |
+| [002](002-ownership-is-a-revision.md) | Ownership is a fact about a revision, not about a process | 2026-08-23 | Proposed |
