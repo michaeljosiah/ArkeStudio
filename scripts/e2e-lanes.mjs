@@ -31,7 +31,9 @@ const ROOT = join(tmpdir(), `arke-lanes-e2e-${Date.now()}`);
 const WORLD = join(ROOT, "worlds", "the-undersong");
 const WORLD_ID = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 const PROD = "saltlight";
-const PORT = 9222;
+// A killed Electron can leave the listener behind for a while, and the next run then fails to
+// bind and waits out the attach timeout as if the app had never started. Override to step aside.
+const PORT = Number(process.env.ARKE_CDP_PORT || 9222);
 const FFMPEG = process.env.ARKE_FFMPEG || "ffmpeg";
 const FFPROBE = process.env.ARKE_FFPROBE || "ffprobe";
 
@@ -128,13 +130,30 @@ async function readCut() {
     return { audio: [], overlays: [] };
   }
 }
-const clearCut = () => rm(cutPath(), { force: true });
 
 // ---------------------------------------------------------------------------
 // A very small CDP client
 // ---------------------------------------------------------------------------
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The gesture writes on mouseup, but not synchronously — it goes to the coordinator and back
+ * before it reaches the file. A fixed sleep either wastes time or, on a slower machine, reads
+ * the value from before the gesture and reports a trim that "did nothing". Poll for the change
+ * instead, and hand back the last value seen so a genuine failure still prints what it found.
+ *
+ * Only for assertions that expect a change; anything asserting nothing happened must read once.
+ */
+async function waitForCut(predicate, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const cut = await readCut();
+    if (predicate(cut)) return cut;
+    if (Date.now() > deadline) return cut;
+    await sleep(200);
+  }
+}
 
 async function targets() {
   const res = await fetch(`http://127.0.0.1:${PORT}/json/list`);
@@ -219,6 +238,16 @@ const pageHelpers = {
   laneLabels: () => [...document.querySelectorAll(".fy-track__label")].map((n) => n.textContent).filter((t) => /^L\d+$/.test(t)),
   clipCount: () => document.querySelectorAll(".fy-ovclip").length,
   headerMeta: () => document.querySelector(".fy-h1row__meta")?.textContent ?? "",
+  /**
+   * The Cut screen and its two resting lanes render before the world has been scanned, so
+   * neither is evidence that anything is loaded. The summary is empty until the derived cut
+   * arrives, and the rows are the drag sources — wait for both, or the first drop lands on a
+   * cut of zero length and the handler discards it in silence.
+   */
+  worldLoaded: () => ({
+    summary: document.querySelector(".fy-h1row__meta")?.textContent ?? "",
+    rows: document.querySelectorAll(".fy-artrow").length,
+  }),
   /** CDP's Input domain cannot do HTML5 drag-and-drop; a constructed DataTransfer can. */
   drop: ({ artifactId, laneFromTop, fraction }) => {
     const rows = [...document.querySelectorAll(".fy-artrow")];
@@ -256,14 +285,23 @@ const pageHelpers = {
     const b = el.getBoundingClientRect();
     return { x: b.x, y: b.y, w: b.width, h: b.height };
   },
-  openMenu: (index) => {
+  /*
+   * The menu is React state, so it is not in the DOM when dispatchEvent returns — reading it on
+   * the next line finds nothing and reports a menu that did not open, when what actually
+   * happened is that it had not rendered yet. Wait a frame before looking.
+   */
+  openMenu: async (index) => {
     const el = document.querySelectorAll(".fy-ovclip")[index ?? 0];
     if (!el) return { error: "no clip" };
     const b = el.getBoundingClientRect();
     el.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: b.x + b.width / 2, clientY: b.y + b.height / 2 }),
     );
-    const menu = document.querySelector(".fy-clipmenu");
+    let menu = null;
+    for (let i = 0; i < 40 && menu === null; i++) {
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 25)));
+      menu = document.querySelector(".fy-clipmenu");
+    }
     if (!menu) return { error: "menu did not open" };
     return {
       items: [...menu.querySelectorAll(".fy-clipmenu__item")].map((i) => ({ text: i.textContent.trim(), disabled: i.disabled })),
@@ -277,8 +315,12 @@ const pageHelpers = {
     item.click();
     return { ok: true };
   },
-  pressEscape: () => {
+  /* Closing is React state too, so the same wait the menu needed on the way open applies here. */
+  pressEscape: async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    for (let i = 0; i < 40 && document.querySelector(".fy-clipmenu") !== null; i++) {
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 25)));
+    }
     return { open: document.querySelector(".fy-clipmenu") !== null };
   },
   menuOpen: () => document.querySelector(".fy-clipmenu") !== null,
@@ -291,6 +333,29 @@ const pageHelpers = {
   exportRows: () => [...document.querySelectorAll(".fy-exportrow__sub")].map((n) => n.textContent),
 };
 
+/**
+ * Reset by removing each clip through the app's own × control.
+ *
+ * Deleting cut.json underneath a running app does not reset anything: the coordinator holds the
+ * cut in memory and serves that, and the watcher suppresses what lands just after the app's own
+ * write — so the file goes but the screen keeps its clips, and the next case places on top of
+ * them. Navigating away and back does not help, because nothing re-reads the world.
+ */
+async function clearClips(cdp) {
+  for (let i = 0; i < 40; i++) {
+    if ((await cdp.eval(pageHelpers.clipCount)) === 0) return;
+    const clicked = await cdp.eval(() => {
+      const x = document.querySelector(".fy-ovclip__x");
+      if (!x) return false;
+      x.click();
+      return true;
+    });
+    if (!clicked) return;
+    await sleep(250);
+  }
+  throw new Error("could not clear the placed clips through the UI");
+}
+
 async function waitFor(cdp, fn, arg, predicate, what, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -301,11 +366,25 @@ async function waitFor(cdp, fn, arg, predicate, what, timeoutMs = 15_000) {
   }
 }
 
-const goto = (cdp, hash) =>
-  cdp.eval((h) => {
-    location.hash = h;
-    return true;
-  }, hash);
+/**
+ * A hash set while the shell is still booting does not stick: the app comes up on the launch
+ * screen with an empty hash and routes itself once it is ready, discarding whatever was written
+ * underneath it. Setting it once and then waiting on a screen that will never arrive reads as
+ * "the Cut screen never rendered" — so re-assert the hash on every turn of the loop.
+ */
+async function navigate(cdp, hash, screen, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    await cdp.eval((h) => {
+      if (location.hash !== h) location.hash = h;
+      return true;
+    }, hash);
+    const arrived = await cdp.eval((s) => document.querySelector(`[data-screen="${s}"]`) !== null, screen);
+    if (arrived) return;
+    if (Date.now() > deadline) throw new Error(`timed out navigating to ${hash} (wanted [data-screen="${screen}"])`);
+    await sleep(400);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // The run
@@ -338,7 +417,15 @@ async function main() {
   await seed();
   console.log(`  ${ROOT}`);
 
-  const electronBin = join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
+  // The `.bin` shim is a `.cmd` on Windows, and since the CVE-2024-27980 fix Node refuses to
+  // spawn one without a shell — it fails with a bare `spawn EINVAL` that names nothing. The
+  // electron package exports the real binary's path, so ask it and skip the shim entirely.
+  let electronBin;
+  try {
+    electronBin = require("electron");
+  } catch {
+    electronBin = join(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "electron.cmd" : "electron");
+  }
   const useXvfb = process.platform === "linux" && !process.env.DISPLAY && !argv.has("--headed");
   const cmd = useXvfb ? "xvfb-run" : electronBin;
   const args = useXvfb
@@ -358,9 +445,17 @@ async function main() {
   try {
     cdp = await attach();
     await cdp.ready;
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`);
-    await waitFor(cdp, () => document.querySelector('[data-screen="cut"]') !== null, null, (v) => v === true, "the Cut screen");
+    await navigate(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`, "cut");
     await waitFor(cdp, pageHelpers.laneCount, null, (n) => n >= 2, "lanes to render");
+    // A drop is fire-and-forget: nothing retries it, so it has to happen after the scan lands.
+    await waitFor(
+      cdp,
+      pageHelpers.worldLoaded,
+      null,
+      (v) => /shots covered/.test(v.summary) && v.rows > 0,
+      "the world to finish scanning",
+      60_000,
+    );
 
     console.log("\nLanes");
     const labels = await cdp.eval(pageHelpers.laneLabels);
@@ -383,24 +478,21 @@ async function main() {
 
     // T5 — cross-lane move, and its live feedback
     const before = await cdp.eval(pageHelpers.clipBox, 0);
+    const lanesBefore = (await readCut()).overlays.map((o) => o.lane).join(",");
     await cdp.drag({ x: before.x + before.w / 2, y: before.y + before.h / 2 }, { x: before.x + before.w / 2, y: before.y + before.h / 2 - 50 });
-    await sleep(600);
-    cut = await readCut();
+    cut = await waitForCut((c) => c.overlays.map((o) => o.lane).join(",") !== lanesBefore);
     ok("T5", "a clip moves up a lane", cut.overlays.some((o) => o.lane === 2) || cut.overlays.filter((o) => o.lane === 1).length >= 1,
       `lanes now ${cut.overlays.map((o) => o.lane).join(",")}`);
 
     // T6 — trim the tail
-    await clearCut();
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/exports`);
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`);
+    await clearClips(cdp);
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 0, "a cleared cut");
     await cdp.eval(pageHelpers.drop, { artifactId: VIDEO_WITH_SOUND, laneFromTop: 0, fraction: 0.1 });
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 1, "the video to place");
     const placed = (await readCut()).overlays[0];
     const grip = await cdp.eval(pageHelpers.gripBox, { index: 0, which: "end" });
     await cdp.drag({ x: grip.x + grip.w / 2, y: grip.y + grip.h / 2 }, { x: grip.x + grip.w / 2 + 60, y: grip.y + grip.h / 2 });
-    await sleep(600);
-    const trimmed = (await readCut()).overlays[0];
+    const trimmed = (await waitForCut((c) => c.overlays[0]?.endSec !== placed.endSec)).overlays[0];
     ok("T6", "the tail moves and the head does not",
       trimmed.endSec > placed.endSec && trimmed.startSec === placed.startSec,
       `${placed.startSec}→${placed.endSec} became ${trimmed.startSec}→${trimmed.endSec}`);
@@ -411,7 +503,7 @@ async function main() {
     ok("T7a", "split is offered for a measured video with sound", splitItem && !splitItem.disabled, menu.note);
     await cdp.eval(pageHelpers.clickMenuItem, "Split");
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 2, "the sound half");
-    cut = await readCut();
+    cut = await waitForCut((c) => c.overlays.length === 2);
     const picture = cut.overlays.find((o) => o.audio === "mute");
     const sound = cut.overlays.find((o) => o.audio === "only");
     ok("T7b", "picture mutes, sound lands one lane below",
@@ -426,13 +518,11 @@ async function main() {
     await cdp.eval(pageHelpers.openMenu, muteIndex);
     await cdp.eval(pageHelpers.clickMenuItem, "Rejoin");
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 1, "the rejoin");
-    cut = await readCut();
+    cut = await waitForCut((c) => c.overlays.length === 1);
     ok("T7d", "rejoin restores sound and removes the twin", cut.overlays.length === 1 && cut.overlays[0].audio === "keep");
 
     console.log("\nRefusals");
-    await clearCut();
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/exports`);
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`);
+    await clearClips(cdp);
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 0, "a cleared cut");
     await cdp.eval(pageHelpers.drop, { artifactId: VIDEO_SILENT, laneFromTop: 0, fraction: 0.1 });
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 1, "the silent video");
@@ -453,9 +543,7 @@ async function main() {
 
     // ---- The point of all this -------------------------------------------
     console.log("\nExport");
-    await clearCut();
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/exports`);
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`);
+    await clearClips(cdp);
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 0, "a cleared cut");
 
     const baseline = await runExport(cdp, "T12");
@@ -464,7 +552,7 @@ async function main() {
       ok("T12b", "and has no audio track", !hasAudioStream(baseline));
     }
 
-    await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`);
+    await navigate(cdp, `#/w/${WORLD_ID}/p/${PROD}/cut`, "cut");
     await waitFor(cdp, pageHelpers.laneCount, null, (n) => n >= 2, "lanes");
     await cdp.eval(pageHelpers.drop, { artifactId: "ar_01J8G0000000000000000000R1", laneFromTop: 1, fraction: 0.2 });
     await waitFor(cdp, pageHelpers.clipCount, null, (n) => n === 1, "the bed");
@@ -516,25 +604,41 @@ async function exportsOnDisk() {
   }
 }
 
-async function runExport(cdp) {
+async function runExport(cdp, label = "export") {
   const had = new Set(await exportsOnDisk());
-  await goto(cdp, `#/w/${WORLD_ID}/p/${PROD}/exports`);
+  await navigate(cdp, `#/w/${WORLD_ID}/p/${PROD}/exports`, "exports");
   await sleep(500);
-  const pressed = await cdp.eval(pageHelpers.clickText, "Export review cut");
+  /*
+   * The action carries its runtime in its label — "Export · 1:07" — so it cannot be matched by
+   * exact text, and a loose /export/i over every button matches the rail's own "Exports" item
+   * first and navigates instead of encoding. That failure is completely silent: no encode
+   * starts, nothing errors, and the export simply never appears.
+   */
+  const pressed = await cdp.eval(() => {
+    const el = [...document.querySelectorAll("button.ui-btn--primary")].find(
+      (b) => b.textContent.trim().startsWith("Export") && !b.disabled,
+    );
+    if (!el) return { error: "no enabled primary Export button", saw: [...document.querySelectorAll("button")].map((b) => b.textContent.trim()) };
+    el.click();
+    return { ok: true, clicked: el.textContent.trim() };
+  });
   if (pressed?.error) {
-    // The button's wording varies with the preset card; fall back to the first primary action.
-    await cdp.eval(() => {
-      const el = [...document.querySelectorAll("button")].find((b) => /export/i.test(b.textContent) && !b.disabled);
-      el?.click();
-      return true;
-    });
+    record(label, "the export could be started", "fail", `${pressed.error}; buttons: ${(pressed.saw ?? []).join(" | ")}`);
+    return null;
   }
   const deadline = Date.now() + 180_000;
   for (;;) {
     const now = await exportsOnDisk();
     const fresh = now.find((f) => !had.has(f));
     if (fresh) return join(WORLD, "exports", fresh);
-    if (Date.now() > deadline) return null;
+    if (Date.now() > deadline) {
+      // An export that fails leaves nothing on disk, so the only account of why is on screen.
+      const screen = await cdp.eval(() => ({
+        rows: [...document.querySelectorAll(".fy-exportrow, .fy-exportrow__sub, .fy-notecard")].map((n) => n.textContent.trim()).slice(0, 10),
+      }));
+      record(label, "the export finished", "fail", `no file after 180s; screen says: ${screen.rows.join(" | ") || "(nothing)"}`);
+      return null;
+    }
     await sleep(1000);
   }
 }
@@ -551,9 +655,16 @@ const durationOf = (file) => {
   return Number.isFinite(v) ? v : null;
 };
 
-/** Mean volume over a window, which is how "is it actually silent there" gets answered. */
+/**
+ * Mean volume over a window, which is how "is it actually silent there" gets answered.
+ *
+ * volumedetect reports its summary at the *info* level, so `-v error` — which every other probe
+ * here wants — hides the one line this reads and the measurement comes back null. A null reads
+ * as "could not measure" and fails the case whatever the audio actually does, so the level has
+ * to stay at info and the noise be turned off some other way.
+ */
 const meanVolume = (file, startSec, durationSec) => {
-  const r = spawnSync(FFMPEG, ["-v", "error", "-ss", String(startSec), "-t", String(durationSec), "-i", file, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" });
+  const r = spawnSync(FFMPEG, ["-hide_banner", "-nostats", "-ss", String(startSec), "-t", String(durationSec), "-i", file, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" });
   const m = /mean_volume:\s*(-?\d+(?:\.\d+)?) dB/.exec(r.stderr || "");
   return m ? Number.parseFloat(m[1]) : null;
 };
