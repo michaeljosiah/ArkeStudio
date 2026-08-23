@@ -36,6 +36,6 @@ export function explainNotCarried(reason: WorldChatNotCarried["reason"]): string
       // place a person finds out that what they asked for would have reached nothing.
       return "It writes under a heading the sheet does not have — ask for it under one of the sheet's own sections and it will land";
     case "changes-nothing":
-      return "It says what the sheet already says — nothing in it would change";
+      return "It says what is already recorded — nothing in it would change";
   }
 }

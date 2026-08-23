@@ -225,6 +225,105 @@ function resolveReferences(
   return { canonRules: [...canonRules], links: [...links] };
 }
 
+/**
+ * What a Development amendment would make of the record it names (SPEC-023 R-20).
+ *
+ * The merge, in one place, because two places is how it goes wrong. Readiness has to know whether
+ * an amendment would change anything — a draft restating what the record already says is a
+ * proposition that reports success and writes nothing — and the only honest way to answer that is
+ * to perform the same merge the file is built from. Written out a second time it would drift, and
+ * the first casualty would be the arcs rule below: a readiness check that merged arcs wholesale
+ * would call a real change empty and hold back work somebody asked for.
+ *
+ * `live` is the record as the world has it and `next` is that record with the draft merged onto
+ * it — the two values a caller compares, and the one a file is written from. Null means there is
+ * nothing to amend: a creation (a new episode, a new shot), or a target this world does not hold,
+ * both of which the caller already handles.
+ */
+export function developmentAmendment(
+  candidate: WorldChangeCandidate,
+  bundle: WorldBundle,
+): { live: Record<string, unknown>; next: Record<string, unknown> } | null {
+  if (!candidate.classification.startsWith("development.")) return null;
+  const target = (candidate as unknown as { target: Record<string, unknown> }).target;
+  const draft = candidate.draft as Record<string, unknown>;
+  const production = bundle.productions.find((p) => p.meta.id === target["productionId"]);
+
+  switch (candidate.classification) {
+    case "development.overview": {
+      if (!production) return null;
+      // A production with no story.json still has a record to merge onto: version 1, empty. Every
+      // field the draft carries is then new, which is exactly right — writing it is a change.
+      const live = (production.story ?? { version: 1 }) as Record<string, unknown>;
+      return { live, next: { ...live, ...draft } };
+    }
+    case "development.season": {
+      if (!production) return null;
+      const live = (production.season ?? { version: 1 }) as Record<string, unknown>;
+      // Arcs merge by id, not wholesale (issue #397 round 2): a conversational draft restating an
+      // arc's note must not silently delete the setup/turn/payoff placements the board authored —
+      // a lane the draft does not mention is a lane it did not change.
+      const liveArcs = (live["arcs"] as Array<{ id: string }> | undefined) ?? [];
+      const draftArcs = draft["arcs"] as Array<{ id: string }> | undefined;
+      const mergedArcs = draftArcs?.map((arc) => ({ ...liveArcs.find((e) => e.id === arc.id), ...arc }));
+      return {
+        live,
+        next: { ...live, ...draft, ...(mergedArcs !== undefined ? { arcs: mergedArcs } : {}) },
+      };
+    }
+    case "development.episode": {
+      const episodeId = target["episodeId"];
+      if (!production || episodeId === undefined) return null; // absent episodeId creates
+      const live = production.episodes.find((e) => e.id === episodeId) as Record<string, unknown> | undefined;
+      return live ? { live, next: { ...live, ...draft } } : null;
+    }
+    case "development.scene-script": {
+      const scene = production?.scenes.find((s) => s.id === target["sceneId"]) as
+        | Record<string, unknown>
+        | undefined;
+      if (!scene) return null;
+      return { live: scene, next: { ...scene, script: { blocks: draft["blocks"] } } };
+    }
+    case "development.shot": {
+      // A shot has no file of its own, so the record being amended is the whole scene with one
+      // shot changed inside it — and an amendment is a patch: every field the draft omits is left
+      // exactly as the shot has it, including the ones a conversation may not touch at all.
+      const scene = production?.scenes.find((s) => s.id === target["sceneId"]) as
+        | (Record<string, unknown> & { shots: Array<Record<string, unknown>> })
+        | undefined;
+      const shotId = target["shotId"];
+      if (!scene || shotId === undefined) return null; // absent shotId adds a shot
+      if (!scene.shots.some((s) => s["id"] === shotId)) return null;
+      return {
+        live: scene,
+        next: { ...scene, shots: scene.shots.map((s) => (s["id"] === shotId ? { ...s, ...draft } : s)) },
+      };
+    }
+    case "development.series": {
+      const live = bundle.series.find((s) => s.id === target["seriesId"]) as Record<string, unknown> | undefined;
+      return live ? { live, next: { ...live, ...draft } } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * The same merge, where the caller has already proved the target is there.
+ *
+ * Every use inside `materialiseCandidate` sits behind its own lookup and its own worded refusal —
+ * "episode X is not in Y", "shot X is not in scene Y" — which say far more than a null would. This
+ * turns the shared merge back into a value for those paths without weakening any of them.
+ */
+function requireAmendment(
+  candidate: WorldChangeCandidate,
+  bundle: WorldBundle,
+): { live: Record<string, unknown>; next: Record<string, unknown> } {
+  const amendment = developmentAmendment(candidate, bundle);
+  if (!amendment) throw new MaterialiseError(candidate.id, `${candidate.classification} has nothing to amend`);
+  return amendment;
+}
+
 export function materialiseCandidate(
   candidate: WorldChangeCandidate,
   identities: Identities,
@@ -458,8 +557,7 @@ export function materialiseCandidate(
     case "development.overview": {
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
-      const live = production.story ?? { version: 1 };
-      const content = jsonContent(candidate.id, StoryOverviewSchema, { ...live, ...candidate.draft });
+      const content = jsonContent(candidate.id, StoryOverviewSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/story.json`, content }],
@@ -471,21 +569,7 @@ export function materialiseCandidate(
     case "development.season": {
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
-      const live = production.season ?? { version: 1 };
-      // Arcs merge by id, not wholesale (issue #397 round 2): a conversational draft restating
-      // an arc's note must not silently delete the setup/turn/payoff placements the board
-      // authored — a lane the draft does not mention is a lane it did not change.
-      const liveArcs = "arcs" in live ? (live.arcs ?? []) : [];
-      const draftArcs = candidate.draft.arcs;
-      const mergedArcs =
-        draftArcs !== undefined
-          ? draftArcs.map((arc) => ({ ...liveArcs.find((existing) => existing.id === arc.id), ...arc }))
-          : undefined;
-      const content = jsonContent(candidate.id, SeasonSchema, {
-        ...live,
-        ...candidate.draft,
-        ...(mergedArcs !== undefined ? { arcs: mergedArcs } : {}),
-      });
+      const content = jsonContent(candidate.id, SeasonSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/season.json`, content }],
@@ -523,7 +607,7 @@ export function materialiseCandidate(
         if (!live || stem === undefined) {
           throw new MaterialiseError(candidate.id, `episode ${episodeId} is not in ${production.meta.id}`);
         }
-        const content = jsonContent(candidate.id, EpisodeSchema, { ...live, ...candidate.draft });
+        const content = jsonContent(candidate.id, EpisodeSchema, requireAmendment(candidate, bundle).next);
         return {
           candidate,
           targets: [{ path: `productions/${production.meta.id}/episodes/${stem}.json`, content }],
@@ -574,7 +658,7 @@ export function materialiseCandidate(
       if (!scene || stem === undefined) {
         throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
       }
-      const content = jsonContent(candidate.id, SceneSchema, { ...scene, script: { blocks: candidate.draft.blocks } });
+      const content = jsonContent(candidate.id, SceneSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
@@ -613,7 +697,9 @@ export function materialiseCandidate(
             `shot ${shotId} is not in ${candidate.target.sceneId} — name a shot the scene has, or leave shotId out to add one`,
           );
         }
-        shots = scene.shots.map((s) => (s.id === shotId ? { ...s, ...draft } : s));
+        // Through the shared merge, so the patch semantics above are stated exactly once: what
+        // readiness compares against is what this writes.
+        shots = requireAmendment(candidate, bundle).next["shots"] as Shot[];
       } else {
         // A new shot needs enough to be one. The storyboard already has a button for a blank.
         if (draft.title === undefined || draft.description === undefined) {
@@ -653,7 +739,7 @@ export function materialiseCandidate(
         // A Series is created with its first season, never from a conversation (SPEC-023 R-9).
         throw new MaterialiseError(candidate.id, `series ${candidate.target.seriesId} is not in this world`);
       }
-      const content = jsonContent(candidate.id, SeriesSchema, { ...live, ...candidate.draft });
+      const content = jsonContent(candidate.id, SeriesSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `series/${live.id}.json`, content }],

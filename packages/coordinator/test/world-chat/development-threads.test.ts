@@ -505,6 +505,134 @@ describe("production-scoped threads (issue 400)", () => {
     );
   });
 
+  /*
+   * The Episode Chat half of "an accept that changes nothing should say so".
+   *
+   * These records are written as the draft merged onto what is live, so a draft restating what
+   * the record already says merges to exactly itself — and the file still differs, because the
+   * committer stamps `version`. Accepted, that is a version cut and a history snapshot over a
+   * record nobody changed, reported to the person as saved.
+   *
+   * Judged by performing the same merge materialise writes from, so the check cannot drift from
+   * the file. The arcs case below is why that matters.
+   */
+  it("holds back an overview that restates the story the production already has", async () => {
+    const w = await world();
+    const live = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.story!;
+    const restated = candidate({
+      classification: "development.overview",
+      target: { kind: "production", productionId: "saltlight" },
+      draft: { logline: live.logline, spine: live.spine },
+    } as Partial<WorldChangeCandidate>);
+    const readiness = evaluateReadiness([restated], w.store.getBundle());
+    assert.deepEqual(readiness.carried, [], "it never becomes a proposal");
+    assert.deepEqual(readiness.notCarried.map((n) => n.reason), ["changes-nothing"]);
+  });
+
+  it("carries an overview that changes one line of it", async () => {
+    const w = await world();
+    const live = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.story!;
+    const moved = candidate({
+      classification: "development.overview",
+      target: { kind: "production", productionId: "saltlight" },
+      draft: { logline: live.logline, spine: "A tide-caller finally asks why it has never cost her." },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([moved], w.store.getBundle()).carried.length, 1);
+  });
+
+  it("holds back a shot amendment that restates the shot", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const shot = scene.shots[0]!;
+    const restated = candidate({
+      classification: "development.shot",
+      target: { kind: "shot", productionId: "saltlight", sceneId: scene.id, shotId: shot.id },
+      draft: { title: shot.title, description: shot.description },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(
+      evaluateReadiness([restated], w.store.getBundle()).notCarried[0]?.reason,
+      "changes-nothing",
+    );
+  });
+
+  it("carries a shot amendment that moves the camera, leaving the rest of the shot alone", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const shot = scene.shots[0]!;
+    const moved = candidate({
+      classification: "development.shot",
+      target: { kind: "shot", productionId: "saltlight", sceneId: scene.id, shotId: shot.id },
+      draft: { title: shot.title, camera: "WIDE · handheld, from the water" },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([moved], w.store.getBundle()).carried.length, 1);
+  });
+
+  it("never holds back a new shot or a new episode — a creation always writes", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const added = candidate({
+      classification: "development.shot",
+      target: { kind: "shot", productionId: "saltlight", sceneId: scene.id },
+      draft: { title: "The water disagrees", description: "@maren-kest reads the rail." },
+    } as Partial<WorldChangeCandidate>);
+    const born = candidate({
+      classification: "development.episode",
+      target: { kind: "episode", productionId: "saltlight" },
+      draft: { title: "Count It Again" },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([added, born], w.store.getBundle()).carried.length, 2);
+  });
+
+  /*
+   * The arcs rule, which is the whole reason the check performs the merge instead of describing
+   * it. Arcs merge by id, so a draft restating one arc's note leaves the setup/turn/payoff
+   * placements the board authored exactly where they were. A check that compared the draft's arcs
+   * to the live arcs wholesale would call this pair the wrong way round in both directions.
+   */
+  const withSeason = (arcs: Array<Record<string, unknown>>) =>
+    ({
+      canon: [],
+      sheets: [],
+      proposals: [],
+      series: [],
+      productions: [
+        {
+          meta: { id: "saltlight" },
+          story: null,
+          scenes: [],
+          episodes: [],
+          season: { version: 2, question: "What does the verse cost?", arcs },
+        },
+      ],
+    }) as never;
+
+  const seasonArcs = (arcs: Array<Record<string, unknown>>) =>
+    candidate({
+      classification: "development.season",
+      target: { kind: "production", productionId: "saltlight" },
+      draft: { arcs },
+    } as Partial<WorldChangeCandidate>);
+
+  it("holds back a season draft that restates an arc, placements and all", () => {
+    const live = [{ id: "arc_1", note: "Maren stops not-asking.", setup: "ep_1", payoff: "ep_4" }];
+    const restated = seasonArcs([{ id: "arc_1", note: "Maren stops not-asking." }]);
+    assert.equal(evaluateReadiness([restated], withSeason(live)).notCarried[0]?.reason, "changes-nothing");
+  });
+
+  it("carries a season draft that changes an arc's note, and never mistakes the merge for one", () => {
+    const live = [{ id: "arc_1", note: "Maren stops not-asking.", setup: "ep_1", payoff: "ep_4" }];
+    const moved = seasonArcs([{ id: "arc_1", note: "Maren asks, and is answered." }]);
+    const readiness = evaluateReadiness([moved], withSeason(live));
+    assert.equal(readiness.carried.length, 1, "a real change must never be held back as empty");
+    assert.deepEqual(readiness.notCarried, []);
+  });
+
+  it("carries a season draft that adds an arc beside the one already there", () => {
+    const live = [{ id: "arc_1", note: "Maren stops not-asking.", setup: "ep_1" }];
+    const added = seasonArcs([{ id: "arc_1", note: "Maren stops not-asking." }, { id: "arc_2", note: "Bray pays." }]);
+    assert.equal(evaluateReadiness([added], withSeason(live)).carried.length, 1);
+  });
+
   it("a series candidate against a series that does not exist is held back as target-missing", async () => {
     const w = await world();
     const missing = candidate({

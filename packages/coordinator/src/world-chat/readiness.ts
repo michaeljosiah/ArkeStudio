@@ -7,6 +7,7 @@ import {
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
 import { lookHasMoved } from "./look.js";
+import { developmentAmendment } from "./materialise.js";
 
 /**
  * What a proposition may become, decided once (#70 §6.2).
@@ -205,6 +206,46 @@ function unknownSections(candidate: WorldChangeCandidate, bundle: WorldBundle): 
 }
 
 /**
+ * Value equality that does not care what order the keys arrived in.
+ *
+ * A draft's nested objects come from the model's JSON in whatever order it wrote them; the live
+ * record's come from a Zod parse, in schema order. `JSON.stringify` alone would call those two
+ * different and carry a proposition that changes nothing — safe, but it would leave exactly the
+ * gap this is here to close.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  const canonical = (value: unknown): string | undefined =>
+    JSON.stringify(value, (_key, inner: unknown) =>
+      inner !== null && typeof inner === "object" && !Array.isArray(inner)
+        ? Object.fromEntries(
+            Object.entries(inner as Record<string, unknown>).sort(([x], [y]) => (x < y ? -1 : 1)),
+          )
+        : inner,
+    );
+  return canonical(a) === canonical(b);
+}
+
+/**
+ * Whether a Development amendment would write anything the record does not already say.
+ *
+ * The Episode Chat half of the same silence. These records are written as the draft merged onto
+ * what is live, so a draft restating what the season, episode, scene or series already says
+ * merges to exactly itself — and the file still differs, because the committer stamps `version`.
+ * Accepted, that is a version cut over a record nobody changed.
+ *
+ * Judged by performing the merge rather than by describing it: `developmentAmendment` is the same
+ * function materialise builds the file from, so this cannot drift from what would actually be
+ * written — which matters most for the arcs rule, where a check that merged wholesale would call
+ * a real change empty and hold back work somebody asked for. A creation, or a target this world
+ * does not hold, returns null and is nothing to judge: the first always writes, and the second is
+ * `target-missing`'s business.
+ */
+function developmentChangesNothing(candidate: WorldChangeCandidate, bundle: WorldBundle): boolean {
+  const amendment = developmentAmendment(candidate, bundle);
+  return amendment !== null && sameValue(amendment.live, amendment.next);
+}
+
+/**
  * Whether this edit would write anything the sheet does not already say.
  *
  * The other half of the same silence. A conversation that re-states what is already on the sheet
@@ -221,6 +262,8 @@ function unknownSections(candidate: WorldChangeCandidate, bundle: WorldBundle): 
  * way.
  */
 function changesNothing(candidate: WorldChangeCandidate, bundle: WorldBundle): boolean {
+  if (candidate.classification.startsWith("development."))
+    return developmentChangesNothing(candidate, bundle);
   if (candidate.classification !== "sheet.edit") return false;
   const record = candidate as unknown as Record<string, unknown>;
   const target = record["target"] as { sheetId: string } | undefined;
@@ -422,6 +465,6 @@ export function explainNotCarried(reason: NotCarriedReason): string {
     case "unknown-section":
       return "it writes under a heading this kind of sheet does not have, so none of it would reach the page";
     case "changes-nothing":
-      return "everything in it is already what the sheet says";
+      return "everything in it is already what the world says";
   }
 }
