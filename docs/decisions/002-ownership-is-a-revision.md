@@ -49,6 +49,11 @@ lands.
   stops the deposed *process*, and the *transaction* is completed by the new owner on open. That
   only works if recovery happens under ownership, which is the first defect below — so the two
   findings are one fix, not two.
+- **Reconciling a closed-world edit snapshots the wrong bytes.** `reconcileExternalEdit()` commits
+  the hand-edited content with `baseHash: sha256(live)`, so the base check compares the edit against
+  itself and the history snapshot captures the edit rather than the version it replaced. R-28
+  promises the prior version is kept; the path relies on an earlier commit having left it there.
+  The function reads `fromVersion` and discards it with `void fromVersion;`.
 - **An adopted Bible edit is invisible to the guard written for it.** `applyTurnBibleEdits()`
   refuses a World Chat turn whose base moved, citing R-27, for precisely the case of an author
   editing in a text editor while the model thinks. It compares frontmatter *versions*;
