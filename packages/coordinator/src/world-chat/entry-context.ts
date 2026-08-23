@@ -218,8 +218,13 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
     const written = (production.episodes ?? []).filter((e) => e.promise?.opens || e.promise?.closes).length;
     const remaining = count === undefined ? 0 : count - written;
     if (writesTheSeason && remaining > EPISODE_RUN) {
+      /*
+       * A limit, not an instruction to go and write them. Phrased as an imperative it arrived on
+       * every turn of an unfinished season — including one opened to change a line of the
+       * overview — and told the model to write eight episodes nobody had asked for.
+       */
       bits.push(
-        `${written > 0 ? `${written} of ${count} are written; ` : ""}write the rest in runs of at most ${EPISODE_RUN} episodes, not all ${remaining} at once. Say which episodes the run covers and where the next one picks up.`,
+        `${written} of ${count} episodes are written. When you write more, a run is at most ${EPISODE_RUN} of them and never all ${remaining} at once: say which episodes the run covers and where the next one picks up.`,
       );
       /*
        * The half that makes the loop terminate. A run that is settled and left on the rail is

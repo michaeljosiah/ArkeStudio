@@ -131,13 +131,13 @@ describe("a production thread is briefed on its shape", () => {
     assert.match(text, /season of 80 episodes/);
     // Room for the companions the same briefing permits: a run plus the overview, the season
     // direction and a world fact all have to fit inside one turn's operation cap.
-    const run = Number(/runs of at most (\d+) episodes/.exec(text)?.[1]);
+    const run = Number(/a run is at most (\d+) of them/.exec(text)?.[1]);
     assert.ok(run > 0, "a run size is named");
     assert.ok(
       run + 3 <= TURN_RESULT_BOUNDS.candidateOperations,
       `run of ${run} leaves room for an overview, a season change and a world fact`,
     );
-    assert.match(text, /not all 80 at once/);
+    assert.match(text, /never all 80 at once/);
     // The half that makes the loop terminate rather than pile up against the wrap-up's own cap.
     assert.match(text, new RegExp(`at most ${MAX_PROPOSALS} changes`));
     assert.match(text, /Wrap up each run before starting the next/);
@@ -168,7 +168,7 @@ describe("a production thread is briefed on its shape", () => {
       ],
     };
     const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
-    assert.ok(!/runs of at most/.test(text), "a season with nothing left to write asks for nothing");
+    assert.ok(!/a run is at most/.test(text), "a season with nothing left to write asks for nothing");
   });
 
   /**
@@ -204,8 +204,8 @@ describe("a production thread is briefed on its shape", () => {
       ],
     };
     const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
-    assert.match(text, /runs of at most/, "eighty blank tiles are eighty episodes still to write");
-    assert.match(text, /not all 80 at once/, "and none of them counts as done");
+    assert.match(text, /a run is at most/, "eighty blank tiles are eighty episodes still to write");
+    assert.match(text, /never all 80 at once/, "and none of them counts as done");
   });
 
   /**
@@ -238,12 +238,12 @@ describe("a production thread is briefed on its shape", () => {
         patched,
       );
       assert.match(text, /season of 80 episodes/, "it still hears the shape");
-      assert.ok(!/runs of at most/.test(text), "but is not asked to write a run of them");
+      assert.ok(!/a run is at most/.test(text), "but is not asked to write a run of them");
     }
     const sceneId = production.scenes[0]?.id;
     if (sceneId) {
       const text = describeEntryContext({ kind: "scene", productionId: production.meta.id, sceneId }, patched);
-      assert.ok(!/runs of at most/.test(text), "and neither is a scene thread");
+      assert.ok(!/a run is at most/.test(text), "and neither is a scene thread");
     }
   });
 
@@ -252,7 +252,7 @@ describe("a production thread is briefed on its shape", () => {
       { medium: "video", kind: "microdrama" },
       { episodeCount: 8, episodeSecondsMin: 60, episodeSecondsMax: 90 },
     );
-    assert.ok(!/runs of at most/.test(text), "a short sample is written in one go");
+    assert.ok(!/a run is at most/.test(text), "a short sample is written in one go");
   });
 
   it("an episodic production without stored defaults still says it is one", async () => {
