@@ -618,8 +618,17 @@ Tables: `entities`, `citations` (who references what, and at which version), `ta
 ## 2.7 Concurrency and external edits
 
 One process owns a world at a time, enforced by a lock file. Hand edits made while a world is
-open are detected by a watcher, which marks the index stale and prompts a reload rather than
-merging.
+**closed** are reconciled explicitly on open. While a world is **open**, the watcher no longer
+compares manifests or declares the world stale — its only remaining job is noticing that `bible.md`
+moved and taking the new bytes, because that file is the one the product invites a user to edit by
+hand. Merging is not attempted in either case.
+
+> **Under revision.** [ADR-002](decisions/002-ownership-is-a-revision.md) proposes that *one writer
+> at a time* survives but *enforced by a lock file* becomes a property of the deployment — local
+> keeps the file, a hosted coordinator takes a lease. Nothing above is false today, and the ADR is
+> Proposed rather than Accepted; the dependent text it would move is listed in its consequences.
+
+
 
 **Hand edits made while the world was closed need an explicit reconciliation**, because simply
 scanning them in would let a change enter the record with no version bump, no snapshot and no
