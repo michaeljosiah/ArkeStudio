@@ -442,6 +442,7 @@ export function ProductionConversation({
                 seq={loaded?.seq ?? null}
                 carried={carriedPoints}
                 status={loaded?.status ?? null}
+                subjectKey={contextKey}
                 wrapping={wrapping}
                 onWrappingChange={setWrapping}
               />
@@ -536,6 +537,7 @@ export function ProductionConversation({
           seq={loaded?.seq ?? null}
           carried={carriedPoints}
           status={loaded?.status ?? null}
+          subjectKey={contextKey}
           wrapping={wrapping}
           onWrappingChange={setWrapping}
         />
@@ -563,6 +565,7 @@ function WrapUp({
   seq,
   carried,
   status,
+  subjectKey,
   wrapping,
   onWrappingChange,
 }: {
@@ -570,6 +573,8 @@ function WrapUp({
   conversationId: string | null;
   seq: number | null;
   carried: number;
+  /** Which subject this button is drawn for; one thread serves several. */
+  subjectKey: string;
   /** A wrap-up that landed closes the conversation; nothing else on this dock does. */
   status: WorldChatStatus | null;
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
@@ -577,9 +582,18 @@ function WrapUp({
   onWrappingChange: (next: boolean) => void;
 }) {
   const setWrapping = onWrappingChange;
-  const asked = useRef<string | null>(null);
+  /*
+   * Per subject, for the same reason the wait is (codex, 2026-08-23).
+   *
+   * A single ref held whichever request was pressed last, so two overlapping wrap-ups made the
+   * later one's id the only one anything could match. A refusal for the earlier subject then
+   * failed to recognise itself, and that subject's button stayed disabled with nothing coming to
+   * clear it. Refusals arrive keyed by conversation, and one conversation serves every subject
+   * here, so the correlation has to live where the subject does.
+   */
+  const asked = useRef<Map<string, string>>(new Map());
   const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
-  const refusedMine = refusal !== null && refusal.requestId === asked.current;
+  const refusedMine = refusal !== null && refusal.requestId === asked.current.get(subjectKey);
   /*
    * Both endings, and only the two of them (codex, 2026-08-23).
    *
@@ -607,7 +621,7 @@ function WrapUp({
           if (!worldId || conversationId === null || seq === null) return;
           const attempt = wrapUpWorldChat(worldId, conversationId, seq);
           if (!attempt) return;
-          asked.current = attempt;
+          asked.current.set(subjectKey, attempt);
           setWrapping(true);
         }}
       >
