@@ -174,6 +174,13 @@ has now reasoned about it wrongly three times.
 **This is a real piece of work, as §2.9 said.** The earlier draft's claim that it was nearly free
 rested on the fencing argument above, which does not hold. The honest scope:
 
+- **Recoverability on the direct paths, which is the cost nobody had priced.** A fence can only
+  refuse where refusing is safe, and on an unjournalled path it is not. Take arrival renames paid
+  provider media into a take directory, deletes the staging copy, and writes `take.json` some steps
+  later — all inside one `gateOp()` with no journal. Refused in between, the media is orphaned and
+  unrecoverable. So fencing the direct paths means giving them the all-or-nothing property R-15
+  gave commits, or checking ownership at the start and letting them run. That is not a detail of
+  the fence; it is a second body of work the fence depends on.
 - **A fence, on every mutation path.** Covering `ownedWrite()` as well as the committer, and
   satisfying the atomicity requirement above rather than approximating it. This is the substance of
   the work, none of it exists today, and this ADR no longer claims to know its shape.
