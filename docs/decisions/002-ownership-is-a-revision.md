@@ -112,7 +112,7 @@ guarantee is retained, not replaced.**
    whether a pid is alive, and a clear error beats a silent race between two Electron windows. It
    does not follow that local writes need no fence, and an earlier revision of this ADR wrongly
    implied it did.
-   - `WorldLock.acquire()` reclaims on **dead pid *or* cold heartbeat**, so a process that is
+   - Reclamation is on **dead pid *or* cold heartbeat** (SPEC-002 R-3), so a process that is
      merely unresponsive — not dead — can be deposed and then carry on writing, because
      `commit()`, `gateOp()` and `ownedWrite()` never revalidate ownership after acquiring it.
    - The trigger is not exotic. The heartbeat is `utimes(...).catch(() => {})`, so a persistently
@@ -207,7 +207,7 @@ contradiction is worse than a listed one:
 | Where | What it says | What it becomes |
 |---|---|---|
 | master §2.7 | *"One process owns a world at a time, enforced by a lock file"* | one **writer** at a time; the enforcement is the deployment's |
-| SPEC-004 R-5, R-9, R-121, §2 | accepting, ripple recomputation and canon-id allocation all happen *"under the world lock"* | under the world's **ownership**, whatever holds it |
+| SPEC-004 R-5, R-9, R-13, §2 | accepting, ripple recomputation and canon-id allocation all happen *"under the world lock"* | under the world's **ownership**, whatever holds it |
 | SPEC-025 §2.9, §2.11 | describes SPEC-002's lock as the current state | unchanged in substance; the pointer already added |
 
 SPEC-004 is the one that matters, because R-5 verifies base hashes *while holding the world lock* —
