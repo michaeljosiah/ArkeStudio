@@ -123,6 +123,17 @@ const WORKING_LABELS: Record<string, string> = {
   fetch_url: "Reading a page online",
   get_production: "Reading the production",
   /*
+   * Going online, which is the one thing here a person opted into and the one thing the screen
+   * has to be honest about (2026-08-23).
+   *
+   * Driven against a real turn: it searched four pages and the spinner said "Checking the world"
+   * for the whole of it. Someone who has just turned on a switch saying the studio may go online
+   * is then told it is reading their own world instead — not a missing label, the wrong claim,
+   * at the only moment the distinction matters.
+   */
+  websearch: "Searching online",
+  webfetch: "Reading a page online",
+  /*
    * The harness's own read-only tools. The world-builder agent is allowed read, glob, grep, list
    * and the todo pair (adapter-opencode/config.ts READ_ONLY_PERMISSION), and it does reach for
    * them — a turn that only ever showed the world-query verbs would fall back to the generic
@@ -167,12 +178,20 @@ export const WRITING_LABEL = "Writing";
  * Matched by suffix rather than by stripping a hard-coded `arke-world_`, so renaming the MCP
  * server cannot silently take the vocabulary out again — which is precisely how this went
  * unnoticed: a fallback that reads plausibly hides its own failure.
+ *
+ * Case-folded for the same reason, found the same way (2026-08-23). The harness names above are
+ * OpenCode's, which are lowercase; Claude Code calls the same tools `Read`, `Glob`, `Grep` and
+ * `WebSearch`. With Claude as the engine EVERY harness tool missed and the turn showed the
+ * fallback throughout — the words were all correct and none of them were ever shown, which is
+ * the second time that sentence has been true of this function. Keys here stay lowercase and the
+ * incoming name is folded to meet them.
  */
 export function workingLabel(tool: string): string {
-  const direct = WORKING_LABELS[tool];
+  const key = tool.toLowerCase();
+  const direct = WORKING_LABELS[key];
   if (direct !== undefined) return direct;
   for (const [name, label] of Object.entries(WORKING_LABELS)) {
-    if (tool.endsWith(`_${name}`)) return label;
+    if (key.endsWith(`_${name}`)) return label;
   }
   return "Checking the world";
 }

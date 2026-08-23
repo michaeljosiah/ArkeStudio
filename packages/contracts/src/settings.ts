@@ -162,12 +162,22 @@ export type NarratorSettings = z.infer<typeof NarratorSettingsSchema>;
 const AppSettingsObjectSchema = z
   .object({
     /**
-     * Whether the studio may read a page from the web when asked to research (2026-08-22).
+     * Whether the studio may go online when asked to research (2026-08-22, widened 2026-08-23).
      *
      * Off, because this app runs on your machine and reads your world off your disk, and going
-     * online is a different promise from the one it makes by default. On, it may fetch a page a
-     * person names; it never searches on its own initiative, and every page it reads is kept as
-     * an attachment on that conversation so the quotes stay checkable.
+     * online is a different promise from the one it makes by default.
+     *
+     * On, it may now SEARCH as well as fetch a page you name. It could only fetch a named URL
+     * before, which sounds like a smaller promise and mostly worked as a broken one: asking it to
+     * go and find out how something is done meant finding the pages yourself and pasting them in,
+     * and the one link it did pick on its own was dead. Nobody asking for research is asking for
+     * that. What it reads is not canon and reaches the world only through the accept gate, the
+     * same as everything else, and it is told to cite the URL a claim came from so you can check
+     * it — see WEB_RESEARCH_RULE.
+     *
+     * Two surfaces answer to this one switch. The `fetch_url` tool asks per call, so switching it
+     * off stops the next call. Harness sessions take their confinement when they open, so
+     * switching it off reaches the next session rather than the running one.
      */
     research: z.object({ web: z.boolean().default(false) }).strict().default({ web: false }),
     routing: RoutingDefaultsSchema.default({}),

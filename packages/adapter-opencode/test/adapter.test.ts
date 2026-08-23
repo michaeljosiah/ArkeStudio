@@ -10,6 +10,7 @@ import {
   SKILLS,
   worldChatResultShapeGuide,
   type HarnessEvent,
+  type SessionConfigInput,
 } from "@arke-studio/contracts";
 import { OpenCodeAdapter } from "../src/opencode-adapter.js";
 import { probeCapabilities } from "../src/capabilities.js";
@@ -639,8 +640,8 @@ describe("the stream channel is never downgraded by a bad moment (R-2)", () => {
 });
 
 describe("the world-builder writes nothing (#70 §8.1)", () => {
-  function worldBuilder() {
-    const config = buildSessionConfig({});
+  function worldBuilder(input: SessionConfigInput = {}) {
+    const config = buildSessionConfig(input);
     const agents = config["agent"] as Record<
       string,
       { tools: Record<string, boolean>; permission: Record<string, string> }
@@ -662,11 +663,31 @@ describe("the world-builder writes nothing (#70 §8.1)", () => {
     }
   });
 
-  it("has no shell or network tool", () => {
+  it("has no shell", () => {
     const agent = worldBuilder();
-    for (const tool of ["bash", "webfetch", "websearch"]) {
-      assert.equal(agent.tools[tool], false);
-      assert.equal(agent.permission[tool], "deny");
+    assert.equal(agent.tools["bash"], false);
+    assert.equal(agent.permission["bash"], "deny");
+  });
+
+  /**
+   * The network is a capability now rather than a hazard, and the person owns the switch. World
+   * Chat is where someone says go and look this up, and an agent that answers rather than authors
+   * has no other way to get a fact it does not already hold — but `research.web` ships off, so it
+   * has that way only once someone asks for it.
+   */
+  it("cannot reach the web until Settings says so", () => {
+    const agent = worldBuilder();
+    for (const tool of ["webfetch", "websearch"]) {
+      assert.equal(agent.tools[tool], false, `${tool} is switched off`);
+      assert.equal(agent.permission[tool], "deny", `${tool} is denied`);
+    }
+  });
+
+  it("can search the web once it does, which is the point of asking it to research something", () => {
+    const agent = worldBuilder({ researchWeb: true });
+    for (const tool of ["webfetch", "websearch"]) {
+      assert.equal(agent.permission[tool], "allow", `${tool} is allowed`);
+      assert.equal(tool in agent.tools, false, `${tool} is not also switched off`);
     }
   });
 

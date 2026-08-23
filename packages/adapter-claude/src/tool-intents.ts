@@ -22,6 +22,8 @@ const TOOL_INTENTS: Readonly<Record<string, ToolIntent>> = {
   TodoRead: "todo",
   Skill: "skill",
   Task: "delegate",
+  WebSearch: "web",
+  WebFetch: "web",
 };
 
 /** MCP tools arrive as `mcp__<server>__<tool>`; ours is the only server a session is given. */

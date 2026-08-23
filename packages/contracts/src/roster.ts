@@ -1,3 +1,4 @@
+import { confinementFor, permits, WEB_RESEARCH_RULE } from "./confinement.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { worldChatResultShapeGuide } from "./world-chat.js";
 
@@ -64,21 +65,33 @@ directory are the complete scope of what you may change. Rules that are not your
  * The prompt an agent actually runs with, from a brief that may be the user's, and a skill that
  * never is (SPEC-019 R-14, R-18).
  *
- * Order is the enforcement. The confinement preamble is written first and the postscript last,
- * with the brief and any skill between them, so neither a rewritten brief nor a skill document
- * can displace the rules the accept gate and the turn validators assume — a skill adds craft
- * guidance and has no way to reach the confinement, the tool denials, the proposal directory or
- * the result shape.
+ * Order is the enforcement. The rules are written first and the postscript last, with the brief
+ * and any skill between them, so neither a rewritten brief nor a skill document can displace the
+ * rules the accept gate and the turn validators assume — a skill adds craft guidance and has no
+ * way to reach the confinement, the tool denials, the proposal directory or the result shape.
+ *
+ * Two rule blocks, and they are gated differently on purpose. The proposal preamble is about a
+ * directory, so only an agent that has one is told about it. The research rule is about a
+ * capability the person controls, so it is written only when the confinement actually permits
+ * `web` — an agent told it can search while the gate refuses every search learns to distrust its
+ * own instructions, and the same prompt would be a promise the Settings toggle does not keep.
  */
 export function agentPromptFor(agent: {
   brief: string;
   needsProposal: boolean;
+  readOnly?: boolean;
+  /** Settings' `research.web`, off unless the person turned it on. */
+  researchWeb?: boolean;
   skill?: { id: string; version: number; body: string } | undefined;
   postscript?: string | undefined;
 }): string {
-  const head = agent.needsProposal ? `${CONFINEMENT_PREAMBLE}
-
-${agent.brief}` : agent.brief;
+  const confinement = confinementFor(agent, { web: agent.researchWeb === true });
+  const blocks = [
+    agent.needsProposal ? CONFINEMENT_PREAMBLE : "",
+    permits(confinement, "web") ? WEB_RESEARCH_RULE : "",
+    agent.brief,
+  ].filter((block) => block.length > 0);
+  const head = blocks.join("\n\n");
   const skilled = agent.skill ? `${head}
 
 ${agent.skill.body}` : head;

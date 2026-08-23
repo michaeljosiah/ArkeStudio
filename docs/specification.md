@@ -1804,9 +1804,12 @@ restriction the agent is asked to respect — it is the only world it is shown.
 Materialisation is also where base hashes are captured (§3.3), so the copy and the staleness
 check come from one act.
 
-**2 · Escape-capable tools are denied.** Shell, process execution and network tools are disabled
-in the session's harness configuration. This is best-effort — it depends on the harness honouring
-its own configuration — and is treated as reducing likelihood, not as a boundary.
+**2 · Escape-capable tools are denied.** Shell and process execution are disabled in the session's
+harness configuration. Network tools are disabled too unless the person has turned research on, in
+which case the session may search and read public pages — that reaches the internet, not the
+filesystem, so it is not an escape from the working directory and nothing it returns enters the
+world except through the accept gate. All of this is best-effort — it depends on the harness
+honouring its own configuration — and is treated as reducing likelihood, not as a boundary.
 
 **3 · Out-of-band writes are detected, not prevented.** This is the layer that actually holds.
 Base-hash verification at accept (R-GATE-6) compares every target against the world as last
@@ -1843,8 +1846,10 @@ across restarts and are revocable, reusing Arke's `grant-store`.
   SHALL NOT be silently absorbed.
   - **WHEN** a world file changes between materialisation and accept **THEN** the accept is
     refused and the change reported.
-- **R-HARNESS-7** Shell, process-execution and network tools SHALL be disabled in authoring
-  sessions, and this SHALL be documented as risk reduction rather than as a security boundary.
+- **R-HARNESS-7** Shell and process-execution tools SHALL be disabled in authoring sessions, and
+  this SHALL be documented as risk reduction rather than as a security boundary. Network tools
+  SHALL follow the `research.web` setting, which is off by default (amended 2026-08-23; see
+  SPEC-005 R-10).
 - **R-HARNESS-2** The application SHALL prefer an existing OpenCode installation over the
   bundled one, and SHALL report which it is using.
 - **R-HARNESS-3** Studio SHALL write the harness's provider configuration from its own settings,

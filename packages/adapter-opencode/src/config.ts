@@ -33,10 +33,18 @@ const V1_TOOLS: Partial<Record<ToolIntent, readonly string[]>> = {
   todo: ["todowrite", "todoread"],
   "world-query": ["arke-world*", "arke-world_*"],
   delegate: ["task"],
+  web: ["webfetch", "websearch"],
 };
 
-/** Never an intent, never available: risk reduction, not a boundary (R-10, D10). */
-const V1_NEVER = ["bash", "webfetch", "websearch"] as const;
+/**
+ * Never an intent, never available: risk reduction, not a boundary (R-10, D10).
+ *
+ * `webfetch` and `websearch` were here and are now intents instead — reading a public page is not
+ * a way into the filesystem, and their being NEVER meant no confinement could grant research even
+ * when that was the whole point of the turn. `bash` stays: it is the one that turns any other
+ * refusal into a suggestion.
+ */
+const V1_NEVER = ["bash"] as const;
 
 /**
  * One confinement, rendered into v1's two parallel surfaces: `tools` decides what exists at all,
@@ -82,11 +90,12 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
       description: member.description,
       prompt: agentPromptFor({
         ...member,
+        researchWeb: input.researchWeb === true,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
       // The confinement is decided once, in contracts, and only spelled here (R-10, R-17).
-      ...renderV1(confinementFor(member)),
+      ...renderV1(confinementFor(member, { web: input.researchWeb === true })),
       // The agent's own choice wins over the session-wide one; absent, OpenCode keeps using
       // whatever it is configured with, which is the only safe default — pinning a model the
       // user's OpenCode has no auth for would break every session.

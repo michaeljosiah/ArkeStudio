@@ -36,6 +36,15 @@ export interface SessionConfigInput {
    * shaped a draft is worth nothing if it names a document the drafting never saw.
    */
   skillModelId?: string;
+  /**
+   * Settings' `research.web`: whether this session may go online (2026-08-23).
+   *
+   * Product policy, like everything else here, and it belongs to the person rather than the role
+   * — so it arrives per session instead of being decided by the confinement's role table. Absent
+   * is off, which is what the setting says until someone changes it; an adapter that never sees
+   * this field must not end up granting the network by default.
+   */
+  researchWeb?: boolean;
 }
 
 /**

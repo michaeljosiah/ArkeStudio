@@ -207,10 +207,14 @@ export class ClaudeAdapter implements HarnessAdapter {
       id: `claude_${randomUUID()}`,
       cwd: input.cwd,
       agentName,
-      confinement: confinementFor(member),
+      // Settings' research toggle, from the same `prepareSession` input the skill comes from.
+      // No `this.opts` fallback: there is no constructor option for it, and inventing an
+      // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
+      confinement: confinementFor(member, { web: this.pending.researchWeb === true }),
       worldQueryUrl: this.opts.worldQueryUrl ?? this.pending.worldQueryUrl,
       systemPrompt: agentPromptFor({
         ...member,
+        researchWeb: this.pending.researchWeb === true,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
