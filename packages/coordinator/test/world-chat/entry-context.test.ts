@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle } from "@arke-studio/contracts";
+import { TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
@@ -112,6 +113,31 @@ describe("a production thread is briefed on its shape", () => {
     assert.match(text, /season of 12 episodes/);
     assert.match(text, /45–90 seconds/);
     assert.match(text, /first 3 seconds are the hook/);
+  });
+
+  /**
+   * A season longer than a turn can carry says so before the model tries (2026-08-23).
+   *
+   * The door promises up to a hundred episodes; a turn stages at most twelve candidates. A model
+   * that reads "eighty episodes" and writes eighty has the whole turn refused for breaking the
+   * bound, after doing all the work — the failure the numbers in this file exist to prevent.
+   */
+  it("tells a long season to come in runs, and names the run size", async () => {
+    const text = await shaped(
+      { medium: "video", kind: "microdrama" },
+      { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
+    );
+    assert.match(text, /season of 80 episodes/);
+    assert.match(text, new RegExp(`runs of at most ${TURN_RESULT_BOUNDS.candidateOperations} episodes`));
+    assert.match(text, /not all 80 at once/);
+  });
+
+  it("says nothing about runs when the whole season fits in one turn", async () => {
+    const text = await shaped(
+      { medium: "video", kind: "microdrama" },
+      { episodeCount: TURN_RESULT_BOUNDS.candidateOperations, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+    );
+    assert.ok(!/runs of at most/.test(text), "a twelve-episode season is written in one go");
   });
 
   it("an episodic production without stored defaults still says it is one", async () => {
