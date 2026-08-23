@@ -27,7 +27,8 @@ import {
 } from "./manifest.js";
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
-import type { Scene, Shot } from "./scene.js";
+import { effectiveFraming } from "./scene.js";
+import type { Scene, Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
 
@@ -179,6 +180,31 @@ export function spatialLayoutFor(scene: Scene, sheets: readonly Sheet[]): string
 }
 
 /** The blocks, before they are joined (R-5). */
+/**
+ * The structured camera as one line a model reads as camera grammar.
+ *
+ * Order is the order a crew says it in — size, angle, lens, focus, movement, pace — then the
+ * light and the look, which are conditions rather than operations. Only what is set is said: an
+ * absent lens must not become "default lens", which is a real instruction to a model that reads
+ * everything it is given.
+ */
+export function framingClause(framing: ShotFraming): string {
+  const said = [
+    framing.size,
+    framing.angle,
+    framing.lens,
+    framing.focus,
+    framing.movement,
+    framing.pace,
+    framing.lighting,
+    framing.timeOfDay,
+    framing.grade,
+  ]
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0);
+  return said.length > 0 ? said.join(", ") : "";
+}
+
 export function assembleBlocks(input: AssembleInput): PromptBlocks {
   const { world, sheets, scene, shot } = input;
   const carried = input.carriedSheetIds ?? new Set<string>();
@@ -235,19 +261,47 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // authored is what the anchor says, so a generic "MCU · slow push-in" stays generic rather than
   // being dressed up as a placement nobody wrote.
   const authoredCamera = shot.camera?.trim() ?? "";
-  const cameraAnchor =
-    spatial.length > 0 && authoredCamera.length > 0 ? `CAMERA ANCHOR\n${authoredCamera}` : "";
+  /*
+   * The structured camera, said out loud (2026-08-23).
+   *
+   * `framing` is nine authored fields — size, angle, lens, focus, movement, pace, lighting, time
+   * of day, grade — edited on the shot sheet, versioned, shown in the UI, and until now dropped
+   * before the prompt was built: the word `framing` appeared nowhere in this file. A director set
+   * a 28mm low-angle slow push and the model was told whatever the prose happened to imply.
+   *
+   * Resolved against the scene's defaults rather than read raw, because presence is the override
+   * flag (turn 97) — a shot that inherits the scene's lens must still say the lens.
+   */
+  const framingLine = framingClause(effectiveFraming(scene, shot));
+  const cameraLines = [authoredCamera, framingLine].filter((line) => line.length > 0).join("\n");
+  const cameraAnchor = spatial.length > 0 && cameraLines.length > 0 ? `CAMERA ANCHOR\n${cameraLines}` : "";
 
   // 5 — direction: this shot's camera and audio. Per-beat, so in a pass it travels with the beat.
   // The camera is spoken once: if it has been raised into its own anchor block, it does not also
   // trail the description.
   const directionParts: string[] = [];
-  if (shot.camera && cameraAnchor.length === 0) directionParts.push(sentence(shot.camera));
+  // Two sentences, not one run-on: without the anchor block to separate them, "facing the doorway
+  // medium close-up, low" reads as a single garbled instruction.
+  if (cameraAnchor.length === 0) {
+    if (authoredCamera.length > 0) directionParts.push(sentence(authoredCamera));
+    if (framingLine.length > 0) directionParts.push(sentence(framingLine));
+  }
   if (shot.audio?.kind && shot.audio.kind !== "silence") {
     directionParts.push(
       sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
     );
   }
+  /*
+   * The rest of the soundtrack, beside the action it belongs to.
+   *
+   * `ambience` and `effects` are authored on the shot sheet and were read by nothing. They sit
+   * here rather than in a block at the end because sound direction works next to the thing that
+   * makes the sound — one global "market noise" applies it to the quiet room two shots later.
+   */
+  const ambience = shot.audio?.ambience?.trim() ?? "";
+  const effects = shot.audio?.effects?.trim() ?? "";
+  if (ambience.length > 0) directionParts.push(sentence(`Ambience: ${ambience}`));
+  if (effects.length > 0) directionParts.push(sentence(`Sound: ${effects}`));
   const direction = directionParts.filter((s) => s.length > 0).join(" ");
 
   // 6 — persistent: what must not drift, once at the end (R-6).
@@ -797,6 +851,21 @@ export function derivedNegatives(input: NegativeInput): string | null {
     // score track would be a policy that switches itself off exactly when it matters most.
       parts.push("No background music — environmental and action sound only.");
     }
+  }
+  /*
+   * What this shot says must not be in it (2026-08-23).
+   *
+   * `continuity.keepOut` is documented in the schema as "the negative half of the same promise"
+   * and was read by nothing — an author wrote what must stay out of frame and it went to disk and
+   * no further. It belongs here rather than in the description, because a negative stated inside
+   * the prose is a noun the model has been handed: "no coffee cup" puts a coffee cup in the room.
+   *
+   * Before the world's standing modes, because it is about this shot specifically and the general
+   * rule should be the last word.
+   */
+  for (const shot of input.shots ?? (input.shot ? [input.shot] : [])) {
+    const keepOut = shot.continuity?.keepOut?.trim();
+    if (keepOut) parts.push(keepOut);
   }
   // Standing failure modes last, after the audio direction: they are the world's accumulated
   // "this keeps going wrong", and a model reading in order should meet the specific request, then

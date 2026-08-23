@@ -405,6 +405,7 @@ export interface CoordinatorOptions {
     skillFor?: (
       purpose: "scene-drafting" | "storyboard",
       family: string | undefined,
+      modelId?: string,
     ) => { id: string; version: number; family: string } | null;
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
@@ -696,7 +697,7 @@ export class Coordinator {
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
-    return resolve(purpose, model?.family);
+    return resolve(purpose, model?.family, model?.id);
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
