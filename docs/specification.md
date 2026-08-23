@@ -1904,6 +1904,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-024 | Durable scene dispatch plans | 009, 012, 013, 019 |
 | SPEC-025 | The host ports — identity, entitlement, content policy, release targets | 004, 005, 008, 009, 012, 013, 014, 024 |
 | SPEC-026 | The page medium — panels, pages, the derived book, and document export | 004, 010, 011, 012, 013, 017, 023 · amends 012, 023 |
+| SPEC-027 | The child's drawing — keeping it, tidying it, painting it, and proving it is still theirs | 004, 013, 015, 017, 026 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.
