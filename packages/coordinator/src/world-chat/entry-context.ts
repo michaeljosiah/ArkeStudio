@@ -1,6 +1,9 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
 import { productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 
+/** Episodes per run, kept under the operation cap so a run can travel with an overview change. */
+const EPISODE_RUN = TURN_RESULT_BOUNDS.candidateOperations - 2;
+
 /**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
  *
@@ -45,7 +48,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const lines = [
         `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit. Read the full records with get_production(${context.productionId}) before deciding against them.`,
       ];
-      const shape = describeShape(production);
+      const shape = describeShape(production, true);
       if (shape) lines.push(shape);
       if (production?.story) {
         lines.push(
@@ -165,7 +168,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
  * The numbers are stated, never the craft: how to use three seconds is the model's job, but it
  * cannot do that job without being told there are three.
  */
-function describeShape(production: ProductionBundle | undefined): string | null {
+function describeShape(production: ProductionBundle | undefined, writesTheSeason = false): string | null {
   if (!production) return null;
   const shape = productionShape(production.meta);
   const bits: string[] = [];
@@ -179,14 +182,22 @@ function describeShape(production: ProductionBundle | undefined): string | null 
      * A season longer than one turn can carry, said before it is attempted (2026-08-23).
      *
      * The door promises up to a hundred episodes now, and a turn stages at most
-     * `TURN_RESULT_BOUNDS.candidateOperations` of them. A model that reads "eighty episodes" and
+     * `TURN_RESULT_BOUNDS.candidateOperations` operations. A model that reads "eighty episodes" and
      * writes eighty has the whole turn refused for breaking the bound — after doing all the work,
-     * which is the failure this file's numbers exist to prevent one level up. Naming the block
-     * size turns that into a plan: write a run, say where it stopped, and come back.
+     * which is the failure this file's numbers exist to prevent one level up. Naming the run size
+     * turns that into a plan: write a run, say where it stopped, and come back.
+     *
+     * The run is smaller than the cap because the cap counts everything, not only episodes: a turn
+     * that writes a full run and also settles the overview or the season direction would otherwise
+     * be one operation over and rejected for doing exactly what it was asked to do.
+     *
+     * Only the thread that writes the season hears it. `describeShape` also brief the episode and
+     * scene threads, and telling a scene thread to write ten episodes is an invitation to propose
+     * work nobody asked for while somebody is looking at one scene.
      */
-    if (count !== undefined && count > TURN_RESULT_BOUNDS.candidateOperations) {
+    if (writesTheSeason && count !== undefined && count > EPISODE_RUN) {
       bits.push(
-        `Write it in runs of at most ${TURN_RESULT_BOUNDS.candidateOperations} episodes, not all ${count} at once. Say which episodes the run covers and where the next one picks up; a season this long is built over several turns and is expected to be.`,
+        `Write it in runs of at most ${EPISODE_RUN} episodes, not all ${count} at once. Say which episodes the run covers and where the next one picks up; a season this long is built over several turns and is expected to be.`,
       );
     }
     if (defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined) {

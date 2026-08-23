@@ -128,16 +128,58 @@ describe("a production thread is briefed on its shape", () => {
       { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
     );
     assert.match(text, /season of 80 episodes/);
-    assert.match(text, new RegExp(`runs of at most ${TURN_RESULT_BOUNDS.candidateOperations} episodes`));
+    // Under the cap, not equal to it: the cap counts every operation, so a full run that also
+    // settles the overview would be one over and rejected for doing what it was asked to do.
+    const run = Number(/runs of at most (\d+) episodes/.exec(text)?.[1]);
+    assert.ok(run > 0 && run < TURN_RESULT_BOUNDS.candidateOperations, `run ${run} leaves headroom`);
     assert.match(text, /not all 80 at once/);
+  });
+
+  /**
+   * Only the thread that writes the season hears it (codex, 2026-08-23).
+   *
+   * `describeShape` briefs the episode and scene threads too, and telling a scene thread to write
+   * ten episodes invites proposals nobody asked for while somebody is looking at one scene.
+   */
+  it("never tells an episode or scene thread to write a run of episodes", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const episodeId = production.episodes[0]?.id;
+    if (episodeId) {
+      const text = describeEntryContext(
+        { kind: "episode", productionId: production.meta.id, episodeId },
+        patched,
+      );
+      assert.match(text, /season of 80 episodes/, "it still hears the shape");
+      assert.ok(!/runs of at most/.test(text), "but is not asked to write a run of them");
+    }
+    const sceneId = production.scenes[0]?.id;
+    if (sceneId) {
+      const text = describeEntryContext({ kind: "scene", productionId: production.meta.id, sceneId }, patched);
+      assert.ok(!/runs of at most/.test(text), "and neither is a scene thread");
+    }
   });
 
   it("says nothing about runs when the whole season fits in one turn", async () => {
     const text = await shaped(
       { medium: "video", kind: "microdrama" },
-      { episodeCount: TURN_RESULT_BOUNDS.candidateOperations, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+      { episodeCount: 8, episodeSecondsMin: 60, episodeSecondsMax: 90 },
     );
-    assert.ok(!/runs of at most/.test(text), "a twelve-episode season is written in one go");
+    assert.ok(!/runs of at most/.test(text), "a short sample is written in one go");
   });
 
   it("an episodic production without stored defaults still says it is one", async () => {
