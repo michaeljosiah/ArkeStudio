@@ -22,3 +22,4 @@ was settled somewhere they had no reason to look?** If so, it is an ADR.
 |---|---|---|---|
 | [001](001-one-gate-per-thing.md) | One gate per thing: the Arke/Aonik approval boundary | 2026-08-22 | Proposed |
 | [002](002-ownership-is-a-revision.md) | Ownership moves from the format to the deployment | 2026-08-23 | Proposed |
+| [003](003-what-an-actor-can-be-asked.md) | Child mode is a capability subset and one thing capability cannot express | 2026-08-23 | Proposed |
