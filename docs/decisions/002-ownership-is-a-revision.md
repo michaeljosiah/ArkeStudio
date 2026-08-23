@@ -36,7 +36,7 @@ it was supporting, so it goes first.
 | Client-chosen `commitId`, so retries are idempotent | **Server-generated.** `commit.ts` does `newId("cm")` per invocation. `hasCommitLine()` deduplicates roll-forward of *that same journal* — crash recovery, not a client replaying a lost response. |
 | Takes are content-addressed | **ULID-addressed.** `TakeIdSchema` is `tk_<ULID>`; a take stores a media *filename*, not a digest. Identical bytes get different addresses. |
 | One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
-| Every mutation goes through it | **No.** `WorldStore.ownedWrite()` is *"one app-owned filesystem write outside the commit/proposal machinery"* — take media landing, reference images copied and removed. It serialises in-process, which is a lock's job, not a fence's. |
+| Every mutation goes through it | **No, and the exceptions have been miscounted three times.** `ownedWrite()`, `gateOp()`, and `WorldChatStore` writing `.conversations/` through neither — with upwards of forty modules in the coordinator issuing direct filesystem writes. SPEC-002 §2.1 now states the criterion (anything writing inside a world) instead of a list, because the list has been wrong at one, two and three. |
 
 **Three defects surfaced while checking the above**, and both are in the code rather than in any
 spec. They are recorded here because they are evidence for this ADR's thesis — ownership is less
