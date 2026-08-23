@@ -200,6 +200,20 @@ forks the commit primitive, changes the accept gate, or asks the format to suppo
 once. One writer at a time remains true in every deployment; the question is only how that writer
 is chosen and how a stale one is stopped.
 
+**It moves normative text in three other documents, and they are not edited here.** A Proposed ADR
+should not rewrite four specifications, but it should say which ones it would, because a silent
+contradiction is worse than a listed one:
+
+| Where | What it says | What it becomes |
+|---|---|---|
+| master §2.7 | *"One process owns a world at a time, enforced by a lock file"* | one **writer** at a time; the enforcement is the deployment's |
+| SPEC-004 R-5, R-9, R-121, §2 | accepting, ripple recomputation and canon-id allocation all happen *"under the world lock"* | under the world's **ownership**, whatever holds it |
+| SPEC-025 §2.9, §2.11 | describes SPEC-002's lock as the current state | unchanged in substance; the pointer already added |
+
+SPEC-004 is the one that matters, because R-5 verifies base hashes *while holding the world lock* —
+which is the coupling this ADR is about, stated in the dependent spec rather than in SPEC-002. It
+is also evidence the coupling is real and load-bearing rather than incidental.
+
 **The desktop gains nothing today.** Local behaviour is unchanged by design. This is groundwork,
 and should be judged as groundwork.
 

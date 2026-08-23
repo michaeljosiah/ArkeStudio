@@ -621,6 +621,13 @@ One process owns a world at a time, enforced by a lock file. Hand edits made whi
 open are detected by a watcher, which marks the index stale and prompts a reload rather than
 merging.
 
+> **Under revision.** [ADR-002](decisions/002-ownership-is-a-revision.md) proposes that *one writer
+> at a time* survives but *enforced by a lock file* becomes a property of the deployment — local
+> keeps the file, a hosted coordinator takes a lease. Nothing above is false today, and the ADR is
+> Proposed rather than Accepted; the dependent text it would move is listed in its consequences.
+
+
+
 **Hand edits made while the world was closed need an explicit reconciliation**, because simply
 scanning them in would let a change enter the record with no version bump, no snapshot and no
 audit line — quietly defeating the gate for anyone with a text editor.
