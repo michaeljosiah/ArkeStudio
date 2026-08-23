@@ -177,7 +177,21 @@ export class ClaudeAdapter implements HarnessAdapter {
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
-    const skill = skillForAgent(agentName, this.opts.skillFamily, this.opts.skillModelId);
+    /*
+     * From the session that was just prepared, not from how the adapter was built (codex,
+     * 2026-08-23).
+     *
+     * `prepareSession` is how the coordinator says what this session is for, and on the Claude
+     * lane it is the only way it says it: `v2-launch.ts` constructs this adapter with neither
+     * value. Reading `this.opts` alone therefore found undefined and handed the scene-writer no
+     * skill at all — while the proposal recorded the document it was supposed to have used. The
+     * constructor options stay as a fallback, because a caller that does pass them means it.
+     */
+    const skill = skillForAgent(
+      agentName,
+      this.pending.skillFamily ?? this.opts.skillFamily,
+      this.pending.skillModelId ?? this.opts.skillModelId,
+    );
     /*
      * No default for `cwd`, though the contract makes it optional.
      *

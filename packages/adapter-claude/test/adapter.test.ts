@@ -348,3 +348,36 @@ describe("the session lifecycle", () => {
     await adapter.dispose?.();
   });
 });
+
+/**
+ * The Claude lane reads the session it was prepared with (codex, 2026-08-23).
+ *
+ * `v2-launch.ts` constructs this adapter with neither `skillFamily` nor `skillModelId` — the
+ * coordinator says what a session is for through `prepareSession`. Reading only the constructor
+ * options therefore found undefined and gave the scene-writer no skill at all, while the proposal
+ * recorded the document it was supposed to have been drafted under.
+ */
+describe("the skill a Claude session drafts under", () => {
+  it("comes from prepareSession, which is the only place the coordinator says it", async () => {
+    const fake = fakeQuery([result()]);
+    // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession?.({ skillFamily: "seedance", skillModelId: "seedance-2.5" });
+    const { sessionId } = await adapter.createSession({ purpose: "scene-drafting", cwd: CWD, agent: "scene-writer" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    const prompt = String(fake.options()["systemPrompt"]);
+    assert.ok(prompt.includes("thirty seconds"), "2.5's own document arrives, not the family's");
+    await adapter.dispose();
+  });
+
+  it("still honours the constructor options when a caller passes them", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillFamily: "seedance" });
+    const { sessionId } = await adapter.createSession({ purpose: "scene-drafting", cwd: CWD, agent: "scene-writer" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    const prompt = String(fake.options()["systemPrompt"]);
+    assert.ok(prompt.includes("Writing shots for this model family"), "the family document still arrives");
+    assert.ok(!prompt.includes("thirty seconds"), "and not a narrowed one nobody routed");
+    await adapter.dispose();
+  });
+});
