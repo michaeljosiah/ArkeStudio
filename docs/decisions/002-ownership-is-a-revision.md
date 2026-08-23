@@ -43,6 +43,12 @@ spec. They are recorded here because they are evidence for this ADR's thesis —
 solid than the lock's existence suggests — and because they want fixing whether or not any of this
 lands.
 
+- **Recovery belongs to whoever owns the world, and that resolves a conflict.** R-15 requires a
+  journal in `committing` to roll forward unconditionally; R-3a requires a deposed writer's
+  in-flight mutation to be refused. Both hold, because they are about different subjects: the fence
+  stops the deposed *process*, and the *transaction* is completed by the new owner on open. That
+  only works if recovery happens under ownership, which is the first defect below — so the two
+  findings are one fix, not two.
 - **Recovery runs before the lock, and in read-only opens.** `WorldStore.open()` calls
   `committer.recover()` before `WorldLock.acquire()`, and `readOnly` gates the lock, the external-
   edit scan and the watcher but **not** recovery. So a second instance opening a world whose owner
