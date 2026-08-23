@@ -26,7 +26,8 @@ machine. `process.kill(pid, 0)` cannot answer a question about a process somewhe
 ## What the engine actually has
 
 An earlier draft of this ADR claimed the engine was already most of the way there, and was wrong
-about three of the four things it counted. The corrected inventory matters more than the argument
+about four of the five things it counted — each time in the direction of making this decision look
+smaller than it is. The corrected inventory matters more than the argument
 it was supporting, so it goes first.
 
 | Claimed | Actually |
@@ -35,6 +36,7 @@ it was supporting, so it goes first.
 | Client-chosen `commitId`, so retries are idempotent | **Server-generated.** `commit.ts` does `newId("cm")` per invocation. `hasCommitLine()` deduplicates roll-forward of *that same journal* — crash recovery, not a client replaying a lost response. |
 | Takes are content-addressed | **ULID-addressed.** `TakeIdSchema` is `tk_<ULID>`; a take stores a media *filename*, not a digest. Identical bytes get different addresses. |
 | One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
+| Every mutation goes through it | **No.** `WorldStore.ownedWrite()` is *"one app-owned filesystem write outside the commit/proposal machinery"* — take media landing, reference images copied and removed. It serialises in-process, which is a lock's job, not a fence's. |
 
 One thing the earlier draft under-credited: `world.json` already carries `canonRevision`, a
 monotonic world-level counter, and `rollForward()` writes world.json **last**, commenting that
@@ -68,8 +70,16 @@ a human deliberated, and it is correct for that, and it was written for that.
 **Ownership becomes a property of the deployment rather than of the format — and the single-writer
 guarantee is retained, not replaced.**
 
-1. **`commit.ts` remains the sole mutation path**, and R-27 stays exactly as it is: a staleness
-   check, defence in depth, explicitly *not* the thing that makes concurrent writers safe.
+1. **Every path that mutates a world is fenced**, not only the committer. R-27 stays exactly as it
+   is: a staleness check, defence in depth, explicitly *not* the thing that makes concurrent
+   writers safe.
+   - `commit.ts` is the sole path for **authored records**. It is not the sole path for the world.
+     `WorldStore.ownedWrite()` exists, in its own words, as *"one app-owned filesystem write
+     outside the commit/proposal machinery"* — take media landing from a job, reference images
+     copied and removed. It serialises within one process, which is sufficient under a lock and
+     nothing at all across two.
+   - A fence that covers only the committer would leave a deposed coordinator landing take media
+     into a world it no longer owns.
 
 2. **Serialization is preserved.** Exactly one writer holds a world at a time in every deployment.
    What changes is how that writer is identified and how its liveness is established, not whether
@@ -82,10 +92,12 @@ guarantee is retained, not replaced.**
    machine identifier (R-24). The heartbeat already exists; the identity and the liveness test
    change.
 
-5. **A commit is fenced by the lease.** The commit path SHALL validate that the lease is still held
-   *and* be atomic against a concurrent holder — ownership is checked and the write is claimed in
-   one indivisible step, not checked and then written. Without this a lease is a suggestion, and a
-   slow-but-alive deposed holder writes over its successor.
+5. **A mutation is fenced by the lease epoch.** A lease SHALL carry a **monotonically increasing
+   epoch**, the epoch SHALL be recorded in the world when a writer claims it, and a write SHALL be
+   refused when its epoch is older than the one recorded. Mutual exclusion is not sufficient:
+   an exclusive-create serialises whoever is contending *right now* and says nothing about whether
+   the winner still owns the lease, so an expired coordinator can win the create and proceed.
+   The epoch is what makes a deposed writer's claim recognisably old.
 
 6. **Divergence is reported, never merged.** Unchanged from §2.9, and this remains true whatever
    the mechanism.
@@ -95,15 +107,20 @@ guarantee is retained, not replaced.**
 **This is a real piece of work, as §2.9 said.** The earlier draft's claim that it was nearly free
 rested on the fencing argument above, which does not hold. The honest scope:
 
-- **Atomic fenced commit.** Verification, fence check and the swap must be one step. On a single
-  filesystem that means an exclusive-create or equivalent primitive at the moment of the rename;
-  on shared storage it means whatever that storage offers as a conditional write. This is the
-  substance of the work and it does not exist today.
+- **Epoch-fenced mutation, on every path.** The fence check and the claim must be one step, and
+  the check must be against the lease *epoch* rather than mere exclusion. On a single filesystem
+  that is an exclusive-create carrying the epoch; on shared storage it is whatever that storage
+  offers as a conditional write. It has to cover `ownedWrite()` as well as the committer. This is
+  the substance of the work and none of it exists today.
 - **Client-supplied `commitId`.** Required before any claim about retry idempotency is true. A
   client whose success response is lost must be able to replay and be told *"already done"* —
   today it would generate a second id and either duplicate or spuriously fail.
-- **Content addressing for media.** Required before blob negotiation of the *"tell me which hashes
-  you are missing"* kind is possible at all. Takes are ULIDs over filenames today.
+- **Blob negotiation needs less than it looked.** `scanWorld()` already streams every media file
+  through SHA-256 and returns a path-to-digest `mediaManifest`, which is enough for a peer to
+  answer *"which of these hashes are you missing"* without touching take identity. Content
+  addressing as *identity* would deduplicate identical bytes and make a take's reference its
+  version; that is a separate benefit, not a prerequisite. An earlier draft of this ADR claimed the
+  reverse.
 - **A specified head.** Item 5's fence and any cheap *"has anything moved?"* both want a world-level
   revision a remote client can name. `canonRevision` is close but advances only for canon, and
   `WorldMetaSchema` is `.strict()` — adding fields to `world.json` makes the file unreadable to
@@ -139,8 +156,11 @@ API to call.
 ## What this does not decide
 
 - **How the atomic fence is implemented**, which is the actual work and wants its own spec.
-- **How a lease is granted or renewed** over a network, and by whom. SPEC-025 `IdentityProvider`
-  territory.
+- **How a lease is granted or renewed** over a network, and by whom. **Not** `IdentityProvider`:
+  SPEC-025 R-4 and §2.2 define that port as resolving the current human actor and their
+  capabilities, while a lease is about which coordinator *instance* owns a world — it must stay
+  valid across a change of actor, and while no actor is present at all. Conflating the two would
+  make ownership depend on who is signed in. It wants its own port, or its own spec.
 - **Blob sync**, which content addressing is a prerequisite for rather than a solution to.
 - **Whether divergence can be resolved in-app**, or only reported.
 - **Any change to the accept gate.** A proposal is still gated; this is about what happens
