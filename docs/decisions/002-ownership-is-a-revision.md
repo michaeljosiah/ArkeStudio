@@ -250,8 +250,9 @@ commits resolving to `FastForward | Diverged | Replayed`, complete manifests rat
 and divergence ended by a human as `Accept | Reject` — where accepting *"advances the head through
 a new revision parented on the current head — never by rewriting history."*
 
-Two of the prerequisites listed above are things Aonik already got right and Arke has not: the
-client-chosen commit id, and content addressing. That is worth reading as evidence about which
+One of the prerequisites listed above is something Aonik already got right and Arke has not: the
+client-chosen commit id, bound to the tree it committed. Content addressing it also has, though
+this ADR concluded that is a benefit rather than a prerequisite. That is worth reading as evidence about which
 parts are load-bearing, rather than as an integration plan.
 
 **Two cautions.** The engine takes no dependency on Aonik, at build time or run time (ADR-001,
