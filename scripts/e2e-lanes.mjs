@@ -33,9 +33,45 @@ const ROOT = join(tmpdir(), `arke-lanes-e2e-${Date.now()}`);
 const WORLD = join(ROOT, "worlds", "the-undersong");
 const WORLD_ID = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 const PROD = "saltlight";
-// A killed Electron can leave the listener behind for a while, and the next run then fails to
-// bind and waits out the attach timeout as if the app had never started. Override to step aside.
-const PORT = Number(process.env.ARKE_CDP_PORT || 9222);
+/**
+ * The CDP port, chosen rather than assumed.
+ *
+ * An exited Electron leaves its listener behind on Windows — the socket stays LISTENING under a
+ * pid that no longer exists, for minutes. The next run cannot bind, so its app comes up with no
+ * debugging endpoint while the script happily talks to the corpse of the last one, finds no page,
+ * and reports "no CDP page target appeared" — which reads as *the app failed to start* when the
+ * app is fine and the port is the problem. Every run poisons the port for the next, so a fixed
+ * default made consecutive runs fail by construction.
+ *
+ * So: probe, and take a free one. An explicit `ARKE_CDP_PORT` is still obeyed exactly — someone
+ * who names a port wants that port — but it is checked too, and refused by name rather than
+ * waited out.
+ */
+async function portIsFree(port) {
+  const { createServer } = await import("node:net");
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(false));
+    server.once("listening", () => server.close(() => resolve(true)));
+    server.listen(port, "127.0.0.1");
+  });
+}
+
+const requestedPort = process.env.ARKE_CDP_PORT ? Number(process.env.ARKE_CDP_PORT) : null;
+let PORT = requestedPort ?? 9222;
+if (requestedPort !== null) {
+  if (!(await portIsFree(requestedPort))) {
+    console.error(
+      `\nARKE_CDP_PORT=${requestedPort} is already in use — most likely a listener left behind by an\n` +
+        `earlier run whose process is gone. Unset it to let this pick a free port, or name another.\n`,
+    );
+    process.exit(2);
+  }
+} else {
+  // Walk up from the conventional port so a human attaching by hand still finds it where expected
+  // on a clean machine, and only drifts when something is squatting.
+  while (!(await portIsFree(PORT))) PORT += 1;
+}
 
 /**
  * Which pair to run: the bundled one, not PATH.
@@ -144,6 +180,18 @@ const VIDEO_WITH_SOUND = "ar_01J8G0000000000000000000V1";
 const VIDEO_SILENT = "ar_01J8G0000000000000000000V2";
 const VIDEO_UNMEASURED = "ar_01J8G0000000000000000000V3";
 
+/*
+ * How long the media seeded for the fixture's own takes and bed runs.
+ *
+ * Five seconds because the fixture's shots are 2.5s to 9s and mostly 4–6, and because a clip
+ * input carries its whole length into the concat — `buildFfmpegArgs` ranges a clip only when the
+ * take is a pass segment, so an oversized source lengthens the film rather than being cut to the
+ * shot's slot. The bed runs longer than any window this plan drops it in, so what reaches the
+ * mix is tone rather than the padding `apad` would add.
+ */
+const TAKE_CLIP_SEC = 5;
+const BED_SEC = 8;
+
 async function seed() {
   await rm(ROOT, { recursive: true, force: true });
   await mkdir(join(ROOT, "worlds"), { recursive: true });
@@ -175,6 +223,50 @@ async function seed() {
   await writeFile(join(arts, "insert.mp4.json"), JSON.stringify(sidecar(VIDEO_WITH_SOUND, "insert.mp4", "a1b2c3d4e5f60001", { durationSec: 6, hasAudio: true }), null, 2));
   await writeFile(join(arts, "silent.mp4.json"), JSON.stringify(sidecar(VIDEO_SILENT, "silent.mp4", "a1b2c3d4e5f60002", { durationSec: 6, hasAudio: false }), null, 2));
   await writeFile(join(arts, "unmeasured.mp4.json"), JSON.stringify(sidecar(VIDEO_UNMEASURED, "unmeasured.mp4", "a1b2c3d4e5f60003", null), null, 2));
+
+  /*
+   * The two things the fixture declares and does not ship.
+   *
+   * `the-undersong` was built for scan and derive assertions; nothing before the lanes work ever
+   * ran an encoder over it, so both gaps sat harmless until §7 existed. Seeded here rather than
+   * committed to `fixtures/`, because that world is coupled to assertions in a dozen other files
+   * and CONTRIBUTING says not to commit world content.
+   */
+
+  // 1. Its three `kind: "clip"` takes each declare `clip.mp4` and ship only `frame.png`, so the
+  //    derived cut points at files that are not there and EVERY export dies — including one with
+  //    nothing placed. That reads as a lanes failure and is nothing of the kind.
+  const takesDir = join(WORLD, "productions", PROD, "takes");
+  for (const takeId of await readdir(takesDir)) {
+    const takeFile = join(takesDir, takeId, "take.json");
+    if (!existsSync(takeFile)) continue;
+    const take = JSON.parse(await readFile(takeFile, "utf8"));
+    const media = take.media;
+    if (typeof media !== "string" || !media.endsWith(".mp4")) continue;
+    const target = join(takesDir, takeId, media);
+    if (existsSync(target)) continue;
+    // Silent on purpose: the picture carries no sound of its own here, so anything audible in the
+    // exported file came from a placed clip — which is the only thing T13 is entitled to conclude.
+    const shot = spawnSync(
+      FFMPEG,
+      ["-y", "-f", "lavfi", "-i", `color=c=gray:s=320x240:r=24:d=${TAKE_CLIP_SEC}`, "-pix_fmt", "yuv420p", target],
+      { encoding: "utf8" },
+    );
+    if (shot.status !== 0) throw new Error(`could not build take media for ${takeId}: ${shot.stderr?.slice(-400)}`);
+  }
+
+  // 2. `harbour-bells.wav` is half a second of digital silence — mean AND max −91 dB. T13 places
+  //    it and asserts the export is audible afterwards, which that file can never satisfy. The
+  //    sidecar's hash is not verified for artifacts, so replacing the bytes keeps the artifact.
+  const bells = join(arts, "harbour-bells.wav");
+  if (existsSync(bells)) {
+    const tone = spawnSync(
+      FFMPEG,
+      ["-y", "-f", "lavfi", "-i", `sine=frequency=440:duration=${BED_SEC}`, "-c:a", "pcm_s16le", bells],
+      { encoding: "utf8" },
+    );
+    if (tone.status !== 0) throw new Error(`could not build the audio bed: ${tone.stderr?.slice(-400)}`);
+  }
 }
 
 const cutPath = () => join(WORLD, "productions", PROD, "cut.json");
@@ -488,6 +580,9 @@ async function main() {
     ? ["-a", electronBin, mainCjs, `--remote-debugging-port=${PORT}`]
     : [mainCjs, `--remote-debugging-port=${PORT}`];
 
+  // Said out loud: when the port drifts off 9222 the reason is a corpse holding it, and a person
+  // attaching DevTools by hand needs to know where the app actually is.
+  console.log(`\nLaunching the desktop build (CDP on ${PORT})…`);
   const app = spawn(cmd, args, {
     cwd: repoRoot,
     env: { ...process.env, ARKE_STUDIO_ROOT: ROOT, ARKE_FFMPEG: FFMPEG },
