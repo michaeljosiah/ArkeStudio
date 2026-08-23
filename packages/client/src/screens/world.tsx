@@ -3826,8 +3826,25 @@ const KINDS_BY_MEDIUM: Record<"story" | "video", readonly { id: string }[]> = {
  * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
  * line makes it a setting. It reaches `season.ending` through the conversation instead.
  */
-const MICRODRAMA_DEFAULTS = {
-  episodeCount: 7,
+/**
+ * How many episodes a season can be promised (2026-08-23).
+ *
+ * This was 5 to 12, which is a short film cut into pieces rather than a vertical series. The
+ * form runs 60 to 100 drops, and a season written to eight has a different spine from one
+ * written to eighty: eight holds a reveal at four, eighty holds it at forty and spends the
+ * difference on the audience knowing what the characters do not. A door that could not say
+ * eighty made every season it opened the wrong shape, and the author found out at the point
+ * where the shape is expensive to change.
+ *
+ * Twelve and under stay, because a sample cut to sell the run is a real thing to be making —
+ * they are the exception in the list now rather than the whole of it.
+ */
+export const EPISODE_COUNT_CHOICES = [8, 12, 20, 30, 40, 60, 80, 100];
+
+export const MICRODRAMA_DEFAULTS = {
+  // 60 rather than 7: the low end of what the form actually runs, so the season a person opens
+  // without touching this is a vertical series and not a short film in slices.
+  episodeCount: 60,
   episodeSecondsMin: 45,
   episodeSecondsMax: 75,
   hookWindowSec: 3,
@@ -3988,7 +4005,7 @@ export function NewProductionScreen() {
                     value={String(episodeCount)}
                     onChange={(v) => setEpisodeCount(Number(v))}
                   >
-                    {[5, 6, 7, 8, 10, 12].map((n) => (
+                    {EPISODE_COUNT_CHOICES.map((n) => (
                       <option key={n} value={String(n)}>
                         {n}
                       </option>

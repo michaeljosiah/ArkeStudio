@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle } from "@arke-studio/contracts";
+import { TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
@@ -112,6 +114,145 @@ describe("a production thread is briefed on its shape", () => {
     assert.match(text, /season of 12 episodes/);
     assert.match(text, /45–90 seconds/);
     assert.match(text, /first 3 seconds are the hook/);
+  });
+
+  /**
+   * A season longer than a turn can carry says so before the model tries (2026-08-23).
+   *
+   * The door promises up to a hundred episodes; a turn stages at most twelve candidates. A model
+   * that reads "eighty episodes" and writes eighty has the whole turn refused for breaking the
+   * bound, after doing all the work — the failure the numbers in this file exist to prevent.
+   */
+  it("tells a long season to come in runs, and names the run size", async () => {
+    const text = await shaped(
+      { medium: "video", kind: "microdrama" },
+      { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
+    );
+    assert.match(text, /season of 80 episodes/);
+    // Room for the companions the same briefing permits: a run plus the overview, the season
+    // direction and a world fact all have to fit inside one turn's operation cap.
+    const run = Number(/a run is at most (\d+) of them/.exec(text)?.[1]);
+    assert.ok(run > 0, "a run size is named");
+    assert.ok(
+      run + 3 <= TURN_RESULT_BOUNDS.candidateOperations,
+      `run of ${run} leaves room for an overview, a season change and a world fact`,
+    );
+    assert.match(text, /never all 80 at once/);
+    // The half that makes the loop terminate rather than pile up against the wrap-up's own cap.
+    assert.match(text, new RegExp(`at most ${MAX_PROPOSALS} changes`));
+    assert.match(text, /Wrap up each run before starting the next/);
+  });
+
+  /**
+   * It stops asking once the season is written (codex, 2026-08-23).
+   *
+   * Gated on the declared count alone, a finished sixty-episode production went on demanding runs
+   * of more episodes every turn — including in a conversation opened to change one line of the
+   * overview.
+   */
+  it("says nothing about runs once every promised episode exists", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: production.episodes.length, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
+    assert.ok(!/a run is at most/.test(text), "a season with nothing left to write asks for nothing");
+  });
+
+  /**
+   * A blank tile is not a written episode (codex, 2026-08-23).
+   *
+   * The season board makes a tile per promised episode and counts it unwritten until it has a
+   * promise. Counting tiles instead would read a board of eighty blanks as a finished season and
+   * stop asking for the episodes nobody has written.
+   */
+  it("counts written episodes, not the tiles standing in for them", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const blanks = Array.from({ length: 80 }, (_, i) => ({
+      id: `ep-${i + 1}`,
+      version: 1,
+      order: i + 1,
+      title: `Episode ${i + 1}`,
+      scenes: [],
+    }));
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          episodes: blanks as (typeof production.episodes)[number][],
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
+    assert.match(text, /a run is at most/, "eighty blank tiles are eighty episodes still to write");
+    assert.match(text, /never all 80 at once/, "and none of them counts as done");
+  });
+
+  /**
+   * Only the thread that writes the season hears it (codex, 2026-08-23).
+   *
+   * `describeShape` briefs the episode and scene threads too, and telling a scene thread to write
+   * ten episodes invites proposals nobody asked for while somebody is looking at one scene.
+   */
+  it("never tells an episode or scene thread to write a run of episodes", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90, hookWindowSec: 3 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const episodeId = production.episodes[0]?.id;
+    if (episodeId) {
+      const text = describeEntryContext(
+        { kind: "episode", productionId: production.meta.id, episodeId },
+        patched,
+      );
+      assert.match(text, /season of 80 episodes/, "it still hears the shape");
+      assert.ok(!/a run is at most/.test(text), "but is not asked to write a run of them");
+    }
+    const sceneId = production.scenes[0]?.id;
+    if (sceneId) {
+      const text = describeEntryContext({ kind: "scene", productionId: production.meta.id, sceneId }, patched);
+      assert.ok(!/a run is at most/.test(text), "and neither is a scene thread");
+    }
+  });
+
+  it("says nothing about runs when the whole season fits in one turn", async () => {
+    const text = await shaped(
+      { medium: "video", kind: "microdrama" },
+      { episodeCount: 8, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+    );
+    assert.ok(!/a run is at most/.test(text), "a short sample is written in one go");
   });
 
   it("an episodic production without stored defaults still says it is one", async () => {
