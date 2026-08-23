@@ -49,6 +49,11 @@ lands.
   stops the deposed *process*, and the *transaction* is completed by the new owner on open. That
   only works if recovery happens under ownership, which is the first defect below — so the two
   findings are one fix, not two.
+- **An adopted Bible edit is invisible to the guard written for it.** `applyTurnBibleEdits()`
+  refuses a World Chat turn whose base moved, citing R-27, for precisely the case of an author
+  editing in a text editor while the model thinks. It compares frontmatter *versions*;
+  `adoptBibleIfMoved()` is "a plain rescan" and advances none. So a hand edit lands, the version is
+  unchanged, the check passes, and the turn applies heading-addressed edits to text it never read.
 - **Recovery runs before the lock, and in read-only opens.** `WorldStore.open()` calls
   `committer.recover()` before `WorldLock.acquire()`, and `readOnly` gates the lock, the external-
   edit scan and the watcher but **not** recovery. So a second instance opening a world whose owner
