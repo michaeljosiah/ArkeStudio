@@ -1,4 +1,4 @@
-# THROWAWAY. Measurement harness for the §2.13 cold-scan flake. Delete with the scratch branch.
+# THROWAWAY. Round two: the same test, in the suite, where it competes for the runner's CPUs.
 name: cold-scan probe
 
 on:
@@ -12,7 +12,7 @@ jobs:
   probe:
     name: ${{ matrix.os }} shard ${{ matrix.shard }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -27,20 +27,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Probe at spec size
+      - name: The whole suite, three times, reporting the cold scan each time
+        shell: bash
         working-directory: packages/coordinator
-        env:
-          PROBE_LABEL: ${{ matrix.os }}-s${{ matrix.shard }}
-          PROBE_REPS: 8
-          PROBE_SCANS: 3
-        run: node --import tsx test/world/__probe-cold-scan.ts
-      - name: Probe at 4x spec size
-        working-directory: packages/coordinator
-        env:
-          PROBE_LABEL: ${{ matrix.os }}-s${{ matrix.shard }}-4x
-          PROBE_REPS: 3
-          PROBE_SCANS: 3
-          PROBE_SHEETS: 200
-          PROBE_ENTRIES: 800
-          PROBE_TAKES: 2000
-        run: node --import tsx test/world/__probe-cold-scan.ts
+        run: |
+          echo "cpus: $(node -e 'console.log(require("node:os").availableParallelism())')"
+          for rep in 1 2 3; do
+            npm test 2>&1 | grep -E "cold scan|^# (pass|fail)" | sed "s/^/RESULT ${{ matrix.os }}-s${{ matrix.shard }} rep=$rep /" || true
+          done
