@@ -65,7 +65,8 @@ export class WrapUpError extends Error {
 }
 
 /** One wrap-up may not produce more proposals than a person can reasonably review (§19). */
-const MAX_PROPOSALS = 40;
+/** Exported so the prompt can name it: a run the model is asked to write has to fit. */
+export const MAX_PROPOSALS = 40;
 
 /**
  * The proposal kind each Development classification stages as (SPEC-023 R-17/R-20): the kind is

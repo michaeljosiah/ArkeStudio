@@ -352,6 +352,16 @@ function byLaneThenStart(a: CutOverlay, b: CutOverlay): number {
  * when it is the sound half. All of it is silent and counted by the caller, never rendered as an
  * absence.
  */
+/**
+ * Where an artifact's bytes sit, relative to the world.
+ *
+ * A sidecar's `file` is a filename *within* `artifacts/` (R-WORLD-3) and the scanner files it
+ * verbatim, so every consumer names the directory itself — the scan's own visual-asset list and
+ * the spine exporter's master track both do. Omitting it hands ffmpeg a path one directory too
+ * high and the encode dies on "No such file or directory" for a file that is plainly there.
+ */
+const artifactPath = (artifact: ClipArtifact): string => `artifacts/${artifact.file}`;
+
 export function exportOverlays(
   overlays: readonly CutOverlay[],
   artifacts: readonly ClipArtifact[],
@@ -364,7 +374,7 @@ export function exportOverlays(
     if (artifact === undefined) continue;
     const still = OVERLAY_STILL_KINDS.has(artifact.kind);
     if (!still && artifact.kind !== "video") continue;
-    resolved.push({ path: artifact.file, startSec: overlay.startSec, endSec: overlay.endSec, still });
+    resolved.push({ path: artifactPath(artifact), startSec: overlay.startSec, endSec: overlay.endSec, still });
   }
   return resolved;
 }
@@ -394,7 +404,7 @@ export function exportAudioClips(
     const carries =
       artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
     if (!carries) continue;
-    resolved.push({ path: artifact.file, startSec: overlay.startSec, endSec: overlay.endSec, gainDb: 0 });
+    resolved.push({ path: artifactPath(artifact), startSec: overlay.startSec, endSec: overlay.endSec, gainDb: 0 });
   }
   return resolved;
 }

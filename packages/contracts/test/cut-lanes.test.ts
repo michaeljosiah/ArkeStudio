@@ -28,12 +28,18 @@ const BELLS = "ar_01J8G0000000000000000000A3";
 const SILENT = "ar_01J8G0000000000000000000A4";
 const UNPROBED = "ar_01J8G0000000000000000000A5";
 
+/**
+ * `file` is a bare filename, because that is what a sidecar on disk actually holds — it is the
+ * name *within* `artifacts/`, and the scanner files it verbatim. Writing the directory in here
+ * is what let the exporter ship a path one level too high for a year: the fixture supplied the
+ * prefix the resolver forgot, so every assertion below agreed with a graph ffmpeg could not open.
+ */
 const artifacts = [
-  { id: PLATE, file: "artifacts/plate.png", kind: "image" },
-  { id: INSERT, file: "artifacts/insert.mp4", kind: "video", mediaInfo: { hasAudio: true } },
-  { id: BELLS, file: "artifacts/bells.wav", kind: "audio" },
-  { id: SILENT, file: "artifacts/silent.mp4", kind: "video", mediaInfo: { hasAudio: false } },
-  { id: UNPROBED, file: "artifacts/unknown.mp4", kind: "video" },
+  { id: PLATE, file: "plate.png", kind: "image" },
+  { id: INSERT, file: "insert.mp4", kind: "video", mediaInfo: { hasAudio: true } },
+  { id: BELLS, file: "bells.wav", kind: "audio" },
+  { id: SILENT, file: "silent.mp4", kind: "video", mediaInfo: { hasAudio: false } },
+  { id: UNPROBED, file: "unknown.mp4", kind: "video" },
 ];
 
 const clip = (
@@ -158,6 +164,23 @@ describe("which clips are known to carry sound", () => {
 
   it("drops a clip citing an artifact the world no longer has", () => {
     assert.deepEqual(exportAudioClips([clip("ar_01J8G0000000000000000000ZZ", 0, 3)], artifacts), []);
+  });
+
+  /*
+   * The bug the whole feature died on, and the reason nothing it emitted had ever encoded: both
+   * resolvers handed back the sidecar's `file` untouched, so ffmpeg was asked for
+   * `<world>/bells.wav` when the bytes are at `<world>/artifacts/bells.wav`, and the export
+   * failed on an input that was plainly there. Pinned against the resolvers rather than the
+   * graph, because the graph was never wrong.
+   */
+  it("names the artifacts directory, since a sidecar's file is only the name within it", () => {
+    const picture = exportOverlays([clip(PLATE, 1, 2)], artifacts);
+    const sound = exportAudioClips([clip(BELLS, 1, 2)], artifacts);
+    assert.equal(picture[0]?.path, "artifacts/plate.png");
+    assert.equal(sound[0]?.path, "artifacts/bells.wav");
+    for (const p of [picture[0]?.path, sound[0]?.path]) {
+      assert.ok(p?.startsWith("artifacts/"), `${p} is missing the artifacts/ directory`);
+    }
   });
 });
 

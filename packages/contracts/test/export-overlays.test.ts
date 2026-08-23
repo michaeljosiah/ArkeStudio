@@ -12,12 +12,13 @@ import type { CutOverlay, DerivedCut } from "../src/cut.js";
 
 const cut = { entries: [{ durationSec: 6, label: "SHOT 1", media: { path: "p/a.mp4" } }], totalSec: 6 } as unknown as DerivedCut;
 
+/** Bare filenames, as a real sidecar holds them — the resolver is what names `artifacts/`. */
 const artifacts = [
-  { id: "ar_01J8G0000000000000000000A1", file: "artifacts/plate.png", kind: "image" },
-  { id: "ar_01J8G0000000000000000000A2", file: "artifacts/insert.mp4", kind: "video" },
-  { id: "ar_01J8G0000000000000000000A3", file: "artifacts/bells.wav", kind: "audio" },
-  { id: "ar_01J8G0000000000000000000A4", file: "artifacts/notes.md", kind: "document" },
-  { id: "ar_01J8G0000000000000000000A5", file: "artifacts/board.png", kind: "board" },
+  { id: "ar_01J8G0000000000000000000A1", file: "plate.png", kind: "image" },
+  { id: "ar_01J8G0000000000000000000A2", file: "insert.mp4", kind: "video" },
+  { id: "ar_01J8G0000000000000000000A3", file: "bells.wav", kind: "audio" },
+  { id: "ar_01J8G0000000000000000000A4", file: "notes.md", kind: "document" },
+  { id: "ar_01J8G0000000000000000000A5", file: "board.png", kind: "board" },
 ];
 
 const overlay = (artifactId: string, startSec: number, endSec: number): CutOverlay =>

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { StagedProposal, WorldChatContext, WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
+import type {
+  StagedProposal,
+  WorldChatContext,
+  WorldChatPoint,
+  WorldChatStatus,
+  WorldChatWorkspace,
+} from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   acceptProposal,
@@ -235,11 +241,31 @@ export function ProductionConversation({
    * saying something again, so it is held back while a wrap-up commits — a condition the
    * transcript needs and a child's local state could not express.
    */
-  const [wrapping, setWrapping] = useState(false);
+  /*
+   * Which subject is waiting, not whether something is (codex, 2026-08-23).
+   *
+   * A boolean here belonged to the dock, and the dock outlives the subject under it: one thread
+   * serves the production, its episodes and its scenes. Wrapping episode A and walking to B
+   * carried A's wait onto B's button; resetting on arrival then lost it when you walked back to A
+   * while it was still committing. A single key fixed both and still lost A's wait the moment B
+   * was wrapped too, because wrap-ups on different subjects genuinely do run at once — the
+   * coordinator has no idea these are the same dock. A set says what is true: each wait shows on
+   * the subject it was started from, survives leaving and returning, and outlives the next one.
+   */
+  const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
+  const wrapping = wrappingKeys.has(contextKey);
+  const setWrapping = (next: boolean) =>
+    setWrappingKeys((keys) => {
+      if (keys.has(contextKey) === next) return keys;
+      const out = new Set(keys);
+      if (next) out.add(contextKey);
+      else out.delete(contextKey);
+      return out;
+    });
   /*
    * Navigating between subjects reuses this mounted component (episode 3 → episode 4), and an
    * unsent draft typed against one subject must not be sent into the other's thread
@@ -415,6 +441,8 @@ export function ProductionConversation({
                 conversationId={conversationId}
                 seq={loaded?.seq ?? null}
                 carried={carriedPoints}
+                status={loaded?.status ?? null}
+                subjectKey={contextKey}
                 wrapping={wrapping}
                 onWrappingChange={setWrapping}
               />
@@ -508,6 +536,8 @@ export function ProductionConversation({
           conversationId={conversationId}
           seq={loaded?.seq ?? null}
           carried={carriedPoints}
+          status={loaded?.status ?? null}
+          subjectKey={contextKey}
           wrapping={wrapping}
           onWrappingChange={setWrapping}
         />
@@ -534,6 +564,8 @@ function WrapUp({
   conversationId,
   seq,
   carried,
+  status,
+  subjectKey,
   wrapping,
   onWrappingChange,
 }: {
@@ -541,17 +573,43 @@ function WrapUp({
   conversationId: string | null;
   seq: number | null;
   carried: number;
+  /** Which subject this button is drawn for; one thread serves several. */
+  subjectKey: string;
+  /** A wrap-up that landed closes the conversation; nothing else on this dock does. */
+  status: WorldChatStatus | null;
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
   wrapping: boolean;
   onWrappingChange: (next: boolean) => void;
 }) {
   const setWrapping = onWrappingChange;
-  const asked = useRef<string | null>(null);
+  /*
+   * Per subject, for the same reason the wait is (codex, 2026-08-23).
+   *
+   * A single ref held whichever request was pressed last, so two overlapping wrap-ups made the
+   * later one's id the only one anything could match. A refusal for the earlier subject then
+   * failed to recognise itself, and that subject's button stayed disabled with nothing coming to
+   * clear it. Refusals arrive keyed by conversation, and one conversation serves every subject
+   * here, so the correlation has to live where the subject does.
+   */
+  const asked = useRef<Map<string, string>>(new Map());
   const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
-  const refusedMine = refusal !== null && refusal.requestId === asked.current;
+  const refusedMine = refusal !== null && refusal.requestId === asked.current.get(subjectKey);
+  /*
+   * Both endings, and only the two of them (codex, 2026-08-23).
+   *
+   * A refusal used to be the only one, because a wrap-up was the last thing a conversation did:
+   * it closed, the dock went, and a state that never reset never showed. A long season is written
+   * in runs and wrapped between them, so the second press met a button still disabled and still
+   * reading "Writing them…" from the first.
+   *
+   * Closing is the success half, not the sequence moving. Anything advances a sequence — saving a
+   * point from the rail, a turn finishing elsewhere — so a seq check clears the wait while the
+   * wrap-up is still committing and re-enables a button whose second press would land on top of
+   * the first. A wrap-up that lands closes the conversation; nothing else here does.
+   */
   useEffect(() => {
-    if (wrapping && refusedMine) setWrapping(false);
-  }, [wrapping, refusedMine]);
+    if (wrapping && (refusedMine || status === "closed")) setWrapping(false);
+  }, [wrapping, refusedMine, status]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
@@ -563,7 +621,7 @@ function WrapUp({
           if (!worldId || conversationId === null || seq === null) return;
           const attempt = wrapUpWorldChat(worldId, conversationId, seq);
           if (!attempt) return;
-          asked.current = attempt;
+          asked.current.set(subjectKey, attempt);
           setWrapping(true);
         }}
       >

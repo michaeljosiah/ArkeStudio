@@ -1,5 +1,17 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { productionAspect, productionShape } from "@arke-studio/contracts";
+import { productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { MAX_PROPOSALS } from "./wrapup.js";
+
+/**
+ * Episodes per run.
+ *
+ * Not the operation cap minus a token reserve — that number got shaved twice and was still wrong,
+ * because the cap counts everything a production turn is allowed to do at once: the episodes, the
+ * overview, the season direction, and any world fact that surfaced while writing them. Eight
+ * leaves four, which is enough for all of those together, and the turn is told the real cap as
+ * well so it can reason rather than count on this number being generous.
+ */
+const EPISODE_RUN = 8;
 
 /**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
@@ -45,7 +57,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const lines = [
         `This is the Production Chat thread for the production ${named}. It shapes the overview, the season, and the episodes; world facts that surface here cross over as their own proposals, never inside a production edit. Read the full records with get_production(${context.productionId}) before deciding against them.`,
       ];
-      const shape = describeShape(production);
+      const shape = describeShape(production, true);
       if (shape) lines.push(shape);
       if (production?.story) {
         lines.push(
@@ -165,7 +177,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
  * The numbers are stated, never the craft: how to use three seconds is the model's job, but it
  * cannot do that job without being told there are three.
  */
-function describeShape(production: ProductionBundle | undefined): string | null {
+function describeShape(production: ProductionBundle | undefined, writesTheSeason = false): string | null {
   if (!production) return null;
   const shape = productionShape(production.meta);
   const bits: string[] = [];
@@ -175,6 +187,56 @@ function describeShape(production: ProductionBundle | undefined): string | null 
     bits.push(
       `This is a ${shape.kindLabel.toLowerCase()}: a season of ${count !== undefined ? count : "several"} episodes, each one a complete piece that also carries the next.`,
     );
+    /*
+     * A season longer than one turn can carry, said before it is attempted (2026-08-23).
+     *
+     * The door promises up to a hundred episodes now, and a turn stages at most
+     * `TURN_RESULT_BOUNDS.candidateOperations` operations. A model that reads "eighty episodes" and
+     * writes eighty has the whole turn refused for breaking the bound — after doing all the work,
+     * which is the failure this file's numbers exist to prevent one level up. Naming the run size
+     * turns that into a plan: write a run, say where it stopped, and come back.
+     *
+     * The run is smaller than the cap because the cap counts everything, not only episodes: a turn
+     * that writes a full run and also settles the overview or the season direction would otherwise
+     * be one operation over and rejected for doing exactly what it was asked to do.
+     *
+     * Only the thread that writes the season hears it. `describeShape` also brief the episode and
+     * scene threads, and telling a scene thread to write ten episodes is an invitation to propose
+     * work nobody asked for while somebody is looking at one scene.
+     */
+    /*
+     * Only while there are episodes left to write. Gated on what remains rather than on what was
+     * promised, or a finished sixty-episode season would go on asking for more of them every turn
+     * — including in a conversation that opened to change one line of the overview.
+     */
+    /*
+     * Written, not merely existing. The season board creates a tile per promised episode and
+     * counts it unwritten until it has a promise ([development.tsx]); counting the tiles instead
+     * would read a board of sixty blanks as a finished season and stop asking for the episodes
+     * nobody has written yet. Same predicate as the board, so the two agree about what is done.
+     */
+    const written = (production.episodes ?? []).filter((e) => e.promise?.opens || e.promise?.closes).length;
+    const remaining = count === undefined ? 0 : count - written;
+    if (writesTheSeason && remaining > EPISODE_RUN) {
+      /*
+       * A limit, not an instruction to go and write them. Phrased as an imperative it arrived on
+       * every turn of an unfinished season — including one opened to change a line of the
+       * overview — and told the model to write eight episodes nobody had asked for.
+       */
+      bits.push(
+        `${written} of ${count} episodes are written. When you write more, a run is at most ${EPISODE_RUN} of them and never all ${remaining} at once: say which episodes the run covers and where the next one picks up.`,
+      );
+      /*
+       * The half that makes the loop terminate. A run that is settled and left on the rail is
+       * still on the rail next turn, and a wrap-up refuses more than MAX_PROPOSALS at once — so an
+       * author following the runs advice for six turns on a sixty-episode season reaches Wrap up
+       * and is refused, with every episode unwritten. Wrapping each run is what turns several
+       * turns into several seasons' worth of work landing.
+       */
+      bits.push(
+        `One turn records at most ${TURN_RESULT_BOUNDS.candidateOperations} changes of any kind, episodes and everything else together, so a run leaves room for the overview, the season direction, or a world fact that surfaced while writing it. Wrap up each run before starting the next: a single wrap-up carries at most ${MAX_PROPOSALS} changes, and runs left unwritten on the rail accumulate until it refuses them all.`,
+      );
+    }
     if (defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined) {
       bits.push(
         `An episode runs ${defaults.episodeSecondsMin}–${defaults.episodeSecondsMax} seconds — a handful of shots, one turn, one thing left hanging. Anything that needs a second act does not fit.`,

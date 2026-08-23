@@ -3,7 +3,13 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { EPISODE_LENGTH_CHOICES, VIDEO_KIND_CHOICES, parseEpisodeLength } from "../src/screens/world.js";
+import {
+  EPISODE_COUNT_CHOICES,
+  EPISODE_LENGTH_CHOICES,
+  MICRODRAMA_DEFAULTS,
+  VIDEO_KIND_CHOICES,
+  parseEpisodeLength,
+} from "../src/screens/world.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -97,6 +103,34 @@ describe("step two offers every kind and every default (design turn 53)", () => 
     const html = render(`/w/${FIXTURE_WORLD_ID}/productions/new`);
     assert.doesNotMatch(html, /ENDING/, "ending is storytelling, and belongs in the conversation");
     assert.doesNotMatch(html, /Cliffhanger/);
+  });
+
+
+  /**
+   * A season can be as long as the form actually runs (2026-08-23).
+   *
+   * This offered 5 to 12, which is a short film in slices. Vertical series run 60 to 100, and a
+   * season written to eight has a different spine from one written to eighty — the reveal sits at
+   * four instead of forty. A door that cannot say eighty makes every season it opens the wrong
+   * shape, and the author finds out where changing it is expensive.
+   */
+  it("offers the lengths a vertical series is actually written to", () => {
+    assert.ok(EPISODE_COUNT_CHOICES.includes(80), "eighty is sayable");
+    assert.ok(
+      EPISODE_COUNT_CHOICES.some((n) => n >= 60 && n <= 100),
+      "the platform range is reachable, not just its edges",
+    );
+    assert.ok(EPISODE_COUNT_CHOICES.includes(8), "and a short sample cut to sell the run still is");
+    assert.deepEqual([...EPISODE_COUNT_CHOICES].sort((a, b) => a - b), [...EPISODE_COUNT_CHOICES], "in order");
+  });
+
+  it("starts on a count that is one of the choices", () => {
+    // The default used to be 7, which stopped being in the list. A select whose value is absent
+    // from its options silently shows the first one instead — a door that lies about what it did.
+    assert.ok(
+      EPISODE_COUNT_CHOICES.includes(MICRODRAMA_DEFAULTS.episodeCount),
+      `the default ${MICRODRAMA_DEFAULTS.episodeCount} is selectable`,
+    );
   });
 
   it("episode length is a range a season can be written from", () => {
