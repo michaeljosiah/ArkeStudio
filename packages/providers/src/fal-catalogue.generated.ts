@@ -149,100 +149,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     }
   },
   {
-    "id": "seedance-2.5",
-    "provider": "fal",
-    "capability": "video",
-    "displayName": "Seedance 2.5 Text to Video",
-    "accepts": {
-      "referenceImages": 9,
-      "startFrame": false,
-      "endFrame": false
-    },
-    "limits": {
-      "maxReferenceVideoSec": 30,
-      "maxReferenceAudioSec": 30,
-      "referencesField": "image_urls",
-      "soundChoice": true,
-      "durationAuto": true,
-      "maxDurationSec": 30,
-      "durations": {
-        "4": "4",
-        "5": "5",
-        "6": "6",
-        "7": "7",
-        "8": "8",
-        "9": "9",
-        "10": "10",
-        "11": "11",
-        "12": "12",
-        "13": "13",
-        "14": "14",
-        "15": "15",
-        "16": "16",
-        "17": "17",
-        "18": "18",
-        "19": "19",
-        "20": "20",
-        "21": "21",
-        "22": "22",
-        "23": "23",
-        "24": "24",
-        "25": "25",
-        "26": "26",
-        "27": "27",
-        "28": "28",
-        "29": "29",
-        "30": "30"
-      },
-      "resolutions": [
-        "480p",
-        "720p",
-        "1080p"
-      ],
-      "aspects": [
-        "21:9",
-        "16:9",
-        "4:3",
-        "1:1",
-        "3:4",
-        "9:16"
-      ],
-      "storyboardPanels": 15
-    },
-    "pricing": {
-      "kind": "perSecond",
-      "microUsdPerSecond": 473000,
-      "byResolution": {
-        "720p": 473000,
-        "480p": 220500
-      }
-    },
-    "family": "seedance",
-    "modes": {
-      "generate": {
-        "locked": []
-      },
-      "first-frame": {
-        "route": "bytedance/seedance-2.5/image-to-video",
-        "locked": [
-          "aspect"
-        ],
-        "sentinels": {
-          "aspect": "auto"
-        }
-      },
-      "first-and-last-frame": {
-        "route": "bytedance/seedance-2.5/image-to-video",
-        "locked": [
-          "aspect"
-        ],
-        "sentinels": {
-          "aspect": "auto"
-        }
-      }
-    }
-  },
-  {
     "id": "seedance-2.0",
     "provider": "fal",
     "capability": "video",
@@ -367,6 +273,94 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       },
       "first-and-last-frame": {
         "route": "bytedance/seedance-2.0/fast/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      }
+    }
+  },
+  {
+    "id": "seedance-2.5",
+    "provider": "fal",
+    "capability": "video",
+    "displayName": "Seedance 2.5 Text to Video",
+    "accepts": {
+      "referenceImages": 9,
+      "startFrame": false,
+      "endFrame": false
+    },
+    "limits": {
+      "maxReferenceVideoSec": 30,
+      "maxReferenceAudioSec": 30,
+      "referencesField": "image_urls",
+      "soundChoice": true,
+      "durationAuto": true,
+      "maxDurationSec": 30,
+      "durations": {
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15",
+        "16": "16",
+        "17": "17",
+        "18": "18",
+        "19": "19",
+        "20": "20",
+        "21": "21",
+        "22": "22",
+        "23": "23",
+        "24": "24",
+        "25": "25",
+        "26": "26",
+        "27": "27",
+        "28": "28",
+        "29": "29",
+        "30": "30"
+      },
+      "resolutions": [
+        "720p",
+        "1080p",
+        "480p"
+      ],
+      "aspects": [
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16"
+      ],
+      "storyboardPanels": 15
+    },
+    "pricing": {
+      "kind": "perSecond",
+      "microUsdPerSecond": 473000,
+      "byResolution": {
+        "720p": 473000,
+        "480p": 220500
+      }
+    },
+    "family": "seedance",
+    "modes": {
+      "generate": {
+        "locked": []
+      },
+      "first-frame": {
+        "route": "bytedance/seedance-2.5/image-to-video",
+        "locked": [
+          "aspect"
+        ]
+      },
+      "first-and-last-frame": {
+        "route": "bytedance/seedance-2.5/image-to-video",
         "locked": [
           "aspect"
         ]
@@ -813,9 +807,9 @@ export const FAL_ENDPOINTS: Record<string, string> = {
   "nano-banana-2": "fal-ai/nano-banana-2",
   "nano-banana-pro": "fal-ai/nano-banana-pro",
   "gpt-image-2-fal": "openai/gpt-image-2",
-  "seedance-2.5": "bytedance/seedance-2.5/text-to-video",
   "seedance-2.0": "bytedance/seedance-2.0/text-to-video",
   "seedance-2.0-fast": "bytedance/seedance-2.0/fast/text-to-video",
+  "seedance-2.5": "bytedance/seedance-2.5/text-to-video",
   "veo-3.1": "fal-ai/veo3.1",
   "veo-3.1-fast": "fal-ai/veo3.1/fast",
   "minimax-h3": "minimax/h3/text-to-video",
@@ -836,9 +830,9 @@ export const FAL_EDIT_ENDPOINTS: Record<string, string> = {
   "nano-banana-2": "fal-ai/nano-banana-2/edit",
   "nano-banana-pro": "fal-ai/nano-banana-pro/edit",
   "gpt-image-2-fal": "openai/gpt-image-2/edit",
-  "seedance-2.5": "bytedance/seedance-2.5/reference-to-video",
   "seedance-2.0": "bytedance/seedance-2.0/reference-to-video",
   "seedance-2.0-fast": "bytedance/seedance-2.0/fast/reference-to-video",
+  "seedance-2.5": "bytedance/seedance-2.5/reference-to-video",
   "minimax-h3": "minimax/h3/reference-to-video",
   "wan-2.7": "fal-ai/wan/v2.7/reference-to-video"
 };

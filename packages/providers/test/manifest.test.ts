@@ -973,3 +973,39 @@ describe("a direct provider's row IS its own id (ElevenLabs 400, 2026-08-17)", (
     assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 300000);
   });
 });
+
+/**
+ * Adding a row must not re-route anyone (codex, 2026-08-23).
+ *
+ * `modelForCapability` falls back to the first row of a capability in manifest order when the
+ * user has chosen nothing. Seedance 2.5 was curated above 2.0 and silently moved every install
+ * that never picked a model onto a different skill and a 56% higher rate — a decision made by a
+ * catalogue edit rather than by anybody.
+ */
+describe("the unconfigured default", () => {
+  const firstOf = (capability: string) =>
+    SHIPPED_MANIFEST.models.find((m) => m.capability === capability)?.id;
+
+  it("is still Seedance 2.0 for video", () => {
+    assert.equal(firstOf("video"), "seedance-2.0");
+  });
+
+  it("leads each family with the cheapest per-second row it ships", () => {
+    // Not a general rule about model quality: a fallback nobody chose should be the conservative
+    // one, and price is the part of that choice a person feels without being asked.
+    const seedance = SHIPPED_MANIFEST.models.filter((m) => m.capability === "video" && m.family === "seedance");
+    const rates = seedance.map((m) => ({ id: m.id, rate: m.price?.microUsdPerSecond ?? Number.MAX_SAFE_INTEGER }));
+    const cheapest = [...rates].sort((a, b) => a.rate - b.rate)[0]!;
+    assert.ok(
+      rates[0]!.rate <= cheapest.rate * 1.1,
+      `the first seedance row (${rates[0]!.id} at ${rates[0]!.rate}) is not far above the cheapest (${cheapest.id} at ${cheapest.rate})`,
+    );
+  });
+
+  it("leads Seedance 2.5 with the resolution its price was read for", () => {
+    // fal states the rate per resolution and the parsed figure is the 720p one; leading with a
+    // different size highlights a control whose estimate prices something else.
+    const model = SHIPPED_MANIFEST.models.find((m) => m.id === "seedance-2.5")!;
+    assert.equal(model.limits.resolutions?.[0], "720p");
+  });
+});

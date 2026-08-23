@@ -116,64 +116,6 @@ const CURATED = {
   // Durations are the route's own enum, read from its schema: fal video routes take a string
   // from a fixed list, never a number of seconds, and the lists differ per family.
   // https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=bytedance/seedance-2.0/text-to-video
-  /*
-   * Seedance 2.5, probed 2026-08-23 — the sync the 2.0 rows below said was coming.
-   *
-   * Every figure here is read from the route's own schema, not carried across from 2.0, because
-   * the two disagree in ways that matter: 2.5 runs to **thirty** seconds where 2.0 stops at
-   * fifteen, drops 4k, gains `end_image_url` on its image sibling, and takes reference audio and
-   * video of 1.8–30.2s where 2.0 declares fifteen. A season written for one is not a season
-   * written for the other, which is why the skill is per family and this row is not a copy.
-   *
-   * The locked ratio has its sentinel now: 2.5's `aspect_ratio` enum opens with `"auto"`, which
-   * is the value that means "the frame decides", so a keyframed dispatch sends that rather than
-   * omitting the field.
-   */
-  "bytedance/seedance-2.5/text-to-video": {
-    id: "seedance-2.5",
-    capability: "video",
-    family: "seedance",
-    modes: {
-      generate: { locked: [] },
-      "first-frame": {
-        route: "bytedance/seedance-2.5/image-to-video",
-        locked: ["aspect"],
-        sentinels: { aspect: "auto" },
-      },
-      "first-and-last-frame": {
-        route: "bytedance/seedance-2.5/image-to-video",
-        locked: ["aspect"],
-        sentinels: { aspect: "auto" },
-      },
-    },
-    editRoute: "bytedance/seedance-2.5/reference-to-video",
-    // "Refer to them in the prompt as @Image1, @Image2" — the route's own words.
-    //
-    // Both frame flags stay false, as on every fal video row: they describe THIS route, and this
-    // route is text-to-video with no image field. `end_image_url` is real but it belongs to the
-    // image sibling, and the way a row says "I can close on a frame" is the task mode above —
-    // which is what the picker and the dispatch dialog both read (issue 154). Setting the flag
-    // here instead would promise a frame on the route that cannot take one.
-    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
-    limits: {
-      // "Each file must be 1.8 to 30.2 seconds" — the route's own bound, on both audio and video.
-      maxReferenceVideoSec: 30,
-      maxReferenceAudioSec: 30,
-      referencesField: "image_urls",
-      soundChoice: true,
-      durationAuto: true,
-      maxDurationSec: 30,
-      durations: Object.fromEntries(
-        Array.from({ length: 27 }, (_, i) => String(i + 4)).map((n) => [n, n]),
-      ),
-      // No 4k on this family: the enum is three deep where 2.0's is four.
-      resolutions: ["480p", "720p", "1080p"],
-      aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
-      // Carried from 2.0 rather than measured: the panel ceiling is a property of how the family
-      // reads a board, and nothing in 2.5's schema speaks to it. Revise when a run says otherwise.
-      storyboardPanels: 15,
-    },
-  },
   "bytedance/seedance-2.0/text-to-video": {
     id: "seedance-2.0",
     capability: "video",
@@ -236,6 +178,66 @@ const CURATED = {
       aspects: ["16:9", "9:16"],
       // SPEC-019 R-23: panels this family reads reliably. Past it the documented failure is a
       // still output or panels rendered out of order.
+      storyboardPanels: 15,
+    },
+  },
+  /*
+   * Seedance 2.5, probed 2026-08-23 — the sync the 2.0 rows above said was coming.
+   *
+   * AFTER 2.0 on purpose. `modelForCapability` falls back to the first video row in manifest
+   * order when `settings.routing.video` is unset, so putting the newer model first would move
+   * every install that never chose one from 2.0 to 2.5 — a different skill and 473000 against
+   * 303400 micro-dollars a second, decided by a catalogue edit rather than by anybody.
+   *
+   * Every figure here is read from the route's own schema, not carried across from 2.0, because
+   * the two disagree in ways that matter: 2.5 runs to **thirty** seconds where 2.0 stops at
+   * fifteen, drops 4k, gains `end_image_url` on its image sibling, and takes reference audio and
+   * video of 1.8–30.2s where 2.0 declares fifteen. A season written for one is not a season
+   * written for the other, which is why the skill is per family and this row is not a copy.
+   *
+   * No sentinel, though 2.5 finally has a spelling for one. Two reasons and either is enough:
+   * `applyLockedSize` in locked-modes.ts is the only thing that would insert it and nothing calls
+   * it — the compiler filters the locked aspect out and never puts a value back — so declaring
+   * one here would claim behaviour the dispatch does not have. And it would buy nothing if it
+   * did: the route declares `aspect_ratio` with a default of `"auto"`, so omitting the field and
+   * sending `"auto"` are the same request.
+   */
+  "bytedance/seedance-2.5/text-to-video": {
+    id: "seedance-2.5",
+    capability: "video",
+    family: "seedance",
+    modes: {
+      generate: { locked: [] },
+      "first-frame": { route: "bytedance/seedance-2.5/image-to-video", locked: ["aspect"] },
+      "first-and-last-frame": { route: "bytedance/seedance-2.5/image-to-video", locked: ["aspect"] },
+    },
+    editRoute: "bytedance/seedance-2.5/reference-to-video",
+    // "Refer to them in the prompt as @Image1, @Image2" — the route's own words.
+    //
+    // Both frame flags stay false, as on every fal video row: they describe THIS route, and this
+    // route is text-to-video with no image field. `end_image_url` is real but it belongs to the
+    // image sibling, and the way a row says "I can close on a frame" is the task mode above —
+    // which is what the picker and the dispatch dialog both read (issue 154). Setting the flag
+    // here instead would promise a frame on the route that cannot take one.
+    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
+    limits: {
+      // "Each file must be 1.8 to 30.2 seconds" — the route's own bound, on both audio and video.
+      maxReferenceVideoSec: 30,
+      maxReferenceAudioSec: 30,
+      referencesField: "image_urls",
+      soundChoice: true,
+      durationAuto: true,
+      maxDurationSec: 30,
+      durations: Object.fromEntries(
+        Array.from({ length: 27 }, (_, i) => String(i + 4)).map((n) => [n, n]),
+      ),
+      // 720p first because it is the route's default and the rate read from fal's prose is the
+      // 720p one: leading with 480p highlights a size the request would not carry and prices the
+      // wrong number under it. No 4k on this family — the enum is three deep where 2.0's is four.
+      resolutions: ["720p", "1080p", "480p"],
+      aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+      // Carried from 2.0 rather than measured: the panel ceiling is a property of how the family
+      // reads a board, and nothing in 2.5's schema speaks to it. Revise when a run says otherwise.
       storyboardPanels: 15,
     },
   },
