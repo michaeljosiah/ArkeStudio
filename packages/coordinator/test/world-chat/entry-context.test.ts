@@ -172,6 +172,43 @@ describe("a production thread is briefed on its shape", () => {
   });
 
   /**
+   * A blank tile is not a written episode (codex, 2026-08-23).
+   *
+   * The season board makes a tile per promised episode and counts it unwritten until it has a
+   * promise. Counting tiles instead would read a board of eighty blanks as a finished season and
+   * stop asking for the episodes nobody has written.
+   */
+  it("counts written episodes, not the tiles standing in for them", async () => {
+    const { bundle } = await scanWorld(FIXTURE_WORLD);
+    const production = bundle.productions[0]!;
+    const blanks = Array.from({ length: 80 }, (_, i) => ({
+      id: `ep-${i + 1}`,
+      version: 1,
+      order: i + 1,
+      title: `Episode ${i + 1}`,
+      scenes: [],
+    }));
+    const patched: WorldBundle = {
+      ...bundle,
+      productions: [
+        {
+          ...production,
+          meta: { ...production.meta, medium: "video", kind: "microdrama" },
+          episodes: blanks as (typeof production.episodes)[number][],
+          season: {
+            ...(production.season ?? { version: 1 }),
+            defaults: { episodeCount: 80, episodeSecondsMin: 60, episodeSecondsMax: 90 },
+          },
+        } as (typeof bundle.productions)[number],
+        ...bundle.productions.slice(1),
+      ],
+    };
+    const text = describeEntryContext({ kind: "production", productionId: production.meta.id }, patched);
+    assert.match(text, /runs of at most/, "eighty blank tiles are eighty episodes still to write");
+    assert.match(text, /not all 80 at once/, "and none of them counts as done");
+  });
+
+  /**
    * Only the thread that writes the season hears it (codex, 2026-08-23).
    *
    * `describeShape` briefs the episode and scene threads too, and telling a scene thread to write

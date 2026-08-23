@@ -209,10 +209,17 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
      * promised, or a finished sixty-episode season would go on asking for more of them every turn
      * — including in a conversation that opened to change one line of the overview.
      */
-    const remaining = count === undefined ? 0 : count - (production.episodes?.length ?? 0);
+    /*
+     * Written, not merely existing. The season board creates a tile per promised episode and
+     * counts it unwritten until it has a promise ([development.tsx]); counting the tiles instead
+     * would read a board of sixty blanks as a finished season and stop asking for the episodes
+     * nobody has written yet. Same predicate as the board, so the two agree about what is done.
+     */
+    const written = (production.episodes ?? []).filter((e) => e.promise?.opens || e.promise?.closes).length;
+    const remaining = count === undefined ? 0 : count - written;
     if (writesTheSeason && remaining > EPISODE_RUN) {
       bits.push(
-        `${production.episodes.length > 0 ? `${production.episodes.length} of ${count} are written; ` : ""}write the rest in runs of at most ${EPISODE_RUN} episodes, not all ${remaining} at once. Say which episodes the run covers and where the next one picks up.`,
+        `${written > 0 ? `${written} of ${count} are written; ` : ""}write the rest in runs of at most ${EPISODE_RUN} episodes, not all ${remaining} at once. Say which episodes the run covers and where the next one picks up.`,
       );
       /*
        * The half that makes the loop terminate. A run that is settled and left on the rail is
