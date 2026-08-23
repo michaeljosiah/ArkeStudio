@@ -38,7 +38,7 @@ it was supporting, so it goes first.
 | One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
 | Every mutation goes through it | **No.** `WorldStore.ownedWrite()` is *"one app-owned filesystem write outside the commit/proposal machinery"* — take media landing, reference images copied and removed. It serialises in-process, which is a lock's job, not a fence's. |
 
-**Two defects surfaced while checking the above**, and both are in the code rather than in any
+**Three defects surfaced while checking the above**, and both are in the code rather than in any
 spec. They are recorded here because they are evidence for this ADR's thesis — ownership is less
 solid than the lock's existence suggests — and because they want fixing whether or not any of this
 lands.
@@ -52,6 +52,14 @@ lands.
   `write()` → `atomicWriteFile()` → rename. There is no exclusive create anywhere in the world
   layer. Two processes opening an unlocked world concurrently can both see nothing, both write, and
   both believe they hold it.
+- **Release deletes whatever lock is there.** `release()` removes `world.lock` on the strength of
+  its own in-memory `held` flag, without checking that the file still names it — with
+  `force: true` and a swallowed error. So a process deposed by the cold-heartbeat reclaim deletes
+  its successor's live lock on the way out, and the world is unlocked while someone is writing it.
+
+Taken together the three make the local lock unreliable in both directions: it can be held twice,
+and it can be released by someone who no longer holds it. This ADR spent several revisions calling
+it "an optimisation that makes conflicts rare", which is more credit than it has earned.
 
 One thing the earlier draft under-credited: `world.json` already carries `canonRevision`, a
 monotonic world-level counter, and `rollForward()` writes world.json **last**, commenting that
