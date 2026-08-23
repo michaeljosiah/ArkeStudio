@@ -247,16 +247,25 @@ export function ProductionConversation({
    * A boolean here belonged to the dock, and the dock outlives the subject under it: one thread
    * serves the production, its episodes and its scenes. Wrapping episode A and walking to B
    * carried A's wait onto B's button; resetting on arrival then lost it when you walked back to A
-   * while it was still committing. Keyed by subject, both are the same answer — the wait shows on
-   * the subject it was started from and nowhere else, and it survives leaving and returning.
+   * while it was still committing. A single key fixed both and still lost A's wait the moment B
+   * was wrapped too, because wrap-ups on different subjects genuinely do run at once — the
+   * coordinator has no idea these are the same dock. A set says what is true: each wait shows on
+   * the subject it was started from, survives leaving and returning, and outlives the next one.
    */
-  const [wrappingKey, setWrappingKey] = useState<string | null>(null);
+  const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
-  const wrapping = wrappingKey === contextKey;
-  const setWrapping = (next: boolean) => setWrappingKey(next ? contextKey : null);
+  const wrapping = wrappingKeys.has(contextKey);
+  const setWrapping = (next: boolean) =>
+    setWrappingKeys((keys) => {
+      if (keys.has(contextKey) === next) return keys;
+      const out = new Set(keys);
+      if (next) out.add(contextKey);
+      else out.delete(contextKey);
+      return out;
+    });
   /*
    * Navigating between subjects reuses this mounted component (episode 3 → episode 4), and an
    * unsent draft typed against one subject must not be sent into the other's thread

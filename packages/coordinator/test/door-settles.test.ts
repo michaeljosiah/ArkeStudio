@@ -78,7 +78,10 @@ class TestClient {
   }
 
   async until(match: (frame: Frame) => boolean, label: string): Promise<Frame> {
-    const deadline = Date.now() + 8_000;
+    // Generous on purpose: this asserts that a settle happens at all, not how fast. Under the
+    // full suite the coordinator shares a machine with a dozen other WebSocket tests, and an
+    // 8-second deadline failed there while passing alone — a red test that means nothing.
+    const deadline = Date.now() + 30_000;
     for (;;) {
       const hit = this.frames.find(match);
       if (hit) return hit;
