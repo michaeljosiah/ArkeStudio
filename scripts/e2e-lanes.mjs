@@ -3,8 +3,10 @@
  * End-to-end check for lanes and clip sound, over CDP against a local desktop build.
  *
  * The plan this automates is docs/issues/099.lanes-cdp-test-plan.md; read that for why each
- * case exists. The one it is really for is EXPORT: the ffmpeg filter graph this feature emits
- * has never produced a file, and only a machine with a full ffmpeg can answer whether it works.
+ * case exists. The one it is really for is EXPORT: the graph has been run by hand and measured
+ * since (#428, which is where it turned out both lane resolvers named a path that does not
+ * exist), but nothing has yet driven it through the app's own screens. Only a machine with a
+ * full ffmpeg can do that.
  *
  * Zero new dependencies: raw CDP over the `ws` the coordinator already ships, and the `electron`
  * the desktop app already builds against.
@@ -34,8 +36,25 @@ const PROD = "saltlight";
 // A killed Electron can leave the listener behind for a while, and the next run then fails to
 // bind and waits out the attach timeout as if the app had never started. Override to step aside.
 const PORT = Number(process.env.ARKE_CDP_PORT || 9222);
-const FFMPEG = process.env.ARKE_FFMPEG || "ffmpeg";
-const FFPROBE = process.env.ARKE_FFPROBE || "ffprobe";
+
+/**
+ * Which pair to run: the bundled one, not PATH.
+ *
+ * A packaged build executes `resources/ffmpeg` (`apps/desktop/src/main.ts`), so a check that
+ * runs whatever the machine happens to have is checking a binary the app never invokes. That is
+ * the order `resolveFfprobe` already settles for measurement, for the same reason, and this is
+ * the encoding half of it: an explicit env var wins, then the staged pair, then PATH as a last
+ * resort so a checkout without build-resources can still run.
+ *
+ * It is not hypothetical. Windows' winget ffmpeg (gyan.dev 8.1.1-full) segfaults on `drawtext`,
+ * which every gap in a cut draws — so pointing the app at PATH turns each export with a gap into
+ * a crash that reads like a lanes bug.
+ */
+const stagedFfmpegDir = join(repoRoot, "apps", "desktop", "build-resources", "ffmpeg");
+const staged = (stem) =>
+  [`${stem}.exe`, stem].map((name) => join(stagedFfmpegDir, name)).find((path) => existsSync(path)) ?? null;
+const FFMPEG = process.env.ARKE_FFMPEG || staged("ffmpeg") || "ffmpeg";
+const FFPROBE = process.env.ARKE_FFPROBE || staged("ffprobe") || "ffprobe";
 
 const results = [];
 const record = (id, name, status, detail = "") => {
@@ -52,12 +71,48 @@ const ok = (id, name, cond, detail = "") =>
 
 const NEEDED_FILTERS = ["amix", "adelay", "apad", "atrim", "concat", "overlay", "drawtext"];
 
+/*
+ * Said on every block, because the staged pair is gitignored: a fresh clone and every worktree
+ * fall through to PATH, and PATH is exactly where the unusable builds live.
+ */
+const REMEDY =
+  "set ARKE_FFMPEG to a working one, or stage the bundled pair with " +
+  "`npm run prepare:runtimes:x64 --workspace @arke-studio/desktop` (Windows only)";
+
 function preflight() {
   const ff = spawnSync(FFMPEG, ["-hide_banner", "-filters"], { encoding: "utf8" });
   if (ff.error) return { ok: false, reason: `${FFMPEG} not runnable: ${ff.error.message}` };
   const listed = ff.stdout || "";
   const missing = NEEDED_FILTERS.filter((f) => !new RegExp(`^ [TSC.]* ${f} `, "m").test(listed));
-  if (missing.length > 0) return { ok: false, reason: `ffmpeg lacks filters: ${missing.join(", ")}` };
+  if (missing.length > 0) {
+    return { ok: false, reason: `${FFMPEG} lacks filters: ${missing.join(", ")} — ${REMEDY}` };
+  }
+  /*
+   * A listed filter is not a working filter, which is the same lesson one level down: reading
+   * `-filters` is reading a table the build was compiled with, not evidence anything runs.
+   *
+   * `drawtext` is the one to actually run. It reaches outside ffmpeg for a font, so a build whose
+   * fontconfig has no config file segfaults on it rather than falling back — and every gap in a
+   * cut draws a slate, so that kills the export rather than the slate. One frame answers it.
+   */
+  const drawn = spawnSync(
+    FFMPEG,
+    [
+      "-hide_banner", "-loglevel", "error",
+      "-f", "lavfi", "-t", "0.1", "-i", "color=c=black:s=64x64:r=24",
+      "-vf", "drawtext=text=probe:fontcolor=white:fontsize=12",
+      "-f", "null", "-",
+    ],
+    { encoding: "utf8" },
+  );
+  if (drawn.status !== 0) {
+    // A signal leaves `status` null, so name whichever one the platform gave us.
+    const how = drawn.signal ?? `exit ${drawn.status}`;
+    return {
+      ok: false,
+      reason: `${FFMPEG} lists drawtext but dies running it (${how}); every export with a gap would crash — ${REMEDY}`,
+    };
+  }
   const probe = spawnSync(FFPROBE, ["-version"], { encoding: "utf8" });
   if (probe.error) return { ok: false, reason: `${FFPROBE} not runnable` };
   return { ok: true };
@@ -394,11 +449,12 @@ async function main() {
   console.log("\nPreflight");
   const pre = preflight();
   if (!pre.ok) {
-    record("PRE", "ffmpeg has the filters the graph needs", "blocked", pre.reason);
+    record("PRE", "ffmpeg has the filters the graph needs, and runs them", "blocked", pre.reason);
     console.log("\nBlocked before starting. The export cases cannot be answered without them.\n");
     process.exit(2);
   }
-  record("PRE", "ffmpeg has the filters the graph needs", "pass");
+  // Named, not just passed: which binary answered decides what the export cases actually prove.
+  record("PRE", "ffmpeg has the filters the graph needs, and runs them", "pass", FFMPEG);
 
   if (!argv.has("--skip-build")) {
     console.log("\nBuilding the desktop bundle (a minute or two)…");
