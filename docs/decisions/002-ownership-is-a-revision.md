@@ -140,12 +140,15 @@ rested on the fencing argument above, which does not hold. The honest scope:
 - **Client-supplied `commitId`.** Required before any claim about retry idempotency is true. A
   client whose success response is lost must be able to replay and be told *"already done"* —
   today it would generate a second id and either duplicate or spuriously fail.
-- **Blob negotiation needs less than it looked.** `scanWorld()` already streams every media file
-  through SHA-256 and returns a path-to-digest `mediaManifest`, which is enough for a peer to
-  answer *"which of these hashes are you missing"* without touching take identity. Content
-  addressing as *identity* would deduplicate identical bytes and make a take's reference its
-  version; that is a separate benefit, not a prerequisite. An earlier draft of this ADR claimed the
-  reverse.
+- **Blob negotiation needs less than it looked, but more than the manifest gives.** `scanWorld()`
+  builds a path-to-digest `mediaManifest`, which is the right shape for a peer to answer *"which of
+  these hashes are you missing"* without touching take identity — but it is **not complete**. The
+  hash is computed only inside `if (record && take.media && safeMedia)`, where `record` is a parsed
+  `media-info.json`; a take with no sidecar, and the scanner treats that as the ordinary case, has
+  no entry at all. Negotiating against it today would silently skip exactly the media nothing has
+  probed. What that needs is an inventory pass that hashes media unconditionally — **not** a change
+  to take identity. Content addressing as *identity* would deduplicate identical bytes and make a
+  take's reference its version; that remains a separate benefit rather than a prerequisite.
 - **Wherever ownership state lands, it is a format change.** An epoch, a claim record, a head —
   any of them is new on-disk state with no location, no initialisation or migration rule, and no
   schema-version boundary today, and `WorldMetaSchema` is `.strict()`, so adding fields to
@@ -191,9 +194,9 @@ API to call.
   capabilities, while a lease is about which coordinator *instance* owns a world — it must stay
   valid across a change of actor, and while no actor is present at all. Conflating the two would
   make ownership depend on who is signed in. It wants its own port, or its own spec.
-- **Blob sync.** `scanWorld()`'s path-to-digest manifest is enough to negotiate against; what a
-  transfer protocol looks like is open. Content addressing as take *identity* is not required for
-  it, per the consequences above.
+- **Blob sync.** The manifest is the right shape to negotiate against once it covers every media
+  file rather than only probed ones; what a transfer protocol looks like is open. Content
+  addressing as take *identity* is not required for it, per the consequences above.
 - **Whether divergence can be resolved in-app**, or only reported.
 - **Any change to the accept gate.** A proposal is still gated; this is about what happens
   underneath one when it lands.
