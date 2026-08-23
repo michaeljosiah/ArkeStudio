@@ -1583,9 +1583,21 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border: 0; background: transparent; padding: 3px 6px; border-radius: 6px; min-width: 120px;
 }
 .fy-sheettitle:focus { background: var(--secondary); outline: none; }
-.fy-sheet { display: flex; gap: 0; flex: 1; min-height: 0; }
-.fy-sheet__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 16px 0; overflow-y: auto; }
-.fy-sheet__side { width: 320px; flex: none; border-left: 1px solid var(--border); padding: 8px 0 16px 16px; display: flex; flex-direction: column; overflow-y: auto; }
+/*
+ * Its own names (2026-08-23).
+ *
+ * These three were `.fy-sheet`, `.fy-sheet__main` and `.fy-sheet__side` — the character sheet's,
+ * taken. One global stylesheet, equal specificity, and this block sits lower in the file, so the
+ * character page silently got the shot drawer's layout: no gutter where it wanted 64px, and a
+ * 320px rail around a 360px card, which clipped the card's own caption and put a horizontal
+ * scrollbar under it. Nothing was wrong with either rule; they were both right for one screen.
+ *
+ * `fy-sheetside` matches the `fy-sheetside__sec` blocks already inside it, so the drawer's names
+ * now agree with each other as well as stop colliding.
+ */
+.fy-sheetbody { display: flex; gap: 0; flex: 1; min-height: 0; }
+.fy-sheetmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 16px 20px 16px 0; overflow-y: auto; }
+.fy-sheetside { width: 320px; flex: none; border-left: 1px solid var(--border); padding: 8px 0 16px 16px; display: flex; flex-direction: column; overflow-y: auto; }
 .fy-sheetsec { display: flex; flex-direction: column; gap: 7px; }
 .fy-sheetlabel {
   display: flex; align-items: center; gap: 10px;
