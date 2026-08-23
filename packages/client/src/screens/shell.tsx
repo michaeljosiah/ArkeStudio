@@ -2462,21 +2462,24 @@ export function SettingsHarnessScreen() {
             question about what the agent may do rather than behind a provider key. Off until
             asked: a conversation that reads the web has fetched a page on the author's line, and
             that is a decision, not a default.
+
+            "Search", not "read pages", since 2026-08-23. It could only open a URL someone typed
+            before, which is not what anyone means by asking it to go and research something.
           */}
           <div className="fy-rt__research">
             <button
               type="button"
               role="switch"
               aria-checked={researchOn}
-              aria-label="Read pages online"
+              aria-label="Search online"
               className={cx("fy-prov__switch", researchOn && "is-on")}
               onClick={() => setResearchWeb(!researchOn)}
             >
               <span />
             </button>
             <div>
-              <strong>Read pages online</strong>
-              <p>{researchOn ? "A conversation can open a page you name." : "Nothing is read online."}</p>
+              <strong>Search online</strong>
+              <p>{researchOn ? "Searches, reads, and cites pages." : "Stays offline."}</p>
             </div>
           </div>
         </div>

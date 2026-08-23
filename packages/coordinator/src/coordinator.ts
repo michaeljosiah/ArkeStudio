@@ -711,6 +711,15 @@ export class Coordinator {
   private skillFamily: string | undefined;
   /** The routed model itself, for a skill that narrows to one (2026-08-23). */
   private skillModelId: string | undefined;
+  /**
+   * Settings' `research.web`, cached the same way, for the same reason (2026-08-23).
+   *
+   * Assigned on EVERY path that reads settings, which is the whole care this field needs. Its
+   * predecessor for the MCP surface was assigned in one method the World Chat path never called,
+   * so it read false for the life of the process and the refusal named a setting that was already
+   * on. Off is the default here too, so forgetting a path fails the same silent way.
+   */
+  private researchWeb = false;
   private appearanceWrite = Promise.resolve();
   private voiceModelsChanged = false;
   private started = false;
@@ -913,6 +922,9 @@ export class Coordinator {
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
       // The model too, or a narrowed skill is recorded and never actually injected.
       ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
+      // Always written, never conditional: an omitted field reads as off downstream, and that is
+      // the right answer, but only saying it when it is true hides which of the two it meant.
+      researchWeb: this.researchWeb,
     });
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
     this.authoring =
@@ -1425,6 +1437,7 @@ export class Coordinator {
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
     this.agentOverrides = settings?.agents;
+    this.researchWeb = settings?.research.web === true;
     const routedVideo = manifest ? modelForCapability(manifest, settings?.routing, "video") : undefined;
     this.skillFamily = routedVideo?.family;
     this.skillModelId = routedVideo?.id;
@@ -3068,6 +3081,11 @@ export class Coordinator {
       case "set-research-web": {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setResearchWeb(msg.enabled);
+        // The harness half of the same switch. Without this line the toggle would move on screen
+        // and in the file while every session still opened with the confinement it had at start —
+        // turning research on and being refused anyway, which is the failure this setting has
+        // already had once. The MCP tool asks settings per call and needs no equivalent.
+        this.researchWeb = settings.research.web;
         this.readModel.seedAppConfig({ research: settings.research });
         this.transport.broadcastSnapshot();
         return;

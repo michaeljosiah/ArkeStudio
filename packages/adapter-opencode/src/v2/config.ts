@@ -53,10 +53,16 @@ const V2_ACTIONS: Partial<Record<ToolIntent, readonly string[]>> = {
   "world-query": ["arke-world_*"],
   skill: ["skill"],
   delegate: ["subagent"],
+  web: ["webfetch", "websearch"],
 };
 
-/** Never an intent — risk reduction, not a boundary (R-10, D10); the accept gate still holds. */
-const V2_NEVER = ["shell", "webfetch", "websearch"] as const;
+/**
+ * Never an intent — risk reduction, not a boundary (R-10, D10); the accept gate still holds.
+ *
+ * `webfetch` and `websearch` moved to {@link V2_ACTIONS}: they are a capability a confinement can
+ * grant, not a hazard. `shell` is the one that stays, for the reason the list existed.
+ */
+const V2_NEVER = ["shell"] as const;
 
 /**
  * One confinement, in v2's grammar — and the grammar IS the policy here, because rules are an
@@ -99,10 +105,11 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
       description: member.description,
       system: agentPromptFor({
         ...member,
+        researchWeb: input.researchWeb === true,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
-      permissions: renderV2(confinementFor(member)),
+      permissions: renderV2(confinementFor(member, { web: input.researchWeb === true })),
       // Config files keep the string form; the API's ModelRef object is the adapter's business.
       ...(override?.model ?? input.model ? { model: override?.model ?? input.model } : {}),
     };

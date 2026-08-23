@@ -157,7 +157,9 @@ export class GenesisService {
     let sessionId = this.sessions.get(genesisId);
     const firstTurn = sessionId === undefined;
     if (sessionId === undefined) {
-      // Same confinement config as authoring sessions — no world, so no world-query MCP.
+      // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
+      // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
+      // door can go and look something up before there is any world to scope a lookup to.
       await writeSessionFiles(this.adapter, dir, this.opts.sessionInput({}));
       try {
         const session = await this.adapter.createSession({ purpose: "drafting", cwd: dir, agent: "world-author" });
