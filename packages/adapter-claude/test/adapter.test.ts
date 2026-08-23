@@ -363,7 +363,7 @@ describe("the skill a Claude session drafts under", () => {
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
     adapter.prepareSession?.({ skillFamily: "seedance", skillModelId: "seedance-2.5" });
-    const { sessionId } = await adapter.createSession({ purpose: "scene-drafting", cwd: CWD, agent: "scene-writer" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);
     assert.ok(prompt.includes("thirty seconds"), "2.5's own document arrives, not the family's");
@@ -373,7 +373,7 @@ describe("the skill a Claude session drafts under", () => {
   it("still honours the constructor options when a caller passes them", async () => {
     const fake = fakeQuery([result()]);
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillFamily: "seedance" });
-    const { sessionId } = await adapter.createSession({ purpose: "scene-drafting", cwd: CWD, agent: "scene-writer" });
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);
     assert.ok(prompt.includes("Writing shots for this model family"), "the family document still arrives");
