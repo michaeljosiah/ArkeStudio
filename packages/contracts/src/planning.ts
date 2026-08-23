@@ -298,8 +298,14 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
    * here rather than in a block at the end because sound direction works next to the thing that
    * makes the sound — one global "market noise" applies it to the quiet room two shots later.
    */
-  const ambience = shot.audio?.ambience?.trim() ?? "";
-  const effects = shot.audio?.effects?.trim() ?? "";
+  //
+  // Silence wins over both. The Sound fields stay editable on a shot directed silent, so an
+  // ambience left behind from before the shot went quiet would otherwise be asked for in the same
+  // prompt that `derivedNegatives` ends with "No audio." — a clip told to be silent and to carry
+  // a generator. The direction that contradicts the negative is the one that goes.
+  const silent = shot.audio?.kind === "silence";
+  const ambience = silent ? "" : (shot.audio?.ambience?.trim() ?? "");
+  const effects = silent ? "" : (shot.audio?.effects?.trim() ?? "");
   if (ambience.length > 0) directionParts.push(sentence(`Ambience: ${ambience}`));
   if (effects.length > 0) directionParts.push(sentence(`Sound: ${effects}`));
   const direction = directionParts.filter((s) => s.length > 0).join(" ");
@@ -824,6 +830,26 @@ export function imageConstraintSuffix(
   return negatives === null ? "" : ` ${negatives}`;
 }
 
+/**
+ * A keep-out said as an instruction, whatever the author typed (codex, 2026-08-23).
+ *
+ * The field's own placeholder is a noun list — "Modern boats, text, lens flare" — and appending
+ * that verbatim produces "No subtitles. Modern boats, text, lens flare", which names three things
+ * and forbids none of them. That is precisely the failure the field exists to prevent, and the
+ * one the skill warns about: a thing named is a thing you handed the model.
+ *
+ * An author who already wrote a sentence keeps it. A list becomes one.
+ */
+function asExclusion(keepOut: string): string {
+  const trimmed = keepOut.replace(/\s+/g, " ").trim();
+  // Already an instruction: "No wristwatch", "Never show the harbour", "Avoid lens flare."
+  if (/^(no\b|none\b|never\b|avoid\b|without\b|exclude\b|keep out\b)/i.test(trimmed)) {
+    return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  }
+  const body = trimmed.replace(/[.;,]+$/, "");
+  return `Do not show: ${body}.`;
+}
+
 export function derivedNegatives(input: NegativeInput): string | null {
   const parts: string[] = [];
   // The audio and subtitle clauses are about a clip's soundtrack and its burned-in text, so they
@@ -865,7 +891,7 @@ export function derivedNegatives(input: NegativeInput): string | null {
    */
   for (const shot of input.shots ?? (input.shot ? [input.shot] : [])) {
     const keepOut = shot.continuity?.keepOut?.trim();
-    if (keepOut) parts.push(keepOut);
+    if (keepOut) parts.push(asExclusion(keepOut));
   }
   // Standing failure modes last, after the audio direction: they are the world's accumulated
   // "this keeps going wrong", and a model reading in order should meet the specific request, then
@@ -1097,7 +1123,21 @@ export function skillFamilyMismatch(
 ): DispatchWarnings["skillFamilyMismatch"] {
   const drafted = scene.draftedWith;
   if (drafted === undefined) return null;
-  if (model.family === drafted.family) return null;
+  /*
+   * Family first, then the models the document named (codex, 2026-08-23).
+   *
+   * A skill that narrows is guidance for those models and no others. Comparing families alone
+   * called 2.5's document a match for 2.0 — same family, opposite advice about the one thing the
+   * document is about — which is a warning that stays silent exactly when it is needed.
+   */
+  if (model.family === drafted.family) {
+    if (drafted.models === undefined || drafted.models.includes(model.id)) return null;
+    return {
+      draftedFor: drafted.models.join(", "),
+      dispatchingTo: model.id,
+      skillId: drafted.skillId,
+    };
+  }
   return {
     draftedFor: drafted.family,
     dispatchingTo: model.family ?? null,

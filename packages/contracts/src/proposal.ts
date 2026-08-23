@@ -89,6 +89,8 @@ export const ProposalSkillSchema = z
     version: z.number().int().min(1),
     /** The model family the guidance was written for, which R-21 compares against at dispatch. */
     family: z.string().min(1),
+    /** The models it narrowed to, if any — a family-wide document names none (2026-08-23). */
+    models: z.array(z.string().min(1)).optional(),
   })
   .strict();
 export type ProposalSkill = z.infer<typeof ProposalSkillSchema>;

@@ -406,7 +406,7 @@ export interface CoordinatorOptions {
       purpose: "scene-drafting" | "storyboard",
       family: string | undefined,
       modelId?: string,
-    ) => { id: string; version: number; family: string } | null;
+    ) => { id: string; version: number; family: string; models?: string[] } | null;
   };
   /** SPEC-008: credential cipher (Electron safeStorage in the desktop; a fake in tests). */
   cipher?: Cipher;
@@ -692,7 +692,7 @@ export class Coordinator {
   private async skillForPurpose(
     purpose: "scene-drafting" | "storyboard",
     capability: Capability,
-  ): Promise<{ id: string; version: number; family: string } | null> {
+  ): Promise<{ id: string; version: number; family: string; models?: string[] } | null> {
     const resolve = this.opts.authoring?.skillFor;
     if (!resolve || !this.opts.manifest) return null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
@@ -709,6 +709,8 @@ export class Coordinator {
    * agents draft under general guidance (R-20).
    */
   private skillFamily: string | undefined;
+  /** The routed model itself, for a skill that narrows to one (2026-08-23). */
+  private skillModelId: string | undefined;
   private appearanceWrite = Promise.resolve();
   private voiceModelsChanged = false;
   private started = false;
@@ -909,6 +911,8 @@ export class Coordinator {
       ...input,
       ...(this.agentOverrides ? { agents: this.agentOverrides } : {}),
       ...(this.skillFamily !== undefined ? { skillFamily: this.skillFamily } : {}),
+      // The model too, or a narrowed skill is recorded and never actually injected.
+      ...(this.skillModelId !== undefined ? { skillModelId: this.skillModelId } : {}),
     });
     this.grants = opts.appRoot ? new GrantStore(opts.appRoot) : null;
     this.authoring =
@@ -1421,9 +1425,9 @@ export class Coordinator {
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
     this.agentOverrides = settings?.agents;
-    this.skillFamily = manifest
-      ? modelForCapability(manifest, settings?.routing, "video")?.family
-      : undefined;
+    const routedVideo = manifest ? modelForCapability(manifest, settings?.routing, "video") : undefined;
+    this.skillFamily = routedVideo?.family;
+    this.skillModelId = routedVideo?.id;
     this.refreshAgents(settings?.agents ?? {});
     const entries = this.ledger ? await this.ledger.readAll() : [];
     this.readModel.seedAppConfig({
@@ -3048,9 +3052,11 @@ export class Coordinator {
         }
         const settings = await this.appSettings.load();
         // The family the next authoring session drafts for follows the routed model (R-16).
-        this.skillFamily = this.opts.manifest
-          ? modelForCapability(this.opts.manifest, settings.routing, "video")?.family
+        const routed = this.opts.manifest
+          ? modelForCapability(this.opts.manifest, settings.routing, "video")
           : undefined;
+        this.skillFamily = routed?.family;
+        this.skillModelId = routed?.id;
         this.emit({
           at: new Date().toISOString(),
           type: "routing.changed",

@@ -1802,3 +1802,55 @@ describe("the shot's structured camera, negatives and sound (2026-08-23)", () =>
     await store.close();
   });
 });
+
+/**
+ * Two ways the new fields could contradict the prompt they joined (codex, 2026-08-23).
+ */
+describe("the plumbed fields do not fight the rest of the prompt", () => {
+  const scene = (shots: Shot[]): Scene => ({
+    id: "sc_92",
+    number: 92,
+    slug: "t",
+    title: "T",
+    status: "draft",
+    version: 1,
+    inherits: { location: "the-vigil", timeOfDay: "night" },
+    shots,
+  });
+
+  it("drops ambience and effects on a shot directed silent", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    // The Sound fields stay editable after a shot goes silent, so leftovers are reachable.
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      audio: { kind: "silence", ambience: "generator two houses down", effects: "coins on tin" },
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.ok(!/generator|coins/.test(blocks.direction), `silence carries no sound: ${blocks.direction}`);
+    // And the negative still says so, which is the half that would have been contradicted.
+    assert.match(derivedNegatives({ capability: "video", shot: s })!, /No audio\./);
+    await store.close();
+  });
+
+  it("turns a keep-out list into an instruction rather than a list of nouns", async () => {
+    const { store } = await open();
+    // The field's own placeholder is a noun list. Appended verbatim it names three things and
+    // forbids none — the exact failure the field exists to prevent.
+    const listed: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      continuity: { keepOut: "Modern boats, text, lens flare" },
+    };
+    const negatives = derivedNegatives({ capability: "video", shot: listed })!;
+    assert.match(negatives, /Do not show: Modern boats, text, lens flare\./);
+
+    // An author who already wrote an instruction keeps their own words.
+    for (const already of ["No wristwatch on Ife", "Never show the harbour.", "Avoid lens flare"]) {
+      const s: Shot = { ...shot(1, 6, "x"), continuity: { keepOut: already } };
+      const said = derivedNegatives({ capability: "video", shot: s })!;
+      assert.ok(!said.includes("Do not show:"), `"${already}" is left as written`);
+      assert.ok(said.includes(already.replace(/\.$/, "")), `and is still said: ${said}`);
+    }
+    await store.close();
+  });
+});

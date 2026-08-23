@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { skillFor, skillLabel, SKILLS } from "../src/skills.js";
+import { skillForAgent } from "../src/agent-session.js";
 
 /**
  * Which document a model is handed (2026-08-23).
@@ -87,5 +88,30 @@ describe("what the seedance document teaches", () => {
     // Turn 97: `beats[].span` is a label, not a machine timeline, and a shot is one setup.
     assert.match(body, /In the first 3 seconds/);
     assert.match(skillFor("scene-drafting", "seedance", "seedance-2.5")!.body, /not permission to write/);
+  });
+});
+
+/**
+ * Findings from the first review round (codex, 2026-08-23), each a way the new narrowing could
+ * have been true on paper and false in the app.
+ */
+describe("a narrowed skill, end to end", () => {
+  it("is what the session actually injects, not just what the record claims", () => {
+    // The coordinator resolved and recorded the 2.5 document while the session, handed only the
+    // family, injected the general one — so a 2.5 scene was drafted under 2.0's guidance and its
+    // proposal said otherwise. A record naming a document the drafting never saw is worse than none.
+    assert.equal(skillForAgent("scene-writer", "seedance", "seedance-2.5")?.id, "seedance-2.5-scene-drafting");
+    assert.equal(skillForAgent("scene-writer", "seedance", "seedance-2.0")?.id, "seedance-scene-drafting");
+    assert.equal(skillForAgent("scene-writer", "seedance")?.id, "seedance-scene-drafting");
+    // An agent that answers rather than authors still takes none, whatever the model.
+    assert.equal(skillForAgent("world-builder", "seedance", "seedance-2.5"), null);
+  });
+
+  it("does not tell an author to write a reference index it cannot know", () => {
+    // References are chosen, budgeted and numbered at dispatch, per shot. An author writing
+    // @Image2 into scene prose is guessing at a slot that does not exist yet.
+    const body = skillFor("scene-drafting", "seedance", "seedance-2.5")!.body;
+    assert.match(body, /never\s+write @Image1/i, "the instruction is a prohibition, not an invitation");
+    assert.match(body, /not knowable when you\s+are writing/i, "and it says why");
   });
 });

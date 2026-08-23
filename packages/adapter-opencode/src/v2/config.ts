@@ -94,7 +94,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
   for (const member of ROSTER) {
     const override = input.agents?.[member.name];
     // The skill comes from the shipped registry, never from the Settings override (R-14, D12).
-    const skill = skillForAgent(member.name, input.skillFamily);
+    const skill = skillForAgent(member.name, input.skillFamily, input.skillModelId);
     agents[member.name] = {
       description: member.description,
       system: agentPromptFor({

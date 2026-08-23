@@ -42,6 +42,7 @@ export interface ClaudeAdapterOptions {
   worldQueryUrl?: string;
   /** Selects the authoring skill for the session (SPEC-019 R-16). */
   skillFamily?: string;
+  skillModelId?: string;
   /** Per-agent Settings overrides — a brief may be rewritten, the confinement may not. */
   agents?: Record<string, { model?: string; brief?: string }>;
   onTrace?: (line: Record<string, unknown>) => void;
@@ -176,7 +177,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
-    const skill = skillForAgent(agentName, this.opts.skillFamily);
+    const skill = skillForAgent(agentName, this.opts.skillFamily, this.opts.skillModelId);
     /*
      * No default for `cwd`, though the contract makes it optional.
      *

@@ -219,6 +219,16 @@ export const SceneSchema = z
         skillId: z.string().min(1),
         version: z.number().int().min(1),
         family: z.string().min(1),
+        /*
+         * The models the skill was written for, when it named any (2026-08-23).
+         *
+         * The family alone answered the question while a family had one document. Now that a
+         * skill can narrow — Seedance 2.5's guidance is about thirty-second sequences, 2.0's is
+         * not — a scene drafted under the narrow one and sent to 2.0 matches on family and
+         * mismatches on everything that matters. Optional and additive: this schema is a read
+         * path, and every scene written before today parses unchanged.
+         */
+        models: z.array(z.string().min(1)).optional(),
       })
       .strict()
       .optional(),

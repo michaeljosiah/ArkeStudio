@@ -46,7 +46,7 @@ export interface Skill {
    * A narrowed skill beats the family's own for the models it names; the family document stays
    * for everything else, so adding a version never leaves a route with no advice.
    */
-  models?: readonly string[];
+  models?: string[];
   /** Which authoring job it applies to. */
   purpose: SkillPurpose;
   /** The document itself. */
@@ -165,10 +165,12 @@ invariant rather than asking for consistency in general: "the scar stays on the 
 wrapper keeps its pattern", "the light stays hard and from the window". A named invariant is
 something a model can check against; "keep it consistent" is not.
 
-**Reference images are numbered, and this family reads the numbers.** The route's own words are
-"refer to them in the prompt as @Image1, @Image2". The upload order and what each image is for
-are stated for you above the shot; where a shot needs to be explicit about which reference
-governs it, cite that number rather than describing the picture again.
+**Reference images are numbered, but not by you.** This family reads numbered references — the
+route's own words are "refer to them in the prompt as @Image1, @Image2" — and the numbering is
+worked out at dispatch, per shot, from whichever artifacts exist and fit the budget. So never
+write @Image1 into a shot: the slot it lands in is not knowable when you are writing, and a
+citation bound to the wrong subject is worse than none. Name the character or the location with
+its ordinary @mention; the reference that travels for it is chosen and numbered downstream.
 
 **It can hear.** This family takes reference audio and video alongside the images, each between
 1.8 and 30.2 seconds. Nothing asks you to supply them, but audio direction on a long shot is worth
