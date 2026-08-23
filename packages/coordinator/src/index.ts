@@ -223,7 +223,7 @@ export {
   type CommitInput,
   type CommitResult,
 } from "./world/commit.js";
-export { WorldLock, WorldLockedError } from "./world/lock.js";
+export { WorldLock, WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 export { checkPathBudget, defaultAppRoot, fsPath, toExtendedLength, toPortable } from "./world/paths.js";
 export { FsWorldProvider, type CreateWorldInput } from "./world/provider.js";
 export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } from "./world/scan.js";

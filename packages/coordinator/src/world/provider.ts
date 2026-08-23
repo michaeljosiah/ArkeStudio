@@ -392,10 +392,15 @@ export class FsWorldProvider implements WorldProvider {
   }
 
   private async closeStore(): Promise<void> {
-    if (!this.store) return;
-    this.refreshRegistry(this.store.getBundle());
-    await this.store.close();
+    const store = this.store;
+    if (!store) return;
+    this.refreshRegistry(store.getBundle());
+    // Detached before the close, not after. Closing releases the lock before it reports anything
+    // (see WorldStore.close), so by the time it can reject — the world was reclaimed out from
+    // under us, or the scan state would not write — the store holds nothing worth keeping, and
+    // retaining it would leave the provider serving a world whose watcher and index are gone.
     this.store = null;
+    await store.close();
   }
 
   /** The open store, for mutations. Null until a world is loaded. */

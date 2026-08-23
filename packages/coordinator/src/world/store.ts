@@ -6,7 +6,15 @@ import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { atomicWriteFile } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
-import { CommitPlanError, Committer, classify, type CommitHooks, type CommitInput, type CommitResult } from "./commit.js";
+import {
+  CommitPlanError,
+  Committer,
+  classify,
+  type CommitHooks,
+  type CommitInput,
+  type CommitResult,
+  type PendingCommit,
+} from "./commit.js";
 import { WorldLock } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { scanWorld, type ScanResult } from "./scan.js";
@@ -69,9 +77,20 @@ export class WorldStore {
     } = {},
   ): Promise<WorldStore> {
     const committer = new Committer(dir, opts.clock);
-    // Recovery first — an interrupted commit must resolve before anything reads (R-15).
-    await committer.recover();
 
+    /*
+     * Ownership first, then recovery.
+     *
+     * An interrupted commit must resolve before anything reads (R-15), but recovery is not a
+     * read: it rolls a `prepared` journal back or a `committing` journal forward, renaming live
+     * files. Running it before the lock meant a second instance resolved a journal that the
+     * world's actual owner was in the middle of writing — the one thing the lock exists to
+     * prevent, done by the code that runs before the lock is taken.
+     *
+     * A read-only open takes no lock, so it never recovers either. It has no claim on the world
+     * and renaming live files is not something a read-only consumer may do; the unresolved
+     * commit is reported instead, and resolved by whoever opens the world for writing.
+     */
     let lock: WorldLock | null = null;
     if (!opts.readOnly) {
       lock = new WorldLock(dir);
@@ -79,11 +98,32 @@ export class WorldStore {
     }
 
     let scan: ScanResult;
+    let pending: PendingCommit[] = [];
     try {
+      if (opts.readOnly) pending = await committer.pendingRecovery();
+      else await committer.recover();
       scan = await scanWorld(dir);
     } catch (err) {
-      await lock?.release();
+      // Whatever stopped the open is the more useful thing to report; a lock acquired a
+      // moment ago is not plausibly deposed, and masking the real failure would help nobody.
+      await lock?.release().catch(() => {});
       throw err;
+    }
+    if (pending.length > 0) {
+      scan.bundle.problems = [
+        ...scan.bundle.problems,
+        ...pending.map((p) => ({
+          path: `.commit/${p.commitId}.json`,
+          message:
+            p.phase === "prepared"
+              ? // Nothing live moved before `prepared`, so what was scanned is the world as it stood
+                // before the commit — whole, and about to lose only the commit that never landed.
+                "an interrupted commit is unresolved; nothing of it reached the world, and it will be rolled back when this world is opened for writing"
+              : // Past the point of no return: some files are renamed and some are not, so what was
+                // scanned is a world part-way through one commit, not a snapshot of either side.
+                "an interrupted commit is unresolved; this world is part-way through it and is not a consistent snapshot until it is opened for writing and the commit completed",
+        })),
+      ];
     }
     const externalEdits = opts.readOnly ? [] : await detectExternalEdits(dir, scan);
     const store = new WorldStore(
@@ -357,8 +397,21 @@ export class WorldStore {
       }
       this.index = null;
       if (this.lock) {
-        await this.saveScanState();
+        /*
+         * The release happens whatever the scan state does. `.index/` is derived and deletable
+         * by design, so a scan state that cannot be written — a full disk, a permissions change
+         * — must not be what keeps a world locked: the heartbeat would go on refreshing a lock
+         * nothing intends to hold, and this process could not reopen its own world until it
+         * exited. The failure is not swallowed for that, only deferred until the lock is off.
+         */
+        let scanStateFailure: unknown;
+        try {
+          await this.saveScanState();
+        } catch (err) {
+          scanStateFailure = err;
+        }
         await this.lock.release();
+        if (scanStateFailure !== undefined) throw scanStateFailure;
       }
     });
   }

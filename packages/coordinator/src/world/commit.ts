@@ -126,6 +126,12 @@ export interface CommitHooks {
   at?: (point: string) => void;
 }
 
+/** An interrupted commit still on disk, named but not acted on (see `Committer.pendingRecovery`). */
+export interface PendingCommit {
+  commitId: string;
+  phase: "prepared" | "committing";
+}
+
 const COMMIT_DIR = ".commit";
 
 // ---------------------------------------------------------------------------
@@ -577,9 +583,42 @@ export class Committer {
   }
 
   /**
+   * What recovery would resolve, without resolving it — for a read-only open, which holds no
+   * lock and so must not rename a live file (R-15). It reports the unresolved commit and leaves
+   * it for whoever opens the world for writing.
+   *
+   * A journal too damaged to parse is reported as `prepared`, which is the only phase it can
+   * have reached: nothing live moves before the journal is wholly on disk.
+   */
+  async pendingRecovery(): Promise<PendingCommit[]> {
+    const out: PendingCommit[] = [];
+    let entries: string[];
+    try {
+      entries = await readdir(toExtendedLength(this.abs(COMMIT_DIR)));
+    } catch {
+      return out;
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith(".json")) continue;
+      let journal: Journal;
+      try {
+        journal = JSON.parse(await readFile(toExtendedLength(this.abs(`${COMMIT_DIR}/${entry}`)), "utf8")) as Journal;
+      } catch {
+        out.push({ commitId: entry.slice(0, -".json".length), phase: "prepared" });
+        continue;
+      }
+      // `done` is debris awaiting a sweep, not an unresolved commit — the world is already whole.
+      if (journal.phase === "done") continue;
+      out.push({ commitId: journal.commitId, phase: journal.phase });
+    }
+    return out;
+  }
+
+  /**
    * Recovery on open (R-15): the journal phase decides — roll back from `prepared`, roll
    * forward from `committing`, clean up from `done`. The world lock guarantees at most one
-   * journal author, so what is found is never ambiguous.
+   * journal author, so what is found is never ambiguous — which is why this runs *after* the
+   * lock is acquired and never on a read-only open (see `pendingRecovery`).
    */
   async recover(): Promise<Array<{ commitId: string; action: "rolled-back" | "rolled-forward" | "cleaned" }>> {
     const out: Array<{ commitId: string; action: "rolled-back" | "rolled-forward" | "cleaned" }> = [];
