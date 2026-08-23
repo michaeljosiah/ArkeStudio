@@ -85,8 +85,19 @@ guarantee is retained, not replaced.**
    What changes is how that writer is identified and how its liveness is established, not whether
    it is alone. This is what SPEC-025 §2.9 said originally, and it was right.
 
-3. **Local keeps the lock file, unchanged.** One machine can answer whether a pid is alive, and a
-   clear error beats a silent race between two Electron windows.
+3. **Local keeps the lock file — but not an exemption from item 1.** One machine can answer
+   whether a pid is alive, and a clear error beats a silent race between two Electron windows. It
+   does not follow that local writes need no fence, and an earlier revision of this ADR wrongly
+   implied it did.
+   - `WorldLock.acquire()` reclaims on **dead pid *or* cold heartbeat**, so a process that is
+     merely unresponsive — not dead — can be deposed and then carry on writing, because
+     `commit()`, `gateOp()` and `ownedWrite()` never revalidate ownership after acquiring it.
+   - The trigger is not exotic. The heartbeat is `utimes(...).catch(() => {})`, so a persistently
+     failing `utimes` — a permissions change, a scanner, a disconnected network drive — leaves a
+     perfectly live process looking dead after 90 seconds. A laptop sleeping does it too.
+   - This is narrower than the hosted case, because both processes are on one machine and a
+     liveness test is available. It is not zero, and the fence that answers the hosted case
+     answers it.
 
 4. **Hosted takes a lease** held by a coordinator instance under an opaque per-run id — never a
    machine identifier (R-24). The heartbeat already exists; the identity and the liveness test
