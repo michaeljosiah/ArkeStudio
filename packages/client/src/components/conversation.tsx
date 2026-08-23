@@ -241,23 +241,22 @@ export function ProductionConversation({
    * saying something again, so it is held back while a wrap-up commits — a condition the
    * transcript needs and a child's local state could not express.
    */
-  const [wrapping, setWrapping] = useState(false);
+  /*
+   * Which subject is waiting, not whether something is (codex, 2026-08-23).
+   *
+   * A boolean here belonged to the dock, and the dock outlives the subject under it: one thread
+   * serves the production, its episodes and its scenes. Wrapping episode A and walking to B
+   * carried A's wait onto B's button; resetting on arrival then lost it when you walked back to A
+   * while it was still committing. Keyed by subject, both are the same answer — the wait shows on
+   * the subject it was started from and nowhere else, and it survives leaving and returning.
+   */
+  const [wrappingKey, setWrappingKey] = useState<string | null>(null);
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
-  /*
-   * A wait belongs to the subject it was started on (codex, 2026-08-23).
-   *
-   * One thread serves the production, its episodes and its scenes, so this component stays
-   * mounted while the subject under it changes. Pressing Wrap up in one episode and walking to
-   * another carried the wait across: the new subject's button arrived disabled and reading
-   * "Writing them…" for a request that has nothing to do with it. The first subject's wrap-up is
-   * unaffected — it is committing on the coordinator, which never knew about this state.
-   */
-  useEffect(() => {
-    setWrapping(false);
-  }, [contextKey]);
+  const wrapping = wrappingKey === contextKey;
+  const setWrapping = (next: boolean) => setWrappingKey(next ? contextKey : null);
   /*
    * Navigating between subjects reuses this mounted component (episode 3 → episode 4), and an
    * unsent draft typed against one subject must not be sent into the other's thread
