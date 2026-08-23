@@ -92,26 +92,51 @@ guarantee is retained, not replaced.**
    machine identifier (R-24). The heartbeat already exists; the identity and the liveness test
    change.
 
-5. **A mutation is fenced by the lease epoch.** A lease SHALL carry a **monotonically increasing
-   epoch**, the epoch SHALL be recorded in the world when a writer claims it, and a write SHALL be
-   refused when its epoch is older than the one recorded. Mutual exclusion is not sufficient:
-   an exclusive-create serialises whoever is contending *right now* and says nothing about whether
-   the winner still owns the lease, so an expired coordinator can win the create and proceed.
-   The epoch is what makes a deposed writer's claim recognisably old.
+5. **A mutation is fenced, and this ADR does not say how.** The requirement is stated below; the
+   mechanism is deliberately left to a spec, because three candidates have now been proposed here
+   and refuted here (§*Three fences that do not hold*).
+
+   **The requirement.** Deciding that ownership is current and claiming the write SHALL be a single
+   indivisible operation *in one store*. Any design that establishes ownership in one system and
+   writes in another leaves a window, and every mechanism below died in that window.
 
 6. **Divergence is reported, never merged.** Unchanged from §2.9, and this remains true whatever
    the mechanism.
+
+## Three fences that do not hold
+
+Each of these was proposed in an earlier revision of this document and refuted in review. They are
+recorded because the next person to pick this up will think of them in roughly this order.
+
+**1. The base hash is the fence.** *Refuted:* a successor may take ownership and commit nothing, or
+commit elsewhere, leaving every base the deposed writer targeted unchanged. R-27 passes and a
+writer that lost ownership writes anyway. The base hash fences against whoever overwrote the same
+paths, which is a coincidence rather than a guarantee.
+
+**2. An exclusive-create at the moment of the rename.** *Refuted:* exclusivity tests **path
+absence**, not whether the creator still owns the lease. It serialises whoever is contending at
+that instant and proves nothing about currency, so an expired holder that gets there first still
+wins — the same failure as (1), reintroduced by the mechanism meant to fix it.
+
+**3. An exclusive-create carrying a lease epoch.** *Refuted:* where the lease authority and the
+filesystem are separate stores, an epoch in the payload is data, not a check. If the epoch-N holder
+expires but creates its claim before the epoch-N+1 holder records the takeover, the create still
+succeeds, because nothing at claim time compares N against the current lease.
+
+The common thread is that **mutual exclusion is not fencing**, and that a fence spanning two stores
+is not atomic however it is dressed. A mechanism that works will either make the storage itself the
+lease authority, or use a storage primitive that conditions the write on the epoch it is given.
+That is a spec, and it wants someone who will test it rather than reason about it — this document
+has now reasoned about it wrongly three times.
 
 ## Consequences
 
 **This is a real piece of work, as §2.9 said.** The earlier draft's claim that it was nearly free
 rested on the fencing argument above, which does not hold. The honest scope:
 
-- **Epoch-fenced mutation, on every path.** The fence check and the claim must be one step, and
-  the check must be against the lease *epoch* rather than mere exclusion. On a single filesystem
-  that is an exclusive-create carrying the epoch; on shared storage it is whatever that storage
-  offers as a conditional write. It has to cover `ownedWrite()` as well as the committer. This is
-  the substance of the work and none of it exists today.
+- **A fence, on every mutation path.** Covering `ownedWrite()` as well as the committer, and
+  satisfying the atomicity requirement above rather than approximating it. This is the substance of
+  the work, none of it exists today, and this ADR no longer claims to know its shape.
 - **Client-supplied `commitId`.** Required before any claim about retry idempotency is true. A
   client whose success response is lost must be able to replay and be told *"already done"* —
   today it would generate a second id and either duplicate or spuriously fail.
@@ -121,6 +146,11 @@ rested on the fencing argument above, which does not hold. The honest scope:
   addressing as *identity* would deduplicate identical bytes and make a take's reference its
   version; that is a separate benefit, not a prerequisite. An earlier draft of this ADR claimed the
   reverse.
+- **Wherever ownership state lands, it is a format change.** An epoch, a claim record, a head —
+  any of them is new on-disk state with no location, no initialisation or migration rule, and no
+  schema-version boundary today, and `WorldMetaSchema` is `.strict()`, so adding fields to
+  `world.json` makes it unreadable to every existing build. A separate claim file avoids that and
+  needs its own format and its own place in R-2's scan. None of this is decided here.
 - **A specified head.** Item 5's fence and any cheap *"has anything moved?"* both want a world-level
   revision a remote client can name. `canonRevision` is close but advances only for canon, and
   `WorldMetaSchema` is `.strict()` — adding fields to `world.json` makes the file unreadable to
@@ -161,7 +191,9 @@ API to call.
   capabilities, while a lease is about which coordinator *instance* owns a world — it must stay
   valid across a change of actor, and while no actor is present at all. Conflating the two would
   make ownership depend on who is signed in. It wants its own port, or its own spec.
-- **Blob sync**, which content addressing is a prerequisite for rather than a solution to.
+- **Blob sync.** `scanWorld()`'s path-to-digest manifest is enough to negotiate against; what a
+  transfer protocol looks like is open. Content addressing as take *identity* is not required for
+  it, per the consequences above.
 - **Whether divergence can be resolved in-app**, or only reported.
 - **Any change to the accept gate.** A proposal is still gated; this is about what happens
   underneath one when it lands.
