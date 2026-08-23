@@ -247,6 +247,18 @@ export function ProductionConversation({
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
   /*
+   * A wait belongs to the subject it was started on (codex, 2026-08-23).
+   *
+   * One thread serves the production, its episodes and its scenes, so this component stays
+   * mounted while the subject under it changes. Pressing Wrap up in one episode and walking to
+   * another carried the wait across: the new subject's button arrived disabled and reading
+   * "Writing them…" for a request that has nothing to do with it. The first subject's wrap-up is
+   * unaffected — it is committing on the coordinator, which never knew about this state.
+   */
+  useEffect(() => {
+    setWrapping(false);
+  }, [contextKey]);
+  /*
    * Navigating between subjects reuses this mounted component (episode 3 → episode 4), and an
    * unsent draft typed against one subject must not be sent into the other's thread
    * (review 2026-08-22). The handover latch resets with it, for the same reason.
