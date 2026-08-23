@@ -1,0 +1,46 @@
+# THROWAWAY. Measurement harness for the §2.13 cold-scan flake. Delete with the scratch branch.
+name: cold-scan probe
+
+on:
+  push:
+    branches: ["scratch/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Probe at spec size
+        working-directory: packages/coordinator
+        env:
+          PROBE_LABEL: ${{ matrix.os }}-s${{ matrix.shard }}
+          PROBE_REPS: 8
+          PROBE_SCANS: 3
+        run: node --import tsx test/world/__probe-cold-scan.ts
+      - name: Probe at 4x spec size
+        working-directory: packages/coordinator
+        env:
+          PROBE_LABEL: ${{ matrix.os }}-s${{ matrix.shard }}-4x
+          PROBE_REPS: 3
+          PROBE_SCANS: 3
+          PROBE_SHEETS: 200
+          PROBE_ENTRIES: 800
+          PROBE_TAKES: 2000
+        run: node --import tsx test/world/__probe-cold-scan.ts
