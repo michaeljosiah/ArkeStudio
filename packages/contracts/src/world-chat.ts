@@ -20,6 +20,7 @@ import {
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
+import { SHEET_SHAPES } from "./sheet-shapes.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -899,6 +900,8 @@ export const WorldChatNotCarriedSchema = z
       "look-moved",
       "look-already-proposed",
       "role-too-long",
+      "unknown-section",
+      "changes-nothing",
     ]),
   })
   .strict();
@@ -1626,7 +1629,16 @@ const exampleDrafts = {
     evidence: [exampleMessageEvidence],
     checkReceiptIds: [],
     draft: {
-      sections: [{ heading: "History", body: "Raised by her aunt Sera after the drowning year." }],
+      /*
+       * A heading this kind of sheet actually has.
+       *
+       * It read "History" until 2026-08-23, and a character sheet has no History. `sheetBody`
+       * writes the shape's headings and only those, so a section under any other one was set on
+       * the map and never read — the proposition was materialised, staged, accepted, versioned
+       * and change-logged, and the sheet afterwards said exactly what it had said before. The
+       * example is the shape most models copy, so this one taught the failure.
+       */
+      sections: [{ heading: "Relationships", body: "Raised by her aunt Sera after the drowning year." }],
     },
   },
   "relationship.change": {
@@ -1847,6 +1859,27 @@ export const WORLD_CHAT_SHAPE_EXAMPLES = {
   bibleEdits: exampleBibleEdits,
 } as const;
 
+/**
+ * The headings a sheet actually has, said to the model that writes them.
+ *
+ * A sheet's prose is a fixed set of sections per kind, not free text: `sheetBody` walks the shape
+ * and writes those headings and no others. Nothing anywhere told the model so — not the schema,
+ * which takes any string up to 120 characters, and not the examples, one of which named a heading
+ * that does not exist — and a section under an invented heading is dropped in silence, after the
+ * proposition has been materialised, staged, accepted, versioned and change-logged.
+ *
+ * Read off `SHEET_SHAPES` rather than written out, so adding a section stays the data change the
+ * table exists to make it. Wrap-up now holds back a proposition that names a heading off this
+ * list, and this is what makes that refusal avoidable rather than a trap.
+ */
+function sheetSectionRule(): string {
+  const lines = Object.values(SHEET_SHAPES).map(
+    (shape) => `  - ${shape.type}: ${shape.sections.map((s) => `"${s.heading}"`).join(", ")}`,
+  );
+  return `  Sections are a fixed set per kind, and a heading outside it is not written anywhere — use one of these exactly, punctuation included, and put anything that fits none of them in the nearest one that does:
+${lines.join("\n")}`;
+}
+
 /** One classification's payload line: what sits beside the common fields, shown as real JSON. */
 function draftPayloadLine(classification: WorldChangeClassification): string {
   const example = exampleDrafts[classification] as ModelCandidateDraft & { target?: unknown };
@@ -2028,6 +2061,7 @@ Each classification below shows one complete example, then every field its draft
 - ${draftPayloadLine("sheet.edit")}
   target names the sheet; the draft carries only what changes. A sheet's version, status, retirement and voice are deliberately absent — those have their own workflows and cannot be reached from here.
   fields: ${draftFieldCatalogue("sheet.edit")}
+${sheetSectionRule()}
 - ${draftPayloadLine("relationship.change")}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}

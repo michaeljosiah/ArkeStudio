@@ -30,5 +30,12 @@ export function explainNotCarried(reason: WorldChatNotCarried["reason"]): string
       // Named as something to ask for rather than something that went wrong: the fix is one
       // sentence in the conversation, and the point is still there to be corrected.
       return `Its role is longer than ${CHARACTER_ROLE_MAX} characters — ask for a short label and the rest can go in Essence`;
+    case "unknown-section":
+      // The two that would otherwise have been written and then not been there. Both are worded
+      // as something still to do, because both points are still on the rail: this is the one
+      // place a person finds out that what they asked for would have reached nothing.
+      return "It writes under a heading the sheet does not have — ask for it under one of the sheet's own sections and it will land";
+    case "changes-nothing":
+      return "It says what the sheet already says — nothing in it would change";
   }
 }

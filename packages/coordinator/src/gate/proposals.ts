@@ -27,7 +27,7 @@ import {
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
 import { appendChanges } from "../world/change-writer.js";
-import { classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
+import { changesAnything, classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -672,7 +672,7 @@ export class ProposalManager {
          * genuine collision and is still refused, with the path named.
          */
         const proposed = await this.readProposalFile(proposalId, target.path);
-        if (proposed !== null && live === proposed) continue;
+        if (proposed !== null && live !== null && !changesAnything(target.path, live, proposed)) continue;
         stalePaths.push(target.path);
       }
       if (stalePaths.length > 0) return { status: "stale", stalePaths };
@@ -683,7 +683,7 @@ export class ProposalManager {
         const proposed = await this.readProposalFile(proposalId, target.path);
         if (proposed === null) throw new Error(`${target.path} missing from proposal ${proposalId}`);
         const live = await this.readLive(target.path);
-        if (live !== null && live === proposed) continue; // unchanged target
+        if (live !== null && !changesAnything(target.path, live, proposed)) continue; // unchanged target
         files.push({
           path: target.path,
           action: live === null ? "create" : "replace",
@@ -692,7 +692,7 @@ export class ProposalManager {
         });
       }
       if (files.length === 0) {
-        // Every target already reads exactly as proposed, so there is no decision left to make —
+        // Every target already says what is proposed, so there is no decision left to make —
         // and a card that cannot be accepted, cannot be usefully discarded, and says nothing when
         // pressed is worse than no card. Driven 2026-08-22: eight sheets from a world door whose
         // commits had landed but whose directories survived sat in Needs you permanently, and

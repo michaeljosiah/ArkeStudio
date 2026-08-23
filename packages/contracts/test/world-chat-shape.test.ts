@@ -5,6 +5,8 @@ import {
   ModelCandidateDraftSchema,
   ModelCandidateOperationSchema,
   ModelGroupOperationSchema,
+  SHEET_SHAPES,
+  type SheetKind,
   WorldChangeClassificationSchema,
   WorldChatTurnResultSchema,
   WORLD_CHAT_SHAPE_EXAMPLES,
@@ -47,6 +49,50 @@ describe("the shape guide's examples satisfy the schemas they teach", () => {
     for (const [classification, draft] of Object.entries(WORLD_CHAT_SHAPE_EXAMPLES.drafts)) {
       const parsed = ModelCandidateDraftSchema.safeParse(draft);
       assert.ok(parsed.success, `${classification} draft example: ${parsed.success ? "" : parsed.error.message}`);
+    }
+  });
+
+  /*
+   * Parsing is not enough for a section heading, and that gap cost a real edit.
+   *
+   * `SectionSchema` takes any string up to 120 characters, so "History" on a character sheet
+   * parsed, rendered into the guide, and taught the model a heading no sheet has. `sheetBody`
+   * writes the shape's headings and only those, so the section was dropped — after the
+   * proposition had been materialised, staged, accepted, versioned and change-logged, leaving a
+   * sheet that said exactly what it said before (`king-s-daughter` / `adaeze-working-name`,
+   * 2026-08-23). The schema could not catch it; only the shape table can.
+   */
+  it("every section heading an example teaches is one the sheet shape actually has", () => {
+    const kindOf = (draft: Record<string, unknown>): SheetKind | undefined => {
+      const payload = (draft["draft"] ?? {}) as Record<string, unknown>;
+      if (draft["classification"] === "sheet.create") return payload["type"] as SheetKind;
+      return (draft["target"] as { sheetKind?: SheetKind } | undefined)?.sheetKind;
+    };
+    for (const [classification, example] of Object.entries(WORLD_CHAT_SHAPE_EXAMPLES.drafts)) {
+      if (classification !== "sheet.create" && classification !== "sheet.edit") continue;
+      const draft = example as unknown as Record<string, unknown>;
+      const kind = kindOf(draft);
+      assert.ok(kind, `${classification} example names no sheet kind`);
+      const headings = SHEET_SHAPES[kind].sections.map((s) => s.heading);
+      const sections = ((draft["draft"] as Record<string, unknown>)["sections"] ?? []) as Array<{ heading: string }>;
+      for (const section of sections) {
+        assert.ok(
+          headings.includes(section.heading),
+          `${classification} teaches "${section.heading}", which a ${kind} does not have — it would be written nowhere. Use one of: ${headings.join(", ")}`,
+        );
+      }
+    }
+  });
+
+  it("the guide names the headings each kind of sheet has", () => {
+    const guide = worldChatResultShapeGuide();
+    for (const shape of Object.values(SHEET_SHAPES)) {
+      for (const section of shape.sections) {
+        assert.ok(
+          guide.includes(`"${section.heading}"`),
+          `the guide never names ${shape.type}'s "${section.heading}", so a model has to guess it`,
+        );
+      }
     }
   });
 

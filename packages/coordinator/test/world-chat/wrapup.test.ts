@@ -912,7 +912,10 @@ describe("readiness on its own", () => {
         role: long,
         canonRules: [],
         links: [],
-        sections: [{ heading: "Essence", body: "Bells above the water." }],
+        // "Look", not "Essence": Essence is a character's section, and a location's prose has
+        // nowhere to put it. The fixture said Essence while nothing checked, which is the same
+        // slip the drafting guide's own example was making.
+        sections: [{ heading: "Look", body: "Bells above the water." }],
       },
     } as Partial<WorldChangeCandidate>);
     assert.equal(evaluateReadiness([place], bundle).carried.length, 1);
@@ -950,6 +953,138 @@ describe("readiness on its own", () => {
     const { carried, notCarried } = evaluateReadiness([newCharacter(long), candidate()], bundle);
     assert.equal(carried.length, 1, "the sibling is unaffected — this is not all-or-nothing");
     assert.equal(notCarried.length, 1);
+  });
+
+  /*
+   * The two shapes of an edit that reports success and writes nothing.
+   *
+   * Driven 2026-08-23 on `king-s-daughter`: a proposition claiming two new facts about a
+   * character was accepted, versioned v1 -> v2, given a history snapshot and a commit line, and
+   * the sheet afterwards was byte-identical to v1. `sheetBody` writes the shape's headings and
+   * only those, so a section under any other one is set on a map and never read — and the file
+   * still differs in bytes, because `updated` is stamped with today, so the gate's byte
+   * comparison called it a change.
+   *
+   * Held back here, where the point stays on the rail and naming a real heading is the repair.
+   */
+  const withSheet = {
+    canon: [],
+    proposals: [],
+    sheets: [
+      {
+        id: "adaeze-working-name",
+        type: "character",
+        name: "Adaeze",
+        sections: [
+          { heading: "Essence", body: "She keeps the count her aunt taught her." },
+          { heading: "Appearance", body: "Small hands, always moving." },
+        ],
+      },
+    ],
+  } as never;
+
+  function sheetEdit(sections: Array<{ heading: string; body: string }>) {
+    return candidate({
+      classification: "sheet.edit",
+      title: "Adaeze counts with her aunt's own gesture",
+      target: { kind: "sheet", sheetKind: "character", sheetId: "adaeze-working-name" },
+      draft: { sections },
+    } as Partial<WorldChangeCandidate>);
+  }
+
+  it("holds back an edit written under a heading the sheet does not have", () => {
+    const edit = sheetEdit([{ heading: "Habits", body: "Thumb against forefinger, four times." }]);
+    const { carried, notCarried } = evaluateReadiness([edit], withSheet);
+    assert.deepEqual(carried, [], "nothing of it would reach the page, so nothing is staged");
+    assert.equal(notCarried[0]!.reason, "unknown-section");
+  });
+
+  /*
+   * One real heading and one invented one is the same silence in a smaller place: the good
+   * section would land, the other would vanish, and the proposition would be reported as written.
+   */
+  it("holds back an edit that names one real heading and one invented one", () => {
+    const edit = sheetEdit([
+      { heading: "Essence", body: "She counts before she speaks." },
+      { heading: "Habits", body: "Thumb against forefinger, four times." },
+    ]);
+    assert.equal(evaluateReadiness([edit], withSheet).notCarried[0]?.reason, "unknown-section");
+  });
+
+  it("carries an edit written under a heading the sheet has", () => {
+    const edit = sheetEdit([{ heading: "Essence", body: "She counts with her aunt's own gesture." }]);
+    const { carried, notCarried } = evaluateReadiness([edit], withSheet);
+    assert.equal(carried.length, 1);
+    assert.deepEqual(notCarried, []);
+  });
+
+  it("holds back an edit that restates what the sheet already says", () => {
+    const edit = sheetEdit([{ heading: "Essence", body: "She keeps the count her aunt taught her." }]);
+    const { carried, notCarried } = evaluateReadiness([edit], withSheet);
+    assert.deepEqual(carried, [], "an accept that changes nothing must not be offered as one");
+    assert.equal(notCarried[0]!.reason, "changes-nothing");
+  });
+
+  it("counts whitespace alone as no change, because the written file would be identical", () => {
+    const edit = sheetEdit([{ heading: "Essence", body: "  She keeps the count her aunt taught her.\n" }]);
+    assert.equal(evaluateReadiness([edit], withSheet).notCarried[0]?.reason, "changes-nothing");
+  });
+
+  /*
+   * The same drop reached by asking for a relationship instead of an edit. Materialise writes a
+   * prose edit's section exactly as it writes a sheet edit's, so fixing one door and not the
+   * other would leave the bug in the building.
+   */
+  it("holds back a relationship whose prose edit names a heading the sheet does not have", () => {
+    const tie = candidate({
+      classification: "relationship.change",
+      title: "Adaeze and her aunt share the count",
+      draft: {
+        from: { kind: "sheet", sheetId: "adaeze-working-name" },
+        to: { kind: "sheet", sheetId: "adaeze-working-name" },
+        linkAction: "unchanged",
+        proseEdits: [
+          {
+            sheet: { kind: "sheet", sheetId: "adaeze-working-name" },
+            sectionHeading: "History",
+            body: "Her aunt taught her the count.",
+            reason: "Said outright.",
+          },
+        ],
+      },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([tie], withSheet).notCarried[0]?.reason, "unknown-section");
+  });
+
+  it("carries a relationship whose prose edit names a heading the sheet has", () => {
+    const tie = candidate({
+      classification: "relationship.change",
+      title: "Adaeze and her aunt share the count",
+      draft: {
+        from: { kind: "sheet", sheetId: "adaeze-working-name" },
+        to: { kind: "sheet", sheetId: "adaeze-working-name" },
+        linkAction: "unchanged",
+        proseEdits: [
+          {
+            sheet: { kind: "sheet", sheetId: "adaeze-working-name" },
+            sectionHeading: "Relationships",
+            body: "Her aunt taught her the count.",
+            reason: "Said outright.",
+          },
+        ],
+      },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([tie], withSheet).carried.length, 1);
+  });
+
+  it("carries an edit that changes a field without touching a section", () => {
+    const edit = candidate({
+      classification: "sheet.edit",
+      title: "Adaeze gets a role",
+      target: { kind: "sheet", sheetKind: "character", sheetId: "adaeze-working-name" },
+      draft: { role: "The counter" },
+    } as Partial<WorldChangeCandidate>);
+    assert.equal(evaluateReadiness([edit], withSheet).carried.length, 1);
   });
 
   /*

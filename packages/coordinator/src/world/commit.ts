@@ -179,6 +179,79 @@ export function classify(path: string): Classified {
   return { track: "unversioned" };
 }
 
+/**
+ * Fields the committer writes itself, so a proposal restating them says nothing (R-12, D7).
+ *
+ * `version` and `updated` are stamped below from the base and the clock, never from what was
+ * staged — which is exactly why they cannot be read as evidence of a change. A file whose only
+ * difference is the version it declares or the day it was written is a file that says the same
+ * thing.
+ */
+const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
+
+/**
+ * Would writing this actually change what the world says?
+ *
+ * The gate used to ask this by comparing bytes, and bytes answer a different question. Three
+ * things move without anything changing: the committer stamps `version` and `updated`, and a
+ * document that has been rebuilt rather than edited comes back in canonical key order with YAML
+ * arrays in block style where the file on disk had them inline. Any one of them is enough to make
+ * an identical sheet look like an edit — so an accept that changed nothing passed the no-op check,
+ * committed, cut v2, wrote a history snapshot and logged a commit, over a file whose body was
+ * byte-identical to v1 (driven 2026-08-23, `king-s-daughter` / `adaeze-working-name`).
+ *
+ * Asked of the parsed document instead, which is the form the question is actually about. Parsing
+ * failures fall back to the byte comparison: a file this cannot read is one whose meaning it
+ * cannot judge, and calling it unchanged on those grounds would drop a real edit — much the worse
+ * of the two mistakes.
+ */
+export function changesAnything(path: string, live: string, proposed: string): boolean {
+  if (live === proposed) return false;
+  const track = classify(path).track;
+  try {
+    if (track === "sheet" || track === "chapter" || track === "bible" || track === "canon") {
+      const before = MarkdownFile.parse(live);
+      const after = MarkdownFile.parse(proposed);
+      if (before.body.trim() !== after.body.trim()) return true;
+      const keys = new Set([...Object.keys(before.data), ...Object.keys(after.data)]);
+      for (const key of STAMPED_BY_COMMITTER) keys.delete(key);
+      // Canon's lifecycle stamps are the committer's too, and it decides which of them moves
+      // from the transition rather than from the file it was handed.
+      if (track === "canon") for (const key of ["introducedAt", "settledAt", "amendedAt"]) keys.delete(key);
+      return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
+    }
+    if (
+      track === "scene" ||
+      track === "story" ||
+      track === "routing" ||
+      track === "season" ||
+      track === "episode" ||
+      track === "series"
+    ) {
+      const before = JsonFile.parse(live).value;
+      const after = JsonFile.parse(proposed).value;
+      const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+      keys.delete("version");
+      return [...keys].some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    }
+    if (track === "art-direction") {
+      // The record the committer rebuilds field by field: the version, the acceptance stamp and
+      // the history are its own, and what a proposal actually proposes is the other four.
+      const before = ArtDirectionRecordSchema.parse(JSON.parse(live));
+      const after = ArtDirectionRecordSchema.parse(JSON.parse(proposed));
+      return (
+        before.description !== after.description ||
+        before.masterLook !== after.masterLook ||
+        JSON.stringify(before.audio) !== JSON.stringify(after.audio) ||
+        JSON.stringify(before.failureModes) !== JSON.stringify(after.failureModes)
+      );
+    }
+  } catch {
+    /* unreadable either side — fall through to the bytes, which already differ */
+  }
+  return true;
+}
+
 /** The revision stamp a canon entry's content carries — what addresses its history snapshot. */
 function canonStamp(data: Record<string, unknown>): number {
   const nums = [data["introducedAt"], data["settledAt"], data["amendedAt"]].filter(

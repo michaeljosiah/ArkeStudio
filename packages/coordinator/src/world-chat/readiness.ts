@@ -1,4 +1,11 @@
-import { CHARACTER_ROLE_MAX, type WorldBundle, type WorldChangeCandidate } from "@arke-studio/contracts";
+import {
+  CHARACTER_ROLE_MAX,
+  SHEET_SHAPES,
+  type Sheet,
+  type SheetKind,
+  type WorldBundle,
+  type WorldChangeCandidate,
+} from "@arke-studio/contracts";
 import { lookHasMoved } from "./look.js";
 
 /**
@@ -21,7 +28,9 @@ export type NotCarriedReason =
   | "invalid"
   | "look-moved"
   | "look-already-proposed"
-  | "role-too-long";
+  | "role-too-long"
+  | "unknown-section"
+  | "changes-nothing";
 
 export interface NotCarried {
   candidateId: string;
@@ -122,6 +131,124 @@ function roleTooLong(candidate: WorldChangeCandidate): boolean {
         : undefined;
   if (kind !== "character") return false;
   return draft.role.trim().length > CHARACTER_ROLE_MAX;
+}
+
+/**
+ * The sections a proposition would write, and the shape they have to fit.
+ *
+ * A sheet's prose is not free-form: `sheetBody` walks `SHEET_SHAPES[type].sections` and writes
+ * those headings and no others, so a section under any other heading is not written anywhere. It
+ * is not refused, not logged and not shown — the key is set on the map and then never read.
+ */
+function draftSections(
+  candidate: WorldChangeCandidate,
+  bundle: WorldBundle,
+): Array<{ heading: string; kind: SheetKind | undefined }> {
+  const record = candidate as unknown as Record<string, unknown>;
+  const draft = (record["draft"] ?? {}) as Record<string, unknown>;
+  const sections = (draft["sections"] as Array<{ heading: string }> | undefined) ?? [];
+  if (candidate.classification === "sheet.create") {
+    const kind = draft["type"] as SheetKind | undefined;
+    return sections.map((s) => ({ heading: s.heading, kind }));
+  }
+  if (candidate.classification === "sheet.edit") {
+    const kind = (record["target"] as { sheetKind?: SheetKind } | undefined)?.sheetKind;
+    return sections.map((s) => ({ heading: s.heading, kind }));
+  }
+  /*
+   * The same door, one room over.
+   *
+   * A relationship change is prose edits to sheets, and materialise writes each one the same way
+   * — `sections[edit.sectionHeading] = edit.body`, then through `sheetBody`. So an invented
+   * heading vanishes here exactly as it does on a sheet edit, and fixing one without the other
+   * would leave the bug reachable by asking for a relationship instead of an edit.
+   *
+   * The kind comes from the sheet the edit names, which is also how materialise resolves it; a
+   * ref to something this wrap-up has not created yet has no sheet to read a shape from, and is
+   * left to `MaterialiseError` as before.
+   */
+  if (candidate.classification === "relationship.change") {
+    const edits =
+      (draft["proseEdits"] as Array<{ sheet?: { sheetId?: string }; sectionHeading: string }>) ?? [];
+    return edits.map((edit) => ({
+      heading: edit.sectionHeading,
+      kind: bundle.sheets.find((s) => s.id === edit.sheet?.sheetId)?.type,
+    }));
+  }
+  return [];
+}
+
+/**
+ * A heading this kind of sheet does not have — so writing it would write nothing.
+ *
+ * Held back here rather than dropped in materialise, for the reason the whole module exists:
+ * silence is the failure. A proposition naming "Habits" on a character was materialised into a
+ * file whose body never gained a word of it, staged, accepted, versioned and change-logged, and
+ * the sheet afterwards said exactly what it had said before (driven 2026-08-23, `king-s-daughter`
+ * / `adaeze-working-name`). Every surface reported success; none of them was in a position to
+ * notice, because by the time the file existed the sentence was already gone.
+ *
+ * The remedy is a sentence in the conversation, which is why the point stays on the rail: the
+ * headings are a fixed, small set, and "put it under Essence" is the whole repair. Any unknown
+ * heading counts, not only an edit made entirely of them — a draft naming one real section and
+ * one invented one would otherwise half-land, which is the same silence in a smaller place.
+ */
+function unknownSections(candidate: WorldChangeCandidate, bundle: WorldBundle): string[] {
+  const unknown: string[] = [];
+  for (const { heading, kind } of draftSections(candidate, bundle)) {
+    if (kind === undefined) continue; // a shape nothing can name is `target-missing`'s business
+    const shape = SHEET_SHAPES[kind];
+    if (!shape) continue;
+    if (!shape.sections.some((s) => s.heading === heading)) unknown.push(heading);
+  }
+  return unknown;
+}
+
+/**
+ * Whether this edit would write anything the sheet does not already say.
+ *
+ * The other half of the same silence. A conversation that re-states what is already on the sheet
+ * produces a draft that merges onto the live sections and changes none of them — and the file
+ * still differs in bytes, because `updated` is stamped with today and the frontmatter is
+ * re-serialised in its canonical order. So it is not a no-op to the gate, which compares bytes;
+ * it commits, cuts a version, writes a history snapshot, and changes nothing anybody can read.
+ *
+ * Judged the way `editSheetContent` writes: absent leaves a field alone, null clears it, and the
+ * sections are compared as `sheetBody` consumes them — trimmed, per heading of the shape. A draft
+ * that names `canonRules` or `links` is never held back, because resolving those needs identities
+ * this pass has not planned yet: carrying a proposition that turns out to change nothing is a far
+ * cheaper mistake than holding back one that does, and the gate refuses the empty commit either
+ * way.
+ */
+function changesNothing(candidate: WorldChangeCandidate, bundle: WorldBundle): boolean {
+  if (candidate.classification !== "sheet.edit") return false;
+  const record = candidate as unknown as Record<string, unknown>;
+  const target = record["target"] as { sheetId: string } | undefined;
+  const sheet: Sheet | undefined = bundle.sheets.find((s) => s.id === target?.sheetId);
+  if (!sheet) return false; // `target-missing` has already spoken
+  // A sheet this cannot read is one whose sections it cannot compare, and "I could not tell"
+  // has to mean "carry it": the gate refuses an empty commit either way, and holding back a real
+  // change over a shape this does not recognise would be the worse of the two mistakes.
+  const shape = SHEET_SHAPES[sheet.type];
+  if (!shape || !Array.isArray(sheet.sections)) return false;
+
+  const draft = (record["draft"] ?? {}) as Record<string, unknown>;
+  if (draft["canonRules"] !== undefined || draft["links"] !== undefined) return false;
+
+  const settled = (next: unknown, current: string | undefined) =>
+    next === undefined ? current : next === null ? undefined : String(next);
+  if (draft["name"] !== undefined && String(draft["name"]) !== sheet.name) return false;
+  if (settled(draft["role"], sheet.role) !== sheet.role) return false;
+  if (settled(draft["billing"], sheet.billing) !== sheet.billing) return false;
+  if (settled(draft["region"], sheet.region) !== sheet.region) return false;
+
+  const before: Record<string, string> = {};
+  for (const section of sheet.sections) before[section.heading] = section.body;
+  const after = { ...before };
+  for (const section of (draft["sections"] as Array<{ heading: string; body: string }> | undefined) ?? []) {
+    after[section.heading] = section.body;
+  }
+  return shape.sections.every((s) => (before[s.heading] ?? "").trim() === (after[s.heading] ?? "").trim());
 }
 
 /** Intent has to be verified, not asserted: a proposition with no evidence is a claim about a claim. */
@@ -225,6 +352,27 @@ export function evaluateReadiness(
       continue;
     }
     /*
+     * A section nothing would write, and an edit that would write nothing.
+     *
+     * Both are the same failure — a proposition that reports success and leaves the world saying
+     * what it said before — and both are caught here for the reason the role bound is: the point
+     * stays in the conversation, where naming a real heading or saying what is actually different
+     * is the entire repair, and its siblings are untouched. Refusing in materialise could manage
+     * neither; that path is all or nothing, so one invented heading would hold back everything
+     * said beside it, including the changes that were perfectly good.
+     *
+     * The named heading first, because it is the one the person can act on: "there is no section
+     * called Habits" is a fact about the sheet, where "this changes nothing" is only a symptom.
+     */
+    if (unknownSections(candidate, bundle).length > 0) {
+      fail("unknown-section");
+      continue;
+    }
+    if (changesNothing(candidate, bundle)) {
+      fail("changes-nothing");
+      continue;
+    }
+    /*
      * One look change waiting at a time.
      *
      * There is a single world look, and the screen that reviews a proposed one finds it by kind
@@ -271,5 +419,9 @@ export function explainNotCarried(reason: NotCarriedReason): string {
       return "there is not enough behind it to write it down";
     case "role-too-long":
       return `it gives a role of more than ${CHARACTER_ROLE_MAX} characters, and a role is a label rather than a sentence`;
+    case "unknown-section":
+      return "it writes under a heading this kind of sheet does not have, so none of it would reach the page";
+    case "changes-nothing":
+      return "everything in it is already what the sheet says";
   }
 }
