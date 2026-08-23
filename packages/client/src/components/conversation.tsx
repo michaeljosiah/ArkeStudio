@@ -547,11 +547,26 @@ function WrapUp({
 }) {
   const setWrapping = onWrappingChange;
   const asked = useRef<string | null>(null);
+  const askedAtSeq = useRef<number | null>(null);
   const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
   const refusedMine = refusal !== null && refusal.requestId === asked.current;
   useEffect(() => {
     if (wrapping && refusedMine) setWrapping(false);
   }, [wrapping, refusedMine]);
+  /*
+   * And when it worked (codex, 2026-08-23).
+   *
+   * Only a refusal cleared this, because a wrap-up used to be the last thing a conversation did:
+   * it closed, the dock went, and a state that never reset never showed. A long season is written
+   * in runs and wrapped between them, so the second press meets a button still disabled and still
+   * reading "Writing them…" from the first. The conversation's own sequence is the signal that
+   * covers both endings — the wrap-up writes its outcome into the log either way, and nothing has
+   * moved while the request is genuinely still in flight.
+   */
+  useEffect(() => {
+    if (!wrapping) return;
+    if (askedAtSeq.current !== null && seq !== null && seq !== askedAtSeq.current) setWrapping(false);
+  }, [wrapping, seq]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
@@ -564,6 +579,7 @@ function WrapUp({
           const attempt = wrapUpWorldChat(worldId, conversationId, seq);
           if (!attempt) return;
           asked.current = attempt;
+          askedAtSeq.current = seq;
           setWrapping(true);
         }}
       >
