@@ -1,4 +1,4 @@
-# ADR-002: Ownership is a fact about a revision, not about a process
+# ADR-002: Ownership moves from the format to the deployment — and what that actually costs
 
 **Status:** Proposed
 **Date:** 2026-08-23
@@ -23,119 +23,125 @@ machine. `process.kill(pid, 0)` cannot answer a question about a process somewhe
 > coordinator instance, and the lock becomes a lease on that instance rather than a file on a disk.
 > That is a real piece of work and it is not this one."*
 
-It read as a large piece of work because the lock reads as the thing that keeps a world correct.
-It is not, and the code already says so.
+## What the engine actually has
 
-## What is already true
+An earlier draft of this ADR claimed the engine was already most of the way there, and was wrong
+about three of the four things it counted. The corrected inventory matters more than the argument
+it was supporting, so it goes first.
 
-Every mutation to a world goes through **one commit primitive** (SPEC-002 §2.5 D1,
-`packages/coordinator/src/world/commit.ts`). It is a journalled transaction — `prepared`,
-`committing`, `done` — that rolls back or rolls forward on recovery (R-15). Three properties of it
-matter here, and all three are already built, tested, and in the hot path:
+| Claimed | Actually |
+|---|---|
+| Compare-and-swap on every write | **A check, not a swap.** `commit()` verifies base hashes, then stages asynchronously, and `rollForward()` renames the live files later. The window between check and rename is wide, and the code names its own precondition: *"verify bases under the lock (R-27)"*. |
+| Client-chosen `commitId`, so retries are idempotent | **Server-generated.** `commit.ts` does `newId("cm")` per invocation. `hasCommitLine()` deduplicates roll-forward of *that same journal* — crash recovery, not a client replaying a lost response. |
+| Takes are content-addressed | **ULID-addressed.** `TakeIdSchema` is `tk_<ULID>`; a take stores a media *filename*, not a digest. Identical bytes get different addresses. |
+| One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
 
-| | What it does | Where |
-|---|---|---|
-| **Compare-and-swap** | Every target carries `baseHash`, the hash of the content the change was drafted against. A commit verifies it and refuses when it has moved. | R-27, `CommitStaleError` |
-| **Idempotent commits** | The change log carries a client-chosen `commitId`, and `hasCommitLine()` makes a retry a no-op rather than a double-apply. | §2.8 |
-| **Content addressing** | Takes are immutable and addressed by id; the reference *is* the version. | §2.7 |
+One thing the earlier draft under-credited: `world.json` already carries `canonRevision`, a
+monotonic world-level counter, and `rollForward()` writes world.json **last**, commenting that
+*"its revision advancing is the world-level signal the commit landed."* A world-level head is
+therefore less novel than it looked — but see the consequences, because it is not yet the thing a
+remote client could ask one question of.
 
-Compare-and-swap, idempotent commits, content addressing. Those are the three things a store needs
-before more than one writer can safely touch it, and Arke has had all three since SPEC-002 — built
-for proposals that go stale while a human thinks, which is the same problem at a different
-timescale.
+## The argument that does not work
 
-The refusal even uses the vocabulary this decision needs:
+The earlier draft claimed a lease needs no fencing token, because a deposed writer's write would be
+stale by construction: its successor would have committed, so the base hash would no longer match
+and R-27 would refuse it.
 
-> `commit refused: base moved for … — staleness is detected, never merged`
+**That is false, for two independent reasons.**
+
+**A successor need not touch the same files.** It may take the lease and commit nothing, or commit
+a different entity entirely. Every base the deposed writer targeted is then unchanged, R-27 passes,
+and a coordinator that lost ownership writes anyway. The base hash fences a writer only against
+whoever happened to overwrite the same paths — which is not a fence, it is a coincidence.
+
+**And the check is not atomic with the write.** Even where the successor *does* touch the same
+files, both commits can read the same base, both pass verification, and both proceed to rename.
+Time-of-check to time-of-use. Under the lock this cannot arise, which is precisely why the lock is
+load-bearing today.
+
+So R-27 is not a concurrency primitive. It is a staleness check for proposals that went cold while
+a human deliberated, and it is correct for that, and it was written for that.
 
 ## Decision
 
-**Ownership is a property of a revision, not of a process.** A writer does not ask *"may I write?"*
-It writes what it drafted, says what it drafted against, and the store decides.
+**Ownership becomes a property of the deployment rather than of the format — and the single-writer
+guarantee is retained, not replaced.**
 
-1. **`commit.ts` is the correctness mechanism and does not change.** Nothing below weakens R-27; it
-   is what everything else leans on.
+1. **`commit.ts` remains the sole mutation path**, and R-27 stays exactly as it is: a staleness
+   check, defence in depth, explicitly *not* the thing that makes concurrent writers safe.
 
-2. **The lock is reclassified as an optimisation.** It makes conflicts *rare*. It never made them
-   *safe* — R-27 did. A deployment may therefore run without it, and R-3 stops being a property of
-   the format and becomes a property of a deployment.
+2. **Serialization is preserved.** Exactly one writer holds a world at a time in every deployment.
+   What changes is how that writer is identified and how its liveness is established, not whether
+   it is alone. This is what SPEC-025 §2.9 said originally, and it was right.
 
-3. **Local keeps the lock file, unchanged.** One user, one machine, one folder: it is the cheapest
-   possible answer and it gives a good error instead of a silent race between two Electron windows.
+3. **Local keeps the lock file, unchanged.** One machine can answer whether a pid is alive, and a
+   clear error beats a silent race between two Electron windows.
 
-4. **Hosted replaces it with a lease** held by a coordinator instance, identified by an **opaque
-   per-run id** — never a hostname, a machine id, or anything else R-24 forbids from a world file.
-   The heartbeat already exists; only the identity and the liveness test change.
+4. **Hosted takes a lease** held by a coordinator instance under an opaque per-run id — never a
+   machine identifier (R-24). The heartbeat already exists; the identity and the liveness test
+   change.
 
-5. **A world gains a head** — a monotonic sequence and the hash of the last commit — so *"has
-   anything moved?"* is one question instead of one per file. Per-file `baseHash` stays as the
-   thing that decides; the head is what makes asking cheap over a network.
+5. **A commit is fenced by the lease.** The commit path SHALL validate that the lease is still held
+   *and* be atomic against a concurrent holder — ownership is checked and the write is claimed in
+   one indivisible step, not checked and then written. Without this a lease is a suggestion, and a
+   slow-but-alive deposed holder writes over its successor.
 
-6. **Divergence is reported, never merged.** Unchanged from §2.9, and now load-bearing rather than
-   incidental.
-
-### The lease does not need fencing, because the base hash is the fence
-
-The standard objection to replacing a lock with a time-based lease is split-brain: a lease expires,
-a new owner takes it, and the old owner — merely slow, not dead — completes a write it began
-before it was deposed. Locks do not solve this; that is why distributed systems reach for fencing
-tokens.
-
-Arke does not need one. **A deposed writer's write is stale by construction**: whatever it drafted
-against has since been committed by the new owner, so `baseHash` no longer matches and R-27 refuses
-it. The fencing token is the content hash, it is per-file rather than per-lease, and it was already
-there.
-
-This is the whole reason this decision is small.
+6. **Divergence is reported, never merged.** Unchanged from §2.9, and this remains true whatever
+   the mechanism.
 
 ## Consequences
 
-**A guard becomes a load-bearing path.** Today the lock is so effective that R-27 almost never
-fires — it exists for proposals that went stale while a human deliberated, which is rare and slow.
-Under this decision it is the thing standing between two writers and a lost edit, at machine speed.
-It needs tests that exercise genuine concurrency, which it does not have; the current ones exercise
-a stale proposal, not a race.
+**This is a real piece of work, as §2.9 said.** The earlier draft's claim that it was nearly free
+rested on the fencing argument above, which does not hold. The honest scope:
 
-**A head is new state that can lie.** A world-level sequence and hash is precisely the kind of
-stored summary this codebase refuses elsewhere — SPEC-026 R-8 derives the book rather than storing
-it, R-3 derives spreads rather than pairing them. It is justified here only because a network round
-trip per file is not viable, and it is safe only if the journalled commit writes it, in the same
-transaction, as the evidence a commit completed. A head written anywhere else becomes a second
-source of truth about what a world contains.
+- **Atomic fenced commit.** Verification, fence check and the swap must be one step. On a single
+  filesystem that means an exclusive-create or equivalent primitive at the moment of the rename;
+  on shared storage it means whatever that storage offers as a conditional write. This is the
+  substance of the work and it does not exist today.
+- **Client-supplied `commitId`.** Required before any claim about retry idempotency is true. A
+  client whose success response is lost must be able to replay and be told *"already done"* —
+  today it would generate a second id and either duplicate or spuriously fail.
+- **Content addressing for media.** Required before blob negotiation of the *"tell me which hashes
+  you are missing"* kind is possible at all. Takes are ULIDs over filenames today.
+- **A specified head.** Item 5's fence and any cheap *"has anything moved?"* both want a world-level
+  revision a remote client can name. `canonRevision` is close but advances only for canon, and
+  `WorldMetaSchema` is `.strict()` — adding fields to `world.json` makes the file unreadable to
+  every existing build. It needs an acceptance criterion in SPEC-002, a format location, an
+  initialisation and migration rule, and a schema-version bump. It does not belong in an ADR bullet,
+  and this ADR no longer pretends otherwise.
 
-**Binaries are still unsolved.** Takes are large, immutable and content-addressed, which makes them
-the *tractable* part of a sync — negotiate hashes, transfer what is missing — but nothing here
-designs that, and a family product moves a lot of pixels. This decision covers the authored record.
+**What is genuinely cheaper than it looks** is only this: the *shape* of the change. Nothing above
+forks the commit primitive, changes the accept gate, or asks the format to support two writers at
+once. One writer at a time remains true in every deployment; the question is only how that writer
+is chosen and how a stale one is stopped.
 
 **The desktop gains nothing today.** Local behaviour is unchanged by design. This is groundwork,
-and it should be judged as groundwork: it is worth landing before the page medium, the drawing
-operations and hands-free voice are built on top of a store whose ownership model would have had to
-change underneath them.
+and should be judged as groundwork.
 
 ## On Aonik, and why this is not a dependency
 
-Aonik's Workspaces capability models the same shape independently: revisions carrying a
-`ParentRevisionId` and a monotonic `Sequence`, a client-chosen `CommitId` for idempotency, commits
-resolving to `FastForward | Diverged | Replayed`, and divergence ended by a human as
-`Accept | Reject` — where accepting *"advances the head through a new revision parented on the
-current head — never by rewriting history."* Its manifests are complete rather than deltas, for the
-stated reason that a delta requires trusting a client's account of what changed.
+Aonik's Workspaces capability models the same problem independently: revisions carrying a
+`ParentRevisionId` and a monotonic `Sequence`, a **client-chosen** `CommitId` for idempotency,
+commits resolving to `FastForward | Diverged | Replayed`, complete manifests rather than deltas,
+and divergence ended by a human as `Accept | Reject` — where accepting *"advances the head through
+a new revision parented on the current head — never by rewriting history."*
 
-That is the same design, arrived at separately, which is good evidence it is the right one. Aligning
-the vocabulary costs nothing and makes a future host's job small.
+Two of the prerequisites listed above are things Aonik already got right and Arke has not: the
+client-chosen commit id, and content addressing. That is worth reading as evidence about which
+parts are load-bearing, rather than as an integration plan.
 
 **Two cautions.** The engine takes no dependency on Aonik, at build time or run time (ADR-001,
-SPEC-025 §2.11) — the AGPL promise depends on that, and this decision must not become the exception.
-And Workspaces **is not landed**: it exists in an unmerged Aonik worktree, absent from that
-repository's `main`. It is a design to align with, not an API to call.
+SPEC-025 §2.11) — the AGPL promise depends on that. And Workspaces **is not landed**: it exists in
+an unmerged Aonik worktree, absent from that repository's `main`. A design to align with, not an
+API to call.
 
 ## What this does not decide
 
-- **How a lease is granted or renewed** over a network, and by whom. That is SPEC-025's
-  `IdentityProvider` territory and wants its own spec.
-- **Blob sync** for takes and other media.
-- **Whether divergence can be resolved in-app**, or only reported. §2.9 currently says report;
-  Aonik's `DivergenceResolution` suggests a third tree is the honest answer, and SPEC-026 §2.12's
-  compare surface is the same surface again.
+- **How the atomic fence is implemented**, which is the actual work and wants its own spec.
+- **How a lease is granted or renewed** over a network, and by whom. SPEC-025 `IdentityProvider`
+  territory.
+- **Blob sync**, which content addressing is a prerequisite for rather than a solution to.
+- **Whether divergence can be resolved in-app**, or only reported.
 - **Any change to the accept gate.** A proposal is still gated; this is about what happens
   underneath one when it lands.
