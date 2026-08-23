@@ -60,6 +60,16 @@ async function portIsFree(port) {
 const requestedPort = process.env.ARKE_CDP_PORT ? Number(process.env.ARKE_CDP_PORT) : null;
 let PORT = requestedPort ?? 9222;
 if (requestedPort !== null) {
+  // Checked before it reaches `listen`, which throws ERR_SOCKET_BAD_PORT *synchronously* on
+  // anything that is not a whole number in range — so `abc`, `65536` and `9222.5` would escape
+  // the error handler above and end the run in a stack trace instead of the refusal promised here.
+  if (!Number.isInteger(requestedPort) || requestedPort < 1 || requestedPort > 65535) {
+    console.error(
+      `\nARKE_CDP_PORT=${process.env.ARKE_CDP_PORT} is not a port — give a whole number from 1 to 65535,\n` +
+        `or unset it to let this pick a free one.\n`,
+    );
+    process.exit(2);
+  }
   if (!(await portIsFree(requestedPort))) {
     console.error(
       `\nARKE_CDP_PORT=${requestedPort} is already in use — most likely a listener left behind by an\n` +
@@ -181,16 +191,47 @@ const VIDEO_SILENT = "ar_01J8G0000000000000000000V2";
 const VIDEO_UNMEASURED = "ar_01J8G0000000000000000000V3";
 
 /*
- * How long the media seeded for the fixture's own takes and bed runs.
+ * How long the media seeded for the fixture's own takes runs, when nothing selects them.
  *
- * Five seconds because the fixture's shots are 2.5s to 9s and mostly 4–6, and because a clip
- * input carries its whole length into the concat — `buildFfmpegArgs` ranges a clip only when the
- * take is a pass segment, so an oversized source lengthens the film rather than being cut to the
- * shot's slot. The bed runs longer than any window this plan drops it in, so what reaches the
- * mix is tone rather than the padding `apad` would add.
+ * An accepted take is generated at its shot's authored duration instead — see `shotSecondsByTake`.
+ * That distinction is the whole point: `buildFfmpegArgs` ranges a clip only when the take is a
+ * pass segment, so an untrimmed take carries its WHOLE source into the concat rather than being
+ * cut to the shot's slot. Seed a 5s clip into a 4s slot and the 67s cut exports as 68s — and
+ * every length assertion here would compare one lengthened film against another and see nothing,
+ * which is a check that has normalised away the defect it exists to catch.
  */
 const TAKE_CLIP_SEC = 5;
+
+/** Longer than any window this plan drops it in, so the mix gets tone, not `apad`'s padding. */
 const BED_SEC = 8;
+
+/**
+ * Shot duration per accepted take: what each take's media must run for the exported film to be
+ * exactly as long as the derived cut says it is.
+ *
+ * Takes nothing selects never reach the cut, so their length cannot affect the export and they
+ * fall back to `TAKE_CLIP_SEC`.
+ */
+async function shotSecondsByTake() {
+  const prodDir = join(WORLD, "productions", PROD);
+  const selections = JSON.parse(await readFile(join(prodDir, "selections.json"), "utf8"));
+  const durationByShot = new Map();
+  const scenesDir = join(prodDir, "scenes");
+  for (const name of await readdir(scenesDir)) {
+    if (!name.endsWith(".json")) continue;
+    const scene = JSON.parse(await readFile(join(scenesDir, name), "utf8"));
+    for (const shot of scene.shots ?? []) {
+      if (typeof shot.durationSec === "number") durationByShot.set(shot.id, shot.durationSec);
+    }
+  }
+  const seconds = new Map();
+  for (const [shotId, selection] of Object.entries(selections)) {
+    const takeId = selection?.acceptedTakeId;
+    const duration = durationByShot.get(shotId);
+    if (takeId && duration !== undefined) seconds.set(takeId, duration);
+  }
+  return seconds;
+}
 
 async function seed() {
   await rm(ROOT, { recursive: true, force: true });
@@ -237,6 +278,7 @@ async function seed() {
   //    derived cut points at files that are not there and EVERY export dies — including one with
   //    nothing placed. That reads as a lanes failure and is nothing of the kind.
   const takesDir = join(WORLD, "productions", PROD, "takes");
+  const acceptedSeconds = await shotSecondsByTake();
   for (const takeId of await readdir(takesDir)) {
     const takeFile = join(takesDir, takeId, "take.json");
     if (!existsSync(takeFile)) continue;
@@ -245,11 +287,14 @@ async function seed() {
     if (typeof media !== "string" || !media.endsWith(".mp4")) continue;
     const target = join(takesDir, takeId, media);
     if (existsSync(target)) continue;
+    // Exactly its shot's slot when a shot accepts it, so the exported film is as long as the
+    // derived cut claims and a length assertion can still fail.
+    const seconds = acceptedSeconds.get(takeId) ?? TAKE_CLIP_SEC;
     // Silent on purpose: the picture carries no sound of its own here, so anything audible in the
     // exported file came from a placed clip — which is the only thing T13 is entitled to conclude.
     const shot = spawnSync(
       FFMPEG,
-      ["-y", "-f", "lavfi", "-i", `color=c=gray:s=320x240:r=24:d=${TAKE_CLIP_SEC}`, "-pix_fmt", "yuv420p", target],
+      ["-y", "-f", "lavfi", "-i", `color=c=gray:s=320x240:r=24:d=${seconds}`, "-pix_fmt", "yuv420p", target],
       { encoding: "utf8" },
     );
     if (shot.status !== 0) throw new Error(`could not build take media for ${takeId}: ${shot.stderr?.slice(-400)}`);
