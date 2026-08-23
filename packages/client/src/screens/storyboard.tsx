@@ -739,8 +739,8 @@ export function ShotSheetScreen() {
         </Button>
       </div>
 
-      <div className="fy-sheet">
-        <div className="fy-sheet__main">
+      <div className="fy-sheetbody">
+        <div className="fy-sheetmain">
           <div className="fy-sheetsec">
             <div className="fy-sheetlabel">Shot script</div>
             <EditableText
@@ -913,7 +913,7 @@ export function ShotSheetScreen() {
           </div>
         </div>
 
-        <div className="fy-sheet__side">
+        <div className="fy-sheetside">
           <div className="fy-sheetside__sec">
             <div className="fy-sheetside__head">Creative</div>
             <div className="fy-mono" style={{ marginBottom: 4 }}>start from a recipe</div>
