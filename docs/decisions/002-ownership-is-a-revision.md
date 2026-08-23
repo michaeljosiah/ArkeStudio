@@ -171,9 +171,15 @@ rested on the fencing argument above, which does not hold. The honest scope:
 - **A fence, on every mutation path.** Covering `ownedWrite()` as well as the committer, and
   satisfying the atomicity requirement above rather than approximating it. This is the substance of
   the work, none of it exists today, and this ADR no longer claims to know its shape.
-- **Client-supplied `commitId`.** Required before any claim about retry idempotency is true. A
-  client whose success response is lost must be able to replay and be told *"already done"* —
-  today it would generate a second id and either duplicate or spuriously fail.
+- **Client-supplied `commitId`, bound to what it committed.** Required before any claim about
+  retry idempotency is true: a client whose success response is lost must be able to replay and be
+  told *"already done"*, where today it would generate a second id and either duplicate or
+  spuriously fail. But *"already done"* is only safe for a **true** retry. An id reused for
+  different content must fail loudly, because replaying the first outcome would tell a client its
+  new work is committed when it is not, and the next read would show those edits simply absent —
+  work lost, with a success on the record. Aonik's `CommitIdReusedException` exists for exactly
+  this and calls it *"loud, deliberately"*; the deduplication Arke has today is an audit line keyed
+  by id, which cannot tell the two cases apart.
 - **Blob negotiation needs less than it looked, but more than the manifest gives.** `scanWorld()`
   builds a path-to-digest `mediaManifest`, which is the right shape for a peer to answer *"which of
   these hashes are you missing"* without touching take identity — but it is **not complete**. The
