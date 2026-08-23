@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CrashSignal, Committer, type CommitInput } from "../../src/world/commit.js";
 import { WorldLock, WorldLockDeposedError, WorldLockedError } from "../../src/world/lock.js";
@@ -235,9 +235,24 @@ describe("world ownership: acquire is exclusive (R-3)", () => {
     await owner.release();
   });
 
-  it("reclaims a lock file too damaged to name anybody", async () => {
+  it("waits out a lock that names nobody yet rather than unlinking a claim mid-write", async () => {
+    const dir = await makeTempWorld();
+    // Exactly what the winner of the exclusive create leaves behind between creating the file
+    // and writing its record into it. Treating that as debris let the loser unlink it and take
+    // the world while the winner's write completed against an unlinked handle — two holders.
+    await writeFile(join(dir, LOCK_FILE), "", "utf8");
+
+    const lock = new WorldLock(dir);
+    closeOnCleanup(() => lock.release().catch(() => {}));
+    await assert.rejects(() => lock.acquire(), WorldLockedError);
+    assert.equal(lock.held, false);
+    assert.equal(await readFile(join(dir, LOCK_FILE), "utf8"), "", "the claim being written is left alone");
+  });
+
+  it("reclaims a lock too damaged to name anybody once it has also gone cold", async () => {
     const dir = await makeTempWorld();
     await writeFile(join(dir, LOCK_FILE), "{ this is not json", "utf8");
+    await goCold(dir); // a crash between the create and the record, not a claim in flight
 
     const lock = new WorldLock(dir);
     closeOnCleanup(() => lock.release().catch(() => {}));
@@ -305,6 +320,34 @@ describe("world ownership: release removes only our own lock (R-3)", () => {
     // The successor is still the owner, and a third opener is still refused.
     await assert.rejects(() => WorldStore.open(dir, { clock: CLOCK }), WorldLockedError);
     await successor.close();
+  });
+
+  it("releases the lock even when the scan state cannot be written", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close().catch(() => {}));
+
+    // Stand in for a full disk or a permissions change: the derived scan state has nowhere to
+    // go. `.index/` is deletable by design, so this must not be what keeps a world locked —
+    // the heartbeat would go on refreshing a lock nothing intends to hold.
+    const scanState = join(dir, ".index", "scan-state.json");
+    await rm(scanState, { force: true });
+    await mkdir(scanState); // a directory where the file goes: the write cannot land
+
+    await assert.rejects(() => store.close(), "the failure is reported, not swallowed");
+    assert.equal(
+      await stat(join(dir, LOCK_FILE)).then(
+        () => true,
+        () => false,
+      ),
+      false,
+      "and the lock came off first, so the world is not stranded",
+    );
+
+    const reopened = new WorldLock(dir);
+    closeOnCleanup(() => reopened.release().catch(() => {}));
+    await reopened.acquire();
+    await reopened.release();
   });
 
   it("releases cleanly, and a second release is a no-op", async () => {

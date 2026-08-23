@@ -27,8 +27,13 @@ const STALE_AFTER_MS = 90_000;
 const ACQUIRE_ATTEMPTS = 4;
 
 export class WorldLockedError extends Error {
-  constructor(readonly pid: number) {
-    super(`world is open in another Arke Studio process (pid ${pid})`);
+  /** Null when the lock is a claim still being written, which names nobody yet. */
+  constructor(readonly pid: number | null) {
+    super(
+      pid === null
+        ? "world is being opened by another Arke Studio process"
+        : `world is open in another Arke Studio process (pid ${pid})`,
+    );
   }
 }
 
@@ -107,14 +112,27 @@ export class WorldLock {
       // with a fresh heartbeat is a real owner, including our own process, where it means
       // another open store instance.
       const existing = await this.read();
-      if (existing && pidAlive(existing.pid) && (await this.heartbeatFresh())) {
+      const fresh = await this.heartbeatFresh();
+      if (existing === null) {
+        /*
+         * A lock that names nobody. Creating the file and writing the record into it are two
+         * operations, and in the moment between them a live claim looks exactly like this — so
+         * a fresh one is somebody mid-acquire, not debris. Reclaiming it on sight let this
+         * process unlink a claim its winner was still writing (the winner's write then lands on
+         * an unlinked handle and reports success), and both came away holding the world, which
+         * is the defect the exclusive create is here to close.
+         *
+         * Only an unparseable lock that has *also* gone cold is debris — a crash between the
+         * two operations, cleared once the heartbeat window has passed like any other.
+         */
+        if (fresh) throw new WorldLockedError(null);
+      } else if (pidAlive(existing.pid) && fresh) {
         throw new WorldLockedError(existing.pid);
       }
       await this.clearStale(existing);
     }
     // Every pass was beaten to the reclaim. Name whoever holds it now rather than looping.
-    const existing = await this.read();
-    throw new WorldLockedError(existing?.pid ?? 0);
+    throw new WorldLockedError((await this.read())?.pid ?? null);
   }
 
   /**

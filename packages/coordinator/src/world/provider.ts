@@ -395,9 +395,10 @@ export class FsWorldProvider implements WorldProvider {
     const store = this.store;
     if (!store) return;
     this.refreshRegistry(store.getBundle());
-    // Detached before the close, not after. Closing can now report that the world was reclaimed
-    // out from under us (WorldLockDeposedError), and that report must not leave the provider
-    // holding a store whose watcher, index and lock are already gone.
+    // Detached before the close, not after. Closing releases the lock before it reports anything
+    // (see WorldStore.close), so by the time it can reject — the world was reclaimed out from
+    // under us, or the scan state would not write — the store holds nothing worth keeping, and
+    // retaining it would leave the provider serving a world whose watcher and index are gone.
     this.store = null;
     await store.close();
   }

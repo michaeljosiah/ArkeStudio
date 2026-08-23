@@ -116,8 +116,12 @@ export class WorldStore {
           path: `.commit/${p.commitId}.json`,
           message:
             p.phase === "prepared"
-              ? "an interrupted commit is unresolved and will be rolled back when this world is opened for writing"
-              : "an interrupted commit is unresolved and will be completed when this world is opened for writing",
+              ? // Nothing live moved before `prepared`, so what was scanned is the world as it stood
+                // before the commit — whole, and about to lose only the commit that never landed.
+                "an interrupted commit is unresolved; nothing of it reached the world, and it will be rolled back when this world is opened for writing"
+              : // Past the point of no return: some files are renamed and some are not, so what was
+                // scanned is a world part-way through one commit, not a snapshot of either side.
+                "an interrupted commit is unresolved; this world is part-way through it and is not a consistent snapshot until it is opened for writing and the commit completed",
         })),
       ];
     }
@@ -393,8 +397,21 @@ export class WorldStore {
       }
       this.index = null;
       if (this.lock) {
-        await this.saveScanState();
+        /*
+         * The release happens whatever the scan state does. `.index/` is derived and deletable
+         * by design, so a scan state that cannot be written — a full disk, a permissions change
+         * — must not be what keeps a world locked: the heartbeat would go on refreshing a lock
+         * nothing intends to hold, and this process could not reopen its own world until it
+         * exited. The failure is not swallowed for that, only deferred until the lock is off.
+         */
+        let scanStateFailure: unknown;
+        try {
+          await this.saveScanState();
+        } catch (err) {
+          scanStateFailure = err;
+        }
         await this.lock.release();
+        if (scanStateFailure !== undefined) throw scanStateFailure;
       }
     });
   }
