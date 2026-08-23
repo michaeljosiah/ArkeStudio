@@ -257,6 +257,31 @@ describe("a turn that ended without an answer", () => {
   });
 
   /**
+   * Both halves found by driving a real turn on the packaged app (2026-08-23), not by reading.
+   *
+   * It searched four pages and the spinner said "Checking the world" for the whole of it. Two
+   * separate causes, and either alone is enough: there was no row for the web tools at all, and
+   * the rows that do exist are spelled OpenCode's way while the engine in use spells them
+   * Claude's. So with Claude every harness tool fell to the fallback — the same failure the
+   * namespacing bug had, one row down, hidden the same way by a fallback that reads plausibly.
+   *
+   * The first assertion is the one that matters most: a person who has just switched research on
+   * is told the studio is reading their own world while it reads the internet.
+   */
+  it("says it is online when it is online, whichever harness spells the tool", () => {
+    assert.equal(workingLabel("websearch"), "Searching online");
+    assert.equal(workingLabel("WebSearch"), "Searching online", "Claude Code's spelling");
+    assert.equal(workingLabel("webfetch"), "Reading a page online");
+    assert.equal(workingLabel("WebFetch"), "Reading a page online", "Claude Code's spelling");
+  });
+
+  it("labels Claude's capitalised tools too, which every one of them missed before", () => {
+    assert.equal(workingLabel("Read"), "Reading a file");
+    assert.equal(workingLabel("Grep"), "Searching the files");
+    assert.equal(workingLabel("Glob"), "Looking through files");
+  });
+
+  /**
    * Observed against a real turn: this is the tool the agent actually calls. Pinned because it
    * is the label most turns will show, so a change to it is a change to what the app says while
    * somebody waits — not an internal detail.
