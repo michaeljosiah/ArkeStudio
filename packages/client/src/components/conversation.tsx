@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { StagedProposal, WorldChatContext, WorldChatPoint, WorldChatWorkspace } from "@arke-studio/contracts";
+import type {
+  StagedProposal,
+  WorldChatContext,
+  WorldChatPoint,
+  WorldChatStatus,
+  WorldChatWorkspace,
+} from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   acceptProposal,
@@ -415,6 +421,7 @@ export function ProductionConversation({
                 conversationId={conversationId}
                 seq={loaded?.seq ?? null}
                 carried={carriedPoints}
+                status={loaded?.status ?? null}
                 wrapping={wrapping}
                 onWrappingChange={setWrapping}
               />
@@ -508,6 +515,7 @@ export function ProductionConversation({
           conversationId={conversationId}
           seq={loaded?.seq ?? null}
           carried={carriedPoints}
+          status={loaded?.status ?? null}
           wrapping={wrapping}
           onWrappingChange={setWrapping}
         />
@@ -534,6 +542,7 @@ function WrapUp({
   conversationId,
   seq,
   carried,
+  status,
   wrapping,
   onWrappingChange,
 }: {
@@ -541,32 +550,32 @@ function WrapUp({
   conversationId: string | null;
   seq: number | null;
   carried: number;
+  /** A wrap-up that landed closes the conversation; nothing else on this dock does. */
+  status: WorldChatStatus | null;
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
   wrapping: boolean;
   onWrappingChange: (next: boolean) => void;
 }) {
   const setWrapping = onWrappingChange;
   const asked = useRef<string | null>(null);
-  const askedAtSeq = useRef<number | null>(null);
   const refusal = useWorldChatWrapUpRefusal(conversationId ?? undefined);
   const refusedMine = refusal !== null && refusal.requestId === asked.current;
-  useEffect(() => {
-    if (wrapping && refusedMine) setWrapping(false);
-  }, [wrapping, refusedMine]);
   /*
-   * And when it worked (codex, 2026-08-23).
+   * Both endings, and only the two of them (codex, 2026-08-23).
    *
-   * Only a refusal cleared this, because a wrap-up used to be the last thing a conversation did:
+   * A refusal used to be the only one, because a wrap-up was the last thing a conversation did:
    * it closed, the dock went, and a state that never reset never showed. A long season is written
-   * in runs and wrapped between them, so the second press meets a button still disabled and still
-   * reading "Writing them…" from the first. The conversation's own sequence is the signal that
-   * covers both endings — the wrap-up writes its outcome into the log either way, and nothing has
-   * moved while the request is genuinely still in flight.
+   * in runs and wrapped between them, so the second press met a button still disabled and still
+   * reading "Writing them…" from the first.
+   *
+   * Closing is the success half, not the sequence moving. Anything advances a sequence — saving a
+   * point from the rail, a turn finishing elsewhere — so a seq check clears the wait while the
+   * wrap-up is still committing and re-enables a button whose second press would land on top of
+   * the first. A wrap-up that lands closes the conversation; nothing else here does.
    */
   useEffect(() => {
-    if (!wrapping) return;
-    if (askedAtSeq.current !== null && seq !== null && seq !== askedAtSeq.current) setWrapping(false);
-  }, [wrapping, seq]);
+    if (wrapping && (refusedMine || status === "closed")) setWrapping(false);
+  }, [wrapping, refusedMine, status]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
@@ -579,7 +588,6 @@ function WrapUp({
           const attempt = wrapUpWorldChat(worldId, conversationId, seq);
           if (!attempt) return;
           asked.current = attempt;
-          askedAtSeq.current = seq;
           setWrapping(true);
         }}
       >
