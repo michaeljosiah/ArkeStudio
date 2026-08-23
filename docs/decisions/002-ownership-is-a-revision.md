@@ -38,6 +38,21 @@ it was supporting, so it goes first.
 | One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
 | Every mutation goes through it | **No.** `WorldStore.ownedWrite()` is *"one app-owned filesystem write outside the commit/proposal machinery"* — take media landing, reference images copied and removed. It serialises in-process, which is a lock's job, not a fence's. |
 
+**Two defects surfaced while checking the above**, and both are in the code rather than in any
+spec. They are recorded here because they are evidence for this ADR's thesis — ownership is less
+solid than the lock's existence suggests — and because they want fixing whether or not any of this
+lands.
+
+- **Recovery runs before the lock, and in read-only opens.** `WorldStore.open()` calls
+  `committer.recover()` before `WorldLock.acquire()`, and `readOnly` gates the lock, the external-
+  edit scan and the watcher but **not** recovery. So a second instance opening a world whose owner
+  is mid-commit will roll that journal back or forward underneath it — and a *read-only* open can
+  rename live files, which makes it not read-only.
+- **Lock acquisition is read-then-write.** `acquire()` reads the lock, decides, then calls
+  `write()` → `atomicWriteFile()` → rename. There is no exclusive create anywhere in the world
+  layer. Two processes opening an unlocked world concurrently can both see nothing, both write, and
+  both believe they hold it.
+
 One thing the earlier draft under-credited: `world.json` already carries `canonRevision`, a
 monotonic world-level counter, and `rollForward()` writes world.json **last**, commenting that
 *"its revision advancing is the world-level signal the commit landed."* A world-level head is
