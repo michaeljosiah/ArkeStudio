@@ -470,8 +470,8 @@
         </p>
         <p>
           Two details an engineer will want. Full-text search has to actually be compiled into the
-          database engine, so rather than assume it Arke proves it at every open, by creating a
-          tiny search table and dropping it again. And the database library is compiled code that
+          database engine, so rather than assume it, Arke proves it at every open by
+          creating a tiny search table and dropping it again. And the database library is compiled code that
           must match the exact application it is loaded into — the copy tests use and the copy the
           desktop app loads are different builds of the same thing under different names, which is
           why packaging has a rebuild step. If it does not load, the engine is told so and says it:
@@ -491,7 +491,7 @@
           <strong>The shipped installer is Windows x64 only</strong>, and the reason is worth
           retelling. ARM64 installers were built until 0.2.9 and should not have been. The database
           library has no ready-made ARM64 build for this application, so it must be cross-compiled,
-          and the compiler component that needs was never installed on any packaging machine. The
+          and the compiler needed for that was never installed on any packaging machine. The
           build step had been set to tolerate a failed native build, so it tolerated it, silently,
           every time: every ARM64 installer ever produced shipped with the search index switched
           off.

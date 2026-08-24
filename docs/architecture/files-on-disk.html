@@ -540,8 +540,8 @@ where it needs to go. She has paid for it: her left ear is done...</div>
     01-neap.json               <i>one file per episode</i></div>
 
         <p>
-          A scene holds its shots inside it. There are no separate shot files — a shot is an entry
-          in the scene, which is why reordering shots never moves anything on disk.
+          A scene holds its shots inside it. There are no separate shot files, which is why
+          reordering shots never moves anything on disk.
         </p>
         <div class="snip"><span class="c">productions/saltlight/scenes/02-the-tables-say-neap.json</span>
 {
@@ -580,7 +580,7 @@ where it needs to go. She has paid for it: her left ear is done...</div>
 }</div>
 
         <p>
-          Choosing between takes writes two files and never touches the takes themselves.
+          Choosing between takes writes two files and never touches the takes.
           <code>selections.json</code> is the small answer — which take won, per shot.
           <code>reviews.jsonl</code> is the durable record of every decision, including the ones you
           reversed.
@@ -615,19 +615,18 @@ where it needs to go. She has paid for it: her left ear is done...</div>
 }</div>
 
         <p class="note">
-          Finished renders do not land inside the production. They are written to
-          <code>exports/</code> at the top of the world, next to <code>productions/</code>, after
-          being encoded somewhere temporary first — so a cancelled or failed render leaves nothing
-          behind that looks like a finished film.
+          Finished renders do not land inside the production. They go to <code>exports/</code> at the
+          top of the world, next to <code>productions/</code>, and are encoded somewhere temporary
+          first — so a cancelled or failed render leaves nothing that looks like a finished film.
         </p>
       </section>
 
       <section id="log">
         <h2>changes.jsonl: what happened, in order</h2>
         <p>
-          One line per accepted change, oldest first, for the life of the world. It says what
-          changed, from which version to which, which fields moved, where the change came from, and
-          what the canon revision stood at afterwards. Nothing ever edits an earlier line.
+          One line per accepted change, oldest first, for the life of the world: what changed, from
+          which version to which, which fields moved, where it came from, and what the canon
+          revision stood at afterwards. Nothing ever edits an earlier line.
         </p>
         <div class="snip"><span class="c">the-undersong/changes.jsonl</span>
 {"ts":"2026-07-12T11:30:00Z","entity":"canon/CANON-044","fromVersion":null,
@@ -644,15 +643,15 @@ where it needs to go. She has paid for it: her left ear is done...</div>
       <section id="dot">
         <h2>The folders that begin with a dot, and the lock</h2>
         <p>
-          These are Arke's own bookkeeping. You never have to open them, but nothing in them is
-          hidden from you, and two of them are not caches at all.
+          Arke's own bookkeeping. Nothing in them is hidden from you, and two of them are not caches
+          at all.
         </p>
         <dl class="kv">
           <dt>.history/</dt>
           <dd>
-            A complete copy of every version ever accepted — not a patch, the whole file. This is
-            the version record, and it is <strong>not</strong> derived: deleting it loses history
-            that nothing can rebuild. A whole-world export includes it deliberately.
+            A complete copy of every version ever accepted — not a patch, the whole file. The
+            version record, and <strong>not</strong> derived: deleting it loses history nothing can
+            rebuild. A whole-world export includes it deliberately.
           </dd>
           <dt>.proposals/</dt>
           <dd>
@@ -703,8 +702,8 @@ where it needs to go. She has paid for it: her left ear is done...</div>
     <b>chapters\01-neap\</b>               <i>v1.md  v2.md</i>
     <b>story\</b>                          <i>v1.json ... v4.json</i></div>
         <p class="caption">
-          Sheets and chapters count their own versions. Canon snapshots are named after the world's
-          canon revision at the time — which is why CANON-044's history jumps from 41 to 71.
+          Sheets and chapters count their own versions. Canon snapshots take the world's canon
+          revision of the moment — which is why CANON-044's history jumps from 41 to 71.
         </p>
 
         <h4>What one proposal looks like</h4>
@@ -908,68 +907,62 @@ where it needs to go. She has paid for it: her left ear is done...</div>
         <ol class="steps">
           <li>
             <h3>Write it alongside, under a temporary name</h3>
-            <p>
-              The new content goes to a fresh file in the same folder, with a scratch name nothing
-              else will ever look at.
-            </p>
+            <p>The new content goes to a fresh file in the same folder, under a name nothing reads.</p>
           </li>
           <li>
             <h3>Push it all the way to the disk</h3>
             <p>
-              Not just handed to the operating system — flushed, so the bytes are really on the disk
-              before anything else happens. Pulling the plug at this moment costs you the temporary
-              file and nothing else.
+              Flushed, not merely handed to the operating system. Pulling the plug at this moment
+              costs you the temporary file and nothing else.
             </p>
           </li>
           <li>
             <h3>Rename it over the target</h3>
             <p>
-              A rename is the one thing the filesystem does completely or not at all. After it, the
+              A rename is the one thing the filesystem does completely or not at all. After it the
               file is wholly new; before it, wholly old. There is no in-between for a reader to
-              catch. If the rename fails, the temporary file is cleaned up and the old file is
-              untouched.
+              catch, and a failed rename cleans up the temporary file and leaves the old one alone.
             </p>
           </li>
           <li>
             <h3>Try again if something is holding the file</h3>
             <p>
-              Antivirus and the system's search indexer briefly hold files inside a user folder, and
-              a rename onto a held file fails for a moment and then works. Arke retries with a short
-              backoff rather than reporting a failure that was never real.
+              Antivirus and the search indexer briefly hold files in a user folder, and a rename onto
+              a held file fails for a moment and then works. Arke retries with a short backoff rather
+              than reporting a failure that was never real.
             </p>
           </li>
         </ol>
         <p>
-          A single file is one thing; accepting a change is usually several — the new file, its
-          history snapshot, the world's revision counter, a line in the change log. Those have to
-          land together or not at all, so Arke writes down what it is about to do first, does it,
-          then removes the note. If the power goes at any point, opening the world reads the note and
-          either finishes the change or rolls it back before anything is allowed to read. The detail
-          is in <a href="the-accept-gate.html">the accept gate</a>.
+          Accepting a change is usually several files at once — the new file, its history snapshot,
+          the revision counter, a line in the change log — and they have to land together or not at
+          all. So Arke writes down what it is about to do, does it, then removes the note. If the
+          power goes at any point, opening the world reads the note and either finishes the change or
+          rolls it back before anything may read. The detail is in
+          <a href="the-accept-gate.html">the accept gate</a>.
         </p>
         <p class="note">
           The one honest gap: some media is copied or moved before its record is written, and those
           two steps are not a single transaction. An interruption between them can leave a picture
-          in the world with no card beside it. It is an orphan file, not a damaged world.
+          with no card beside it. That is an orphan file, not a damaged world.
         </p>
       </section>
 
       <section id="windows">
         <h2>Long paths, and moving between machines</h2>
         <p>
-          Windows has an old limit of 260 characters on a path, and a world can nest fairly deep — a
-          world name, then a production name, then a takes folder, then one take's own folder, then
-          a file. Arke asks the operating system for the long-path treatment on every read and write
-          it makes, so its own work is never subject to that limit. It also works out the worst case
-          at first run and warns you if your folder sits somewhere deep enough to trouble
-          <em>other</em> programs — your file explorer, your text editor — which may not have asked
-          for the same treatment. Keeping Arke's home near the top of a drive avoids the whole
-          question.
+          Windows has an old limit of 260 characters on a path, and a world nests fairly deep: a
+          world name, a production name, a takes folder, one take's own folder, then a file. Arke
+          asks the operating system for the long-path treatment on every read and write it makes, so
+          its own work is never subject to that limit. It also works out the worst case at first run
+          and warns you if your folder sits deep enough to trouble other programs — your file
+          explorer, your text editor — which may not have asked for the same treatment. Keeping
+          Arke's home near the top of a drive avoids the question.
         </p>
         <p>
-          Separately: any path stored inside a file is written with forward slashes, never
-          backslashes. Windows accepts both, and everything else accepts only one. Writing the one
-          both understand is why a world folder made on Windows opens unchanged elsewhere.
+          Separately: any path stored inside a file is written with forward slashes. Windows accepts
+          both kinds of slash and everything else accepts only one, so writing the one both
+          understand is why a world made on Windows opens unchanged elsewhere.
         </p>
       </section>
 
@@ -981,36 +974,36 @@ where it needs to go. She has paid for it: her left ear is done...</div>
         </p>
         <h3>While Arke is open</h3>
         <p>
-          One file is genuinely invited: the bible. Arke watches for it moving, quietly re-reads it,
-          and carries on. That is the feature working, not an anomaly — it is a notes file, and
-          asking you to approve your own typing would be a toll on thinking out loud.
+          One file is genuinely invited: the bible. Arke notices it move, quietly re-reads it, and
+          carries on. That is the feature working — it is a notes file, and asking you to approve
+          your own typing would be a toll on thinking out loud.
         </p>
         <p>
-          Everything else is a different matter. Arke does not merge your edit and it does not
-          silently adopt it. Worse, it does not reliably notice it either: it is holding its own
-          picture of the world in memory, and the next thing it writes is calculated from that
-          picture, not from your file. Your edit can be quietly written over. Nothing is corrupted,
-          but nothing is safe either. Close the world first.
+          Everything else is a different matter. Arke does not merge your edit, does not silently
+          adopt it, and does not reliably notice it either: it holds its own picture of the world in
+          memory, and the next thing it writes is calculated from that picture, not from your file.
+          Your edit can be quietly written over. Nothing is corrupted, but nothing is safe either.
+          Close the world first.
         </p>
         <h3>While Arke is closed</h3>
         <p>
-          This is the supported way, and it is handled properly. Arke keeps a fingerprint of every
-          file as it stood when it last had the world open. On opening, it compares them and collects
-          what changed: files edited, files that appeared, files that vanished. It does not adopt any
-          of it on its own — each one is surfaced for you to reconcile deliberately.
+          This is the supported way. Arke keeps a fingerprint of every file as it stood when it last
+          had the world open. On opening it compares them and collects what changed: files edited,
+          files that appeared, files that vanished. It adopts none of it on its own — each one is
+          surfaced for you to reconcile deliberately.
         </p>
         <p>
-          When you do reconcile an edited sheet, canon entry or chapter, Arke takes the bytes you
-          typed as the new content, cuts the next version, writes the history snapshot, and logs the
-          change as having come from outside the app. A file you deleted stays deleted and gets a
-          line in the log saying so. Anything it does not version — an image, a data file — gets a
-          log line and nothing more.
+          When you reconcile an edited sheet, canon entry or chapter, Arke takes the bytes you typed
+          as the new content, cuts the next version, writes the history snapshot, and logs the change
+          as having come from outside the app. A file you deleted stays deleted and gets a line
+          saying so. Anything it does not version — an image, a data file — gets a log line and
+          nothing more.
         </p>
         <p class="note">
           If the search cache is missing — you deleted it, or the world came from someone else —
-          there is no fingerprint list to compare against, so the world is simply adopted as it
-          stands rather than reported as edited. That is on purpose: a deletable cache must never
-          cost you anything, including a false alarm.
+          there is no fingerprint list to compare against, so the world is adopted as it stands
+          rather than reported as edited. That is on purpose: a deletable cache must never cost you
+          anything, including a false alarm.
         </p>
       </section>
 
