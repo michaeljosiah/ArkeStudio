@@ -4,7 +4,7 @@ import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -74,6 +74,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       // The reader names a section — the prose never travels; the server reads the authoritative
       // sheet. A character's Essence and Appearance are the descriptive prose worth hearing.
       sectionHeading: z.enum(["Essence", "Appearance"]),
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The same for a section of the bible (2026-08-24).
+   *
+   * A separate frame rather than a widened `read-sheet-section`, because the two differ in the
+   * one field that matters: a sheet's readable sections are a closed pair the app authored, and
+   * a bible's headings belong to whoever wrote it. Folding them together would have meant a
+   * `sheetId` that is sometimes absent and an enum that is sometimes a free string — two
+   * optional fields standing in for one real distinction.
+   *
+   * Asked for by an author who had the whole arc in the bible and no way to hear it: the sheets
+   * could be read aloud and the one long-form document in the world could not.
+   */
+  z
+    .object({
+      kind: z.literal("read-bible-section"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      // Named, never sent: the prose does not travel, the server reads the bible on disk. Free
+      // text because `splitBible` takes the author's own `## ` headings as it finds them.
+      sectionHeading: z.string().min(1),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
@@ -404,6 +427,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
         .max(40)
         .optional(),
+    })
+    .strict(),
+  /** Prepare or reopen a Bench session from a durable media candidate. Nothing is dispatched. */
+  z
+    .object({
+      kind: z.literal("world-chat-open-media"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      candidateId: CandidateIdSchema,
+      expectedCandidateRevision: z.number().int().min(1),
     })
     .strict(),
   /**

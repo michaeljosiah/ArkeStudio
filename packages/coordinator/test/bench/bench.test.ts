@@ -134,6 +134,36 @@ describe("opening and discovery", () => {
     assert.equal(summaries.length, 2);
     assert.equal(summaries[0]?.id, b?.session.id); // newest first
   });
+
+  it("creates an exact prefilled video session and reopens it without resetting edits", async () => {
+    const dir = await makeTempWorld();
+    const id = newId("sess") as SessionId;
+    const first = await openBenchSession(dir, CLOCK, {
+      sessionId: id,
+      defaultModel: { provider: "fal", model: "test-video" },
+      initial: { mode: "video", brief: "The bell rises through black water.", title: "Drowned bell" },
+    });
+    assert.equal(first?.session.id, id);
+    assert.equal(first?.session.title, "Drowned bell");
+    assert.equal(first?.session.composer.mode, "video");
+    assert.equal(first?.session.composer.brief, "The bell rises through black water.");
+    await first!.store.append(
+      {
+        type: "composer-set",
+        mode: "video",
+        provider: "fal",
+        model: "test-video",
+        params: { kind: "video", durationSec: 5 },
+        brief: "Edited on the Bench.",
+      },
+      { at: CLOCK() },
+    );
+    const reopened = await openBenchSession(dir, CLOCK, {
+      sessionId: id,
+      initial: { mode: "video", brief: "The original brief." },
+    });
+    assert.equal(reopened?.session.composer.brief, "Edited on the Bench.");
+  });
 });
 
 describe("reference allocation (issue 305 §4)", () => {

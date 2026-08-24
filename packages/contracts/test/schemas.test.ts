@@ -1047,6 +1047,16 @@ describe("domain events and frames", () => {
     assert.doesNotThrow(() =>
       ClientMessageSchema.parse({ kind: "generate-world-image", worldId: WORLD_ID, requestId: WORLD_ID }),
     );
+    assert.doesNotThrow(() =>
+      ClientMessageSchema.parse({
+        kind: "world-chat-open-media",
+        worldId: WORLD_ID,
+        requestId: WORLD_ID,
+        conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+        candidateId: "cand_01J8F3K2QW9VZX4N7M0RTYB6HC",
+        expectedCandidateRevision: 2,
+      }),
+    );
     assert.throws(() => ClientMessageSchema.parse({ kind: "generate-world-image", worldId: WORLD_ID }));
     const queueMessages = [
       { kind: "establish-look", worldId: WORLD_ID, sheetId: "maren-kest", count: 4 },

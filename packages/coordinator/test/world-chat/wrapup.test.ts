@@ -218,6 +218,7 @@ describe("what a conversation carries", () => {
       classification: "media.image-opportunity",
       title: "A picture of the lock",
       draft: {
+        medium: "image",
         target: { kind: "world" },
         purpose: "world-key-art",
         brief: "The lock at slack water.",

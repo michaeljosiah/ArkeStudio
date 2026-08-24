@@ -126,6 +126,33 @@ function renderConversation(): string {
   );
 }
 
+function renderMediaConversation(): string {
+  const state = stateWithConversation();
+  state.worldChat!.points = [
+    {
+      id: "cand_01J8F3K2QW9VZX4N7M0RTYB6HF" as never,
+      kind: "point",
+      subject: "This world",
+      subjectKind: "new",
+      text: "The drowned bell rises",
+      settled: false,
+      revision: 1,
+      media: {
+        medium: "video",
+        purpose: "concept-video",
+        brief: "A drowned bell rising slowly through black water.",
+        reason: "It wants movement.",
+      },
+    },
+  ];
+  __setStateForTest(state);
+  return renderToString(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
 /** The markup between the rail's opening tag and the end of the document. */
 function railHtml(html: string): string {
   const start = html.indexOf('class="fy-gate__side"');
@@ -241,6 +268,12 @@ describe("the transcript", () => {
 });
 
 describe("the understanding panel", () => {
+  it("offers a video brief to the reviewed Bench without offering Generate", () => {
+    const rail = railHtml(renderMediaConversation());
+    assert.match(rail, /A drowned bell rising slowly through black water/);
+    assert.match(rail, /Prepare video/);
+    assert.doesNotMatch(rail, />Generate</, "spend remains behind the Bench's provider and estimate controls");
+  });
   /*
    * The design's original rule was that a point carried no control at all: deciding happened
    * twice, and both times about everything at once. In practice a conversation produces a dozen

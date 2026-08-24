@@ -177,6 +177,18 @@ describe("the rendered guide", () => {
     for (const value of ["world-key-art", "character-main-photo", "character-look"]) {
       assert.ok(guide.includes(value), `image purpose option ${value} is named`);
     }
+    for (const value of ["image", "video", "concept-image", "concept-video", "shot-video"]) {
+      assert.ok(guide.includes(value), `media option ${value} is named`);
+    }
+  });
+
+  it("keeps old image opportunities readable", () => {
+    const legacy = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["media.image-opportunity"]) as Record<string, unknown>;
+    const draft = legacy["draft"] as Record<string, unknown>;
+    delete draft["medium"];
+    const parsed = ModelCandidateDraftSchema.parse(legacy);
+    assert.equal(parsed.classification, "media.image-opportunity");
+    if (parsed.classification === "media.image-opportunity") assert.equal(parsed.draft.medium, "image");
   });
 
   /**

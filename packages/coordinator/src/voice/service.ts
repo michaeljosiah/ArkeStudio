@@ -8,6 +8,7 @@ import {
   previewLineFor,
   PROVIDERS,
   rankVoices,
+  splitBible,
   type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
@@ -180,6 +181,27 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
   return { text };
 }
 
+/**
+ * The same, for a section of the bible (2026-08-24).
+ *
+ * No enum of permitted headings, which is the one real difference from the sheet version. A
+ * sheet's shape is authored by the app, so naming its two readable sections in a type is honest.
+ * A bible is a blank page somebody types into — `splitBible` exists precisely because its
+ * headings are the author's — so the readable set cannot be written down in advance, and the
+ * check that matters is only whether the section is there and has words in it.
+ *
+ * Asked for by an author who wanted the story read back to her rather than read. The bible is
+ * where the whole arc lives and it was the one long-form document in the world with no way to
+ * hear it.
+ */
+export function authoritativeBibleSpeech(bibleText: string, heading: string): { text: string } {
+  const section = splitBible(bibleText).sections.find((candidate) => candidate.heading === heading);
+  if (!section) throw new Error("That section is no longer in the bible.");
+  const text = normalizeSpeechText(section.body);
+  if (!text) throw new Error("Nothing to read yet.");
+  return { text };
+}
+
 export interface SpeechSpec {
   /**
    * A provider id, not a closed pair. This was `"kokoro" | "elevenlabs"`, which is the same
@@ -345,6 +367,12 @@ export class VoiceService {
     store: WorldStore,
     voiceId: string,
     text: string,
+    /**
+     * Called as each piece finishes, so a long read can start playing before it is all made.
+     * Absent for short prose, where the whole thing arrives in one piece anyway and a caller
+     * that does not want to think about parts should not have to.
+     */
+    onPart?: (part: { file: string; index: number; total: number }) => void,
   ): Promise<{ file: string; cached: boolean }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
@@ -369,12 +397,25 @@ export class VoiceService {
      */
     const chunks = splitForSpeech(normalized);
     const rendered: Uint8Array[] = [];
-    for (const chunk of chunks) {
+    for (const [index, chunk] of chunks.entries()) {
       const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
       if (part.length < 12 || Buffer.from(part).toString("ascii", 0, 4) !== "RIFF") {
         throw new Error("Voxa returned invalid audio.");
       }
       rendered.push(part);
+      /*
+       * Hand each piece over the moment it exists, so listening can begin on the first one while
+       * the rest are still being made. A ten-minute section takes about ten minutes to render on
+       * this machine; waiting for all of it before the first word is a wait nobody should sit
+       * through, and the pieces are already separate files.
+       */
+      if (onPart) {
+        const partRel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: chunk, format: "wav" });
+        await store.gateOp(async () => {
+          await atomicWriteFile(join(store.dir, partRel), part);
+        });
+        onPart({ file: partRel, index, total: chunks.length });
+      }
     }
     const audio = concatWav(rendered);
     await store.gateOp(async () => {

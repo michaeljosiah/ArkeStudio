@@ -141,6 +141,8 @@ interface StoreState {
   /** SPEC-011: audition results keyed provider/voiceId — cached files replay free. */
   voicePreviews: Record<string, { file: string | null; error: string | null }>;
   voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
+  /** The pieces of a long read, in order, per request — see the voice.audio branch below. */
+  voiceParts: Record<string, string[]>;
   /** SPEC-011: dictation results by requestId — inserted as editable text, never submitted. */
   dictation: Record<string, { text: string | null; error: string | null }>;
   /**
@@ -250,6 +252,7 @@ let current: StoreState = {
   voiceCatalogue: null,
   voicePreviews: {},
   voiceAudio: {},
+  voiceParts: {},
   dictation: {},
   worldChatRefusals: {},
   worldChatWrapUpRefusals: {},
@@ -283,6 +286,13 @@ const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
 export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
   briefEnhancedListeners.add(listener);
   return () => briefEnhancedListeners.delete(listener);
+}
+
+export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
+const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
+export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
+  worldChatMediaListeners.add(listener);
+  return () => worldChatMediaListeners.delete(listener);
 }
 
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
@@ -591,6 +601,7 @@ function handleFrame(json: string): void {
       voiceCatalogue: changedWorld ? null : current.voiceCatalogue,
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
+      voiceParts: changedWorld ? {} : current.voiceParts,
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -641,6 +652,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
+    }
+    if (event.type === "world-chat.media-opened") {
+      for (const listener of worldChatMediaListeners) listener(event);
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
@@ -795,6 +809,7 @@ function handleFrame(json: string): void {
     let voiceCatalogue = current.voiceCatalogue;
     let voicePreviews = current.voicePreviews;
     let voiceAudio = current.voiceAudio;
+    let voiceParts = current.voiceParts;
     let dictation = current.dictation;
     let worldChatRefusals = current.worldChatRefusals;
     let worldChatWrapUpRefusals = current.worldChatWrapUpRefusals;
@@ -837,7 +852,21 @@ function handleFrame(json: string): void {
         [`${event.provider}/${event.voiceId}`]: { file: event.file, error: event.error },
       };
     } else if (event.type === "voice.audio") {
+      /*
+       * A long read arrives as several of these under one requestId (2026-08-24). Keyed by
+       * request, each would overwrite the last and a screen would only ever see the final piece —
+       * so the pieces are collected alongside, in the order the coordinator made them.
+       *
+       * The keyed entry still holds the newest event, because that is what every existing caller
+       * reads for status, cost and errors, and none of them know about parts.
+       */
       voiceAudio = { ...voiceAudio, [event.requestId]: event };
+      if (event.part !== undefined && event.file) {
+        const already = voiceParts[event.requestId] ?? [];
+        const next = already.slice();
+        next[event.part] = event.file;
+        voiceParts = { ...voiceParts, [event.requestId]: next };
+      }
     } else if (event.type === "dictation.result") {
       dictation = { ...dictation, [event.requestId]: { text: event.text, error: event.error } };
     } else if (event.type === "world-chat.attachment-refused") {
@@ -1005,6 +1034,7 @@ function handleFrame(json: string): void {
       voiceCatalogue,
       voicePreviews,
       voiceAudio,
+      voiceParts,
       dictation,
       worldChatRefusals,
       worldChatWrapUpRefusals,
@@ -2115,6 +2145,20 @@ export function readSheetSection(
   return requestId;
 }
 
+/**
+ * The same for a section of the bible, whose headings are the author's own and so cannot be an
+ * enum here the way a sheet's two readable sections can (2026-08-24).
+ */
+export function readBibleSection(
+  worldId: string,
+  sectionHeading: string,
+  requestId = queueRequest("read-bible-section"),
+  confirmationToken?: string,
+): string {
+  send({ kind: "read-bible-section", worldId, sectionHeading, requestId, ...(confirmationToken ? { confirmationToken } : {}) });
+  return requestId;
+}
+
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
@@ -2197,6 +2241,11 @@ export function useVoicePreviews(): Record<string, { file: string | null; error:
 
 export function useVoiceAudio(): Record<string, Extract<DomainEvent, { type: "voice.audio" }>> {
   return useStore().voiceAudio;
+}
+
+/** The pieces of a long read, in order, per request. Empty for anything that arrived whole. */
+export function useVoiceParts(): Record<string, string[]> {
+  return useStore().voiceParts;
 }
 
 export function useDictation(): Record<string, { text: string | null; error: string | null }> {
@@ -2843,6 +2892,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     voiceCatalogue: null,
     voicePreviews: {},
     voiceAudio: {},
+    voiceParts: {},
     dictation: {},
     worldChatRefusals: {},
     worldChatWrapUpRefusals: {},
@@ -2997,6 +3047,26 @@ export function rejectWorldChatPoint(
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
   return sent;
+}
+
+/** Prepare or reopen a reviewed Bench session. This command never dispatches generation. */
+export function openWorldChatMedia(
+  worldId: string,
+  conversationId: string,
+  candidateId: string,
+  expectedRevision: number,
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "world-chat-open-media",
+    worldId,
+    requestId,
+    conversationId,
+    candidateId,
+    expectedCandidateRevision: expectedRevision,
+  } as ClientMessage)
+    ? requestId
+    : null;
 }
 
 /**

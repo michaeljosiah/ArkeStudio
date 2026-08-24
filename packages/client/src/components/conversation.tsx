@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import type {
   StagedProposal,
   WorldChatContext,
@@ -16,8 +17,10 @@ import {
   restoreBible,
   saveWorldChatPoint,
   openWorldChat,
+  openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  subscribeWorldChatMediaOpened,
   useStore,
   useWorldChatProgress,
   useWorldChatWrapUpRefusal,
@@ -235,6 +238,7 @@ export function ProductionConversation({
   dock?: { title: string; subject: string };
 }) {
   const { state } = useStore();
+  const navigate = useNavigate();
   const [message, setMessage] = useState("");
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
@@ -255,6 +259,9 @@ export function ProductionConversation({
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
+  const [busyMedia, setBusyMedia] = useState<string | null>(null);
+  const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
+  const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
   const wrapping = wrappingKeys.has(contextKey);
@@ -274,6 +281,9 @@ export function ProductionConversation({
   useEffect(() => {
     setMessage("");
     setOpening(null);
+    setBusyMedia(null);
+    setMediaRefusal(null);
+    mediaRequest.current = null;
   }, [contextKey]);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
@@ -281,6 +291,39 @@ export function ProductionConversation({
     return [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
   }, [state?.world?.conversations, contextKey]);
   const conversationId = thread?.id ?? null;
+
+  useEffect(
+    () =>
+      subscribeWorldChatMediaOpened((answer) => {
+        if (
+          answer.requestId !== mediaRequest.current?.requestId ||
+          answer.conversationId !== mediaRequest.current.conversationId ||
+          answer.worldId !== worldId
+        ) return;
+        mediaRequest.current = null;
+        setBusyMedia(null);
+        if (answer.sessionId) {
+          setMediaRefusal(null);
+          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+        } else {
+          setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
+        }
+      }),
+    [navigate, worldId],
+  );
+
+  const openMedia = (point: WorldChatPoint) => {
+    if (!worldId || !conversationId || !point.media) return;
+    if (point.media.sessionId) {
+      void navigate(`/w/${worldId}/artifacts/bench/${point.media.sessionId}`);
+      return;
+    }
+    const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
+    if (!requestId) return;
+    mediaRequest.current = { requestId, candidateId: point.id, conversationId };
+    setBusyMedia(point.id);
+    setMediaRefusal(null);
+  };
 
   useEffect(() => {
     if (!worldId || !conversationId) return;
@@ -425,6 +468,8 @@ export function ProductionConversation({
                   <ConversationPoints
                     points={points}
                     empty={pointsEmpty}
+                    onMedia={openMedia}
+                    busyId={busyMedia}
                     {...(worldId && conversationId
                       ? {
                           onSave: (point: WorldChatPoint) =>
@@ -434,6 +479,7 @@ export function ProductionConversation({
                         }
                       : {})}
                   />
+                  {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
                 </details>
               )}
               <WrapUp
@@ -519,6 +565,8 @@ export function ProductionConversation({
         <ConversationPoints
           points={points}
           empty={pointsEmpty}
+          onMedia={openMedia}
+          busyId={busyMedia}
           {...(worldId && conversationId
             ? {
                 onSave: (point: WorldChatPoint) =>
@@ -528,6 +576,7 @@ export function ProductionConversation({
               }
             : {})}
         />
+        {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
         {/* Every level has a wrap-up (turn 92). It was drawn on 89a from the start and built
             nowhere, which left the season — the first hop anybody walks — with no way to turn a
             conversation into anything at all. */}
@@ -813,12 +862,14 @@ export function ConversationPoints({
   empty,
   onSave,
   onReject,
+  onMedia,
   busyId,
 }: {
   points: readonly WorldChatPoint[];
   empty: string;
   onSave?: (point: WorldChatPoint) => void;
   onReject?: (point: WorldChatPoint) => void;
+  onMedia?: (point: WorldChatPoint) => void;
   busyId?: string | null;
 }) {
   const groups = groupPointsBySubject(points);
@@ -843,8 +894,22 @@ export function ConversationPoints({
           {group.items.map((point) => (
             <div key={point.id} className="fy-panel__point">
               <div className="fy-panel__pointtext">{point.text}</div>
+              {point.media && <div className="fy-panel__mediabrief">{point.media.brief}</div>}
               <div className="fy-panel__pointacts">
-                {point.settled ? (
+                {point.media ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busyId === point.id || Boolean(point.media.blockedReason)}
+                    onClick={() => onMedia?.(point)}
+                  >
+                    {busyId === point.id
+                      ? "Preparing…"
+                      : point.media.sessionId
+                        ? "Open Bench"
+                        : `Prepare ${point.media.medium}`}
+                  </Button>
+                ) : point.settled ? (
                   <Button variant="ghost" size="sm" disabled={busyId === point.id} onClick={() => onSave?.(point)}>
                     {busyId === point.id ? "Saving…" : "Save"}
                   </Button>
@@ -857,6 +922,7 @@ export function ConversationPoints({
                   </Button>
                 )}
               </div>
+              {point.media?.blockedReason && <div className="fy-panel__mediawhy">{point.media.blockedReason}</div>}
             </div>
           ))}
         </div>

@@ -4317,6 +4317,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-panel__pointacts { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 /* Why there is no Save, in the space the Save would have taken. */
 .fy-panel__pointwhy { font: 400 10px var(--font-mono); color: var(--neutral-400); padding: 0 6px; }
+.fy-panel__mediabrief { margin-top: 5px; color: var(--muted-foreground); font: 400 11px/1.55 var(--font-sans); }
+.fy-panel__mediawhy { margin-top: 5px; color: var(--muted-foreground); font: 400 10px/1.5 var(--font-mono); }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
 /* A wrap-up that was refused. Quiet like the failed turn it rhymes with: nothing was written and
    nothing was lost, so this is the app explaining itself, not raising an alarm. */
@@ -4483,6 +4485,10 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-bible__empty { font: 400 12px/1.6 var(--font-sans); color: var(--muted-foreground); margin: 0; }
 .fy-bible__empty code { font: 400 11px var(--font-mono); }
 .fy-bible__toc { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; line-height: 1.5; }
+/* A contents row that also offers to read the section aloud (2026-08-24). */
+.fy-bible__tocrow { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.fy-bible__tocname { min-width: 0; overflow-wrap: anywhere; }
+.fy-bible__tocnote { display: block; margin-top: 4px; font-size: 11.5px; color: var(--muted); }
 .fy-bible__versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .fy-bible__versions li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 @media (max-width: 1100px) {

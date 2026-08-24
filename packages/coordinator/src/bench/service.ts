@@ -27,6 +27,7 @@ import {
   type BenchReservedTake,
   type BenchSession,
   type BenchSessionSummary,
+  type BenchMode,
   type BenchTake,
   type Capability,
   type Delivery,
@@ -96,11 +97,14 @@ export async function openBenchSession(
     defaultModel?: { provider: string; model: string } | undefined;
     /** Force a new session even where others exist — the clear-the-bench gesture. */
     fresh?: boolean | undefined;
+    /** Create an exact, fresh session with these reviewed words when sessionId does not exist. */
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
   } = {},
 ): Promise<OpenedBench | null> {
   if (options.sessionId !== undefined) {
     const store = new BenchStore(sessionDir(worldDir, options.sessionId));
     const session = await store.fold();
+    if (options.initial !== undefined) return createBenchSession(store, options.sessionId, now(), options);
     return session === null ? null : { store, session };
   }
   if (options.fresh !== true) {
@@ -114,19 +118,42 @@ export async function openBenchSession(
   }
   const id = newId("sess") as SessionId;
   const store = new BenchStore(sessionDir(worldDir, id));
-  const at = now();
+  return createBenchSession(store, id, now(), options);
+}
+
+async function createBenchSession(
+  store: BenchStore,
+  id: SessionId,
+  at: string,
+  options: {
+    defaultModel?: { provider: string; model: string } | undefined;
+    initial?: { mode: Extract<BenchMode, "image" | "video">; brief: string; title?: string } | undefined;
+  },
+): Promise<OpenedBench | null> {
+  const mode = options.initial?.mode ?? "image";
   await store.create(id, at);
-  await store.append(
-    {
-      type: "composer-set",
-      mode: "image",
-      provider: options.defaultModel?.provider ?? "",
-      model: options.defaultModel?.model ?? "",
-      params: { kind: "image", count: 1 },
-      brief: "",
-    },
-    { at },
-  );
+  const initialized = new Set((await store.read()).flatMap((event) => event.requestId ? [event.requestId] : []));
+  const composerRequestId = `initial-composer:${id}`;
+  const titleRequestId = `initial-title:${id}`;
+  if (!initialized.has(composerRequestId)) {
+    await store.append(
+      {
+        type: "composer-set",
+        mode,
+        provider: options.defaultModel?.provider ?? "",
+        model: options.defaultModel?.model ?? "",
+        params: mode === "image" ? { kind: "image", count: 1 } : { kind: "video" },
+        brief: options.initial?.brief ?? "",
+      },
+      { at, requestId: composerRequestId },
+    );
+  }
+  if (options.initial?.title && !initialized.has(titleRequestId)) {
+    await store.append(
+      { type: "title-set", title: options.initial.title.slice(0, 200) },
+      { at, requestId: titleRequestId },
+    );
+  }
   const session = await store.fold();
   return session === null ? null : { store, session };
 }

@@ -139,6 +139,12 @@ import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js
  * enough for an ordinary session in one pass, short enough that nobody waits on it.
  */
 const BENCH_POSTER_BACKFILL_MS = 5_000;
+
+/** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
+function mediaSessionId(candidateId: string, revision: number): SessionId {
+  const body = createHash("sha256").update(`${candidateId}:${revision}`).digest("hex").slice(0, 26).toUpperCase();
+  return `sess_${body}` as SessionId;
+}
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
@@ -155,6 +161,7 @@ import {
 } from "./takes/review.js";
 import {
   normalizeSpeechText,
+  authoritativeBibleSpeech,
   authoritativeSheetSpeech,
   previewCacheFile,
   speechCacheFile,
@@ -277,6 +284,7 @@ import {
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
+import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
   createSheetFromSentence,
@@ -631,6 +639,124 @@ export class Coordinator {
 
   /** How many staged clips a dialog may leave behind before the oldest is dropped. */
   private static readonly MAX_STAGED_CLIPS = 8;
+  /**
+   * Narrate a passage of the world, whichever document it came from (2026-08-24).
+   *
+   * Everything from "who reads this" onward is identical for a character's Essence and for a
+   * section of the bible: the same narrator preference, the same local-versus-cloud split, the
+   * same cache probe, the same estimate-and-confirm before a paid call. Only the finding of the
+   * words differs, and that stays with each caller, because that is where the two documents are
+   * genuinely different.
+   *
+   * Extracted rather than copied when the bible gained read-aloud. Duplicating it would have
+   * meant two copies of a confirmation-token path that decides whether money is spent, and the
+   * second copy would have drifted.
+   */
+  private async narrateSection(input: {
+    store: WorldStore;
+    /** The frame that asked, for the enqueue record. */
+    frameKind: QueueCommand;
+    worldId: string;
+    requestId: string;
+    confirmationToken?: string;
+    /** Already resolved and normalised by the caller — this method never reads a document. */
+    text: string;
+    purpose: "sheet-section" | "bible-section";
+    sectionHeading: string;
+    /** What is being read, for the cache key and the queue target. `bible` for the bible. */
+    subject: { id: string; version: number };
+    /** Present only when the subject is a sheet; the bible belongs to no one in the world. */
+    sheetId?: string;
+    fail: (error: string, characters?: number) => void;
+  }): Promise<void> {
+    if (!this.voiceService) return;
+    const { store, worldId, requestId, text, purpose, sectionHeading, subject, fail } = input;
+    const identity = {
+      worldId,
+      ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
+      sheetVersion: subject.version,
+      purpose,
+      sectionHeading,
+    };
+    // Who narrates is the app's preference, not the character's. Reading prose ABOUT
+    // somebody in their own voice was the old behaviour, and it refused entirely for the
+    // many characters who have no voice assigned.
+    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+    const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
+    const narrator = narratorFor(
+      narratorSettings?.narrator ?? null,
+      await this.voiceService.catalogue(narratorVoices),
+    );
+    if (narrator.provider !== "kokoro" && narrator.provider !== "elevenlabs") {
+      fail("The narrator's voice is not available — choose another in Settings.", text.length);
+      return;
+    }
+    const speaking = { provider: narrator.provider, voiceId: narrator.voiceId };
+    if (speaking.provider === "kokoro") {
+      try {
+        /*
+         * Emit each piece as it lands rather than one clip at the end (2026-08-24).
+         *
+         * Local synthesis runs at roughly the speed of speech, so a ten-minute section is a
+         * ten-minute wait if the first word has to arrive with the last. The client queues these
+         * and starts on the first, which is the same total render with none of the silence.
+         */
+        let streamed = 0;
+        const result = await this.voiceService.localSpeech(store, speaking.voiceId, text, (piece) => {
+          // A single-piece read stays exactly what it was: one event, no part numbers.
+          if (piece.total < 2) return;
+          streamed += 1;
+          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
+            provider: "kokoro", model: "kokoro-82m", voiceId: speaking.voiceId, status: "ready",
+            file: piece.file, cached: false, characterCount: text.length, estimatedMicroUsd: 0,
+            part: piece.index, parts: piece.total } as DomainEvent);
+        });
+        // The joined clip, for a cache hit next time and for anything that wants one file. A
+        // streamed read has already been heard, so this closes it rather than announcing it.
+        if (streamed === 0) {
+          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
+            provider: "kokoro", model: "kokoro-82m", voiceId: speaking.voiceId, status: "ready",
+            file: result.file, cached: result.cached, characterCount: text.length,
+            estimatedMicroUsd: 0 } as DomainEvent);
+        }
+      } catch (error) { fail(error instanceof Error ? error.message : "Local voice failed.", text.length); }
+      return;
+    }
+    const model = this.opts.manifest?.models.find((candidate) => candidate.provider === "elevenlabs" && candidate.capability === "voice-tts");
+    if (!model) { fail("ElevenLabs voice is unavailable.", text.length); return; }
+    const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, text, format: "mp3" });
+    try {
+      const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file))));
+      const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
+      if (!mp3) throw new Error("invalid cache");
+      this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
+        provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, status: "ready",
+        file, cached: true, characterCount: text.length, estimatedMicroUsd: 0 } as DomainEvent);
+      return;
+    } catch { /* confirmation required */ }
+    const estimate = estimateMicroUsd(model, { characters: text.length });
+    const token = createHash("sha256").update(`${subject.id}\n${subject.version}\n${file}`).digest("hex");
+    const enqueued: EnqueueInput = { worldId, target: { kind: "voice-preview", id: `${subject.id}/elevenlabs/${speaking.voiceId}` },
+      capability: "voice-tts", provider: "elevenlabs", model: model.id,
+      params: { voiceId: speaking.voiceId, text, requestId, purpose,
+        ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
+        sheetVersion: subject.version, sectionHeading, characterCount: text.length },
+      estimatedMicroUsd: estimate, landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! } };
+    if (input.confirmationToken !== token) {
+      this.pendingVoiceReads.set(requestId, { token, input: enqueued });
+      this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
+        provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
+        status: "confirmation-required", file: null, cached: false, characterCount: text.length,
+        estimatedMicroUsd: estimate, confirmationToken: token } as DomainEvent);
+      return;
+    }
+    const pending = this.pendingVoiceReads.get(requestId);
+    if (!pending || pending.token !== token) { fail("The read request changed; review it again.", text.length); return; }
+    this.pendingVoiceReads.delete(requestId);
+    const queued = await this.enqueueBatch(requestId, input.frameKind, [pending.input]);
+    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", text.length);
+  }
+
   /** Session config builder with the user's agent settings folded in. */
   /** Session input plus whatever Settings currently says — read per call, never captured. */
   private readonly sessionInput: SessionInput;
@@ -2391,6 +2517,78 @@ export class Coordinator {
         // The list counts live points and orders by what is waiting, so it moves when one goes.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-open-media": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (sessionId: SessionId | null, medium: "image" | "video", reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "world-chat.media-opened",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            candidateId: msg.candidateId,
+            requestId: msg.requestId,
+            medium,
+            sessionId,
+            ...(reason ? { reason } : {}),
+          });
+        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
+        const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
+        if (!loaded || !candidate) {
+          answer(null, "image", "That media brief is no longer in this conversation.");
+          return;
+        }
+        const candidateMedium = candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
+        if (candidate.revision !== msg.expectedCandidateRevision) {
+          answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
+          await this.openWorldChat(store, msg.conversationId);
+          return;
+        }
+        if (candidate.status !== "live" || candidate.classification !== "media.image-opportunity") {
+          answer(null, candidateMedium, "That point is not an available media brief.");
+          return;
+        }
+        const medium = candidate.draft.medium;
+        const route = mediaRouteFor(candidate, msg.worldId);
+        if (route.kind === "invalid") {
+          answer(null, medium, route.reason);
+          return;
+        }
+        const bundle = store.getBundle();
+        const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+        if (blocking.length > 0) {
+          answer(null, medium, explainBlocked(blocking));
+          return;
+        }
+        const prior = loaded.mediaHandoffs[candidate.id];
+        const sessionId = prior?.candidateRevision === candidate.revision
+          ? prior.sessionId
+          : mediaSessionId(candidate.id, candidate.revision);
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        const routed = this.opts.manifest ? modelForCapability(this.opts.manifest, settings?.routing, medium) : undefined;
+        const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
+        const opened = await openBenchSession(store.dir, () => this.nowIso(), {
+          sessionId,
+          initial: { mode: medium, brief: candidate.draft.brief, title: candidate.title },
+          ...(enabled ? { defaultModel: { provider: enabled.provider, model: enabled.id } } : {}),
+        }).catch(() => null);
+        if (!opened) {
+          answer(null, medium, "The Bench could not be prepared. Try again.");
+          return;
+        }
+        if (prior?.candidateRevision !== candidate.revision) {
+          await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
+            { type: "media.handoff-created", candidateId: candidate.id, candidateRevision: candidate.revision, sessionId, medium },
+            { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
+          );
+        }
+        this.readModel.setBench({ worldId: store.worldId, session: opened.session });
+        this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        answer(sessionId, medium);
         return;
       }
       case "world-chat-wrap-up": {
@@ -5544,6 +5742,29 @@ export class Coordinator {
         }
         return;
       }
+      case "read-bible-section": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const bible = store.getBundle().bible;
+        const failBible = (error: string, characters = 0) => this.emit({
+          at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
+          worldId: msg.worldId, sheetVersion: bible.version, purpose: "bible-section",
+          sectionHeading: msg.sectionHeading, provider: "kokoro", model: "kokoro-82m",
+          voiceId: "unassigned", status: "failed", file: null, cached: false,
+          characterCount: characters, estimatedMicroUsd: 0, error,
+        } as DomainEvent);
+        if (!bible.present) { failBible("There is no bible in this world yet."); return; }
+        let bibleText: string;
+        try { bibleText = authoritativeBibleSpeech(bible.text, msg.sectionHeading).text; }
+        catch (error) { failBible(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
+        await this.narrateSection({
+          store, frameKind: msg.kind, worldId: msg.worldId, requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          text: bibleText, purpose: "bible-section", sectionHeading: msg.sectionHeading,
+          subject: { id: "bible", version: bible.version }, fail: failBible,
+        });
+        return;
+      }
       case "read-sheet-section": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
@@ -5563,65 +5784,12 @@ export class Coordinator {
         if (!sheet) { fail("The character is no longer available."); return; }
         try { resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); }
         catch (error) { fail(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
-        // Who narrates is the app's preference, not the character's. Reading prose ABOUT
-        // somebody in their own voice was the old behaviour, and it refused entirely for the
-        // many characters who have no voice assigned.
-        const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
-        const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
-        const narrator = narratorFor(
-          narratorSettings?.narrator ?? null,
-          await this.voiceService.catalogue(narratorVoices),
-        );
-        if (narrator.provider !== "kokoro" && narrator.provider !== "elevenlabs") {
-          fail("The narrator's voice is not available — choose another in Settings.");
-          return;
-        }
-        const speaking = { provider: narrator.provider, voiceId: narrator.voiceId };
-        if (speaking.provider === "kokoro") {
-          try {
-            const result = await this.voiceService.localSpeech(store, speaking.voiceId, text);
-            this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-              worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
-              sectionHeading: msg.sectionHeading, provider: "kokoro", model: "kokoro-82m",
-              voiceId: speaking.voiceId, status: "ready", file: result.file, cached: result.cached,
-              characterCount: text.length, estimatedMicroUsd: 0 });
-          } catch (error) { fail(error instanceof Error ? error.message : "Local voice failed."); }
-          return;
-        }
-        const model = this.opts.manifest?.models.find((candidate) => candidate.provider === "elevenlabs" && candidate.capability === "voice-tts");
-        if (!model) { fail("ElevenLabs voice is unavailable."); return; }
-        const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, text, format: "mp3" });
-        try {
-          const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file))));
-          const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
-          if (!mp3) throw new Error("invalid cache");
-          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
-            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
-            status: "ready", file, cached: true, characterCount: text.length, estimatedMicroUsd: 0 });
-          return;
-        } catch { /* confirmation required */ }
-        const estimate = estimateMicroUsd(model, { characters: text.length });
-        const token = createHash("sha256").update(`${sheet.id}\n${sheet.version}\n${file}`).digest("hex");
-        const input: EnqueueInput = { worldId: msg.worldId, target: { kind: "voice-preview", id: `${sheet.id}/elevenlabs/${speaking.voiceId}` },
-          capability: "voice-tts", provider: "elevenlabs", model: model.id,
-          params: { voiceId: speaking.voiceId, text, requestId: msg.requestId, purpose: "sheet-section",
-            sheetId: sheet.id, sheetVersion: sheet.version, sectionHeading: msg.sectionHeading, characterCount: text.length },
-          estimatedMicroUsd: estimate, landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! } };
-        if (msg.confirmationToken !== token) {
-          this.pendingVoiceReads.set(msg.requestId, { token, input });
-          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "sheet-section",
-            sectionHeading: msg.sectionHeading, provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
-            status: "confirmation-required", file: null, cached: false, characterCount: text.length,
-            estimatedMicroUsd: estimate, confirmationToken: token });
-          return;
-        }
-        const pending = this.pendingVoiceReads.get(msg.requestId);
-        if (!pending || pending.token !== token) { fail("The read request changed; review it again."); return; }
-        this.pendingVoiceReads.delete(msg.requestId);
-        const queued = await this.enqueueBatch(msg.requestId, msg.kind, [pending.input]);
-        if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.");
+        await this.narrateSection({
+          store, frameKind: msg.kind, worldId: msg.worldId, requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          text: resolved.text, purpose: "sheet-section", sectionHeading: msg.sectionHeading,
+          subject: { id: sheet.id, version: sheet.version }, sheetId: sheet.id, fail,
+        });
         return;
       }
       case "transcribe-dictation": {
@@ -7699,6 +7867,12 @@ export class Coordinator {
         // So the rail's count matches what wrap-up will actually carry — see ProjectOptions.
         lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
         look: { version: bundle.artDirection.version, description: bundle.artDirection.description },
+        mediaBlockedReason: (candidate) => {
+          const route = mediaRouteFor(candidate, store.worldId);
+          if (route.kind === "invalid") return route.reason;
+          const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+          return blocking.length > 0 ? explainBlocked(blocking) : null;
+        },
       }),
     );
     this.transport.broadcastSnapshot();

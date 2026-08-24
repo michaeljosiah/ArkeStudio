@@ -1,9 +1,9 @@
 import type { Proposal, WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
 
 /**
- * Taking an image idea to the place that can make it (#70 §14).
+ * Taking a media idea to the place that can make it (#70 §14).
  *
- * A conversation can notice that something wants a picture. It cannot make one, and it cannot ask
+ * A conversation can notice that something wants an image or video. It cannot make one, and it cannot ask
  * the queue for one either: World Chat never sends a queue command. What it can do is carry the
  * brief to the screen that already knows how to generate — where the routed model, the estimate
  * and the Generate button live, and where a person presses it.
@@ -20,32 +20,35 @@ export type MediaRoute =
 /**
  * Where an idea goes (§14.1).
  *
- * Only three combinations are valid, and each maps to a workflow that already exists. There is
- * deliberately no generic "replace this image" destination: replacing an image without saying
- * which image, by which workflow, is how generated media ends up somewhere nobody expected.
+ * Every supported opportunity opens the Bench, where model, references, controls and cost are
+ * reviewed before Generate. Purpose validation still prevents a generic request from claiming it
+ * will replace a particular world asset.
  */
 export function routeFor(candidate: WorldChangeCandidate, worldId: string): MediaRoute {
   if (candidate.classification !== "media.image-opportunity") {
-    return { kind: "invalid", reason: "this is not an image idea" };
+    return { kind: "invalid", reason: "this is not a media idea" };
   }
   const draft = candidate.draft as {
+    medium?: "image" | "video";
     target: { kind: string; sheetId?: string; sheetKind?: string };
-    purpose: "world-key-art" | "character-main-photo" | "character-look";
+    purpose: "world-key-art" | "character-main-photo" | "character-look" | "concept-image" | "concept-video" | "shot-video";
   };
 
   if (draft.purpose === "world-key-art") {
     return draft.target.kind === "world"
-      ? { kind: "route", path: `/w/${worldId}` }
+      ? { kind: "route", path: `/w/${worldId}/artifacts/bench` }
       : { kind: "invalid", reason: "key art belongs to the world, not to one entity" };
   }
 
-  if (draft.target.kind !== "sheet" || draft.target.sheetKind !== "character") {
-    return { kind: "invalid", reason: "this needs a character to be about" };
+  if (draft.purpose === "character-main-photo" || draft.purpose === "character-look") {
+    return draft.target.kind === "sheet" && draft.target.sheetKind === "character"
+      ? { kind: "route", path: `/w/${worldId}/artifacts/bench` }
+      : { kind: "invalid", reason: "this needs a character to be about" };
   }
-  const slug = draft.target.sheetId!;
-  return draft.purpose === "character-main-photo"
-    ? { kind: "route", path: `/w/${worldId}/cast/${slug}/main-photo` }
-    : { kind: "route", path: `/w/${worldId}/cast/${slug}/looks` };
+  if (draft.purpose === "shot-video" && draft.target.kind !== "shot") {
+    return { kind: "invalid", reason: "a shot video needs a shot to be about" };
+  }
+  return { kind: "route", path: `/w/${worldId}/artifacts/bench` };
 }
 
 export interface BlockingDependency {
@@ -70,6 +73,7 @@ export function blockingDependencies(
   candidate: WorldChangeCandidate,
   bundle: WorldBundle,
   staged: readonly Proposal[],
+  candidates: readonly WorldChangeCandidate[] = [],
 ): BlockingDependency[] {
   if (candidate.classification !== "media.image-opportunity") return [];
   const draft = candidate.draft as {
@@ -92,7 +96,10 @@ export function blockingDependencies(
     // A pending-entity reference names a proposition, not a proposal. It cannot have landed
     // unless wrap-up carried it and somebody accepted what it became.
     if (dependency.candidateId) {
-      blocking.push({ summary: "something from this conversation that has not been accepted yet" });
+      const dependencyCandidate = candidates.find((one) => one.id === dependency.candidateId);
+      if (dependencyCandidate?.status !== "accepted") {
+        blocking.push({ summary: "something from this conversation that has not been accepted yet" });
+      }
     }
   }
 
