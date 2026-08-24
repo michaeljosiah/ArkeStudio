@@ -4,6 +4,7 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ART_DIRECTION_PATH, ArtDirectionRecordSchema } from "@arke-studio/contracts";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
+import { editSheetContent } from "../../src/sheets/authoring.js";
 import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readChanges } from "../../src/world/change-writer.js";
@@ -62,6 +63,45 @@ describe("proposal lifecycle (R-1..R-4, R-16)", () => {
     const outcome = await gate.accept(proposal.id);
     assert.equal(outcome.status, "no-op");
     assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 5, "no version bumped");
+    await store.close();
+  });
+
+  /*
+   * The same emptiness, arriving as different bytes — which is how it got through.
+   *
+   * The test above stages the live file untouched, so byte equality was enough to catch it. A
+   * World Chat edit never arrives that way: `editSheetContent` rebuilds the sheet, so `updated`
+   * carries today's date, the frontmatter comes back in canonical key order, and YAML arrays that
+   * were inline on disk come back in block style. Three differences, no change — and the gate
+   * compared bytes, so it committed, cut v2, wrote a history snapshot and logged a commit over a
+   * file whose body was identical to v1. Driven 2026-08-23 on `king-s-daughter`, where a
+   * character sheet was reported saved and said exactly what it had said before.
+   */
+  it("retires an edit that differs only in what the committer stamps (R-3)", async () => {
+    const { dir, store, gate } = await openGate();
+    const sheet = store.getBundle().sheets.find((s) => s.id === "maren-kest")!;
+    const before = await readFile(join(dir, MAREN), "utf8");
+
+    const sections: Record<string, string> = {};
+    for (const section of sheet.sections) sections[section.heading] = section.body;
+    const content = editSheetContent({ sheet, sections, date: "2026-08-23" });
+    assert.notEqual(content, before, "the bytes differ — that is the whole point of this case");
+
+    const proposal = await gate.stage({
+      kind: "sheet-edit",
+      summary: "says what the sheet already says",
+      source: "world-chat:test",
+      targets: [{ path: MAREN, content }],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "no-op", "an accept that changes nothing has to say so");
+    assert.equal(store.getBundle().sheets.find((s) => s.id === "maren-kest")!.version, 5, "no version bumped");
+    assert.equal(await readFile(join(dir, MAREN), "utf8"), before, "and the file is untouched");
+    const commits = (await readChanges(join(dir, "changes.jsonl"))).filter(
+      (line) => (line as { proposalId?: string }).proposalId === proposal.id && "commitId" in line,
+    );
+    assert.deepEqual(commits, [], "no commit is logged for a change that was never made");
     await store.close();
   });
 
