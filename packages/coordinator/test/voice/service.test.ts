@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
-import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speechCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
+import { authoritativeSheetSpeech, concatWav, normalizeSpeechText, previewCacheFile, speechCacheFile, splitForSpeech, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -184,6 +184,112 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
  * The listing endpoint reads a preset table. It is not evidence that anything can be spoken, and
  * asking it was the only question being asked.
  */
+/**
+ * Measured against the real runtime on 2026-08-24, after a read-aloud of a bible section killed
+ * local voice for the whole app in front of somebody.
+ *
+ * 500 characters synthesises in about 32 seconds and leaves the engine healthy. 8,610 in one
+ * request returns 503 after sixteen seconds and leaves Kokoro permanently unavailable — every
+ * voice feature, not just that one, until the app is restarted. The guard that existed refused
+ * at 10,000, which the fatal request passed straight through.
+ */
+describe("long text is spoken in pieces, because one long request fells the engine", () => {
+  it("keeps a short passage whole — no seams where none are needed", () => {
+    assert.deepEqual(splitForSpeech("Her mother died. She was handed to her aunt."), [
+      "Her mother died. She was handed to her aunt.",
+    ]);
+  });
+
+  it("breaks at sentence ends, and keeps the terminator with its sentence", () => {
+    const text = `${"a".repeat(300)}. ${"b".repeat(300)}? ${"c".repeat(300)}!`;
+    const parts = splitForSpeech(text);
+    assert.equal(parts.length, 3);
+    assert.ok(parts[0]!.endsWith("."), "a full stop reads differently from a question mark");
+    assert.ok(parts[1]!.endsWith("?"));
+    assert.ok(parts.every((p) => p.length <= 450));
+  });
+
+  it("packs several short sentences into one piece rather than one request each", () => {
+    const parts = splitForSpeech("One. Two. Three. Four.");
+    assert.deepEqual(parts, ["One. Two. Three. Four."]);
+  });
+
+  /** Refusing to speak a long sentence is a worse answer than breathing in an odd place. */
+  it("falls back to a clause seam when a single sentence will not fit", () => {
+    const parts = splitForSpeech(`${"word ".repeat(80)}, and then ${"more ".repeat(80)}.`);
+    assert.ok(parts.length > 1);
+    assert.ok(parts.every((p) => p.length <= 450), "every piece is under the measured safe size");
+  });
+
+  it("never emits an empty piece, whatever the spacing", () => {
+    for (const text of ["   ", "A.  .  B.", ". . .", ""]) {
+      assert.ok(splitForSpeech(text).every((p) => p.trim() !== ""), `empty piece from ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("covers the real section that caused this, in pieces the engine survives", () => {
+    const parts = splitForSpeech("Sentence here. ".repeat(600));
+    assert.ok(parts.length > 15);
+    assert.ok(parts.every((p) => p.length <= 450));
+    assert.equal(parts.join(" ").replace(/\s+/g, " ").trim(), "Sentence here. ".repeat(600).trim());
+  });
+});
+
+describe("joining the pieces back into one clip", () => {
+  const wav = (samples: number[]) => {
+    const out = Buffer.alloc(44 + samples.length * 2);
+    out.write("RIFF", 0, "ascii");
+    out.writeUInt32LE(out.length - 8, 4);
+    out.write("WAVE", 8, "ascii");
+    out.write("fmt ", 12, "ascii");
+    out.writeUInt32LE(16, 16);
+    out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
+    out.writeUInt32LE(24_000, 24); out.writeUInt32LE(48_000, 28);
+    out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
+    out.write("data", 36, "ascii");
+    out.writeUInt32LE(samples.length * 2, 40);
+    samples.forEach((s, i) => out.writeInt16LE(s, 44 + i * 2));
+    return new Uint8Array(out);
+  };
+
+  it("concatenates the audio and rewrites both sizes a player reads", () => {
+    const joined = Buffer.from(concatWav([wav([1, 2]), wav([3, 4, 5])]));
+    assert.equal(joined.toString("ascii", 0, 4), "RIFF");
+    assert.equal(joined.readUInt32LE(4), joined.length - 8, "the RIFF size");
+    assert.equal(joined.readUInt32LE(40), 10, "the data size — five samples, two bytes each");
+    assert.deepEqual([0, 1, 2, 3, 4].map((i) => joined.readInt16LE(44 + i * 2)), [1, 2, 3, 4, 5]);
+  });
+
+  it("returns a single piece untouched, rather than rebuilding it", () => {
+    const one = wav([7, 8]);
+    assert.equal(concatWav([one]), one);
+  });
+
+  /**
+   * The data chunk is found, not assumed at 44: the engine may emit LIST or fact chunks, and a
+   * hard-coded offset would read those as samples and play them as noise.
+   */
+  it("finds the data chunk past an extra chunk it does not recognise", () => {
+    const base = Buffer.from(wav([9, 9]));
+    const extra = Buffer.alloc(12);
+    extra.write("LIST", 0, "ascii");
+    extra.writeUInt32LE(4, 4);
+    extra.write("INFO", 8, "ascii");
+    const withExtra = Buffer.concat([base.subarray(0, 36), extra, base.subarray(36)]);
+    withExtra.writeUInt32LE(withExtra.length - 8, 4);
+    const joined = Buffer.from(concatWav([new Uint8Array(withExtra), wav([1])]));
+    // The LIST chunk survives in the header, so `data` sits 12 bytes later than in a bare wav.
+    const dataSizeAt = 36 + 12 + 4;
+    assert.equal(joined.toString("ascii", 36 + 12, 36 + 16), "data", "the header kept the chunk it did not understand");
+    assert.equal(joined.readUInt32LE(dataSizeAt), 6, "three samples survived, not the LIST bytes");
+    assert.deepEqual([0, 1, 2].map((i) => joined.readInt16LE(36 + 20 + i * 2)), [9, 9, 1]);
+  });
+
+  it("refuses audio that is not a wav at all", () => {
+    assert.throws(() => concatWav([new Uint8Array([1, 2, 3]), wav([1])]), /invalid audio/);
+  });
+});
+
 describe("the catalogue does not offer a voice the engine cannot speak", () => {
   const service = (sidecar: ReturnType<typeof fakeSidecar>) =>
     new VoiceService({

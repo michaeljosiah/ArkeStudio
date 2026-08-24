@@ -69,6 +69,100 @@ export function normalizeSpeechText(text: string): string {
 }
 
 /**
+ * How much text the local engine is asked to speak at once (2026-08-24).
+ *
+ * Measured, not guessed. 500 characters synthesises in about 32 seconds and leaves the engine
+ * healthy; 8,610 in one request returns 503 after sixteen seconds and leaves Kokoro permanently
+ * unavailable — not just for that request, for every voice feature in the app until it is
+ * restarted. The cap this replaces was 10,000, which let the fatal request straight through.
+ *
+ * 450 sits under the largest size proven safe, with room for the sentence splitter to overshoot
+ * slightly rather than cut a clause in half.
+ */
+const LOCAL_SPEECH_CHUNK = 450;
+
+/**
+ * Break text into pieces small enough to synthesise, preferring sentence ends.
+ *
+ * A chunk boundary is audible — the engine renders each piece with its own opening and closing
+ * prosody — so they are placed where a reader would pause anyway. A sentence longer than the cap
+ * falls back to clause boundaries, then to a hard cut, because refusing to speak a long sentence
+ * would be a worse answer than breathing in an odd place.
+ */
+export function splitForSpeech(text: string, max = LOCAL_SPEECH_CHUNK): string[] {
+  const pieces: string[] = [];
+  let held = "";
+  const flush = () => {
+    if (held.trim() !== "") pieces.push(held.trim());
+    held = "";
+  };
+  // Keep the terminator with the sentence it ends: the engine reads "?" differently from ".".
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    if (sentence.length > max) {
+      flush();
+      let rest = sentence;
+      while (rest.length > max) {
+        const window = rest.slice(0, max);
+        // A comma or semicolon in the back half is a better seam than the middle of a word.
+        const seam = Math.max(window.lastIndexOf(", "), window.lastIndexOf("; "));
+        const cut = seam > max / 2 ? seam + 1 : Math.max(window.lastIndexOf(" "), max);
+        pieces.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+      }
+      held = rest;
+      continue;
+    }
+    if (held.length + sentence.length + 1 > max) flush();
+    held = held === "" ? sentence : `${held} ${sentence}`;
+  }
+  flush();
+  return pieces;
+}
+
+/**
+ * Join RIFF/WAVE buffers into one, keeping the first header and concatenating the audio.
+ *
+ * Chunked synthesis returns a complete wav per piece, and a player handed them end to end would
+ * hear the second header as a click. The `data` chunk is located rather than assumed at a fixed
+ * offset — the engine is free to include `LIST` or `fact` chunks, and a hard-coded 44 would read
+ * those as samples.
+ */
+export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
+  if (parts.length === 0) throw new Error("Nothing to join.");
+  if (parts.length === 1) return parts[0]!;
+  const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
+    const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
+    if (view.length < 12 || view.toString("ascii", 0, 4) !== "RIFF" || view.toString("ascii", 8, 12) !== "WAVE") {
+      throw new Error("Voxa returned invalid audio.");
+    }
+    let at = 12;
+    while (at + 8 <= view.length) {
+      const id = view.toString("ascii", at, at + 4);
+      const size = view.readUInt32LE(at + 4);
+      if (id === "data") {
+        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, Math.min(at + 8 + size, buf.length)) };
+      }
+      at += 8 + size + (size % 2); // chunks are word-aligned
+    }
+    throw new Error("Voxa returned invalid audio.");
+  };
+  const first = dataOf(parts[0]!);
+  const bodies = parts.map((part) => dataOf(part).data);
+  const total = bodies.reduce((sum, body) => sum + body.length, 0);
+  const out = Buffer.alloc(first.header.length + total);
+  Buffer.from(first.header).copy(out, 0);
+  let at = first.header.length;
+  for (const body of bodies) {
+    Buffer.from(body).copy(out, at);
+    at += body.length;
+  }
+  // The two sizes a player actually reads: the RIFF total and the data chunk's own length.
+  out.writeUInt32LE(out.length - 8, 4);
+  out.writeUInt32LE(total, first.header.length - 4);
+  return new Uint8Array(out);
+}
+
+/**
  * The words of a readable section — and only the words.
  *
  * It used to resolve the voice too, from `sheet.voice`, which read prose *about* a character in
@@ -254,7 +348,6 @@ export class VoiceService {
   ): Promise<{ file: string; cached: boolean }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
-    if (normalized.length > 10_000) throw new Error("This text is too long to read aloud in one request.");
     const rel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
     try {
@@ -266,8 +359,24 @@ export class VoiceService {
       /* miss → synthesise */
     }
     if (!this.deps.sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
-    const audio = await this.deps.sidecar.synthesize({ voiceId, text: normalized });
-    if (audio.length < 12 || Buffer.from(audio).toString("ascii", 0, 4) !== "RIFF") throw new Error("Voxa returned invalid audio.");
+    /*
+     * One request per chunk, in order, rather than one request for everything.
+     *
+     * A single 8,610-character request was measured returning 503 and leaving the engine
+     * unavailable for the rest of the process — so the whole app lost voice because one section
+     * of a bible was long. Sequential rather than parallel on purpose: this is one small model on
+     * the user's own machine, and several concurrent syntheses is the other way to fell it.
+     */
+    const chunks = splitForSpeech(normalized);
+    const rendered: Uint8Array[] = [];
+    for (const chunk of chunks) {
+      const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
+      if (part.length < 12 || Buffer.from(part).toString("ascii", 0, 4) !== "RIFF") {
+        throw new Error("Voxa returned invalid audio.");
+      }
+      rendered.push(part);
+    }
+    const audio = concatWav(rendered);
     await store.gateOp(async () => {
       await atomicWriteFile(abs, audio);
     });
