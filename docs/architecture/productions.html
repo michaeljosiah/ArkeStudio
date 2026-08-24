@@ -639,7 +639,7 @@ the watch. Six columns since 1747…</div>
               <td><code>productions/&lt;name&gt;/episodes/&lt;stem&gt;.json</code></td>
               <td>
                 Its place in the running order, its promise, an ordered list of its scenes, any
-                boundary-crossing link to its neighbours, and its release details.
+                link to its neighbours, and its release details.
               </td>
             </tr>
           </table>
@@ -650,19 +650,19 @@ the watch. Six columns since 1747…</div>
           Two fields that sound alike are deliberately separate: the season's <code>ending</code>
           is its own authored resolution in prose, while the per-episode ending <em>policy</em> —
           "cliffhanger" — lives among the defaults. Two facts, two fields, because one field means
-          whichever the reader assumed.
+          whichever the reader assumed. An arc is a lane across the season, naming where it is set
+          up, where it turns, and where it pays off:
         </p>
-        <p>An arc is a lane across the season, naming where it is set up, where it turns, and where it pays off:</p>
-        <div class="snip"><span class="c">an arc in season.json</span>
+<div class="snip"><span class="c">an arc in season.json</span>
 <span class="k">"arcs"</span>: [
   { <span class="k">"id"</span>: "the-tithe", <span class="k">"title"</span>: "Who has been paying",
     <span class="k">"setup"</span>: "ep_first-night", <span class="k">"turn"</span>: "ep_the-audit", <span class="k">"payoff"</span>: "ep_her-own-hand" }
 ]</div>
         <p>
-          A lane with a setup and a turn and no payoff is not stored as a problem anywhere. It is
-          worked out and said out loud when the season is drawn: <em>the arc "Who has been paying"
-          sets up and turns but never pays off.</em> Seven other things are worked out the same way
-          — a repeated hook, the same cliffhanger twice, a character in no episode, an unresolved
+          A lane with a setup and a turn and no payoff is stored nowhere as a problem. It is worked
+          out and said out loud when the season is drawn: <em>the arc "Who has been paying" sets up
+          and turns but never pays off.</em> Seven other things are worked out the same way — a
+          repeated hook, the same cliffhanger twice, a character in no episode, an unresolved
           promise, a contradiction, too many new things in one episode, an unusual spend pattern.
           Each names what it is about and the evidence it stands on, and there is deliberately no
           score of any kind: a number would hide exactly the sentence you needed.
@@ -675,7 +675,7 @@ the watch. Six columns since 1747…</div>
         </p>
 
         <h4>The episode, and the one rule to remember</h4>
-        <div class="snip"><span class="c">productions/&lt;name&gt;/episodes/the-missing-night.json</span>
+<div class="snip"><span class="c">productions/&lt;name&gt;/episodes/the-missing-night.json</span>
 {
   <span class="k">"id"</span>: "ep_the-missing-night",
   <span class="k">"version"</span>: 2,
@@ -696,13 +696,12 @@ the watch. Six columns since 1747…</div>
           scenes, one closing and one opening, rather than one scene claimed by two episodes.
         </p>
         <p>
-          The same care shows in the small things. Identity is the file name and the id, fixed at
-          creation; position is <code>order</code>, and reordering rewrites only that. Moving a
-          scene between episodes is one change touching both files together, so there is no instant
-          where a scene belongs to two episodes or to none, and deleting an episode that still
-          lists scenes refuses by name. A scene in no episode, a scene in two, or a list naming a
-          scene that does not exist are each said out loud rather than crashing anything — and each
-          holds up that episode's export until it is dealt with.
+          Identity is the file name and the id, fixed at creation; position is <code>order</code>,
+          and reordering rewrites only that. Moving a scene between episodes is one change touching
+          both files together, so there is no instant where a scene belongs to two episodes or to
+          none, and deleting an episode that still lists scenes refuses by name. A scene in no
+          episode, a scene in two, or a list naming a scene that does not exist are each said out
+          loud rather than crashing anything — and each holds up that episode's export.
         </p>
         <p>
           <code>release</code> is the episode's own delivery record — published title and
