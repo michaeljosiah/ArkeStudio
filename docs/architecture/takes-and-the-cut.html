@@ -163,8 +163,8 @@
   <b>reviews.jsonl</b>            <i>every accept and reject you have made</i>
   cut.json                  <i>audio tracks and placed clips only</i></div>
         <p class="caption">
-          Real names from the sample world, shortened in the middle. Identifiers sort by the moment
-          they were made, so a folder listing is already a history.
+          Real names from the sample world, shortened in the middle. Identifiers sort by when they
+          were made, so a folder listing is already a history.
         </p>
 
         <p>Here is one, exactly as it sits on disk.</p>
@@ -228,9 +228,8 @@
         <p>
           That buys three things. A rejected take can still explain what arrived, because nothing
           overwrote it with your opinion of it. A shot can hold several candidates <em>and</em> a
-          decision between them, rather than collapsing both into one word. And nothing that
-          assembles your film can read a status off a take and become a second answer to what the
-          film is.
+          decision between them, rather than collapsing both into one word. And nothing assembling
+          your film can read a status off a take and become a second answer to what the film is.
         </p>
 
         <h4>A whole-scene pass, and why segments are ranges</h4>
@@ -244,9 +243,8 @@
         <p>
           Cutting real files would mean choosing between two bad options. Re-encoding spends time and
           picture quality on material you may reject in ten seconds. Copying without re-encoding is
-          lossless but can only cut where the file already has a clean break, which on a six-second
-          clip can land a second from where the shot ends — and a shot that starts a second late is a
-          worse artefact than one never cut at all.
+          lossless but can only cut where the file already has a clean break — on a six-second clip,
+          sometimes a second from where the shot ends, which is a worse artefact than no cut at all.
         </p>
         <p>
           <strong>The boundaries come from the plan, not from the clip.</strong> They are the numbers
@@ -258,10 +256,10 @@
         <h4>Continuing, rather than restarting</h4>
         <p>
           A take may record that it was made by <em>extending</em> an earlier one. Arke allows one hop
-          and refuses a second, so no chain can form in which reselecting one shot invalidates a whole
-          scene's tail. Change a selection something was built on and the extending take keeps its
-          media and record, but the shot using it has its selection cleared — a visible hole, rather
-          than footage the record says no longer applies.
+          and refuses a second, so no chain forms in which reselecting one shot invalidates a scene's
+          whole tail. Change a selection something was built on and the extending take keeps its media
+          and record, but the shot using it has its selection cleared — a visible hole, rather than
+          footage the record says no longer applies.
         </p>
         <p class="note">
           <span class="pill pill--part">designed</span> The extension link is part of the file's
@@ -298,11 +296,10 @@
         <p>
           A video take may carry one advisory measurement taken the moment it landed: some providers
           return a clip claiming a normal frame rate that in fact repeats frames — nominally smooth,
-          effectively half the motion. It is deliberately powerless, because it cannot tell a
-          provider's stutter from a shot you meant to be motionless, so it never rejects, repairs or
-          hides anything. And <strong>absent means "not measured", never "measured clean"</strong>.
-          Older takes are not filled in retroactively: a take is immutable, and inventing a
-          measurement nobody took would be worse than saying nothing.
+          effectively half the motion. It is deliberately powerless, since it cannot tell a provider's
+          stutter from a shot you meant to be motionless. And <strong>absent means "not measured",
+          never "measured clean"</strong>. Older takes are not filled in retroactively: a take is
+          immutable, and inventing a measurement nobody took would be worse than saying nothing.
         </p>
       </section>
 
@@ -342,9 +339,9 @@
         </p>
         <p>
           So the scene file stays purely what you wrote, and the selections file stays a small,
-          reversible note about what is in play. Accepting a take creates no proposal and bumps no
-          scene version. How far into the footage a shot starts sits here too, and resets to zero when
-          you pick a different take: 4.2 seconds into one clip is not 4.2 seconds into another.
+          reversible note about what is in play. How far into the footage a shot starts sits here too,
+          and resets to zero when you pick a different take: 4.2 seconds into one clip is not 4.2
+          seconds into another.
         </p>
       </section>
 
@@ -381,11 +378,10 @@
           that way yet.
         </p>
         <p>
-          Keeping the history rather than only its conclusion is what makes a production explicable to
-          you later. "Which take is in the cut" is answered by the selections file; "why did I go
-          round three times on shot 12" can only be answered by a record nothing overwrote. It is also
-          why the cut needs no versions of its own — going back to an earlier cut means going back to
-          the selections that produced it.
+          Keeping the history rather than only its conclusion is what makes a production explicable
+          later. "Which take is in the cut" is answered by the selections file; "why did I go round
+          three times on shot 12" can only be answered by a record nothing overwrote. It is also why
+          the cut needs no versions of its own — an earlier cut is the selections that produced it.
         </p>
         <p>
           Accepting writes both files in one commit. Split into two writes, a crash between them would
@@ -428,17 +424,16 @@
           lets the record say so.
         </p>
         <p>
-          Second, clips you place by hand: a plate, a title card, a piece of music dropped onto the cut
-          at a window you choose. That placement is the one <em>position</em> Arke stores, which is why
+          Second, clips you place by hand: a plate, a title card, music dropped onto the cut at a
+          window you choose. That placement is the one <em>position</em> Arke stores, which is why
           placed clips sit on <strong>lanes</strong> of their own — the picture stays derived, so there
           is still exactly one answer to where a shot sits. A lane is stacking order, as in any editing
-          application: a higher lane is nearer the viewer. Sound ignores lanes, because a mix has no
-          stacking.
+          application: higher is nearer the viewer. Sound ignores lanes, because a mix has no stacking.
         </p>
         <p>
-          A placed clip only ever <em>cites</em> a file, and carries no prompt, no cost and no review,
-          because nothing about it was generated or judged. Its sound can be kept, muted, or split onto
-          the lane below. Deleting the placement removes the placement; the file stays in your world.
+          A placed clip only ever <em>cites</em> a file, and carries no prompt, cost or review, because
+          nothing about it was generated or judged. Deleting the placement removes the placement; the
+          file stays in your world.
         </p>
       </section>
 
@@ -448,8 +443,8 @@
           A music video is not cut by laying shots end to end. The song is fixed before a single frame
           exists, and every shot has a place <em>in</em> it. For those productions Arke keeps a
           <strong>spine</strong>: a master track, and a map of where each shot sits against it. One
-          file, copied nowhere else — two records of one timeline disagree eventually, and the
-          disagreement shows up as a cut that plays correctly for its maker and nobody else.
+          file, copied nowhere else — two records of one timeline disagree eventually, and that shows
+          up as a cut which plays correctly for its maker and nobody else.
         </p>
         <dl class="kv">
           <dt>the track</dt>
@@ -469,10 +464,10 @@
         </dl>
         <p>
           With a spine, Arke walks the <em>song</em> from zero to its end and asks what covers each
-          moment, rather than adding up shot lengths. Everything uncovered comes out as black. A cut
-          with eleven seconds of black in the second verse is a true statement about where the work is;
-          a cut that quietly runs eleven seconds short is not, and it is the one nobody notices until
-          the export is playing next to the song.
+          moment, rather than adding up shot lengths. Everything uncovered comes out as black. Eleven
+          seconds of black in the second verse is a true statement about where the work is; a cut that
+          quietly runs eleven seconds short is not, and nobody notices that one until the export is
+          playing next to the song.
         </p>
 
         <h4>Intended length, and measured length</h4>
@@ -523,23 +518,22 @@
         <p>
           The difference between the first two is a real decision. A review cut renders whatever there
           is, because seeing the gaps is the point of watching one. A master claims the film is
-          finished, so it is refused while a shot has no picture, while two shots claim the same
-          seconds, while a clip's length was never measured, or while a shot you wrote is anchored
-          nowhere. The refusal names its reason and arrives <em>before</em> the encode — rather than
-          after somebody has sent the file on.
+          finished, so it is refused while a shot has no picture, two shots claim the same seconds, a
+          clip's length was never measured, or a shot you wrote is anchored nowhere. The refusal names
+          its reason <em>before</em> the encode, not after somebody has sent the file on.
         </p>
         <p>
-          Gaps become <strong>slates</strong>: a black card with the shot's label and duration drawn
-          across it, in the same single encode as everything else. Placed clips are laid over the
-          picture, each confined to its own window, their sound delayed to where it was placed.
+          Gaps become <strong>slates</strong>: a black card carrying the shot's label and duration, in
+          the same single encode as everything else. Placed clips are laid over the picture, each
+          confined to its own window.
         </p>
 
         <h4>ffmpeg is a separate program, not part of Arke</h4>
         <p>
-          Everything touching video frames — encoding an export, cutting a boundary still, measuring a
-          clip — is done by handing arguments to <strong>ffmpeg</strong>, a long-standing open-source
-          tool Arke runs as a separate program. It is bundled with the packaged desktop build and
-          absent from most other ways of running the application.
+          Encoding an export, cutting a boundary still, measuring a clip — all of it is done by handing
+          arguments to <strong>ffmpeg</strong>, a long-standing open-source tool Arke runs as a separate
+          program. It ships with the packaged desktop build and is absent from most other ways of
+          running the application.
         </p>
         <p>
           So Arke works without it, and says so. Measurements are absent; the motion check is absent;
@@ -549,9 +543,9 @@
           as though it had no track at all.
         </p>
         <p>
-          The encode is written to a hidden staging file and moved into <code>exports\</code> only when
-          it finishes; cancel it and the staging file is deleted. There is never a half-rendered film
-          looking like a finished one. Exporting the whole <em>world</em> is a different act — see
+          The encode goes to a hidden staging file and moves into <code>exports\</code> only when it
+          finishes; cancel it and the stage is deleted, so there is never a half-rendered film looking
+          like a finished one. Exporting the whole <em>world</em> is a different act — see
           <a href="files-on-disk.html">files on disk</a>.
         </p>
       </section>
