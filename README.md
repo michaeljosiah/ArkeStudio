@@ -122,10 +122,12 @@ capability specs, each with its requirements, its design reasoning and its decis
 Where a spec and the code disagree, that is a bug in one of them, and the specs say plainly
 what is designed but not yet built.
 
-Two references are read off the source rather than the specs:
-[`docs/architecture.md`](docs/architecture.md) for how the code is arranged — what runs where and
-what may depend on what — and [`docs/filesystem-operations.md`](docs/filesystem-operations.md) for
-what each operation creates, replaces, appends, moves or removes.
+Two references are read off the source rather than the specs.
+[`docs/architecture/`](docs/architecture/index.html) is an illustrated guide to how Arke is built —
+the files on disk, the model behind worlds and productions, the accept gate, generation and spend,
+and the program itself — written to be readable without a background in code.
+[`docs/filesystem-operations.md`](docs/filesystem-operations.md) is the exact list of what each
+operation creates, replaces, appends, moves or removes.
 
 | | |
 |---|---|

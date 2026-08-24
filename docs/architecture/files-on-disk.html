@@ -1,0 +1,1014 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="The complete map of what Arke Studio writes to disk: Arke's home folder, one world folder in full, what each file is for, and what is safe to delete."
+    />
+    <title>Arke Studio - Files on disk</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="top">
+        <div class="eyebrow">Files on disk</div>
+        <h1>Two folders hold everything.</h1>
+        <p class="lede">
+          Arke Studio keeps nothing in a private database you cannot open. There is one folder for
+          the application and one folder per world, and between them they hold the lot. This is the
+          reference page: open your own folder, find a name you do not recognise, look it up here.
+        </p>
+        <p>
+          The first folder is Arke's home: keys, preferences, what has been spent, what has been
+          queued. The second is a world, and that is the one that matters, because it is the thing
+          you own.
+        </p>
+        <p class="note">
+          Every path here was checked against the running code and the sample world that ships with
+          the source. Where the sample world has no such file, that is not an omission — Arke never
+          creates an empty folder. One appears the first time an operation needs to put something
+          in it.
+        </p>
+      </section>
+
+      <section id="home">
+        <h2>Arke's home on your machine</h2>
+        <p>
+          One folder, in your user folder, called <code>ArkeStudio</code>. Arke creates it the first
+          time it runs and never asks you where to put it. Nothing in here is your writing. Your
+          writing is one level down, inside a world.
+        </p>
+        <p>
+          The location can be moved. Arke reads a setting called <code>ARKE_STUDIO_ROOT</code> — an
+          environment variable — and if it holds a path, that path replaces the default entirely.
+          That is how a test copy runs beside a real one, and it is how you would put Arke on a
+          second drive.
+        </p>
+
+        <div class="tree"><b>ArkeStudio\</b>                    <i>in your user folder, unless ARKE_STUDIO_ROOT says otherwise</i>
+  config.json                  <i>app config, written on first launch</i>
+  settings.json                <i>your preferences: which model goes where, the spend alert</i>
+  credentials.dat              <i>your provider keys, encrypted for your account alone</i>
+  grants.json                  <i>permissions you told Arke to remember</i>
+  ledger.jsonl                 <i>every charge, one line each, across every world</i>
+  <b>queue\</b>
+    jobs.jsonl                 <i>every generation job and each state it passed through</i>
+  <b>provider-calls\</b>
+    calls.jsonl                <i>recent calls, redacted, for when something goes wrong</i>
+  <b>logs\</b>
+    app.jsonl                  <i>faults, alerts, validation runs</i>
+    coordinator.jsonl          <i>what the engine did</i>
+    desktop.jsonl              <i>what the window did</i>
+    harness.jsonl              <i>what the assistant's adapter did; rolls over at 5 MB</i>
+  <b>run\</b>
+    children.json              <i>helper processes Arke started, so none is left orphaned</i>
+  <b>models\</b>                      <i>local runtimes and voices you chose to download</i>
+  <b>update\</b>
+    pending.json               <i>a receipt for a staged update: read once, then removed</i>
+  <b>.spool\</b>                      <i>a pasted file, on its way into a world</i>
+  <b>.genesis\</b>                    <i>a conversation about a world that does not exist yet</i>
+  <b>.art\</b>  <b>.extract\</b>             <i>scratch space for the look helper and fact extraction</i>
+  <b>.index\</b>
+    app.db                     <i>a listing cache over the logs and the worlds present</i>
+  <b>worlds\</b>
+    the-undersong\             <u>one world, one folder. this is your work</u>
+    another-world\
+  <b>archive\</b>                     <i>worlds you archived: moved whole, never deleted</i>
+  <b>exports\</b>                     <i>whole-world copies, one stamped folder each</i></div>
+
+        <h4>What each one is, and what losing it costs</h4>
+        <div class="scroller">
+          <table>
+            <tr><th>Path</th><th>What it is</th><th>If you lose it</th></tr>
+            <tr>
+              <td><code>config.json</code></td>
+              <td>App configuration, created on first launch. Never holds a key.</td>
+              <td>Nothing. Written again on the next start.</td>
+            </tr>
+            <tr>
+              <td><code>settings.json</code></td>
+              <td>Your preferences: which model handles which kind of job, the spend alert, theme, local runtime choices.</td>
+              <td>Preferences only. They go back to their defaults.</td>
+            </tr>
+            <tr>
+              <td><code>credentials.dat</code></td>
+              <td>Your provider keys, encrypted for your account. The file's permissions are reset to you alone on every write.</td>
+              <td>The keys. Paste them in again. They are never written into a world, so no export can carry them out.</td>
+            </tr>
+            <tr>
+              <td><code>grants.json</code></td>
+              <td>Permissions you told Arke to remember. Revoking marks a grant revoked; it does not erase the record that you gave it.</td>
+              <td>Arke asks you again the next time.</td>
+            </tr>
+            <tr>
+              <td><code>ledger.jsonl</code></td>
+              <td>One line per finished metered job, across every world, including the ones that failed or you cancelled.</td>
+              <td>Your spending history. The work itself is untouched.</td>
+            </tr>
+            <tr>
+              <td><code>queue/jobs.jsonl</code></td>
+              <td>Every generation job and every state it passed through. Added to, never rewritten.</td>
+              <td>The trail of what was asked for. Anything in flight loses its record.</td>
+            </tr>
+            <tr>
+              <td><code>provider-calls/calls.jsonl</code></td>
+              <td>The redacted request and reply of recent calls, so a failure can be explained. Capped: past 2,000 records or 50 MB the oldest go. Restricted to your account.</td>
+              <td>Nothing but the ability to diagnose a recent failure.</td>
+            </tr>
+            <tr>
+              <td><code>logs/</code></td>
+              <td>Four running logs, added to a line at a time.</td>
+              <td>Nothing.</td>
+            </tr>
+            <tr>
+              <td><code>run/children.json</code></td>
+              <td>Which helper processes Arke started, so a crash cannot leave one running forever.</td>
+              <td>Nothing. A stale one is swept at the next start.</td>
+            </tr>
+            <tr>
+              <td><code>models/</code></td>
+              <td>Local runtimes and voices you chose to download. A download lands under a temporary name and only takes its real name once it is whole and checked.</td>
+              <td>Disk space and a re-download.</td>
+            </tr>
+            <tr>
+              <td><code>update/pending.json</code></td>
+              <td>A receipt saying an update is staged and whether it lands on restart or on close. The next start reads it, acts, and removes it.</td>
+              <td>Nothing. The update is offered again.</td>
+            </tr>
+            <tr>
+              <td><code>.spool/</code></td>
+              <td>A file pasted from the clipboard, given a real name so the ordinary filing path can take it. Swept at the next start.</td>
+              <td>Nothing.</td>
+            </tr>
+            <tr>
+              <td><code>.index/app.db</code></td>
+              <td>A search and listing cache built from the logs and the worlds present. Its database may leave two small companion files beside it.</td>
+              <td>Nothing. Deleting it is a supported thing to do; the next start rebuilds it.</td>
+            </tr>
+            <tr>
+              <td><code>worlds/</code></td>
+              <td>Your work. One folder per world.</td>
+              <td><span class="pill pill--no">Everything</span></td>
+            </tr>
+            <tr>
+              <td><code>archive/</code></td>
+              <td>Worlds you archived. Archiving closes the world and moves the whole folder here — it is a rename, not a delete.</td>
+              <td><span class="pill pill--no">Everything in them</span></td>
+            </tr>
+            <tr>
+              <td><code>exports/</code></td>
+              <td>Whole-world copies you asked for, one time-stamped folder each.</td>
+              <td>Copies only. The originals are untouched.</td>
+            </tr>
+            <tr>
+              <td><code>.genesis/</code> <code>.art/</code> <code>.extract/</code></td>
+              <td>Scratch space: a conversation about a world that does not exist yet, the art-direction helper, and fact extraction from a document.</td>
+              <td>Nothing. A genesis sandbox is removed once the world is begun; the other two are not yet swept automatically.</td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="world">
+        <h2>One world, in full</h2>
+        <p>
+          Below is the sample world that ships with the source, with the folders Arke creates later
+          shown in their places. A world made a moment ago contains three things — its own record,
+          its change log, and the look if you chose one while making it. Everything else here
+          arrives the first time you do something that needs it.
+        </p>
+
+        <div class="tree"><b>the-undersong\</b>
+  world.json                   <i>name, logline, tone, genre, and the canon revision number</i>
+  bible.md                     <i>your own prose about the world</i>
+  world-art.png                <i>the master look every generated image inherits</i>
+  <b>art-direction\</b>
+    art-direction.json         <i>the look in words, plus every look it has had before</i>
+  <b>canon\</b>                       <i>what is true: one file per statement</i>
+    CANON-001.md  CANON-002.md  CANON-044.md  ...  CANON-071.md
+  <b>characters\</b>                  <i>one file per character</i>
+    maren-kest.md  bray-half-hitch.md  the-chorister.md  perrin-tallow.md
+  <b>locations\</b>
+    the-vigil.md  the-saltmarket.md  the-drowned-chapel.md  widows-walk.md
+  <b>factions\</b>
+    the-ebb-council.md
+  <b>references\</b>                  <i>the picture kits that keep a face looking like itself</i>
+    reviews.jsonl              <i>every reference accept and reject, one line each</i>
+    <b>maren-kest\</b>
+      kit.json                 <i>which tiles exist, which are locked, what made them</i>
+      head-front.png  head-left-three-quarter.png  body-full.png
+      model-sheet-v4.png       <i>the one composite sent with every generation</i>
+      model-sheet-v4-pitch.png
+    <b>the-chorister\</b>  <b>the-vigil\</b>  <b>the-saltmarket\</b>  <b>bray-half-hitch\</b>
+  <b>artifacts\</b>                   <i>files you brought in, and a card beside each one</i>
+    harbour-bells.wav          harbour-bells.wav.json
+    undersong-treatment.pdf    undersong-treatment.pdf.json
+    board-v2.png               board-v2.png.json
+  <b>voices\</b>
+    voices.json                <i>voices you cloned, once you have cloned any</i>
+  <b>productions\</b>                 <i>the things you make from the world</i>
+    saltlight\                 <i>a film</i>
+    the-ledger-of-nights\      <i>a novel</i>
+  <b>series\</b>                      <i>one thin record per series, for episodic work</i>
+  <b>exports\</b>                     <i>finished renders</i>
+  changes.jsonl                <i>every accepted change, one line each, oldest first</i>
+  world.lock                   <i>present only while the world is open</i>
+  <u>.history\</u>                    <i>a full copy of every version ever accepted</i>
+  <u>.proposals\</u>                  <i>changes waiting for you to accept or discard</i>
+  <u>.conversations\</u>              <i>your chats with Arke about this world</i>
+  <u>.sessions\</u>                   <i>bench sessions: the same kind of working history</i>
+  <u>.commit\</u>                     <i>one change in flight; empty the rest of the time</i>
+  <u>.index\</u>                      <i>the search cache and the last-seen file list</i>
+  <u>.cache\</u>  <u>.staging\</u>  <u>incoming\</u>   <i>working space for things being made right now</i></div>
+        <p class="caption">
+          Everything above the dotted names is your work, in a form you could have typed yourself.
+          The dotted names are Arke's bookkeeping.
+        </p>
+      </section>
+
+      <section id="record">
+        <h2>The world's own record, the bible, and the look</h2>
+
+        <h4>world.json</h4>
+        <p>
+          The world's identity and its two counters. <code>canonRevision</code> is a clock that ticks
+          once every time a canon change is accepted, so any file can say which state of the world it
+          was made against. <code>nextCanonId</code> is the next number to hand out.
+        </p>
+        <div class="snip"><span class="c">the-undersong/world.json</span>
+{
+  <span class="k">"worldId"</span>: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+  <span class="k">"slug"</span>: "the-undersong",
+  <span class="k">"name"</span>: "The Undersong",
+  <span class="k">"logline"</span>: "A drowned god still sings beneath the harbour.",
+  <span class="k">"tone"</span>: "quiet dread",
+  <span class="k">"genre"</span>: "coastal fantasy",
+  <span class="k">"canonRevision"</span>: 104,
+  <span class="k">"nextCanonId"</span>: 72
+}</div>
+
+        <h4>bible.md</h4>
+        <p>
+          Your own prose about the world, and the one file the product invites you to open in a text
+          editor. Save it while Arke is running and it quietly takes the new text. Every save cuts a
+          version and keeps the outgoing text, so an edit nobody wanted is one restore away. A world
+          without a bible is ordinary, not broken.
+        </p>
+        <div class="snip"><span class="c">the-undersong/bible.md</span>
+---
+version: 7
+updated: "2026-08-07"
+---
+
+The harbour was here before the town and will be here after it. Everything
+the town believes about the water it learned from people who drowned...</div>
+
+        <h4>world-art.png and art-direction/</h4>
+        <p>
+          The look is one image and one description. The image is the master look every generated
+          picture inherits; the description is the sentence a model is actually given. The record
+          keeps every earlier version beside the current one. Covered in
+          <a href="the-world.html">the world</a>.
+        </p>
+        <div class="snip"><span class="c">the-undersong/art-direction/art-direction.json</span>
+{
+  <span class="k">"version"</span>: 3,
+  <span class="k">"description"</span>: "Painterly, tidal, restrained. Weathered maritime realism,
+                    visible brushwork, slate and sea-glass colour...",
+  <span class="k">"masterLook"</span>: "world-art.png",
+  <span class="k">"acceptedAt"</span>: "2026-07-18T10:00:00Z",
+  <span class="k">"history"</span>: [
+    { <span class="k">"version"</span>: 1, <span class="k">"description"</span>: "First world image", ... },
+    { <span class="k">"version"</span>: 2, <span class="k">"description"</span>: "Cold-water realism", ... }
+  ]
+}</div>
+      </section>
+
+      <section id="writing">
+        <h2>Canon, and the three kinds of sheet</h2>
+        <p>
+          <code>canon/</code> holds what is true about the world: one file per statement, numbered,
+          never renumbered. The header carries the few facts a computer needs — what it links to,
+          which revision introduced it, which revisions amended it — and everything below is
+          ordinary prose.
+        </p>
+        <div class="snip"><span class="c">the-undersong/canon/CANON-044.md</span>
+---
+id: CANON-044
+type: thread
+title: Who taught the Chorister?
+status: open
+introducedAt: 41
+amendedAt: 71
+links: [the-chorister, maren-kest, CANON-001, CANON-051, CANON-052]
+---
+
+The Chorister knows Maren's true note, and true notes are taught, not
+overheard. Nobody has settled who taught them, or when, or what was paid
+for the lesson...</div>
+        <p>
+          <code>characters/</code>, <code>locations/</code> and <code>factions/</code> are the same
+          shape as each other: one Markdown file per thing, a header of facts, prose underneath. The
+          version number in the header is the sheet's own and rises by one every time you accept a
+          change to it. See <a href="the-world.html">the world</a> for what each section is for.
+        </p>
+        <div class="snip"><span class="c">the-undersong/characters/maren-kest.md</span>
+---
+id: maren-kest
+type: character
+name: Maren Kest
+role: Tide-caller
+billing: lead
+version: 5
+status: locked
+voice: { provider: elevenlabs, voiceId: v_8Kq2, label: Low tide }
+canonRules: [CANON-002, CANON-058]
+links: [bray-half-hitch, the-chorister]
+---
+
+## Essence
+Tide-caller. She hears the verse under the harbour and pulls the water
+where it needs to go. She has paid for it: her left ear is done...</div>
+      </section>
+
+      <section id="pictures">
+        <h2>Reference kits, and artifacts</h2>
+        <p>
+          A reference kit is the pile of pictures that keeps a character recognisable across
+          hundreds of generations. Each sheet gets a folder: the tiles, a record of which tile is
+          locked and what made it, and the compiled sheet that travels with a generation request.
+          Covered in <a href="the-world.html">the world</a>.
+        </p>
+        <div class="snip"><span class="c">the-undersong/references/maren-kest/kit.json</span>
+{
+  <span class="k">"sheetId"</span>: "maren-kest",
+  <span class="k">"anchor"</span>: "head-front.png",
+  <span class="k">"tiles"</span>: [
+    { <span class="k">"angle"</span>: "head-front", <span class="k">"status"</span>: "locked",    <span class="k">"file"</span>: "head-front.png" },
+    { <span class="k">"angle"</span>: "body-full",  <span class="k">"status"</span>: "generated", <span class="k">"file"</span>: "body-full.png" },
+    { <span class="k">"angle"</span>: "head-profile", <span class="k">"status"</span>: "empty" }
+  ],
+  <span class="k">"compilations"</span>: [
+    { <span class="k">"file"</span>: "model-sheet-v4.png", <span class="k">"format"</span>: "character-sheet",
+      <span class="k">"sheetVersion"</span>: 4, <span class="k">"accepted"</span>: true }
+  ],
+  <span class="k">"designatedCompilation"</span>: "model-sheet-v4.png"
+}</div>
+        <p>
+          <code>artifacts/</code> holds files you brought in — a sound, a photograph, a treatment as
+          a document. The file keeps the name you recognise, and beside it sits a small card of the
+          same name with <code>.json</code> on the end: where it came from, what it is, what it is
+          linked to. Filing copies your file; the original on your desk is never touched or moved.
+        </p>
+        <div class="snip"><span class="c">the-undersong/artifacts/harbour-bells.wav.json</span>
+{
+  <span class="k">"id"</span>: "ar_01J8G0000000000000000000R1",
+  <span class="k">"kind"</span>: "audio",
+  <span class="k">"file"</span>: "harbour-bells.wav",
+  <span class="k">"hash"</span>: "sha256:6a1e02b9c44d7f31",
+  <span class="k">"origin"</span>: { <span class="k">"by"</span>: "user" },
+  <span class="k">"links"</span>: ["the-vigil", "CANON-001"],
+  <span class="k">"created"</span>: "2026-06-11T10:00:00Z"
+}</div>
+        <p class="caption">
+          The card names a file, never a path — which is one of the two reasons a world folder can be
+          moved anywhere and still work.
+        </p>
+      </section>
+
+      <section id="productions">
+        <h2>Inside a production</h2>
+        <p>
+          A production is a thing you make from the world: a film, a novel, a series. Making one
+          creates a single file. Nothing is pre-built — no empty scenes folder, no take directories,
+          no copies of your sheets. <a href="productions.html">Productions</a> covers the working
+          shape; <a href="takes-and-the-cut.html">takes and the cut</a> covers what happens once
+          pictures start arriving.
+        </p>
+
+        <div class="tree"><b>productions\saltlight\</b>
+  production.json              <i>title, format, status: the only file made at creation</i>
+  story.json                   <i>the spine and the acts, as structure</i>
+  story.md                     <i>the treatment, as prose</i>
+  routing.json                 <i>which model this production sends its work to</i>
+  spine.json                   <i>the beat map, once one has been drawn</i>
+  <b>scenes\</b>
+    02-the-tables-say-neap.json  <i>the scene, and every shot inside it</i>
+    04-the-verse-rises.json
+    06-slack-water.json
+  <b>chapters\</b>                    <i>prose productions use these instead of scenes</i>
+    01-neap.md  02-the-same-ink.md  03-nothing-wrong-with-it.md
+  <b>takes\</b>
+    <b>tk_01J8A0000000000000000000A1\</b>
+      take.json                <i>what was asked, what it cost, what it was made against</i>
+      frame.png                <i>the media itself</i>
+    <b>tk_01J8F0000000000000000000B2\</b>
+  selections.json              <i>which take is the chosen one, per shot</i>
+  reviews.jsonl                <i>every accept and reject, with the reason</i>
+  cut.json                     <i>the audio tracks and where they sit</i>
+  <b>boards\</b>
+    scene-2.png                <i>a compiled board for one scene</i>
+  <b>storyboards\</b>                 <i>panels drawn for those boards</i>
+  <b>audio\</b>                       <i>generated dialogue</i>
+  <b>incoming\</b>                    <i>media that has landed but is not yet a take</i>
+  season.json                  <i>episode order, for an episodic production</i>
+  <b>episodes\</b>
+    01-neap.json               <i>one file per episode</i></div>
+
+        <p>
+          A scene holds its shots inside it. There are no separate shot files, which is why
+          reordering shots never moves anything on disk.
+        </p>
+        <div class="snip"><span class="c">productions/saltlight/scenes/02-the-tables-say-neap.json</span>
+{
+  <span class="k">"id"</span>: "sc_02", <span class="k">"number"</span>: 2, <span class="k">"title"</span>: "The tables say neap",
+  <span class="k">"status"</span>: "accepted", <span class="k">"version"</span>: 3,
+  <span class="k">"inherits"</span>: { <span class="k">"location"</span>: "the-vigil", <span class="k">"timeOfDay"</span>: "dusk" },
+  <span class="k">"shots"</span>: [
+    {
+      <span class="k">"id"</span>: "sh_06", <span class="k">"number"</span>: 6, <span class="k">"title"</span>: "The waterline disagrees",
+      <span class="k">"description"</span>: "From the rail, the marker post at the harbour mouth.
+                      The tide is a hand-span above where the tables put it.",
+      <span class="k">"camera"</span>: "MS - slow push-in",
+      <span class="k">"audio"</span>: { <span class="k">"kind"</span>: "sfx", <span class="k">"line"</span>: "water against stone, too high" },
+      <span class="k">"durationSec"</span>: 6
+    }
+  ]
+}</div>
+
+        <p>
+          A take is one attempt at one shot. The media sits in the take's own folder, and beside it
+          a record of what produced it — including which canon revision and which sheet versions it
+          was made against, so an old take can always explain itself.
+        </p>
+        <div class="snip"><span class="c">productions/saltlight/takes/tk_01J8A0000000000000000000A1/take.json</span>
+{
+  <span class="k">"id"</span>: "tk_01J8A0000000000000000000A1",
+  <span class="k">"coversShots"</span>: ["sh_12"],
+  <span class="k">"kind"</span>: "frame",
+  <span class="k">"provider"</span>: "fal",  <span class="k">"model"</span>: "flux-pro-1.1",
+  <span class="k">"provenance"</span>: { <span class="k">"canonRevision"</span>: 41,
+                   <span class="k">"sheets"</span>: { "maren-kest": 4, "the-vigil": 2 } },
+  <span class="k">"prompt"</span>: "Maren Kest at the black stone rail of the Vigil at night...",
+  <span class="k">"references"</span>: ["references/maren-kest/model-sheet-v4.png"],
+  <span class="k">"cost"</span>: { <span class="k">"estimatedMicroUsd"</span>: 40000, <span class="k">"actualMicroUsd"</span>: 38000 },
+  <span class="k">"media"</span>: "frame.png"
+}</div>
+
+        <p>
+          Choosing between takes writes two files and never touches the takes.
+          <code>selections.json</code> is the small answer — which take won, per shot.
+          <code>reviews.jsonl</code> is the durable record of every decision, including the ones you
+          reversed.
+        </p>
+        <div class="snip"><span class="c">productions/saltlight/selections.json</span>
+{
+  <span class="k">"sh_12"</span>: {
+    <span class="k">"acceptedTakeId"</span>: "tk_01J8F0000000000000000000B2",
+    <span class="k">"startFrameTakeId"</span>: "tk_01J8A0000000000000000000A1"
+  }
+}</div>
+        <div class="snip"><span class="c">productions/saltlight/reviews.jsonl</span>
+{"ts":"2026-07-30T13:58:02Z","takeId":"tk_...C3","shotId":"sh_12","decision":"reject",
+ "by":"user","citation":{"sheet":"maren-kest","field":"appearance",
+ "note":"coat drifted off-sheet"}}
+{"ts":"2026-07-30T14:04:11Z","takeId":"tk_...B2","shotId":"sh_12","decision":"accept",
+ "by":"user"}</div>
+        <p class="caption">
+          Wrapped here to fit the page. On disk each record is one line.
+        </p>
+
+        <p>
+          <code>cut.json</code> holds only the sound: the audio tracks and where they sit, plus any
+          clip you placed by hand. The picture order is not stored, because the scenes and
+          <code>selections.json</code> already answer it — storing it again would give two answers
+          to one question.
+        </p>
+        <div class="snip"><span class="c">productions/saltlight/cut.json</span>
+{
+  <span class="k">"audio"</span>: [ { <span class="k">"kind"</span>: "score", <span class="k">"label"</span>: "Underscore", <span class="k">"entries"</span>: [ ... ] } ],
+  <span class="k">"overlays"</span>: []
+}</div>
+
+        <p class="note">
+          Finished renders do not land inside the production. They go to <code>exports/</code> at the
+          top of the world, next to <code>productions/</code>, and are encoded somewhere temporary
+          first — so a cancelled or failed render leaves nothing that looks like a finished film.
+        </p>
+      </section>
+
+      <section id="log">
+        <h2>changes.jsonl: what happened, in order</h2>
+        <p>
+          One line per accepted change, oldest first, for the life of the world: what changed, from
+          which version to which, which fields moved, where it came from, and what the canon
+          revision stood at afterwards. Nothing ever edits an earlier line.
+        </p>
+        <div class="snip"><span class="c">the-undersong/changes.jsonl</span>
+{"ts":"2026-07-12T11:30:00Z","entity":"canon/CANON-044","fromVersion":null,
+ "toVersion":41,"fieldsChanged":["body"],"source":"chat:sess_3aa",
+ "canonRevisionAfter":41}
+{"ts":"2026-07-14T09:00:00Z","entity":"characters/maren-kest","fromVersion":3,
+ "toVersion":4,"fieldsChanged":["appearance","voice-written"],
+ "source":"chat:sess_9f2","canonRevisionAfter":41,"proposalId":"pr_...P0"}</div>
+        <p class="caption">
+          Wrapped to fit. On disk each record is one line. The sample world has 104 of them.
+        </p>
+      </section>
+
+      <section id="dot">
+        <h2>The folders that begin with a dot, and the lock</h2>
+        <p>
+          Arke's own bookkeeping. Nothing in them is hidden from you, and two of them are not caches
+          at all.
+        </p>
+        <dl class="kv">
+          <dt>.history/</dt>
+          <dd>
+            A complete copy of every version ever accepted — not a patch, the whole file. The
+            version record, and <strong>not</strong> derived: deleting it loses history nothing can
+            rebuild. A whole-world export includes it deliberately.
+          </dd>
+          <dt>.proposals/</dt>
+          <dd>
+            Changes waiting for you. One folder per proposal, holding the complete proposed files
+            rather than a description of edits. Accepting removes the folder; discarding removes it
+            too and writes a line saying so. See <a href="the-accept-gate.html">the accept gate</a>.
+          </dd>
+          <dt>.conversations/</dt>
+          <dd>
+            Your chats with Arke about this world: one folder each, holding the conversation's own
+            record and every event in it, a line at a time. See <a href="the-assistant.html">the assistant</a>.
+          </dd>
+          <dt>.sessions/</dt>
+          <dd>Bench sessions — working history of the same kind, kept beside conversations.</dd>
+          <dt>.commit/</dt>
+          <dd>
+            One change part-way through being written; empty the rest of the time. Opening the world
+            finishes or undoes whatever it finds here before anything reads.
+          </dd>
+          <dt>.index/</dt>
+          <dd>
+            The search cache, plus a list of what every file looked like when Arke last had the
+            world open. Pure cache: the next open rebuilds it from the real files.
+          </dd>
+          <dt>.cache/</dt>
+          <dd>Voice previews, video being encoded, working copies. Rebuilt on demand.</dd>
+          <dt>.staging/</dt>
+          <dd>Where a generated file lands and is checked before it is allowed into the world.</dd>
+          <dt>incoming/</dt>
+          <dd>Candidates waiting on your decision, such as a proposed world image.</dd>
+          <dt>world.lock</dt>
+          <dd>
+            Present only while the world is open, so a second copy of Arke cannot write to the same
+            world at once. It names the process holding it and refreshes while open; a lock left by
+            a crash is reclaimed rather than locking you out of your own work. It holds no machine
+            name.
+          </dd>
+        </dl>
+
+        <h4>What .history/ looks like</h4>
+        <div class="tree"><b>.history\</b>
+  <b>characters\maren-kest\</b>       <i>v1.md  v2.md  v3.md  v4.md  v5.md</i>
+  <b>canon\CANON-044\</b>             <i>v41.md  v57.md  v64.md  v71.md</i>
+  <b>bible\</b>                       <i>v1.md  v2.md  ...</i>
+  <b>art-direction\</b>               <i>v1.json  v2.json  v3.json</i>
+  <b>productions\saltlight\</b>
+    <b>scenes\02-the-tables-say-neap\</b>  <i>v1.json  v2.json  v3.json</i>
+    <b>chapters\01-neap\</b>               <i>v1.md  v2.md</i>
+    <b>story\</b>                          <i>v1.json ... v4.json</i></div>
+        <p class="caption">
+          Sheets and chapters count their own versions. Canon snapshots take the world's canon
+          revision of the moment — which is why CANON-044's history jumps from 41 to 71.
+        </p>
+
+        <h4>What one proposal looks like</h4>
+        <div class="tree"><b>.proposals\pr_01J8H0000000000000000000P1\</b>
+  proposal.json                <i>what is changing, and what it was drafted against</i>
+  ripple.json                  <i>what else this touches, worked out before you decide</i>
+  <b>characters\</b>
+    maren-kest.md              <i>the complete proposed file, not a list of edits</i>
+  <b>_base\characters\</b>
+    maren-kest.md              <i>the live file as it stood when drafting began</i>
+  opencode.json                <i>only when an assistant session drafted it</i></div>
+        <div class="snip"><span class="c">.proposals/pr_.../proposal.json</span>
+{
+  <span class="k">"id"</span>: "pr_01J8H0000000000000000000P1",
+  <span class="k">"kind"</span>: "sheet-edit",
+  <span class="k">"summary"</span>: "Maren pays for scene four - her left ear is gone,
+              and the sheet should say so",
+  <span class="k">"targets"</span>: [ { <span class="k">"path"</span>: "characters/maren-kest.md",
+                <span class="k">"baseVersion"</span>: 4, <span class="k">"baseHash"</span>: "sha256:9f2c66a1b0e4d8c2f7a31d5e" } ],
+  <span class="k">"baseCanonRevision"</span>: 42,
+  <span class="k">"source"</span>: "chat:sess_9f2"
+}</div>
+        <p class="caption">
+          The sample world keeps two proposals but no <code>_base</code> copies; a proposal Arke
+          stages itself writes them for every target that already exists.
+        </p>
+      </section>
+
+      <section id="kinds">
+        <h2>Three kinds of file, and why each is used where it is</h2>
+        <div class="scroller">
+          <table>
+            <tr><th>Kind</th><th>Used for</th><th>Why that kind</th></tr>
+            <tr>
+              <td><strong>Markdown with a header</strong><br /><code>.md</code></td>
+              <td>Characters, locations, factions, canon entries, chapters, your bible.</td>
+              <td>
+                The prose is the point, and prose should be readable. The header at the top holds the
+                few facts a computer needs — a name, a version number, what it links to — and the
+                rest of the file is just writing.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Structured data</strong><br /><code>.json</code></td>
+              <td>
+                The world's own record, productions, scenes, takes, the look, the picture kits, the
+                cards beside artifacts.
+              </td>
+              <td>
+                Structure with no prose in it. Still plain text you can read, still editable by hand
+                if you must, but nothing here is meant to be read as writing.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>One line per event</strong><br /><code>.jsonl</code></td>
+              <td>
+                The change log, the spend ledger, the job log, review decisions, conversation events.
+              </td>
+              <td>
+                Things that only ever get added to. See below.
+              </td>
+            </tr>
+          </table>
+        </div>
+        <p>
+          The third kind deserves a proper explanation, because it is why a crash here is boring. A
+          file of this kind is only ever appended to. Nothing rewrites an earlier line, nothing
+          renumbers, nothing compacts in place. So the worst an interrupted write can do is leave
+          the last line half-finished — it cannot reach back and damage the history above it.
+        </p>
+        <p>
+          And a half-finished last line is tolerated rather than fatal. Reading discards a truncated
+          final line and keeps everything before it. The next write finishes the broken line off
+          with a line break before adding anything new, so the ruined record can never be merged
+          into the next valid one. Losing the last line is the entire cost.
+        </p>
+      </section>
+
+      <section id="delete">
+        <h2>What is safe to delete</h2>
+        <p>
+          Everything derived rebuilds. Nothing you authored lives only in a cache. The rule Arke
+          holds itself to is that deleting any of the green rows below costs you a rebuild and
+          nothing else.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>Path</th><th>Safe?</th><th>What happens</th></tr>
+            <tr>
+              <td><code>&lt;world&gt;/.index/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>The search cache and the last-seen file list. The next open rebuilds both from the real files. There are tests whose whole job is proving this.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/.index/app.db</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>The cross-world listing cache. Rebuilt at the next start from the logs and the worlds present.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.cache/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>Voice previews and encoding scratch. Made again on demand.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.staging/</code></td>
+              <td><span class="pill pill--yes">Safe</span> when closed</td>
+              <td>Generated files being checked. Deleting it mid-generation loses that generation, nothing more.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/logs/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>Diagnostics only. You lose the ability to explain something that already happened.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/provider-calls/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>Same: recent call records, kept for diagnosis. Arke already drops the oldest itself.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/.spool/</code> <code>.genesis/</code> <code>.art/</code> <code>.extract/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>Scratch space. Arke sweeps the spool and finished genesis sandboxes itself.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/models/</code></td>
+              <td><span class="pill pill--yes">Safe</span></td>
+              <td>Downloaded runtimes and voices. You lose disk space and have to download again.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/world.lock</code></td>
+              <td><span class="pill pill--part">Only when closed</span></td>
+              <td>Deleting it while the world is open removes the thing stopping a second copy of Arke from writing over the first. When Arke is not running it is already gone.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.commit/</code></td>
+              <td><span class="pill pill--part">Only when closed</span></td>
+              <td>If a change was interrupted, this is what finishes or undoes it. Delete it after a crash and you may leave a change half-landed.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.history/</code></td>
+              <td><span class="pill pill--no">Not safe</span></td>
+              <td>The version record. Not derived, not rebuildable. Delete it and every earlier version of every sheet, canon entry, scene and chapter is gone.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/changes.jsonl</code></td>
+              <td><span class="pill pill--no">Not safe</span></td>
+              <td>The account of what happened and when. Nothing else holds it.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.proposals/</code></td>
+              <td><span class="pill pill--no">Not safe</span></td>
+              <td>Work drafted and not yet accepted. It exists nowhere else.</td>
+            </tr>
+            <tr>
+              <td><code>&lt;world&gt;/.conversations/</code></td>
+              <td><span class="pill pill--no">Not safe</span></td>
+              <td>Your chats about the world. Kept when a world is archived; not carried by an export.</td>
+            </tr>
+            <tr>
+              <td>Anything else in a world</td>
+              <td><span class="pill pill--no">Not safe</span></td>
+              <td>It is your work. There is no second copy.</td>
+            </tr>
+            <tr>
+              <td><code>ArkeStudio/ledger.jsonl</code>, <code>queue/jobs.jsonl</code></td>
+              <td><span class="pill pill--part">Costs the record</span></td>
+              <td>No world depends on them, so nothing breaks — but your spending history and job history are not written down anywhere else.</td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="never">
+        <h2>What is never written into a world</h2>
+        <h3>No keys</h3>
+        <p>
+          Provider keys live in one encrypted file in Arke's home folder — never in a world. The
+          store that holds them sits outside every world precisely so no export can carry one out.
+          Send someone a world folder and you have sent them no credentials.
+        </p>
+        <h3>No absolute paths</h3>
+        <p>
+          Nothing inside a world names a location on your machine. An artifact card names a file,
+          not a path. A take names a reference by its place within the world. Where a path does
+          appear inside a file it is written with forward slashes, whatever machine wrote it.
+        </p>
+        <p>
+          This is what makes a world portable: copy the folder to a memory stick, open it on a
+          different computer with a different user name and a different drive letter, and every
+          sheet, canon entry, take, version and link still resolves. A test opens a world, changes
+          something, then walks every text file in it looking for anything that reads as an absolute
+          path, and fails if it finds one.
+        </p>
+      </section>
+
+      <section id="safely">
+        <h2>How a file is written safely</h2>
+        <p>
+          A reader must never see half a file. So Arke never writes over a file in place.
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>Write it alongside, under a temporary name</h3>
+            <p>The new content goes to a fresh file in the same folder, under a name nothing reads.</p>
+          </li>
+          <li>
+            <h3>Push it all the way to the disk</h3>
+            <p>
+              Flushed, not merely handed to the operating system. Pulling the plug at this moment
+              costs you the temporary file and nothing else.
+            </p>
+          </li>
+          <li>
+            <h3>Rename it over the target</h3>
+            <p>
+              A rename is the one thing the filesystem does completely or not at all. After it the
+              file is wholly new; before it, wholly old. There is no in-between for a reader to
+              catch, and a failed rename cleans up the temporary file and leaves the old one alone.
+            </p>
+          </li>
+          <li>
+            <h3>Try again if something is holding the file</h3>
+            <p>
+              Antivirus and the search indexer briefly hold files in a user folder, and a rename onto
+              a held file fails for a moment and then works. Arke retries with a short backoff rather
+              than reporting a failure that was never real.
+            </p>
+          </li>
+        </ol>
+        <p>
+          Accepting a change is usually several files at once — the new file, its history snapshot,
+          the revision counter, a line in the change log — and they have to land together or not at
+          all. So Arke writes down what it is about to do, does it, then removes the note. If the
+          power goes at any point, opening the world reads the note and either finishes the change or
+          rolls it back before anything may read. The detail is in
+          <a href="the-accept-gate.html">the accept gate</a>.
+        </p>
+        <p class="note">
+          The one honest gap: some media is copied or moved before its record is written, and those
+          two steps are not a single transaction. An interruption between them can leave a picture
+          with no card beside it. That is an orphan file, not a damaged world.
+        </p>
+      </section>
+
+      <section id="windows">
+        <h2>Long paths, and moving between machines</h2>
+        <p>
+          Windows has an old limit of 260 characters on a path, and a world nests deep: a world
+          name, a production name, a takes folder, one take's folder, then a file. Arke asks the
+          operating system for the long-path treatment on every read and write it makes, so its own
+          work is never subject to that limit. At first run it works out the worst case and warns
+          you if your folder sits deep enough to trouble other programs — your file explorer, your
+          text editor — which may not have asked for the same treatment.
+        </p>
+        <p>
+          Separately: any path stored inside a file is written with forward slashes. Windows accepts
+          both kinds of slash and everything else accepts only one, so writing the one both
+          understand is why a world made on Windows opens unchanged elsewhere.
+        </p>
+      </section>
+
+      <section id="byhand">
+        <h2>Editing a world by hand</h2>
+        <p>The files are yours and a text editor opens all of them. What happens next depends on
+          whether Arke is running.
+        </p>
+        <h3>While Arke is open</h3>
+        <p>
+          One file is genuinely invited: the bible. Arke notices it move, quietly re-reads it, and
+          carries on. That is the feature working — it is a notes file, and asking you to approve
+          your own typing would be a toll on thinking out loud.
+        </p>
+        <p>
+          Everything else is a different matter. Arke does not merge your edit, does not silently
+          adopt it, and does not reliably notice it either: it holds its own picture of the world in
+          memory, and the next thing it writes is calculated from that picture, not from your file.
+          Your edit can be quietly written over. Nothing is corrupted, but nothing is safe either.
+          Close the world first.
+        </p>
+        <h3>While Arke is closed</h3>
+        <p>
+          This is the supported way. Arke keeps a fingerprint of every file as it stood when it last
+          had the world open. On opening it compares them and collects what changed: files edited,
+          files that appeared, files that vanished. It adopts none of it on its own — each one is
+          surfaced for you to reconcile deliberately.
+        </p>
+        <p>
+          Reconciling an edited sheet, canon entry or chapter takes the bytes you typed as the new
+          content, cuts the next version, writes the history snapshot, and logs the change as having
+          come from outside the app. A file you deleted stays deleted and gets a line saying so.
+          Anything Arke does not version — an image, a data file — gets a log line and nothing more.
+        </p>
+        <p class="note">
+          If the search cache is missing — you deleted it, or the world came from someone else —
+          there is no fingerprint list to compare against, so the world is adopted as it stands
+          rather than reported as edited. That is on purpose: a deletable cache must never cost you
+          anything, including a false alarm.
+        </p>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
+        reading the source and the sample world. The exact list of what every operation creates,
+        replaces, appends, moves and removes is in <code>docs/filesystem-operations.md</code>.
+      </div>
+    </div>
+  </body>
+</html>

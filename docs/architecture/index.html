@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Arke Studio is built: the world is a folder, and everything else is a view of it. An eight-page guide to the files, the model behind worlds and productions, and the program around them — written for anyone, not only engineers."
+    />
+    <title>Arke Studio - How it is built</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="idea">
+        <div class="eyebrow">How Arke Studio is built</div>
+        <h1>The world is a folder. Everything else is a view of it.</h1>
+        <p class="lede">
+          Arke Studio is one program that runs on your own computer. Everything it knows sits in
+          ordinary files, in an ordinary folder you can open, copy, back up or read in a text
+          editor. These pages explain what those files are, how they describe a world and the
+          things you make from it, and how the program around them is put together.
+        </p>
+        <p>
+          Most creative software keeps your work in a database, or on a server, or inside a
+          project file only that software can open. Arke does none of those. There is no cloud
+          account, no database, and no hidden version control. If you delete Arke tomorrow, your
+          worlds are still there, still readable, still yours.
+        </p>
+        <p>
+          That is not a nice extra. It is the decision everything else hangs off, and it explains
+          most of what follows — why prose is stored as plain text, why every accepted change
+          leaves a line in a log you can read, and why the parts of the program that are
+          <em>working something out</em> can always be thrown away and rebuilt.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3>Written for anyone</h3>
+            <p>
+              No code anywhere in this set. Where a file name or a field matters it is named and
+              explained in plain words, because those are the names you would see if you opened
+              your own world folder.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Read off the code</h3>
+            <p>
+              Every layout, field and rule here was read out of the source and the sample world
+              that ships with the app. The specifications describe what is <em>intended</em>;
+              these pages describe what is <em>there</em>.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Honest about gaps</h3>
+            <p>
+              Things that are designed and not yet built are marked
+              <span class="pill pill--part">designed</span> wherever they come up, rather than
+              described as though they exist.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="pages">
+        <h2>The set</h2>
+        <p>
+          Eight pages. If you read two, read <a href="the-world.html">The world</a> and
+          <a href="the-accept-gate.html">The accept gate</a> — between them they carry the whole
+          idea.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3><a href="files-on-disk.html">1 · Files on disk</a></h3>
+            <p>
+              The complete map. Every folder and every file, on your machine and inside a world,
+              with what it is and whether losing it costs you anything. The page to open when you
+              see a name you do not recognise.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="the-world.html">2 · The world</a></h3>
+            <p>
+              The asset itself: the world's own record, characters and places, canon, the bible,
+              the look, and the picture kits that keep a cast recognisable from shot to shot.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="productions.html">3 · Productions</a></h3>
+            <p>
+              What you make out of a world. Stories with chapters, films with scenes and shots,
+              series with seasons and episodes — all of them pointing at the world's cast rather
+              than copying it.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="takes-and-the-cut.html">4 · Takes and the cut</a></h3>
+            <p>
+              Every generated result is kept and never edited. Which one you are using is recorded
+              somewhere else entirely, and the cut is worked out from the two rather than stored.
+              The most important shape in the product.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="the-accept-gate.html">5 · The accept gate</a></h3>
+            <p>
+              How a change actually happens: drafted somewhere else first, consequences shown
+              before you decide, and an interrupted write that can never leave your world
+              half-changed.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="the-assistant.html">6 · The assistant</a></h3>
+            <p>
+              The AI that drafts with you, and the fence around it: what it can see, what it can
+              touch, why it has to cite what it read, and why it cannot browse your folder.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="generation.html">7 · Generation and spend</a></h3>
+            <p>
+              From pressing the button to a clip landing: what is written down before anything is
+              sent, what happens when it goes wrong, where your keys live, and how every charge is
+              recorded.
+            </p>
+          </div>
+          <div class="card">
+            <h3><a href="the-program.html">8 · The program</a></h3>
+            <p>
+              How the application is assembled — the two halves, the helper programs, where the
+              code lives, and how it is built and shipped. The one page an engineer should start
+              on.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="parts">
+        <h2>The shape of it, in one screen</h2>
+        <p>
+          What you install is one application. Inside it there are two halves and up to four
+          helpers, and the split is what makes the rules further down enforceable rather than
+          merely stated.
+        </p>
+        <div class="flow">
+          <div class="node node--lead">
+            <strong>The window</strong>
+            <span>Everything you see and click. It holds no files and knows no file paths — it asks the engine for everything.</span>
+          </div>
+          <div class="link">↔</div>
+          <div class="node node--lead">
+            <strong>The engine</strong>
+            <span>Your world on disk, the accept gate, canon, the search index, the job queue, the spend ledger. All the rules live here.</span>
+          </div>
+        </div>
+        <p>
+          The two talk over a private connection on your own machine that nothing outside can
+          reach. Around them sit the helper programs: the writing assistant, local speech, an
+          optional local image and video engine, and ffmpeg for measuring and encoding video. Each
+          is a separate program the engine starts and looks after, and each can be absent — which
+          Arke reports as a stated consequence rather than a failure.
+          <a href="the-program.html">The program</a> covers all of it properly.
+        </p>
+
+        <h4>And the shape of your work</h4>
+        <div class="flow">
+          <div class="node node--lead"><strong>World</strong><span>cast, places, canon, look</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Production</strong><span>a film, a story, a series</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Scene</strong><span>with its shots inside it</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Take</strong><span>one generated result</span></div>
+        </div>
+        <p class="caption">
+          Each arrow is a reference, not a copy. A production does not contain a character; it
+          names one, and the naming is resolved fresh every time the work is dispatched.
+        </p>
+      </section>
+
+      <section id="rules">
+        <h2>The rules that hold it together</h2>
+        <p>
+          Nine of them. Every page in this set is, in the end, an explanation of how one or two of
+          these are actually enforced.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>Rule</th><th>What it means for you</th><th>Where</th></tr>
+            <tr>
+              <td><strong>The folder is the only truth</strong></td>
+              <td>Everything else — the index, the caches, the thumbnails — can be deleted and rebuilt. Nothing you made lives only in a cache.</td>
+              <td><a href="files-on-disk.html">Files on disk</a></td>
+            </tr>
+            <tr>
+              <td><strong>Nothing authored lands without an accept</strong></td>
+              <td>Sheets, canon and scenes change when you say so, never behind your back, and never while you are still reading the proposal.</td>
+              <td><a href="the-accept-gate.html">The accept gate</a></td>
+            </tr>
+            <tr>
+              <td><strong>You see the consequences before you decide</strong></td>
+              <td>What else a change touches is worked out before the accept, not reported after it.</td>
+              <td><a href="the-accept-gate.html">The accept gate</a></td>
+            </tr>
+            <tr>
+              <td><strong>The canon refuses rather than guesses</strong></td>
+              <td>Asked something it cannot support, the world says so and cites the closest it has. An invented citation fails verification and takes the answer with it.</td>
+              <td><a href="the-assistant.html">The assistant</a></td>
+            </tr>
+            <tr>
+              <td><strong>A take is never edited</strong></td>
+              <td>Every result you generated is still there. Choosing between them is a separate, reversible act.</td>
+              <td><a href="takes-and-the-cut.html">Takes and the cut</a></td>
+            </tr>
+            <tr>
+              <td><strong>Staleness is refused, never merged</strong></td>
+              <td>If something changed underneath a pending edit, Arke stops and tells you rather than silently combining two versions.</td>
+              <td><a href="the-accept-gate.html">The accept gate</a></td>
+            </tr>
+            <tr>
+              <td><strong>Identity travels</strong></td>
+              <td>A character's main photo and composite sheet follow her into every generation that accepts a reference, so consistency is structural rather than a function of prompt luck.</td>
+              <td><a href="the-world.html">The world</a></td>
+            </tr>
+            <tr>
+              <td><strong>Nothing is filed by hand</strong></td>
+              <td>Where a file came from is recorded at the moment it arrives, so anything that cited a character turns up against that character later.</td>
+              <td><a href="the-world.html">The world</a></td>
+            </tr>
+            <tr>
+              <td><strong>No lock-in</strong></td>
+              <td>Open format, open licence, no absolute paths, no keys inside a world. Copy the folder to another machine and it works.</td>
+              <td><a href="files-on-disk.html">Files on disk</a></td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <section id="later">
+        <h2>Designed, and not built yet</h2>
+        <p>
+          Stated here as well as in place, because a document that describes only what exists reads
+          as though everything exists.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3><span class="pill pill--part">designed</span> The narrative game</h3>
+            <p>Branching narrative with a chapter graph, playthrough state and an engine-neutral export.</p>
+          </div>
+          <div class="card">
+            <h3><span class="pill pill--part">designed</span> Recovery from the archive</h3>
+            <p>Archiving a world moves it whole today. Bringing one back is specified and not written.</p>
+          </div>
+          <div class="card">
+            <h3><span class="pill pill--part">designed</span> The four host ports</h3>
+            <p>
+              Arke assumes one person, at one machine, spending their own money, publishing to a
+              local file. All four are meant to become replaceable, so the same engine can sit
+              underneath a hosted product without forking. None of the four exists in the code yet.
+            </p>
+          </div>
+          <div class="card">
+            <h3><span class="pill pill--part">in build</span> Voice mode</h3>
+            <p>Speaking a world into existence rather than typing it.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="elsewhere">
+        <h2>Where to go next</h2>
+        <p>
+          These pages explain how Arke is built. Three other kinds of document explain other
+          things, and it is worth knowing which is which.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>If you want</th><th>Read</th></tr>
+            <tr>
+              <td>To use a particular feature</td>
+              <td>
+                The feature guides in <code>docs/features/</code> — cloned voices, worldbuilding
+                chat, the Claude Code harness, the production and story workspace.
+              </td>
+            </tr>
+            <tr>
+              <td>To know why a decision was made, or what was rejected</td>
+              <td>
+                The capability specifications in <code>docs/specifications/</code>. Each carries
+                numbered requirements, the design reasoning, and a table of decisions that were
+                reversed or turned down, with the reason kept.
+              </td>
+            </tr>
+            <tr>
+              <td>To know exactly what a given action writes to disk</td>
+              <td>
+                <code>docs/filesystem-operations.md</code> — the operation-by-operation ledger of
+                what is created, replaced, appended, moved and removed.
+              </td>
+            </tr>
+            <tr>
+              <td>To contribute</td>
+              <td>
+                <code>CONTRIBUTING.md</code>. Behaviour is decided in a specification and then
+                built, so a change to what the product does comes with a change to a spec.
+              </td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <div class="foot">
+        Written against Arke Studio 0.5.47, by reading the source and the sample world rather than
+        the plans. The capability specifications in <code>docs/specifications/</code> describe what
+        is intended and record why each decision was made;
+        <code>docs/filesystem-operations.md</code> is the exact list of what every operation
+        creates, replaces, appends, moves and removes. Where any of them and these pages disagree,
+        that is a bug in one of them.
+      </div>
+    </div>
+  </body>
+</html>

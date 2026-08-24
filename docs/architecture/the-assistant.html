@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Arke Studio's writing assistant works: what it can see, what it can touch, why every claim it makes has to cite something real, and why nothing it produces reaches your world without you."
+    />
+    <title>Arke Studio - The assistant</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="what">
+        <div class="eyebrow">The assistant</div>
+        <h1>It drafts with you, and it decides nothing</h1>
+        <p class="lede">
+          Arke has a writing assistant. It reads your world, argues with you about it, and writes
+          drafts. What is worth explaining is the fence around it: what it may see, what it may
+          touch, and the fact that everything it makes still has to come to you.
+        </p>
+
+        <p>There are two kinds of conversation, and they differ only in what they already know.</p>
+
+        <div class="grid">
+          <div class="card">
+            <h3>Talking about the world</h3>
+            <p>
+          Open-ended, about a story. You describe what you have been thinking; it replies like a
+          collaborator and keeps a running account of what it understood — a list of
+          <em>propositions</em>: this character, this rule, this open question.
+        </p>
+          </div>
+          <div class="card">
+            <h3>Talking about one thing</h3>
+            <p>
+          A thread opened from something you were looking at — an entry, a sheet, a production, an
+          episode, a scene. It starts knowing the subject, so you never describe what is already
+          on the screen.
+        </p>
+          </div>
+        </div>
+
+        <p style="margin-top:14px">
+          A scene thread is not a blank page. This is the real orientation Arke writes for one, built
+          from the scene as it stands:
+        </p>
+        <div class="snip"><span class="c">the opening lines a scene thread is given</span>
+This is the scene thread for "The verse rises" (sc_04) in the production
+saltlight. Its script is ordered blocks that shots cite; propose the whole
+block list as it should read, keeping an existing block's id when only its
+text changes. Read the season and the episode this scene serves before
+deciding against them.
+
+A shot itself can be settled here: propose the shot to amend, or leave the
+shot out to add one at the end. Carry only the fields that change. A shot's
+id and its number are not yours to set, and reordering is the storyboard's
+drag, not a proposition.</div>
+
+        <h4>What a conversation produces</h4>
+        <p>
+          A proposal. Never a direct edit. Nothing you type and nothing it writes creates,
+          accepts, discards or dispatches anything — not "yes", not "do it", not "make it so". Two
+          actions cross that line and both are buttons: wrapping up a conversation, and accepting
+          one of the proposals it made.
+        </p>
+        <div class="flow">
+          <div class="node node--lead"><strong>You talk</strong><span>it replies, and files what it understood</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Propositions</strong><span>a panel of what it thinks changed</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Wrap up</strong><span>a button; makes staged proposals</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Accept</strong><span>a button; the only thing that writes</span></div>
+        </div>
+        <p>
+          Agreement in conversation is cheap and easy to misread, so it is worth nothing here. The
+          assistant is told never to say a change has been made, because it never has. See
+          <a href="the-accept-gate.html">the accept gate</a> for what the buttons actually do.
+        </p>
+      </section>
+
+      <section id="scratch">
+        <div class="eyebrow">Where it works</div>
+        <h2>Its working folder is a scratch folder, never your world</h2>
+        <p>
+          Every program that edits files has a working folder — where it is standing when it writes
+          something without saying where. For Arke's assistant that folder is never your world. It is
+          one of two things.
+        </p>
+        <div class="kv">
+          <dt>drafting</dt>
+          <dd>
+            The proposal it is working on: a small folder inside your world's
+            <code>.proposals\</code> holding copies of exactly the files in scope. It edits the copies.
+          </dd>
+          <dt>conversation</dt>
+          <dd>
+            A fresh folder <em>outside</em> your world entirely, under Arke's own storage, made for
+            one turn and deleted afterwards. It holds that turn's settings and nothing else.
+          </dd>
+        </div>
+        <div class="tree">%APP_ROOT%\run\world-chat\&lt;conversation&gt;\&lt;run&gt;\   <i>made per turn, swept at startup</i></div>
+        <p>
+          The second is deliberate. A program treats its working folder as somewhere it may write,
+          so a scratch folder inside the world would be a writable path in the one place this
+          feature promises never to write. Anything written without naming a location lands in the
+          draft, because that is the only world it was shown.
+        </p>
+        <p class="note">
+          <strong>Stated rather than assumed away.</strong> A malfunctioning assistant that got
+          hold of a shell could still damage world files between saves. Arke <em>detects</em> that
+          — an accept compares each file against a fingerprint taken when the draft was made, and
+          opening a world reconciles anything that changed underneath — and keeps the history. It
+          does not prevent it; prevention needs the operating system to hold the boundary, and
+          that is deferred. An earlier draft of this design claimed prevention outright and was
+          wrong.
+        </p>
+      </section>
+
+      <section id="asking">
+        <div class="eyebrow">What it can see</div>
+        <h2>It cannot browse your world. It has to ask.</h2>
+        <p>
+          Its draft folder holds only what it is working on. Everything else — canon, sheets,
+          productions — it must request, one question at a time, through a single narrow channel
+          Arke runs itself. It asks things like <em>what does canon say about the Keeper</em>, and gets
+          back ranked entries with their full text. Six questions when drafting, eight in a
+          conversation, and these are the real descriptions it is given:
+        </p>
+        <div class="snip"><span class="k">search the canon</span>
+  Lexically search the world's canon entries. Returns ranked candidates with
+  FULL statement text so answers can quote verifiable spans, plus how many
+  entries were searched. Below-floor results mean canon does not answer the
+  query.
+
+<span class="k">fetch one entry</span>
+  Fetch one canon entry by id: title, status, lineage, full statement.
+
+<span class="k">fetch one sheet</span>
+  Fetch one sheet by slug (character, location or faction): frontmatter and
+  prose sections at the current version.
+
+<span class="k">list what exists</span>
+  List world entities of a kind, with status and version.
+
+<span class="k">what cites what</span>
+  What cites and is cited by an entity id — citations with the versions they
+  were made at.
+
+<span class="k">fetch a production</span>
+  Fetch one production's records whole: story, season, episodes with their
+  promises and scene memberships, and the scene index.</div>
+        <p class="caption">
+          A conversation gets two more: searching the sheets, and reading text out of a document you
+          handed it.
+        </p>
+        <p>
+          Look at what is missing. Nothing here writes, and nowhere is there a place to put a file
+          name or a path. A channel that cannot express a location on disk cannot be pointed at
+          one, which is stronger than asking it not to.
+        </p>
+        <h4>Why this beats handing it the folder</h4>
+        <ol class="steps">
+          <li>
+            <h3>There is no path to get wrong</h3>
+            <p>
+          A folder invites a wrong turn: a step upward, a shortcut, a path assembled from two
+          half-correct pieces. A question has no such surface.
+        </p>
+          </li>
+          <li>
+            <h3>Every read is observable</h3>
+            <p>
+          Arke answers the questions, so Arke knows what was asked and what came back — which is
+          what makes the progress lines possible. <em>"checked: CANON-031 · CANON-002 · the Bell
+          Market, no contradiction if memory is passive"</em> is one search, in your language.
+        </p>
+          </li>
+          <li>
+            <h3>It works on worlds too big to read</h3>
+            <p>
+          A conversation holds only so much text. Ranked search over the world's own index — the
+          list Arke keeps of every word in every entry — does not stop working when the world
+          outgrows it.
+        </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="citations">
+        <div class="eyebrow">What it may claim</div>
+        <h2>Citations, and refusing to guess</h2>
+        <p>
+          Every claim it makes about your world has to say where it read it: which entry, at which
+          version, and a fingerprint of that text as it stood. A real record, from the sample world:
+        </p>
+        <div class="snip"><span class="c">what one search left behind</span>
+"tool": "search-canon",
+"status": "complete",
+"querySummary": "ledger corrections · the fourth hand · Charter Night bells",
+"consulted": [
+  { "ref": { "kind": "canon", "entryId": "CANON-050" },
+    "observedVersion": 62,
+    "contentHash": "sha256:9c41e7b2a05d83f6" },
+  { "ref": { "kind": "canon", "entryId": "CANON-064" },
+    "observedVersion": 87,
+    "contentHash": "sha256:77b0c2d94e1a5f38" }
+],
+"searchedCount": 14</div>
+        <p>
+          The version and the fingerprint make a citation checkable later; if the entry has moved
+          on, it no longer matches. Those values used to go only to Arke, so the assistant was
+          asked to cite numbers it had never been shown, and every citation was either omitted or
+          invented. Now each answer comes back in two parts: what you asked for, and a block
+          naming exactly what may be cited from it.
+        </p>
+        <p class="note">
+          <strong>This is what makes "the canon never guesses" a mechanism rather than a
+          promise.</strong> Quotations are checked mechanically against the text they claim to
+          come from, and an invented one fails. If any piece of the evidence fails, the whole turn
+          is rejected and retried once with the failure named — never patched up by dropping the
+          claim that would not verify. <em>"No, she cannot"</em> plus <em>"unless she has stood in
+          that water before"</em> becomes a falsehood the moment the second half is removed.
+        </p>
+        <p>
+          When the world has no answer there is no model call at all: below a relevance floor the
+          refusal happens before the assistant can improvise. A refusal says how many entries were
+          searched, shows the closest anyway, and offers two exits — open it as an unanswered
+          question, or draft an answer with the results in front of you.
+        </p>
+        <p>
+          Two smaller rules. Only <em>your</em> words count as evidence, never the assistant's own
+          earlier replies. And a quotation is matched forgivingly about layout but strictly about
+          content: a paragraph break is a hard boundary, so a "quotation" cannot stitch two
+          sentences from opposite ends of an entry into one claim.
+        </p>
+      </section>
+
+      <section id="lease">
+        <div class="eyebrow">Which world</div>
+        <h2>A conversation is tied to the world it started in</h2>
+        <p>
+          When a conversation asks a question it does not ask about "whichever world is open". It asks
+          with a pass, issued when the turn began, naming one world and one conversation, valid for
+          thirty minutes — longer than a turn, far shorter than a session.
+        </p>
+        <p>
+          Every question compares the pass against the world actually open, and if they disagree
+          it is refused — never redirected. A long turn outlives a moment of screen state, so
+          without the pass, switching worlds mid-turn would have the assistant answer out of the
+          new one. Nothing would look wrong: the answer would be well-formed, the citation would
+          verify, and it would be about the wrong place entirely.
+        </p>
+        <p>
+          Even the refusal is careful — it says the world the pass was issued for is no longer
+          open, and stops, because naming the world that <em>is</em> open would leak one
+          conversation into another. Drafting sessions get no pass and need none.
+        </p>
+      </section>
+
+      <section id="permissions">
+        <div class="eyebrow">Backstops</div>
+        <h2>When it has to ask you, and remembering the answer</h2>
+        <p>
+          Occasionally it reaches for something that needs your say-so. You are asked in Arke's
+          words, not the machine's — <em>"The agent wants to run a shell command"</em> — and can
+          answer once or always. Always writes a remembered grant, kept in
+          <code>grants.json</code> at the application level rather than in your world, so a world
+          you copy elsewhere carries none of your answers.
+        </p>
+        <div class="snip"><span class="c">grants.json — the whole shape</span>
+{
+  "grants": [
+    { <span class="k">"id"</span>: "grant_m4x2q1",
+      <span class="k">"actionClass"</span>: "edit",
+      <span class="k">"createdAt"</span>: "2026-08-14T09:12:44Z" },
+    { <span class="k">"id"</span>: "grant_m4x9tt",
+      <span class="k">"actionClass"</span>: "webfetch",
+      <span class="k">"createdAt"</span>: "2026-08-19T18:03:10Z",
+      <span class="k">"revoked"</span>: true }
+  ]
+}</div>
+        <p>
+          Revoking marks the line revoked rather than deleting it. The grant stops working at once —
+          only unmarked grants count — but the record of what was granted, and when, survives. A
+          permissions list that erases its own history cannot be audited.
+        </p>
+        <p class="note">
+          <strong>These prompts are meant to be rare, and frequency is treated as a bug.</strong>
+          In the confined configuration the assistant's only capability is editing files inside
+          the draft you asked for, which is not worth interrupting you about. Prompts appearing
+          often mean the fence has drifted.
+        </p>
+        <p class="note">
+          <strong>Specified but not built.</strong> The worldbuilding-chat issue requires that a
+          remembered grant can never override a hard denial, and that a request for a denied
+          capability be rejected automatically and recorded as a configuration defect. In the code
+          the check compares the action's name and nothing else — no cross-check against the
+          permitted list, and nothing records a defect. The denials are enforced earlier, so such
+          a request should not reach a prompt at all; the belt the issue describes is simply not
+          there beside the braces.
+        </p>
+      </section>
+
+      <section id="engines">
+        <div class="eyebrow">Two engines</div>
+        <h2>Two different assistants behind one door</h2>
+        <p>
+          Arke ships with an assistant built in, and can also drive Claude Code if you already
+          have it installed and signed in. You never talk to either: you ask Arke for a draft, and
+          one of them does the drafting.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead>
+              <tr><th>&nbsp;</th><th>The built-in one</th><th>Your own Claude Code</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>How it runs</strong></td>
+                <td>A separate program Arke starts, watches, restarts if it falls over, and stops on quit, leaving nothing behind.</td>
+                <td>Driven directly. It starts its own program; a session lasts only as long as Arke keeps hold of it.</td>
+              </tr>
+              <tr>
+                <td><strong>Where it comes from</strong></td>
+                <td>Inside the installer. Works on a brand-new machine with nothing else on it.</td>
+                <td>Yours. Arke never ships a copy — the point is to drive the one you already trust.</td>
+              </tr>
+              <tr>
+                <td><strong>Who pays</strong></td>
+                <td>Whichever provider you configured in settings.</td>
+                <td>The Claude subscription you already have. No key to paste.</td>
+              </tr>
+              <tr>
+                <td><strong>How the fence is applied</strong></td>
+                <td>Written into a settings file the program is trusted to honour.</td>
+                <td>Decided by Arke, each time a capability is reached for.</td>
+              </tr>
+              <tr>
+                <td><strong>Default</strong></td>
+                <td><span class="pill pill--yes">Always</span> what you get if you do nothing.</td>
+                <td><span class="pill pill--part">Opt in</span> and never a fallback — if it goes missing, Arke says so and carries on with the built-in one.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:14px">
+          The fence is written down once, in nobody's vocabulary, as a list of what is permitted
+          rather than what is banned. That was measured, not assumed: ban one shell and an
+          assistant reaches for another to do the same job, and a program that updates itself
+          grows capabilities nobody has heard of. Anything not on the list is refused.
+        </p>
+        <h4>Why the second one is tested rather than trusted</h4>
+        <p>
+          It is somebody else's program, on a version Arke does not control, that updates itself
+          without asking — one moved from 2.1.177 to 2.1.235 in the middle of a single working
+          session. What would break is the fence, and it would break silently, so a version number
+          is not good enough.
+        </p>
+        <p>
+          So Arke checks. It runs one throwaway job in a temporary folder, asks for something it
+          has just forbidden, then looks at the folder to see whether it happened. Three ways to
+          fail, and only one is dramatic: the forbidden thing happened; the decision was never put
+          to Arke at all, which proves nothing and is therefore a refusal; or the test could not
+          run. Every build tried so far passes — which is why the check has to be cheap enough to
+          always run.
+        </p>
+        <p class="note">
+          <strong>A measured limit, recorded in the source.</strong> Against version 2.1.235, Arke
+          is not consulted about every action: work that changes nothing and stays inside the
+          working folder is approved before the question reaches it. Audited with everything
+          denied, the draft was unchanged, the forbidden file was never created, and a read aimed
+          <em>outside</em> the folder did reach Arke and was refused. The boundary holds for
+          anything that changes something or leaves the folder.
+        </p>
+        <p>
+          With Claude Code, Arke also never stops to ask you mid-job: an installation advertises
+          around thirty capabilities and gained five between two runs of one experiment, so
+          anything unrecognised is refused outright rather than parked on a prompt nobody is there
+          to see. The plumbing is on <a href="the-program.html">the program</a>.
+        </p>
+      </section>
+
+      <section id="network">
+        <div class="eyebrow">The outside world</div>
+        <h2>Going online, stated exactly</h2>
+        <p>
+          It <em>was</em> a permanent denial: the requirement named network tools alongside the
+          shell as always disabled. That was amended on 23 August 2026. Reaching the web is now a
+          capability governed by a setting that is off until you turn it on, and the requirement's
+          own wording is that with it off, network tools are disabled exactly as before. The shell
+          was not amended.
+        </p>
+        <p>
+          The recorded reason is a reason and not an excuse: the blanket denial was never a policy
+          anyone had chosen for research. Asking the assistant to look something up produced a
+          refusal no rule had decided and none could lift. Reading a public page is not a way out
+          of the working folder.
+        </p>
+        <p>
+          With it on, a page you name is fetched and kept as an attachment on the conversation, so
+          a claim taken from the web stays checkable rather than verified against a live address
+          that reads differently next month. Nothing it returns is canon: it reaches your world only
+          through the accept gate, like everything else.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Capability</th><th>Drafting</th><th>Conversation</th></tr></thead>
+            <tbody>
+              <tr><td>Read, edit and search inside the working folder</td><td><span class="pill pill--yes">Yes</span></td><td><span class="pill pill--no">No editing at all</span></td></tr>
+              <tr><td>Ask questions about your world</td><td><span class="pill pill--yes">Yes</span></td><td><span class="pill pill--yes">Yes</span></td></tr>
+              <tr><td>Load shipped craft guidance</td><td><span class="pill pill--yes">Yes</span></td><td><span class="pill pill--no">No</span></td></tr>
+              <tr><td>Search and read public pages</td><td><span class="pill pill--part">Only if you turn it on</span></td><td><span class="pill pill--part">Only if you turn it on</span></td></tr>
+              <tr><td>Run a shell command</td><td><span class="pill pill--no">Never</span></td><td><span class="pill pill--no">Never</span></td></tr>
+              <tr><td>Start its own helper assistants</td><td><span class="pill pill--no">Never</span></td><td><span class="pill pill--no">Never</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note" style="margin-top:14px">
+          <strong>Two places where the older, flatter claim survives in writing.</strong> The
+          Claude Code feature guide, published four days before the amendment, still lists
+          reaching the internet as never allowed; and the note beside the shipped guidance
+          documents still says flatly that drafting sessions have no network tools. Both were true
+          when written, and are now true only with the setting off — the default.
+        </p>
+        <h4>Guidance ships with the application and is never fetched</h4>
+        <p>
+          The first reason is structural rather than principled: an assistant with the network
+          denied could not fetch a document it needed, so a design that fetched them would fail in
+          exactly the default configuration. The second is that first run works on a machine that
+          has never been online. The third is that no outside server sits between you and drafting
+          a scene.
+        </p>
+      </section>
+
+      <section id="skills">
+        <div class="eyebrow">Who does what</div>
+        <h2>Named assistants, and guidance attached to a job</h2>
+        <p>
+          There is not one assistant but several, each with a purpose and a written brief. They belong
+          to the application, not to your world, so a world copied to another machine carries no
+          assistants with it and behaves identically when it arrives.
+        </p>
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Named</th><th>For</th><th>Writes</th></tr></thead>
+            <tbody>
+              <tr><td>world author</td><td>Draft the opening shape of a new world, and its bible</td><td>world, first sheets</td></tr>
+              <tr><td>sheet editor</td><td>Draft and revise character, location and faction sheets</td><td>sheets</td></tr>
+              <tr><td>canon author</td><td>Draft canon entries and settle open questions</td><td>canon entries</td></tr>
+              <tr><td>scene writer</td><td>Draft scenes into shot lists</td><td>scenes</td></tr>
+              <tr><td>story writer</td><td>Draft overviews and chapters</td><td>overview, chapters</td></tr>
+              <tr><td>art director</td><td>Turn what a world is into one image prompt</td><td>nothing</td></tr>
+              <tr><td>prompt enhancer</td><td>Rewrite a rough ask for the chosen image or video model</td><td>nothing</td></tr>
+              <tr><td>lyricist</td><td>Draft song lyrics for a stated musical style</td><td>nothing</td></tr>
+              <tr><td>canon answerer</td><td>Answer questions from retrieved canon, or refuse</td><td>nothing</td></tr>
+              <tr><td>world builder</td><td>Talk about a world and keep a running account of it</td><td>nothing</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:14px">
+          You may rewrite a brief in settings; you may not rewrite the rules around it. The order
+          on the page is the enforcement — rules first, your brief and any guidance in the middle,
+          the contract the application checks against last. Before that ordering existed, a
+          rewritten brief failed in ways that looked like Arke's own bugs.
+        </p>
+        <h4>Guidance attached to a kind of work</h4>
+        <p>
+          Separately from who is doing the work, there is guidance attached to particular
+          <em>jobs</em> — drafting a scene, drawing a storyboard — written for one family of video
+          models, because the same instruction does not land the same way everywhere. A real
+          extract:
+        </p>
+        <div class="snip"><span class="c">drawing a storyboard this model family can read</span>
+Line art only. Stick figures and simple contour drawing. Flat, clean,
+uncluttered, no rendering, no shading, no texture, no colour grading. A dense,
+heavily rendered board reads as noise and produces a still output or panels in
+the wrong order.
+
+No text inside the image. No labels, captions, shot numbers, arrows with
+words, or titles. Text drawn on a panel is text the model may render into the
+frame, and a burned-in caption cannot be removed from the footage afterwards.</div>
+        <p>
+          Guidance can narrow below a family when a family is not of one mind: one model runs to
+          thirty seconds where its predecessor stops at fifteen, and thirty seconds is not fifteen
+          twice. The narrower document wins for the models it names, and nothing is ever handed
+          another family's advice.
+        </p>
+        <p>
+          A scene records which guidance it was drafted under, with the version number, as
+          provenance: two scenes drafted either side of a change differ for a reason otherwise
+          unrecoverable. A dispatch may override which model shoots a scene, so Arke compares the
+          two and says so before money moves — see <a href="generation.html">generation and
+          spend</a>.
+        </p>
+      </section>
+
+      <section id="stored">
+        <div class="eyebrow">On disk</div>
+        <h2>Where a conversation is kept</h2>
+        <p>
+          Inside the world, one folder per conversation. Operational state, like staged proposals — not
+          part of the record of what your world <em>is</em>.
+        </p>
+        <div class="tree"><b>the-undersong\</b>
+├─ <b>.conversations\</b>
+│  └─ <b>cv_01J8F3K2QW9VZX4N7M0RTYB6HC\</b>
+│     ├─ conversation.json   <i>who it is: an id and when it started</i>
+│     ├─ events.jsonl        <u>append-only; the record</u>
+│     └─ checkpoint.json     <i>a summary, rebuilt if missing</i>
+├─ <b>.proposals\</b>          <i>where drafts are staged</i>
+└─ world.json</div>
+        <p>
+          The list of events is the truth and is only ever added to, one line per thing that happened,
+          in order. The first line of the real sample conversation, trimmed:
+        </p>
+        <div class="snip">{"seq":1,"at":"2026-08-06T21:00:00Z","event":{
+  <span class="k">"type"</span>: "conversation.created",
+  <span class="k">"title"</span>: "The fourth hand",
+  <span class="k">"entryContext"</span>: {
+    "kind": "canon-question",
+    "question": "Whose hand writes the ledger's corrections?",
+    "candidateEntryIds": ["CANON-050"] }}}</div>
+        <p>
+          The third file is a summary, kept only so a long conversation reopens quickly. It is
+          never believed over the list of events: it is distrusted if it cannot be read, and
+          distrusted if it claims events the list does not contain — which is what a half-finished
+          write leaves behind. Deleting it costs a rebuild and nothing else.
+        </p>
+      </section>
+
+      <section id="voice">
+        <div class="eyebrow">Voice</div>
+        <h2>Speaking to it <span class="pill pill--part">in build</span></h2>
+        <p>
+          There is a specification for talking to Arke out loud, and its governing rule is a good
+          one: <em>voice changes the input, it never changes the artefact</em>. You can talk your
+          way to a draft; you cannot talk your way past an accept.
+        </p>
+        <div class="kv">
+          <dt>built</dt>
+          <dd>
+            Dictation. You speak instead of typing, it is transcribed on your own machine, and the
+            words appear as <strong>editable text that is never sent</strong>; the recording is dropped
+            once transcribed. That editing step is the safety story: a world is made of exactly the
+            proper nouns transcription gets wrong.
+          </dd>
+          <dt>not built</dt>
+          <dd>
+            Everything else in that specification — spoken replies, interrupting playback, a listening
+            session spanning several turns, choosing the studio's own voice. The realtime channel it
+            would run over is present in the local voice component and deliberately unused, and every
+            task on the specification's list is still unticked.
+          </dd>
+        </div>
+        <p>
+          One divergence is deliberate and says so. The specification asked for hold-to-speak; the
+          implementation is click to start, click to stop — because worldbuilding is full of long
+          pauses, and holding a key through them is no better than a machine cutting them short.
+        </p>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
+        reading the source. Where a specification and the code disagreed, the code is what is
+        described here and the disagreement is named on the page. Related:
+        <a href="the-accept-gate.html">the accept gate</a> for what happens to a proposal,
+        <a href="the-world.html">the world</a> for what the assistant is searching, and
+        <a href="the-program.html">the program</a> for how the two engines are actually driven.
+      </div>
+    </div>
+  </body>
+</html>

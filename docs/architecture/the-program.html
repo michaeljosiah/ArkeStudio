@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Arke Studio is assembled: the window, the engine, the helpers it looks after, how the halves talk, where the code lives, and what is shipped."
+    />
+    <title>Arke Studio - The program</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="parts">
+        <div class="eyebrow">The program</div>
+        <h1>Two halves, a private wire between them, and some helpers</h1>
+        <p class="lede">
+          What you install is one application. Inside it are two halves and a handful of helper
+          programs. The split is not decoration: it is what keeps the rules of the studio
+          enforceable in exactly one place.
+        </p>
+
+        <div class="flow">
+          <div class="node node--lead">
+            <strong>The window</strong>
+            <span>Everything you see and click. It holds no files and knows no file paths — it asks the engine for everything. (In the code: the renderer.)</span>
+          </div>
+          <div class="link">↔</div>
+          <div class="node node--lead">
+            <strong>The engine</strong>
+            <span>Your world on disk, the accept gate, canon, the search index, the job queue, the spend ledger. All the rules live here. (In the code: the coordinator.)</span>
+          </div>
+          <div class="link">→</div>
+          <div class="node">
+            <strong>The helpers</strong>
+            <span>Separate programs the engine starts, watches, restarts and stops: the writing assistant, the speech program, the image engine.</span>
+          </div>
+        </div>
+
+        <p>
+          The engine is <em>not</em> a server you install. It is a library loaded into the same
+          process that puts the window on screen. Two things follow: nothing about Arke is
+          reachable from a network, because there is no network part to reach; and quitting really
+          does stop everything, because nothing is left over to stop.
+        </p>
+        <p>
+          The window is deliberately ignorant. It never opens a file, never learns where your
+          worlds are, never holds a key. Drag a file onto it and the path is resolved in the shell
+          and leaves at once as a message; the window never sees it. Everything on screen arrived
+          as a message from the engine, which is why a screen can never be right about something
+          the engine has wrong.
+        </p>
+        <p class="note">
+          What a world <em>is</em> belongs to other pages: <a href="the-world.html">the world</a>,
+          <a href="productions.html">productions</a>,
+          <a href="takes-and-the-cut.html">takes &amp; the cut</a>,
+          <a href="the-accept-gate.html">the accept gate</a>. This one is only about how the
+          program is put together.
+        </p>
+      </section>
+
+      <section id="talking">
+        <h2>How the two halves talk</h2>
+        <p>
+          They talk over a private connection on your own machine — the address only your own
+          computer can reach, on a port picked fresh at each launch. Nothing outside can dial it.
+        </p>
+        <p>
+          When the window connects it says hello. The engine replies with <strong>one complete
+          picture</strong> of the current state, then <strong>one small message per change</strong>,
+          each numbered in order, which the window applies to the picture it holds.
+        </p>
+        <p>
+          If the connection drops, the window asks for a whole fresh picture rather than for the
+          changes it missed. Partial replay was considered and refused, and the reason is the
+          point: patching from an unknown starting point is how a screen ends up quietly wrong. A
+          window that redraws is briefly blank; a window that guesses is confidently mistaken, and
+          nothing on screen says which.
+        </p>
+
+        <h4>How big that vocabulary is</h4>
+        <div class="scroller">
+          <table>
+            <tr><th>Direction</th><th>Count</th><th>What it means</th></tr>
+            <tr>
+              <td><strong>Window → engine</strong><br /><code>packages/contracts/src/frames.ts</code></td>
+              <td><strong>220</strong> kinds of message</td>
+              <td>Every distinct thing you can ask the studio to do, described once and checked on arrival.</td>
+            </tr>
+            <tr>
+              <td><strong>Engine → window</strong><br /><code>packages/contracts/src/events.ts</code></td>
+              <td><strong>85</strong> kinds of event</td>
+              <td>Every distinct thing that can happen, described once and checked on the way out.</td>
+            </tr>
+          </table>
+        </div>
+        <p class="caption">
+          Counted from the source at 0.5.47, taking only the top-level members of each list. A
+          large application with a small, single, written-down vocabulary.
+        </p>
+        <p>
+          Both directions are checked against that vocabulary, and the two ways of failing are
+          handled differently on purpose. Bytes that are not readable at all close the connection:
+          that is a fault, and faults should be loud. A readable message the engine has never heard
+          of is only dropped and logged, because that is usually one half of the app being a build
+          ahead of the other — and closing the connection over it made the whole studio read as
+          disconnected on one keystroke.
+        </p>
+
+        <h4>The bridge</h4>
+        <p>
+          The window runs sandboxed. It is given exactly one small object to talk through, and
+          that object is the entire surface between the halves: connect, send, listen, plus a short
+          list of host chores — open the data folder, set the theme, quit. No file system, no
+          paths, never a credential. Where a feature needs a file dialog, the dialog belongs to the
+          shell and so does the path it returns; the window learns only that an attachment exists.
+        </p>
+      </section>
+
+      <section id="video">
+        <h2>Video, and why it is served differently</h2>
+        <p>
+          Pictures and video do not travel over the message channel. The same private connection
+          also answers ordinary web requests, and media is fetched from a local address shaped like
+          <code>/media/&lt;world&gt;/&lt;file&gt;</code> — resolved to a real file, refused if it is
+          not genuinely inside the named world, then streamed.
+        </p>
+        <p>
+          The reason is <strong>byte ranges</strong> — being able to ask for just the part from
+          here to here. A video element cannot seek without them. Serve a file whole and the player
+          reports it has nothing to seek within, then silently ignores every attempt to move the
+          playhead: playback works, scrubbing does not, and nothing says why. So ranges are
+          answered properly, including the awkward form meaning "the last N bytes".
+        </p>
+        <p class="note">
+          Media is served with caching switched off. Generated grids and boards are recompiled in
+          place under the same name, and a cached copy would show you the old picture with no way
+          to tell.
+        </p>
+      </section>
+
+      <section id="helpers">
+        <h2>The helpers, and never leaving one behind</h2>
+        <p>
+          Three helper programs run beside Arke, each looked after by the same piece of code. They
+          differ in what they say, not in how they live.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3>The writing assistant</h3>
+            <p>
+              The agent that drafts with you. See <a href="the-assistant.html">the assistant</a>.
+            </p>
+          </div>
+          <div class="card">
+            <h3>The local speech program</h3>
+            <p>Text-to-speech and dictation on your own machine, at no cost per line.</p>
+          </div>
+          <div class="card">
+            <h3>The local image engine</h3>
+            <p>
+              Optional. Where you have ComfyUI, Arke generates on your own graphics card rather
+              than pay a service. See <a href="generation.html">generation &amp; spend</a>.
+            </p>
+          </div>
+        </div>
+        <p>
+          Each gets a free local port, a health check, a restart budget and a stated reason when it
+          cannot run. A missing helper is an ordinary state, not a broken one: the app opens and
+          works regardless, and the affected feature says what is unavailable and why.
+        </p>
+
+        <h4>Three belts, because one is not enough</h4>
+        <p>
+          Arke promises never to leave a helper running after it exits. That has to hold when Arke
+          is force-killed and none of its own cleanup code runs at all, so it is kept three ways.
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>The operating system holds the leash</h3>
+            <p>
+              Each helper is tied to Arke's own lifetime by the operating system, through a handle
+              Arke holds and the system closes when Arke dies — however it dies. The child and
+              everything it spawned go with it. This is the only belt that survives a force-kill.
+            </p>
+          </li>
+          <li>
+            <h3>A small file the next start-up sweeps</h3>
+            <p>
+              Every helper Arke starts is written into a small register at
+              <code>run\children.json</code> and released when it exits cleanly. The next launch
+              reads that file: anything recorded whose owner is gone is an orphan, and is killed.
+              This covers the runs where the leash could not attach.
+            </p>
+          </li>
+          <li>
+            <h3>Descendants are recorded too</h3>
+            <p>
+              Sometimes the thing Arke launched is only a wrapper around the real program, and
+              killing the wrapper leaves the worker running — which is how stray assistant
+              processes used to pile up. So once a helper is healthy its living descendants are
+              recorded beside it, and both the stop path and a later sweep can reach past a dead
+              wrapper.
+            </p>
+          </li>
+        </ol>
+        <p>
+          Why three and not one. Arke's own tidy-up — stopping helpers politely, and a last sweep
+          as the process exits — runs only when Arke is allowed to exit normally, and a force-kill
+          runs none of it. The leash is the only belt that acts at that instant. The register
+          survives a force-kill too, but it only cleans up at the <em>next</em> launch, so it is
+          the net rather than the first line — and the net for any run where the leash could not
+          attach at all. The third exists because a wrapper hides the process doing the work: kill
+          the wrapper's number alone and the real worker lives on.
+        </p>
+        <p>
+          All of it is careful about identity. Process numbers get reused quickly, so a recorded
+          helper is killed only when the process now holding that number still bears the right
+          program name and started when the record was made. A leaked helper is a nuisance.
+          Killing a stranger's process is not.
+        </p>
+      </section>
+
+      <section id="handed">
+        <h2>Everything the engine needs from outside is handed to it</h2>
+        <p>
+          The engine never reaches out for anything. It does not open a file dialog, fetch an
+          encryption key, find a video encoder or load a model. All of those are handed to it as
+          options when the app starts, and the shell is the only part that knows how to get them.
+        </p>
+        <p>This buys two things. <strong>The rules can be tested without a machine</strong> — no
+          screen, no network and no graphics card appear anywhere in the engine's tests, because
+          anything needing one arrives as a plain object a test can supply. And <strong>a missing
+          capability becomes a stated consequence rather than a crash</strong>: every option's
+          absence has a written-down meaning. Real examples from the engine's own list:
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>Handed in</th><th>Absent means</th></tr>
+            <tr>
+              <td>A video encoder</td>
+              <td>Exports state the reason they cannot run. They are never simply missing from the screen.</td>
+            </tr>
+            <tr>
+              <td>A way to measure media</td>
+              <td>Durations stay unknown and a master track cannot be assigned — which the timeline says out loud rather than guessing around.</td>
+            </tr>
+            <tr>
+              <td>A file picker</td>
+              <td>Attaching a file says so, instead of doing nothing.</td>
+            </tr>
+            <tr>
+              <td>An app folder</td>
+              <td>Permissions you granted the assistant last only for this session; nothing is remembered.</td>
+            </tr>
+            <tr>
+              <td>The runtime fetcher</td>
+              <td>Nothing is downloaded and the app behaves exactly as it did before that feature existed.</td>
+            </tr>
+            <tr>
+              <td>The search index binding</td>
+              <td>Search and counts degrade; authoring still works. That sentence is literally the reason the shell hands over.</td>
+            </tr>
+          </table>
+        </div>
+        <p class="caption">
+          Read from the options the engine declares and the shell that fills them in. Not one of
+          them is a crash, a blank panel, or a disabled button with no explanation.
+        </p>
+      </section>
+
+      <section id="layout">
+        <h2>Where the code lives</h2>
+        <p>The same split shows up as folders. Eight of them hold code.</p>
+        <div class="tree"><b>ArkeStudio\</b>
+  <b>packages\</b>
+    contracts\          <i>the shared vocabulary — depends on nothing</i>
+    coordinator\        <i>the engine</i>
+    client\             <i>the window</i>
+    providers\          <i>how to talk to each generation service</i>
+    adapter-opencode\   <i>two ways of driving a writing assistant,</i>
+    adapter-claude\     <i>behind one shared interface</i>
+    voice\              <i>talking to the local speech program</i>
+  <b>apps\</b>
+    desktop\            <i>the application shell — the only place that knows about windows</i>
+  design-system\        <i>the prototypes the screens are built against (not code that ships)</i>
+  docs\                 <i>the master specification and the capability specs</i>
+  fixtures\             <i>a sample world, used by tests and shipped with the app</i></div>
+        <div class="scroller">
+          <table>
+            <tr><th>Folder</th><th>What is in it</th></tr>
+            <tr><td><code>packages/contracts</code></td><td>The shape of every file and every message, described once. The window and the engine both read from here, which is why they cannot disagree about what a scene is.</td></tr>
+            <tr><td><code>packages/coordinator</code></td><td>The engine: the world on disk, the accept gate, canon, the index, the job queue, the ledger, and the supervisor that looks after helpers.</td></tr>
+            <tr><td><code>packages/client</code></td><td>The window. Every screen.</td></tr>
+            <tr><td><code>packages/providers</code></td><td>How to talk to each generation service, what each model costs, and the local recipes.</td></tr>
+            <tr><td><code>packages/adapter-opencode</code></td><td>Driving the assistant that ships in the installer.</td></tr>
+            <tr><td><code>packages/adapter-claude</code></td><td>Driving a Claude Code you already installed yourself, behind the same interface.</td></tr>
+            <tr><td><code>packages/voice</code></td><td>Talking to the local speech program.</td></tr>
+            <tr><td><code>apps/desktop</code></td><td>The application shell: it puts a window on screen, loads the engine into its own process, and hands the engine everything from the outside world.</td></tr>
+          </table>
+        </div>
+
+        <h4>The rule, and the fact that it is checkable</h4>
+        <p>
+          One shared vocabulary depends on nothing and everything else depends on it. The window
+          never reaches into the engine and the engine never reaches into the window, and neither
+          knows what a desktop application is — that is the shell's job alone.
+        </p>
+        <p>
+          This is checkable rather than aspirational. Here are the checks actually run against
+          0.5.47, and what they found:
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>Check</th><th>Result</th></tr>
+            <tr><td>Anything outside the application shell importing the desktop framework</td><td><span class="pill pill--yes">0 files</span></td></tr>
+            <tr><td>Anything outside the window importing the user-interface library</td><td><span class="pill pill--yes">0 files</span></td></tr>
+            <tr><td>The shared vocabulary importing another Arke package</td><td><span class="pill pill--yes">0 imports</span> — its only outside dependency is the schema library</td></tr>
+            <tr><td>The window importing the engine</td><td><span class="pill pill--yes">0 imports</span></td></tr>
+            <tr><td>The engine importing the window</td><td><span class="pill pill--yes">0 imports</span></td></tr>
+            <tr><td>What the window imports from inside Arke</td><td><span class="pill pill--yes">only the shared vocabulary</span>, at 45 import sites</td></tr>
+            <tr><td>The window touching files, paths or other programs directly</td><td><span class="pill pill--yes">0 files</span></td></tr>
+          </table>
+        </div>
+        <p class="caption">
+          One honest wrinkle: the engine does import the two assistant adapters, because it has to
+          assemble the command that launches one. It touches the provider and voice packages only
+          in its stand-alone developer entry point, which never ships.
+        </p>
+      </section>
+
+      <section id="index">
+        <h2>The search index</h2>
+        <p>
+          Two small databases make searching and listing fast. One sits at the app level: the list
+          of worlds, so the picker can draw without opening any of them, plus a mirror of the job
+          log and the spend log. The other sits inside each world and holds the searchable text —
+          canon, character sheets, who mentions whom.
+        </p>
+        <p>
+          Both are <strong>caches, and only caches</strong>. Each is built purely from files that
+          are themselves the truth, and each is structurally prevented from becoming truth itself.
+          Delete either and it rebuilds. That is why deleting a cache can never lose spend history:
+          the ledger on disk is the record and the database is only a copy made for speed. It is
+          also why a change to the shape of a cache throws the tables away and rebuilds, rather
+          than migrating anything.
+        </p>
+        <p>
+          Two details an engineer will want. Full-text search has to actually be compiled into the
+          database engine, so rather than assume it, Arke proves it at every open by
+          creating a tiny search table and dropping it again. And the database library is compiled code that
+          must match the exact application it is loaded into — the copy tests use and the copy the
+          desktop app loads are different builds of the same thing under different names, which is
+          why packaging has a rebuild step. If it does not load, the engine is told so and says it:
+          search and counts degrade, authoring still works.
+        </p>
+      </section>
+
+      <section id="shipping">
+        <h2>Building and shipping</h2>
+        <div class="kv">
+          <dt>build</dt><dd>Builds the window, then flattens the shell and its bridge into two files, stamping in the version number read from one place so the About box cannot disagree with the installer.</dd>
+          <dt>test</dt><dd>Runs every workspace's tests.</dd>
+          <dt>package</dt><dd>Stages the helper runtimes, checks every bundled component has a recorded licence obligation, builds, then makes an installer.</dd>
+          <dt>release</dt><dd>The same, driven by pushing a version tag; the tag and the version in the package must agree or the build stops.</dd>
+        </div>
+        <p>
+          <strong>The shipped installer is Windows x64 only</strong>, and the reason is worth
+          retelling. ARM64 installers were built until 0.2.9 and should not have been. The database
+          library has no ready-made ARM64 build for this application, so it must be cross-compiled,
+          and the compiler needed for that was never installed on any packaging machine. The
+          build step had been set to tolerate a failed native build, so it tolerated it, silently,
+          every time: every ARM64 installer ever produced shipped with the search index switched
+          off.
+        </p>
+        <p>
+          A build that quietly drops a feature is worse than no build. ARM64 was withdrawn and the
+          tolerance setting removed with it; Windows on ARM runs the x64 build under emulation,
+          the honest fallback until the toolchain exists on the packaging machines.
+        </p>
+        <p>
+          The gate every change must pass runs on <strong>both Windows and Linux</strong>. Windows
+          because that is what ships. Linux because it is unforgiving about the two assumptions
+          Windows lets you make for years without noticing: which way a path separator leans, and
+          whether two names differing only in capital letters are the same file.
+        </p>
+      </section>
+
+      <section id="tests">
+        <h2>Tests</h2>
+        <p>
+          There are <strong>232 test files</strong> across the repository, unevenly spread: 137 of
+          them cover the engine and 56 cover the window.
+        </p>
+        <p>
+          For the engine, test code very nearly matches source code by volume —
+          <strong>39,860 lines of test against 43,645 lines of engine</strong>, roughly nine lines
+          of test for every ten of code. Across the whole repository it is 63,867 against 107,956.
+        </p>
+        <p>
+          The contributing guide names four places where a mistake is <em>expensive and quiet</em>
+          and asks anyone touching them to say how they know the change is safe: <strong>the world
+          folder, the accept gate, the job queue and packaging</strong>. That is where the weight
+          sits — the four places where being wrong costs someone their work, their money, or an
+          installer that lies about what is inside it.
+        </p>
+      </section>
+
+      <section id="later">
+        <h2>Designed, and not built yet</h2>
+        <p>
+          Stated plainly, because a document that describes only what exists will read as though
+          everything exists.
+        </p>
+        <p>
+          Arke assumes four things: one person, at one machine, spending their own money,
+          publishing to a local file. Each is load-bearing somewhere in the code, and each is wrong
+          for a hosted product built on the same engine. The plan is not to make Arke multi-user,
+          metered or moderated. It is to make those four assumptions <em>replaceable</em> — four
+          small interfaces, each with a default that gives exactly today's behaviour, so the same
+          engine could sit underneath a hosted product without anyone forking it.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>The question</th><th>Today's answer</th><th>In the code</th></tr>
+            <tr><td>Who is doing this, and what may they do?</td><td>The person at the keyboard; everything.</td><td><span class="pill pill--no">not built</span></td></tr>
+            <tr><td>May this work happen, against what allowance?</td><td>Yes, always. The ledger records it afterwards.</td><td><span class="pill pill--no">not built</span></td></tr>
+            <tr><td>May this content be generated, and who sees it first?</td><td>Anything; the author sees it first.</td><td><span class="pill pill--no">not built</span></td></tr>
+            <tr><td>Where does a finished thing go?</td><td>A file on this disk.</td><td><span class="pill pill--no">not built</span></td></tr>
+          </table>
+        </div>
+        <p>
+          Checked rather than assumed: none of the four names appears anywhere in the code, and
+          neither does the identity stamp the specification would add to the change log, the spend
+          ledger and the review record. The specification is marked a draft and all eleven of its
+          pieces of work are unticked. It is a design, honestly labelled as one.
+        </p>
+        <p class="note">
+          Where a specification and the code disagree, this page follows the code and says so. The
+          host ports are the clearest case in the repository: the design is detailed, reviewed and
+          revised, and not a line of it exists yet.
+        </p>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
+        reading the source: every count and every dependency check on this page was run against the
+        working tree rather than taken from a document. Neighbouring pages:
+        <a href="files-on-disk.html">files on disk</a>,
+        <a href="the-world.html">the world</a>, <a href="productions.html">productions</a>,
+        <a href="takes-and-the-cut.html">takes &amp; the cut</a>,
+        <a href="the-accept-gate.html">the accept gate</a>,
+        <a href="the-assistant.html">the assistant</a>,
+        <a href="generation.html">generation &amp; spend</a>.
+      </div>
+    </div>
+  </body>
+</html>

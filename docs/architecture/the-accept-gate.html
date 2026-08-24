@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How a change actually enters an Arke Studio world: a staged proposal, a ripple you see before you decide, the nine ways an accept can be refused, and a write that happens all at once or not at all."
+    />
+    <title>Arke Studio - The accept gate</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="gate">
+        <div class="eyebrow">The accept gate</div>
+        <h1>How a change actually happens</h1>
+        <p class="lede">
+          Three promises hold this product up. Nothing authored enters your world without you
+          accepting it. You see what a change will affect <em>before</em> you decide, not after.
+          And a write that is interrupted can never leave your world half-changed.
+        </p>
+        <p>
+          Everything else in Arke is built on top of this one mechanism, which is what makes it
+          safe to let something else do the writing. And the gate is deliberately the same for
+          everything it covers: a character sheet, a canon rule, a scene, a chapter the studio
+          drafted — they differ in how you edit them and in what they affect, never in how they
+          get in. A special path for one kind of thing is treated as a defect, not a convenience.
+        </p>
+      </section>
+
+      <section id="loop">
+        <h2>The loop, end to end</h2>
+        <p>
+          It runs the same way whether you filled in a form or talked it through with the studio.
+          The examples below are the real files from the sample world, unedited.
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>The change is drafted somewhere else first</h3>
+            <p>
+              It is staged in <code>.proposals/</code>, in a folder of its own, as a complete copy
+              of the file as it <em>would</em> be. Your real file has not been touched, and will
+              not be until you say so.
+            </p>
+          </li>
+          <li>
+            <h3>The draft writes down exactly what it was based on</h3>
+            <p>
+              Not just which file, but which version of it, and a fingerprint of its precise
+              contents at the moment drafting began. This is the thing that makes the whole gate
+              trustworthy later.
+            </p>
+            <div class="snip"><span class="c">.proposals/pr_01J8H0000000000000000000P1/proposal.json</span>
+{
+  <span class="k">"id"</span>: "pr_01J8H0000000000000000000P1",
+  <span class="k">"kind"</span>: "sheet-edit",
+  <span class="k">"summary"</span>: "Maren pays for scene four — her left ear is gone, and the sheet should say so",
+  <span class="k">"targets"</span>: [
+    {
+      <span class="k">"path"</span>: "characters/maren-kest.md",
+      <span class="k">"baseVersion"</span>: 4,
+      <span class="k">"baseHash"</span>: "sha256:9f2c66a1b0e4d8c2f7a31d5e"
+    }
+  ],
+  <span class="k">"baseCanonRevision"</span>: 42,
+  <span class="k">"reservedCanonIds"</span>: [],
+  <span class="k">"source"</span>: "chat:sess_9f2",
+  <span class="k">"created"</span>: "2026-07-30T18:00:00Z"
+}</div>
+          </li>
+          <li>
+            <h3>Arke works out what else this touches</h3>
+            <p>
+              Before you decide, not after. The consequences are worked out from the world's own
+              index — from what actually cites what — and written down beside the proposal.
+            </p>
+            <div class="snip"><span class="c">.proposals/pr_01J8H0000000000000000000P1/ripple.json</span>
+{
+  <span class="k">"computedAt"</span>: "2026-07-30T18:00:01Z",
+  <span class="k">"governing"</span>: false,
+  <span class="k">"items"</span>: [
+    { <span class="k">"kind"</span>: "stale-reference-tiles",
+      <span class="k">"summary"</span>: "3 reference tiles and the compiled model sheet were made against v4 — regenerate looks after accept",
+      <span class="k">"targets"</span>: ["references/maren-kest"] },
+    { <span class="k">"kind"</span>: "productions-pick-up",
+      <span class="k">"summary"</span>: "Saltlight has unfinished shots citing maren-kest — its next dispatch picks up v5",
+      <span class="k">"targets"</span>: ["saltlight"] },
+    { <span class="k">"kind"</span>: "takes-pinned-to-old-version",
+      <span class="k">"summary"</span>: "2 accepted takes stay pinned to v4; the cut keeps playing them",
+      <span class="k">"targets"</span>: ["tk_01J8F0000000000000000000B2", "tk_01J8A0000000000000000000A1"] },
+    { <span class="k">"kind"</span>: "owning-canon-rules",
+      <span class="k">"summary"</span>: "CANON-002 owns tide-calling's cost — the sheet change must not restate the rule",
+      <span class="k">"targets"</span>: ["CANON-002"] }
+  ]
+}</div>
+          </li>
+          <li>
+            <h3>You accept, or you discard</h3>
+            <p>
+              Discarding removes the folder and leaves one line in the change log saying so.
+              Accepting runs the checks below. If anything is wrong the accept is refused and says
+              which thing — it never quietly does half of what you asked.
+            </p>
+          </li>
+          <li>
+            <h3>The change lands as one act</h3>
+            <p>
+              The previous version is copied into <code>.history/</code>, the live file is
+              replaced, the version number goes up, a line is appended to
+              <code>changes.jsonl</code>, and the index and your screen catch up. All of it, or
+              none of it.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="proposal">
+        <h2>What a proposal is</h2>
+        <p>
+          A folder. Inside it are whole files, not a list of edits — the complete file as it would
+          be if you accepted, sitting beside a copy of the file as it was when drafting started.
+        </p>
+        <div class="tree"><b>.proposals/</b>
+  <b>pr_01J8H0000000000000000000P1/</b>
+    proposal.json                <i>what this is, and what it was based on</i>
+    ripple.json                  <i>what it would affect, worked out in advance</i>
+    <u>characters/maren-kest.md</u>       <i>the sheet as it would be — a complete file</i>
+    <b>_base/</b>
+      characters/maren-kest.md   <i>the same sheet as it was when drafting began</i></div>
+        <p class="caption">
+          The sample world ships the first three of these; <code>_base/</code> is written by the
+          running application whenever the target already existed.
+        </p>
+        <p>
+          Whole files rather than a list of edits costs a few kilobytes and buys three things.
+          Showing you the before and the after is reading two files, with no patching to get wrong.
+          The folder is what an authoring session is handed <em>instead of</em> your world, so an
+          assistant that goes wrong can only ruin a draft. And accepting becomes a set of file
+          swaps, which can be made safe against a power cut — see
+          <a href="#accepting">what accepting does</a>.
+        </p>
+        <h4>What the manifest records</h4>
+        <dl class="kv">
+          <dt>kind</dt>
+          <dd>
+            What sort of change this is — a sheet edit, a new sheet, a canon amendment, a settled
+            canon rule, a scene, a chapter, a story overview, a change to the world's look. Sixteen
+            kinds in all. It decides which editor you get, never how it gets in.
+          </dd>
+          <dt>summary</dt>
+          <dd>One line in your own language, shown on the card. The second sample below is a good one.</dd>
+          <dt>targets</dt>
+          <dd>
+            Every file this would write. Each carries the version it was drafted against and a
+            fingerprint of that version's exact contents. A file being created has neither — it
+            records nothing, which is itself the claim that nothing was there.
+          </dd>
+          <dt>baseCanonRevision</dt>
+          <dd>Which revision of the world's rules the draft was written against.</dd>
+          <dt>reservedCanonIds</dt>
+          <dd>
+            Numbers claimed for new canon rules at the moment the draft needed one. Discarding the
+            proposal does not hand them back — a number is burned rather than reused, so a
+            reference to CANON-071 never comes to mean a different rule than it did.
+          </dd>
+          <dt>source</dt>
+          <dd>
+            Where the draft came from: <code>form</code> if you filled it in yourself, or the
+            named chat session that produced it, like <code>chat:sess_9f2</code>. It ends up on the
+            change-log line, so months later you can tell which conversation wrote a sentence.
+          </dd>
+          <dt>conflicts</dt>
+          <dd>
+            Only present after a rebase. Each names one field that both you and the world changed,
+            with all three readings side by side, and cannot be accepted until you pick a side.
+          </dd>
+          <dt>openChoices</dt>
+          <dd>
+            A question the studio could not answer for itself — "this looks close to an existing
+            rule; is it a new one, or a change to that one?" It blocks this proposal and no other,
+            so it waits beside the values it would change rather than holding up everything else.
+          </dd>
+        </dl>
+        <p>
+          A second proposal, for variety — a canon amendment raised from a form rather than a
+          conversation, and one where the summary is doing real work:
+        </p>
+        <div class="snip"><span class="c">.proposals/pr_01J8H0000000000000000000P6/proposal.json</span>
+{
+  <span class="k">"kind"</span>: "canon-edit",
+  <span class="k">"summary"</span>: "1847 belongs in the watch rule — the year the ledger does not explain,
+              recorded where the next watchkeeper will actually read it",
+  <span class="k">"targets"</span>: [
+    { <span class="k">"path"</span>: "canon/CANON-019.md", <span class="k">"baseVersion"</span>: 60, <span class="k">"baseHash"</span>: "sha256:4b7d20c9e16a83f5" }
+  ],
+  <span class="k">"baseCanonRevision"</span>: 90,
+  <span class="k">"source"</span>: "form"
+}</div>
+        <p>
+          <strong>What staging buys you.</strong> The draft survives the application being closed,
+          killed or updated. It passes between the conversation and the form without losing
+          anything. More than one draft may target the same sheet at once — you are told, and not
+          stopped. And because the live file is genuinely untouched, "discard" is a real discard:
+          there is nothing to undo.
+        </p>
+      </section>
+
+      <section id="ripple">
+        <h2>The ripple: consequences, before you decide</h2>
+        <p>
+          The ripple is not a warning written by a model. It comes from the world's own record of
+          what cites what, so it can be specific: which three tiles, which production, which two
+          takes.
+        </p>
+        <p>
+          It is worked out when the draft is staged, again every time the draft changes, and then
+          <strong>once more at the moment you press accept</strong> — after the checks, while the
+          world is held still. That last one is the one that counts, and that is what
+          <code>"governing"</code> means in the file: <code>false</code> on the copy you have been
+          reading, <code>true</code> only on the set worked out at the decision itself. The reason
+          is unglamorous. A preview may be minutes or days old, and if the change would now affect
+          eleven things rather than three you were shown a number that is no longer true — so the
+          accept stops, replaces the preview with the real set, and asks you to look again.
+        </p>
+        <h4>What it reports</h4>
+        <div class="scroller">
+          <table>
+            <tr><th>Consequence</th><th>What it is telling you</th></tr>
+            <tr>
+              <td>Reference tiles predate this</td>
+              <td>Pictures made from the old version of this sheet. They are not deleted and not silently redone — you regenerate the look afterwards if you want to.</td>
+            </tr>
+            <tr>
+              <td>Productions pick this up</td>
+              <td>Productions with unfinished shots citing this sheet. Their next dispatch uses the new version. Work already sent is not recalled.</td>
+            </tr>
+            <tr>
+              <td>Scene briefs re-render</td>
+              <td>Scenes whose cast block is built from this sheet and will read differently next time.</td>
+            </tr>
+            <tr>
+              <td>Accepted takes stay pinned</td>
+              <td>Footage you already chose was made with the old version and remains pinned to it. <a href="takes-and-the-cut.html">The cut keeps playing what it has.</a> This is the item people find most reassuring and it is the one most often forgotten.</td>
+            </tr>
+            <tr>
+              <td>A canon rule owns this</td>
+              <td>The subject is governed by a rule that lives elsewhere, so the edit should not restate it. <a href="the-world.html">One fact, one home.</a></td>
+            </tr>
+            <tr>
+              <td>Possible contradictions</td>
+              <td>Existing rules sharing this vocabulary, so you can read both sentences side by side. Advisory only — it blocks nothing, and says so.</td>
+            </tr>
+            <tr>
+              <td>Entries gain a cross-reference</td>
+              <td>Rules linking here, which now read against amended text.</td>
+            </tr>
+            <tr>
+              <td>Productions see the new revision</td>
+              <td>Any canon change moves the world's revision number, and every production sees it on its next dispatch.</td>
+            </tr>
+          </table>
+        </div>
+        <p>
+          A change to the world's look reports its own four: how many visual assets stay exactly as
+          they are, how many reference kits and productions will see the new look next time, and how
+          many accepted takes become pinned to the look being replaced. That last count deliberately
+          includes work made under the look you are about to change — counting only what was already
+          old would describe the <em>previous</em> decision rather than this one.
+        </p>
+      </section>
+
+      <section id="refusals">
+        <h2>The refusals</h2>
+        <p>
+          There are nine distinct ways an accept can decline, and each says which one it is in
+          words rather than a code. That matters more than it sounds: a refusal you cannot act on
+          is no better than a crash.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>What it says</th><th>What it means</th><th>What you do</th></tr>
+            <tr>
+              <td>The world moved while this was open</td>
+              <td>The file this draft was based on is not the file that is there now — you edited it in another window, or in a text editor, or another draft landed first.</td>
+              <td>Rebase onto current, then read the result. Or discard.</td>
+            </tr>
+            <tr>
+              <td>The consequences changed</td>
+              <td>What this would affect is materially different from the set you were shown. The panel now shows the real one.</td>
+              <td>Read the new set and accept with those consequences, or discard.</td>
+            </tr>
+            <tr>
+              <td>Nothing to accept</td>
+              <td>Every part of the draft already matches what the world says. There is no decision left to make.</td>
+              <td>Nothing. The card retires itself and notes it in the log.</td>
+            </tr>
+            <tr>
+              <td>Review the merged result</td>
+              <td>This was rebased onto newer work. Something was merged and you have not looked at it yet.</td>
+              <td>Read it. Marking it seen unblocks the accept.</td>
+            </tr>
+            <tr>
+              <td>Conflicted fields await a choice</td>
+              <td>You and the world changed the same field. Arke will not pick for you.</td>
+              <td>For each one, choose <em>this proposal</em> or <em>the world</em>. Both readings are shown.</td>
+            </tr>
+            <tr>
+              <td>The target was retired</td>
+              <td>The sheet or rule this would change has been retired since drafting.</td>
+              <td>Discard. A retired thing cannot be edited, only discarded.</td>
+            </tr>
+            <tr>
+              <td>This draft cannot be written as it stands</td>
+              <td>Something in it is outside what may be written — a character's role over its length limit, or a structured record the world could not read back.</td>
+              <td>Ask the studio to fix it, or discard. Nothing has landed.</td>
+            </tr>
+            <tr>
+              <td>An edit to this proposal did not finish</td>
+              <td>An in-place edit to the draft stopped halfway and its outcome cannot be determined.</td>
+              <td>The half-finished edit is dealt with first. Accepting past it would write something nobody reviewed.</td>
+            </tr>
+            <tr>
+              <td>The studio is still drafting</td>
+              <td>A turn is currently writing into this proposal's folder. It is not settled enough to act on.</td>
+              <td>Cancel the run, or wait for it. This one clears itself the moment the run ends.</td>
+            </tr>
+          </table>
+        </div>
+        <p class="note">
+          <strong>Staleness is detected, never merged.</strong> When a file has moved underneath a
+          draft, Arke stops and names the file. It does not combine the two versions behind your
+          back, and it does not overwrite the newer one with the older. Merging is a separate,
+          explicit step you ask for — and even then it merges field by field, hands you anything
+          both sides touched, and refuses to be accepted until you have read the result. There is no
+          path through this gate where two versions of your writing are silently reconciled.
+        </p>
+      </section>
+
+      <section id="accepting">
+        <h2>What accepting does — all at once, or not at all</h2>
+        <p>Five things happen, and they are one act:</p>
+        <div class="flow">
+          <div class="node node--lead"><strong>Snapshot</strong><span>the outgoing version is copied into <code>.history/</code></span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Replace</strong><span>the live file becomes the proposed file</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Version</strong><span>the number goes up; canon moves the world's revision once</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Log</strong><span>one line appended to <code>changes.jsonl</code></span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Catch up</strong><span>the index and your screen follow</span></div>
+        </div>
+        <p>
+          One proposal is one act, however many files it touches. A change amending a sheet and
+          two canon rules lands all three together and moves the world's revision number exactly
+          once, not three times.
+        </p>
+        <h4>Why the power going out cannot hurt you</h4>
+        <p>
+          Before anything real is touched, the whole set of steps is written down as a plan on
+          disk — every file that will move, and a fingerprint of what it should look like before and
+          after. Only then does anything happen. The plan carries a marker with three states, and
+          that marker is what makes the guarantee work:
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>State</th><th>What has happened</th><th>What the next open does</th></tr>
+            <tr>
+              <td><strong>prepared</strong></td>
+              <td>The plan is written. Nothing live has been touched — the copies into <code>.history/</code> and the new files are being staged off to one side.</td>
+              <td>Undoes it. The staged work is thrown away and your world is byte-for-byte what it was.</td>
+            </tr>
+            <tr>
+              <td><strong>committing</strong></td>
+              <td>The point of no return. The staged files are being swapped into place, one at a time.</td>
+              <td>Finishes it. Every step checks the recorded fingerprint first, so a step already done is simply skipped.</td>
+            </tr>
+            <tr>
+              <td><strong>done</strong></td>
+              <td>Everything is in place and logged.</td>
+              <td>Sweeps up the leftovers. The world is already whole.</td>
+            </tr>
+          </table>
+        </div>
+        <p>
+          There is no fourth state and no in-between for you to find: either the change happened or
+          it did not. Underneath, every write follows the same discipline — the new contents go to a
+          temporary neighbour, are flushed properly to the disk, then renamed over the target, a
+          rename being the one operation the filesystem will not leave half done.
+        </p>
+        <p class="note">
+          Opening a world <em>read-only</em> reports an unfinished plan but will not act on it:
+          finishing means moving real files, and only the copy that owns the world may do that. It
+          is left for whoever opens the world properly — see <a href="#lock">one owner at a time</a>.
+        </p>
+      </section>
+
+      <section id="log">
+        <h2>The change log</h2>
+        <p>
+          <code>changes.jsonl</code> sits at the top of your world folder, one line per change,
+          oldest first. It is the audit trail, it is what the search index is rebuilt from, and it
+          is the evidence that a change finished. Here is a real line:
+        </p>
+        <div class="snip"><span class="c">changes.jsonl</span>
+{"ts":"2026-07-14T09:00:00Z","entity":"characters/maren-kest",
+ "fromVersion":3,"toVersion":4,
+ "fieldsChanged":["appearance","voice-written"],
+ "source":"chat:sess_9f2","canonRevisionAfter":41,
+ "proposalId":"pr_01J8H0000000000000000000P0"}</div>
+        <dl class="kv">
+          <dt>ts</dt><dd>When, to the second.</dd>
+          <dt>entity</dt><dd>What changed, by its place in the world rather than its filename.</dd>
+          <dt>fromVersion / toVersion</dt><dd>Three became four. A new thing has <code>null</code> going in, which is how a creation reads.</dd>
+          <dt>fieldsChanged</dt><dd>Which parts moved — here, her appearance and her written voice. Not the text, just the names.</dd>
+          <dt>source</dt><dd>What caused it: <code>form</code>, or the named chat session. This is how you find the conversation behind a sentence a year later.</dd>
+          <dt>canonRevisionAfter</dt><dd>Which revision of the world's rules was in force once this landed.</dd>
+          <dt>proposalId</dt><dd>The draft it came from, when it came through the gate.</dd>
+        </dl>
+        <p>
+          Lines written by a running world also carry the identifier of the act that wrote them,
+          which is how an interrupted write can tell whether it already logged itself. Other line
+          shapes cover a discard, a retirement, a reserved canon number, a file that vanished.
+        </p>
+        <p>
+          <strong>It is only ever appended to.</strong> Never rewritten, never reordered, never
+          compacted. And a crash during an append leaves a torn final line — that is expected rather
+          than fatal. The reader discards a partial last line, and the next append starts by
+          finishing the broken one off with a newline so it can never be swallowed into the middle
+          of a valid record. A damaged log costs you the last line, not the file.
+        </p>
+      </section>
+
+      <section id="history">
+        <h2>History, and putting something back</h2>
+        <p>
+          <code>.history/</code> holds a complete copy of every version ever accepted. Not the
+          differences between versions — the whole file, every time.
+        </p>
+        <div class="tree"><b>.history/</b>
+  <b>characters/maren-kest/</b>
+    v3.md          <i>the whole sheet, as it was at version three</i>
+    v4.md
+  <b>canon/CANON-002/</b>
+    v42.md         <i>canon is filed by the world revision it belonged to</i></div>
+        <p>
+          Full copies rather than differences, for two reasons. There is no version-control system
+          underneath Arke, and building one — replaying a chain of edits to reconstruct a file,
+          correctly, for ever — to save twenty kilobytes on a sheet is a bad trade. And you can
+          open <code>v3.md</code> in any text editor and simply read it. A stack of differences is
+          not readable by a person, and a chain that must be replayed has a first broken link.
+        </p>
+        <p>
+          Restoring reads one of these copies and puts its contents in as a <strong>new</strong>
+          version. Restore version four while the sheet is at six, and you get version seven; five
+          and six stay in <code>.history/</code> exactly where they were. Nothing about going back
+          destroys the record of having gone forward, so restoring is never a decision you can regret.
+        </p>
+        <p class="note">
+          Pictures, video and audio are never snapshotted. Takes never change once they exist and are
+          addressed by their own identity, so the reference to a take <em>is</em> the version —
+          there is nothing to keep a copy of. See <a href="takes-and-the-cut.html">takes and the cut</a>.
+        </p>
+      </section>
+
+      <section id="ungated">
+        <h2>What does not go through the gate, and why</h2>
+        <p>
+          The gate protects the <strong>authored record</strong> — the facts a production cites. It
+          does not cover everything in the folder, and the distinction is worth stating clearly.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3>Generated takes</h3>
+            <p>
+              A take exists the moment a provider hands it back; holding it outside your world
+              until you approved it would leave generated material in limbo. What needs your
+              acceptance is not the take existing but the take becoming a shot's answer and
+              entering the cut — a different decision, on a different object.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Operational records</h3>
+            <p>
+              Jobs, charges, review decisions, the change log itself, the lock file, the search
+              index. Written by the system as work happens. They are records of things that
+              occurred rather than claims about what is true — and putting the change log behind
+              the gate would be circular.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Directly authored prose</h3>
+            <p>
+              Chapter prose after acceptance, and the world bible, are written straight to disk by
+              you. Still versioned, still copied into <code>.history/</code>, still logged — every
+              save is restorable. They simply do not wait for a decision, because you are making it
+              as you type.
+            </p>
+          </div>
+        </div>
+        <h4>Two more that surprise people</h4>
+        <p>
+          <strong>A look chosen while creating a world does not pass through the gate.</strong> It
+          is written straight in as an accepted first version, with no proposal behind it and — a
+          real consequence — no first copy in <code>.history/</code>, because there was no earlier
+          version to keep. Every later change to the look does go through the gate, and does write
+          history.
+        </p>
+        <p>
+          <strong>Creating a world is not itself one all-or-nothing act.</strong> The folder and the
+          world file can exist before the first change-log line is appended. That is deliberate: the
+          all-or-nothing machinery protects changes <em>to</em> a world, and needs the world to
+          exist first. Both facts are written down plainly in the repository's own record of what
+          touches the disk, rather than left for someone to discover.
+        </p>
+      </section>
+
+      <section id="lock">
+        <h2>One owner at a time</h2>
+        <p>
+          A world open in one copy of Arke is locked against another. The lock is a small file at
+          the top of the folder called <code>world.lock</code>, recording which running program holds
+          the world and when that program started.
+        </p>
+        <p>
+          <strong>Claiming has to be a single indivisible act.</strong> "Look whether the lock file
+          is there, and if it is not, write one" is not a lock — it is two separate acts with a gap
+          between them, and two copies of Arke opening the same world at the same instant both look,
+          both see nothing, both write, and both come away believing they own it. So the claim is
+          made with the one operation that means <em>create this file, and fail if it already
+          exists</em>. Exactly one caller can win that, always. The loser reads the winner's record
+          and is told who has the world.
+        </p>
+        <p>
+          While a world is open, the holder touches the lock file every twenty seconds — a
+          heartbeat. If Arke crashed rather than closing properly, the lock is left behind with
+          nobody alive holding it; a lock whose owner is dead or whose heartbeat stopped over a
+          minute ago is treated as debris and cleared. You are never shut out of your own work by a
+          program that is no longer running.
+        </p>
+        <p>
+          Letting go takes the same care in reverse. Releasing removes only a lock that still names
+          you: a copy declared crashed and reclaimed still believes it holds the world, and deleting
+          whatever the file happens to say would unlock the world underneath its new owner. If that
+          has happened it is raised rather than passed over quietly — you are entitled to know a
+          program has been writing to a world it no longer owned.
+        </p>
+      </section>
+
+      <section id="outside">
+        <h2>Editing a world in a text editor while Arke is open</h2>
+        <p>
+          You can. The files are yours, they are plain text, and nothing stops you. Honestly, here
+          is what happens.
+        </p>
+        <p>
+          While a world is open, Arke watches the folder, ignoring its own working areas — the
+          index, the staging folders, the conversations, the lock — and settling for a moment before
+          reacting, so a text editor's messy save sequence reads as one event rather than five. When
+          it notices a change it did not make, it <strong>reports</strong> it. It does not merge it
+          and does not adopt it silently: the change appears in your waiting queue as "files changed
+          outside the app", and sits there until you deal with it.
+        </p>
+        <p>
+          Accepting the reconciliation takes what is on disk as the truth: the version goes up, a
+          copy is filed, and a change-log line is added with a source of <code>external-edit</code>,
+          so the trail is honest that this change did not come through the gate. A file you deleted
+          outside the app stays deleted and gains a line saying so. A file with no version to move
+          gets a log line and nothing else.
+        </p>
+        <p class="note">
+          <strong>One known gap, stated plainly.</strong> The specification says the snapshot taken
+          when adopting an outside edit should be of the version being replaced. In the code it is a
+          snapshot of the edit itself, so your pre-edit contents survive only if some earlier accept
+          happened to leave them in <code>.history/</code>. The repository documents this against its
+          own requirement rather than hiding it. <span class="pill pill--part">specified, not built</span>
+        </p>
+        <p>
+          Detection can also degrade: some systems cannot watch a folder tree at all, and a watch can
+          be lost while a world is open. Arke then lets the watch go rather than trust it. The check
+          made when the world is next opened still catches the edits, so the worst case is finding
+          out later rather than immediately.
+        </p>
+      </section>
+
+      <section id="disagreements">
+        <h2>Where the plan and the build differ</h2>
+        <p>
+          This page was written by reading the code, so it is worth naming where the code and the
+          written plan do not yet agree.
+        </p>
+        <dl class="kv">
+          <dt>read-only context</dt>
+          <dd>
+            The specification says a proposal folder also holds a read-only <code>_context/</code> —
+            a canon extract and related sheets for the editor to read but not change. Nothing writes
+            one. What exists is <code>_base/</code>, the before-copy used for merging.
+            <span class="pill pill--part">specified, not built</span>
+          </dd>
+          <dt>restore</dt>
+          <dd>
+            <code>restore</code> is one of the sixteen kinds a proposal can be, but putting a version
+            back does not currently stage one — it commits directly, as a deliberate human act. The
+            kind is defined and unused. <span class="pill pill--part">defined, unused</span>
+          </dd>
+          <dt>adoption snapshot</dt>
+          <dd>
+            The outside-edit snapshot described in the section above.
+            <span class="pill pill--part">specified, not built</span>
+          </dd>
+        </dl>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
+        reading the source and the sample world. The proposal and ripple samples are the two real
+        drafts sitting in <code>fixtures/worlds/the-undersong/.proposals/</code>, and the change-log
+        line is a real line from that world's <code>changes.jsonl</code>. Related:
+        <a href="the-world.html">the world</a>, <a href="files-on-disk.html">files on disk</a>,
+        <a href="takes-and-the-cut.html">takes &amp; the cut</a>,
+        <a href="the-assistant.html">the assistant</a>.
+      </div>
+    </div>
+  </body>
+</html>
