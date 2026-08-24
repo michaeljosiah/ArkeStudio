@@ -256,10 +256,10 @@
         </p>
         <p>
           Whole files rather than a list of edits costs a few kilobytes and buys three things.
-          Showing you the before and the after is reading two files, with no patching to get
-          wrong. The folder is also what an authoring session is handed <em>instead of</em> your
-          world, so an assistant that goes wrong can only ruin a draft. And accepting becomes a
-          set of file swaps, which is something that can be made safe against a power cut — see
+          Showing you the before and the after is reading two files, with no patching to get wrong.
+          The folder is what an authoring session is handed <em>instead of</em> your world, so an
+          assistant that goes wrong can only ruin a draft. And accepting becomes a set of file
+          swaps, which can be made safe against a power cut — see
           <a href="#accepting">what accepting does</a>.
         </p>
         <h4>What the manifest records</h4>
@@ -321,19 +321,19 @@
 }</div>
         <p>
           <strong>What staging buys you.</strong> The draft survives the application being closed,
-          killed, or updated. It can be handed between the conversation and the form without
-          losing anything. More than one draft may target the same sheet at once — you are told,
-          and not stopped. And because the live file is genuinely untouched, "discard" is a real
-          discard: there is nothing to undo.
+          killed or updated. It passes between the conversation and the form without losing
+          anything. More than one draft may target the same sheet at once — you are told, and not
+          stopped. And because the live file is genuinely untouched, "discard" is a real discard:
+          there is nothing to undo.
         </p>
       </section>
 
       <section id="ripple">
         <h2>The ripple: consequences, before you decide</h2>
         <p>
-          The ripple is not a warning written by a model. It is worked out from the world's own
-          record of what cites what, so it can be specific: which three tiles, which production,
-          which two takes.
+          The ripple is not a warning written by a model. It comes from the world's own record of
+          what cites what, so it can be specific: which three tiles, which production, which two
+          takes.
         </p>
         <p>
           It is worked out when the draft is staged, again every time the draft changes, and then
@@ -396,8 +396,8 @@
         <h2>The refusals</h2>
         <p>
           There are nine distinct ways an accept can decline, and each says which one it is in
-          words rather than a code. This matters more than it sounds: a refusal you cannot act on
-          is functionally the same as a crash.
+          words rather than a code. That matters more than it sounds: a refusal you cannot act on
+          is no better than a crash.
         </p>
         <div class="scroller">
           <table>
@@ -474,16 +474,16 @@
           <div class="node"><strong>Catch up</strong><span>the index and your screen follow</span></div>
         </div>
         <p>
-          One proposal is always one act, however many files it touches. A change that amends a
-          sheet and two canon rules lands all three together, and moves the world's revision number
-          exactly once rather than three times.
+          One proposal is one act, however many files it touches. A change amending a sheet and
+          two canon rules lands all three together and moves the world's revision number exactly
+          once, not three times.
         </p>
         <h4>Why the power going out cannot hurt you</h4>
         <p>
           Before anything real is touched, the whole set of steps is written down as a plan on
-          disk — every file that will move, and a fingerprint of what it should look like before
-          and after. Only then does anything happen. The plan carries a marker with three possible
-          states, and the marker is what makes the guarantee work:
+          disk — every file that will move, and a fingerprint of what it should look like before and
+          after. Only then does anything happen. The plan carries a marker with three states, and
+          that marker is what makes the guarantee work:
         </p>
         <div class="scroller">
           <table>
@@ -506,10 +506,10 @@
           </table>
         </div>
         <p>
-          There is no fourth state and no in-between for you to find. Either the change happened or
-          it did not. Underneath, every single write follows the same discipline: the new contents
-          are written to a temporary neighbour, flushed to the disk properly, and then renamed over
-          the target — a rename being the one operation the filesystem will not leave half done.
+          There is no fourth state and no in-between for you to find: either the change happened or
+          it did not. Underneath, every write follows the same discipline — the new contents go to a
+          temporary neighbour, are flushed properly to the disk, then renamed over the target, a
+          rename being the one operation the filesystem will not leave half done.
         </p>
         <p class="note">
           Opening a world <em>read-only</em> reports an unfinished plan but will not act on it:
@@ -589,53 +589,52 @@
       <section id="ungated">
         <h2>What does not go through the gate, and why</h2>
         <p>
-          The gate protects the <strong>authored record</strong>: the facts a production cites. It
-          does not protect everything in the folder, and the distinction is worth stating clearly.
+          The gate protects the <strong>authored record</strong> — the facts a production cites. It
+          does not cover everything in the folder, and the distinction is worth stating clearly.
         </p>
         <div class="grid">
           <div class="card">
             <h3>Generated takes</h3>
             <p>
-              A take exists the moment a provider hands it back. Holding it outside your world until
-              you approved it would mean generated material living in limbo. What needs your
-              acceptance is not the take existing — it is the take becoming a shot's answer, and
-              entering the cut. That is a different decision, on a different object.
+              A take exists the moment a provider hands it back; holding it outside your world
+              until you approved it would leave generated material in limbo. What needs your
+              acceptance is not the take existing but the take becoming a shot's answer and
+              entering the cut — a different decision, on a different object.
             </p>
           </div>
           <div class="card">
             <h3>Operational records</h3>
             <p>
               Jobs, charges, review decisions, the change log itself, the lock file, the search
-              index. These are written by the system as work happens. They are records of things
-              that occurred rather than claims about what is true — and gating the change log
-              behind the gate would be circular.
+              index. Written by the system as work happens. They are records of things that
+              occurred rather than claims about what is true — and putting the change log behind
+              the gate would be circular.
             </p>
           </div>
           <div class="card">
             <h3>Directly authored prose</h3>
             <p>
               Chapter prose after acceptance, and the world bible, are written straight to disk by
-              you. They are still versioned, still snapshotted into <code>.history/</code>, still
-              logged — every save is restorable. They just do not wait for a decision, because you
-              are the one making it as you type.
+              you. Still versioned, still copied into <code>.history/</code>, still logged — every
+              save is restorable. They simply do not wait for a decision, because you are making it
+              as you type.
             </p>
           </div>
         </div>
         <h4>Two more that surprise people</h4>
         <p>
           <strong>A look chosen while creating a world does not pass through the gate.</strong> It
-          is written directly as an accepted first version. It has no proposal behind it, and — a
-          real consequence — no first snapshot in <code>.history/</code> either, because there was
-          no earlier version to keep. Every subsequent change to the look does go through the gate
-          and does write history.
+          is written straight in as an accepted first version, with no proposal behind it and — a
+          real consequence — no first copy in <code>.history/</code>, because there was no earlier
+          version to keep. Every later change to the look does go through the gate, and does write
+          history.
         </p>
         <p>
           <strong>Creating a world is not itself one all-or-nothing act.</strong> The folder and the
-          world file can exist before the first change-log line has been appended. This is
-          deliberate rather than an oversight: the all-or-nothing machinery protects changes to a
-          world, and it needs a world to exist before it can protect anything. Both of these are
-          documented plainly in the repository's own record of what touches the disk, rather than
-          being left for someone to discover.
+          world file can exist before the first change-log line is appended. That is deliberate: the
+          all-or-nothing machinery protects changes <em>to</em> a world, and needs the world to
+          exist first. Both facts are written down plainly in the repository's own record of what
+          touches the disk, rather than left for someone to discover.
         </p>
       </section>
 
@@ -643,8 +642,8 @@
         <h2>One owner at a time</h2>
         <p>
           A world open in one copy of Arke is locked against another. The lock is a small file at
-          the top of the folder called <code>world.lock</code>, and it records which running program
-          holds the world and when that program started.
+          the top of the folder called <code>world.lock</code>, recording which running program holds
+          the world and when that program started.
         </p>
         <p>
           <strong>Claiming has to be a single indivisible act.</strong> "Look whether the lock file
@@ -658,9 +657,9 @@
         <p>
           While a world is open, the holder touches the lock file every twenty seconds — a
           heartbeat. If Arke crashed rather than closing properly, the lock is left behind with
-          nobody alive holding it, and a lock file with a dead owner or a heartbeat that stopped
-          over a minute ago is treated as debris and cleared. You are never shut out of your own
-          work by a program that is no longer running.
+          nobody alive holding it; a lock whose owner is dead or whose heartbeat stopped over a
+          minute ago is treated as debris and cleared. You are never shut out of your own work by a
+          program that is no longer running.
         </p>
         <p>
           Letting go takes the same care in reverse. Releasing removes only a lock that still names
@@ -674,23 +673,23 @@
       <section id="outside">
         <h2>Editing a world in a text editor while Arke is open</h2>
         <p>
-          You can. The files are yours, they are plain text, and nothing stops you. Here is honestly
-          what happens.
+          You can. The files are yours, they are plain text, and nothing stops you. Honestly, here
+          is what happens.
         </p>
         <p>
-          While a world is open, Arke watches the folder. It ignores its own working areas — the
-          index, the staging folders, the conversations, the lock — and settles for a moment before
-          reacting, so a text editor's messy save sequence is seen as one event rather than five.
-          When it notices a change it did not make, it <strong>reports</strong> it. It does not
-          merge it, and it does not adopt it silently. The change appears in your waiting queue as
-          "files changed outside the app", and it sits there until you deal with it.
+          While a world is open, Arke watches the folder, ignoring its own working areas — the
+          index, the staging folders, the conversations, the lock — and settling for a moment before
+          reacting, so a text editor's messy save sequence reads as one event rather than five. When
+          it notices a change it did not make, it <strong>reports</strong> it. It does not merge it
+          and does not adopt it silently: the change appears in your waiting queue as "files changed
+          outside the app", and sits there until you deal with it.
         </p>
         <p>
-          Accepting the reconciliation takes the bytes on disk as the truth: the file's version goes
-          up, a snapshot is written, and a change-log line is added with a source of
-          <code>external-edit</code>, so the audit trail is honest about the fact that this change
-          did not come through the gate. A file you deleted outside the app stays deleted and gains
-          a line saying so. A file with no version to move gets a log line and nothing else.
+          Accepting the reconciliation takes what is on disk as the truth: the version goes up, a
+          copy is filed, and a change-log line is added with a source of <code>external-edit</code>,
+          so the trail is honest that this change did not come through the gate. A file you deleted
+          outside the app stays deleted and gains a line saying so. A file with no version to move
+          gets a log line and nothing else.
         </p>
         <p class="note">
           <strong>One known gap, stated plainly.</strong> The specification says the snapshot taken

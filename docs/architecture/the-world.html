@@ -141,12 +141,9 @@
           A world is a folder. Take the productions out of it — the films and the stories being
           made inside — and what remains is the world proper: its own record, its people and
           places, its canon, the author's own thinking, its look, the pictures that keep a face,
-          the files you have brought in, and its voices. Every one of them opens in a text
-          editor.
-        </p>
-        <p>
-          Every example below is real, quoted as it sits on disk in <em>The Undersong</em>, the
-          sample world that ships with the repository.
+          the files you have brought in, and its voices. Every one of them opens in a text editor,
+          and every example below is quoted as it sits on disk in <em>The Undersong</em>, the sample
+          world that ships with the repository.
         </p>
 
         <div class="tree"><b>the-undersong/</b>
@@ -258,12 +255,9 @@
           A character, a place and a faction are the same kind of file, called a
           <strong>sheet</strong>. They differ in which prose headings they carry and in one or two
           lines of the header — and in nothing else. They version the same way, pass the same
-          gate, are cited the same way, retire the same way and take pictures the same way.
-        </p>
-        <p>
-          That matters more than it sounds: everything that can go wrong with an entity — a stale
-          citation, a version that moved under someone, a name that no longer resolves — has to be
-          got right once rather than three times.
+          gate, are cited the same way, retire the same way and take pictures the same way — so
+          everything that can go wrong with an entity has to be got right once rather than three
+          times.
         </p>
         <div class="snip"><span class="c">characters/maren-kest.md</span>
 ---
@@ -402,10 +396,8 @@ word she could keep.</div>
         <p>
           A sheet may name one production, which makes it that production's <strong>guest</strong>
           — the barman in one scene who is not a citizen of the world. Guests sit in the same
-          <code>characters/</code> folder as everyone else and share the same pool of names.
-        </p>
-        <p>
-          Ownership decides one thing only: where the sheet is <em>shown</em>. The world's cast
+          <code>characters/</code> folder as everyone else and share the same pool of names, and
+          ownership decides one thing only: where the sheet is <em>shown</em>. The world's cast
           count, its ledgers and the fan of faces on the world hub leave guests out; the production
           shows them as a group beside the world cast it draws on. Otherwise a guest is an ordinary
           sheet — it versions, gates, is cited, takes a reference kit, takes a voice, retires. Scope
@@ -489,24 +481,21 @@ whose melody cannot be carried back across waking…
 
         <h4>Revisions, not dates</h4>
         <p>
-          Three numbers on the entry — introduced, settled, amended — are all
-          <em>canon revisions</em>, that same single counter from <code>world.json</code>.
-          CANON-058 was introduced and settled at revision 81 and last amended at 103. Because
-          every take and every image also records the revision it was made under, "this shot was
-          made when CANON-058 still said something else" is arithmetic rather than an argument.
-          Every version of the entry is kept, addressed by the revision that produced it.
+          The three numbers on the entry — introduced, settled, amended — are all
+          <em>canon revisions</em>, that same counter from <code>world.json</code>. CANON-058 was
+          introduced and settled at 81 and last amended at 103. Every take and every image records
+          the revision it was made under too, so "this shot was made when CANON-058 still said
+          something else" is arithmetic rather than an argument. Every version of the entry is
+          kept, addressed by the revision that produced it.
         </p>
         <p>
-          <code>links</code> mixes both kinds of name freely — canon numbers and sheet names alike
-          — because a statement about dreams really is about two other statements and two
-          characters at once, and two separate lists would only be two things to keep in step.
+          <code>links</code> mixes both kinds of name freely, because a statement about dreams
+          really is about two other statements and two characters at once, and two separate lists
+          would only be two things to keep in step.
         </p>
 
         <h4>How canon answers a question</h4>
-        <p>
-          Asking the world a question is the feature this design exists for, and the discipline is
-          the point rather than a nicety.
-        </p>
+        <p>Asking the world a question is what this whole arrangement exists for.</p>
         <ol class="steps">
           <li>
             <h3>It searches only what is written</h3>
@@ -563,9 +552,9 @@ whose melody cannot be carried back across waking…
         <p>
           It is deliberately <strong>not canon</strong>, and that distinction is the whole design.
           Canon holds what the world has decided; the bible holds what the author thinks. Nothing
-          cites it, nothing generates from it, and the question-answering above never draws on it
-          — an answer sourced from a musing would look exactly like an answer sourced from a
-          settled fact, which is the one failure the citation discipline exists to prevent.
+          cites it and the question-answering above never draws on it — an answer sourced from a
+          musing would look exactly like one sourced from a settled fact, which is the single
+          failure the citation discipline exists to prevent.
         </p>
         <div class="scroller">
           <table>
@@ -584,10 +573,10 @@ whose melody cannot be carried back across waking…
           approval step on thinking out loud is a toll on thinking.
         </p>
         <p>
-          It is also the one authored file Arke expects you to open in a text editor of your own.
-          Save it from outside while the app is running and the app simply takes the new text. Both
-          writers — you typing in the app, and the assistant describing an edit — go through the
-          same path, so neither can forget to cut a version.
+          It is also the one authored file Arke expects you to open in an editor of your own: save
+          it from outside while the app is running and the app simply takes the new text. Both
+          writers — you, and the assistant describing an edit — go through the same path, so
+          neither can forget to cut a version.
         </p>
         <p class="note">
           A world made before the bible existed has none, which is ordinary rather than broken —
@@ -641,17 +630,17 @@ whose melody cannot be carried back across waking…
         </p>
         <h4>Exceptions are named, not hidden</h4>
         <p>
-          Anything that wants to differ from the world look has to say so in its own file, and the
-          world's art direction surface lists every one of them by name. An exception you cannot
-          see is the one that quietly makes a world look like two worlds.
+          Anything that wants to differ has to say so in its own file, and the art direction surface
+          lists every one by name. An exception you cannot see is what quietly makes one world look
+          like two.
         </p>
         <p>
-          <span class="pill pill--part">partly built</span> A single character's reference kit can
-          carry its own look, and it is honoured — reference pictures for that character are
-          generated against it. A production can also record one, and the world surface names it
-          as an exception and leaves it out of the reach count — but nothing currently reads it
-          when a shot is dispatched, and no screen writes it. The field is in the format and in
-          the world's own accounting; the inheritance the specification describes is not finished.
+          <span class="pill pill--part">partly built</span> A character's reference kit can carry
+          its own look, and it is honoured — that character's reference pictures are generated
+          against it. A production can record one too, and the world surface names it as an
+          exception and leaves it out of the reach count, but nothing reads it when a shot is
+          dispatched and no screen writes it. The field is in the format and in the world's
+          accounting; the inheritance the specification describes is not finished.
         </p>
       </section>
 
@@ -660,9 +649,9 @@ whose melody cannot be carried back across waking…
         <h2>Reference kits: how a face survives</h2>
         <p>
           Each sheet with pictures gets a folder under <code>references/</code> holding its images
-          and one small file listing them. This is the mechanism behind the promise that identity
-          travels: a character carries the same two pictures into every generation that will take
-          them, so she keeps her face.
+          and one small file listing them. This is the mechanism behind identity travelling: a
+          character carries the same two pictures into every generation that will take them, which
+          is why she keeps her face.
         </p>
         <div class="flow">
           <div class="node node--lead"><strong>The main photo</strong><span>one accepted image — this is what she looks like</span></div>
@@ -703,44 +692,43 @@ whose melody cannot be carried back across waking…
         <p>
           <strong>The main photo</strong> is the anchor: one accepted image that settles what she
           looks like, and the thing every later picture of her is generated against. Generation is
-          gated on it alone — no model sheet, no wardrobe explorations, nothing else is required
-          before you can shoot her.
+          gated on it alone — no model sheet, no wardrobe explorations, nothing else needed before
+          you can shoot her.
         </p>
         <p>
-          <strong>The model sheet</strong> is one composite image — turnaround, expressions and
-          details in a single picture — nominated to ride along with dispatches. Exactly one is
-          designated, because "send the references" has to mean one definite thing rather than
-          whichever the folder happened to list first.
+          <strong>The model sheet</strong> is one composite — turnaround, expressions and details in
+          a single picture — nominated to ride along with dispatches. Exactly one is designated,
+          because "send the references" has to mean one definite thing rather than whichever the
+          folder happened to list first.
         </p>
         <p>
-          <strong>Tiles</strong> are individual pictures at fixed angles: head front, three-quarter
+          <strong>Tiles</strong> are single pictures at fixed angles — head front, three-quarter
           left and right, profile, full body, back, expression, detail. A tile is empty, queued,
-          arrived-but-unreviewed, <em>locked</em>, or superseded — and only a locked tile is a real
+          arrived-but-unreviewed, <em>locked</em> or superseded, and only a locked tile counts as a
           reference. A superseded tile keeps its row rather than vanishing, because pictures made
-          against it must stay explicable.
+          against it have to stay explicable.
         </p>
         <p>
           The load-bearing detail is on nearly every line: each tile and each composite records
           <strong>the version of the sheet and the version of the art direction it was made
-          against</strong>. That single habit is what lets Arke tell you "three of these pictures
-          predate the change you just made" instead of leaving you to notice, six shots later,
-          that she has the wrong coat. A stale reference is arithmetic here, not judgement.
+          against</strong>. That one habit is what lets Arke say "three of these pictures predate
+          the change you just made", instead of leaving you to notice six shots later that she has
+          the wrong coat. A stale reference is arithmetic here, not judgement.
         </p>
         <p class="note">
           <span class="pill pill--part">superseded design</span> The older six-angle turnaround —
           with its rule that body angles wait until the whole head set is locked — is still in the
-          file format, still readable, and still in the coordinator's toolkit. The sample kit above
-          is one of those. But new kits are created with no angle tiles at all, and the app's
-          character reference screen is built on the main photo and the one compiled sheet instead.
-          The written specification for kits describes the older design; the code has moved on, and
-          the code is what runs.
+          file format and still readable; the sample kit above is one of those. But new kits are
+          created with no angle tiles at all, and the character reference screen is built on the
+          main photo and the one compiled sheet instead. The written specification for kits still
+          describes the older design. The code has moved on, and the code is what runs.
         </p>
         <p>
-          Locations work the same way with different furniture: instead of a face, a set of
-          accepted <em>views</em> — establishing, reverse, day — capped at six, one of them marked
-          as the establishing one that later views are generated against. Panels keep their slot
-          when a view is replaced, because a prompt that already cited "panel 2" is wrong the
-          moment panel 2 silently becomes something else.
+          Locations work the same way with different furniture: instead of a face, a set of accepted
+          <em>views</em> — establishing, reverse, day — capped at six, one marked as the establishing
+          view that later ones are generated against. A replaced view inherits the slot of the view
+          it supersedes, because a prompt that already cited "panel 2" is wrong the moment panel 2
+          silently becomes something else.
         </p>
       </section>
 
@@ -764,31 +752,28 @@ whose melody cannot be carried back across waking…
 }</div>
         <p>
           The card carries what kind of thing it is, a fingerprint of the exact bytes, where it came
-          from, what it is about, and when it arrived. <code>file</code> is a name inside
-          <code>artifacts/</code> and can never be a path pointing somewhere else on your machine —
-          that is what keeps the world movable.
+          from, what it is about and when it arrived. <code>file</code> is a name inside
+          <code>artifacts/</code> and can never point elsewhere on your machine, which is part of
+          what keeps the world movable.
         </p>
         <p>
-          Provenance is written <em>at the moment the file arrives</em>, not filed by hand
-          afterwards, which is why things file themselves. A recording you dropped in while talking
-          about the Vigil shows up against the Vigil later, and against CANON-001, without anybody
-          having remembered to tag it. Something Arke made itself says so and names what made it —
-          the board card in the sample world reads
-          <code>board-compile:saltlight/sc_04@v2</code>.
+          Provenance is written <em>at the moment the file arrives</em> rather than filed by hand
+          afterwards, which is why things file themselves: a recording dropped in while you were
+          talking about the Vigil shows up against the Vigil later, and against CANON-001, with
+          nobody remembering to tag it. Something Arke made itself names what made it — the board
+          card here reads <code>board-compile:saltlight/sc_04@v2</code>.
         </p>
         <p>
-          Artifacts never change. Replacing one files a new artifact that records what it
-          supersedes, and the old file, its card and every existing link to it all stay exactly
-          where they were. Pickers work out what to stop offering from the new card, so nothing has
-          to reach back and mark the old one — which means an old link can never be broken by a
-          replacement it knows nothing about.
+          Artifacts never change. Replacing one files a new artifact recording what it supersedes,
+          and the old file, its card and every existing link stay exactly where they were. Pickers
+          work out what to stop offering from the new card, so nothing reaches back to mark the old
+          one — an old link can never be broken by a replacement it knows nothing about.
         </p>
         <p>
-          Like a sheet, an artifact can belong to one production rather than to the world.
-          Belonging is not the same as being about: <code>links</code> may name three productions,
-          while ownership names at most one. Conflating them would make an artifact disappear from
-          the world's shelf the moment you linked it to a film, which is the opposite of what
-          linking it meant.
+          Like a sheet, an artifact can belong to one production rather than to the world. Belonging
+          is not the same as being about: <code>links</code> may name three productions, ownership
+          names at most one. Conflating them would make an artifact vanish from the world's shelf
+          the moment you linked it to a film, which is the opposite of what linking it meant.
         </p>
       </section>
 
@@ -798,22 +783,21 @@ whose melody cannot be carried back across waking…
         <p>
           A character's voice is four lines on her own sheet: which provider speaks it, which voice
           that provider knows it by, what you call it, and the version of her sheet the choice was
-          made against. It is a direct edit rather than a proposal — it is your own pick, not a
-          drafted change waiting to be reviewed — but it still cuts a version and still tells you
-          which productions it touches.
+          made against. It commits directly rather than waiting for review — it is your own pick,
+          not a drafted change — but it still cuts a version and still names the productions it
+          touches.
         </p>
         <p>
-          A voice cloned from a recording belongs to the world rather than to a character, so it
-          lives at the world root in <code>voices/</code>: the clip itself, and one file listing
-          the voices this world owns. The clip is deliberately kept there as its own copy even
-          though the recording is also filed as an artifact — a reference clip is a few seconds
-          long, and a character whose voice broke because somebody tidied the artifacts shelf is
-          not worth the half megabyte saved.
+          A voice cloned from a recording belongs to the world rather than to any one character, so
+          it lives at the world root in <code>voices/</code>: the clip, and one file listing the
+          voices this world owns. The clip is kept there as its own copy even though the recording
+          is also filed as an artifact — a reference clip is seconds long, and a character whose
+          voice broke because somebody tidied the artifacts shelf is not worth the half megabyte
+          saved.
         </p>
         <p>
-          That list is read very forgivingly. One malformed entry costs one voice; refusing the
-          whole file would cost every voice in the world and tell the author nothing was ever
-          cloned.
+          That list is read forgivingly. One malformed entry costs one voice; refusing the whole
+          file would cost every voice in the world and tell the author nothing was ever cloned.
         </p>
         <p>
           How lines are actually spoken, what it costs and where the audio lands is a separate

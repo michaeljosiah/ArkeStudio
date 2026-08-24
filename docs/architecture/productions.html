@@ -144,9 +144,9 @@
         </p>
 
         <p>
-          The sample world that ships with Arke Studio, <em>The Undersong</em>, holds two of them.
-          One is filmed, one is prose. They sit side by side under <code>productions/</code>, and
-          they draw on the same six locations and the same five characters.
+          The sample world that ships with Arke Studio, <em>The Undersong</em>, holds two: one
+          filmed, one prose. They sit side by side and draw on the same five characters and the
+          same six locations.
         </p>
 
         <div class="tree"><b>the-undersong/</b>                       <i>one world folder</i>
@@ -176,10 +176,7 @@
          └─ 04-her-own-hand.md</div>
 
         <h4>What a production says about itself</h4>
-        <p>
-          The whole of a production's own record is one small file. Here are both of the sample
-          world's, complete and unabridged:
-        </p>
+        <p>The whole of a production's own record is one small file. Here are both, complete:</p>
 
         <div class="snip"><span class="c">productions/saltlight/production.json</span>
 {
@@ -204,43 +201,40 @@
 }</div>
         <p class="caption">
           Notice how little is here. Nothing about the cast, nothing about the look, nothing about
-          the world. All of that is somewhere else, once.
+          the world — all of that is somewhere else, once.
         </p>
 
         <h4>Three words for what a production is, and why</h4>
-        <p>
-          A production carries up to three classification words, and the reason there are three is
-          entirely about not lying to a reader.
-        </p>
+        <p>There are three classification words, and the reason there are three is about not lying to a reader.</p>
         <dl class="kv">
           <dt>format</dt>
           <dd>
-            The oldest of the three, and frozen: it is only ever <code>story</code>,
-            <code>video</code> or <code>stills</code>. It is <strong>always written</strong>, even
-            for productions the word barely fits, because a copy of Arke that predates the other
-            two fields will read this one and must not be misled by it.
+            The oldest, and frozen: only ever <code>story</code>, <code>video</code> or
+            <code>stills</code>. It is <strong>always written</strong>, even where the word barely
+            fits, because a copy of Arke that predates the other two will read this one and must
+            not be misled by it.
           </dd>
           <dt>medium</dt>
           <dd>
-            What the audience receives: <code>story</code> or <code>video</code>. Optional. When it
-            is absent it is worked out from <code>format</code> — story stays story, video stays
-            video, and the retired <code>stills</code> becomes video. It is written down
-            <em>only</em> when it says something the old word cannot.
+            What the audience receives: <code>story</code> or <code>video</code>. When absent it is
+            worked out from <code>format</code> — story stays story, video stays video, the retired
+            <code>stills</code> becomes video — and it is written down only when it says something
+            the old word cannot.
           </dd>
           <dt>kind</dt>
           <dd>
             The named form beneath the medium: <code>film</code>, <code>microdrama</code>,
-            <code>music-video</code>, <code>interactive</code>, <code>book</code>. A kind only sets
+            <code>music-video</code>, <code>interactive</code>, <code>book</code>. A kind sets
             starting numbers and which screens appear; every video kind has the same scenes, shots,
             takes and cut. An unrecognised kind falls back to the medium's ordinary behaviour
             rather than making the production disappear.
           </dd>
         </dl>
         <p>
-          That is why both files above carry only <code>format</code>. Neither is a micro drama or
-          an interactive piece, so writing <code>medium</code> and <code>kind</code> would add two
-          keys that say nothing new — and adding them marks the world as needing a newer build.
-          A plain creation stays readable by every version that ever existed.
+          That is why both files above carry only <code>format</code>: neither is a micro drama or
+          an interactive piece, so the other two keys would say nothing new — and writing them
+          marks the world as needing a newer build. A plain creation stays readable by every
+          version that ever existed.
         </p>
 
         <h4>Four more things a production may carry</h4>
@@ -248,36 +242,33 @@
           <dt>aspect</dt>
           <dd>
             The shape it delivers in — <code>16:9</code>, <code>9:16</code>. It sits on the
-            production and not on the world, because one world routinely holds a wide film and a
+            production and not on the world because one world routinely holds a wide film and a
             vertical cut of the same material, and a single world-level shape cannot hold both
             without one production silently changing the other's. Absent means 16:9, which is what
-            everything made before the field existed actually rendered. Written in one tidy form:
-            <code>" 9 : 16 "</code> and <code>9:16</code> are stored the same, and something that
-            is not two numbers around a colon is refused at the point of typing rather than stored
-            to fail later.
+            everything made before the field existed actually rendered.
           </dd>
           <dt>musicPolicy</dt>
           <dd>
             A production may make the world's music rule <strong>stricter and never looser</strong>.
-            The world can say either "environmental sound only" or "the model may score it"; the
-            production may only say "environmental sound only", and there is deliberately no way to
-            write the permissive value here at all. That rule is built into the shape of the file
-            rather than into a screen, because a screen can be worked around and a file that cannot
-            express the wrong thing cannot be talked into it.
+            The world may say "environmental sound only" or "the model may score it"; a production
+            may only say the first, and there is no way to write the permissive value here at all.
+            That rule is built into the shape of the file rather than into a screen, because a
+            screen can be worked around and a file that cannot express the wrong thing cannot be
+            talked into it.
           </dd>
           <dt>failureModes</dt>
           <dd>
-            Standing "don't do this" notes, sent with every generation — up to twenty, each a
-            sentence or so. The production's are <em>added to</em> the world's, world first, never
-            instead of them: the world's are the ones every production is entitled to assume.
+            Standing "don't do this" notes sent with every generation — up to twenty, a sentence
+            each. The production's are <em>added to</em> the world's, world first, never instead of
+            them: the world's are the ones every production is entitled to assume.
           </dd>
           <dt>styleOverride</dt>
           <dd>
-            A visual language just for this production. It is deliberately conspicuous: the world's
+            A visual language just for this production, deliberately conspicuous: the world's
             art-direction screen lists it by name among the exceptions to the house look, so a
-            production that has quietly wandered off is visible from the world level.
+            production that has wandered off is visible from the world level.
             <span class="pill pill--part">partly wired</span> The exception is listed and the field
-            is stored, but nothing in the code that assembles a shot's instructions reads it yet.
+            stored, but nothing that assembles a shot's instructions reads it yet.
           </dd>
         </dl>
       </section>
@@ -285,9 +276,9 @@
       <section id="reference">
         <h2>Nothing is copied</h2>
         <p>
-          This is the central idea of the whole model, and it is worth stating on its own.
-          Creating a production copies nothing out of the world. Not a character, not a location,
-          not a rule. The production points, and resolves what it points at when it needs it.
+          This is the central idea of the whole model. Creating a production copies nothing out of
+          the world — not a character, not a location, not a rule. The production points, and
+          resolves what it points at when it needs it.
         </p>
         <div class="flow">
           <div class="node node--lead"><strong>The world</strong><span>Maren's sheet, at v5</span></div>
@@ -298,33 +289,31 @@
         </div>
         <p>
           What that buys is simple and large: edit Maren's sheet once and the change reaches every
-          production that cites her, on its next dispatch. There is no migration, no sync, no
-          "update from world" button, and no possibility of a production quietly running on a
-          version of a character nobody remembers approving. A production is a <em>view</em> of the
-          world with a running order attached to it.
+          production that cites her, on its next dispatch. No migration, no sync, no "update from
+          world" button — and no way for a production to be quietly running on a version of a
+          character nobody remembers approving.
         </p>
         <p>
-          The exception proves it. A production may own a guest — a character who belongs to this
-          film and not to the world. A guest is an ordinary sheet in the ordinary place with one
-          extra line naming its owner, and it versions, gates, gets a reference kit and gets a
-          voice exactly as a world character does. The ownership decides only where it is
-          <em>shown</em>. See <a href="the-world.html">the world</a> for how sheets themselves work.
+          The exception proves it. A production may own a <em>guest</em> — a character who belongs
+          to this film and not to the world. A guest is an ordinary sheet in the ordinary place
+          with one extra line naming its owner; ownership decides where it is shown and nothing
+          else. See <a href="the-world.html">the world</a> for how sheets work.
         </p>
       </section>
 
       <section id="shapes">
         <h2>Two shapes: prose, and something filmed</h2>
         <p>
-          Beneath <code>production.json</code>, a production takes one of two shapes. The medium
-          decides which, and the two do not overlap: a prose production has chapters and no scenes,
-          a filmed one has scenes and no chapters.
+          Beneath <code>production.json</code> a production takes one of two shapes, and they do
+          not overlap: a prose production has chapters and no scenes, a filmed one has scenes and
+          no chapters.
         </p>
 
         <h4>A story</h4>
         <p>
-          <code>story.json</code> is the overview the whole thing is drafted against. Here is the
-          real one from <em>Saltlight</em>, which is a filmed production that still keeps one —
-          the overview is about the story, not about the medium:
+          <code>story.json</code> is the overview the whole thing is drafted against. This one
+          belongs to <em>Saltlight</em>, which is filmed — the overview is about the story, not
+          about the medium:
         </p>
         <div class="snip"><span class="c">productions/saltlight/story.json</span>
 {
@@ -348,16 +337,14 @@
   <span class="k">"targetLength"</span>: "short film · 11 minutes"
 }</div>
         <p>
-          Four fields, all optional, all prose except the version. There is no act structure
-          enforced, no beat template, no required number of anything. The file exists so the thing
-          you are writing towards is written down once, in your words, where the assistant can read
-          it too.
+          Four fields, all optional, all prose. No act structure is enforced, no beat template, no
+          required number of anything. The file exists so that what you are writing towards is
+          written down once, in your words, where the assistant can read it too.
         </p>
 
         <p>
-          The prose itself lives one file per chapter under <code>chapters/</code>, as ordinary
-          Markdown with a small block of facts at the top. This is the real head of the sample
-          novella's first chapter:
+          The prose itself lives one file per chapter, as ordinary Markdown with a small block of
+          facts at the top:
         </p>
         <div class="snip"><span class="c">productions/the-ledger-of-nights/chapters/01-neap.md</span>
 ---
@@ -378,31 +365,30 @@ the watch. Six columns since 1747…</div>
         <dl class="kv">
           <dt>order vs number</dt>
           <dd>
-            <code>order</code> is the one authority on position. <code>number</code> is the older
-            field, still on disk in the sample, and read only when <code>order</code> is missing.
-            Reordering writes <code>order</code> and leaves <code>number</code> alone — nothing is
-            rewritten just to rename a key. Neither is required: a chapter whose position cannot be
-            worked out falls back to filename order, predictably, rather than vanishing from the
-            book.
+            <code>order</code> is the one authority on position; <code>number</code> is the older
+            field, still on disk here, read only when <code>order</code> is missing. Reordering
+            writes <code>order</code> and leaves <code>number</code> alone — nothing is rewritten
+            just to rename a key. Neither is required: a chapter whose position cannot be worked
+            out falls back to filename order rather than vanishing from the book.
           </dd>
           <dt>the filename</dt>
           <dd>
-            <code>01-neap.md</code> is a convenience, not a fact. Order is never taken from it,
-            because if it were, reordering would rename files, and renaming a file moves its
-            version history — so dragging chapter four above chapter three would break the history
-            of a chapter that had not changed.
+            <code>01-neap.md</code> is a convenience, never a fact. If order came from the
+            filename, reordering would rename files — and renaming a file moves its version
+            history, so dragging chapter four above three would break the history of a chapter that
+            had not changed.
           </dd>
           <dt>words · status · version</dt>
           <dd>
-            A word count, a state you choose the vocabulary for (<code>drafted</code>,
-            <code>outlined</code>, whatever suits), and a version that ticks up each time an
-            accepted change lands. Typing into your own chapter saves in place and cuts no version;
-            a chapter the assistant drafted arrives as a proposal. See
+            A word count, a state whose vocabulary you choose (<code>drafted</code>,
+            <code>outlined</code>), and a version that ticks up when an accepted change lands.
+            Typing into your own chapter saves in place and cuts no version; a chapter the
+            assistant drafted arrives as a proposal — see
             <a href="the-accept-gate.html">the accept gate</a>.
           </dd>
           <dt>draws</dt>
           <dd>
-            Which sheets and which canon entries this chapter leans on. It is what lets a change to
+            Which sheets and canon entries this chapter leans on. It is what lets a change to
             CANON-019 tell you which chapters were written against it.
           </dd>
         </dl>
@@ -416,10 +402,7 @@ the watch. Six columns since 1747…</div>
 
       <section id="scenes">
         <h2>A scene, and the shots inside it</h2>
-        <p>
-          Here is a complete scene file from the sample world — the fourth scene of
-          <em>Saltlight</em>, unedited:
-        </p>
+        <p>A complete scene file from the sample world — the fourth scene of <em>Saltlight</em>:</p>
         <div class="snip"><span class="c">productions/saltlight/scenes/04-the-verse-rises.json</span>
 {
   <span class="k">"id"</span>: "sc_04",
@@ -455,43 +438,38 @@ the watch. Six columns since 1747…</div>
     <span class="c">// "Bray stops mid-story" (sh_14) and "The harbour holds its breath" (sh_15)</span>
   ]
 }</div>
-        <p>
-          Everything in that file is a decision, not a detail. Here are the ones worth
-          understanding.
-        </p>
+        <p>Four things in there are decisions rather than details.</p>
 
         <ul class="steps">
           <li>
             <h3><code>@maren-kest</code> is a live reference, not text</h3>
             <p>
-              When Arke assembles the instructions for this shot, that token is replaced by
-              whatever the character sheet says <em>at that moment</em>, and her model sheet is
-              attached alongside as a reference picture. Edit her sheet tonight and tomorrow's
-              dispatch picks it up. Nothing was copied into the scene to go stale. The mentions are
-              also the only cast list — there is no second list of who is in the shot to fall out
-              of step with the description. And because sheets are pointed at by a stable short
-              name, renaming Maren does not silently drop her out of the shots that mention her.
+              When Arke assembles the instructions for this shot, that token becomes whatever the
+              character sheet says <em>at that moment</em>, and her model sheet is attached
+              alongside as a reference picture. Nothing was copied into the scene to go stale. The
+              mentions are also the only cast list, so there is no second list to fall out of step
+              — and because sheets are pointed at by a stable short name, renaming Maren does not
+              silently drop her out of the shots that mention her.
             </p>
           </li>
           <li>
             <h3><code>number</code> is identity; <code>order</code> is position</h3>
             <p>
-              A scene's number is its name — "Scene 4" — and it is never rewritten. It keys the
-              scene's board image on disk, and it is what a cut entry points at. Position is a
+              A scene's number is its name — "Scene 4" — and is never rewritten: it keys the
+              scene's board image on disk and it is what a cut entry points at. Position is a
               separate, optional field that reordering rewrites and nothing else touches. Two
-              fields on purpose: renumbering the world every time you drag something is exactly how
-              references quietly break, and a number that means two things means neither.
+              fields on purpose, because renumbering the world every time you drag something is how
+              references quietly break.
             </p>
           </li>
           <li>
             <h3>The scene sets the room; a shot overrides by having a value</h3>
             <p>
-              <code>inherits</code> says the location, the time of day and the tone once, for the
-              whole scene. Alongside it a scene may carry <code>defaults</code> — the camera every
-              shot starts from. A shot that names its own value for a field wins for that field
-              only, and the rest still come from the scene. There is no separate "override this"
-              switch anywhere, because the presence of the value <em>is</em> the override: a switch
-              is a second thing that can disagree with the first.
+              <code>inherits</code> says location, time of day and tone once for the whole scene,
+              and <code>defaults</code> says the camera every shot starts from. A shot naming its
+              own value wins for that field only. There is no "override this" switch anywhere,
+              because the presence of the value <em>is</em> the override — and a switch is a second
+              thing that can disagree with the first.
             </p>
           </li>
           <li>
@@ -507,10 +485,10 @@ the watch. Six columns since 1747…</div>
 
         <h4>The camera, said in nine fields</h4>
         <p>
-          <code>camera</code> in the sample above is one free line — "MCU · slow push-in" — and it
-          still works exactly as written. Beside it a shot may carry a structured camera, which is
-          the same nine fields a scene's <code>defaults</code> uses. Every field is optional, so an
-          older scene file is an ordinary scene rather than an incomplete one.
+          <code>camera</code> above is one free line — "MCU · slow push-in" — and still works
+          exactly as written. Beside it a shot may carry a structured camera, the same nine fields
+          a scene's <code>defaults</code> uses. All are optional, so an older scene file is an
+          ordinary scene rather than an incomplete one.
         </p>
         <div class="scroller">
           <table>
@@ -523,18 +501,16 @@ the watch. Six columns since 1747…</div>
           </table>
         </div>
         <p>
-          They are all free text on purpose. The list of legal sizes and movements is display
-          vocabulary, not something the file format polices, so a new word for a new kind of shot
-          never needs the file format to change.
+          They are free text on purpose: the list of legal sizes and movements is display
+          vocabulary, so a new word for a new kind of shot never needs the file format to change.
         </p>
         <p>
-          Above them sits <code>intent</code> — how the shot should <em>feel</em>, in a sentence,
-          rather than how it should be made. "Held, not slow — she is deciding whether to have
-          heard it." The idea is that the camera can be inferred from the feeling, and that
-          anything you set by hand wins over anything inferred.
-          <span class="pill pill--part">partly built</span> The field is edited on the shot sheet,
-          versioned and saved, and the assistant can write it; but no code that assembles a shot's
-          instructions reads it, so today it is a note to yourself and to the assistant rather than
+          Above them sits <code>intent</code> — how the shot should <em>feel</em>, in a sentence.
+          "Held, not slow — she is deciding whether to have heard it." The idea is that the camera
+          can be inferred from the feeling, and that anything set by hand wins over anything
+          inferred. <span class="pill pill--part">partly built</span> The field is edited on the
+          shot sheet, versioned and saved, and the assistant can write it — but nothing that
+          assembles a shot's instructions reads it, so today it is a note to yourself rather than
           something that steers the camera.
         </p>
 
@@ -543,20 +519,20 @@ the watch. Six columns since 1747…</div>
           <dt>audio</dt>
           <dd>
             A kind (<code>vo</code>, <code>dialogue</code>, <code>sfx</code>,
-            <code>silence</code>), the speaker where there is one, the line itself, and — beside
-            them — <code>ambience</code> and <code>effects</code>: the bed under the line and the
-            hits next to it. Sound direction sits on the shot rather than on the scene because one
-            global "market noise" applies itself to the quiet room two shots later.
+            <code>silence</code>), the speaker where there is one, the line, and beside them
+            <code>ambience</code> and <code>effects</code> — the bed under the line and the hits
+            next to it. Sound sits on the shot rather than the scene because one global "market
+            noise" applies itself to the quiet room two shots later.
           </dd>
           <dt>durationSec</dt>
           <dd>
-            How long this shot runs. It is what the running time is added up from, and what decides
+            How long this shot runs: what the running time is added up from, and what decides
             whether a whole scene fits inside one generation or has to be sent in passes.
           </dd>
           <dt>beats</dt>
           <dd>
-            Timing rows inside a shot — a label like "0–3s" against a line of what happens. A label,
-            deliberately, not a machine timeline.
+            Timing rows inside a shot — a label like "0–3s" against a line of what happens. A
+            label, deliberately, not a machine timeline.
             <span class="pill pill--part">partly built</span> Edited and stored; not yet read by
             anything that builds a generation.
           </dd>
@@ -564,9 +540,9 @@ the watch. Six columns since 1747…</div>
           <dd>
             Two halves of one promise. <code>openOnPrevious</code> records that this shot
             <em>wants</em> to open on the last frame of the one before it — the chaining itself is
-            driven by the actual boundary picture, and this is the authored wish. <code>keepOut</code>
-            is the negative half: things that must not be in the frame, and it really does travel
-            into the generation as an exclusion.
+            driven by the actual boundary picture, and this is the authored wish.
+            <code>keepOut</code> is the negative half, things that must not be in frame, and it
+            really does travel into the generation as an exclusion.
           </dd>
         </dl>
 
@@ -574,29 +550,28 @@ the watch. Six columns since 1747…</div>
         <p>
           Arke writes the instructions for a shot from the world: the cited sheets, the scene's
           location, the world's tone and look, the shot's camera and audio. You can edit that text
-          freely. What is stored when you do is an <em>override</em> sitting beside the shot,
-          together with the version number of every sheet it cited at the moment you edited it.
+          freely. What is stored is an <em>override</em> beside the shot, together with the version
+          number of every sheet it cited at the moment you edited:
         </p>
-        <div class="snip"><span class="c">the shape of an edited prompt, on a shot</span>
+        <div class="snip"><span class="c">an edited prompt, on a shot</span>
 <span class="k">"promptOverride"</span>: {
   <span class="k">"text"</span>: "…the words you actually want sent…",
   <span class="k">"sheetVersions"</span>: { <span class="k">"maren-kest"</span>: 4, <span class="k">"the-vigil"</span>: 2 }
 }</div>
         <p>
-          Three things follow from storing it that way rather than overwriting the assembled text.
-          The assembled form stays derivable, so it can still be shown next to yours. Reset stays
-          possible, because the thing you replaced was never destroyed. And staleness becomes
-          computable: when Maren advances to v5, Arke can say <em>this shot's prompt was written
-          against v4 and will not pick the change up</em> — which is true precisely because the
-          version was recorded, not guessed.
+          Three things follow from storing it that way rather than overwriting. The assembled form
+          stays derivable, so it can still be shown next to yours. Reset stays possible, because
+          what you replaced was never destroyed. And staleness becomes computable: when Maren
+          advances to v5, Arke can say <em>this prompt was written against v4 and will not pick the
+          change up</em> — true precisely because the version was recorded rather than guessed.
         </p>
 
         <h4>The script, and which shot covers which line</h4>
         <p>
-          A scene may carry a script: an ordered list of blocks, each one either action or
-          dialogue, each with a stable identifier that survives editing and reordering. A shot then
-          records which blocks it covers — and, beside each, a short fingerprint of that block's
-          text at the moment it was cited.
+          A scene may carry a script: ordered blocks, each either action or dialogue, each with a
+          stable identifier that survives editing and reordering. A shot records which blocks it
+          covers and, beside each, a short fingerprint of that block's text at the moment it was
+          cited.
         </p>
         <div class="snip"><span class="c">the script, and a shot citing it</span>
 <span class="k">"script"</span>: { <span class="k">"blocks"</span>: [
@@ -609,12 +584,12 @@ the watch. Six columns since 1747…</div>
 <span class="c">// on the shot:</span>
 <span class="k">"covers"</span>: [ { <span class="k">"blockId"</span>: "blk_at-bells", <span class="k">"textDigest"</span>: "sha256:9f2c…" } ]</div>
         <p>
-          Nowhere does anything store the words "this shot is out of date". Compare the fingerprint
-          against the block's text now and one of four answers falls out: the shot cites nothing,
-          the text is unchanged, the text has changed since it was cited, or the block it cited no
-          longer exists. Working it out every time is better than storing it, because a stored flag
-          can be wrong and a derivation cannot. Splitting a block in two is an edit plus an insert,
-          and the shot keeps pointing at the identifier it always pointed at.
+          Nothing anywhere stores "this shot is out of date". Compare the fingerprint against the
+          block now and one of four answers falls out: the shot cites nothing, the text is
+          unchanged, the text has changed since it was cited, or the block no longer exists.
+          Working it out every time beats storing it, because a stored flag can be wrong and a
+          derivation cannot. Splitting a block is an edit plus an insert, and the shot keeps
+          pointing at the identifier it always pointed at.
         </p>
 
         <h4>Two different pictures of a scene</h4>
@@ -622,34 +597,32 @@ the watch. Six columns since 1747…</div>
           <div class="card">
             <h3>The board</h3>
             <p>
-              A contact sheet of the scene as it currently stands, compiled locally from the frames
-              already chosen — free, repeatable, and identical every time from an identical scene.
-              It records the scene version it was made from, so it can be marked out of date when
-              the scene moves on. Shots with nothing chosen leave a gap in the grid, which is the
-              point: you are looking at your progress.
+              A contact sheet of the scene as it stands, compiled locally from the frames already
+              chosen — free, repeatable, identical every time from an identical scene. It records
+              the scene version it was made from, so it can be marked out of date. Shots with
+              nothing chosen leave a gap in the grid, which is the point.
             </p>
           </div>
           <div class="card">
             <h3>The storyboard</h3>
             <p>
-              A different thing entirely: line art, drawn by a model, made to be <em>read by</em>
-              a video model as a reference. It costs money, so it is dispatched, priced and
-              recorded like any other generation, and it records which scene version and which
-              delivery shape it was drawn at. It lands <strong>unaccepted</strong> — a board nobody
-              looked at silently steering a scene would be the accept gate inverted.
+              A different thing: line art, drawn by a model, made to be <em>read by</em> a video
+              model as a reference. It costs money, so it is dispatched, priced and recorded like
+              any other generation, and it records which scene version and delivery shape it was
+              drawn at. It lands <strong>unaccepted</strong> — a board nobody looked at silently
+              steering a scene would be the accept gate inverted.
             </p>
           </div>
         </div>
 
         <h4>What the scene was written under</h4>
         <p>
-          A scene may record the drafting guidance it was written with — which document, which
-          version, which family of models it was written for. This is provenance, in the same
-          spirit as the override's recorded sheet versions, and it earns its place because a scene
-          can be sent to a different model than the one it was written for. When that happens, the
-          dispatch says so before any money moves: <em>this scene was written for one family and
-          you are sending it to another</em>. A scene with no recorded guidance never mismatches,
-          because guidance for nobody in particular is wrong for nobody in particular.
+          A scene may record the drafting guidance it was written with: which document, which
+          version, which family of models. This is provenance, in the same spirit as the override's
+          recorded sheet versions, and it earns its place because a scene can be sent to a
+          different model than the one it was written for. When that happens the dispatch says so
+          before any money moves. A scene with no recorded guidance never mismatches, because
+          guidance for nobody in particular is wrong for nobody in particular.
         </p>
       </section>
 
@@ -657,9 +630,8 @@ the watch. Six columns since 1747…</div>
         <h2>Series, seasons and episodes</h2>
         <p>
           For something with more than one instalment, three more records join in. All three are
-          deliberately thin, and thin for one reason: a record that described a character would be
-          a second place that character exists, and a character described in two places is a
-          character that drifts.
+          deliberately thin, for one reason: a record that described a character would be a second
+          place that character exists, and a character described twice is a character that drifts.
         </p>
         <div class="scroller">
           <table>
@@ -669,18 +641,17 @@ the watch. Six columns since 1747…</div>
               <td><code>series/&lt;name&gt;.json</code></td>
               <td>
                 Title, the repeatable premise — the story engine — an ordered list of which
-                productions are its seasons, and only the continuity that is genuinely not world
-                canon. Living inside the world folder <em>is</em> its link to the world; there is
-                no field repeating it.
+                productions are its seasons, and only continuity that is genuinely not world canon.
+                Living inside the world folder <em>is</em> its link to the world; no field repeats it.
               </td>
             </tr>
             <tr>
               <td><strong>Season</strong></td>
               <td><code>productions/&lt;name&gt;/season.json</code></td>
               <td>
-                The season's question, its ending, its direction, its arcs, and its editable
-                defaults. There is no separate season entity — an episodic production
-                <em>is</em> the season, with this file beside it.
+                The season's question, its ending, its direction, its arcs, its editable defaults.
+                There is no separate season entity — an episodic production <em>is</em> the season,
+                with this file beside it.
               </td>
             </tr>
             <tr>
@@ -696,16 +667,13 @@ the watch. Six columns since 1747…</div>
 
         <h4>The season</h4>
         <p>
-          Two fields that sound alike are deliberately separate. The season's <code>ending</code>
-          is its own authored resolution, in prose — how this season finishes. The per-episode
-          ending <em>policy</em> — "cliffhanger" — lives among the defaults. Two facts, two fields,
-          because one field would have to mean whichever the reader assumed.
+          Two fields that sound alike are deliberately separate: the season's <code>ending</code>
+          is its own authored resolution in prose, while the per-episode ending <em>policy</em> —
+          "cliffhanger" — lives among the defaults. Two facts, two fields, because one field would
+          mean whichever the reader assumed.
         </p>
-        <p>
-          An arc is a lane across the season. Each one names, at most, the episode where it is set
-          up, the episode where it turns, and the episode where it pays off:
-        </p>
-        <div class="snip"><span class="c">the shape of an arc in season.json</span>
+        <p>An arc is a lane across the season, naming where it is set up, where it turns, and where it pays off:</p>
+        <div class="snip"><span class="c">an arc in season.json</span>
 <span class="k">"arcs"</span>: [
   { <span class="k">"id"</span>: "the-tithe", <span class="k">"title"</span>: "Who has been paying",
     <span class="k">"setup"</span>: "ep_first-night", <span class="k">"turn"</span>: "ep_the-audit", <span class="k">"payoff"</span>: "ep_her-own-hand" }
@@ -714,19 +682,17 @@ the watch. Six columns since 1747…</div>
           A lane with a setup and a turn and no payoff is not stored as a problem anywhere. It is
           worked out and said out loud when the season is drawn: <em>the arc "Who has been paying"
           sets up and turns but never pays off.</em> Seven other things are worked out the same way
-          — a hook repeated across episodes, the same cliffhanger twice, a character who appears in
-          no episode, a promise never resolved, a contradiction, an episode introducing too many new
-          things at once, an unusual spend pattern. Each names what it is about and the evidence it
-          stands on. There is deliberately no score of any kind: a number would hide exactly the
-          sentence you needed to read.
+          — a repeated hook, the same cliffhanger twice, a character in no episode, an unresolved
+          promise, a contradiction, an episode introducing too many new things at once, an unusual
+          spend pattern. Each names what it is about and the evidence it stands on, and there is
+          deliberately no score of any kind: a number would hide exactly the sentence you needed.
         </p>
         <p>
           The <code>defaults</code> are <strong>defaults and never invariants</strong> — episode
-          count, the seconds an episode should run between, how long the hook has, the ending
-          policy, the export preset. Choosing "micro drama" at creation writes sixty episodes,
-          forty-five to seventy-five seconds, a three-second hook, cliffhanger endings and a 9:16
-          delivery shape into the file, where every one of them is a control you can change. They
-          are starting numbers, not rules.
+          count, how long an episode should run, how long the hook has, the ending policy, the
+          export preset. Choosing "micro drama" writes sixty episodes, forty-five to seventy-five
+          seconds, a three-second hook, cliffhanger endings and a 9:16 shape into the file, where
+          every one is a control you can change.
         </p>
 
         <h4>The episode, and the one rule to remember</h4>
@@ -747,46 +713,45 @@ the watch. Six columns since 1747…</div>
         <p class="note">
           The episode's ordered list of scenes is the <strong>only</strong> authority on which
           scenes are in it. Scene files carry no episode field at all. One authority means the two
-          can never disagree, and a moment that crosses a release boundary is honestly two linked
-          scenes — one closing, one opening — rather than one scene claimed by two episodes.
+          can never disagree — and a moment that crosses a release boundary is honestly two linked
+          scenes, one closing and one opening, rather than one scene claimed by two episodes.
         </p>
         <p>
-          The same care shows in the small things. Identity is the file name and the id, both fixed
-          at creation; position is the <code>order</code> field, and reordering rewrites only that.
-          Moving a scene from one episode to another is one change touching both episode files
-          together, so there is no instant where a scene belongs to two episodes or to none.
-          Deleting an episode that still lists scenes refuses by name rather than orphaning them.
-          A scene in no episode, a scene in two, or a list naming a scene that does not exist are
-          each said out loud rather than crashing anything — and each one holds up that episode's
-          export until it is dealt with.
+          The same care shows in the small things. Identity is the file name and the id, fixed at
+          creation; position is <code>order</code>, and reordering rewrites only that. Moving a
+          scene between episodes is one change touching both files together, so there is no instant
+          where a scene belongs to two episodes or to none. Deleting an episode that still lists
+          scenes refuses by name. A scene in no episode, a scene in two, or a list naming a scene
+          that does not exist are each said out loud rather than crashing anything, and each holds
+          up that episode's export until it is dealt with.
         </p>
         <p>
-          <code>release</code> is the episode's own delivery record: title and description as
-          published, a chosen thumbnail, tags, a recap, a teaser, alternative crops. It belongs to
+          <code>release</code> is the episode's own delivery record — published title and
+          description, a chosen thumbnail, tags, a recap, a teaser, alternative crops. It belongs to
           the episode because the episode is the thing released; a film releases as the production
-          itself, and there is deliberately no abstract "release unit" invented to cover both.
+          itself, and no abstract "release unit" was invented to cover both.
         </p>
       </section>
 
       <section id="page">
         <h2>The page medium <span class="pill pill--no">not built</span></h2>
         <p>
-          Arke makes prose and it makes moving pictures. It cannot yet make the thing that sits
-          between them: an illustrated page — a picture with words set on it, a spread, a panel
-          with a speech balloon, a book you could send to a printer.
+          Arke makes prose and it makes moving pictures. It cannot yet make the thing between them:
+          an illustrated page — a picture with words set on it, a spread, a panel with a balloon, a
+          book you could send to a printer.
         </p>
         <p>
-          There is a full specification for it and no code behind it. Nothing in the program reads
-          or writes a page today. What the specification settles is worth knowing because of the
-          shape it insists on, which is the shape of everything else here:
+          There is a full specification and no code behind it: nothing in the program reads or
+          writes a page today. What it settles is worth knowing, because it insists on the same
+          shape as everything else here.
         </p>
         <div class="grid">
           <div class="card">
             <h3>A panel is a shot</h3>
             <p>
-              Not a new kind of thing. A page-based production would share the same dispatch, the
-              same takes, the same review and the same selection as video, with duration and camera
-              movement simply absent rather than defaulted, because a page has no time.
+              Not a new kind of thing. A page production would share the same dispatch, takes,
+              review and selection as video, with duration and camera movement simply absent rather
+              than defaulted, because a page has no time.
             </p>
           </div>
           <div class="card">
@@ -794,25 +759,22 @@ the watch. Six columns since 1747…</div>
             <p>
               A page is an ordered group of panels with a layout; the book is worked out from the
               pages and the chosen pictures, exactly as the cut is. A spread is worked out from the
-              page numbering and never stored, so inserting a page cannot leave a stale pairing
-              behind.
+              page numbering and never stored, so inserting a page leaves no stale pairing behind.
             </p>
           </div>
           <div class="card">
             <h3>Words are a layer, not paint</h3>
             <p>
               Narration and balloons would be set on top at render time, from the same script
-              blocks a shot cites — never generated into the picture. Text inside a generated image
-              cannot be corrected, resized, translated or read aloud. The one exception is lettering
-              that belongs to the depicted world, like a sign, which is picture rather than words.
+              blocks a shot cites — never generated into the picture, because text inside a
+              generated image cannot be corrected, resized, translated or read aloud.
             </p>
           </div>
         </div>
         <p>
-          It is honest about its own uncertainty, too. The specification records a real test in
-          which a model was asked, exhaustively, for no text of any kind and returned lettered boat
-          hulls anyway — which is why nothing in the design is allowed to assume that asking
-          worked.
+          It is honest about its own uncertainty. The specification records a real test in which a
+          model was asked, exhaustively, for no text of any kind and returned lettered boat hulls
+          anyway — which is why nothing in the design is allowed to assume that asking worked.
         </p>
       </section>
 
@@ -821,7 +783,7 @@ the watch. Six columns since 1747…</div>
         <p>
           A production can be one the viewer steers. It is not a fourth medium and not a second
           kind of scene: it is ordinary video, made of ordinary scenes and shots and takes, with
-          one extra file that says how the scenes connect.
+          one extra file saying how the scenes connect.
         </p>
         <div class="snip"><span class="c">productions/&lt;name&gt;/routing.json</span>
 {
@@ -837,39 +799,37 @@ the watch. Six columns since 1747…</div>
 }</div>
         <p>
           <strong>A choice selects the next scene and does nothing else.</strong> There is no way to
-          write a condition, a variable, an inventory or an unlock — and that is not a rule enforced
-          somewhere, it is a shape the file cannot hold. A file with a <code>condition</code> key in
-          it does not fail a check; it fails to be a routing file at all, with the offending key
-          named. Endings and exclusions are designations of scenes that already exist, not a second
-          kind of scene.
+          write a condition, a variable, an inventory or an unlock — not a rule enforced somewhere,
+          but a shape the file cannot hold. A file with a <code>condition</code> key in it does not
+          fail a check; it fails to be a routing file at all, with the offending key named. Endings
+          and exclusions are designations of scenes that already exist, never a second kind of scene.
         </p>
         <p>
-          Because the map is a plain graph, everything worth knowing about it is worked out rather
-          than stored: a scene nothing can reach that nobody deliberately excluded, a choice
-          pointing at a scene that is not there, a place from which no ending can be reached, a loop
-          with no way out, a scene two routes arrive at, an ending that still offers choices, and
-          any edge nobody has walked in preview. Each is either something that blocks publishing or
-          something that warns, named, with the scene or choice it is about. Preview walks count as
-          evidence, and a walk stops counting the moment the choice it names is changed — so
-          evidence can never vouch for an edge that no longer exists.
+          Because the map is a plain graph, everything worth knowing is worked out rather than
+          stored: a scene nothing can reach that nobody deliberately excluded, a choice pointing at
+          a scene that is not there, a place from which no ending can be reached, a loop with no way
+          out, a scene two routes arrive at, an ending that still offers choices, and any edge
+          nobody has walked in preview. Each either blocks publishing or warns, named, with the
+          scene or choice it is about. Preview walks count as evidence, and a walk stops counting
+          the moment the choice it names is changed — so evidence can never vouch for an edge that
+          no longer exists.
         </p>
         <p class="note">
-          Both halves are built: the branch map screen, the findings, the durable preview evidence,
-          and an export that packages the thing as something you can host yourself. What was
-          designed as a medium of its own is now a <em>kind</em> of video — because a medium is what
-          the audience receives, and interactive video receives moving pictures.
+          All of it is built: the branch map, the findings, the durable preview evidence, and an
+          export that packages the piece as something you can host yourself. What was designed as a
+          medium of its own is now a <em>kind</em> of video — because a medium is what the audience
+          receives, and interactive video receives moving pictures.
         </p>
       </section>
 
       <div class="foot">
         Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
         reading the source and the sample world. Every file shown is either taken verbatim from
-        <code>fixtures/worlds/the-undersong/</code> or is a shape read straight out of the code
-        that defines it; anything specified but not built is marked as such on the page. Neighbours:
+        <code>fixtures/worlds/the-undersong/</code> or is a shape read out of the code that defines
+        it; anything specified but not built is marked on the page. Neighbours:
         <a href="the-world.html">the world</a> for the cast and canon a production points at,
         <a href="takes-and-the-cut.html">takes and the cut</a> for what happens after a scene is
-        written, <a href="generation.html">generation and spend</a> for what a dispatch costs, and
-        <a href="files-on-disk.html">files on disk</a> for the folder in full.
+        written, and <a href="generation.html">generation and spend</a> for what a dispatch costs.
       </div>
     </div>
   </body>
