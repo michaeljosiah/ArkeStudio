@@ -8,6 +8,7 @@ import {
   previewLineFor,
   PROVIDERS,
   rankVoices,
+  splitBible,
   type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
@@ -73,6 +74,27 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
     throw new Error("This section is not available for read aloud.");
   }
   const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
+  if (!text) throw new Error("Nothing to read yet.");
+  return { text };
+}
+
+/**
+ * The same, for a section of the bible (2026-08-24).
+ *
+ * No enum of permitted headings, which is the one real difference from the sheet version. A
+ * sheet's shape is authored by the app, so naming its two readable sections in a type is honest.
+ * A bible is a blank page somebody types into — `splitBible` exists precisely because its
+ * headings are the author's — so the readable set cannot be written down in advance, and the
+ * check that matters is only whether the section is there and has words in it.
+ *
+ * Asked for by an author who wanted the story read back to her rather than read. The bible is
+ * where the whole arc lives and it was the one long-form document in the world with no way to
+ * hear it.
+ */
+export function authoritativeBibleSpeech(bibleText: string, heading: string): { text: string } {
+  const section = splitBible(bibleText).sections.find((candidate) => candidate.heading === heading);
+  if (!section) throw new Error("That section is no longer in the bible.");
+  const text = normalizeSpeechText(section.body);
   if (!text) throw new Error("Nothing to read yet.");
   return { text };
 }

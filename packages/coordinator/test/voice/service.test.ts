@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
-import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speechCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
+import { authoritativeBibleSpeech, authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speechCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -296,6 +296,54 @@ describe("the preview cache key", () => {
     assert.equal(speechCacheFile(base), speechCacheFile({ ...base, text: " hello harbour " }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, model: "kokoro-82m-v2" }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, format: "mp3" }));
+  });
+});
+
+/**
+ * The bible gained read-aloud because the whole arc of a story lives in it and it was the one
+ * long-form document in the world with no way to hear it (2026-08-24). Asked for by an author who
+ * had told a story out loud over an evening and wanted it read back to her.
+ */
+describe("authoritative bible speech", () => {
+  const BIBLE = [
+    "Some prose before any heading at all.",
+    "",
+    "## The story, told",
+    "",
+    "Her mother came from nothing.   She died the night the girl was born.",
+    "",
+    "## Format rules",
+    "",
+    "Ninety seconds.",
+    "",
+    "## Not written yet",
+    "",
+  ].join("\n");
+
+  it("reads the section it was asked for, normalised", () => {
+    assert.deepEqual(authoritativeBibleSpeech(BIBLE, "The story, told"), {
+      text: "Her mother came from nothing. She died the night the girl was born.",
+    });
+  });
+
+  /**
+   * No enum of permitted headings, unlike the sheet version — a bible's headings belong to
+   * whoever wrote it, so the only checks available are that the section is there and has words.
+   */
+  it("takes any heading the author actually wrote", () => {
+    assert.deepEqual(authoritativeBibleSpeech(BIBLE, "Format rules"), { text: "Ninety seconds." });
+  });
+
+  it("refuses a heading that is not in the document, rather than reading the wrong one", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, "The story"), /no longer in the bible/);
+  });
+
+  it("refuses an empty section instead of sending nothing to a paid provider", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, "Not written yet"), /Nothing to read/);
+  });
+
+  it("never reads the preamble, which belongs to no heading", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, ""), /no longer in the bible/);
   });
 });
 

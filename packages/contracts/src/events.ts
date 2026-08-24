@@ -57,6 +57,7 @@ export const QueueCommandSchema = z.enum([
   "voice-preview",
   "voice-line",
   "read-sheet-section",
+  "read-bible-section",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -415,9 +416,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("voice.audio"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      sheetId: SlugSchema,
+      /**
+       * Absent for a bible read, which belongs to the world rather than to anybody in it
+       * (2026-08-24). Every other purpose still names a sheet; the client keys these by
+       * `requestId`, so nothing downstream was using this to find the reply.
+       */
+      sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "bible-section"]),
       sectionHeading: z.string().min(1).optional(),
       provider: z.enum(["kokoro", "elevenlabs"]),
       model: z.string().min(1),

@@ -78,6 +78,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The same for a section of the bible (2026-08-24).
+   *
+   * A separate frame rather than a widened `read-sheet-section`, because the two differ in the
+   * one field that matters: a sheet's readable sections are a closed pair the app authored, and
+   * a bible's headings belong to whoever wrote it. Folding them together would have meant a
+   * `sheetId` that is sometimes absent and an enum that is sometimes a free string — two
+   * optional fields standing in for one real distinction.
+   *
+   * Asked for by an author who had the whole arc in the bible and no way to hear it: the sheets
+   * could be read aloud and the one long-form document in the world could not.
+   */
+  z
+    .object({
+      kind: z.literal("read-bible-section"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      // Named, never sent: the prose does not travel, the server reads the bible on disk. Free
+      // text because `splitBible` takes the author's own `## ` headings as it finds them.
+      sectionHeading: z.string().min(1),
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
    * Archive a world: out of the library, still on the disk. The folder moves to `archive/`
    * whole, so what comes next — recovery, or deleting it for good — is a decision taken later
    * and somewhere else, never a side effect of tidying up.

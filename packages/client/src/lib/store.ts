@@ -2125,6 +2125,20 @@ export function readSheetSection(
   return requestId;
 }
 
+/**
+ * The same for a section of the bible, whose headings are the author's own and so cannot be an
+ * enum here the way a sheet's two readable sections can (2026-08-24).
+ */
+export function readBibleSection(
+  worldId: string,
+  sectionHeading: string,
+  requestId = queueRequest("read-bible-section"),
+  confirmationToken?: string,
+): string {
+  send({ kind: "read-bible-section", worldId, sectionHeading, requestId, ...(confirmationToken ? { confirmationToken } : {}) });
+  return requestId;
+}
+
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
