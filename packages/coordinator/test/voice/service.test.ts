@@ -40,10 +40,19 @@ const SHEET = {
   ],
 } as unknown as Sheet;
 
-function fakeSidecar() {
+function fakeSidecar(engine: "ready" | "down" | "unreachable" = "ready") {
   const calls: string[] = [];
   return {
     calls,
+    health: async () => {
+      calls.push("health");
+      if (engine === "unreachable") return null;
+      return {
+        engineStatus: {
+          kokoro: engine === "ready" ? { ready: true } : { ready: false, reason: "Kokoro is unavailable." },
+        },
+      };
+    },
     listVoices: async () => {
       calls.push("voices");
       return [{ id: "af_bella", label: "Bella", attributes: ["low", "warm"] }];
@@ -163,6 +172,60 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
       () => voiceLineRequest({ ...base, sheet: voiceless, deliveryParams: null, deliveryNotice: null }),
       /no assigned voice/,
     );
+  });
+});
+
+/**
+ * Found in front of an audience (2026-08-24). The runtime was up, its top-level health said
+ * `ok: true`, and `/voices` listed three Kokoro presets — while the speech engine had failed to
+ * load at startup and never retried. Settings offered a narrator, one was chosen, and the first
+ * anyone knew was a 503 at the moment of pressing play.
+ *
+ * The listing endpoint reads a preset table. It is not evidence that anything can be spoken, and
+ * asking it was the only question being asked.
+ */
+describe("the catalogue does not offer a voice the engine cannot speak", () => {
+  const service = (sidecar: ReturnType<typeof fakeSidecar>) =>
+    new VoiceService({
+      sidecar,
+      localPresets: [
+        { provider: "kokoro", voiceId: "af_bella", label: "Bella", attributes: [], local: true, canClone: false },
+      ],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+      clock: CLOCK,
+    });
+
+  it("offers the live voices when the engine reports itself ready", async () => {
+    const sidecar = fakeSidecar("ready");
+    const voices = await service(sidecar).catalogue();
+    assert.deepEqual(voices.map((v) => v.voiceId), ["af_bella"]);
+    assert.ok(sidecar.calls.includes("health"), "it asks before it offers");
+  });
+
+  it("offers nothing local when the engine says it is not ready — not even the presets", async () => {
+    const sidecar = fakeSidecar("down");
+    const voices = await service(sidecar).catalogue();
+    assert.deepEqual(voices, [], "we have been told in as many words that none of them can be spoken");
+    assert.equal(sidecar.calls.includes("voices"), false, "and it does not bother asking for a list it cannot use");
+  });
+
+  /**
+   * Unreachable is not the same as failed. An engine that has not answered yet may simply be
+   * starting, and blanking the configured presets on a timeout would make a slow launch look
+   * like a broken install.
+   */
+  it("keeps the configured presets when the runtime does not answer at all", async () => {
+    const voices = await service(fakeSidecar("unreachable")).catalogue();
+    assert.deepEqual(voices.map((v) => v.voiceId), ["af_bella"]);
+  });
+
+  it("still offers cloned voices when the local engine is down, since they are not its to speak", async () => {
+    const voices = await service(fakeSidecar("down")).catalogue([
+      { id: "cv_1", label: "Timi", provider: "elevenlabs", voiceId: "v_timi" } as never,
+    ]);
+    assert.equal(voices.length, 1, "a cloud-cloned voice does not depend on the local runtime");
   });
 });
 

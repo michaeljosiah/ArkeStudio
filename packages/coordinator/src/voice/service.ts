@@ -32,6 +32,15 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
 
 /** The sidecar slice this service needs; @arke-studio/voice's VoxaClient satisfies it. */
 export interface SidecarLike {
+  /**
+   * Whether each engine can actually do its job — asked before the catalogue offers a voice.
+   *
+   * `listVoices` answers from the preset list and keeps answering after the speech engine has
+   * failed to load, so the two questions are genuinely different and only one of them was being
+   * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
+   * depending on @arke-studio/voice.
+   */
+  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
@@ -162,6 +171,25 @@ export class VoiceService {
   async catalogue(clonedVoices: readonly ClonedVoice[] = []): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
+      /*
+       * Ask whether it can speak before offering a voice (2026-08-24).
+       *
+       * Driven from a real failure, in front of somebody. The runtime was up and answering, its
+       * top-level health said `ok: true`, and `/voices` listed Bella, Nicole and Michael — while
+       * the speech engine had failed to load at startup and never retried. So Settings offered a
+       * narrator, one was chosen, and the first anyone knew of it was a 503 at the moment of
+       * pressing play. `/voices` reads a preset list; it is not evidence that anything can be
+       * synthesised.
+       *
+       * Three states, and the middle one is the fix. No sidecar at all leaves the configured
+       * presets alone, because an engine that has not started yet is not an engine that has
+       * failed. A sidecar reporting the engine ready gives its live list. A sidecar reporting it
+       * NOT ready contributes nothing — not even the presets — because that is the one case
+       * where we have been told, in as many words, that none of them can be spoken.
+       */
+      const health = await this.deps.sidecar.health().catch(() => null);
+      const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
+      if (speechEngine === "down") return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices)];
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
         local = live.map((v) => ({
@@ -177,13 +205,18 @@ export class VoiceService {
         }));
       }
     }
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices)];
+  }
+
+  /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
+  private async cloudVoices(): Promise<VoiceCandidate[]> {
     const cloud: VoiceCandidate[] = [];
     for (const source of this.deps.cloudSources) {
       const key = await this.deps.getKey(source.provider);
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));
     }
-    return [...cloud, ...local, ...clonedVoiceCandidates(clonedVoices)];
+    return cloud;
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
