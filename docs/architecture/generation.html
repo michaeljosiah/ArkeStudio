@@ -246,7 +246,7 @@
           safe, so Arke goes and looks instead.
         </p>
         <p>How it looks depends on what the service can be asked:</p>
-        <div class="kv">
+        <dl class="kv">
           <dt>Ask by number</dt>
           <dd>
             Where the service can be asked "did you receive errand 01J8E1?", the answer is definite
@@ -269,7 +269,7 @@
             cost is unknown."</em> This is not a hole in the design. It is the only honest position
             when nobody can say what happened.
           </dd>
-        </div>
+        </dl>
         <p class="note">
           Reconciliation runs at start-up and finishes before the queue will accept any new work.
           Coming back to forty jobs you left running, you are told what Arke found rather than
@@ -310,7 +310,7 @@
         </p>
 
         <h4>The parts worth knowing</h4>
-        <div class="kv">
+        <dl class="kv">
           <dt>status</dt>
           <dd>
             One of seven words: <code>queued</code>, <code>submitting</code>, <code>running</code>,
@@ -349,7 +349,7 @@
             rather than cutting a line out of the file. Its charge line in the ledger is untouched:
             what was spent stays spent.
           </dd>
-        </div>
+        </dl>
 
         <h4>A reconcile action</h4>
         <p>
@@ -632,7 +632,7 @@ harbour-mouth — dropping vessel-anchorage
           belonged to. It exists so that when something looks wrong you can see what was actually
           sent rather than reconstructing it from memory.
         </p>
-        <div class="kv">
+        <dl class="kv">
           <dt>scrubbed</dt>
           <dd>Any field whose name looks like a secret is replaced outright, every key Arke knows about is scrubbed from the text, and the signed part of every web address is cut off — those carry temporary access tokens.</dd>
           <dt>yours only</dt>
@@ -641,7 +641,7 @@ harbour-mouth — dropping vessel-anchorage
           <dd>Past two thousand records or fifty megabytes it is compacted — the newest two thousand are rewritten and the rest dropped. A debugging aid that grows without limit is a disk problem you did not ask for.</dd>
           <dt>both kinds</dt>
           <dd>Web calls and command-line calls share the record, because they answer the same question. Neither is dressed up as the other: an exit code is not a web status, and mapping one to the other would put a number in your history that no service ever returned.</dd>
-        </div>
+        </dl>
       </section>
 
       <section id="providers">

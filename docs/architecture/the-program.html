@@ -138,10 +138,9 @@
         <div class="eyebrow">The program</div>
         <h1>Two halves, a private wire between them, and some helpers</h1>
         <p class="lede">
-          What you install is one application. Inside it there are two halves and a handful of
-          helper programs. The split is not decoration — it is what keeps the rules of the studio
-          enforceable in exactly one place, and it is why the same engine could one day sit under
-          something other than this window.
+          What you install is one application. Inside it are two halves and a handful of helper
+          programs. The split is not decoration: it is what keeps the rules of the studio
+          enforceable in exactly one place.
         </p>
 
         <div class="flow">
@@ -157,14 +156,14 @@
           <div class="link">→</div>
           <div class="node">
             <strong>The helpers</strong>
-            <span>Separate programs the engine starts, watches, restarts and stops: the writing assistant, the local speech program, the local image engine.</span>
+            <span>Separate programs the engine starts, watches, restarts and stops: the writing assistant, the speech program, the image engine.</span>
           </div>
         </div>
 
         <p>
           The engine is <em>not</em> a server you install. It is a library loaded into the same
-          process that puts the window on screen. Two things follow. Nothing about Arke is
-          reachable from a network, because there is no network part to reach. And quitting really
+          process that puts the window on screen. Two things follow: nothing about Arke is
+          reachable from a network, because there is no network part to reach; and quitting really
           does stop everything, because nothing is left over to stop.
         </p>
         <p>
@@ -175,11 +174,10 @@
           the engine has wrong.
         </p>
         <p class="note">
-          What a world <em>is</em> — scenes, characters, canon, takes, the cut — belongs to other
-          pages: <a href="the-world.html">the world</a>,
+          What a world <em>is</em> belongs to other pages: <a href="the-world.html">the world</a>,
           <a href="productions.html">productions</a>,
-          <a href="takes-and-the-cut.html">takes &amp; the cut</a> and
-          <a href="the-accept-gate.html">the accept gate</a>. This page is only about how the
+          <a href="takes-and-the-cut.html">takes &amp; the cut</a>,
+          <a href="the-accept-gate.html">the accept gate</a>. This one is only about how the
           program is put together.
         </p>
       </section>
@@ -188,12 +186,12 @@
         <h2>How the two halves talk</h2>
         <p>
           They talk over a private connection on your own machine — the address only your own
-          computer can reach, on a port picked fresh at every launch. Nothing outside can dial it.
+          computer can reach, on a port picked fresh at each launch. Nothing outside can dial it.
         </p>
         <p>
           When the window connects it says hello. The engine replies with <strong>one complete
-          picture</strong> of the current state, then sends <strong>one small message per
-          change</strong>, each numbered in order, which the window applies to the picture it holds.
+          picture</strong> of the current state, then <strong>one small message per change</strong>,
+          each numbered in order, which the window applies to the picture it holds.
         </p>
         <p>
           If the connection drops, the window asks for a whole fresh picture rather than for the
@@ -225,11 +223,11 @@
         </p>
         <p>
           Both directions are checked against that vocabulary, and the two ways of failing are
-          treated differently on purpose. Bytes that are not readable at all close the connection:
+          handled differently on purpose. Bytes that are not readable at all close the connection:
           that is a fault, and faults should be loud. A readable message the engine has never heard
-          of is dropped with a line in the log, because that is usually one half of the app being a
-          build ahead of the other — and closing the connection over it made the whole studio read
-          as disconnected on a single keystroke.
+          of is only dropped and logged, because that is usually one half of the app being a build
+          ahead of the other — and closing the connection over it made the whole studio read as
+          disconnected on one keystroke.
         </p>
 
         <h4>The bridge</h4>
@@ -247,16 +245,15 @@
         <p>
           Pictures and video do not travel over the message channel. The same private connection
           also answers ordinary web requests, and media is fetched from a local address shaped like
-          <code>/media/&lt;world&gt;/&lt;file&gt;</code>. The engine resolves that to a real file,
-          refuses anything not genuinely inside the named world, and streams it.
+          <code>/media/&lt;world&gt;/&lt;file&gt;</code> — resolved to a real file, refused if it is
+          not genuinely inside the named world, then streamed.
         </p>
         <p>
           The reason is <strong>byte ranges</strong> — being able to ask for just the part from
           here to here. A video element cannot seek without them. Serve a file whole and the player
           reports it has nothing to seek within, then silently ignores every attempt to move the
-          playhead: playback works, scrubbing does not, and nothing says why. So the media side
-          answers ranges properly, including the awkward form meaning "the last N bytes", and
-          refuses a range past the end of the file outright rather than returning a short stream.
+          playhead: playback works, scrubbing does not, and nothing says why. So ranges are
+          answered properly, including the awkward form meaning "the last N bytes".
         </p>
         <p class="note">
           Media is served with caching switched off. Generated grids and boards are recompiled in
@@ -268,8 +265,8 @@
       <section id="helpers">
         <h2>The helpers, and never leaving one behind</h2>
         <p>
-          Three helper programs run beside Arke, each started and looked after by the same piece of
-          code — they differ in what they say, not in how they live.
+          Three helper programs run beside Arke, each looked after by the same piece of code. They
+          differ in what they say, not in how they live.
         </p>
         <div class="grid">
           <div class="card">
@@ -292,9 +289,8 @@
         </div>
         <p>
           Each gets a free local port, a health check, a restart budget and a stated reason when it
-          cannot run. A missing helper is an ordinary state, not a broken one: the app opens,
-          browses and navigates regardless, and the affected feature says what is unavailable and
-          why.
+          cannot run. A missing helper is an ordinary state, not a broken one: the app opens and
+          works regardless, and the affected feature says what is unavailable and why.
         </p>
 
         <h4>Three belts, because one is not enough</h4>
@@ -308,38 +304,36 @@
             <p>
               Each helper is tied to Arke's own lifetime by the operating system, through a handle
               Arke holds and the system closes when Arke dies — however it dies. The child and
-              everything it spawned go with it. This is the only belt that survives a force-kill,
-              which is why it comes first.
+              everything it spawned go with it. This is the only belt that survives a force-kill.
             </p>
           </li>
           <li>
             <h3>A small file the next start-up sweeps</h3>
             <p>
-              Every helper Arke starts is written into a little register at
-              <code>run\children.json</code> and released again when it exits cleanly. The next
-              launch reads that file: anything recorded whose owner is gone is an orphan, and is
-              killed. This covers the runs where the leash could not attach, and orphans left by
-              older builds.
+              Every helper Arke starts is written into a small register at
+              <code>run\children.json</code> and released when it exits cleanly. The next launch
+              reads that file: anything recorded whose owner is gone is an orphan, and is killed.
+              This covers the runs where the leash could not attach.
             </p>
           </li>
           <li>
             <h3>Descendants are recorded too</h3>
             <p>
               Sometimes the thing Arke launched is only a wrapper around the real program, and
-              killing the wrapper leaves the actual worker running — which is exactly how stray
-              assistant processes used to pile up. So once a helper is healthy its living
-              descendants are recorded beside it, and both the stop path and a later sweep can
-              reach past a dead wrapper.
+              killing the wrapper leaves the worker running — which is how stray assistant
+              processes used to pile up. So once a helper is healthy its living descendants are
+              recorded beside it, and both the stop path and a later sweep can reach past a dead
+              wrapper.
             </p>
           </li>
         </ol>
         <p>
-          The first two belts do nothing at all if Arke is force-killed, which is why the kernel
-          holds the leash; and a wrapper hides the process doing the work, which is why descendants
-          are recorded. All three are careful about identity: process numbers get reused quickly,
-          so a recorded helper is killed only when the process now holding that number still bears
-          the right program name and started when the record was made. A leaked helper is a
-          nuisance. Killing a stranger's process is not.
+          Why three and not one: the register and the exit sweep run no code at all if Arke is
+          force-killed, so only the first belt covers that; and a wrapper hides the process doing
+          the work, so only the third belt reaches it. All three are careful about identity —
+          process numbers get reused quickly, so a recorded helper is killed only when the process
+          now holding that number still bears the right program name and started when the record
+          was made. A leaked helper is a nuisance. Killing a stranger's process is not.
         </p>
       </section>
 
@@ -352,10 +346,9 @@
         </p>
         <p>This buys two things. <strong>The rules can be tested without a machine</strong> — no
           screen, no network and no graphics card appear anywhere in the engine's tests, because
-          anything needing one arrives as a plain object a test can supply instead. And <strong>a
-          missing capability becomes a stated consequence rather than a crash</strong>: every
-          option's absence has a written-down meaning. Real examples, from the engine's own list of
-          what it accepts:
+          anything needing one arrives as a plain object a test can supply. And <strong>a missing
+          capability becomes a stated consequence rather than a crash</strong>: every option's
+          absence has a written-down meaning. Real examples from the engine's own list:
         </p>
         <div class="scroller">
           <table>
@@ -455,10 +448,10 @@
       <section id="index">
         <h2>The search index</h2>
         <p>
-          Two small databases make searching and listing fast. One sits at the app level and holds
-          the list of worlds — so the picker can draw without opening a single world — plus a
-          mirror of the job log and the spend log. The other sits inside each world and holds the
-          searchable text: canon, character sheets, who mentions whom.
+          Two small databases make searching and listing fast. One sits at the app level: the list
+          of worlds, so the picker can draw without opening any of them, plus a mirror of the job
+          log and the spend log. The other sits inside each world and holds the searchable text —
+          canon, character sheets, who mentions whom.
         </p>
         <p>
           Both are <strong>caches, and only caches</strong>. Each is built purely from files that
@@ -470,12 +463,12 @@
         </p>
         <p>
           Two details an engineer will want. Full-text search has to actually be compiled into the
-          database engine, so rather than assume it, Arke proves it at every open by creating a
+          database engine, so rather than assume it Arke proves it at every open, by creating a
           tiny search table and dropping it again. And the database library is compiled code that
           must match the exact application it is loaded into — the copy tests use and the copy the
-          desktop app loads are different builds of the same thing, kept under different names so
-          they cannot collide, which is why packaging has a rebuild step. If that binary does not
-          load the engine is told so and says it: search and counts degrade, authoring still works.
+          desktop app loads are different builds of the same thing under different names, which is
+          why packaging has a rebuild step. If it does not load, the engine is told so and says it:
+          search and counts degrade, authoring still works.
         </p>
       </section>
 
@@ -490,16 +483,16 @@
         <p>
           <strong>The shipped installer is Windows x64 only</strong>, and the reason is worth
           retelling. ARM64 installers were built until 0.2.9 and should not have been. The database
-          library has no ready-made ARM64 build for this application, so it has to be
-          cross-compiled — and the compiler component that needs was never installed on any machine
-          that did the packaging. The build step had been set to tolerate a failed native build, so
-          it tolerated it, silently, every time. Every ARM64 installer ever produced shipped with
-          the search index quietly switched off.
+          library has no ready-made ARM64 build for this application, so it must be cross-compiled,
+          and the compiler component that needs was never installed on any packaging machine. The
+          build step had been set to tolerate a failed native build, so it tolerated it, silently,
+          every time: every ARM64 installer ever produced shipped with the search index switched
+          off.
         </p>
         <p>
           A build that quietly drops a feature is worse than no build. ARM64 was withdrawn and the
           tolerance setting removed with it; Windows on ARM runs the x64 build under emulation,
-          which is the honest fallback until the toolchain exists on the packaging machines.
+          the honest fallback until the toolchain exists on the packaging machines.
         </p>
         <p>
           The gate every change must pass runs on <strong>both Windows and Linux</strong>. Windows
@@ -524,9 +517,8 @@
           The contributing guide names four places where a mistake is <em>expensive and quiet</em>
           and asks anyone touching them to say how they know the change is safe: <strong>the world
           folder, the accept gate, the job queue and packaging</strong>. That is where the weight
-          sits, and it is the list you would draw up yourself — those are the four places where
-          being wrong costs someone their work, their money, or an installer that lies about what
-          is inside it.
+          sits — the four places where being wrong costs someone their work, their money, or an
+          installer that lies about what is inside it.
         </p>
       </section>
 
@@ -556,7 +548,7 @@
         <p>
           Checked rather than assumed: none of the four names appears anywhere in the code, and
           neither does the identity stamp the specification would add to the change log, the spend
-          ledger and the review record. The specification is marked a draft, and all eleven of its
+          ledger and the review record. The specification is marked a draft and all eleven of its
           pieces of work are unticked. It is a design, honestly labelled as one.
         </p>
         <p class="note">

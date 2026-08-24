@@ -123,7 +123,7 @@ Where a spec and the code disagree, that is a bug in one of them, and the specs 
 what is designed but not yet built.
 
 Two references are read off the source rather than the specs.
-[`docs/architecture/`](docs/architecture/index.html) is an eight-page guide to how Arke is built —
+[`docs/architecture/`](docs/architecture/index.html) is an illustrated guide to how Arke is built —
 the files on disk, the model behind worlds and productions, the accept gate, generation and spend,
 and the program itself — written to be readable without a background in code.
 [`docs/filesystem-operations.md`](docs/filesystem-operations.md) is the exact list of what each

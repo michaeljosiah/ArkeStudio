@@ -199,21 +199,21 @@
           </dd>
           <dt>provenance</dt>
           <dd>
-            The canon revision and the version of every sheet the prompt drew on, frozen at
-            dispatch. When Maren's sheet later advances to version 5 this still says 4 — which is
-            how "these fourteen shots were made before the coat changed" stays answerable.
+            The canon revision and the version of every sheet the prompt drew on, frozen at dispatch.
+            When Maren's sheet later advances to 5 this still says 4 — which is how "these fourteen
+            shots were made before the coat changed" stays answerable.
           </dd>
           <dt>references, startFrame</dt>
           <dd>
             The reference pictures attached, and the still this clip was seeded from when it was
-            continuity-chained off the shot before it. Both name places inside the world, never
-            somewhere on your hard drive.
+            chained off the shot before it. Both name places inside the world, never somewhere on
+            your hard drive.
           </dd>
           <dt>params</dt>
           <dd>
-            Everything else the dispatch carried. Kept as "all that is not already a field of its
-            own", so a control a provider adds next month is recorded the day it is first used, with
-            nobody remembering to add it.
+            Everything else the dispatch carried, kept as "all that is not already a field of its
+            own" — so a control a provider adds next month is recorded the first day it is used,
+            with nobody remembering to add it.
           </dd>
           <dt>cost</dt>
           <dd>
@@ -229,42 +229,41 @@
         </p>
         <p>
           That buys three things at once. A rejected take can still explain what arrived, because
-          nothing overwrote it with the fact that you disliked it. A shot can hold several
-          candidates <em>and</em> a decision between them, rather than collapsing both into one word.
-          And nothing that assembles your film can read a status off a take and become a second
-          answer to what the film is.
+          nothing overwrote it with the fact that you disliked it. A shot can hold several candidates
+          <em>and</em> a decision between them, rather than collapsing both into one word. And nothing
+          that assembles your film can read a status off a take and become a second answer to what
+          the film is.
         </p>
 
         <h4>A whole-scene pass, and why segments are ranges</h4>
         <p>
           Ask for a whole scene at once and one clip comes back covering three shots. Each shot still
-          needs its own reviewable result, so Arke writes three more takes — holding no media of
-          their own. Each names the pass and a start and end point inside it.
+          needs its own reviewable result, so Arke writes three more takes holding no media of their
+          own. Each names the pass and a start and end point inside it.
         </p>
         <div class="snip"><span class="c">a segment take: a range into another take's file</span>
   <span class="k">"segment"</span>: { "passTakeId": "tk_01J8G...P1", "inSec": 12, "outSec": 18 }</div>
         <p>
-          Cutting real files would force a choice between two bad options. Re-encoding three clips
-          spends time and picture quality on material you may reject ten seconds later. Copying
-          without re-encoding is lossless but can only cut where the file already has a clean break,
-          which on a six-second clip can land a second from where the shot ends — and a shot that
-          starts a second late is a worse artefact than one never cut at all.
+          Cutting real files would force a choice between two bad options. Re-encoding spends time and
+          picture quality on material you may reject ten seconds later. Copying without re-encoding is
+          lossless but can only cut where the file already has a clean break, which on a six-second
+          clip can land a second from where the shot ends — and a shot that starts a second late is a
+          worse artefact than one never cut at all.
         </p>
         <p>
           <strong>The boundaries come from the plan, not from the clip.</strong> They are the numbers
-          worked out before the job was sent. Deciding them afterwards, by looking at the returned
+          worked out before the job was sent. Deciding them afterwards, by inspecting the returned
           footage for where a cut seems to be, would be guessing at cuts the model may never have
           made — and then presenting the guess as your scene's structure.
         </p>
 
         <h4>Continuing, rather than restarting</h4>
         <p>
-          A take may record that it was made by <em>extending</em> an earlier one. Arke allows one
-          hop and refuses a second, so no chain can form in which reselecting one shot invalidates a
-          whole scene's tail. Change a selection something was built on and the extending take is not
-          deleted — it keeps its media, record and reviews — but the shot using it has its selection
-          cleared, so the cut shows a hole rather than quietly playing footage the record says no
-          longer applies.
+          A take may record that it was made by <em>extending</em> an earlier one. Arke allows one hop
+          and refuses a second, so no chain can form in which reselecting one shot invalidates a whole
+          scene's tail. Change a selection something was built on and the extending take keeps its
+          media and its record, but the shot using it has its selection cleared — so the cut shows a
+          hole rather than quietly playing footage the record says no longer applies.
         </p>
         <p class="note">
           <span class="pill pill--part">designed</span> The extension link is part of the file's
@@ -274,18 +273,17 @@
 
         <h4>Reference takes</h4>
         <p>
-          Not every result is footage. A character sheet, a look, a main photograph, an accepted
-          angle on a location — all takes, with the same immutable record and the same review. They
-          cover a <em>sheet</em> rather than a shot, so their covered-shots list is empty, and they
-          live under <code>references\</code> beside the character they belong to. Same shape,
-          different shelf. See <a href="the-world.html">the world</a>.
+          Not every result is footage. A character sheet, a look, a main photograph, an accepted angle
+          on a location — all takes, with the same immutable record and the same review. They cover a
+          <em>sheet</em> rather than a shot, so their covered-shots list is empty, and they live under
+          <code>references\</code> beside the character. Same shape, different shelf. See
+          <a href="the-world.html">the world</a>.
         </p>
 
         <h4>What was measured afterwards lives beside the take</h4>
         <p>
-          How long a clip actually runs is not something the dispatch knew; a measurement found it
-          out later. So it goes in its own small file in the take's folder, and the take is left
-          alone.
+          How long a clip actually runs is not something the dispatch knew; a measurement found it out
+          later. So it goes in its own small file in the take's folder, and the take is left alone.
         </p>
         <div class="snip"><span class="c">productions\saltlight\takes\tk_01J8F...B2\media-info.json</span>
 {
@@ -296,23 +294,18 @@
         <p>
           Writing it into the take would rewrite paid history with something that happened afterwards,
           and would make "we measured and it failed" indistinguishable from "nobody has measured this
-          yet" — a distinction that matters, because Arke runs fine on a machine with no measuring
-          tool at all.
+          yet" — which matters, because Arke runs fine on a machine with no measuring tool at all.
         </p>
 
         <h4>The motion check, and what its absence means</h4>
         <p>
-          A video take may carry one advisory measurement taken the moment it landed. Some providers
-          return a clip claiming a normal frame rate that in fact repeats frames — nominally smooth,
-          effectively half the motion, and usually the only thing that notices is the person watching
-          it.
-        </p>
-        <p>
-          It is deliberately powerless: it cannot tell a provider's stutter from a shot you meant to
-          be motionless, so it never rejects, repairs or hides anything. And <strong>absent means
-          "not measured", never "measured clean"</strong>. Older takes are not filled in
-          retroactively — a take is immutable, and inventing a measurement nobody took would be worse
-          than saying nothing.
+          A video take may carry one advisory measurement taken the moment it landed: some providers
+          return a clip claiming a normal frame rate that in fact repeats frames, nominally smooth and
+          effectively half the motion. It is deliberately powerless — it cannot tell a provider's
+          stutter from a shot you meant to be motionless, so it never rejects, repairs or hides
+          anything. And <strong>absent means "not measured", never "measured clean"</strong>. Older
+          takes are not filled in retroactively: a take is immutable, and inventing a measurement
+          nobody took would be worse than saying nothing.
         </p>
       </section>
 
@@ -329,18 +322,17 @@
   }
 }</div>
         <p>
-          <code>acceptedTakeId</code> is the take this shot uses. <code>startFrameTakeId</code> is
-          the take whose closing picture the <em>next</em> shot opens on — pinned when you accepted
-          this one, so a sequence holds its continuity without you re-choosing the same still every
-          time. Where the accepted take is a pass segment the frame comes from the pass rather than
-          the segment, so a boundary landing in both places does not chain the same picture twice.
+          <code>acceptedTakeId</code> is the take this shot uses. <code>startFrameTakeId</code> is the
+          take whose closing picture the <em>next</em> shot opens on, pinned when you accepted this
+          one. Where the accepted take is a pass segment the frame comes from the pass rather than the
+          segment, so a boundary landing in both places does not chain the same picture twice.
         </p>
         <p>
           This looks like a small filing decision and is the hinge of the whole design. Sheets, canon
-          and scenes are <strong>authored</strong>: they change only when you accept a change to
-          them, which means a proposal, a check on what else it disturbs, and your decision — the
-          apparatus described in <a href="the-accept-gate.html">the accept gate</a>. Picking a take
-          is not that kind of act. It is you choosing between results that already exist.
+          and scenes are <strong>authored</strong>: they change only when you accept a change to them,
+          which means a proposal, a check on what else it disturbs, and your decision — the apparatus
+          described in <a href="the-accept-gate.html">the accept gate</a>. Picking a take is not that
+          kind of act. It is you choosing between results that already exist.
         </p>
         <p>
           If the choice lived inside the scene file, accepting a take would <em>edit an authored
@@ -355,13 +347,9 @@
           So the scene file stays purely what you wrote, and the selections file stays a small,
           reversible note about what is in play. Accepting a take creates no proposal and bumps no
           scene version — asserted directly in the tests, because it is the entire reason the two
-          files are apart.
-        </p>
-        <p>
-          One other thing sits here for the same reason: how far into the chosen footage a shot
-          starts. That is a statement about which part of a clip is in the picture, not an edit to
-          the clip. Choosing a different take resets it to zero, because 4.2 seconds into one clip is
-          not 4.2 seconds into another.
+          files are apart. How far into the chosen footage a shot starts sits here too, for the same
+          reason, and resets to zero when you pick a different take: 4.2 seconds into one clip is not
+          4.2 seconds into another.
         </p>
       </section>
 
@@ -378,38 +366,37 @@
 {"ts":"2026-07-30T14:04:11Z","takeId":"tk_01J8F0000000000000000000B2","shotId":"sh_12",
  "decision":"accept","by":"user"}</div>
         <p class="caption">
-          Two real lines from the sample world, wrapped to fit the page; each is one line on disk.
-          Six minutes apart: a rejection saying exactly what was wrong, then the take that replaced
-          it.
+          Two real lines from the sample world, wrapped to fit the page. Six minutes apart: a
+          rejection saying exactly what was wrong, then the take that replaced it.
         </p>
         <p>
-          Nothing rewrites an earlier line. A later decision supersedes an earlier one without
-          erasing it, and a take nobody has judged is simply one with no line — unreviewed is the
-          <em>absence</em> of a record rather than a flag stored somewhere that could be wrong.
+          Nothing rewrites an earlier line. A later decision supersedes an earlier one without erasing
+          it, and a take nobody has judged is simply one with no line — unreviewed is the
+          <em>absence</em> of a record rather than a flag that could be wrong.
         </p>
         <p>
-          A rejection must cite a sheet <em>and</em> a field; Arke refuses one without both. That
-          turns a shrug into evidence: not "no", but "her coat drifted from what her appearance field
-          says". It leaves the take untouched, leaves any existing selection untouched, and changes
-          nothing about the shot's prompt.
+          A rejection must cite a sheet <em>and</em> a field; Arke refuses one without both. That turns
+          a shrug into evidence: not "no", but "her coat drifted from what her appearance field says".
+          It leaves the take untouched, leaves any existing selection untouched, and changes nothing
+          about the shot's prompt.
         </p>
         <p class="note">
           <span class="pill pill--part">designed</span> The citation is a durable record only. It is
-          collected in the shape that would let rejections feed back into a prompt; nothing reads
-          them that way yet.
+          collected in the shape that would let rejections feed back into a prompt; nothing reads them
+          that way yet.
         </p>
         <p>
           Keeping the whole history of your judgement rather than only its conclusion is what makes a
           production explicable to you later. "Which take is in the cut" is a small question the
-          selections file answers. "Why did I go round three times on shot 12, and what was wrong
-          each time" is a better one, and only an append-only record can answer it. It is also why
-          the cut needs no versions of its own: returning to an earlier cut means returning to the
-          selections that produced it, and those decisions are all still here.
+          selections file answers; "why did I go round three times on shot 12" is a better one, and
+          only an append-only record can answer it. It is also why the cut needs no versions of its
+          own — returning to an earlier cut means returning to the selections that produced it, and
+          those decisions are all still here.
         </p>
         <p>
-          Accepting writes both files in one commit. Split into two writes, a crash between them
-          would leave a decision recorded with no selection set, and the cut would disagree with the
-          record of how it got that way.
+          Accepting writes both files in one commit. Split into two writes, a crash between them would
+          leave a decision recorded with no selection set, and the cut would disagree with the record
+          of how it got that way.
         </p>
       </section>
 
@@ -445,21 +432,21 @@
           It holds only what has nowhere else to live. First, audio: dialogue, score and ambience
           tracks. A dialogue entry names the speaking character, the voice take, and <strong>the
           version of that character's sheet the voice was assigned at</strong> — two lines from one
-          character can legitimately sound different if they were generated either side of a voice
-          change, and that field lets the record say so rather than leaving it a mystery.
+          character can legitimately sound different if they were made either side of a voice change,
+          and that field lets the record say so rather than leaving it a mystery.
         </p>
         <p>
-          Second, clips you place by hand: a plate, a title card, a piece of music dropped onto the
-          cut at a window you choose. That placement is the one <em>position</em> Arke stores, which
-          is why placed clips sit on <strong>lanes</strong> of their own — the picture stays derived,
-          so there is still exactly one answer to where a shot sits. A lane is stacking order, as in
-          any editing application: a higher lane is nearer the viewer. Sound ignores lanes entirely,
-          because a mix has no stacking.
+          Second, clips you place by hand: a plate, a title card, a piece of music dropped onto the cut
+          at a window you choose. That placement is the one <em>position</em> Arke stores, which is why
+          placed clips sit on <strong>lanes</strong> of their own — the picture stays derived, so there
+          is still exactly one answer to where a shot sits. A lane is stacking order, as in any editing
+          application: a higher lane is nearer the viewer. Sound ignores lanes, because a mix has no
+          stacking.
         </p>
         <p>
           A placed clip only ever <em>cites</em> a file. It carries no prompt, no cost and no review,
-          because nothing about it was generated or judged. Its sound can be kept, muted, or split
-          onto the lane below — picture on one clip, sound on another, both pointing at the one file.
+          because nothing about it was generated or judged. Its sound can be kept, muted, or split onto
+          the lane below — picture on one clip, sound on another, both pointing at the one file.
           Deleting the placement removes the placement; the file stays in your world.
         </p>
       </section>
@@ -467,12 +454,12 @@
       <section id="spine">
         <h2>When the song is the clock</h2>
         <p>
-          A music video is not cut by laying shots end to end. The song is fixed before a single
-          frame exists, and every shot has a place <em>in</em> it. For those productions Arke keeps a
-          <strong>spine</strong>: a master track, and a map of where each shot sits against it. It is
-          one file, copied nowhere else — two records of one timeline disagree eventually, and that
-          disagreement shows up as a cut which plays correctly for the person who made it and for
-          nobody else.
+          A music video is not cut by laying shots end to end. The song is fixed before a single frame
+          exists, and every shot has a place <em>in</em> it. For those productions Arke keeps a
+          <strong>spine</strong>: a master track, and a map of where each shot sits against it. One
+          file, copied nowhere else — two records of one timeline disagree eventually, and the
+          disagreement shows up as a cut that plays correctly for the person who made it and nobody
+          else.
         </p>
         <dl class="kv">
           <dt>the track</dt>
@@ -480,61 +467,60 @@
           <dt>markers</dt>
           <dd>
             Sections carve the song up — "Verse 1" — and lyric markers say what is being sung at a
-            moment, so a shot can be anchored to a line rather than a stopwatch. A lyric sheet is
-            read exactly or refused wholesale with the offending line number: half a lyric sheet is
-            worse than none, because the markers you kept would be whichever the file listed first.
+            moment, so a shot can be anchored to a line rather than a stopwatch. A lyric sheet is read
+            exactly or refused wholesale with the offending line number: half a sheet is worse than
+            none, because the markers you kept would be whichever the file listed first.
           </dd>
           <dt>anchors</dt>
           <dd>
-            One per shot: the window in the song it occupies, and whether that clip's own sound is
-            kept or muted under the track.
+            One per shot: the window in the song it occupies, and whether that clip's own sound is kept
+            or muted under the track.
           </dd>
         </dl>
         <p>
           With a spine, Arke walks the <em>song</em> from zero to its end and asks what covers each
-          moment, rather than walking the shots and adding up their lengths. Everything the walk
-          cannot cover comes out as black. A cut with eleven seconds of black in the second verse is
-          a true statement about where the work is; a cut that quietly runs eleven seconds short is
-          not, and it is the one nobody notices until the export is playing next to the song.
+          moment, rather than walking the shots and adding up lengths. Everything the walk cannot cover
+          comes out as black. A cut with eleven seconds of black in the second verse is a true statement
+          about where the work is; a cut that quietly runs eleven seconds short is not, and it is the
+          one nobody notices until the export is playing next to the song.
         </p>
 
         <h4>Intended length, and measured length</h4>
         <p>
           A shot's <strong>intended</strong> duration is what you wrote when you wrote the shot — six
-          seconds in the scene file. In an ordinary production that is its slot in the cut, and a
-          shot that never stated one is given four. With a spine the anchor's window is the budget
-          instead, and anchoring never rewrites the duration you authored.
+          seconds in the scene file. In an ordinary production that is its slot in the cut, and a shot
+          that never stated one is given four. With a spine the anchor's window is the budget instead,
+          and anchoring never rewrites the duration you authored.
         </p>
         <p>
           A take's <strong>measured</strong> duration is what the file turned out to be. If it runs
           shorter than its window, the shortfall becomes a labelled card saying how many seconds are
-          missing — not a frozen last frame, because a frozen frame reads as a creative choice and
-          this is unfinished work.
+          missing — not a frozen last frame, because a frozen frame reads as a creative choice and this
+          is unfinished work.
         </p>
         <p>
           When the length has never been measured, Arke states it rather than guessing around it. The
           clip is laid in for the whole window, because that is the only guess producing a watchable
-          cut, and the guess is written down against that shot: <em>"has not been probed, so its
-          length is assumed to cover the window"</em>. A review cut may be in that state; a master
-          may not.
+          cut, and the guess is written down against that shot: <em>"has not been probed, so its length
+          is assumed to cover the window"</em>. A review cut may be in that state; a master may not.
         </p>
       </section>
 
       <section id="exports">
         <h2>What leaves the folder</h2>
         <p>
-          An export is a single local render of the cut Arke has just worked out. No provider is
-          called and nothing is uploaded. The finished file lands in your world's own
-          <code>exports\</code> folder, named for the production, the preset and the moment.
+          An export is a single local render of the cut Arke has just worked out. No provider is called
+          and nothing is uploaded. The finished file lands in your world's own <code>exports\</code>
+          folder, named for the production, the preset and the moment.
         </p>
         <div class="tree"><b>the-undersong\</b>
   productions\
   <b>exports\</b>
     saltlight-review-cut-20260730140411.mp4   <i>production, preset, when</i></div>
         <p class="note">
-          <span class="pill pill--part">disagrees</span> The master specification's folder diagram
-          puts <code>exports\</code> inside the production. The code writes it at the top of the
-          world. The code is what runs.
+          <span class="pill pill--part">disagrees</span> The master specification's folder diagram puts
+          <code>exports\</code> inside the production. The code writes it at the top of the world. The
+          code is what runs.
         </p>
         <div class="scroller">
           <table>
@@ -557,17 +543,15 @@
           Gaps become <strong>slates</strong>: a black card with the shot's label and duration drawn
           across it, in the same single encode as everything else. Placed clips are laid over the
           picture, each confined to its own window, their sound delayed to where it was placed and
-          mixed underneath. The mixer is explicitly told not to normalise, because its default would
-          quietly duck every other sound for the length of the new one — an automatic mix nobody
-          chose, arriving at export.
+          mixed underneath.
         </p>
 
         <h4>ffmpeg is a separate program, not part of Arke</h4>
         <p>
-          Everything touching video frames — encoding an export, cutting a boundary still, measuring
-          a clip — is done by handing arguments to <strong>ffmpeg</strong>, a long-standing
-          open-source tool Arke runs as a separate program. It is bundled with the packaged desktop
-          build and absent from most other ways of running the application.
+          Everything touching video frames — encoding an export, cutting a boundary still, measuring a
+          clip — is done by handing arguments to <strong>ffmpeg</strong>, a long-standing open-source
+          tool Arke runs as a separate program. It is bundled with the packaged desktop build and
+          absent from most other ways of running the application.
         </p>
         <p>
           So Arke is built to work without it and to say so. Measurements are absent; the motion check
@@ -577,15 +561,11 @@
           rather than exporting as though it had no track at all.
         </p>
         <p>
-          The encode is written to a hidden staging file and moved into <code>exports\</code> only
-          when it finishes; cancel it and the staging file is deleted. There is never a half-rendered
-          film in your exports folder looking like a finished one.
-        </p>
-        <p>
-          Separately, you can export the whole world as a folder that reopens identically elsewhere.
-          Caches, indexes and staged proposals are left behind; the version history comes with it,
-          because a world that cannot explain how it got here is not the same world. See
-          <a href="files-on-disk.html">files on disk</a>.
+          The encode is written to a hidden staging file and moved into <code>exports\</code> only when
+          it finishes; cancel it and the staging file is deleted. There is never a half-rendered film
+          in your exports folder looking like a finished one. Exporting the whole <em>world</em> is a
+          different act — a folder that reopens identically elsewhere, caches left behind and the
+          version history brought along. See <a href="files-on-disk.html">files on disk</a>.
         </p>
       </section>
 
@@ -625,8 +605,8 @@
       <div class="foot">
         Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by reading
         the source and the sample world. Every file sample here is real, taken from
-        <code>fixtures\worlds\the-undersong</code> and shortened only where an identifier was too
-        long for the column. Dispatch, providers and what a generation costs belong to
+        <code>fixtures\worlds\the-undersong</code> and shortened only where an identifier was too long
+        for the column. Dispatch, providers and what a generation costs belong to
         <a href="generation.html">generation &amp; spend</a>; the machinery behind accepting an
         authored change belongs to <a href="the-accept-gate.html">the accept gate</a>.
       </div>
