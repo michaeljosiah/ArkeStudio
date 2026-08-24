@@ -1,0 +1,703 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="How Arke Studio stores generated results, keeps your choice between them somewhere else, records your judgement, and works the cut out fresh every time it is shown."
+    />
+    <title>Arke Studio - Takes and the cut</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="take">
+        <div class="eyebrow">Takes and the cut</div>
+        <h1>One result, one folder, and the choice kept somewhere else</h1>
+        <p class="lede">
+          This page carries the single most important shape in the product. Authored things —
+          sheets, canon, scenes — change only when you accept a change to them. Choosing between
+          generated results is a different kind of act, so it is written in a different place. Once
+          that split is real on disk, most of the rest follows.
+        </p>
+
+        <h2>What a take is</h2>
+        <p>
+          A <strong>take</strong> is one generated result: one attempt at one shot. It gets its own
+          folder inside the production, its own media file, and a full record of what produced it.
+        </p>
+
+        <div class="tree"><b>productions\saltlight\</b>
+  production.json           <i>title, format, status</i>
+  scenes\
+    04-the-verse-rises.json <i>the shots you wrote, in order</i>
+  <b>takes\</b>                   <i>one folder per result — nothing here is ever rewritten</i>
+    tk_01J8A...A1\
+      take.json             <i>how it was made</i>
+      frame.png             <i>what came back</i>
+    tk_01J8C...C3\          <i>an earlier attempt at the same shot — rejected, still here</i>
+    <u>tk_01J8F...B2\</u>          <u>the one currently in the cut</u>
+  <b>selections.json</b>          <i>which take each shot is using right now</i>
+  <b>reviews.jsonl</b>            <i>every accept and reject you have made</i>
+  cut.json                  <i>audio tracks and placed clips only</i></div>
+        <p class="caption">
+          Real folder names from the sample world shipped with the repository, shortened in the
+          middle. The identifiers are long on purpose: they sort by the moment they were created,
+          so a folder listing is already a history.
+        </p>
+
+        <p>Here is one, exactly as it sits on disk.</p>
+
+        <div class="snip"><span class="c">productions\saltlight\takes\tk_01J8F0000000000000000000B2\take.json</span>
+{
+  <span class="k">"id"</span>: "tk_01J8F0000000000000000000B2",
+  <span class="k">"jobId"</span>: "jb_01J8E0000000000000000000J2",
+  <span class="k">"coversShots"</span>: ["sh_12"],
+  <span class="k">"kind"</span>: "clip",
+  <span class="k">"provider"</span>: "fal",
+  <span class="k">"model"</span>: "seedance-2.0",
+  <span class="k">"provenance"</span>: { "canonRevision": 42, "sheets": { "maren-kest": 4, "the-vigil": 2 } },
+  <span class="k">"prompt"</span>: "Maren Kest grips the rail of the Vigil, head tilted, hearing the verse
+             first. Night, green-white lamps, quiet dread. MCU, slow push-in.",
+  <span class="k">"references"</span>: ["references/maren-kest/model-sheet-v4.png"],
+  <span class="k">"startFrame"</span>: "takes/tk_01J8A0000000000000000000A1/frame.png",
+  <span class="k">"params"</span>: { "aspect": "16:9", "resolution": "720p", "durationSec": 6, "seed": 4417 },
+  <span class="k">"cost"</span>: { "estimatedMicroUsd": 130000, "actualMicroUsd": 128400,
+             "actualSource": "provider-reported" },
+  <span class="k">"dispatchedAt"</span>: "2026-07-30T14:01:12Z",
+  <span class="k">"completedAt"</span>: "2026-07-30T14:02:04Z",
+  <span class="k">"media"</span>: "clip.mp4"
+}</div>
+
+        <p>You can read the whole history of the attempt off that page:</p>
+        <dl class="kv">
+          <dt>coversShots</dt>
+          <dd>
+            Which shots this result is footage for. Usually one. A whole-scene pass covers several
+            at once, and a <em>reference</em> take carries an empty list, because it covers a
+            character or a place rather than a shot.
+          </dd>
+          <dt>provenance</dt>
+          <dd>
+            What the world looked like at the moment this was sent: the canon revision, and the
+            version of every sheet the prompt drew on. Frozen. When Maren's sheet later advances to
+            version 5, this record still says 4 — which is how "these fourteen shots were made
+            before the coat changed" stays an answerable question months later.
+          </dd>
+          <dt>references</dt>
+          <dd>Exactly which reference pictures were attached, by their place in the world folder.</dd>
+          <dt>startFrame</dt>
+          <dd>
+            The still this clip was seeded from, when it was continuity-chained off the shot before
+            it. It names a picture inside the world, not somewhere on your hard drive.
+          </dd>
+          <dt>params</dt>
+          <dd>
+            Everything else the dispatch carried — aspect, resolution, length, seed. Kept as
+            "everything that is not already a field of its own", so a new control a provider adds
+            next month is recorded the day it is first used, without anyone remembering to add it.
+          </dd>
+          <dt>cost</dt>
+          <dd>
+            What it was estimated at, what it actually came to, and where that figure came from.
+            <a href="generation.html">Generation &amp; spend</a> is the page for that.
+          </dd>
+        </dl>
+
+        <h4>A take is never edited</h4>
+        <p>
+          <code>take.json</code> is written once, on arrival, and never again. Try the shot again
+          and you get another take; the first one stays, with its media and its record intact.
+        </p>
+        <p>
+          This is what buys you three things at once. A rejected take can still explain what
+          arrived — because nothing overwrote it with the fact that you did not like it. A shot can
+          hold several candidates <em>and</em> a decision between them, instead of collapsing both
+          into one word. And nothing that assembles your film can read a status off a take and
+          become a second answer to what the film is.
+        </p>
+
+        <h4>A whole-scene pass, and why segments are ranges</h4>
+        <p>
+          Ask for a whole scene in one go and one clip comes back covering three shots. Each shot
+          still needs its own reviewable result, so Arke writes three more takes — but they hold no
+          media of their own. Each names the pass and an in-point and an out-point inside it.
+        </p>
+        <div class="snip"><span class="c">a segment take: a range into somebody else's file</span>
+  <span class="k">"segment"</span>: { "passTakeId": "tk_01J8G...P1", "inSec": 12, "outSec": 18 }</div>
+        <p>
+          Cutting real files instead would force a choice between two bad options. Re-encoding
+          three clips spends time and picture quality on material you may reject ten seconds later.
+          Copying without re-encoding is fast and lossless but can only cut where the file already
+          has a clean break, which on a six-second clip can land a second away from where the shot
+          actually ends — and a shot that starts a second late is a worse artefact than one that
+          was never cut at all. A range costs nothing, is exact, and defers the one encode to
+          export, where it belongs.
+        </p>
+        <p>
+          <strong>The boundaries come from the plan, not from the clip.</strong> They are the
+          numbers worked out before the job was ever sent. Deciding them afterwards, by looking at
+          the returned footage for where a cut seems to be, would be guessing at cuts the model may
+          never have made — and then quietly presenting the guess as your scene's structure.
+        </p>
+
+        <h4>Continuing a take, rather than restarting</h4>
+        <p>
+          A take may record that it was made by <em>extending</em> an earlier one. Arke allows one
+          hop and refuses a second, so a chain cannot form in which reselecting a single shot
+          invalidates a whole scene's tail. When you do change a selection that something was built
+          on, the take that extended it is not deleted — it keeps its media, its record and its
+          reviews — but the shot using it has its selection cleared, so the cut immediately shows a
+          hole instead of quietly playing footage the record says no longer applies.
+        </p>
+        <p class="note">
+          <span class="pill pill--part">designed</span> The extension link is part of the file's
+          shape and the refusal logic reads it, but nothing in the code that writes an arriving take
+          fills it in yet. The one-hop rule is therefore enforced against a field that is currently
+          always empty.
+        </p>
+
+        <h4>Reference takes</h4>
+        <p>
+          Not every result is footage for a shot. A character sheet, a look, a main photograph, an
+          accepted angle on a location — these are takes too, with the same immutable record and the
+          same review. They cover a <em>sheet</em> rather than a shot, so their list of covered
+          shots is empty, and they live under <code>references\</code> beside the character they
+          belong to rather than under the production. Same shape, different shelf. See
+          <a href="the-world.html">the world</a>.
+        </p>
+
+        <h4>What was measured afterwards lives beside the take, not inside it</h4>
+        <p>
+          How long a clip actually runs is not something the dispatch knew; it is something a
+          measurement found out later. So it is written to its own small file in the take's folder,
+          and the take is left alone.
+        </p>
+        <div class="snip"><span class="c">productions\saltlight\takes\tk_01J8F...B2\media-info.json</span>
+{
+  <span class="k">"sourceHash"</span>: "sha256:…",
+  <span class="k">"mediaInfo"</span>: { "durationSec": 6.04, "hasAudio": true },
+  <span class="k">"probedAt"</span>: "2026-07-30T14:02:11Z"
+}</div>
+        <p>
+          Two reasons, both plain. Writing it into the take would rewrite paid history with
+          something that happened after the fact. And it would make "we measured and it failed"
+          indistinguishable from "nobody has measured this yet" — which matters, because Arke runs
+          fine on a machine with no measuring tool installed at all. The hash of the bytes that were
+          measured is kept, so a record that outlived its media is detectable rather than believed.
+        </p>
+
+        <h4>The motion check, and what its absence means</h4>
+        <p>
+          A video take may carry one advisory measurement taken the moment it landed. Some providers
+          return a clip that claims a normal frame rate and in fact repeats frames — nominally
+          smooth, effectively half the motion, and the only thing that usually notices is the person
+          watching it. Recording that before review saves someone a careful viewing.
+        </p>
+        <p>
+          It is deliberately powerless. It cannot tell a provider's stutter from a shot you meant to
+          be motionless, so it never rejects, repairs, re-encodes or hides anything. And
+          <strong>absent means "not measured", never "measured clean"</strong>. Older takes are not
+          filled in retroactively: a take is immutable, and inventing a measurement nobody took
+          would be worse than saying nothing.
+        </p>
+      </section>
+
+      <section id="choice">
+        <h2>Where the choice lives</h2>
+        <p>
+          Which take a shot is currently using is written in a separate small file, and nowhere
+          else.
+        </p>
+        <div class="snip"><span class="c">productions\saltlight\selections.json</span>
+{
+  <span class="k">"sh_12"</span>: {
+    <span class="k">"acceptedTakeId"</span>: "tk_01J8F0000000000000000000B2",
+    <span class="k">"startFrameTakeId"</span>: "tk_01J8A0000000000000000000A1"
+  }
+}</div>
+        <p>
+          <code>acceptedTakeId</code> is the take this shot is using. <code>startFrameTakeId</code>
+          is the take whose closing picture the <em>next</em> shot opens on — pinned when you
+          accepted this one, so a sequence can hold its continuity without you re-choosing the same
+          still every time. Where the accepted take is a pass segment, the frame is taken from the
+          pass rather than from the segment, so a boundary that lands in both places does not chain
+          the same picture twice.
+        </p>
+        <p>
+          This looks like a small filing decision and is actually the hinge of the whole design.
+          Sheets, canon and scenes are <strong>authored</strong> things. They change only when you
+          accept a change to them, which means a proposal, a check on what else it disturbs, and
+          your decision — the whole apparatus described in
+          <a href="the-accept-gate.html">the accept gate</a>. Picking a take is not that kind of
+          act. It is you choosing between results that already exist.
+        </p>
+        <p>
+          If the choice lived inside the scene file, accepting a take would <em>edit an authored
+          thing</em>. That forces one of two bad outcomes. Either every take you accept drags a
+          proposal and a consequence check behind it, which makes working through forty takes
+          unbearable — or the gate quietly acquires an exception, and the promise that nothing
+          authored changes without your say-so stops being true. Worse, the line between "what I have
+          decided is true about this world" and "what I am currently using in this cut" would
+          disappear, and it is exactly that line that lets you change your mind cheaply.
+        </p>
+        <p>
+          So the scene file stays purely what you wrote — shots, descriptions, camera, sound,
+          order — and the selections file stays a small, mutable, reversible note about what is
+          currently in play. Accepting a take creates no proposal and bumps no scene version. That
+          property is asserted directly in the tests, because it is the entire reason the two files
+          are separate.
+        </p>
+        <p>
+          One other thing sits in the same file for the same reason: how far into the chosen footage
+          a shot starts. That is a statement about which part of a chosen clip is in the picture, not
+          an edit to the clip. Choosing a different take resets it to zero, because 4.2 seconds into
+          one clip is not 4.2 seconds into another, and silently carrying the number across would
+          start your shot at an unrelated moment.
+        </p>
+      </section>
+
+      <section id="judgement">
+        <h2>The record of your judgement</h2>
+        <p>
+          Beside the selections sits a file that only ever grows. One line per decision, in the
+          order you made them.
+        </p>
+        <div class="snip"><span class="c">productions\saltlight\reviews.jsonl</span>
+{"ts":"2026-07-30T13:58:02Z","takeId":"tk_01J8C0000000000000000000C3","shotId":"sh_12",
+ "decision":"reject","by":"user",
+ "citation":{"sheet":"maren-kest","field":"appearance","note":"coat drifted off-sheet"}}
+{"ts":"2026-07-30T14:04:11Z","takeId":"tk_01J8F0000000000000000000B2","shotId":"sh_12",
+ "decision":"accept","by":"user"}</div>
+        <p class="caption">
+          Two real lines from the sample world, wrapped here to fit the page; each is one line on
+          disk. Six minutes apart: a rejection that says exactly what was wrong, then the take that
+          replaced it.
+        </p>
+        <p>
+          Nothing rewrites an earlier line. A later decision about a take supersedes an earlier one
+          without erasing it, and a take nobody has judged is simply one with no line — unreviewed
+          is the <em>absence</em> of a record rather than a flag stored somewhere that could be
+          wrong.
+        </p>
+        <p>
+          A rejection must cite a sheet <em>and</em> a field; Arke refuses one without both. That
+          turns a shrug into evidence: not "no", but "her coat drifted from what her appearance
+          field says". It leaves the take untouched, leaves any existing selection untouched, and
+          changes nothing about the shot's prompt. In this version the citation is a durable record
+          only — the corpus a future "your rejections teach this shot" behaviour would read, which
+          this version does not implement.
+        </p>
+        <p class="note">
+          <span class="pill pill--part">designed</span> Rejections are collected in the shape that
+          would let them feed back into a prompt. Nothing reads them that way yet.
+        </p>
+        <p>
+          Keeping the whole history of your judgement rather than only its conclusion is what makes
+          a production explicable to yourself later. "Which take is in the cut" is one small
+          question, answered by the selections file. "Why did I go round three times on shot 12, and
+          what was wrong each time" is a different and much better question, and only an append-only
+          record can answer it. It is also why the cut needs no versions of its own: going back to
+          an earlier cut means going back to the selections that produced it, and those decisions
+          are all still here.
+        </p>
+        <p>
+          Accepting writes both files — the decision and the selection — in a single commit. Split
+          into two writes, a crash between them would leave a decision recorded with no selection
+          set, and the cut would disagree with the record of how it got that way.
+        </p>
+      </section>
+
+      <section id="cut">
+        <h2>The cut is worked out, not stored</h2>
+        <p>There is no file holding the edit. The picture is assembled fresh, every time.</p>
+        <div class="flow">
+          <div class="node node--lead"><strong>Scenes and shots</strong><span>the running order you authored</span></div>
+          <div class="link">+</div>
+          <div class="node"><strong>selections.json</strong><span>which take each shot uses</span></div>
+          <div class="link">+</div>
+          <div class="node"><strong>cut.json</strong><span>audio tracks and placed clips only</span></div>
+          <div class="link">=</div>
+          <div class="node node--lead"><strong>The cut</strong><span>derived on every view and every export</span></div>
+        </div>
+        <p>
+          Arke walks the scenes in order, walks the shots inside them, and asks the selections file
+          what each shot is using. That is the film. Change a selection and the cut reflects it with
+          no reconciliation step, no rebuild, and nothing to keep in sync — because a stored
+          sequence would be a second answer to what the film is, and the two would diverge the first
+          time you changed your mind.
+        </p>
+        <p>
+          <code>cut.json</code> holds only the things with nowhere else to live: your audio tracks
+          and the clips you have placed by hand.
+        </p>
+
+        <h4>A shot with no chosen take is a gap</h4>
+        <p>
+          It is drawn as a gap and counted as one — <em>"13 of 15 shots placed · 2 gaps"</em>, and
+          beside it <em>"2 gaps · 30s uncovered"</em>. Not an error, not a warning: remaining work,
+          in the right places, at the right lengths. Being able to watch a half-finished film with
+          its holes where the holes actually are is the point of the whole arrangement. On export a
+          gap becomes a black card reading its shot's label and duration, so an unfinished cut is
+          still something a composer or a collaborator can sit through without the film seeming to
+          jump.
+        </p>
+
+        <h4>Audio tracks</h4>
+        <p>
+          Three kinds: dialogue, score, ambience. A dialogue entry names the speaking character, the
+          voice take, and — importantly — <strong>the version of that character's sheet the voice was
+          assigned at</strong>. Two lines from one character can legitimately sound different if they
+          were generated either side of a voice change, and this is what lets the record say so
+          instead of leaving it a mystery six months later. Placement is at the level of a shot
+          boundary in this version; a full audio timeline is a larger surface than the design shows.
+        </p>
+
+        <h4>Placed clips and lanes</h4>
+        <p>
+          You can also drop a file you already have — a plate, a title card, a piece of music — onto
+          the cut at a window you choose. That placement is the one <em>position</em> Arke stores,
+          which is why placed clips live on lanes of their own rather than in the running order: the
+          picture stays derived, so there is still exactly one answer to where a shot sits.
+        </p>
+        <p>
+          A lane is stacking order, the same convention as any editing application — a higher lane is
+          nearer the viewer. A lane has no type of its own: what a clip does at export is read from
+          the file it points at, which is why one lane can hold a picture and the lane beneath it the
+          sound split out of that same file. Sound ignores lanes entirely, because a mix has no
+          stacking.
+        </p>
+        <p>
+          A placed clip only ever <em>cites</em> a file. It carries no prompt, no cost and no review,
+          because nothing about it was generated or judged — it is not a take and never becomes one.
+          Deleting the placement removes the placement; the file stays in your world.
+        </p>
+        <p>
+          Its sound has three states. Keep, which is the default, because a file you chose and placed
+          yourself is not the model's invention. Mute. Or sound-only — the half a split leaves behind,
+          where the picture stays where it was and the sound becomes its own clip on the lane below,
+          both still pointing at the one file. Arke refuses to split a file measured as silent, rather
+          than muting your picture in exchange for a sound half that can never play.
+        </p>
+      </section>
+
+      <section id="spine">
+        <h2>When the song is the clock</h2>
+        <p>
+          A music video is not cut by laying shots end to end. The song is fixed before a single
+          frame exists, and every shot has a place <em>in</em> it. For those productions Arke keeps a
+          <strong>spine</strong>: a master track, and a map of where each shot sits against it.
+        </p>
+        <p>
+          The spine is one file in the production, and nothing about it is copied anywhere else — not
+          into the scenes, not into the cut file. Two records of one timeline disagree eventually,
+          and that disagreement shows up as a cut that plays correctly for the person who made it and
+          for nobody else.
+        </p>
+        <p>It holds three things:</p>
+        <dl class="kv">
+          <dt>the track</dt>
+          <dd>Which file in your world is the master. Its length is measured, never typed.</dd>
+          <dt>markers</dt>
+          <dd>
+            Points worth naming. Sections carve the song up — "Verse 1" — and lyric markers say what
+            is being sung at a moment, so a shot can be anchored to a line rather than to a
+            stopwatch. Markers can be imported from a lyric sheet, which Arke reads exactly or
+            refuses wholesale with the offending line number: half a lyric sheet is worse than none,
+            because the markers you kept would be whichever the file happened to list first.
+          </dd>
+          <dt>anchors</dt>
+          <dd>
+            One per shot: the window in the song it occupies, and whether that clip's own sound is
+            kept or muted underneath the track.
+          </dd>
+        </dl>
+        <p>
+          With a spine, Arke walks the <em>song</em> from zero to its end and asks what covers each
+          moment — rather than walking the shots and adding up their lengths. Deriving the picture
+          from shot order would produce a second timeline disagreeing with the first, which is
+          exactly what not storing the cut was meant to prevent. Everything the walk cannot cover
+          comes out as black. A cut with eleven seconds of black in the second verse is a true
+          statement about where the work is; a cut that quietly runs eleven seconds short is not, and
+          it is the one nobody notices until the export is playing next to the song.
+        </p>
+
+        <h4>Intended length, and measured length</h4>
+        <p>
+          These are two different numbers and Arke never lets them pretend to be one.
+        </p>
+        <p>
+          A shot's <strong>intended</strong> duration is what you wrote when you wrote the shot — the
+          six seconds in the scene file. In an ordinary production that is the shot's slot in the
+          cut; a shot that never stated one is given four seconds. With a spine, the anchor's window
+          is the budget instead, and anchoring a shot never rewrites the duration you authored.
+        </p>
+        <p>
+          A take's <strong>measured</strong> duration is what the file turned out to be. If the take
+          runs shorter than the window it was anchored to, the shortfall becomes a labelled card
+          reading how many seconds are missing — not a frozen last frame, because a frozen frame
+          reads as a creative choice and this is unfinished work.
+        </p>
+        <p>
+          And when the length has simply never been measured — no measuring tool on the machine, or a
+          file it could not read — Arke states it rather than guessing around it. The clip is laid in
+          for its whole window, because that is the only guess that produces a watchable cut, and the
+          guess is written down as a named problem against that shot: <em>"has not been probed, so
+          its length is assumed to cover the window"</em>. A review cut is allowed to be in that
+          state. A master is not.
+        </p>
+        <p>
+          Problems with the anchors themselves are named, never counted: a shot anchored somewhere
+          that is no longer a shot; an anchor running past the end of the song, which is not a long
+          shot but a shot that does not exist; two shots claiming the same seconds. An overlap is
+          reported as the actual overlap — "overlaps SHOT 12 by 1.0s" — rather than as a distance to
+          somewhere else, because the number is there to be acted on.
+        </p>
+      </section>
+
+      <section id="exports">
+        <h2>What leaves the folder</h2>
+        <p>
+          An export is a single local render of the cut Arke just worked out. No provider is called
+          and nothing is uploaded. The finished file lands in your world's own <code>exports\</code>
+          folder, named for the production, the preset, and the moment it was made.
+        </p>
+        <div class="tree"><b>the-undersong\</b>
+  productions\
+  <b>exports\</b>
+    saltlight-review-cut-20260730140411.mp4   <i>production, preset, when</i></div>
+        <p class="note">
+          <span class="pill pill--part">disagrees</span> The master specification's folder diagram
+          puts <code>exports\</code> inside the production. The code writes it at the top of the
+          world. The code is what runs.
+        </p>
+        <p>Three presets, and no way to edit them in this version:</p>
+        <div class="scroller">
+          <table>
+            <tr><th>Preset</th><th>Size</th><th>What it is for</th></tr>
+            <tr><td><strong>review cut</strong></td><td>1280 &times; 720, 24 fps</td><td>Watching. Renders whatever exists, holes included.</td></tr>
+            <tr><td><strong>master</strong></td><td>1920 &times; 1080, 24 fps</td><td>Delivery. Refuses while anything is unresolved.</td></tr>
+            <tr><td><strong>social excerpt</strong></td><td>1080 &times; 1920, 30 fps</td><td>Upright, for a phone.</td></tr>
+          </table>
+        </div>
+        <p>
+          The difference between the first two is a real design decision. A review cut renders
+          whatever there is, because seeing the gaps against the film is the entire point of watching
+          one. A master is a claim that the film is finished, so it is refused while a shot has no
+          picture, while two shots claim the same seconds, while a clip's length was never measured,
+          or while a shot you wrote and generated is anchored nowhere at all. The refusal names the
+          reason and arrives <em>before</em> the encode — which is the moment to say so, rather than
+          after somebody has sent the file on.
+        </p>
+
+        <h4>ffmpeg is a separate program, not part of Arke</h4>
+        <p>
+          Everything that touches video frames — encoding an export, cutting a boundary still,
+          measuring a clip — is done by handing arguments to <strong>ffmpeg</strong>, a long-standing
+          open-source tool that Arke runs as a separate program. It is bundled with the packaged
+          desktop build, and absent from most other ways of running the application.
+        </p>
+        <p>
+          So Arke is built to work without it and to say so. Measurements are simply absent. The
+          motion check is absent. And an export does not fail silently or produce a broken file — it
+          reports its reason in plain terms: <em>"export needs ffmpeg — bundled in packaged builds;
+          set ARKE_FFMPEG to use one now"</em>. A spine production whose master track cannot be
+          measured refuses in the same way, rather than falling through and exporting as though it
+          had no track at all.
+        </p>
+
+        <h4>Whole, or not at all</h4>
+        <p>
+          The encode is written to a hidden staging file and moved into <code>exports\</code> only
+          when it finishes. Cancel it and the staging file is deleted. There is never a
+          half-rendered film sitting in your exports folder looking like a finished one. Progress is
+          reported while it runs, and one production can only have one export in flight at a time —
+          otherwise a second click during a slow measurement would launch a second encode nobody
+          asked for.
+        </p>
+        <p>
+          Gaps become <strong>slates</strong>: a black card with the shot's label and duration drawn
+          across it, in the same encode as everything else. Placed clips are laid over the assembled
+          picture, each confined to its own window, and their sound is delayed to where it was placed
+          and mixed underneath. The mixer is explicitly told not to normalise, because the default
+          behaviour would quietly duck every other sound for the length of the new one — an automatic
+          mix nobody chose, arriving at export.
+        </p>
+
+        <h4>Exporting the world itself</h4>
+        <p>
+          Separately, you can export the entire world as a folder that reopens identically on another
+          machine. Caches, indexes, staged proposals and the lock file are left behind; the
+          <code>.history\</code> record comes with it, because history is the version record and not
+          a cache — a world that cannot explain how it got here is not the same world. See
+          <a href="files-on-disk.html">files on disk</a>.
+        </p>
+      </section>
+
+      <section id="rules">
+        <h2>The rules on this page</h2>
+        <div class="scroller">
+          <table>
+            <tr><th>Rule</th><th>What it means for you</th></tr>
+            <tr>
+              <td><strong>A take is never edited</strong></td>
+              <td>Every result you generated is still there, with the record of exactly how it was made. Trying again costs you nothing you already had.</td>
+            </tr>
+            <tr>
+              <td><strong>The choice is stored separately</strong></td>
+              <td>Accepting a take changes one small operational file. It creates no proposal, bumps no version, and touches nothing you authored.</td>
+            </tr>
+            <tr>
+              <td><strong>Reviews are append-only</strong></td>
+              <td>You keep the history of your judgement, not just its conclusion — including what was wrong with the takes you turned down.</td>
+            </tr>
+            <tr>
+              <td><strong>The cut is derived</strong></td>
+              <td>There is no stored edit that can drift out of step with your scenes. Change a selection and the film changes, with nothing to reconcile.</td>
+            </tr>
+            <tr>
+              <td><strong>A gap is visible work</strong></td>
+              <td>A shot with no chosen take is drawn, counted and exported as a labelled hole of the right length — never omitted, never an error.</td>
+            </tr>
+            <tr>
+              <td><strong>Absent means not measured</strong></td>
+              <td>A missing duration or a missing motion check means nobody looked, never that everything is fine. Arke says which.</td>
+            </tr>
+          </table>
+        </div>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by reading
+        the source and the sample world. Every file sample on this page is real: the takes,
+        selections and reviews come from <code>fixtures\worlds\the-undersong</code>, shortened only
+        where an identifier was too long for the column. Dispatch, providers and what a generation
+        costs belong to <a href="generation.html">generation &amp; spend</a>; the machinery behind
+        accepting an authored change belongs to <a href="the-accept-gate.html">the accept gate</a>.
+      </div>
+    </div>
+  </body>
+</html>

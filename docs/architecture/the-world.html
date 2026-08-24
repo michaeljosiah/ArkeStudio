@@ -145,8 +145,8 @@
           editor.
         </p>
         <p>
-          The examples on this page are all real. They come from <em>The Undersong</em>, the
-          sample world that ships with the repository, and they are quoted as they sit on disk.
+          Every example below is real, quoted as it sits on disk in <em>The Undersong</em>, the
+          sample world that ships with the repository.
         </p>
 
         <div class="tree"><b>the-undersong/</b>
@@ -240,17 +240,14 @@
           </dd>
         </dl>
         <p>
-          The rest is description: the name you see, the one-line pitch, the tone and genre words,
-          and the two dates. <code>slug</code> is the folder name, and it is written down as well
-          as being the folder, so a world that has been moved or renamed can still say what it
-          used to be called.
+          The rest is description: the name, the one-line pitch, the tone and genre words, the two
+          dates, and the folder name written down as well as being the folder.
         </p>
         <p class="note">
-          A world is created with almost nothing in it — <code>world.json</code>,
-          <code>changes.jsonl</code>, and an art direction file only if you chose a look on the
-          way in. There are no empty <code>canon/</code> or <code>characters/</code> folders
-          waiting to be filled. Each one appears the first time something needs it, which is why
-          a young world looks small rather than looking unfinished.
+          A new world is created with almost nothing in it — this file, the change log, and an art
+          direction file only if you chose a look on the way in. There are no empty
+          <code>canon/</code> or <code>characters/</code> folders waiting to be filled; each
+          appears the first time something needs it.
         </p>
       </section>
 
@@ -264,9 +261,9 @@
           gate, are cited the same way, retire the same way and take pictures the same way.
         </p>
         <p>
-          This matters more than it sounds. Everything that can go wrong with an entity — a stale
+          That matters more than it sounds: everything that can go wrong with an entity — a stale
           citation, a version that moved under someone, a name that no longer resolves — has to be
-          got right once instead of three times.
+          got right once rather than three times.
         </p>
         <div class="snip"><span class="c">characters/maren-kest.md</span>
 ---
@@ -389,10 +386,10 @@ word she could keep.</div>
 
         <h4>Retired, and where copies come from</h4>
         <p>
-          A sheet you are finished with is <strong>retired</strong>, not deleted: the file stays
-          where it was, gains one line saying so, and keeps resolving. It drops out of the pickers
-          for new work and a shot still citing it is named before you spend anything. But the take
-          you made six months ago still explains itself, which is the entire reason.
+          A sheet you are finished with is <strong>retired</strong>, not deleted: the file stays,
+          gains one line saying so, and keeps resolving. It drops out of the pickers for new work,
+          and a shot still citing it is named before you spend anything — but the take you made six
+          months ago still explains itself, which is the entire reason.
         </p>
         <p>
           A sheet made by duplicating another carries an <strong>origin</strong> line naming the
@@ -404,27 +401,26 @@ word she could keep.</div>
         <h4>Guests: a sheet a production owns</h4>
         <p>
           A sheet may name one production, which makes it that production's <strong>guest</strong>
-          — the barman in one scene who is not a citizen of the world. Guests live in the same
+          — the barman in one scene who is not a citizen of the world. Guests sit in the same
           <code>characters/</code> folder as everyone else and share the same pool of names.
         </p>
         <p>
           Ownership decides one thing only: where the sheet is <em>shown</em>. The world's cast
-          count, its ledgers and the fan of faces on the world hub leave guests out; the
-          production shows them as a group beside the world cast it draws on. In every other
-          respect a guest is an ordinary sheet — it versions, it passes the gate, it is cited, it
-          takes a reference kit, it takes a voice, it retires. Scope changes ownership, never
-          mechanism, so there is no second class of thing to keep working.
+          count, its ledgers and the fan of faces on the world hub leave guests out; the production
+          shows them as a group beside the world cast it draws on. Otherwise a guest is an ordinary
+          sheet — it versions, gates, is cited, takes a reference kit, takes a voice, retires. Scope
+          changes ownership, never mechanism, so there is no second class of thing to keep working.
         </p>
         <p>
-          A guest can be promoted into the world by clearing that one line. Nothing moves, the name
-          does not change, the version does not reset, and every citation keeps resolving. There is
-          deliberately no way back down: a sheet promoted by mistake is retired, not demoted, because
-          demotion would mean pulling a name out from under work that has already used it.
+          Clearing that one line promotes a guest into the world. Nothing moves, the name does not
+          change, the version does not reset, every citation keeps resolving. There is deliberately
+          no way back down: a sheet promoted by mistake is retired, not demoted, because demotion
+          would pull a name out from under work that has already used it.
         </p>
         <p class="note">
-          The sample world has no guests — it predates them. The mechanism is fully built; you can
-          see the world hub's counts, the production's guest group and the promotion path all
-          reading the same single line of the file.
+          The sample world has no guests — it predates them — but the mechanism is fully built, and
+          the world's counts, the production's guest group and the promotion path all read that same
+          single line.
         </p>
       </section>
 
@@ -479,17 +475,16 @@ whose melody cannot be carried back across waking…
         <p>
           An entry is <span class="pill pill--part">proposed</span>,
           <span class="pill pill--yes">settled</span> or
-          <span class="pill pill--part">open</span>. A proposed entry is a draft waiting on the
-          <a href="the-accept-gate.html">accept gate</a> and does not live in
-          <code>canon/</code> yet, which is why the sample world's folder holds only settled and
-          open ones.
+          <span class="pill pill--part">open</span>. A proposed entry is still a draft at the
+          <a href="the-accept-gate.html">accept gate</a> and is not in <code>canon/</code> yet,
+          which is why the sample world's folder holds only settled and open ones.
         </p>
         <p>
-          <strong>Open</strong> is the interesting one. An open entry holds a real number from the
-          moment it exists, so you can cite the question before anybody has answered it — and it
-          is deliberately kept out of the set Arke searches when answering questions, because a
-          thread asserts nothing. That is what lets the world say "the canon has not decided this"
-          instead of inventing a decision on the spot.
+          <strong>Open</strong> is the interesting one. It holds a real number from the moment it
+          exists, so you can cite the question before anybody has answered it — and it is
+          deliberately kept out of the set Arke searches when answering questions, because a thread
+          asserts nothing. That is what lets the world say "the canon has not decided this" instead
+          of inventing a decision on the spot.
         </p>
 
         <h4>Revisions, not dates</h4>
@@ -502,10 +497,9 @@ whose melody cannot be carried back across waking…
           Every version of the entry is kept, addressed by the revision that produced it.
         </p>
         <p>
-          <code>links</code> mixes both kinds of name freely — other canon numbers and sheet
-          names alike — because a statement about dreams is genuinely about two other statements
-          and two characters at once, and forcing that into two separate lists would only mean
-          somebody had to keep them in step.
+          <code>links</code> mixes both kinds of name freely — canon numbers and sheet names alike
+          — because a statement about dreams really is about two other statements and two
+          characters at once, and two separate lists would only be two things to keep in step.
         </p>
 
         <h4>How canon answers a question</h4>
@@ -517,44 +511,41 @@ whose melody cannot be carried back across waking…
           <li>
             <h3>It searches only what is written</h3>
             <p>
-              The search runs over the canon entries in the folder. Open threads are excluded.
-              Retired entries are excluded. Nothing else is consulted — not the bible, not your
-              chapters, not the model's own idea of coastal fantasy.
+              The search runs over the canon entries in the folder. Open threads and retired
+              entries are excluded. Nothing else is consulted — not the bible, not your chapters,
+              not the model's own idea of coastal fantasy.
             </p>
           </li>
           <li>
             <h3>Nothing found means it stops there</h3>
             <p>
-              If nothing comes back above the relevance floor, you get a refusal and no model is
-              asked anything at all. It costs nothing and it cannot hallucinate, because nothing
-              was ever put in front of it.
+              If nothing comes back, you get a refusal and no model is asked anything at all. It
+              costs nothing and it cannot invent, because nothing was ever put in front of it.
             </p>
           </li>
           <li>
             <h3>An answer is claims plus quotes</h3>
             <p>
-              Every claim in an answer names the entry it came from and quotes the exact span of
-              that entry supporting it. The citations render as links you can follow to the entry
-              itself.
+              Every claim names the entry it came from and quotes the exact span supporting it,
+              rendered as a link you can follow to the entry.
             </p>
           </li>
           <li>
             <h3>Every quote is checked against the file</h3>
             <p>
-              Each quoted span is verified to actually appear in the entry it cites. If any one of
-              them fails, the whole answer is thrown away and asked for once more, naming the
-              failure — and if that fails too, you get a refusal. No answer is ever shown built
-              from a partly verified set, because a paragraph with one invented sentence in it
-              looks exactly like a paragraph with none.
+              Each quoted span is verified to actually appear in the entry it cites. If one fails,
+              the whole answer is thrown away and asked for once more; if that fails too, you get a
+              refusal. Nothing is ever shown built from a partly verified set, because a paragraph
+              with one invented sentence in it looks exactly like a paragraph with none.
             </p>
           </li>
           <li>
             <h3>A refusal says what it looked at</h3>
             <p>
-              It reports how many entries were searched and names the closest ones that did not
-              answer, and it distinguishes "I found nothing" from "I found things that do not
-              decide this". Then it offers to open the question as a thread, which is how a
-              refusal turns into work rather than a dead end.
+              It reports how many entries were searched, names the closest ones that did not
+              answer, and distinguishes "I found nothing" from "I found things that do not decide
+              this". Then it offers to open the question as a thread — which is how a refusal turns
+              into work rather than a dead end.
             </p>
           </li>
         </ol>
@@ -564,10 +555,10 @@ whose melody cannot be carried back across waking…
         <div class="eyebrow">bible.md</div>
         <h2>The bible: the author's own prose</h2>
         <p>
-          <code>bible.md</code> sits at the top of the world folder, beside
-          <code>world.json</code>, so it is the first file anybody opening the folder finds. It is
-          a blank page you type into: the through-line, the intent, the mood, the half-formed
-          thing you are not ready to decide.
+          <code>bible.md</code> sits at the top of the world folder beside <code>world.json</code>,
+          so it is the first file anybody opening the folder finds. It is a blank page you type
+          into: the through-line, the intent, the mood, the half-formed thing you are not ready to
+          decide.
         </p>
         <p>
           It is deliberately <strong>not canon</strong>, and that distinction is the whole design.
@@ -587,23 +578,21 @@ whose melody cannot be carried back across waking…
           </table>
         </div>
         <p>
-          Because nothing cites it, it does not need approving. What stands in for approval is the
-          version: every save cuts one, the outgoing text is kept, and the change log records who
-          wrote it. An edit nobody wanted is one restore away — which for a notes file is the
-          better trade, since an approval step on thinking out loud is a toll on thinking.
+          Because nothing cites it, it does not need approving. The version stands in for approval:
+          every save cuts one, the outgoing text is kept, and the change log records who wrote it.
+          An edit nobody wanted is one restore away — the better trade for a notes file, since an
+          approval step on thinking out loud is a toll on thinking.
         </p>
         <p>
           It is also the one authored file Arke expects you to open in a text editor of your own.
-          Save it from outside while the app is running and the app takes the new text rather than
-          accusing anyone of interfering. Both writers — you typing in the app, and the assistant
-          describing an edit in its turn — go through the same path, so neither can forget to cut
-          a version.
+          Save it from outside while the app is running and the app simply takes the new text. Both
+          writers — you typing in the app, and the assistant describing an edit — go through the
+          same path, so neither can forget to cut a version.
         </p>
         <p class="note">
-          A world made before the bible existed simply has no <code>bible.md</code>, and that is
-          ordinary rather than broken. A bible somebody hand-wrote with no header at all still
-          reads as a bible; the first save writes the header back in. The sample world is one of
-          the ones with none.
+          A world made before the bible existed has none, which is ordinary rather than broken —
+          the sample world is one. A bible hand-written with no header at all still reads as a
+          bible; the first save writes the header back in.
         </p>
       </section>
 
@@ -628,30 +617,27 @@ whose melody cannot be carried back across waking…
   ]
 }</div>
         <p>
-          The written description is what actually travels into a generation — it is put in front
-          of the model in words. The image is what a person looks at. Both are kept, because the
-          two are not interchangeable: a picture cannot tell a model "one warm practical light",
-          and a sentence cannot tell you whether you like it.
+          The written description is what actually travels into a generation, in words. The image
+          is what a person looks at. Both are kept because they are not interchangeable: a picture
+          cannot tell a model "one warm practical light", and a sentence cannot tell you whether
+          you like it.
         </p>
         <p>
-          <strong>Every version is kept</strong>, with its own description and its own image, in
-          the same file. That is not sentiment. A clip made in June was made under the look as it
-          stood in June, and the only way to answer "why does this shot look like that" a month
-          later is to be able to read what was in force at the time rather than what is in force
-          now.
+          <strong>Every version is kept</strong>, with its own description and image, in the same
+          file. That is not sentiment. A clip made in June was made under the look as it stood in
+          June, and answering "why does this shot look like that" a month later means reading what
+          was in force then rather than what is in force now.
         </p>
         <p>
-          The record is never blank. A world that has never touched it still resolves to a real
+          The record is never blank: a world that has never touched it still resolves to a real
           description, derived from its own tone and genre words and shown as derived rather than
-          as something you wrote. The alternative — an absent file meaning "no policy" and an
-          untouched file meaning "the default" — would be two different silences that look the
-          same.
+          as something you wrote. Otherwise an absent file and an untouched one would be two
+          different silences that look identical.
         </p>
         <p>
           Changing the look goes through the <a href="the-accept-gate.html">accept gate</a> like
-          any other change, and the gate tells you the reach first: how many images, how many
-          reference kits, how many productions and how many already-accepted takes are pinned to
-          the version you are about to replace.
+          any other change, and the gate tells you the reach first: how many images, reference
+          kits, productions and already-accepted takes are pinned to the version you are replacing.
         </p>
         <h4>Exceptions are named, not hidden</h4>
         <p>
