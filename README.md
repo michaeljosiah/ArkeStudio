@@ -122,8 +122,10 @@ capability specs, each with its requirements, its design reasoning and its decis
 Where a spec and the code disagree, that is a bug in one of them, and the specs say plainly
 what is designed but not yet built.
 
-The code-backed list of what each operation creates, replaces, appends, moves or removes is
-[`docs/filesystem-operations.md`](docs/filesystem-operations.md).
+Two references are read off the source rather than the specs:
+[`docs/architecture.md`](docs/architecture.md) for how the code is arranged — what runs where and
+what may depend on what — and [`docs/filesystem-operations.md`](docs/filesystem-operations.md) for
+what each operation creates, replaces, appends, moves or removes.
 
 | | |
 |---|---|
@@ -131,6 +133,7 @@ The code-backed list of what each operation creates, replaces, appends, moves or
 | `packages/coordinator` | The world on disk, the accept gate, canon, jobs and dispatch |
 | `packages/client` | The React app |
 | `packages/adapter-opencode` | The writing harness |
+| `packages/adapter-claude` | The bring-your-own harness, over the Claude Agent SDK |
 | `packages/providers` | Provider clients, the model manifest and the ledger |
 | `packages/voice` | The Voxa sidecar client |
 | `apps/desktop` | The Electron shell that embeds the coordinator |

@@ -99,6 +99,11 @@ world files use forward slashes internally.
 
 # 1 · Architecture
 
+This section is the architectural *decision* and the reasoning behind it. The topology, package
+map and dependency rules as the code currently has them are in
+[`architecture.md`](architecture.md), which is read off the source; where the two disagree, that
+is a bug in one of them.
+
 ## 1.1 Architectural decision
 
 **A thin React client over a local coordinator, with the filesystem as the only durable
