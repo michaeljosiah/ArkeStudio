@@ -244,8 +244,10 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
           // Unmeasured material bounds nothing (R-5a): absent is "not measured", never "zero".
           const measured = production.takeMediaInfo[take.id]?.mediaInfo.durationSec;
           const consumed = measured !== undefined && trim >= measured;
-          // No `inSec` at all when nothing is trimmed, so an untrimmed export is byte-identical
-          // to the one this repo has always produced.
+          // No `inSec` at all when nothing is trimmed, so trim adds nothing to the arguments of
+          // an export that does not use it. (It once said the untrimmed export was byte-identical
+          // to what this repo had always produced; conforming a clip to its shot's slot ended
+          // that, and had to — the identical bytes were the ones that ignored the slot.)
           media = consumed
             ? null
             : {
@@ -447,8 +449,26 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
       if (item.inSec !== undefined) args.push("-ss", String(item.inSec));
       if (item.outSec !== undefined) args.push("-to", String(item.outSec));
       args.push("-i", `${worldDir}/${item.path}`);
+      /*
+       * Conformed to the shot's slot, which is what makes the slot binding (issue 450).
+       *
+       * Ranging the input is not enough and for an ordinary take there is nothing to range: only
+       * a pass segment carries `outSec`, so an untrimmed take handed its whole source to the
+       * concat and `durationSec` — the authored slot the story ordered — decided nothing. A 4s
+       * shot holding an 8s take exported eight seconds of picture against a cut that said four,
+       * and because a placed clip is positioned in absolute output time, every shot after it slid
+       * out from under whatever had been laid over it while the sound, correctly conformed to
+       * `totalSec`, stopped early and left the overrun silent.
+       *
+       * `tpad` then `trim` yields exactly the slot whether the source runs long or short — the
+       * same conform the spine exporter arrived at, and for the same reason it records there:
+       * `fps` alone rounds each clip from its own source length independently, so it cannot make
+       * two clips agree about what four seconds is. Cloning the last frame is what fills a short
+       * one, which beats both a black hole in the picture and a film that quietly changes length.
+       */
+      const slot = item.durationSec;
       filters.push(
-        `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps}[v${inputIndex}]`,
+        `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps},tpad=stop_mode=clone:stop_duration=${slot},trim=duration=${slot},setpts=PTS-STARTPTS[v${inputIndex}]`,
       );
     } else {
       args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
@@ -489,8 +509,8 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
   /*
    * Sound (lanes). Every clip that carries any is delayed to where it was placed and mixed under
    * the whole film; nothing else on the story clock makes a sound, so a cut with no placed audio
-   * emits exactly the arguments it always did — the same promise trim makes about an untrimmed
-   * export.
+   * adds none of these arguments — the same promise trim makes about an export that does not use
+   * it.
    *
    * `normalize=0` is load-bearing and is the one thing to be careful about here: amix divides
    * every input by the number of inputs by default, so laying a second sound anywhere would

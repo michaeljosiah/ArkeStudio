@@ -130,3 +130,52 @@ describe("the arguments an overlay produces", () => {
     assert.match(graph, /\[2:v\]scale=/);
   });
 });
+
+/**
+ * A shot's slot is binding (issue 450).
+ *
+ * `buildExportPlan` always knew each item's authored duration and the encoder used it for slates
+ * alone, so an untrimmed take handed its whole source to the concat: a 4s shot holding an 8s take
+ * exported eight seconds of picture against a cut that said four. What made it more than a wrong
+ * number is that a placed clip is positioned in absolute output time — so every shot after an
+ * overrun slid out from under whatever had been laid over it, while the sound, conformed to
+ * `totalSec`, stopped early and left the overrun silent.
+ *
+ * Verified against ffmpeg 8.1.2 before being pinned here: three 4s slots fed 8s, 2s and 4s
+ * sources encode to exactly 12.000s of video and 12.000s of audio, reading blue at 1s and 3.5s,
+ * green at 4.5s and 7.5s, and red at 8.5s and 11.5s — the oversized one cut, the undersized one
+ * clone-padded, and a sound placed 5s→7s landing inside the second shot rather than beside it.
+ */
+describe("a shot's slot is what a clip is conformed to", () => {
+  const graphFor = (entries: { durationSec: number; media: { path: string } | null }[]) => {
+    const of = { entries: entries.map((e, i) => ({ ...e, label: `SHOT ${i + 1}` })), totalSec: entries.reduce((a, e) => a + e.durationSec, 0) } as unknown as DerivedCut;
+    const a = buildFfmpegArgs(buildExportPlan(of, "review-cut"), "/w", "/out.mp4");
+    return a[a.indexOf("-filter_complex") + 1] ?? "";
+  };
+
+  it("cuts a clip to its shot's slot and pads a short one up to it", () => {
+    const graph = graphFor([{ durationSec: 4, media: { path: "p/a.mp4" } }]);
+    // Both halves, because either alone leaves one direction of the defect in place: `trim`
+    // without `tpad` still lets a short take shorten the film.
+    assert.match(graph, /tpad=stop_mode=clone:stop_duration=4/, "a short take is filled to the slot");
+    assert.match(graph, /trim=duration=4/, "and a long one is cut to it");
+    assert.match(graph, /trim=duration=4,setpts=PTS-STARTPTS/, "each segment restarts at zero for the concat");
+  });
+
+  it("conforms every clip to its own slot, not to one length for all of them", () => {
+    // The bug this pins is a single shared duration: it passes a same-length cut and fails a real
+    // one, which is exactly the shape a plausible refactor takes.
+    const graph = graphFor([
+      { durationSec: 4, media: { path: "p/a.mp4" } },
+      { durationSec: 6.5, media: { path: "p/b.mp4" } },
+    ]);
+    assert.match(graph, /\[0:v\][^;]*trim=duration=4,/, "the first clip takes the first slot");
+    assert.match(graph, /\[1:v\][^;]*trim=duration=6\.5,/, "and the second takes its own");
+  });
+
+  it("leaves slates alone, which were always exact", () => {
+    const graph = graphFor([{ durationSec: 4, media: null }]);
+    assert.ok(!graph.includes("tpad="), "a slate is generated at its length, never conformed to it");
+    assert.match(graph, /drawtext=/);
+  });
+});
