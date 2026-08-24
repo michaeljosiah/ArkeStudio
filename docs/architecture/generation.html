@@ -140,13 +140,13 @@
         <h1>Pressing the button</h1>
         <p class="lede">
           Everything Arke makes for you — a still, a six-second clip, a line of dialogue in a
-          character's voice — travels down one road. The same road whether the work runs on a
-          service you pay by the second or on the graphics card in your own machine.
+          character's voice — travels down one road. The same road whether the work runs on a service
+          you pay by the second or on the graphics card in your own machine.
         </p>
         <p>
-          The unit is a <strong>dispatch</strong>: one request, sent once, for one result. Arke
-          calls the record of it a job, and a job is not a button press. It is a durable line in a
-          file that outlives the press, the window, and the machine being switched off mid-render.
+          The unit is a <strong>dispatch</strong>: one request, sent once, for one result. Arke calls
+          the record of it a job, and a job is not a button press. It is a durable line in a file
+          that outlives the press, the window, and the machine being switched off mid-render.
         </p>
 
         <h4>What actually happens</h4>
@@ -154,13 +154,10 @@
           <li>
             <h3>The request is assembled</h3>
             <p>
-              Not from the shot alone: the shot's own action, the world's look, the scene's place
-              and time of day, and the model sheets of whoever is in it. A character whose picture
-              is going to travel contributes the picture; one whose picture is not going
-              contributes their written description instead, so nobody in the shot goes
-              undescribed. The world's look is stated once at the top and restated once at the
-              bottom as what must not drift — never per beat, because a model told the same thing
-              four times spends its attention arguing about which mention is authoritative.
+              Not from the shot alone: the shot's action, the world's look, the scene's place and
+              time of day, and the model sheets of whoever is in it. A character whose picture is
+              going to travel contributes the picture; one whose picture is not going contributes
+              their written description instead, so nobody in the shot goes undescribed.
             </p>
           </li>
           <li>
@@ -174,18 +171,16 @@
           <li>
             <h3>It goes to the provider</h3>
             <p>
-              With an <strong>errand number</strong> attached — a one-off identifier Arke generated
-              and wrote down before the request. Where a service honours such a number, it
-              recognises a repeat of the same errand and refuses to do the work twice. Jobs queue
-              per service in the order you asked for them, at a rate Arke lowers by itself if the
-              service says you are going too fast.
+              With an <strong>errand number</strong> — a one-off identifier written down before the
+              request. Where a service honours one, it recognises a repeat of the same errand and
+              refuses to do the work twice.
             </p>
           </li>
           <li>
             <h3>The result is checked before it is kept</h3>
             <p>
               The returned file lands in a hidden staging folder, is inspected to confirm it is
-              really the kind of file it claims and arrived whole, and only then is moved into your
+              really the kind of file it claims and arrived whole, and only then moves into your
               world under its final name. If a job returns several files and one fails, none lands.
             </p>
           </li>
@@ -203,17 +198,16 @@
       <section id="durable">
         <h2>Written down before it happens, never after</h2>
         <p>
-          There are two ways a program that spends your money can betray you, and they are
-          opposites. It can lose work you paid for. Or it can pay twice for work you asked for
-          once. A queue that only records what it <em>intends</em> to do prevents the first and
-          causes the second: after a crash, an unsent request and a sent-but-unwitnessed request
-          look identical, and the obvious recovery — sending it — is the double charge.
+          There are two ways a program that spends your money can betray you, and they are opposites.
+          It can lose work you paid for, or pay twice for work you asked for once. A queue that only
+          records what it <em>intends</em> to do prevents the first and causes the second: after a
+          crash an unsent request and a sent-but-unwitnessed request look identical, and the obvious
+          recovery — sending it — is the double charge.
         </p>
         <p>
           So the rule is that <strong>every change of state is written down before the action it
-          authorises.</strong> The instant before a request leaves, the job log already says a
-          request is leaving. If the power goes then, what remains on disk is a record of something
-          in flight rather than a gap.
+          authorises.</strong> If the power goes the instant before a request leaves, what remains is
+          a record of something in flight rather than a gap.
         </p>
 
         <div class="flow">
@@ -228,47 +222,32 @@
 
         <h4>Never trust silence</h4>
         <p>
-          The second half matters more. Finding a job that reads <code>submitting</code> on
-          restart, Arke does not know what happened, and does not guess. A gap in what it could
-          observe is <strong>unknown, to be found out</strong> — never a failure to quietly retry.
-        </p>
-        <p>
-          A retry is not free. Guessing "it probably never sent" charges you twice for one clip;
-          guessing "it probably did" throws away work you already paid for. No amount of cleverness
-          makes either guess safe, so Arke goes and looks. How it looks depends on what the service
-          can be asked:
+          Finding a job that reads <code>submitting</code> on restart, Arke does not know what
+          happened, and does not guess. A gap in what it could observe is <strong>unknown, to be
+          found out</strong> — never a failure to quietly retry. Guessing "it probably never sent"
+          charges you twice for one clip; guessing "it probably did" throws away work you already
+          paid for. So Arke goes and looks, and how depends on what the service can be asked:
         </p>
         <dl class="kv">
           <dt>Ask by number</dt>
-          <dd>
-            Where a service can be asked "did you receive errand 01J8E1?", the answer is definite
-            both ways. Found means the work exists and Arke adopts it. Not found means it never
-            arrived, and Arke sends it safely.
-          </dd>
+          <dd>Where a service can be asked "did you receive errand 01J8E1?", the answer is definite both ways: found means Arke adopts the work, not found means it sends safely.</dd>
           <dt>Check the recent list</dt>
-          <dd>
-            Where a service can only list its recent work, a match is conclusive. Absence is only
-            conclusive if the list reaches back past the moment in question — so Arke checks the
-            oldest entry's age before believing a negative.
-          </dd>
+          <dd>Where a service can only list recent work, a match is conclusive. Absence is only conclusive if the list reaches back past the moment in question, so Arke checks the oldest entry's age before believing a negative.</dd>
           <dt>Ask you</dt>
           <dd>
-            Where a service can do neither, the job is parked and you are asked, with the cost of a
-            possible duplicate in plain money: <em>"Arke did not witness the submission result. fal
-            may have accepted and charged it, and cannot confirm what happened. No automatic retry
-            was made. Resubmitting may charge about $0.13 again; the prior actual cost is
-            unknown."</em> This is not a hole in the design. It is the only honest position when
-            nobody can say what happened.
+            Where it can do neither, the job is parked and you are asked, with the cost of a possible
+            duplicate in plain money: <em>"Arke did not witness the submission result. fal may have
+            accepted and charged it, and cannot confirm what happened. No automatic retry was made.
+            Resubmitting may charge about $0.13 again; the prior actual cost is unknown."</em> This
+            is not a hole in the design. It is the only honest position when nobody can say what
+            happened.
           </dd>
         </dl>
         <p class="note">
-          Reconciliation runs at start-up and finishes before the queue accepts new work. Coming
-          back to forty jobs you left running, you are told what Arke found rather than handed a
-          queue that resumed on assumptions.
-        </p>
-        <p>
-          One deliberate exception: a job that already carries the service's own reference number
-          resumes by <em>watching</em>, never by resending. Nothing about it is unknown.
+          This runs at start-up and finishes before the queue accepts new work, so coming back to
+          forty jobs you are told what Arke found rather than handed a queue that resumed on
+          assumptions. A job that already carries the service's own reference number is the
+          exception: it resumes by watching, never by resending.
         </p>
       </section>
 
@@ -276,10 +255,10 @@
         <h2>What a job line says</h2>
         <p>
           <code>queue/jobs.jsonl</code> lives at the application level, not inside a world, because
-          jobs from every open world compete for one account's rate limit and one machine's
-          graphics card. It is append-only: a job is never edited, it gains a new complete line
-          each time it changes. Keep the last line for each job and you have the present; read them
-          in order and you have the history.
+          jobs from every open world compete for one account's rate limit and one machine's graphics
+          card. It is append-only: a job is never edited, it gains a new complete line each time it
+          changes. Keep the last line for each job and you have the present; read them in order and
+          you have the history.
         </p>
         <div class="snip"><span class="c">queue\jobs.jsonl</span>
 {<span class="k">"id"</span>:"jb_01J8E0000000000000000000J2",
@@ -294,44 +273,22 @@
  <span class="k">"createdAt"</span>:"2026-07-30T14:01:05Z", <span class="k">"updatedAt"</span>:"2026-07-30T14:02:04Z"}</div>
         <p class="caption">
           A real line from the sample world, wrapped to fit. Nothing in it is a secret or a path
-          outside the world; it is safe to read, safe to send someone, and legible a decade from
-          now in any text editor.
+          outside the world.
         </p>
 
         <dl class="kv">
           <dt>status</dt>
-          <dd>
-            One of seven words: <code>queued</code>, <code>submitting</code>, <code>running</code>,
-            <code>succeeded</code>, <code>failed</code>, <code>cancelled</code>, and
-            <code>needs-reconciliation</code> — the one meaning Arke could not observe what
-            happened and is waiting on you.
-          </dd>
+          <dd>One of seven words: <code>queued</code>, <code>submitting</code>, <code>running</code>, <code>succeeded</code>, <code>failed</code>, <code>cancelled</code>, and <code>needs-reconciliation</code> — the one meaning Arke could not observe what happened and is waiting on you.</dd>
           <dt>target</dt>
-          <dd>
-            What the job is <em>for</em>, in the caller's own words: a shot, a whole scene pass, a
-            model sheet, a voice line, a reference tile. The queue does not know what any of those
-            mean, which is exactly why one queue serves all of them.
-          </dd>
+          <dd>What the job is <em>for</em>, in the caller's own words: a shot, a whole scene pass, a model sheet, a voice line, a reference tile. The queue does not know what any of those mean, which is why one queue serves all of them.</dd>
           <dt>provider, model</dt>
-          <dd>
-            Which service, and which specific model on it — never just "a video provider", because
-            a default that resolved only to a company would give you a different price and
-            different limits on different days.
-          </dd>
+          <dd>Which service, and which specific model on it — never just "a video provider", because a default that resolved only to a company would give you a different price and different limits on different days.</dd>
           <dt>estimatedMicroUsd</dt>
           <dd>What Arke expected this to cost, in millionths of a dollar, worked out before the request left. <code>130000</code> is thirteen cents.</dd>
           <dt>attempt</dt>
-          <dd>
-            How many physical sends have been authorised, written down before each one. A crash may
-            make Arke overcount by one; it can never undercount, which is the direction that
-            matters when a send costs money.
-          </dd>
+          <dd>How many physical sends have been authorised, written down before each one. A crash may make Arke overcount by one; it can never undercount, which is the direction that matters when a send costs money.</dd>
           <dt>deletedAt</dt>
-          <dd>
-            Removing a finished job from your Activity list appends a final line marking it gone
-            rather than cutting a line out. Its charge line is untouched: what was spent stays
-            spent.
-          </dd>
+          <dd>Removing a finished job from your Activity list appends a final line marking it gone rather than cutting a line out. Its charge line is untouched: what was spent stays spent.</dd>
         </dl>
 
         <h4>A reconcile action</h4>
@@ -340,17 +297,17 @@
           report entry is a <strong>reconcile action</strong>, and there are seven possible answers:
           <em>adopted</em> (the work was found and is now being watched), <em>resubmitted</em> (it
           was provably never received), <em>resumed polling</em> (it had a reference number all
-          along), <em>requeued</em>, <em>failed</em>, <em>ledger-completed</em> (the job had
-          finished but its charge line was missing, so it was written), and <em>held for user</em>.
+          along), <em>requeued</em>, <em>failed</em>, <em>ledger-completed</em> (the job had finished
+          but its charge line was missing, so it was written), and <em>held for user</em>.
         </p>
       </section>
 
       <section id="failures">
         <h2>When something goes wrong</h2>
         <p>
-          Retrying the wrong thing is expensive in a way that retrying an ordinary web page is not:
-          a content refusal retried five times is five charges for the same refusal. So failures
-          are sorted into four kinds, and each kind behaves differently.
+          Retrying the wrong thing is expensive in a way that retrying an ordinary web page is not: a
+          content refusal retried five times is five charges for the same refusal. So failures are
+          sorted into four kinds, and each behaves differently.
         </p>
         <div class="scroller">
           <table>
@@ -378,17 +335,16 @@
           </table>
         </div>
         <p>
-          An error Arke cannot recognise is treated as <strong>refused</strong>, not as a hiccup:
-          failing visibly is cheaper than retrying wrongly.
+          An error Arke cannot recognise is treated as <strong>refused</strong>: failing visibly is
+          cheaper than retrying wrongly.
         </p>
 
         <h4>Checking the file before keeping it</h4>
         <p>
-          Every returned file is inspected at the level a download failure actually breaks. Arke
-          reads the first bytes to confirm the file is what it claims, then reads the <em>end</em>
-          to confirm the closing marker is there. An empty download is refused outright. For
-          pictures it goes further: whatever the service said it was sending, the bytes decide
-          whether it is really a PNG, a JPEG or a WebP, and the landed file is named accordingly.
+          Arke reads the first bytes of a returned file to confirm it is what it claims, then reads
+          the <em>end</em> to confirm the closing marker is there. An empty download is refused
+          outright. For pictures the bytes, not the service's word, decide whether it is really a
+          PNG, a JPEG or a WebP, and the landed file is named accordingly.
         </p>
         <p class="note">
           Why an unverified file is worse than a failure: a clip cut off in transit still plays. It
@@ -404,8 +360,8 @@
         <p>
           A shot with four characters and a location cites five reference pictures. The model you
           chose may accept four. Some accept one. Some accept none — all three of Arke's own local
-          recipes accept none. Something has to give, and the decision cannot be silent: a quiet
-          cap reads on screen as full coverage, and you end up blaming the model for drift a rule
+          recipes accept none. Something has to give, and the decision cannot be silent: a quiet cap
+          reads on screen as full coverage, and you end up blaming the model for drift that a rule
           you never saw actually caused.
         </p>
         <p>So Arke ranks the candidates in a fixed order, takes what fits, and <strong>names what it dropped before you commit</strong>.</p>
@@ -417,82 +373,58 @@
           <div class="node"><strong>3 · First named</strong><span>order of appearance in the shot</span></div>
         </div>
         <p>
-          Characters go first because a face drifting is what a viewer notices; a room shifting by
-          a shade is not. Within that, everyone cited gets their main picture before anybody gets a
-          second — breadth before depth. A character with both a model sheet and a photograph can
-          spend a spare slot on the second image, but only once everyone else has their first.
+          Characters go first because a face drifting is what a viewer notices; a room shifting by a
+          shade is not. Within that, everyone cited gets their main picture before anybody gets a
+          second — breadth before depth.
         </p>
         <div class="snip"><span class="c">the sentence shown before you commit</span>
 Seedance 2.0 accepts 4 references: carrying maren, alder, kess,
 harbour-mouth — dropping vessel-anchorage
 </div>
-        <p>Four separate things can run out, and Arke names which one bound the request, because they behave differently:</p>
+        <p>Four things can run out, and Arke names which one bound the request, because they behave differently:</p>
         <div class="scroller">
           <table>
             <tr><th>Ran out of</th><th>Behaviour</th><th>Why</th></tr>
-            <tr>
-              <td><strong>Picture slots</strong></td>
-              <td>Drops by rank, names the drop</td>
-              <td>The model accepts a fixed number and no more.</td>
-            </tr>
-            <tr>
-              <td><strong>Distinct subjects</strong></td>
-              <td>Warns, never drops</td>
-              <td>How many people a model holds apart describes where it starts degrading, not a wall. Dropping a character you wrote into the shot gives you a stable take of the wrong scene, with the warning that would have explained it replaced by the damage.</td>
-            </tr>
-            <tr>
-              <td><strong>Seconds of sound or motion</strong></td>
-              <td>Refuses the one that does not fit</td>
-              <td>Where a model takes sound or motion as a reference at all, it is budgeted in seconds, because seconds are what can be proved. A clip whose length could not be measured is refused rather than assumed to be zero — zero is exactly what would make it fit.</td>
-            </tr>
-            <tr>
-              <td><strong>Size on the wire</strong></td>
-              <td>Blocks</td>
-              <td>This one does not degrade. Past the ceiling the request is one the service is already known to reject, and naming a certain failure while still letting you press the button is the warn-versus-refuse distinction applied backwards.</td>
-            </tr>
+            <tr><td><strong>Picture slots</strong></td><td>Drops by rank, names the drop</td><td>The model accepts a fixed number and no more.</td></tr>
+            <tr><td><strong>Distinct subjects</strong></td><td>Warns, never drops</td><td>How many people a model holds apart describes where it starts degrading, not a wall. Dropping a character you wrote into the shot gives you a stable take of the wrong scene, with the warning that would have explained it replaced by the damage.</td></tr>
+            <tr><td><strong>Seconds of sound or motion</strong></td><td>Refuses the one that does not fit</td><td>Budgeted in seconds, because seconds are what can be proved. A clip whose length could not be measured is refused rather than assumed to be zero — zero is exactly what would make it fit.</td></tr>
+            <tr><td><strong>Size on the wire</strong></td><td>Blocks</td><td>This one does not degrade. Past the ceiling the request is one the service is already known to reject, and naming a certain failure while still letting you press the button is the warn-versus-refuse distinction applied backwards.</td></tr>
           </table>
         </div>
         <p>
-          A cited character with no picture on file consumes no slot at all — their written
-          description still travels in the words. And a model that accepts no pictures says so
-          rather than silently sending none: <em>"Local · Draft Image accepts no reference images —
-          those images are omitted; only existing sheet descriptions remain for maren, alder."</em>
+          A cited character with no picture on file consumes no slot — their written description
+          still travels in the words. And a model that accepts no pictures says so rather than
+          silently sending none: <em>"Local · Draft Image accepts no reference images — those images
+          are omitted; only existing sheet descriptions remain for maren, alder."</em>
         </p>
       </section>
 
       <section id="money">
         <h2>Money</h2>
         <p>
-          Every amount in Arke is a whole number of millionths of a dollar. There is deliberately no
-          decimal arithmetic anywhere: prices reach fractions of a cent, a scene is dozens of them
-          added up, and rounding happens exactly once, at the moment a figure goes on screen. A
-          total assembled from decimals accumulates error you cannot see and cannot reconcile
-          against a real invoice.
+          Every amount in Arke is a whole number of millionths of a dollar, rounded exactly once, at
+          the moment a figure goes on screen. Prices reach fractions of a cent and a scene is dozens
+          of them added up; a total assembled from decimals accumulates error you cannot see and
+          cannot reconcile against a real invoice.
         </p>
 
         <h4>Knowing before you spend</h4>
         <p>
           Arke ships with a price list — the <strong>model manifest</strong> — covering every model
           it can dispatch to. It is a plain file inside the application, read at start-up and never
-          fetched over the network: a product that works offline should not need the internet to
-          tell you what a button costs, and a price list downloaded at run time is one more thing
-          that can be tampered with.
-        </p>
-        <p>
-          Prices are not one shape. Video bills by the second and often differently per resolution,
-          images per picture or per megapixel, speech per character, text per word in and per word
-          out. The list carries each shape as its own kind rather than flattening them, so an
-          estimate is arithmetic rather than a guess. A model absent from the list is
-          <strong>refused, not attempted</strong> — dispatching without an estimate would break the
-          one promise the app makes about money, which is that you see the figure before you
-          commit.
+          fetched over the network: a product that works offline should not need the internet to tell
+          you what a button costs. Video bills by the second and often differently per resolution,
+          images per picture or per megapixel, speech per character; the list carries each shape as
+          its own kind rather than flattening them, so an estimate is arithmetic rather than a guess.
+          A model absent from the list is <strong>refused, not attempted</strong> — dispatching
+          without an estimate would break the app's one promise about money.
         </p>
 
         <h4>The ledger</h4>
         <p>
           <code>ledger.jsonl</code> sits beside the job log at the application level. One line per
-          finished job. Append-only, never rewritten, never compacted; the only repair it permits
-          is trimming a final line left half-written by a crash, which removes nothing complete.
+          finished job. Append-only, never rewritten, never compacted; the only repair it permits is
+          trimming a final line left half-written by a crash, which removes nothing complete.
         </p>
         <div class="snip"><span class="c">ledger.jsonl</span>
 {<span class="k">"ts"</span>:"2026-07-30T14:02:04Z",
@@ -505,50 +437,46 @@ harbour-mouth — dropping vessel-anchorage
  <span class="k">"actualSource"</span>:"provider-reported"}</div>
         <p>
           <strong>Failures and cancellations get a line too.</strong> Arke cannot promise you were
-          not billed for a job that failed, so it records what the service said rather than
-          asserting a zero. Cancelling after work has begun does not reliably prevent the charge
-          either, and a ledger that omitted cancellations would drift from your real invoice in
+          not billed for a job that failed, and cancelling after work has begun does not reliably
+          prevent the charge. A ledger that omitted them would drift from your real invoice in
           exactly the direction that destroys trust in it.
         </p>
         <p>
-          <code>actualSource</code> is the field that keeps it honest. It says where the number came
-          from: <em>provider-reported</em> means the service said what it charged,
-          <em>manifest-derived</em> means nobody said anything so the shipped estimate was recorded
-          as the actual, and <em>local-zero</em> means it ran on your own machine. A total mixing
-          measured figures with derived ones is not a measured total, and Arke labels it as mixed
-          rather than presenting one number as though it were all the same kind.
+          <code>actualSource</code> is the field that keeps it honest. <em>provider-reported</em>
+          means the service said what it charged; <em>manifest-derived</em> means nobody said
+          anything, so the shipped estimate was recorded as the actual; <em>local-zero</em> means it
+          ran on your own machine. A total mixing measured figures with derived ones is not a
+          measured total, and Arke labels it as mixed.
         </p>
         <p class="note">
           The ledger keys on the world's permanent identifier — the long code in
           <code>worldId</code> — never on its folder name or its title. Rename a world and its whole
-          spending history follows, because none of that history was ever attached to a name.
-          Renaming in Arke does not move the folder, for the same reason: the folder is an address,
-          the title is a word you should be free to rewrite.
+          spending history follows, because none of it was ever attached to a name. Renaming does not
+          move the folder either: the folder is an address, the title is a word you should be free to
+          rewrite.
         </p>
 
         <h4>Drift, and the rolling figure</h4>
         <p>
-          A hand-written price list goes stale — providers change prices and retire models. Arke
-          does not prevent that; it makes it visible. Because every line holds both the expectation
-          and the charge, the gap is measurable. When one model's charges have diverged from its
-          shipped price by more than fifteen per cent across at least three jobs, that model is
-          named on the spend screen with the size of the difference. Only genuinely reported charges
-          count: comparing an estimate against an estimate would measure Arke's arithmetic against
-          itself.
+          A hand-written price list goes stale as providers change prices. Arke does not prevent
+          that; it makes it visible. Because every line holds both the expectation and the charge,
+          the gap is measurable: when one model's charges have diverged from its shipped price by
+          more than fifteen per cent across at least three jobs, it is named on the spend screen with
+          the size of the difference. Only genuinely reported charges count — comparing an estimate
+          against an estimate would only measure Arke's own arithmetic.
         </p>
         <p>
-          The figure Arke shows you is a <strong>rolling</strong> one. Not a calendar month and not
-          a running total since you installed it, but everything spent in the last <em>N</em> days
-          counted backwards from now — seven by default. Tomorrow, today's spend is still in it and
-          last Monday's has fallen out. It answers "what is this costing me lately" rather than
-          "what have I ever spent", and it does not reset on the first of the month and flatter you.
+          The figure Arke shows you is a <strong>rolling</strong> one: not a calendar month and not a
+          running total since you installed it, but everything spent in the last <em>N</em> days
+          counted backwards from now, seven by default. Tomorrow, today's spend is still in it and
+          last Monday's has fallen out. It answers "what is this costing me lately", and it does not
+          reset on the first of the month and flatter you.
         </p>
         <p>
           It counts across all your worlds, because one key produces one bill however many worlds it
-          was spent from. Set a threshold and Arke tells you when the rolling figure crosses it —
-          once, not on every job after. It <strong>alerts and never blocks.</strong> A hard stop
-          mid-scene with a cut half assembled is worse than a warning, and the money is yours, on
-          your own account.
+          was spent from. Cross a threshold you set and Arke tells you once, not on every job after.
+          It <strong>alerts and never blocks</strong>: a hard stop mid-scene with a cut half assembled
+          is worse than a warning, and the money is yours, on your own account.
         </p>
       </section>
 
@@ -557,17 +485,17 @@ harbour-mouth — dropping vessel-anchorage
         <p>
           <code>credentials.dat</code>, at the application level beside the job log and the ledger —
           <strong>never inside a world</strong>. Each key is encrypted against a secret your
-          operating system holds for your account, so the file is useless on another machine or
-          under another login even if copied. Every write resets its permissions so only your
-          account can read it, with anything inherited from the folder above stripped.
+          operating system holds for your account, so the file is useless on another machine or under
+          another login even if copied, and every write resets its permissions so only your account
+          can read it.
         </p>
         <p>
-          Worlds are meant to be copied, zipped, handed to a collaborator, moved between machines.
-          A key inside one would mean sharing your work shares your account. So sharing a world
-          never shares a credential. The unencrypted key exists only in the memory of the running
-          application, and is registered with the redaction boundary the moment you type it — so
-          anything that later tries to write it to a log finds it already scrubbed, rather than
-          every logging call site being expected to remember.
+          Worlds are meant to be copied, zipped and handed to a collaborator. A key inside one would
+          mean sharing your work shares your account, so sharing a world never shares a credential.
+          The unencrypted key exists only in the memory of the running application, and is registered
+          with the redaction boundary the moment you type it — anything that later tries to write it
+          to a log finds it already scrubbed, rather than every logging call site being expected to
+          remember.
         </p>
 
         <h4>The one that is not Arke's to hold</h4>
@@ -575,30 +503,29 @@ harbour-mouth — dropping vessel-anchorage
           Higgsfield is different. Arke does not talk to it over the web at all; it drives
           Higgsfield's own command-line tool, which signs in for itself. That sign-in is a browser
           flow: Arke starts the tool, the tool opens your browser, you sign in there, and the tool
-          keeps its own short-lived token. Arke waits — up to five minutes, then stops waiting and
-          says so, because a login left open forever is a stuck screen.
+          keeps its own short-lived token. Arke waits — up to five minutes, then stops and says so,
+          because a login left open forever is a stuck screen.
         </p>
         <p>
-          Nothing is copied out of that tool into <code>credentials.dat</code>. A second copy of a
+          Nothing is copied out of that tool into <code>credentials.dat</code>: a second copy of a
           token the tool refreshes on its own schedule would be stale by design. So "is Higgsfield
-          set up" is a question Arke answers by asking the tool, not by looking for a file, and the
-          answer can change while the app is running. If your sign-in reaches several billing
-          accounts and none is picked, Arke says so before dispatching anything: a generation billed
-          to the wrong account cannot be taken back.
+          set up" is answered by asking the tool, not by looking for a file, and the answer can change
+          while the app is running. If your sign-in reaches several billing accounts and none is
+          picked, Arke says so before dispatching anything — a generation billed to the wrong account
+          cannot be taken back.
         </p>
 
         <h4>The record of what was sent</h4>
         <p>
           <code>provider-calls/calls.jsonl</code> holds a redacted copy of every physical call Arke
-          makes on your behalf — what went out, what came back, how long it took, which job it
-          belonged to. It exists so that when something looks wrong you can see what was actually
-          sent instead of reconstructing it from memory.
+          makes on your behalf, so that when something looks wrong you can see what was actually sent
+          instead of reconstructing it from memory.
         </p>
         <dl class="kv">
           <dt>scrubbed</dt>
           <dd>Any field whose name looks like a secret is replaced outright, every key Arke knows is scrubbed from the text, and the signed tail of every web address is cut off — those carry temporary access tokens.</dd>
           <dt>yours only</dt>
-          <dd>Restricted to your account, like the credential file. It is deliberately left out of the support bundle Arke can package for a bug report.</dd>
+          <dd>Restricted to your account, like the credential file, and deliberately left out of the support bundle Arke can package for a bug report.</dd>
           <dt>bounded</dt>
           <dd>Past two thousand records or fifty megabytes it is compacted: the newest two thousand are rewritten and the rest dropped. A debugging aid that grows without limit is a disk problem you did not ask for.</dd>
           <dt>both kinds</dt>
@@ -619,7 +546,7 @@ harbour-mouth — dropping vessel-anchorage
             <tr><td><strong>ElevenLabs</strong></td><td>Speech, and voice cloning in the cloud.</td><td>Yours</td></tr>
             <tr><td><strong>Ollama</strong></td><td>Text, on your own machine.</td><td>None</td></tr>
             <tr><td><strong>Kokoro</strong></td><td>Preset speech on your own machine, through the speech helper below. Present only when that helper can run.</td><td>None</td></tr>
-            <tr><td><strong>ComfyUI</strong></td><td>The engine behind Arke's local picture, video and cloned-voice recipes. Present only when an engine is actually wired up.</td><td>None</td></tr>
+            <tr><td><strong>ComfyUI</strong></td><td>The engine behind Arke's local picture, video and cloned-voice recipes. Present only when an engine is wired up.</td><td>None</td></tr>
           </table>
         </div>
         <p class="note">
@@ -631,8 +558,8 @@ harbour-mouth — dropping vessel-anchorage
         <h4>Generating on your own machine</h4>
         <p>
           Local generation exists so the iteration a shot goes through before it is worth paying for
-          does not accrue per-second charges. Arke never exposes ComfyUI as such. What you get is a
-          short menu of Arke-written <strong>recipes</strong> sitting in the same picker as the paid
+          does not accrue per-second charges. Arke never exposes ComfyUI as such: what you get is a
+          short menu of Arke-written <strong>recipes</strong>, sitting in the same picker as the paid
           models, chosen the same way, queued the same way, landing takes the same way, and written
           to the ledger the same way — at zero, labelled unmetered.
         </p>
@@ -652,15 +579,14 @@ harbour-mouth — dropping vessel-anchorage
         </div>
         <p>
           A recipe is a fixed thing, not a workshop: no graph editor, no importing someone else's
-          workflow. A recipe is also a promise about what will happen and what it will need, so each
-          names the exact model files and add-ons it depends on, down to a fingerprint of the file
-          contents, checked immediately before every dispatch. A file that does not match what the
-          recipe pinned switches the recipe off with that as the reason, rather than producing a
-          picture from something else.
+          workflow. It is also a promise about what it will need, so each names the exact model files
+          and add-ons it depends on, down to a fingerprint of the contents, checked immediately before
+          every dispatch. A file that does not match what the recipe pinned switches the recipe off
+          with that as the reason, rather than producing a picture from something else.
         </p>
         <p>
           Speech and dictation run separately, through a small supervised helper Arke starts on your
-          machine that listens only to itself. It reads text aloud in preset voices and transcribes
+          machine that listens only to itself: it reads text aloud in preset voices and transcribes
           push-to-talk dictation into any chat box. Cloud speech does not go through it — that takes
           the ordinary road, through the queue, with an errand number and a ledger line, so there is
           exactly one path where money is concerned.
@@ -669,42 +595,40 @@ harbour-mouth — dropping vessel-anchorage
         <h4>Readiness, checked before you press anything</h4>
         <p>
           A text model degrades gracefully on a small machine. A video model that does not fit in
-          graphics memory does not run at all. So Arke checks first, in order: is there an engine,
-          does it answer, is it new enough, does it have the add-on this recipe needs, are the model
-          files present, do they match their fingerprints, is the card big enough. The first thing
-          that fails switches the recipe off <em>with that reason named</em> — and the queue enforces
-          the same answer on the way in, so nothing is written down for a dispatch the app already
-          knows cannot run.
+          graphics memory does not run at all. So Arke checks in order: is there an engine, does it
+          answer, is it new enough, does it have the add-on this recipe needs, are the model files
+          present, do they match their fingerprints, is the card big enough. The first failure
+          switches the recipe off <em>with that reason named</em> — and the queue enforces the same
+          answer on the way in, so nothing is written down for a dispatch the app already knows
+          cannot run.
         </p>
         <p>
-          Two judgement calls are worth stating. A card big enough overall but mostly held by
-          another program right now gets a different sentence from a card that is simply too small —
-          one will never work, the other is busy — and Arke assumes it can reclaim a few gigabytes
-          by unloading the engine before it refuses. And if the card could not be measured at all,
-          the recipe reads <em>unknown</em> and dispatches anyway: refusing on a machine that would
-          have worked costs you the feature, while allowing one that then refuses in a quarter of a
-          second costs you a click.
+          Two judgement calls sit inside that. A card big enough overall but mostly held by another
+          program right now gets a different sentence from one that is simply too small — one will
+          never work, the other is busy. And a card that could not be measured at all reads
+          <em>unknown</em> and dispatches anyway: refusing on a machine that would have worked costs
+          you the feature, while allowing one that then refuses in a quarter of a second costs you a
+          click.
         </p>
       </section>
 
       <section id="missing">
         <h2>Missing is a state, not a bug</h2>
         <p>
-          Arke assumes almost nothing about your machine. What is absent is reported with the
-          reason, and the rest of the application carries on. Three real examples:
+          Arke assumes almost nothing about your machine. What is absent is reported with the reason,
+          and the rest of the application carries on. Three real examples:
         </p>
         <div class="grid">
           <div class="card">
             <h3><span class="pill pill--no">no encoder</span> No video tooling</h3>
             <p>
-              Arke uses a standard media encoder to draw the still that represents a clip, to
-              measure whether a clip actually moves, and to export a finished cut. It ships inside
-              the packaged application and is absent almost everywhere else. Without it, clips still
-              generate, land, and can be watched and accepted — they simply have no thumbnail and no
-              motion measurement, which is the state those screens have always handled. Only
-              <em>export</em> refuses, and it says why. That split is deliberate: drawing a thumbnail
-              happens while a paid take is being filed, and an error thrown there would destroy a
-              generation you had already paid for.
+              A standard media encoder draws the still that represents a clip, measures whether a
+              clip actually moves, and exports a finished cut. It ships inside the packaged
+              application and is absent almost everywhere else. Without it, clips still generate,
+              land and can be watched and accepted — they simply have no thumbnail and no motion
+              measurement. Only <em>export</em> refuses, and it says why. The split is deliberate:
+              a thumbnail is drawn while a paid take is being filed, and an error thrown there would
+              destroy a generation you had already paid for.
             </p>
           </div>
           <div class="card">
@@ -721,9 +645,9 @@ harbour-mouth — dropping vessel-anchorage
             <p>
               A job for a service with no key does not fail. Its lane pauses with the reason "no
               credential stored for this provider", the job returns to the front of the queue, and
-              other services keep working. If Higgsfield's tool is not installed at all, every call
-              returns "the Higgsfield CLI is not installed on this machine" — the remedy — rather
-              than an obscure error that reads as though your shot failed to render.
+              other services keep working. And if Higgsfield's tool is not installed at all, every
+              call returns "the Higgsfield CLI is not installed on this machine" — the remedy —
+              rather than an obscure error that reads as though your shot failed to render.
             </p>
           </div>
         </div>
@@ -736,9 +660,9 @@ harbour-mouth — dropping vessel-anchorage
       <section id="written-down">
         <h2>What is written down when you spend money</h2>
         <p>
-          Four things, in three places, none of which is a database. Arke keeps a search index to
-          make screens fast — counts, lists, what cites what — and that index is a cache. Delete it
-          and it rebuilds from the files below, every figure identical.
+          Four things, in three places, none of which is a database. Arke keeps a search index to make
+          screens fast, and that index is a cache: delete it and it rebuilds from the files below,
+          every figure identical.
         </p>
         <div class="scroller">
           <table>
@@ -773,24 +697,19 @@ harbour-mouth — dropping vessel-anchorage
           All four survive, because in every case <strong>the log is the truth and the index is the
           convenience.</strong> The job log and the ledger sit outside every world by design: a
           world's index can be deleted, a world can be renamed, a world can be moved to another
-          machine, and none of it touches what you spent or what you asked for.
-        </p>
-        <p class="note">
-          One consequence worth knowing. The job log is append-only, so a busy month makes it long,
-          not messy — and everything Arke shows you about your queue and your spending is worked out
-          by reading those lines in order. If you ever want to check Arke's arithmetic, you can open
-          the file.
+          machine, and none of it touches what you spent or what you asked for. If you ever want to
+          check Arke's arithmetic, you can open the file.
         </p>
       </section>
 
       <div class="foot">
-        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
-        reading the source. The job and ledger samples are real lines from
-        <code>fixtures\queue\jobs.jsonl</code> and <code>fixtures\ledger.jsonl</code>, wrapped only
-        to fit the column. What happens to a result once it lands belongs to
-        <a href="takes-and-the-cut.html">takes &amp; the cut</a>; how a scene decides what to
-        dispatch belongs to <a href="productions.html">productions</a>; where every one of these
-        files sits on your disk belongs to <a href="files-on-disk.html">files on disk</a>.
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by reading
+        the source. The job and ledger samples are real lines from
+        <code>fixtures\queue\jobs.jsonl</code> and <code>fixtures\ledger.jsonl</code>, wrapped only to
+        fit the column. What happens to a result once it lands belongs to
+        <a href="takes-and-the-cut.html">takes &amp; the cut</a>; how a scene decides what to dispatch
+        belongs to <a href="productions.html">productions</a>; where every one of these files sits on
+        your disk belongs to <a href="files-on-disk.html">files on disk</a>.
       </div>
     </div>
   </body>
