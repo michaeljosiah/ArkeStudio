@@ -656,42 +656,39 @@ where it needs to go. She has paid for it: her left ear is done...</div>
           </dd>
           <dt>.proposals/</dt>
           <dd>
-            Changes waiting for you. One folder per proposal, each holding the complete proposed
-            files rather than a description of edits. Accepting removes the folder; discarding
-            removes it too and writes a line saying so. See <a href="the-accept-gate.html">the accept gate</a>.
+            Changes waiting for you. One folder per proposal, holding the complete proposed files
+            rather than a description of edits. Accepting removes the folder; discarding removes it
+            too and writes a line saying so. See <a href="the-accept-gate.html">the accept gate</a>.
           </dd>
           <dt>.conversations/</dt>
           <dd>
             Your chats with Arke about this world: one folder each, holding the conversation's own
-            small record and every event in it, a line at a time. See <a href="the-assistant.html">the assistant</a>.
+            record and every event in it, a line at a time. See <a href="the-assistant.html">the assistant</a>.
           </dd>
           <dt>.sessions/</dt>
           <dd>Bench sessions — working history of the same kind, kept beside conversations.</dd>
           <dt>.commit/</dt>
           <dd>
-            One change part-way through being written. Empty the rest of the time. Opening the world
+            One change part-way through being written; empty the rest of the time. Opening the world
             finishes or undoes whatever it finds here before anything reads.
           </dd>
           <dt>.index/</dt>
           <dd>
             The search cache, plus a list of what every file looked like when Arke last had the
-            world open. Pure cache: delete it and the next open rebuilds it from the real files.
+            world open. Pure cache: the next open rebuilds it from the real files.
           </dd>
           <dt>.cache/</dt>
           <dd>Voice previews, video being encoded, working copies. Rebuilt on demand.</dd>
           <dt>.staging/</dt>
           <dd>Where a generated file lands and is checked before it is allowed into the world.</dd>
           <dt>incoming/</dt>
-          <dd>
-            Candidates waiting on your decision — a proposed world image, an image staged for a
-            generation to look at.
-          </dd>
+          <dd>Candidates waiting on your decision, such as a proposed world image.</dd>
           <dt>world.lock</dt>
           <dd>
             Present only while the world is open, so a second copy of Arke cannot write to the same
-            world at the same time. It records which process holds it and refreshes while open; a
-            lock left behind by a crash is reclaimed rather than locking you out of your own work.
-            It holds no machine name.
+            world at once. It names the process holding it and refreshes while open; a lock left by
+            a crash is reclaimed rather than locking you out of your own work. It holds no machine
+            name.
           </dd>
         </dl>
 
@@ -773,18 +770,16 @@ where it needs to go. She has paid for it: her left ear is done...</div>
           </table>
         </div>
         <p>
-          The third kind deserves a proper explanation, because it is the reason a crash is boring
-          rather than frightening. A file of this kind is only ever appended to. Nothing rewrites an
-          earlier line, nothing renumbers, nothing compacts in place. So the worst an interrupted
-          write can do is leave the last line half-finished — it cannot reach back and damage the
-          history above it.
+          The third kind deserves a proper explanation, because it is why a crash here is boring. A
+          file of this kind is only ever appended to. Nothing rewrites an earlier line, nothing
+          renumbers, nothing compacts in place. So the worst an interrupted write can do is leave
+          the last line half-finished — it cannot reach back and damage the history above it.
         </p>
         <p>
-          And a half-finished last line is tolerated rather than fatal. When Arke reads the file it
-          discards a truncated final line and keeps everything before it. When it next writes, it
-          finishes the broken line off with a line break before adding anything new, so the ruined
-          record can never be merged into the next valid one. Losing the last line is the entire
-          cost.
+          And a half-finished last line is tolerated rather than fatal. Reading discards a truncated
+          final line and keeps everything before it. The next write finishes the broken line off
+          with a line break before adding anything new, so the ruined record can never be merged
+          into the next valid one. Losing the last line is the entire cost.
         </p>
       </section>
 
@@ -886,23 +881,22 @@ where it needs to go. She has paid for it: her left ear is done...</div>
         <h2>What is never written into a world</h2>
         <h3>No keys</h3>
         <p>
-          Provider keys live in one file, encrypted, in Arke's home folder — never in a world. That
-          is deliberate and it is checked in the code: the store that holds them is described as
-          sitting outside every world precisely so no export can carry one out. Send someone a world
-          folder and you have sent them no credentials.
+          Provider keys live in one encrypted file in Arke's home folder — never in a world. The
+          store that holds them sits outside every world precisely so no export can carry one out.
+          Send someone a world folder and you have sent them no credentials.
         </p>
         <h3>No absolute paths</h3>
         <p>
-          Nothing inside a world names a location on your machine. An artifact card names a file, not
-          a path. A take names a reference by its place within the world. Where a path does appear
-          inside a file it is written with forward slashes, whatever machine wrote it.
+          Nothing inside a world names a location on your machine. An artifact card names a file,
+          not a path. A take names a reference by its place within the world. Where a path does
+          appear inside a file it is written with forward slashes, whatever machine wrote it.
         </p>
         <p>
           This is what makes a world portable: copy the folder to a memory stick, open it on a
           different computer with a different user name and a different drive letter, and every
-          sheet, canon entry, take, version and link still resolves. There is a test that opens a
-          world, changes something, then walks every text file in it looking for anything that looks
-          like an absolute path, and fails if it finds one.
+          sheet, canon entry, take, version and link still resolves. A test opens a world, changes
+          something, then walks every text file in it looking for anything that reads as an absolute
+          path, and fails if it finds one.
         </p>
       </section>
 

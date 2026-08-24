@@ -328,12 +328,19 @@
           </li>
         </ol>
         <p>
-          Why three and not one: the register and the exit sweep run no code at all if Arke is
-          force-killed, so only the first belt covers that; and a wrapper hides the process doing
-          the work, so only the third belt reaches it. All three are careful about identity —
-          process numbers get reused quickly, so a recorded helper is killed only when the process
-          now holding that number still bears the right program name and started when the record
-          was made. A leaked helper is a nuisance. Killing a stranger's process is not.
+          Why three and not one. Arke's own tidy-up — stopping helpers politely, and a last sweep
+          as the process exits — runs only when Arke is allowed to exit normally, and a force-kill
+          runs none of it. The leash is the only belt that acts at that instant. The register
+          survives a force-kill too, but it only cleans up at the <em>next</em> launch, so it is
+          the net rather than the first line — and the net for any run where the leash could not
+          attach at all. The third exists because a wrapper hides the process doing the work: kill
+          the wrapper's number alone and the real worker lives on.
+        </p>
+        <p>
+          All of it is careful about identity. Process numbers get reused quickly, so a recorded
+          helper is killed only when the process now holding that number still bears the right
+          program name and started when the record was made. A leaked helper is a nuisance.
+          Killing a stranger's process is not.
         </p>
       </section>
 
