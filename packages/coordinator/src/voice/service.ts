@@ -8,6 +8,7 @@ import {
   previewLineFor,
   PROVIDERS,
   rankVoices,
+  splitBible,
   type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
@@ -32,6 +33,15 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
 
 /** The sidecar slice this service needs; @arke-studio/voice's VoxaClient satisfies it. */
 export interface SidecarLike {
+  /**
+   * Whether each engine can actually do its job — asked before the catalogue offers a voice.
+   *
+   * `listVoices` answers from the preset list and keeps answering after the speech engine has
+   * failed to load, so the two questions are genuinely different and only one of them was being
+   * asked. Structurally typed rather than importing SidecarHealth, so this package keeps not
+   * depending on @arke-studio/voice.
+   */
+  health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; attributes: string[] }>>;
   synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
@@ -60,6 +70,100 @@ export function normalizeSpeechText(text: string): string {
 }
 
 /**
+ * How much text the local engine is asked to speak at once (2026-08-24).
+ *
+ * Measured, not guessed. 500 characters synthesises in about 32 seconds and leaves the engine
+ * healthy; 8,610 in one request returns 503 after sixteen seconds and leaves Kokoro permanently
+ * unavailable — not just for that request, for every voice feature in the app until it is
+ * restarted. The cap this replaces was 10,000, which let the fatal request straight through.
+ *
+ * 450 sits under the largest size proven safe, with room for the sentence splitter to overshoot
+ * slightly rather than cut a clause in half.
+ */
+const LOCAL_SPEECH_CHUNK = 450;
+
+/**
+ * Break text into pieces small enough to synthesise, preferring sentence ends.
+ *
+ * A chunk boundary is audible — the engine renders each piece with its own opening and closing
+ * prosody — so they are placed where a reader would pause anyway. A sentence longer than the cap
+ * falls back to clause boundaries, then to a hard cut, because refusing to speak a long sentence
+ * would be a worse answer than breathing in an odd place.
+ */
+export function splitForSpeech(text: string, max = LOCAL_SPEECH_CHUNK): string[] {
+  const pieces: string[] = [];
+  let held = "";
+  const flush = () => {
+    if (held.trim() !== "") pieces.push(held.trim());
+    held = "";
+  };
+  // Keep the terminator with the sentence it ends: the engine reads "?" differently from ".".
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    if (sentence.length > max) {
+      flush();
+      let rest = sentence;
+      while (rest.length > max) {
+        const window = rest.slice(0, max);
+        // A comma or semicolon in the back half is a better seam than the middle of a word.
+        const seam = Math.max(window.lastIndexOf(", "), window.lastIndexOf("; "));
+        const cut = seam > max / 2 ? seam + 1 : Math.max(window.lastIndexOf(" "), max);
+        pieces.push(rest.slice(0, cut).trim());
+        rest = rest.slice(cut).trim();
+      }
+      held = rest;
+      continue;
+    }
+    if (held.length + sentence.length + 1 > max) flush();
+    held = held === "" ? sentence : `${held} ${sentence}`;
+  }
+  flush();
+  return pieces;
+}
+
+/**
+ * Join RIFF/WAVE buffers into one, keeping the first header and concatenating the audio.
+ *
+ * Chunked synthesis returns a complete wav per piece, and a player handed them end to end would
+ * hear the second header as a click. The `data` chunk is located rather than assumed at a fixed
+ * offset — the engine is free to include `LIST` or `fact` chunks, and a hard-coded 44 would read
+ * those as samples.
+ */
+export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
+  if (parts.length === 0) throw new Error("Nothing to join.");
+  if (parts.length === 1) return parts[0]!;
+  const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
+    const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
+    if (view.length < 12 || view.toString("ascii", 0, 4) !== "RIFF" || view.toString("ascii", 8, 12) !== "WAVE") {
+      throw new Error("Voxa returned invalid audio.");
+    }
+    let at = 12;
+    while (at + 8 <= view.length) {
+      const id = view.toString("ascii", at, at + 4);
+      const size = view.readUInt32LE(at + 4);
+      if (id === "data") {
+        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, Math.min(at + 8 + size, buf.length)) };
+      }
+      at += 8 + size + (size % 2); // chunks are word-aligned
+    }
+    throw new Error("Voxa returned invalid audio.");
+  };
+  const first = dataOf(parts[0]!);
+  const bodies = parts.map((part) => dataOf(part).data);
+  const total = bodies.reduce((sum, body) => sum + body.length, 0);
+  const out = Buffer.alloc(first.header.length + total);
+  Buffer.from(first.header).copy(out, 0);
+  let at = first.header.length;
+  for (const body of bodies) {
+    Buffer.from(body).copy(out, at);
+    at += body.length;
+  }
+  // The two sizes a player actually reads: the RIFF total and the data chunk's own length.
+  out.writeUInt32LE(out.length - 8, 4);
+  out.writeUInt32LE(total, first.header.length - 4);
+  return new Uint8Array(out);
+}
+
+/**
  * The words of a readable section — and only the words.
  *
  * It used to resolve the voice too, from `sheet.voice`, which read prose *about* a character in
@@ -73,6 +177,27 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
     throw new Error("This section is not available for read aloud.");
   }
   const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
+  if (!text) throw new Error("Nothing to read yet.");
+  return { text };
+}
+
+/**
+ * The same, for a section of the bible (2026-08-24).
+ *
+ * No enum of permitted headings, which is the one real difference from the sheet version. A
+ * sheet's shape is authored by the app, so naming its two readable sections in a type is honest.
+ * A bible is a blank page somebody types into — `splitBible` exists precisely because its
+ * headings are the author's — so the readable set cannot be written down in advance, and the
+ * check that matters is only whether the section is there and has words in it.
+ *
+ * Asked for by an author who wanted the story read back to her rather than read. The bible is
+ * where the whole arc lives and it was the one long-form document in the world with no way to
+ * hear it.
+ */
+export function authoritativeBibleSpeech(bibleText: string, heading: string): { text: string } {
+  const section = splitBible(bibleText).sections.find((candidate) => candidate.heading === heading);
+  if (!section) throw new Error("That section is no longer in the bible.");
+  const text = normalizeSpeechText(section.body);
   if (!text) throw new Error("Nothing to read yet.");
   return { text };
 }
@@ -162,6 +287,25 @@ export class VoiceService {
   async catalogue(clonedVoices: readonly ClonedVoice[] = []): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
+      /*
+       * Ask whether it can speak before offering a voice (2026-08-24).
+       *
+       * Driven from a real failure, in front of somebody. The runtime was up and answering, its
+       * top-level health said `ok: true`, and `/voices` listed Bella, Nicole and Michael — while
+       * the speech engine had failed to load at startup and never retried. So Settings offered a
+       * narrator, one was chosen, and the first anyone knew of it was a 503 at the moment of
+       * pressing play. `/voices` reads a preset list; it is not evidence that anything can be
+       * synthesised.
+       *
+       * Three states, and the middle one is the fix. No sidecar at all leaves the configured
+       * presets alone, because an engine that has not started yet is not an engine that has
+       * failed. A sidecar reporting the engine ready gives its live list. A sidecar reporting it
+       * NOT ready contributes nothing — not even the presets — because that is the one case
+       * where we have been told, in as many words, that none of them can be spoken.
+       */
+      const health = await this.deps.sidecar.health().catch(() => null);
+      const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
+      if (speechEngine === "down") return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices)];
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
         local = live.map((v) => ({
@@ -177,13 +321,18 @@ export class VoiceService {
         }));
       }
     }
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices)];
+  }
+
+  /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
+  private async cloudVoices(): Promise<VoiceCandidate[]> {
     const cloud: VoiceCandidate[] = [];
     for (const source of this.deps.cloudSources) {
       const key = await this.deps.getKey(source.provider);
       if (key === null) continue; // unkeyed providers simply contribute nothing
       cloud.push(...(await source.list(key).catch(() => [])));
     }
-    return [...cloud, ...local, ...clonedVoiceCandidates(clonedVoices)];
+    return cloud;
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
@@ -218,10 +367,15 @@ export class VoiceService {
     store: WorldStore,
     voiceId: string,
     text: string,
+    /**
+     * Called as each piece finishes, so a long read can start playing before it is all made.
+     * Absent for short prose, where the whole thing arrives in one piece anyway and a caller
+     * that does not want to think about parts should not have to.
+     */
+    onPart?: (part: { file: string; index: number; total: number }) => void,
   ): Promise<{ file: string; cached: boolean }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
-    if (normalized.length > 10_000) throw new Error("This text is too long to read aloud in one request.");
     const rel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
     try {
@@ -233,8 +387,37 @@ export class VoiceService {
       /* miss → synthesise */
     }
     if (!this.deps.sidecar) throw new Error("Voxa is not running — local voice is off; cloud voice still works");
-    const audio = await this.deps.sidecar.synthesize({ voiceId, text: normalized });
-    if (audio.length < 12 || Buffer.from(audio).toString("ascii", 0, 4) !== "RIFF") throw new Error("Voxa returned invalid audio.");
+    /*
+     * One request per chunk, in order, rather than one request for everything.
+     *
+     * A single 8,610-character request was measured returning 503 and leaving the engine
+     * unavailable for the rest of the process — so the whole app lost voice because one section
+     * of a bible was long. Sequential rather than parallel on purpose: this is one small model on
+     * the user's own machine, and several concurrent syntheses is the other way to fell it.
+     */
+    const chunks = splitForSpeech(normalized);
+    const rendered: Uint8Array[] = [];
+    for (const [index, chunk] of chunks.entries()) {
+      const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
+      if (part.length < 12 || Buffer.from(part).toString("ascii", 0, 4) !== "RIFF") {
+        throw new Error("Voxa returned invalid audio.");
+      }
+      rendered.push(part);
+      /*
+       * Hand each piece over the moment it exists, so listening can begin on the first one while
+       * the rest are still being made. A ten-minute section takes about ten minutes to render on
+       * this machine; waiting for all of it before the first word is a wait nobody should sit
+       * through, and the pieces are already separate files.
+       */
+      if (onPart) {
+        const partRel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: chunk, format: "wav" });
+        await store.gateOp(async () => {
+          await atomicWriteFile(join(store.dir, partRel), part);
+        });
+        onPart({ file: partRel, index, total: chunks.length });
+      }
+    }
+    const audio = concatWav(rendered);
     await store.gateOp(async () => {
       await atomicWriteFile(abs, audio);
     });

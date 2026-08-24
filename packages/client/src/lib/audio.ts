@@ -63,6 +63,22 @@ function handle(event: Event): void {
       if (state.status !== "ended") publish({ ...state, status: "paused" });
       return;
     case "ended":
+      /*
+       * A queued read walks to its next piece here rather than stopping.
+       *
+       * `at` advances whether or not the next piece exists yet, because it means "the piece to
+       * play now", not "the piece playing". Leaving it where it was would make the next append
+       * replay the piece that just finished — which is what the first version of this did.
+       * When the queue has run dry the element rests on `ended`, and `enqueueClip` starts it
+       * again the moment another piece lands.
+       */
+      if (queue && state.clip?.id === queue.id) {
+        queue.at += 1;
+        if (queue.urls[queue.at] !== undefined) {
+          void playQueued();
+          return;
+        }
+      }
       publish({ ...state, status: "ended", currentTime: state.duration });
       return;
     case "timeupdate":
@@ -110,6 +126,44 @@ export async function playClip(clip: Clip): Promise<void> {
     // Otherwise this is the autoplay policy: the dock is up and its own play button will work.
     publish({ ...state, status: "blocked", error: "Press play to start the ready audio." });
   }
+}
+
+/*
+ * A read that arrives in pieces (2026-08-24).
+ *
+ * Local synthesis runs at roughly the speed of speech, so a ten-minute passage is made over ten
+ * minutes. Rather than hold the first word until the last one exists, the coordinator sends each
+ * piece as it lands and they queue here: the first plays immediately, each following one is
+ * appended, and `ended` advances to the next. When the queue runs dry mid-read the element simply
+ * stops on `ended`, and the next append starts it again — which is why nothing here polls or
+ * guesses at how long a piece takes.
+ *
+ * Keyed by the request that owns the read. A second read replaces the first outright: two voices
+ * over one another is never what anybody meant.
+ */
+let queue: { id: string; urls: string[]; at: number; title: string; sub?: string } | null = null;
+
+/** Start a queued read, or append to the one already running under this id. */
+export async function enqueueClip(clip: Clip & { part: number }): Promise<void> {
+  if (!queue || queue.id !== clip.id) {
+    queue = { id: clip.id, urls: [], at: 0, title: clip.title, ...(clip.sub ? { sub: clip.sub } : {}) };
+  }
+  queue.urls[clip.part] = clip.url;
+  // Nothing sounding for this read yet — start it. `ended` carries the rest.
+  const idle = state.clip?.id !== clip.id || state.status === "ended" || state.status === "idle";
+  if (idle && queue.urls[queue.at] !== undefined) await playQueued();
+}
+
+async function playQueued(): Promise<void> {
+  if (!queue) return;
+  const url = queue.urls[queue.at];
+  if (url === undefined) return; // the next piece is still being made; `enqueueClip` resumes us
+  await playClip({ id: queue.id, url, title: queue.title, ...(queue.sub ? { sub: queue.sub } : {}) });
+}
+
+/** Stop and forget a queued read — a new read, or the dock being dismissed. */
+export function clearQueue(): void {
+  queue = null;
 }
 
 /** The dock's play/pause. Rows use it too, so the same clip toggles from either place. */

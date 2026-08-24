@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, splitBible } from "@arke-studio/contracts";
+import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, cx } from "../components/ui.js";
-import { restoreBible, saveBible, useStore } from "../lib/store.js";
+import { readBibleSection, restoreBible, saveBible, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
+import { mediaUrl } from "../lib/media.js";
+import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
+import { ClipPlayButton } from "../components/player.js";
 
 /**
  * The world bible (SPEC-022) — one page, one document, no approval step.
@@ -123,6 +126,60 @@ export function BibleScreen() {
 
   const size = useMemo(() => bibleSize(text), [text]);
   const outline = useMemo(() => splitBible(text), [text]);
+
+  /*
+   * Read-aloud, on the contents rather than in the prose (2026-08-24).
+   *
+   * The sheet screen puts its speaker on hover over the paragraph itself, which works there
+   * because a sheet's readable prose is two short blocks. A bible is one long editable document
+   * and the body of this screen is a text editor — hanging a play button inside it would fight
+   * the caret. The contents list already names every section, so it is the one place that can
+   * offer "hear this" without getting in the way of writing.
+   *
+   * Asked for by an author who wanted the story read back to her. The whole arc lives in here.
+   */
+  const voiceAudio = useVoiceAudio();
+  const [read, setRead] = useState<{ requestId: string; heading: string } | null>(null);
+  const readResult = read ? voiceAudio[read.requestId] : undefined;
+  const narrator = state?.app.narrator ?? null;
+  const narratorLabel = narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
+  /*
+   * Plays the moment it lands, rather than making somebody press twice for the same thing.
+   *
+   * A long section arrives in pieces, because local synthesis runs at about the speed of speech
+   * and holding the first word until the last one exists is a ten-minute silence. Each piece is
+   * queued as it appears and the first starts immediately; the player walks the rest. A short
+   * section still arrives whole and takes the single-clip path, unchanged.
+   */
+  const parts = useVoiceParts()[read?.requestId ?? ""] ?? [];
+  const queued = useRef(0);
+  useEffect(() => {
+    if (!read || !world) return;
+    for (let i = queued.current; i < parts.length; i += 1) {
+      const file = parts[i];
+      if (file === undefined) return; // a gap means the piece is still being made; wait for it
+      void enqueueClip({
+        id: read.requestId,
+        url: mediaUrl(world.meta.slug, file),
+        title: read.heading,
+        sub: `read aloud · ${narratorLabel}`,
+        part: i,
+      });
+      queued.current = i + 1;
+    }
+  }, [read?.requestId, read?.heading, parts.length, world?.meta.slug, narratorLabel]);
+
+  useEffect(() => {
+    if (parts.length > 0) return; // a streamed read is already sounding
+    if (read && readResult?.status === "ready" && readResult.file && world) {
+      void playClip({
+        id: readResult.requestId,
+        url: mediaUrl(world.meta.slug, readResult.file),
+        title: read.heading,
+        sub: `read aloud · ${narratorLabel}`,
+      });
+    }
+  }, [read?.heading, readResult?.requestId, readResult?.status, readResult?.file, parts.length, world?.meta.slug, narratorLabel]);
   const history = useMemo(() => {
     const current = bible?.version ?? 1;
     return Array.from({ length: Math.max(0, current - 1) }, (_, i) => current - 1 - i).slice(0, 12);
@@ -204,9 +261,55 @@ export function BibleScreen() {
               </p>
             ) : (
               <ol className="fy-bible__toc">
-                {outline.sections.map((section) => (
-                  <li key={section.heading}>{section.heading}</li>
-                ))}
+                {outline.sections.map((section) => {
+                  const mine = read?.heading === section.heading ? readResult : undefined;
+                  return (
+                    <li key={section.heading}>
+                      <span className="fy-bible__tocrow">
+                        <span className="fy-bible__tocname">{section.heading}</span>
+                        {mine?.status === "ready" && mine.file && world ? (
+                          <ClipPlayButton
+                            clip={{
+                              id: mine.requestId,
+                              url: mediaUrl(world.meta.slug, mine.file),
+                              title: section.heading,
+                              sub: `read aloud · ${narratorLabel}`,
+                            }}
+                          />
+                        ) : (
+                          <Button
+                            aria-label={`Read ${section.heading} aloud`}
+                            disabled={section.body.trim() === "" || (read?.heading === section.heading && !mine)}
+                            onClick={() => {
+                              if (!worldId) return;
+                              queued.current = 0;
+                              clearQueue();
+                              setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
+                            }}
+                          >
+                            {read?.heading === section.heading && !mine ? "Preparing…" : "Listen"}
+                          </Button>
+                        )}
+                      </span>
+                      {mine?.status === "confirmation-required" && (
+                        <span className="fy-bible__tocnote">
+                          This section goes to ElevenLabs and is kept in Activity.
+                          <Button
+                            onClick={() => {
+                              if (worldId && read && mine.confirmationToken)
+                                readBibleSection(worldId, section.heading, read.requestId, mine.confirmationToken);
+                            }}
+                          >
+                            Confirm {mine.characterCount} characters · {formatMicroUsd(mine.estimatedMicroUsd)}
+                          </Button>
+                        </span>
+                      )}
+                      {mine?.status === "failed" && (
+                        <span className="fy-bible__tocnote">{mine.error ?? "Read aloud failed."}</span>
+                      )}
+                    </li>
+                  );
+                })}
               </ol>
             )}
           </section>

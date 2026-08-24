@@ -715,6 +715,15 @@ async function initialize(): Promise<{ port: number }> {
   const voxaAt = () =>
     new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
   const voxaSidecar = {
+    /*
+     * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
+     * only on `sidecarHealth` below — that one exists to drive the Settings row and folds the
+     * answer into a runtime status. This is the plain question: can the speech engine speak.
+     *
+     * Null when no runtime was found at all, which the catalogue reads as "unknown, leave the
+     * configured presets alone" rather than "failed, offer nothing".
+     */
+    health: () => (voxaSelection.command === null ? Promise.resolve(null) : voxaAt().health()),
     listVoices: () => voxaAt().listVoices(),
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
       voxaAt().synthesize(input),

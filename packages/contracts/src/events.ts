@@ -57,6 +57,7 @@ export const QueueCommandSchema = z.enum([
   "voice-preview",
   "voice-line",
   "read-sheet-section",
+  "read-bible-section",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -415,10 +416,25 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("voice.audio"),
       requestId: UlidSchema,
       worldId: UlidSchema,
-      sheetId: SlugSchema,
+      /**
+       * Absent for a bible read, which belongs to the world rather than to anybody in it
+       * (2026-08-24). Every other purpose still names a sheet; the client keys these by
+       * `requestId`, so nothing downstream was using this to find the reply.
+       */
+      sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "bible-section"]),
       sectionHeading: z.string().min(1).optional(),
+      /**
+       * Which piece of a long read this is, and how many there are (2026-08-24).
+       *
+       * A ten-minute section takes about ten minutes to synthesise locally, so it arrives as a
+       * run of these rather than one clip at the end — the first plays while the rest are still
+       * being made. Absent for anything short enough to be a single piece, which is every read
+       * that existed before this.
+       */
+      part: z.number().int().min(0).optional(),
+      parts: z.number().int().min(1).optional(),
       provider: z.enum(["kokoro", "elevenlabs"]),
       model: z.string().min(1),
       voiceId: z.string().min(1),

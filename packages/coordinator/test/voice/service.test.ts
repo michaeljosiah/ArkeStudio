@@ -5,7 +5,17 @@ import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
-import { authoritativeSheetSpeech, normalizeSpeechText, previewCacheFile, speechCacheFile, VoiceService, voiceLineRequest } from "../../src/voice/service.js";
+import {
+  authoritativeBibleSpeech,
+  authoritativeSheetSpeech,
+  concatWav,
+  normalizeSpeechText,
+  previewCacheFile,
+  speechCacheFile,
+  splitForSpeech,
+  VoiceService,
+  voiceLineRequest,
+} from "../../src/voice/service.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -40,10 +50,19 @@ const SHEET = {
   ],
 } as unknown as Sheet;
 
-function fakeSidecar() {
+function fakeSidecar(engine: "ready" | "down" | "unreachable" = "ready") {
   const calls: string[] = [];
   return {
     calls,
+    health: async () => {
+      calls.push("health");
+      if (engine === "unreachable") return null;
+      return {
+        engineStatus: {
+          kokoro: engine === "ready" ? { ready: true } : { ready: false, reason: "Kokoro is unavailable." },
+        },
+      };
+    },
     listVoices: async () => {
       calls.push("voices");
       return [{ id: "af_bella", label: "Bella", attributes: ["low", "warm"] }];
@@ -163,6 +182,166 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
       () => voiceLineRequest({ ...base, sheet: voiceless, deliveryParams: null, deliveryNotice: null }),
       /no assigned voice/,
     );
+  });
+});
+
+/**
+ * Found in front of an audience (2026-08-24). The runtime was up, its top-level health said
+ * `ok: true`, and `/voices` listed three Kokoro presets — while the speech engine had failed to
+ * load at startup and never retried. Settings offered a narrator, one was chosen, and the first
+ * anyone knew was a 503 at the moment of pressing play.
+ *
+ * The listing endpoint reads a preset table. It is not evidence that anything can be spoken, and
+ * asking it was the only question being asked.
+ */
+/**
+ * Measured against the real runtime on 2026-08-24, after a read-aloud of a bible section killed
+ * local voice for the whole app in front of somebody.
+ *
+ * 500 characters synthesises in about 32 seconds and leaves the engine healthy. 8,610 in one
+ * request returns 503 after sixteen seconds and leaves Kokoro permanently unavailable — every
+ * voice feature, not just that one, until the app is restarted. The guard that existed refused
+ * at 10,000, which the fatal request passed straight through.
+ */
+describe("long text is spoken in pieces, because one long request fells the engine", () => {
+  it("keeps a short passage whole — no seams where none are needed", () => {
+    assert.deepEqual(splitForSpeech("Her mother died. She was handed to her aunt."), [
+      "Her mother died. She was handed to her aunt.",
+    ]);
+  });
+
+  it("breaks at sentence ends, and keeps the terminator with its sentence", () => {
+    const text = `${"a".repeat(300)}. ${"b".repeat(300)}? ${"c".repeat(300)}!`;
+    const parts = splitForSpeech(text);
+    assert.equal(parts.length, 3);
+    assert.ok(parts[0]!.endsWith("."), "a full stop reads differently from a question mark");
+    assert.ok(parts[1]!.endsWith("?"));
+    assert.ok(parts.every((p) => p.length <= 450));
+  });
+
+  it("packs several short sentences into one piece rather than one request each", () => {
+    const parts = splitForSpeech("One. Two. Three. Four.");
+    assert.deepEqual(parts, ["One. Two. Three. Four."]);
+  });
+
+  /** Refusing to speak a long sentence is a worse answer than breathing in an odd place. */
+  it("falls back to a clause seam when a single sentence will not fit", () => {
+    const parts = splitForSpeech(`${"word ".repeat(80)}, and then ${"more ".repeat(80)}.`);
+    assert.ok(parts.length > 1);
+    assert.ok(parts.every((p) => p.length <= 450), "every piece is under the measured safe size");
+  });
+
+  it("never emits an empty piece, whatever the spacing", () => {
+    for (const text of ["   ", "A.  .  B.", ". . .", ""]) {
+      assert.ok(splitForSpeech(text).every((p) => p.trim() !== ""), `empty piece from ${JSON.stringify(text)}`);
+    }
+  });
+
+  it("covers the real section that caused this, in pieces the engine survives", () => {
+    const parts = splitForSpeech("Sentence here. ".repeat(600));
+    assert.ok(parts.length > 15);
+    assert.ok(parts.every((p) => p.length <= 450));
+    assert.equal(parts.join(" ").replace(/\s+/g, " ").trim(), "Sentence here. ".repeat(600).trim());
+  });
+});
+
+describe("joining the pieces back into one clip", () => {
+  const wav = (samples: number[]) => {
+    const out = Buffer.alloc(44 + samples.length * 2);
+    out.write("RIFF", 0, "ascii");
+    out.writeUInt32LE(out.length - 8, 4);
+    out.write("WAVE", 8, "ascii");
+    out.write("fmt ", 12, "ascii");
+    out.writeUInt32LE(16, 16);
+    out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
+    out.writeUInt32LE(24_000, 24); out.writeUInt32LE(48_000, 28);
+    out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
+    out.write("data", 36, "ascii");
+    out.writeUInt32LE(samples.length * 2, 40);
+    samples.forEach((s, i) => out.writeInt16LE(s, 44 + i * 2));
+    return new Uint8Array(out);
+  };
+
+  it("concatenates the audio and rewrites both sizes a player reads", () => {
+    const joined = Buffer.from(concatWav([wav([1, 2]), wav([3, 4, 5])]));
+    assert.equal(joined.toString("ascii", 0, 4), "RIFF");
+    assert.equal(joined.readUInt32LE(4), joined.length - 8, "the RIFF size");
+    assert.equal(joined.readUInt32LE(40), 10, "the data size — five samples, two bytes each");
+    assert.deepEqual([0, 1, 2, 3, 4].map((i) => joined.readInt16LE(44 + i * 2)), [1, 2, 3, 4, 5]);
+  });
+
+  it("returns a single piece untouched, rather than rebuilding it", () => {
+    const one = wav([7, 8]);
+    assert.equal(concatWav([one]), one);
+  });
+
+  /**
+   * The data chunk is found, not assumed at 44: the engine may emit LIST or fact chunks, and a
+   * hard-coded offset would read those as samples and play them as noise.
+   */
+  it("finds the data chunk past an extra chunk it does not recognise", () => {
+    const base = Buffer.from(wav([9, 9]));
+    const extra = Buffer.alloc(12);
+    extra.write("LIST", 0, "ascii");
+    extra.writeUInt32LE(4, 4);
+    extra.write("INFO", 8, "ascii");
+    const withExtra = Buffer.concat([base.subarray(0, 36), extra, base.subarray(36)]);
+    withExtra.writeUInt32LE(withExtra.length - 8, 4);
+    const joined = Buffer.from(concatWav([new Uint8Array(withExtra), wav([1])]));
+    // The LIST chunk survives in the header, so `data` sits 12 bytes later than in a bare wav.
+    const dataSizeAt = 36 + 12 + 4;
+    assert.equal(joined.toString("ascii", 36 + 12, 36 + 16), "data", "the header kept the chunk it did not understand");
+    assert.equal(joined.readUInt32LE(dataSizeAt), 6, "three samples survived, not the LIST bytes");
+    assert.deepEqual([0, 1, 2].map((i) => joined.readInt16LE(36 + 20 + i * 2)), [9, 9, 1]);
+  });
+
+  it("refuses audio that is not a wav at all", () => {
+    assert.throws(() => concatWav([new Uint8Array([1, 2, 3]), wav([1])]), /invalid audio/);
+  });
+});
+
+describe("the catalogue does not offer a voice the engine cannot speak", () => {
+  const service = (sidecar: ReturnType<typeof fakeSidecar>) =>
+    new VoiceService({
+      sidecar,
+      localPresets: [
+        { provider: "kokoro", voiceId: "af_bella", label: "Bella", attributes: [], local: true, canClone: false },
+      ],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+      clock: CLOCK,
+    });
+
+  it("offers the live voices when the engine reports itself ready", async () => {
+    const sidecar = fakeSidecar("ready");
+    const voices = await service(sidecar).catalogue();
+    assert.deepEqual(voices.map((v) => v.voiceId), ["af_bella"]);
+    assert.ok(sidecar.calls.includes("health"), "it asks before it offers");
+  });
+
+  it("offers nothing local when the engine says it is not ready — not even the presets", async () => {
+    const sidecar = fakeSidecar("down");
+    const voices = await service(sidecar).catalogue();
+    assert.deepEqual(voices, [], "we have been told in as many words that none of them can be spoken");
+    assert.equal(sidecar.calls.includes("voices"), false, "and it does not bother asking for a list it cannot use");
+  });
+
+  /**
+   * Unreachable is not the same as failed. An engine that has not answered yet may simply be
+   * starting, and blanking the configured presets on a timeout would make a slow launch look
+   * like a broken install.
+   */
+  it("keeps the configured presets when the runtime does not answer at all", async () => {
+    const voices = await service(fakeSidecar("unreachable")).catalogue();
+    assert.deepEqual(voices.map((v) => v.voiceId), ["af_bella"]);
+  });
+
+  it("still offers cloned voices when the local engine is down, since they are not its to speak", async () => {
+    const voices = await service(fakeSidecar("down")).catalogue([
+      { id: "cv_1", label: "Timi", provider: "elevenlabs", voiceId: "v_timi" } as never,
+    ]);
+    assert.equal(voices.length, 1, "a cloud-cloned voice does not depend on the local runtime");
   });
 });
 
@@ -296,6 +475,54 @@ describe("the preview cache key", () => {
     assert.equal(speechCacheFile(base), speechCacheFile({ ...base, text: " hello harbour " }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, model: "kokoro-82m-v2" }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, format: "mp3" }));
+  });
+});
+
+/**
+ * The bible gained read-aloud because the whole arc of a story lives in it and it was the one
+ * long-form document in the world with no way to hear it (2026-08-24). Asked for by an author who
+ * had told a story out loud over an evening and wanted it read back to her.
+ */
+describe("authoritative bible speech", () => {
+  const BIBLE = [
+    "Some prose before any heading at all.",
+    "",
+    "## The story, told",
+    "",
+    "Her mother came from nothing.   She died the night the girl was born.",
+    "",
+    "## Format rules",
+    "",
+    "Ninety seconds.",
+    "",
+    "## Not written yet",
+    "",
+  ].join("\n");
+
+  it("reads the section it was asked for, normalised", () => {
+    assert.deepEqual(authoritativeBibleSpeech(BIBLE, "The story, told"), {
+      text: "Her mother came from nothing. She died the night the girl was born.",
+    });
+  });
+
+  /**
+   * No enum of permitted headings, unlike the sheet version — a bible's headings belong to
+   * whoever wrote it, so the only checks available are that the section is there and has words.
+   */
+  it("takes any heading the author actually wrote", () => {
+    assert.deepEqual(authoritativeBibleSpeech(BIBLE, "Format rules"), { text: "Ninety seconds." });
+  });
+
+  it("refuses a heading that is not in the document, rather than reading the wrong one", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, "The story"), /no longer in the bible/);
+  });
+
+  it("refuses an empty section instead of sending nothing to a paid provider", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, "Not written yet"), /Nothing to read/);
+  });
+
+  it("never reads the preamble, which belongs to no heading", () => {
+    assert.throws(() => authoritativeBibleSpeech(BIBLE, ""), /no longer in the bible/);
   });
 });
 
