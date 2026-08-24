@@ -160,4 +160,22 @@ describe("media points", () => {
     assert.equal(point?.media?.brief, "A drowned bell rising through black water.");
     assert.equal(point?.media?.sessionId, sessionId);
   });
+
+  it("groups a shot video under its scene and names the exact shot", () => {
+    const candidate = lookChange({
+      classification: "media.image-opportunity",
+      subject: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+      draft: {
+        medium: "video",
+        target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+        purpose: "shot-video",
+        brief: "Maren hears the verse under the water.",
+        reason: "The beat is visual.",
+        dependencies: [],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const [point] = projectPoints([candidate]);
+    assert.equal(point?.subject, "sc_04");
+    assert.equal(point?.subjectKind, "shot · sh_12");
+  });
 });

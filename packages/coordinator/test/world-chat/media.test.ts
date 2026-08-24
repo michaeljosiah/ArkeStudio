@@ -210,6 +210,58 @@ describe("what must land before it can be generated", () => {
     assert.deepEqual(blocking, []);
   });
 
+  it("keeps blocking when a later revision was accepted instead of the one the brief pinned", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const dependency = idea({ target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" } });
+    const blocking = blockingDependencies(
+      idea({
+        target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+        dependencies: [{ candidateId: dependency.id, revision: 1 }],
+      }),
+      bundle,
+      [],
+      [{ ...dependency, revision: 2, status: "accepted" }],
+    );
+    assert.equal(blocking.length, 1, "accepting a correction does not accept what the old brief depended on");
+  });
+
+  it("blocks every target kind that does not exist", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const missing = [
+      { kind: "canon", entryId: "CANON-999" },
+      { kind: "sheet", sheetKind: "character", sheetId: "nobody" },
+      { kind: "production", productionId: "nobody" },
+      { kind: "episode", productionId: "saltlight" },
+      { kind: "episode", productionId: "saltlight", episodeId: "ep_missing" },
+      { kind: "scene", productionId: "saltlight", sceneId: "sc_missing" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_missing" },
+      { kind: "series", seriesId: "missing-series" },
+    ];
+    for (const target of missing) {
+      const blocking = blockingDependencies(
+        idea({ medium: "video", purpose: "concept-video", target }),
+        bundle,
+        [],
+      );
+      assert.equal(blocking.length, 1, `${target.kind} must exist before its media can be prepared`);
+    }
+  });
+
+  it("allows media for an existing production, scene and exact shot", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    for (const target of [
+      { kind: "production", productionId: "saltlight" },
+      { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+    ]) {
+      assert.deepEqual(
+        blockingDependencies(idea({ medium: "video", purpose: "concept-video", target }), bundle, []),
+        [],
+      );
+    }
+  });
+
   it("says nothing when nothing is blocking", () => {
     assert.equal(explainBlocked([]), "");
   });

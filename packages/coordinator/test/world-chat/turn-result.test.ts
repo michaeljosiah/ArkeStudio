@@ -15,7 +15,8 @@ import {
   type WorldChatMessage,
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
-import { payloadDigest, structuralKey } from "../../src/world-chat/identity.js";
+import { payloadDigest, structuralKey, suppressedByTombstone } from "../../src/world-chat/identity.js";
+import { contentHash } from "../../src/world-chat/observations.js";
 import {
   correctiveMessage,
   parseTurnResult,
@@ -91,6 +92,28 @@ function canonCreateDraft(message: WorldChatMessage, quote = "Her aunt raised he
       title: "Maren's upbringing",
       statement: "Maren Kest was raised by her aunt.",
       links: [],
+    },
+  };
+}
+
+function mediaDraft(
+  message: WorldChatMessage,
+  target: { kind: "shot"; productionId: string; sceneId: string; shotId: string },
+): ModelCandidateDraft {
+  return {
+    classification: "media.image-opportunity",
+    title: `Video for ${target.shotId}`,
+    rationale: "The beat needs movement.",
+    settledness: "tentative",
+    evidence: intentEvidence(message, "the bells only ring at slack water"),
+    checkReceiptIds: [],
+    draft: {
+      medium: "video",
+      target,
+      purpose: "shot-video",
+      brief: `The bells rise under ${target.shotId}.`,
+      reason: "The action is visual.",
+      dependencies: [],
     },
   };
 }
@@ -221,6 +244,36 @@ describe("accepting a turn", () => {
     assert.equal(outcome.turn.candidates[0]!.id, existing.id);
     assert.equal(outcome.turn.candidates[0]!.revision, 2, "it updated rather than duplicated");
   });
+
+  it("keeps media for different shots as different propositions", async () => {
+    const input = await baseInput();
+    const first = mediaDraft(input.message, {
+      kind: "shot",
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      shotId: "sh_12",
+    });
+    const created = validateTurnResult({
+      ...input,
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: first }] }),
+    });
+    assert.ok(created.ok);
+    const second = mediaDraft(input.message, {
+      kind: "shot",
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      shotId: "sh_13",
+    });
+    const outcome = validateTurnResult({
+      ...(await baseInput({ messages: [input.message], existing: created.turn.candidates })),
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t2", candidate: second }] }),
+    });
+    assert.ok(outcome.ok);
+    const existing = created.turn.candidates[0]!;
+    const added = outcome.turn.candidates[0]!;
+    assert.notEqual(added.id, existing.id, "the second shot receives its own proposition");
+    assert.notEqual(structuralKey(added), structuralKey(existing));
+  });
 });
 
 describe("rejecting a turn", () => {
@@ -348,6 +401,47 @@ describe("rejecting a turn", () => {
 });
 
 describe("retraction and resurfacing", () => {
+  it("still suppresses an image tombstone written before medium existed", async () => {
+    const input = await baseInput();
+    const draft: ModelCandidateDraft = {
+      classification: "media.image-opportunity",
+      title: "Maren at the bells",
+      rationale: "The moment wants a still.",
+      settledness: "tentative",
+      evidence: intentEvidence(input.message, "the bells only ring at slack water"),
+      checkReceiptIds: [],
+      draft: {
+        medium: "image",
+        target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+        purpose: "character-look",
+        brief: "maren at the bells",
+        reason: "the moment wants a still",
+        dependencies: [],
+      },
+    };
+    const legacyDigest = contentHash({
+      key: "media.image-opportunity|sheet:maren-kest|character-look",
+      draft: {
+        brief: "maren at the bells",
+        dependencies: [],
+        purpose: "character-look",
+        reason: "the moment wants a still",
+        target: { kind: "sheet", sheetId: "maren-kest", sheetKind: "character" },
+      },
+      settledness: "tentative",
+    });
+    const tombstone: CandidateTombstone = {
+      candidateId: newId("cand") as CandidateId,
+      revision: 1,
+      structuralKey: "media.image-opportunity|sheet:maren-kest|character-look",
+      payloadDigest: legacyDigest,
+      retractedByMessageId: input.message.id,
+      at: AT,
+    };
+    assert.equal(payloadDigest(draft), legacyDigest, "the new parser preserves the old image digest");
+    assert.equal(suppressedByTombstone(draft, [tombstone]), tombstone);
+  });
+
   it("withdraws a proposition and remembers the claim", async () => {
     const input = await baseInput();
     const created = validateTurnResult({

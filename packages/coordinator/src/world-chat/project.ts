@@ -38,6 +38,14 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
     return candidate.target.shotId === undefined ? "new shot" : `shot · ${candidate.target.shotId}`;
   }
   if (candidate.classification === "development.series") return `series · ${candidate.target.seriesId}`;
+  if (candidate.classification === "media.image-opportunity") {
+    const target = candidate.draft.target;
+    if (target.kind === "production") return "production";
+    if (target.kind === "episode") return target.episodeId ? `episode · ${target.episodeId}` : "episode";
+    if (target.kind === "scene") return `scene · ${target.sceneId}`;
+    if (target.kind === "shot") return target.shotId ? `shot · ${target.shotId}` : "shot";
+    if (target.kind === "series") return `series · ${target.seriesId}`;
+  }
   const subject = candidate.subject;
   if (subject.kind === "new") {
     switch (candidate.classification) {
@@ -72,6 +80,12 @@ function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: stri
   // A shot is named by the scene it lives in — "sh_12" alone says nothing about where it is.
   if (candidate.classification === "development.shot") return candidate.target.sceneId;
   if (candidate.classification === "development.series") return candidate.target.seriesId;
+  if (candidate.classification === "media.image-opportunity") {
+    const target = candidate.draft.target;
+    if (target.kind === "production" || target.kind === "episode") return target.productionId;
+    if (target.kind === "scene" || target.kind === "shot") return target.sceneId;
+    if (target.kind === "series") return target.seriesId;
+  }
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;

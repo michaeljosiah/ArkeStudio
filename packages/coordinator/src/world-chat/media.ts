@@ -1,4 +1,5 @@
-import type { Proposal, WorldBundle, WorldChangeCandidate } from "@arke-studio/contracts";
+import type { Proposal, WorldBundle, WorldChangeCandidate, WorldChatEntityRef } from "@arke-studio/contracts";
+import { entityRefExists } from "./readiness.js";
 
 /**
  * Taking a media idea to the place that can make it (#70 §14).
@@ -77,8 +78,8 @@ export function blockingDependencies(
 ): BlockingDependency[] {
   if (candidate.classification !== "media.image-opportunity") return [];
   const draft = candidate.draft as {
-    target: { kind: string; sheetId?: string };
-    dependencies: Array<{ candidateId?: string; proposalId?: string }>;
+    target: WorldChatEntityRef;
+    dependencies: Array<{ candidateId?: string; revision?: number; proposalId?: string }>;
   };
 
   const blocking: BlockingDependency[] = [];
@@ -97,7 +98,10 @@ export function blockingDependencies(
     // unless wrap-up carried it and somebody accepted what it became.
     if (dependency.candidateId) {
       const dependencyCandidate = candidates.find((one) => one.id === dependency.candidateId);
-      if (dependencyCandidate?.status !== "accepted") {
+      if (
+        dependencyCandidate?.status !== "accepted" ||
+        dependencyCandidate.revision !== dependency.revision
+      ) {
         blocking.push({ summary: "something from this conversation that has not been accepted yet" });
       }
     }
@@ -105,17 +109,19 @@ export function blockingDependencies(
 
   // The target itself is a dependency, and the commonest one to be missing: an idea about a
   // character proposed in the same conversation cannot be generated until that character exists.
-  if (draft.target.kind === "sheet" && draft.target.sheetId) {
-    const exists = bundle.sheets.some((s) => s.id === draft.target.sheetId && s.retired !== true);
-    if (!exists) {
+  if (!entityRefExists(draft.target, bundle)) {
+    if (draft.target.kind === "sheet") {
+      const sheetId = draft.target.sheetId;
       const pending = staged.find((p) =>
-        p.targets.some((t) => t.path.endsWith(`/${draft.target.sheetId}.md`)),
+        p.targets.some((t) => t.path.endsWith(`/${sheetId}.md`)),
       );
       blocking.push(
         pending
           ? { proposalId: pending.id, summary: pending.summary }
           : { summary: "the character this is about is not in the world" },
       );
+    } else {
+      blocking.push({ summary: `the ${draft.target.kind} this is about is not in the world` });
     }
   }
 
