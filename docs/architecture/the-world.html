@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="What a world folder in Arke Studio holds: its own record, its cast and places, its canon, its bible, its look, its reference kits, its artifacts and its voices — with real files from the sample world."
+    />
+    <title>Arke Studio - The world</title>
+    <style>
+      :root {
+        --paper: #f4f1ea;
+        --ink: #171715;
+        --ink-soft: #5f5b53;
+        --line: rgba(23, 23, 21, 0.14);
+        --card: #fffefa;
+        --coral: #ec6a4a;
+        --teal: #2d7b7a;
+        --amber: #c88d32;
+        --red: #b9483d;
+        --green: #3e7455;
+        --sans: "Segoe UI Variable Text", "Aptos", "Segoe UI", system-ui, sans-serif;
+        --display: "Segoe UI Variable Display", "Aptos Display", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+        --shadow: 0 10px 30px rgba(28, 24, 18, 0.09);
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 14% 0%, rgba(45, 123, 122, 0.11), transparent 27rem),
+          radial-gradient(circle at 86% 6%, rgba(236, 106, 74, 0.1), transparent 30rem),
+          var(--paper);
+        font-family: var(--sans);
+        line-height: 1.62;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: inherit; }
+      .shell { width: min(980px, calc(100% - 40px)); margin: 0 auto; }
+      .topbar {
+        position: sticky; top: 0; z-index: 50;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        min-height: 58px; padding: 10px 0;
+        border-bottom: 1px solid var(--line);
+        background: rgba(244, 241, 234, 0.92);
+        backdrop-filter: blur(18px);
+      }
+      .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--display); }
+      .brand span { font-size: 12.5px; color: var(--ink-soft); }
+      .toc { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+      .toc a { text-decoration: none; }
+      .toc a:hover { color: var(--coral); }
+
+      h1 { font-family: var(--display); font-size: clamp(30px, 5vw, 44px); line-height: 1.12; margin: 0 0 14px; letter-spacing: -0.01em; }
+      h2 { font-family: var(--display); font-size: 25px; margin: 0 0 12px; letter-spacing: -0.01em; }
+      h3 { font-size: 16px; margin: 0 0 6px; }
+      h4 { font: 600 12px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); margin: 26px 0 8px; }
+      p { margin: 0 0 14px; }
+      section { padding: 44px 0; border-bottom: 1px solid var(--line); }
+      section:last-of-type { border-bottom: none; }
+      .eyebrow { font: 600 11.5px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 10px; }
+      .lede { font-size: 18px; color: var(--ink-soft); }
+
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+      .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+      .steps li { counter-increment: s; position: relative; padding: 14px 18px 14px 54px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+      .steps li::before {
+        content: counter(s); position: absolute; left: 16px; top: 14px;
+        width: 26px; height: 26px; border-radius: 50%;
+        background: var(--ink); color: var(--paper);
+        display: grid; place-items: center; font: 600 13px var(--mono);
+      }
+      table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { font: 600 11.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-soft); }
+      code { font-family: var(--mono); font-size: 0.92em; background: rgba(23, 23, 21, 0.06); padding: 1px 5px; border-radius: 4px; }
+      .pill { display: inline-block; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 9px; border-radius: 99px; }
+      .pill--yes { background: rgba(62, 116, 85, 0.14); color: var(--green); }
+      .pill--no { background: rgba(185, 72, 61, 0.13); color: var(--red); }
+      .pill--part { background: rgba(200, 141, 50, 0.16); color: var(--amber); }
+      .note { border-left: 3px solid var(--amber); padding: 4px 0 4px 16px; color: var(--ink-soft); }
+      .foot { padding: 30px 0 60px; font-size: 13px; color: var(--ink-soft); }
+      .scroller { overflow-x: auto; }
+
+      /* Additions for this page: file trees, file samples, and a parts diagram. */
+      .tree {
+        background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+        padding: 18px 20px; box-shadow: var(--shadow);
+        font: 13px/1.75 var(--mono); white-space: pre; overflow-x: auto; margin: 0 0 14px;
+      }
+      .tree b { font-weight: 600; color: var(--teal); }
+      .tree i { font-style: normal; color: var(--ink-soft); }
+      .tree u { text-decoration: none; color: var(--coral); }
+      .snip {
+        background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--teal);
+        border-radius: 10px; padding: 14px 18px; margin: 0 0 14px;
+        font: 12.5px/1.7 var(--mono); white-space: pre; overflow-x: auto;
+      }
+      .snip .k { color: var(--teal); }
+      .snip .c { color: var(--ink-soft); }
+      .caption { font-size: 13px; color: var(--ink-soft); margin: -6px 0 22px; }
+      .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px; margin: 0 0 14px; }
+      .node {
+        flex: 1 1 150px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+        padding: 13px 15px; box-shadow: var(--shadow);
+      }
+      .node strong { display: block; font-size: 14.5px; }
+      .node span { font-size: 12.5px; color: var(--ink-soft); }
+      .node--lead { border-left: 3px solid var(--coral); }
+      .link { align-self: center; font: 600 15px var(--mono); color: var(--ink-soft); padding: 0 2px; }
+      .kv { display: grid; grid-template-columns: minmax(140px, auto) 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 14px; }
+      .kv dt { font-family: var(--mono); font-size: 12.5px; color: var(--teal); padding-top: 3px; }
+      .kv dd { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="brand"><strong>Arke Studio</strong><span>how it is built</span></div>
+        <nav class="toc">
+          <a href="index.html">Start here</a>
+          <a href="files-on-disk.html">Files on disk</a>
+          <a href="the-world.html">The world</a>
+          <a href="productions.html">Productions</a>
+          <a href="takes-and-the-cut.html">Takes &amp; the cut</a>
+          <a href="the-accept-gate.html">The accept gate</a>
+          <a href="the-assistant.html">The assistant</a>
+          <a href="generation.html">Generation &amp; spend</a>
+          <a href="the-program.html">The program</a>
+        </nav>
+      </div>
+
+      <section id="top">
+        <div class="eyebrow">The world</div>
+        <h1>Everything a world knows about itself</h1>
+        <p class="lede">
+          A world is a folder. Take the productions out of it — the films and the stories being
+          made inside — and what remains is the world proper: its own record, its people and
+          places, its canon, the author's own thinking, its look, the pictures that keep a face,
+          the files you have brought in, and its voices. Every one of them opens in a text
+          editor.
+        </p>
+        <p>
+          The examples on this page are all real. They come from <em>The Undersong</em>, the
+          sample world that ships with the repository, and they are quoted as they sit on disk.
+        </p>
+
+        <div class="tree"><b>the-undersong/</b>
+  world.json                    <i>the world's own record — short on purpose</i>
+  bible.md                      <i>the author's prose, versioned, ungated</i>
+  changes.jsonl                 <i>every accepted change, one line each</i>
+  world-art.png                 <i>the master look image</i>
+  <b>art-direction/</b>
+    art-direction.json          <i>the visual language, and every version it has had</i>
+  <b>characters/</b>
+    maren-kest.md
+    bray-half-hitch.md
+    the-chorister.md            <i>…</i>
+  <b>locations/</b>
+    the-vigil.md
+    the-saltmarket.md           <i>…</i>
+  <b>factions/</b>
+    the-ebb-council.md
+  <b>canon/</b>
+    CANON-001.md … CANON-071.md <i>one statement per file</i>
+  <b>references/</b>
+    <b>maren-kest/</b>
+      kit.json                  <i>what pictures exist, and what they were made against</i>
+      head-front.png
+      model-sheet-v4.png
+  <b>artifacts/</b>
+    harbour-bells.wav
+    harbour-bells.wav.json      <i>the card that says where it came from</i>
+  <b>voices/</b>
+    voices.json                 <i>voices cloned from a recording</i>
+  <b>productions/</b>            <u>a separate subject — see Productions</u>
+  <b>.history/</b> <b>.proposals/</b> <b>.index/</b>  <i>machinery — see Files on disk</i></div>
+        <p class="caption">
+          The sample world does not carry every one of these. It has no <code>bible.md</code> and
+          no <code>voices/</code>, because it was written before those existed and opening a world
+          never rewrites it.
+        </p>
+        <p>
+          Two habits run under everything below, and they explain most of the odd-looking
+          decisions. <strong>Nothing is deleted</strong>, because something has almost certainly
+          cited it already, and a citation that stops meaning anything is worse than a stale name
+          in a list. And <strong>nothing points outside the folder</strong> — no absolute paths,
+          no machine names — because a world that cannot be moved to another drive is a world you
+          can lose.
+        </p>
+      </section>
+
+      <section id="record">
+        <div class="eyebrow">world.json</div>
+        <h2>The world's own record</h2>
+        <p>
+          This is the whole file. It is the shortest thing in the folder, and it is what makes the
+          folder a world at all: a directory with no readable <code>world.json</code> is quietly
+          ignored rather than reported as broken, so you can keep notes beside your worlds without
+          the app complaining.
+        </p>
+        <div class="snip"><span class="c">world.json</span>
+{
+  <span class="k">"worldId"</span>: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+  <span class="k">"slug"</span>: "the-undersong",
+  <span class="k">"schemaVersion"</span>: 1,
+  <span class="k">"name"</span>: "The Undersong",
+  <span class="k">"logline"</span>: "A drowned god still sings beneath the harbour.",
+  <span class="k">"tone"</span>: "quiet dread",
+  <span class="k">"genre"</span>: "coastal fantasy",
+  <span class="k">"canonRevision"</span>: 104,
+  <span class="k">"nextCanonId"</span>: 72,
+  <span class="k">"created"</span>: "2026-05-02T09:14:00Z",
+  <span class="k">"updated"</span>: "2026-08-07T19:25:00Z"
+}</div>
+        <p>Three of those do real work.</p>
+        <dl class="kv">
+          <dt>worldId</dt>
+          <dd>
+            A long identifier that is minted once and never changes. The spend ledger and the job
+            queue live outside the world, in the application's own folder, and they key on this
+            rather than on the folder name — so renaming <em>The Undersong</em> tomorrow does not
+            orphan a penny of its history.
+          </dd>
+          <dt>canonRevision</dt>
+          <dd>
+            One counter for the whole world. It ticks up exactly once for every accepted change
+            that touches canon, and never for anything else. It is what turns "as the world stood
+            at revision 42" from a figure of speech into something you can go and check.
+          </dd>
+          <dt>nextCanonId</dt>
+          <dd>
+            The next canon number to hand out. Numbers are allocated once and never reused. Even
+            reserving a number and then throwing the draft away leaves that number spent — because
+            a number is cheap and a number that has meant two different things is not.
+          </dd>
+        </dl>
+        <p>
+          The rest is description: the name you see, the one-line pitch, the tone and genre words,
+          and the two dates. <code>slug</code> is the folder name, and it is written down as well
+          as being the folder, so a world that has been moved or renamed can still say what it
+          used to be called.
+        </p>
+        <p class="note">
+          A world is created with almost nothing in it — <code>world.json</code>,
+          <code>changes.jsonl</code>, and an art direction file only if you chose a look on the
+          way in. There are no empty <code>canon/</code> or <code>characters/</code> folders
+          waiting to be filled. Each one appears the first time something needs it, which is why
+          a young world looks small rather than looking unfinished.
+        </p>
+      </section>
+
+      <section id="sheets">
+        <div class="eyebrow">Characters, locations, factions</div>
+        <h2>Sheets: one shape for three things</h2>
+        <p>
+          A character, a place and a faction are the same kind of file, called a
+          <strong>sheet</strong>. They differ in which prose headings they carry and in one or two
+          lines of the header — and in nothing else. They version the same way, pass the same
+          gate, are cited the same way, retire the same way and take pictures the same way.
+        </p>
+        <p>
+          This matters more than it sounds. Everything that can go wrong with an entity — a stale
+          citation, a version that moved under someone, a name that no longer resolves — has to be
+          got right once instead of three times.
+        </p>
+        <div class="snip"><span class="c">characters/maren-kest.md</span>
+---
+<span class="k">id</span>: maren-kest
+<span class="k">type</span>: character
+<span class="k">name</span>: Maren Kest
+<span class="k">role</span>: Tide-caller
+<span class="k">billing</span>: lead
+<span class="k">version</span>: 5
+<span class="k">status</span>: locked
+<span class="k">voice</span>:
+  <span class="k">provider</span>: elevenlabs
+  <span class="k">voiceId</span>: v_8Kq2
+  <span class="k">label</span>: Low tide
+  <span class="k">assignedAtVersion</span>: 4
+<span class="k">canonRules</span>: [CANON-002, CANON-058]
+<span class="k">links</span>: [bray-half-hitch, the-chorister]
+<span class="k">created</span>: "2026-05-02"
+<span class="k">updated</span>: "2026-08-07"
+---
+
+<span class="c">## Essence</span>
+Tide-caller. She hears the verse under the harbour and pulls the water where it
+needs to go. She has paid for it: her left ear is done, and she knows the right
+is next.
+
+<span class="c">## Appearance</span>
+Salt-crusted braids, pale grey eyes, oilskin coat with a bioluminescent thread
+at the collar. Moves like someone listening for a note nobody else can hear.
+
+<span class="c">## Relationships</span>
+Trusts Bray with her life, not her secrets. The Chorister knows her true note,
+and Maren does not know how.
+
+<span class="c">## Voice · written</span>
+Low and even. Speaks to the water before she speaks to people. Never wastes a
+word she could keep.</div>
+        <p>The header block, in plain words:</p>
+        <div class="scroller">
+          <table>
+            <tr><th>Line</th><th>What it means</th></tr>
+            <tr>
+              <td><code>id</code></td>
+              <td>
+                The short name everything else points at. It matches the filename and it is what
+                you type as <code>@maren-kest</code> in a shot description. Renaming her to
+                "Maren Kestrel" changes <code>name</code> and nothing else — the id stays, the
+                file does not move, and every citation still resolves.
+              </td>
+            </tr>
+            <tr>
+              <td><code>version</code></td>
+              <td>
+                Her own number, counting her own accepted changes and nobody else's. Every sheet
+                has one and they do not move together. A world where one number advanced for
+                everything could never answer "was this picture made before or after I changed
+                her face".
+              </td>
+            </tr>
+            <tr>
+              <td><code>status</code></td>
+              <td>
+                <span class="pill pill--part">sketch</span> or
+                <span class="pill pill--yes">locked</span>. A sketch is still being worked out; a
+                locked sheet is one you have decided about. Both can be cited — a sketch is just
+                flagged as one wherever it appears. Locking needs no pictures at all.
+              </td>
+            </tr>
+            <tr>
+              <td><code>role</code>, <code>billing</code></td>
+              <td>
+                Characters only. "Tide-caller", "lead". The role is held to 28 characters
+                <em>when it is written</em>, because it has one 15-pixel line on the cast card —
+                but never when it is read, so a world that already holds a longer one still opens
+                and that character still appears.
+              </td>
+            </tr>
+            <tr>
+              <td><code>region</code></td>
+              <td>Locations only. The Vigil's is "Harbour mouth".</td>
+            </tr>
+            <tr>
+              <td><code>voice</code></td>
+              <td>
+                Which voice speaks her lines — and the version of her sheet that was current when
+                you picked it. Recording that is the whole point: two versions later Arke can tell
+                you the choice was made against an older description of how she sounds, instead of
+                letting it quietly go out of date.
+              </td>
+            </tr>
+            <tr>
+              <td><code>canonRules</code></td>
+              <td>
+                Canon entries she is bound by, <em>as references only</em>. The rule itself lives
+                in canon and the sheet never restates it, so there is exactly one copy of every
+                truth. Try to edit a canon rule from her sheet and you are sent to the entry.
+              </td>
+            </tr>
+            <tr>
+              <td><code>links</code></td>
+              <td>
+                Other sheets she is connected to. The link is stored on her side only. Bray's file
+                is not touched when she links him — his page still shows the connection, worked
+                out rather than stored twice, because two stored copies of one relationship is how
+                the two halves come to disagree.
+              </td>
+            </tr>
+            <tr>
+              <td>The prose below</td>
+              <td>
+                Headed sections, kept in the order you wrote them. Characters carry Essence,
+                Appearance, Relationships and Voice&nbsp;·&nbsp;written; locations carry Look,
+                Sound and Customs; factions carry Essence, Wants and Fears. The list is a small
+                table in one place, so adding a heading is a change to data rather than to four
+                different pieces of the program.
+              </td>
+            </tr>
+          </table>
+        </div>
+
+        <h4>Retired, and where copies come from</h4>
+        <p>
+          A sheet you are finished with is <strong>retired</strong>, not deleted: the file stays
+          where it was, gains one line saying so, and keeps resolving. It drops out of the pickers
+          for new work and a shot still citing it is named before you spend anything. But the take
+          you made six months ago still explains itself, which is the entire reason.
+        </p>
+        <p>
+          A sheet made by duplicating another carries an <strong>origin</strong> line naming the
+          source and the version it was copied at. That is a record of an event, not a live wire.
+          When the original moves on, the copy does not — and it should not, because you copied
+          her to make somebody else.
+        </p>
+
+        <h4>Guests: a sheet a production owns</h4>
+        <p>
+          A sheet may name one production, which makes it that production's <strong>guest</strong>
+          — the barman in one scene who is not a citizen of the world. Guests live in the same
+          <code>characters/</code> folder as everyone else and share the same pool of names.
+        </p>
+        <p>
+          Ownership decides one thing only: where the sheet is <em>shown</em>. The world's cast
+          count, its ledgers and the fan of faces on the world hub leave guests out; the
+          production shows them as a group beside the world cast it draws on. In every other
+          respect a guest is an ordinary sheet — it versions, it passes the gate, it is cited, it
+          takes a reference kit, it takes a voice, it retires. Scope changes ownership, never
+          mechanism, so there is no second class of thing to keep working.
+        </p>
+        <p>
+          A guest can be promoted into the world by clearing that one line. Nothing moves, the name
+          does not change, the version does not reset, and every citation keeps resolving. There is
+          deliberately no way back down: a sheet promoted by mistake is retired, not demoted, because
+          demotion would mean pulling a name out from under work that has already used it.
+        </p>
+        <p class="note">
+          The sample world has no guests — it predates them. The mechanism is fully built; you can
+          see the world hub's counts, the production's guest group and the promotion path all
+          reading the same single line of the file.
+        </p>
+      </section>
+
+      <section id="canon">
+        <div class="eyebrow">canon/</div>
+        <h2>Canon: one statement per file</h2>
+        <p>
+          Canon is what the world has decided. Each entry is its own numbered file, and each file
+          says one thing. Numbers are handed out in the order entries are introduced and are never
+          renumbered, so <code>CANON-058</code> means the same thing to a note you wrote last
+          spring as it does today.
+        </p>
+        <div class="snip"><span class="c">canon/CANON-058.md</span>
+---
+<span class="k">id</span>: CANON-058
+<span class="k">type</span>: lore
+<span class="k">title</span>: Dreams, and the one who does not dream
+<span class="k">status</span>: settled
+<span class="k">introducedAt</span>: 81
+<span class="k">amendedAt</span>: 103
+<span class="k">settledAt</span>: 81
+<span class="k">links</span>: [CANON-052, CANON-054, CANON-050, maren-kest, perrin-tallow]
+---
+
+The Keeper Below cannot speak plainly to a waking mind — waking minds insist on
+ordinary language, and it has none. The sleeping mind is less particular.
+
+Throughout the harbour, people occasionally share a dream: flooded streets; a
+great door beneath the water; someone standing on the other side of it; a song
+whose melody cannot be carried back across waking…
+
+&gt; Room note: she stays wrong sometimes. The moment she becomes a reliable
+&gt; translator, the Keeper becomes a plot device and the dread dies.</div>
+        <p>
+          Seven kinds of statement, because they are asked different questions and answered in
+          different places:
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>Type</th><th>What it holds</th><th>From the sample world</th></tr>
+            <tr><td><code>rule</code></td><td>A constraint the world obeys.</td><td>CANON-002, <em>Tide-calling</em> — a caller cannot move a tide she has not stood in.</td></tr>
+            <tr><td><code>lore</code></td><td>Something that is simply true here.</td><td>CANON-058, <em>Dreams, and the one who does not dream</em>.</td></tr>
+            <tr><td><code>location</code></td><td>A fact about a place, distinct from the place's sheet.</td><td>CANON-019, <em>The Vigil holds the harbour mouth</em>.</td></tr>
+            <tr><td><code>faction</code></td><td>A fact about a group, likewise.</td><td>None in the sample world — the type exists and is unused there.</td></tr>
+            <tr><td><code>timeline</code></td><td>Something that happened, and when.</td><td>CANON-031, <em>The drowning of the god</em>.</td></tr>
+            <tr><td><code>tone</code></td><td>How the thing is meant to feel.</td><td>CANON-007, <em>Quiet dread, never spectacle — except once</em>.</td></tr>
+            <tr><td><code>thread</code></td><td>A question the world is deliberately still asking.</td><td>CANON-044, <em>Who taught the Chorister?</em></td></tr>
+          </table>
+        </div>
+
+        <h4>Three states, and why the third one matters</h4>
+        <p>
+          An entry is <span class="pill pill--part">proposed</span>,
+          <span class="pill pill--yes">settled</span> or
+          <span class="pill pill--part">open</span>. A proposed entry is a draft waiting on the
+          <a href="the-accept-gate.html">accept gate</a> and does not live in
+          <code>canon/</code> yet, which is why the sample world's folder holds only settled and
+          open ones.
+        </p>
+        <p>
+          <strong>Open</strong> is the interesting one. An open entry holds a real number from the
+          moment it exists, so you can cite the question before anybody has answered it — and it
+          is deliberately kept out of the set Arke searches when answering questions, because a
+          thread asserts nothing. That is what lets the world say "the canon has not decided this"
+          instead of inventing a decision on the spot.
+        </p>
+
+        <h4>Revisions, not dates</h4>
+        <p>
+          Three numbers on the entry — introduced, settled, amended — are all
+          <em>canon revisions</em>, that same single counter from <code>world.json</code>.
+          CANON-058 was introduced and settled at revision 81 and last amended at 103. Because
+          every take and every image also records the revision it was made under, "this shot was
+          made when CANON-058 still said something else" is arithmetic rather than an argument.
+          Every version of the entry is kept, addressed by the revision that produced it.
+        </p>
+        <p>
+          <code>links</code> mixes both kinds of name freely — other canon numbers and sheet
+          names alike — because a statement about dreams is genuinely about two other statements
+          and two characters at once, and forcing that into two separate lists would only mean
+          somebody had to keep them in step.
+        </p>
+
+        <h4>How canon answers a question</h4>
+        <p>
+          Asking the world a question is the feature this design exists for, and the discipline is
+          the point rather than a nicety.
+        </p>
+        <ol class="steps">
+          <li>
+            <h3>It searches only what is written</h3>
+            <p>
+              The search runs over the canon entries in the folder. Open threads are excluded.
+              Retired entries are excluded. Nothing else is consulted — not the bible, not your
+              chapters, not the model's own idea of coastal fantasy.
+            </p>
+          </li>
+          <li>
+            <h3>Nothing found means it stops there</h3>
+            <p>
+              If nothing comes back above the relevance floor, you get a refusal and no model is
+              asked anything at all. It costs nothing and it cannot hallucinate, because nothing
+              was ever put in front of it.
+            </p>
+          </li>
+          <li>
+            <h3>An answer is claims plus quotes</h3>
+            <p>
+              Every claim in an answer names the entry it came from and quotes the exact span of
+              that entry supporting it. The citations render as links you can follow to the entry
+              itself.
+            </p>
+          </li>
+          <li>
+            <h3>Every quote is checked against the file</h3>
+            <p>
+              Each quoted span is verified to actually appear in the entry it cites. If any one of
+              them fails, the whole answer is thrown away and asked for once more, naming the
+              failure — and if that fails too, you get a refusal. No answer is ever shown built
+              from a partly verified set, because a paragraph with one invented sentence in it
+              looks exactly like a paragraph with none.
+            </p>
+          </li>
+          <li>
+            <h3>A refusal says what it looked at</h3>
+            <p>
+              It reports how many entries were searched and names the closest ones that did not
+              answer, and it distinguishes "I found nothing" from "I found things that do not
+              decide this". Then it offers to open the question as a thread, which is how a
+              refusal turns into work rather than a dead end.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section id="bible">
+        <div class="eyebrow">bible.md</div>
+        <h2>The bible: the author's own prose</h2>
+        <p>
+          <code>bible.md</code> sits at the top of the world folder, beside
+          <code>world.json</code>, so it is the first file anybody opening the folder finds. It is
+          a blank page you type into: the through-line, the intent, the mood, the half-formed
+          thing you are not ready to decide.
+        </p>
+        <p>
+          It is deliberately <strong>not canon</strong>, and that distinction is the whole design.
+          Canon holds what the world has decided; the bible holds what the author thinks. Nothing
+          cites it, nothing generates from it, and the question-answering above never draws on it
+          — an answer sourced from a musing would look exactly like an answer sourced from a
+          settled fact, which is the one failure the citation discipline exists to prevent.
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th></th><th>A canon entry</th><th>The bible</th></tr>
+            <tr><td>Passes the accept gate</td><td><span class="pill pill--yes">yes</span></td><td><span class="pill pill--no">no</span></td></tr>
+            <tr><td>Gets a version on every save</td><td><span class="pill pill--yes">yes</span></td><td><span class="pill pill--yes">yes</span></td></tr>
+            <tr><td>Old versions kept, restorable</td><td><span class="pill pill--yes">yes</span></td><td><span class="pill pill--yes">yes</span></td></tr>
+            <tr><td>Cited by shots and sheets</td><td><span class="pill pill--yes">yes</span></td><td><span class="pill pill--no">no</span></td></tr>
+            <tr><td>Used to answer questions</td><td><span class="pill pill--yes">yes</span></td><td><span class="pill pill--no">no</span></td></tr>
+          </table>
+        </div>
+        <p>
+          Because nothing cites it, it does not need approving. What stands in for approval is the
+          version: every save cuts one, the outgoing text is kept, and the change log records who
+          wrote it. An edit nobody wanted is one restore away — which for a notes file is the
+          better trade, since an approval step on thinking out loud is a toll on thinking.
+        </p>
+        <p>
+          It is also the one authored file Arke expects you to open in a text editor of your own.
+          Save it from outside while the app is running and the app takes the new text rather than
+          accusing anyone of interfering. Both writers — you typing in the app, and the assistant
+          describing an edit in its turn — go through the same path, so neither can forget to cut
+          a version.
+        </p>
+        <p class="note">
+          A world made before the bible existed simply has no <code>bible.md</code>, and that is
+          ordinary rather than broken. A bible somebody hand-wrote with no header at all still
+          reads as a bible; the first save writes the header back in. The sample world is one of
+          the ones with none.
+        </p>
+      </section>
+
+      <section id="look">
+        <div class="eyebrow">art-direction/</div>
+        <h2>The look: one description, one image, one version</h2>
+        <p>
+          A world has exactly one visual language, and it lives in one small file with the master
+          look image beside it at the world root.
+        </p>
+        <div class="snip"><span class="c">art-direction/art-direction.json</span>
+{
+  <span class="k">"version"</span>: 3,
+  <span class="k">"description"</span>: "Painterly, tidal, restrained. Weathered maritime realism,
+                    visible brushwork, slate and sea-glass colour, one warm
+                    practical light, fog with real depth.",
+  <span class="k">"masterLook"</span>: "world-art.png",
+  <span class="k">"acceptedAt"</span>: "2026-07-18T10:00:00Z",
+  <span class="k">"history"</span>: [
+    { <span class="k">"version"</span>: 1, <span class="k">"description"</span>: "First world image",  … },
+    { <span class="k">"version"</span>: 2, <span class="k">"description"</span>: "Cold-water realism", … }
+  ]
+}</div>
+        <p>
+          The written description is what actually travels into a generation — it is put in front
+          of the model in words. The image is what a person looks at. Both are kept, because the
+          two are not interchangeable: a picture cannot tell a model "one warm practical light",
+          and a sentence cannot tell you whether you like it.
+        </p>
+        <p>
+          <strong>Every version is kept</strong>, with its own description and its own image, in
+          the same file. That is not sentiment. A clip made in June was made under the look as it
+          stood in June, and the only way to answer "why does this shot look like that" a month
+          later is to be able to read what was in force at the time rather than what is in force
+          now.
+        </p>
+        <p>
+          The record is never blank. A world that has never touched it still resolves to a real
+          description, derived from its own tone and genre words and shown as derived rather than
+          as something you wrote. The alternative — an absent file meaning "no policy" and an
+          untouched file meaning "the default" — would be two different silences that look the
+          same.
+        </p>
+        <p>
+          Changing the look goes through the <a href="the-accept-gate.html">accept gate</a> like
+          any other change, and the gate tells you the reach first: how many images, how many
+          reference kits, how many productions and how many already-accepted takes are pinned to
+          the version you are about to replace.
+        </p>
+        <h4>Exceptions are named, not hidden</h4>
+        <p>
+          Anything that wants to differ from the world look has to say so in its own file, and the
+          world's art direction surface lists every one of them by name. An exception you cannot
+          see is the one that quietly makes a world look like two worlds.
+        </p>
+        <p>
+          <span class="pill pill--part">partly built</span> A single character's reference kit can
+          carry its own look, and it is honoured — reference pictures for that character are
+          generated against it. A production can also record one, and the world surface names it
+          as an exception and leaves it out of the reach count — but nothing currently reads it
+          when a shot is dispatched, and no screen writes it. The field is in the format and in
+          the world's own accounting; the inheritance the specification describes is not finished.
+        </p>
+      </section>
+
+      <section id="kits">
+        <div class="eyebrow">references/</div>
+        <h2>Reference kits: how a face survives</h2>
+        <p>
+          Each sheet with pictures gets a folder under <code>references/</code> holding its images
+          and one small file listing them. This is the mechanism behind the promise that identity
+          travels: a character carries the same two pictures into every generation that will take
+          them, so she keeps her face.
+        </p>
+        <div class="flow">
+          <div class="node node--lead"><strong>The main photo</strong><span>one accepted image — this is what she looks like</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>The model sheet</strong><span>one composite: turnaround, expressions, details</span></div>
+          <div class="link">→</div>
+          <div class="node"><strong>Every generation</strong><span>both ride along with the shot</span></div>
+        </div>
+        <p>Here is a real kit, trimmed:</p>
+        <div class="snip"><span class="c">references/maren-kest/kit.json</span>
+{
+  <span class="k">"sheetId"</span>: "maren-kest",
+  <span class="k">"anchor"</span>: "head-front.png",
+  <span class="k">"mainPhoto"</span>: {
+    <span class="k">"file"</span>: "head-front.png",
+    <span class="k">"sheetVersion"</span>: 4,
+    <span class="k">"artDirectionVersion"</span>: 3,
+    <span class="k">"acceptedAt"</span>: "2026-07-14T09:00:00Z"
+  },
+  <span class="k">"tiles"</span>: [
+    { <span class="k">"angle"</span>: "head-front",              <span class="k">"status"</span>: "locked",    <span class="k">"sheetVersion"</span>: 4 },
+    { <span class="k">"angle"</span>: "head-left-three-quarter", <span class="k">"status"</span>: "locked",    <span class="k">"sheetVersion"</span>: 4 },
+    { <span class="k">"angle"</span>: "body-full",               <span class="k">"status"</span>: "generated", <span class="k">"sheetVersion"</span>: 3 },
+    { <span class="k">"angle"</span>: "head-profile",            <span class="k">"status"</span>: "empty" },
+    { <span class="k">"angle"</span>: "expression",              <span class="k">"status"</span>: "empty" }
+  ],
+  <span class="k">"compilations"</span>: [
+    {
+      <span class="k">"file"</span>: "model-sheet-v4.png",
+      <span class="k">"format"</span>: "character-sheet",
+      <span class="k">"sheetVersion"</span>: 4,
+      <span class="k">"artDirectionVersion"</span>: 3,
+      <span class="k">"accepted"</span>: true
+    }
+  ],
+  <span class="k">"designatedCompilation"</span>: "model-sheet-v4.png"
+}</div>
+        <p>
+          <strong>The main photo</strong> is the anchor: one accepted image that settles what she
+          looks like, and the thing every later picture of her is generated against. Generation is
+          gated on it alone — no model sheet, no wardrobe explorations, nothing else is required
+          before you can shoot her.
+        </p>
+        <p>
+          <strong>The model sheet</strong> is one composite image — turnaround, expressions and
+          details in a single picture — nominated to ride along with dispatches. Exactly one is
+          designated, because "send the references" has to mean one definite thing rather than
+          whichever the folder happened to list first.
+        </p>
+        <p>
+          <strong>Tiles</strong> are individual pictures at fixed angles: head front, three-quarter
+          left and right, profile, full body, back, expression, detail. A tile is empty, queued,
+          arrived-but-unreviewed, <em>locked</em>, or superseded — and only a locked tile is a real
+          reference. A superseded tile keeps its row rather than vanishing, because pictures made
+          against it must stay explicable.
+        </p>
+        <p>
+          The load-bearing detail is on nearly every line: each tile and each composite records
+          <strong>the version of the sheet and the version of the art direction it was made
+          against</strong>. That single habit is what lets Arke tell you "three of these pictures
+          predate the change you just made" instead of leaving you to notice, six shots later,
+          that she has the wrong coat. A stale reference is arithmetic here, not judgement.
+        </p>
+        <p class="note">
+          <span class="pill pill--part">superseded design</span> The older six-angle turnaround —
+          with its rule that body angles wait until the whole head set is locked — is still in the
+          file format, still readable, and still in the coordinator's toolkit. The sample kit above
+          is one of those. But new kits are created with no angle tiles at all, and the app's
+          character reference screen is built on the main photo and the one compiled sheet instead.
+          The written specification for kits describes the older design; the code has moved on, and
+          the code is what runs.
+        </p>
+        <p>
+          Locations work the same way with different furniture: instead of a face, a set of
+          accepted <em>views</em> — establishing, reverse, day — capped at six, one of them marked
+          as the establishing one that later views are generated against. Panels keep their slot
+          when a view is replaced, because a prompt that already cited "panel 2" is wrong the
+          moment panel 2 silently becomes something else.
+        </p>
+      </section>
+
+      <section id="artifacts">
+        <div class="eyebrow">artifacts/</div>
+        <h2>Artifacts: files you bring in</h2>
+        <p>
+          Anything you drop into a world — a recording, a treatment, a board, a photograph — is
+          copied into <code>artifacts/</code> and gains a small card beside it with the same name
+          and <code>.json</code> on the end. The original on your desktop is untouched.
+        </p>
+        <div class="snip"><span class="c">artifacts/harbour-bells.wav.json</span>
+{
+  <span class="k">"id"</span>: "ar_01J8G0000000000000000000R1",
+  <span class="k">"kind"</span>: "audio",
+  <span class="k">"file"</span>: "harbour-bells.wav",
+  <span class="k">"hash"</span>: "sha256:6a1e02b9c44d7f31",
+  <span class="k">"origin"</span>: { <span class="k">"by"</span>: "user" },
+  <span class="k">"links"</span>: ["the-vigil", "CANON-001"],
+  <span class="k">"created"</span>: "2026-06-11T10:00:00Z"
+}</div>
+        <p>
+          The card carries what kind of thing it is, a fingerprint of the exact bytes, where it came
+          from, what it is about, and when it arrived. <code>file</code> is a name inside
+          <code>artifacts/</code> and can never be a path pointing somewhere else on your machine —
+          that is what keeps the world movable.
+        </p>
+        <p>
+          Provenance is written <em>at the moment the file arrives</em>, not filed by hand
+          afterwards, which is why things file themselves. A recording you dropped in while talking
+          about the Vigil shows up against the Vigil later, and against CANON-001, without anybody
+          having remembered to tag it. Something Arke made itself says so and names what made it —
+          the board card in the sample world reads
+          <code>board-compile:saltlight/sc_04@v2</code>.
+        </p>
+        <p>
+          Artifacts never change. Replacing one files a new artifact that records what it
+          supersedes, and the old file, its card and every existing link to it all stay exactly
+          where they were. Pickers work out what to stop offering from the new card, so nothing has
+          to reach back and mark the old one — which means an old link can never be broken by a
+          replacement it knows nothing about.
+        </p>
+        <p>
+          Like a sheet, an artifact can belong to one production rather than to the world.
+          Belonging is not the same as being about: <code>links</code> may name three productions,
+          while ownership names at most one. Conflating them would make an artifact disappear from
+          the world's shelf the moment you linked it to a film, which is the opposite of what
+          linking it meant.
+        </p>
+      </section>
+
+      <section id="voices">
+        <div class="eyebrow">voices/</div>
+        <h2>Voices</h2>
+        <p>
+          A character's voice is four lines on her own sheet: which provider speaks it, which voice
+          that provider knows it by, what you call it, and the version of her sheet the choice was
+          made against. It is a direct edit rather than a proposal — it is your own pick, not a
+          drafted change waiting to be reviewed — but it still cuts a version and still tells you
+          which productions it touches.
+        </p>
+        <p>
+          A voice cloned from a recording belongs to the world rather than to a character, so it
+          lives at the world root in <code>voices/</code>: the clip itself, and one file listing
+          the voices this world owns. The clip is deliberately kept there as its own copy even
+          though the recording is also filed as an artifact — a reference clip is a few seconds
+          long, and a character whose voice broke because somebody tidied the artifacts shelf is
+          not worth the half megabyte saved.
+        </p>
+        <p>
+          That list is read very forgivingly. One malformed entry costs one voice; refusing the
+          whole file would cost every voice in the world and tell the author nothing was ever
+          cloned.
+        </p>
+        <p>
+          How lines are actually spoken, what it costs and where the audio lands is a separate
+          subject — see <a href="generation.html">Generation &amp; spend</a>.
+        </p>
+      </section>
+
+      <section id="not-held">
+        <div class="eyebrow">The negative space</div>
+        <h2>What a world does not hold</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>No keys</h3>
+            <p>
+              No provider key ever enters a world folder. Keys are encrypted once at the
+              application level and locked to your user account. It follows that a world can be
+              copied, zipped, shared or backed up without leaking anything, and that is the point.
+            </p>
+          </div>
+          <div class="card">
+            <h3>No absolute paths</h3>
+            <p>
+              No file inside a world names a drive, a home directory or a machine. Every path
+              inside is relative to the world folder. That single rule is what makes a world
+              portable: created on one path, it opens on another.
+            </p>
+          </div>
+          <div class="card">
+            <h3>No git</h3>
+            <p>
+              History is Arke's own — kept versions of every authored file and one append-only log
+              of every accepted change, in the folder. No repository, no commits, nothing to learn.
+              See <a href="files-on-disk.html">Files on disk</a>.
+            </p>
+          </div>
+          <div class="card">
+            <h3>No database</h3>
+            <p>
+              There is a search index in the folder, but it is a cache. Delete it and the next open
+              rebuilds it from the files. Nothing is true because the index says so.
+            </p>
+          </div>
+        </div>
+               <p>
+          What a world <em>does</em> hold, beyond this page, is its productions: the films and the
+          stories being made from all of the above. That is <a href="productions.html">the next
+          subject</a>.
+        </p>
+      </section>
+
+      <div class="foot">
+        Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
+        reading the source and the sample world. Every file quoted here is real and unedited except
+        where marked "trimmed". Where the written specifications and the code disagree — the
+        reference kit design, and the production-level look exception — the code is what is
+        described, and the disagreement is named where it happens.
+      </div>
+    </div>
+  </body>
+</html>
