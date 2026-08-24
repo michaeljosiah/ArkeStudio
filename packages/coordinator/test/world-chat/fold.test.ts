@@ -85,6 +85,20 @@ async function store(): Promise<WorldChatStore> {
 }
 
 describe("world chat fold", () => {
+  it("keeps a durable media handoff without removing the candidate", async () => {
+    const s = await store();
+    const candidateId = newId("cand");
+    const sessionId = newId("sess");
+    await s.append({ type: "conversation.created", title: "The bells", entryContext: { kind: "world" } }, { at: AT });
+    await s.append(
+      { type: "media.handoff-created", candidateId, candidateRevision: 2, sessionId, medium: "video" },
+      { at: AT },
+    );
+    const { events } = await s.read();
+    const { view } = foldConversation(CV, AT, events);
+    assert.deepEqual(view.mediaHandoffs[candidateId], { candidateRevision: 2, sessionId, medium: "video" });
+  });
+
   it("shows the current value of a proposition, not the history of it", async () => {
     const s = await store();
     const id = newId("cand");

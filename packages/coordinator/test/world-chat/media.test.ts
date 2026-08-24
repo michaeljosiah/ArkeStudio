@@ -53,7 +53,7 @@ function idea(draft: Record<string, unknown>): WorldChangeCandidate {
     },
     createdAt: AT,
     updatedAt: AT,
-    draft: { purpose: "character-main-photo", brief: "Her, at the rail.", reason: "", dependencies: [], ...draft },
+    draft: { medium: "image", purpose: "character-main-photo", brief: "Her, at the rail.", reason: "", dependencies: [], ...draft },
   } as unknown as WorldChangeCandidate;
 }
 
@@ -78,7 +78,7 @@ describe("where an image idea goes", () => {
       idea({ target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" }, purpose: "character-main-photo" }),
       WORLD,
     );
-    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/cast/maren-kest/main-photo` });
+    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/artifacts/bench` });
   });
 
   it("sends a look to the looks workflow, not the main photo one", () => {
@@ -86,12 +86,12 @@ describe("where an image idea goes", () => {
       idea({ target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" }, purpose: "character-look" }),
       WORLD,
     );
-    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/cast/maren-kest/looks` });
+    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/artifacts/bench` });
   });
 
-  it("sends key art to the world", () => {
+  it("sends key art to the Bench", () => {
     const route = routeFor(idea({ target: { kind: "world" }, purpose: "world-key-art" }), WORLD);
-    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}` });
+    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/artifacts/bench` });
   });
 
   it("refuses key art aimed at one entity", () => {
@@ -110,6 +110,11 @@ describe("where an image idea goes", () => {
   it("refuses anything that is not an image idea", () => {
     const notMedia = { ...idea({ target: { kind: "world" } }), classification: "canon.create" } as WorldChangeCandidate;
     assert.equal(routeFor(notMedia, WORLD).kind, "invalid");
+  });
+
+  it("sends a video brief to the same reviewed Bench", () => {
+    const route = routeFor(idea({ medium: "video", target: { kind: "world" }, purpose: "concept-video" }), WORLD);
+    assert.deepEqual(route, { kind: "route", path: `/w/${WORLD}/artifacts/bench` });
   });
 });
 
@@ -188,6 +193,73 @@ describe("what must land before it can be generated", () => {
       [],
     );
     assert.equal(blocking.length, 1);
+  });
+
+  it("stops blocking once that proposition has been accepted", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const dependency = idea({ target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" } });
+    const blocking = blockingDependencies(
+      idea({
+        target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+        dependencies: [{ candidateId: dependency.id, revision: 1 }],
+      }),
+      bundle,
+      [],
+      [{ ...dependency, status: "accepted" }],
+    );
+    assert.deepEqual(blocking, []);
+  });
+
+  it("keeps blocking when a later revision was accepted instead of the one the brief pinned", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const dependency = idea({ target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" } });
+    const blocking = blockingDependencies(
+      idea({
+        target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
+        dependencies: [{ candidateId: dependency.id, revision: 1 }],
+      }),
+      bundle,
+      [],
+      [{ ...dependency, revision: 2, status: "accepted" }],
+    );
+    assert.equal(blocking.length, 1, "accepting a correction does not accept what the old brief depended on");
+  });
+
+  it("blocks every target kind that does not exist", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    const missing = [
+      { kind: "canon", entryId: "CANON-999" },
+      { kind: "sheet", sheetKind: "character", sheetId: "nobody" },
+      { kind: "production", productionId: "nobody" },
+      { kind: "episode", productionId: "saltlight" },
+      { kind: "episode", productionId: "saltlight", episodeId: "ep_missing" },
+      { kind: "scene", productionId: "saltlight", sceneId: "sc_missing" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_missing" },
+      { kind: "series", seriesId: "missing-series" },
+    ];
+    for (const target of missing) {
+      const blocking = blockingDependencies(
+        idea({ medium: "video", purpose: "concept-video", target }),
+        bundle,
+        [],
+      );
+      assert.equal(blocking.length, 1, `${target.kind} must exist before its media can be prepared`);
+    }
+  });
+
+  it("allows media for an existing production, scene and exact shot", async () => {
+    bundle ??= (await scanWorld(FIXTURE_WORLD)).bundle;
+    for (const target of [
+      { kind: "production", productionId: "saltlight" },
+      { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+    ]) {
+      assert.deepEqual(
+        blockingDependencies(idea({ medium: "video", purpose: "concept-video", target }), bundle, []),
+        [],
+      );
+    }
   });
 
   it("says nothing when nothing is blocking", () => {

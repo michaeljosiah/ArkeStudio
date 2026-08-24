@@ -4317,6 +4317,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-panel__pointacts { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 /* Why there is no Save, in the space the Save would have taken. */
 .fy-panel__pointwhy { font: 400 10px var(--font-mono); color: var(--neutral-400); padding: 0 6px; }
+.fy-panel__mediabrief { margin-top: 5px; color: var(--muted-foreground); font: 400 11px/1.55 var(--font-sans); }
+.fy-panel__mediawhy { margin-top: 5px; color: var(--muted-foreground); font: 400 10px/1.5 var(--font-mono); }
 .fy-panel__caption { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); text-align: center; }
 /* A wrap-up that was refused. Quiet like the failed turn it rhymes with: nothing was written and
    nothing was lost, so this is the app explaining itself, not raising an alarm. */

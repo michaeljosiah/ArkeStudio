@@ -285,6 +285,13 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
+const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
+export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
+  worldChatMediaListeners.add(listener);
+  return () => worldChatMediaListeners.delete(listener);
+}
+
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
 const lyricsDraftedListeners = new Set<(answer: LyricsDrafted) => void>();
 export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void {
@@ -641,6 +648,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
+    }
+    if (event.type === "world-chat.media-opened") {
+      for (const listener of worldChatMediaListeners) listener(event);
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
@@ -2997,6 +3007,26 @@ export function rejectWorldChatPoint(
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
   return sent;
+}
+
+/** Prepare or reopen a reviewed Bench session. This command never dispatches generation. */
+export function openWorldChatMedia(
+  worldId: string,
+  conversationId: string,
+  candidateId: string,
+  expectedRevision: number,
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "world-chat-open-media",
+    worldId,
+    requestId,
+    conversationId,
+    candidateId,
+    expectedCandidateRevision: expectedRevision,
+  } as ClientMessage)
+    ? requestId
+    : null;
 }
 
 /**

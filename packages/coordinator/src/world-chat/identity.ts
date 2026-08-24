@@ -3,6 +3,7 @@ import type {
   ModelCandidateDraft,
   WorldChangeCandidate,
   WorldChangeClassification,
+  WorldChatEntityRef,
 } from "@arke-studio/contracts";
 import { contentHash } from "./observations.js";
 
@@ -57,9 +58,16 @@ export function targetKey(draft: Pick<ModelCandidateDraft, "classification"> & R
   const name = payload?.["name"] ?? payload?.["title"] ?? payload?.["question"];
   if (typeof name === "string") return `new:${normalise(name) as string}`;
 
-  const mediaTarget = payload?.["target"] as { entryId?: string; sheetId?: string } | undefined;
-  if (mediaTarget?.entryId) return `canon:${mediaTarget.entryId}`;
-  if (mediaTarget?.sheetId) return `sheet:${mediaTarget.sheetId}`;
+  const mediaTarget = payload?.["target"] as WorldChatEntityRef | undefined;
+  if (mediaTarget?.kind === "canon") return `canon:${mediaTarget.entryId}`;
+  if (mediaTarget?.kind === "sheet") return `sheet:${mediaTarget.sheetId}`;
+  if (mediaTarget?.kind === "production") return `production:${mediaTarget.productionId}`;
+  if (mediaTarget?.kind === "episode") return `episode:${mediaTarget.productionId}:${mediaTarget.episodeId ?? ""}`;
+  if (mediaTarget?.kind === "scene") return `scene:${mediaTarget.productionId}:${mediaTarget.sceneId}`;
+  if (mediaTarget?.kind === "shot") {
+    return `shot:${mediaTarget.productionId}:${mediaTarget.sceneId}:${mediaTarget.shotId ?? ""}`;
+  }
+  if (mediaTarget?.kind === "series") return `series:${mediaTarget.seriesId}`;
   return "unbound";
 }
 
@@ -84,6 +92,9 @@ export function structuralKey(draft: ModelCandidateDraft | WorldChangeCandidate)
     parts.push(JSON.stringify([normalise(from), normalise(to)]));
   }
   if (draft.classification === "media.image-opportunity") {
+    // Image opportunities predate medium. Keep their key stable so persisted tombstones still
+    // suppress the exact claim they were written for; video gets its own explicit namespace.
+    if (payload["medium"] === "video") parts.push("video");
     parts.push(String(payload["purpose"] ?? ""));
   }
   return parts.join("|");
@@ -92,9 +103,15 @@ export function structuralKey(draft: ModelCandidateDraft | WorldChangeCandidate)
 /** "Is this the same claim?" — the structure plus the normalised values. */
 export function payloadDigest(draft: ModelCandidateDraft | WorldChangeCandidate): string {
   const record = draft as unknown as Record<string, unknown>;
+  const payload = { ...((record["draft"] ?? {}) as Record<string, unknown>) };
+  // The parser supplies `medium: image` to old records. Leaving that default in the digest would
+  // make every pre-medium image tombstone stop matching after an upgrade.
+  if (draft.classification === "media.image-opportunity" && payload["medium"] === "image") {
+    delete payload["medium"];
+  }
   return contentHash({
     key: structuralKey(draft),
-    draft: normalise(record["draft"]),
+    draft: normalise(payload),
     settledness: record["settledness"],
   });
 }

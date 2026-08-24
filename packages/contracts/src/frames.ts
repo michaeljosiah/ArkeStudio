@@ -4,7 +4,7 @@ import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -404,6 +404,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .array(z.object({ candidateId: z.string().min(1), revision: z.number().int().min(1) }).strict())
         .max(40)
         .optional(),
+    })
+    .strict(),
+  /** Prepare or reopen a Bench session from a durable media candidate. Nothing is dispatched. */
+  z
+    .object({
+      kind: z.literal("world-chat-open-media"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      candidateId: CandidateIdSchema,
+      expectedCandidateRevision: z.number().int().min(1),
     })
     .strict(),
   /**

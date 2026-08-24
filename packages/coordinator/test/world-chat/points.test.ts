@@ -137,3 +137,45 @@ describe("the count under the wrap-up button", () => {
     assert.equal(projectPoints([lookChange()], {})[0]?.settled, true);
   });
 });
+
+describe("media points", () => {
+  it("projects the brief and its existing Bench session", () => {
+    const candidate = lookChange({
+      classification: "media.image-opportunity",
+      subject: { kind: "world" },
+      draft: {
+        medium: "video",
+        target: { kind: "world" },
+        purpose: "concept-video",
+        brief: "A drowned bell rising through black water.",
+        reason: "It wants movement.",
+        dependencies: [],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const sessionId = newId("sess");
+    const [point] = projectPoints([candidate], {
+      mediaHandoffs: { [candidate.id]: { candidateRevision: candidate.revision, sessionId, medium: "video" } },
+    });
+    assert.equal(point?.settled, false, "media does not become a proposal");
+    assert.equal(point?.media?.brief, "A drowned bell rising through black water.");
+    assert.equal(point?.media?.sessionId, sessionId);
+  });
+
+  it("groups a shot video under its scene and names the exact shot", () => {
+    const candidate = lookChange({
+      classification: "media.image-opportunity",
+      subject: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+      draft: {
+        medium: "video",
+        target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+        purpose: "shot-video",
+        brief: "Maren hears the verse under the water.",
+        reason: "The beat is visual.",
+        dependencies: [],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const [point] = projectPoints([candidate]);
+    assert.equal(point?.subject, "sc_04");
+    assert.equal(point?.subjectKind, "shot · sh_12");
+  });
+});

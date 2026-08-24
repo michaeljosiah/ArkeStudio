@@ -38,6 +38,14 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
     return candidate.target.shotId === undefined ? "new shot" : `shot · ${candidate.target.shotId}`;
   }
   if (candidate.classification === "development.series") return `series · ${candidate.target.seriesId}`;
+  if (candidate.classification === "media.image-opportunity") {
+    const target = candidate.draft.target;
+    if (target.kind === "production") return "production";
+    if (target.kind === "episode") return target.episodeId ? `episode · ${target.episodeId}` : "episode";
+    if (target.kind === "scene") return `scene · ${target.sceneId}`;
+    if (target.kind === "shot") return target.shotId ? `shot · ${target.shotId}` : "shot";
+    if (target.kind === "series") return `series · ${target.seriesId}`;
+  }
   const subject = candidate.subject;
   if (subject.kind === "new") {
     switch (candidate.classification) {
@@ -72,6 +80,12 @@ function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: stri
   // A shot is named by the scene it lives in — "sh_12" alone says nothing about where it is.
   if (candidate.classification === "development.shot") return candidate.target.sceneId;
   if (candidate.classification === "development.series") return candidate.target.seriesId;
+  if (candidate.classification === "media.image-opportunity") {
+    const target = candidate.draft.target;
+    if (target.kind === "production" || target.kind === "episode") return target.productionId;
+    if (target.kind === "scene" || target.kind === "shot") return target.sceneId;
+    if (target.kind === "series") return target.seriesId;
+  }
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;
@@ -227,6 +241,10 @@ export interface ProjectOptions {
    * even when nothing is waiting on the approvals screen.
    */
   look?: CurrentLook;
+  /** Why a media brief cannot be prepared yet, keyed by its durable candidate id. */
+  mediaBlockedReason?: (candidate: WorldChangeCandidate) => string | null;
+  /** Existing Bench handoffs, supplied by projectWorkspace from the fold. */
+  mediaHandoffs?: WorldChatLoaded["mediaHandoffs"];
 }
 
 export function projectPoints(
@@ -235,18 +253,35 @@ export function projectPoints(
 ): WorldChatPoint[] {
   return candidates
     .filter((c) => c.status === "live")
-    .map((candidate) => ({
-      id: candidate.id,
-      kind: candidate.classification === "canon.thread" || candidate.classification === "undecided"
-        ? ("question" as const)
-        : ("point" as const),
-      subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
-      subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
-      text: candidate.title.slice(0, 400),
-      settled: wouldCarry(candidate, options),
-      revision: candidate.revision,
-      ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
-    }));
+    .map((candidate) => {
+      const media = candidate.classification === "media.image-opportunity" ? candidate.draft : null;
+      const handoff = options.mediaHandoffs?.[candidate.id];
+      const blockedReason = media ? options.mediaBlockedReason?.(candidate) ?? null : null;
+      return {
+        id: candidate.id,
+        kind: candidate.classification === "canon.thread" || candidate.classification === "undecided"
+          ? ("question" as const)
+          : ("point" as const),
+        subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
+        subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
+        text: candidate.title.slice(0, 400),
+        settled: wouldCarry(candidate, options),
+        revision: candidate.revision,
+        ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
+        ...(media
+          ? {
+              media: {
+                medium: media.medium,
+                purpose: media.purpose,
+                brief: media.brief,
+                reason: media.reason,
+                ...(handoff?.candidateRevision === candidate.revision ? { sessionId: handoff.sessionId } : {}),
+                ...(blockedReason ? { blockedReason } : {}),
+              },
+            }
+          : {}),
+      };
+    });
 }
 
 /**
@@ -313,7 +348,7 @@ export function projectWorkspace(
     })),
     hasMore: loaded.hasMore,
     seq: loaded.seq,
-    points: projectPoints(loaded.candidates, options),
+    points: projectPoints(loaded.candidates, { ...options, mediaHandoffs: loaded.mediaHandoffs }),
     attachments: loaded.attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,

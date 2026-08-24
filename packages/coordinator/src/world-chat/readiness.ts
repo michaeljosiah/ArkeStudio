@@ -5,6 +5,7 @@ import {
   type SheetKind,
   type WorldBundle,
   type WorldChangeCandidate,
+  type WorldChatEntityRef,
 } from "@arke-studio/contracts";
 import { lookHasMoved } from "./look.js";
 import { developmentAmendment } from "./materialise.js";
@@ -59,6 +60,46 @@ function settlednessHolds(candidate: WorldChangeCandidate): boolean {
   return candidate.settledness === "settled";
 }
 
+/** Whether a reference names an entity that exists now. Media uses the strict default. */
+export function entityRefExists(
+  target: WorldChatEntityRef,
+  bundle: WorldBundle,
+  options: { allowUnallocated?: boolean } = {},
+): boolean {
+  if (target.kind === "world") return true;
+  if (target.kind === "canon") {
+    const entry = bundle.canon.find((c) => c.id === target.entryId);
+    return entry !== undefined && entry.retired !== true;
+  }
+  if (target.kind === "sheet") {
+    const sheet = bundle.sheets.find((s) => s.id === target.sheetId);
+    return sheet !== undefined && sheet.retired !== true;
+  }
+  if (target.kind === "production") {
+    return bundle.productions.some((p) => p.meta.id === target.productionId);
+  }
+  if (target.kind === "episode") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    if (!production) return false;
+    return target.episodeId === undefined
+      ? options.allowUnallocated === true
+      : production.episodes.some((e) => e.id === target.episodeId);
+  }
+  if (target.kind === "scene") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    return production !== undefined && production.scenes.some((s) => s.id === target.sceneId);
+  }
+  if (target.kind === "shot") {
+    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
+    const scene = production?.scenes.find((s) => s.id === target.sceneId);
+    if (!scene) return false;
+    return target.shotId === undefined
+      ? options.allowUnallocated === true
+      : scene.shots.some((shot) => shot.id === target.shotId);
+  }
+  return bundle.series.some((s) => s.id === target.seriesId);
+}
+
 function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boolean {
   const target = (candidate as unknown as Record<string, unknown>)["target"] as
     | { kind: "canon"; entryId: string }
@@ -70,43 +111,10 @@ function targetExists(candidate: WorldChangeCandidate, bundle: WorldBundle): boo
     | { kind: "series"; seriesId: string }
     | undefined;
   if (!target) return true;
-
-  if (target.kind === "canon") {
-    const entry = bundle.canon.find((c) => c.id === target.entryId);
-    // A retired entry resolves for old citations but must not be amended into the present.
-    return entry !== undefined && entry.retired !== true;
-  }
-  // The production targets (SPEC-023 R-20): a proposition against a production, episode, scene
-  // or series that is not in this world stays in the conversation as target-missing — named,
-  // never a crash, and never a proposal against nothing.
-  if (target.kind === "production") {
-    return bundle.productions.some((p) => p.meta.id === target.productionId);
-  }
-  if (target.kind === "episode") {
-    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
-    if (!production) return false;
-    return target.episodeId === undefined || production.episodes.some((e) => e.id === target.episodeId);
-  }
-  if (target.kind === "scene") {
-    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
-    return production !== undefined && production.scenes.some((s) => s.id === target.sceneId);
-  }
-  /*
-   * A shot's scene must exist, and a shot it names must be in it. `shotId` absent is a shot
-   * this proposition would add, so only the scene has to be there — the same shape as an
-   * episode target with no episodeId.
-   */
-  if (target.kind === "shot") {
-    const production = bundle.productions.find((p) => p.meta.id === target.productionId);
-    const scene = production?.scenes.find((s) => s.id === target.sceneId);
-    if (!scene) return false;
-    return target.shotId === undefined || scene.shots.some((shot) => shot.id === target.shotId);
-  }
-  if (target.kind === "series") {
-    return bundle.series.some((s) => s.id === target.seriesId);
-  }
-  const sheet = bundle.sheets.find((s) => s.id === target.sheetId);
-  return sheet !== undefined && sheet.retired !== true;
+  const allowUnallocated =
+    (candidate.classification === "development.episode" && target.kind === "episode") ||
+    (candidate.classification === "development.shot" && target.kind === "shot");
+  return entityRefExists(target as WorldChatEntityRef, bundle, { allowUnallocated });
 }
 
 /**
