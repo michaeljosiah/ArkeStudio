@@ -162,19 +162,17 @@
         </div>
 
         <p>
-          The engine is <em>not</em> a server you install, and there is no second thing running in
-          your task bar. It is a library loaded into the same process that puts the window on
-          screen. That matters for two reasons. Nothing about Arke is reachable from a network,
-          because there is no network part to reach. And quitting the app really does stop
-          everything, because there is nothing left over to stop.
+          The engine is <em>not</em> a server you install. It is a library loaded into the same
+          process that puts the window on screen. Two things follow. Nothing about Arke is
+          reachable from a network, because there is no network part to reach. And quitting really
+          does stop everything, because nothing is left over to stop.
         </p>
         <p>
           The window is deliberately ignorant. It never opens a file, never learns where your
-          worlds are, and never holds a key. When you drag a file onto it, the window has the file
-          the browser handed it, but the path is resolved in the shell and leaves immediately as a
-          message — the window never sees it. Everything the window knows arrived as a message
-          from the engine, which is why a screen can never be right about something the engine is
-          wrong about.
+          worlds are, never holds a key. Drag a file onto it and the path is resolved in the shell
+          and leaves at once as a message; the window never sees it. Everything on screen arrived
+          as a message from the engine, which is why a screen can never be right about something
+          the engine has wrong.
         </p>
         <p class="note">
           What a world <em>is</em> — scenes, characters, canon, takes, the cut — belongs to other
@@ -189,22 +187,20 @@
       <section id="talking">
         <h2>How the two halves talk</h2>
         <p>
-          They talk over a private connection on your own machine, bound to the loopback address
-          that only your own computer can reach, on a port picked fresh at every launch. Nothing
-          outside the machine can dial it.
+          They talk over a private connection on your own machine — the address only your own
+          computer can reach, on a port picked fresh at every launch. Nothing outside can dial it.
         </p>
         <p>
-          The shape of the conversation is simple and worth stating exactly. When the window
-          connects it says hello. The engine replies with <strong>one complete picture</strong> of
-          the current state. After that the engine sends <strong>one small message per change</strong>,
-          each numbered in order, and the window applies them to the picture it holds.
+          When the window connects it says hello. The engine replies with <strong>one complete
+          picture</strong> of the current state, then sends <strong>one small message per
+          change</strong>, each numbered in order, which the window applies to the picture it holds.
         </p>
         <p>
-          If the connection drops, the window reconnects and asks for a whole fresh picture. It
-          does not ask for the changes it missed. Partial replay was considered and refused, and
-          the reason is the important part: patching from an unknown starting point is exactly how
-          a screen ends up quietly wrong. A window that redraws is momentarily blank; a window
-          that guesses is confidently mistaken, and nothing on screen says which.
+          If the connection drops, the window asks for a whole fresh picture rather than for the
+          changes it missed. Partial replay was considered and refused, and the reason is the
+          point: patching from an unknown starting point is how a screen ends up quietly wrong. A
+          window that redraws is briefly blank; a window that guesses is confidently mistaken, and
+          nothing on screen says which.
         </p>
 
         <h4>How big that vocabulary is</h4>
@@ -224,27 +220,25 @@
           </table>
         </div>
         <p class="caption">
-          Counted from the source at 0.5.47, by walking the two lists and taking only their
-          top-level members. Both numbers are a fair measure of scale: this is a large application
-          with a small, single, written-down vocabulary.
+          Counted from the source at 0.5.47, taking only the top-level members of each list. A
+          large application with a small, single, written-down vocabulary.
         </p>
         <p>
-          Both directions are checked against that vocabulary, and both failures are handled
-          differently on purpose. Bytes that are not readable at all close the connection — that
-          is a fault, and faults should be loud. A perfectly readable message the engine has never
-          heard of is dropped with a line in the log and nothing else, because that is usually
-          version skew between two halves of one app, and closing the socket over it made the
-          whole studio read as disconnected on a single keystroke.
+          Both directions are checked against that vocabulary, and the two ways of failing are
+          treated differently on purpose. Bytes that are not readable at all close the connection:
+          that is a fault, and faults should be loud. A readable message the engine has never heard
+          of is dropped with a line in the log, because that is usually one half of the app being a
+          build ahead of the other — and closing the connection over it made the whole studio read
+          as disconnected on a single keystroke.
         </p>
 
         <h4>The bridge</h4>
         <p>
-          The window runs sandboxed, with no access to the machine at all. It is given exactly one
-          small object to talk through, and that object is the entire surface between the two
-          halves: connect, send, listen, plus a short list of host chores — open the data folder,
-          set the theme, quit. No file system, no paths, and never a credential. If a feature needs
-          a file dialog, the dialog belongs to the shell and so does the path it returns; the
-          window learns only that an attachment now exists.
+          The window runs sandboxed. It is given exactly one small object to talk through, and
+          that object is the entire surface between the halves: connect, send, listen, plus a short
+          list of host chores — open the data folder, set the theme, quit. No file system, no
+          paths, never a credential. Where a feature needs a file dialog, the dialog belongs to the
+          shell and so does the path it returns; the window learns only that an attachment exists.
         </p>
       </section>
 
@@ -252,19 +246,17 @@
         <h2>Video, and why it is served differently</h2>
         <p>
           Pictures and video do not travel over the message channel. The same private connection
-          also answers ordinary web requests, and media is fetched from an ordinary local address
-          shaped like <code>/media/&lt;world&gt;/&lt;file&gt;</code>. The engine resolves that to a
-          real file, refuses anything that is not genuinely inside the named world, and streams it.
+          also answers ordinary web requests, and media is fetched from a local address shaped like
+          <code>/media/&lt;world&gt;/&lt;file&gt;</code>. The engine resolves that to a real file,
+          refuses anything not genuinely inside the named world, and streams it.
         </p>
         <p>
-          The reason it is done this way rather than pushed down the message channel is
-          <strong>byte ranges</strong> — the ability to ask for "just the part from here to here".
-          A video element cannot seek without them. Serve a file whole and the player reports that
-          it has nothing to seek within, then silently ignores every attempt to move the playhead.
-          Playback works; scrubbing does not; nothing anywhere says why. So the media side answers
-          range requests properly, including the awkward one that means "the last N bytes", and
-          answers a request for a range past the end of the file with a plain refusal rather than a
-          truncated stream.
+          The reason is <strong>byte ranges</strong> — being able to ask for just the part from
+          here to here. A video element cannot seek without them. Serve a file whole and the player
+          reports it has nothing to seek within, then silently ignores every attempt to move the
+          playhead: playback works, scrubbing does not, and nothing says why. So the media side
+          answers ranges properly, including the awkward form meaning "the last N bytes", and
+          refuses a range past the end of the file outright rather than returning a short stream.
         </p>
         <p class="note">
           Media is served with caching switched off. Generated grids and boards are recompiled in
@@ -283,8 +275,7 @@
           <div class="card">
             <h3>The writing assistant</h3>
             <p>
-              The agent that drafts with you. Started with a port of its own, watched for health,
-              restarted with backoff if it dies. See <a href="the-assistant.html">the assistant</a>.
+              The agent that drafts with you. See <a href="the-assistant.html">the assistant</a>.
             </p>
           </div>
           <div class="card">
@@ -294,7 +285,7 @@
           <div class="card">
             <h3>The local image engine</h3>
             <p>
-              Optional. Where you have ComfyUI, Arke can generate on your own graphics card rather
+              Optional. Where you have ComfyUI, Arke generates on your own graphics card rather
               than pay a service. See <a href="generation.html">generation &amp; spend</a>.
             </p>
           </div>
@@ -302,53 +293,53 @@
         <p>
           Each gets a free local port, a health check, a restart budget and a stated reason when it
           cannot run. A missing helper is an ordinary state, not a broken one: the app opens,
-          browses and navigates regardless, and the affected feature says which thing is
-          unavailable and why.
+          browses and navigates regardless, and the affected feature says what is unavailable and
+          why.
         </p>
 
         <h4>Three belts, because one is not enough</h4>
         <p>
-          Arke promises never to leave a helper running after it exits. That promise has to hold
-          when Arke is force-killed and no cleanup code of its own runs at all, so it is kept three
-          separate ways.
+          Arke promises never to leave a helper running after it exits. That has to hold when Arke
+          is force-killed and none of its own cleanup code runs at all, so it is kept three ways.
         </p>
         <ol class="steps">
           <li>
             <h3>The operating system holds the leash</h3>
             <p>
-              On Windows each helper is tied to Arke's own lifetime by the kernel, using a handle
-              that Arke holds and the system closes when Arke dies — however it dies. The child and
+              Each helper is tied to Arke's own lifetime by the operating system, through a handle
+              Arke holds and the system closes when Arke dies — however it dies. The child and
               everything it spawned go with it. This is the only belt that survives a force-kill,
-              which is precisely why it is first.
+              which is why it comes first.
             </p>
           </li>
           <li>
             <h3>A small file the next start-up sweeps</h3>
             <p>
               Every helper Arke starts is written into a little register at
-              <code>run\children.json</code>, and released again when it exits cleanly. The next
-              launch reads that file: anything recorded whose owner is gone is an orphan and is
-              killed. This is the fallback for the runs where the leash could not attach, and for
-              orphans left by older builds.
+              <code>run\children.json</code> and released again when it exits cleanly. The next
+              launch reads that file: anything recorded whose owner is gone is an orphan, and is
+              killed. This covers the runs where the leash could not attach, and orphans left by
+              older builds.
             </p>
           </li>
           <li>
             <h3>Descendants are recorded too</h3>
             <p>
-              Sometimes the thing Arke launched is only a wrapper around the real program. Killing
-              the wrapper leaves the actual worker running — this is exactly how stray assistant
-              processes used to pile up. So once a helper is healthy, its living descendants are
-              looked up and written into the register beside it, and both the stop path and a later
-              sweep can reach past a dead wrapper.
+              Sometimes the thing Arke launched is only a wrapper around the real program, and
+              killing the wrapper leaves the actual worker running — which is exactly how stray
+              assistant processes used to pile up. So once a helper is healthy its living
+              descendants are recorded beside it, and both the stop path and a later sweep can
+              reach past a dead wrapper.
             </p>
           </li>
         </ol>
         <p>
-          A fourth, cheapest line runs on the ordinary way out: as the process exits it kills the
-          helpers it knows about, descendants included. Every one of these is careful about
-          identity — process numbers get reused quickly, so a recorded helper is only killed when
-          the process now holding that number still has the right program name and started when the
-          record was made. A leaked helper is a nuisance. Killing a stranger's process is not.
+          The first two belts do nothing at all if Arke is force-killed, which is why the kernel
+          holds the leash; and a wrapper hides the process doing the work, which is why descendants
+          are recorded. All three are careful about identity: process numbers get reused quickly,
+          so a recorded helper is killed only when the process now holding that number still bears
+          the right program name and started when the record was made. A leaked helper is a
+          nuisance. Killing a stranger's process is not.
         </p>
       </section>
 
@@ -356,20 +347,15 @@
         <h2>Everything the engine needs from outside is handed to it</h2>
         <p>
           The engine never reaches out for anything. It does not open a file dialog, fetch an
-          encryption key, find a video encoder or load a model. All of those are passed in as
-          options when the app starts, and the application shell is the only thing that knows how
-          to obtain them.
+          encryption key, find a video encoder or load a model. All of those are handed to it as
+          options when the app starts, and the shell is the only part that knows how to get them.
         </p>
-        <p>This buys exactly two things, and both are worth the discipline.</p>
-        <p>
-          <strong>The rules can be tested without a machine.</strong> There is no screen, no
-          network and no graphics card anywhere in the engine's tests, because everything that
-          would need one arrives as a plain object a test can supply instead.
-        </p>
-        <p>
-          <strong>A missing capability becomes a stated consequence rather than a crash.</strong>
-          Each option's absence has a defined, written-down meaning. Real examples, from the
-          engine's own list of what it accepts:
+        <p>This buys two things. <strong>The rules can be tested without a machine</strong> — no
+          screen, no network and no graphics card appear anywhere in the engine's tests, because
+          anything needing one arrives as a plain object a test can supply instead. And <strong>a
+          missing capability becomes a stated consequence rather than a crash</strong>: every
+          option's absence has a written-down meaning. Real examples, from the engine's own list of
+          what it accepts:
         </p>
         <div class="scroller">
           <table>
@@ -401,9 +387,8 @@
           </table>
         </div>
         <p class="caption">
-          Read from the options the engine declares, and from the shell that fills them in. The
-          pattern to notice is that none of these is a crash, a blank panel, or a disabled button
-          with no tooltip.
+          Read from the options the engine declares and the shell that fills them in. Not one of
+          them is a crash, a blank panel, or a disabled button with no explanation.
         </p>
       </section>
 
@@ -440,14 +425,13 @@
 
         <h4>The rule, and the fact that it is checkable</h4>
         <p>
-          There is one shared vocabulary that depends on nothing and that everything else depends
-          on. The window never reaches into the engine, and the engine never reaches into the
-          window. Neither of them knows what a desktop application is; that is the shell's job
-          alone.
+          One shared vocabulary depends on nothing and everything else depends on it. The window
+          never reaches into the engine and the engine never reaches into the window, and neither
+          knows what a desktop application is — that is the shell's job alone.
         </p>
         <p>
-          That is not an aspiration in a document. It is a property you can test in a few seconds,
-          so here are the checks actually run against 0.5.47 and what they found:
+          This is checkable rather than aspirational. Here are the checks actually run against
+          0.5.47, and what they found:
         </p>
         <div class="scroller">
           <table>
@@ -463,8 +447,8 @@
         </div>
         <p class="caption">
           One honest wrinkle: the engine does import the two assistant adapters, because it has to
-          assemble the command that launches one. The provider and voice packages it uses only in
-          its stand-alone developer entry point, which never ships.
+          assemble the command that launches one. It touches the provider and voice packages only
+          in its stand-alone developer entry point, which never ships.
         </p>
       </section>
 
@@ -478,21 +462,20 @@
         </p>
         <p>
           Both are <strong>caches, and only caches</strong>. Each is built purely from files that
-          are themselves the truth, and each is structurally prevented from becoming the truth
-          itself. Delete either one and it rebuilds. That is why deleting a cache can never lose
-          spend history: the ledger on disk is the record, and the database is a copy of it made
-          for speed. It is also why the engine simply throws its tables away and rebuilds them
-          whenever their shape changes, rather than trying to migrate a cache.
+          are themselves the truth, and each is structurally prevented from becoming truth itself.
+          Delete either and it rebuilds. That is why deleting a cache can never lose spend history:
+          the ledger on disk is the record and the database is only a copy made for speed. It is
+          also why a change to the shape of a cache throws the tables away and rebuilds, rather
+          than migrating anything.
         </p>
         <p>
           Two details an engineer will want. Full-text search has to actually be compiled into the
-          database engine — so rather than assume it, Arke proves it at every open by creating a
+          database engine, so rather than assume it, Arke proves it at every open by creating a
           tiny search table and dropping it again. And the database library is compiled code that
-          must match the exact application it is loaded into: the copy used by tests and the copy
-          loaded by the desktop app are different builds of the same thing, kept under different
-          names so they cannot collide, which is why packaging has a rebuild step. If that binary
-          does not load, the engine is told so and says it: search and counts degrade, authoring
-          still works.
+          must match the exact application it is loaded into — the copy tests use and the copy the
+          desktop app loads are different builds of the same thing, kept under different names so
+          they cannot collide, which is why packaging has a rebuild step. If that binary does not
+          load the engine is told so and says it: search and counts degrade, authoring still works.
         </p>
       </section>
 
@@ -505,47 +488,45 @@
           <dt>release</dt><dd>The same, driven by pushing a version tag; the tag and the version in the package must agree or the build stops.</dd>
         </div>
         <p>
-          <strong>The shipped installer is Windows x64 only</strong>, and the reason is a good one
-          to retell. ARM64 installers were built until 0.2.9 and should not have been. The database
+          <strong>The shipped installer is Windows x64 only</strong>, and the reason is worth
+          retelling. ARM64 installers were built until 0.2.9 and should not have been. The database
           library has no ready-made ARM64 build for this application, so it has to be
-          cross-compiled — and the compiler component required for that was never installed on any
-          machine that did the packaging. The build step was set to tolerate a failed native build,
-          so it tolerated it, silently, every time. Every ARM64 installer ever produced shipped with
+          cross-compiled — and the compiler component that needs was never installed on any machine
+          that did the packaging. The build step had been set to tolerate a failed native build, so
+          it tolerated it, silently, every time. Every ARM64 installer ever produced shipped with
           the search index quietly switched off.
         </p>
         <p>
-          A build that quietly drops a feature is worse than no build. So ARM64 was withdrawn, the
-          tolerance flag was removed with it, and Windows on ARM runs the x64 build under
-          emulation — the honest fallback until the toolchain exists on the machines that package.
+          A build that quietly drops a feature is worse than no build. ARM64 was withdrawn and the
+          tolerance setting removed with it; Windows on ARM runs the x64 build under emulation,
+          which is the honest fallback until the toolchain exists on the packaging machines.
         </p>
         <p>
           The gate every change must pass runs on <strong>both Windows and Linux</strong>. Windows
           because that is what ships. Linux because it is unforgiving about the two assumptions
           Windows lets you make for years without noticing: which way a path separator leans, and
-          whether two file names differing only in capital letters are the same file.
+          whether two names differing only in capital letters are the same file.
         </p>
       </section>
 
       <section id="tests">
         <h2>Tests</h2>
         <p>
-          There are <strong>232 test files</strong> across the repository. They are not spread
-          evenly, and the distribution is itself informative: 137 of them cover the engine and 56
-          cover the window.
+          There are <strong>232 test files</strong> across the repository, unevenly spread: 137 of
+          them cover the engine and 56 cover the window.
         </p>
         <p>
           For the engine, test code very nearly matches source code by volume —
-          <strong>39,860 lines of tests against 43,645 lines of engine</strong>, or roughly nine
-          lines of test for every ten lines of code. Across the whole repository it is 63,867
-          against 107,956.
+          <strong>39,860 lines of test against 43,645 lines of engine</strong>, roughly nine lines
+          of test for every ten of code. Across the whole repository it is 63,867 against 107,956.
         </p>
         <p>
-          The contributing guide names four places where a mistake is <em>expensive and quiet</em>,
+          The contributing guide names four places where a mistake is <em>expensive and quiet</em>
           and asks anyone touching them to say how they know the change is safe: <strong>the world
           folder, the accept gate, the job queue and packaging</strong>. That is where the weight
-          sits, and it is the same list you would draw up yourself — those are the four places
-          where being wrong costs someone their work, their money, or an installer that lies about
-          what is in it.
+          sits, and it is the list you would draw up yourself — those are the four places where
+          being wrong costs someone their work, their money, or an installer that lies about what
+          is inside it.
         </p>
       </section>
 
@@ -556,13 +537,12 @@
           everything exists.
         </p>
         <p>
-          Arke currently assumes four things: that there is one person, at one machine, spending
-          their own money, publishing to a local file. Every one of those is load-bearing somewhere
-          in the code, and every one is wrong for a hosted product built on the same engine. The
-          plan is not to make Arke multi-user, metered or moderated. It is to make those four
-          assumptions <em>replaceable</em> — four small interfaces, each with a default that gives
-          exactly today's behaviour, so the engine could sit underneath a hosted application
-          without anyone forking it.
+          Arke assumes four things: one person, at one machine, spending their own money,
+          publishing to a local file. Each is load-bearing somewhere in the code, and each is wrong
+          for a hosted product built on the same engine. The plan is not to make Arke multi-user,
+          metered or moderated. It is to make those four assumptions <em>replaceable</em> — four
+          small interfaces, each with a default that gives exactly today's behaviour, so the same
+          engine could sit underneath a hosted product without anyone forking it.
         </p>
         <div class="scroller">
           <table>
@@ -576,8 +556,8 @@
         <p>
           Checked rather than assumed: none of the four names appears anywhere in the code, and
           neither does the identity stamp the specification would add to the change log, the spend
-          ledger and the review record. The specification is still marked as a draft and every one
-          of its eleven pieces of work is unticked. It is a design, honestly labelled as one.
+          ledger and the review record. The specification is marked a draft, and all eleven of its
+          pieces of work are unticked. It is a design, honestly labelled as one.
         </p>
         <p class="note">
           Where a specification and the code disagree, this page follows the code and says so. The
@@ -588,9 +568,9 @@
 
       <div class="foot">
         Part of <a href="index.html">how Arke Studio is built</a>. Written against 0.5.47 by
-        reading the source. Message and event counts, test counts, line counts and every
-        dependency check on this page were run against the working tree rather than taken from a
-        document. Neighbouring pages: <a href="files-on-disk.html">files on disk</a>,
+        reading the source: every count and every dependency check on this page was run against the
+        working tree rather than taken from a document. Neighbouring pages:
+        <a href="files-on-disk.html">files on disk</a>,
         <a href="the-world.html">the world</a>, <a href="productions.html">productions</a>,
         <a href="takes-and-the-cut.html">takes &amp; the cut</a>,
         <a href="the-accept-gate.html">the accept gate</a>,
