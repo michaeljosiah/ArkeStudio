@@ -69,6 +69,7 @@ export function foldConversation(
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
   const candidates = new Map<string, WorldChangeCandidate>();
+  const mediaHandoffs: WorldChatLoaded["mediaHandoffs"] = {};
   const groups = new Map<string, CandidateGroup>();
   const attachments = new Map<string, WorldChatAttachment>();
   const tombstones = new Map<string, CandidateTombstone>();
@@ -184,6 +185,13 @@ export function foldConversation(
         }
         break;
       }
+      case "media.handoff-created":
+        mediaHandoffs[e.candidateId] = {
+          candidateRevision: e.candidateRevision,
+          sessionId: e.sessionId,
+          medium: e.medium,
+        };
+        break;
       case "attachment.created":
         attachments.set(e.attachment.id, e.attachment);
         break;
@@ -323,6 +331,7 @@ export function foldConversation(
     ),
     hasMore: shown.length < windowed.length,
     candidates: [...candidates.values()],
+    mediaHandoffs,
     groups: [...groups.values()],
     attachments: [...attachments.values()],
     activeRun: [...runs.values()].find((r) => r.status === "interrupted" || r.status === "running") ?? null,

@@ -84,6 +84,7 @@ export function structuralKey(draft: ModelCandidateDraft | WorldChangeCandidate)
     parts.push(JSON.stringify([normalise(from), normalise(to)]));
   }
   if (draft.classification === "media.image-opportunity") {
+    parts.push(String(payload["medium"] ?? "image"));
     parts.push(String(payload["purpose"] ?? ""));
   }
   return parts.join("|");

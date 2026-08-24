@@ -13,6 +13,7 @@ import {
   ProposalIdSchema,
   RunIdSchema,
   SceneIdSchema,
+  SessionIdSchema,
   Sha256Schema,
   ShotIdSchema,
   SlugSchema,
@@ -597,24 +598,48 @@ const ArtDirectionChangePayload = {
     .strict(),
 } as const;
 
-const ImagePurposeSchema = z.enum(["world-key-art", "character-main-photo", "character-look"]);
+export const MediaOpportunityMediumSchema = z.enum(["image", "video"]);
+export type MediaOpportunityMedium = z.infer<typeof MediaOpportunityMediumSchema>;
+
+export const MediaOpportunityPurposeSchema = z.enum([
+  "world-key-art",
+  "character-main-photo",
+  "character-look",
+  "concept-image",
+  "concept-video",
+  "shot-video",
+]);
+export type MediaOpportunityPurpose = z.infer<typeof MediaOpportunityPurposeSchema>;
+
+const MediaOpportunityDraftSchema = z
+  .object({
+    /** Defaulted so image opportunities already persisted before video support still parse. */
+    medium: MediaOpportunityMediumSchema.default("image"),
+    target: WorldChatEntityRefSchema,
+    purpose: MediaOpportunityPurposeSchema,
+    brief: z.string().min(1).max(4000),
+    reason: z.string().max(1000),
+    dependencies: z.array(
+      z.union([
+        PendingRefSchema,
+        z.object({ proposalId: ProposalIdSchema, targetPath: z.string().optional() }).strict(),
+      ]),
+    ),
+  })
+  .strict()
+  .superRefine((draft, ctx) => {
+    const videoPurpose = draft.purpose === "concept-video" || draft.purpose === "shot-video";
+    if (draft.medium === "video" && !videoPurpose) {
+      ctx.addIssue({ code: "custom", path: ["purpose"], message: "a video needs a video purpose" });
+    }
+    if (draft.medium === "image" && videoPurpose) {
+      ctx.addIssue({ code: "custom", path: ["purpose"], message: "an image needs an image purpose" });
+    }
+  });
 
 const ImageOpportunityPayload = {
   classification: z.literal("media.image-opportunity"),
-  draft: z
-    .object({
-      target: WorldChatEntityRefSchema,
-      purpose: ImagePurposeSchema,
-      brief: z.string().min(1).max(4000),
-      reason: z.string().max(1000),
-      dependencies: z.array(
-        z.union([
-          PendingRefSchema,
-          z.object({ proposalId: ProposalIdSchema, targetPath: z.string().optional() }).strict(),
-        ]),
-      ),
-    })
-    .strict(),
+  draft: MediaOpportunityDraftSchema,
 } as const;
 
 /**
@@ -984,6 +1009,15 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       proposalId: ProposalIdSchema.optional(),
     })
     .strict(),
+  z
+    .object({
+      type: z.literal("media.handoff-created"),
+      candidateId: CandidateIdSchema,
+      candidateRevision: z.number().int().min(1),
+      sessionId: SessionIdSchema,
+      medium: MediaOpportunityMediumSchema,
+    })
+    .strict(),
   z.object({ type: z.literal("attachment.created"), attachment: WorldChatAttachmentSchema }).strict(),
   z
     .object({
@@ -1147,6 +1181,15 @@ export const WorldChatSummarySchema = z
   .strict();
 export type WorldChatSummary = z.infer<typeof WorldChatSummarySchema>;
 
+export const WorldChatMediaHandoffSchema = z
+  .object({
+    candidateRevision: z.number().int().min(1),
+    sessionId: SessionIdSchema,
+    medium: MediaOpportunityMediumSchema,
+  })
+  .strict();
+export type WorldChatMediaHandoff = z.infer<typeof WorldChatMediaHandoffSchema>;
+
 /** A named failure to read part of a conversation. Surfaced, never silently swallowed. */
 export const WorldChatProblemSchema = z
   .object({
@@ -1175,6 +1218,8 @@ export const WorldChatLoadedSchema = z
     /** True when older messages exist before `messages[0]`. */
     hasMore: z.boolean(),
     candidates: z.array(WorldChangeCandidateSchema),
+    /** Bench sessions prepared from media candidates, keyed by candidate id. */
+    mediaHandoffs: z.record(CandidateIdSchema, WorldChatMediaHandoffSchema).default({}),
     groups: z.array(CandidateGroupSchema),
     attachments: z.array(WorldChatAttachmentSchema),
     activeRun: WorldChatRunSchema.nullable(),
@@ -1418,6 +1463,18 @@ export const WorldChatPointSchema = z
      * share a fate before it offers a decision on any of them.
      */
     groupId: z.string().min(1).optional(),
+    /** Present only for a media opportunity; the client may offer this reviewed handoff. */
+    media: z
+      .object({
+        medium: MediaOpportunityMediumSchema,
+        purpose: MediaOpportunityPurposeSchema,
+        brief: z.string().min(1).max(4000),
+        reason: z.string().max(1000),
+        sessionId: SessionIdSchema.optional(),
+        blockedReason: z.string().min(1).max(500).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
@@ -1682,6 +1739,7 @@ const exampleDrafts = {
     evidence: [exampleMessageEvidence],
     checkReceiptIds: [],
     draft: {
+      medium: "image",
       target: { kind: "sheet", sheetKind: "character", sheetId: "maren-kest" },
       purpose: "character-look",
       brief: "Maren at the harbour rail at slack water, bells above her, late light.",
@@ -2069,6 +2127,7 @@ ${sheetSectionRule()}
   Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one.
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
+  Use this for media the person could generate. medium is image or video. Use concept-image for a free image, concept-video for a free video, and shot-video when the target is a shot. The Studio proposes the brief; it never claims the media already exists.
   fields: ${draftFieldCatalogue("media.image-opportunity")}
 - ${draftPayloadLine("development.overview")}
   The production's structured overview as it should now read. Only in a production, episode or scene conversation.

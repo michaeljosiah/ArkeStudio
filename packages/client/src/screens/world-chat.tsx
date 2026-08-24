@@ -19,12 +19,14 @@ import {
   retryWorldChatTurn,
   createWorldChat,
   openWorldChat,
+  openWorldChatMedia,
   sendWorldChat,
   unarchiveWorldChat,
   useStore,
   useWorldChatProgress,
   rejectWorldChatPoint,
   saveWorldChatPoint,
+  subscribeWorldChatMediaOpened,
   useWorldChatRefusals,
   useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
@@ -363,17 +365,32 @@ function PointRow({
   busy,
   onSave,
   onReject,
+  onMedia,
 }: {
-  point: { id: string; text: string; settled: boolean; kind: string; revision: number; groupId?: string };
+  point: {
+    id: string;
+    text: string;
+    settled: boolean;
+    kind: string;
+    revision: number;
+    groupId?: string;
+    media?: { medium: "image" | "video"; brief: string; sessionId?: string; blockedReason?: string };
+  };
   busy: boolean;
   onSave: () => void;
   onReject: () => void;
+  onMedia: () => void;
 }) {
   return (
     <div className="fy-panel__point">
       <div className="fy-panel__pointtext">{point.text}</div>
+      {point.media && <div className="fy-panel__mediabrief">{point.media.brief}</div>}
       <div className="fy-panel__pointacts">
-        {point.settled ? (
+        {point.media ? (
+          <Button variant="ghost" size="sm" disabled={busy || Boolean(point.media.blockedReason)} onClick={onMedia}>
+            {busy ? "Preparing…" : point.media.sessionId ? "Open Bench" : `Prepare ${point.media.medium}`}
+          </Button>
+        ) : point.settled ? (
           <Button variant="ghost" size="sm" disabled={busy} onClick={onSave}>
             {busy ? "Saving…" : "Save"}
           </Button>
@@ -386,6 +403,7 @@ function PointRow({
           Reject
         </Button>
       </div>
+      {point.media?.blockedReason && <div className="fy-panel__mediawhy">{point.media.blockedReason}</div>}
     </div>
   );
 }
@@ -435,6 +453,8 @@ export function WorldChatScreen() {
    * workspace comes back, which is the only thing that knows whether the point survived.
    */
   const [busyPoints, setBusyPoints] = useState<string[]>([]);
+  const mediaRequests = useRef(new Map<string, string>());
+  const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The act waiting on a conversation to exist, and what was open when it was asked for. */
   const [opening, setOpening] = useState<{ act: Opening; wasOpen: string | null } | null>(null);
   /** What a deferred attach would not take, since the composer's own call answered before it ran. */
@@ -458,6 +478,28 @@ export function WorldChatScreen() {
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
   const opened = workspace?.conversationId ?? null;
+
+  useEffect(() => {
+    mediaRequests.current.clear();
+    setMediaRefusal(null);
+  }, [conversationId]);
+
+  useEffect(
+    () =>
+      subscribeWorldChatMediaOpened((answer) => {
+        const candidateId = mediaRequests.current.get(answer.requestId);
+        if (!candidateId || answer.conversationId !== conversationId || answer.worldId !== worldId) return;
+        mediaRequests.current.delete(answer.requestId);
+        setBusyPoints((points) => points.filter((id) => id !== candidateId));
+        if (answer.sessionId) {
+          setMediaRefusal(null);
+          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+        } else {
+          setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
+        }
+      }),
+    [conversationId, navigate, worldId],
+  );
 
   /**
    * The conversation arriving is what the held act was waiting for.
@@ -525,6 +567,19 @@ export function WorldChatScreen() {
         ? saveWorldChatPoint(worldId, conversationId, point.id, point.revision, members) !== null
         : rejectWorldChatPoint(worldId, conversationId, point.id, point.revision, members);
     if (sent) setBusyPoints((prev) => [...prev, point.id]);
+  };
+
+  const openMedia = (point: { id: string; revision: number; media?: { sessionId?: string } }) => {
+    if (!worldId || !conversationId) return;
+    if (point.media?.sessionId) {
+      void navigate(`/w/${worldId}/artifacts/bench/${point.media.sessionId}`);
+      return;
+    }
+    const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
+    if (!requestId) return;
+    mediaRequests.current.set(requestId, point.id);
+    setBusyPoints((points) => [...points, point.id]);
+    setMediaRefusal(null);
   };
 
   /*
@@ -784,6 +839,7 @@ export function WorldChatScreen() {
             <div className="fy-panel__note">
               Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
             </div>
+            {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           </div>
 
           <div className="fy-panel__body">
@@ -806,6 +862,7 @@ export function WorldChatScreen() {
                         busy={busyPoints.includes(p.id) || running || wrappingUp}
                         onSave={() => decide(p, "save")}
                         onReject={() => decide(p, "reject")}
+                        onMedia={() => openMedia(p)}
                       />
                     ))}
                   </div>
@@ -823,6 +880,7 @@ export function WorldChatScreen() {
                         busy={busyPoints.includes(p.id) || running || wrappingUp}
                         onSave={() => decide(p, "save")}
                         onReject={() => decide(p, "reject")}
+                        onMedia={() => openMedia(p)}
                       />
                     ))}
                   </div>

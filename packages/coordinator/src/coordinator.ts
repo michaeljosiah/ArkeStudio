@@ -139,6 +139,12 @@ import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js
  * enough for an ordinary session in one pass, short enough that nobody waits on it.
  */
 const BENCH_POSTER_BACKFILL_MS = 5_000;
+
+/** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
+function mediaSessionId(candidateId: string, revision: number): SessionId {
+  const body = createHash("sha256").update(`${candidateId}:${revision}`).digest("hex").slice(0, 26).toUpperCase();
+  return `sess_${body}` as SessionId;
+}
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
@@ -277,6 +283,7 @@ import {
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
+import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
   createSheetFromSentence,
@@ -2391,6 +2398,78 @@ export class Coordinator {
         // The list counts live points and orders by what is waiting, so it moves when one goes.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-open-media": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (sessionId: SessionId | null, medium: "image" | "video", reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "world-chat.media-opened",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            candidateId: msg.candidateId,
+            requestId: msg.requestId,
+            medium,
+            sessionId,
+            ...(reason ? { reason } : {}),
+          });
+        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
+        const candidate = loaded?.candidates.find((one) => one.id === msg.candidateId);
+        if (!loaded || !candidate) {
+          answer(null, "image", "That media brief is no longer in this conversation.");
+          return;
+        }
+        const candidateMedium = candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
+        if (candidate.revision !== msg.expectedCandidateRevision) {
+          answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
+          await this.openWorldChat(store, msg.conversationId);
+          return;
+        }
+        if (candidate.status !== "live" || candidate.classification !== "media.image-opportunity") {
+          answer(null, candidateMedium, "That point is not an available media brief.");
+          return;
+        }
+        const medium = candidate.draft.medium;
+        const route = mediaRouteFor(candidate, msg.worldId);
+        if (route.kind === "invalid") {
+          answer(null, medium, route.reason);
+          return;
+        }
+        const bundle = store.getBundle();
+        const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+        if (blocking.length > 0) {
+          answer(null, medium, explainBlocked(blocking));
+          return;
+        }
+        const prior = loaded.mediaHandoffs[candidate.id];
+        const sessionId = prior?.candidateRevision === candidate.revision
+          ? prior.sessionId
+          : mediaSessionId(candidate.id, candidate.revision);
+        const settings = this.appSettings ? await this.appSettings.load() : null;
+        const routed = this.opts.manifest ? modelForCapability(this.opts.manifest, settings?.routing, medium) : undefined;
+        const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
+        const opened = await openBenchSession(store.dir, () => this.nowIso(), {
+          sessionId,
+          initial: { mode: medium, brief: candidate.draft.brief, title: candidate.title },
+          ...(enabled ? { defaultModel: { provider: enabled.provider, model: enabled.id } } : {}),
+        }).catch(() => null);
+        if (!opened) {
+          answer(null, medium, "The Bench could not be prepared. Try again.");
+          return;
+        }
+        if (prior?.candidateRevision !== candidate.revision) {
+          await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
+            { type: "media.handoff-created", candidateId: candidate.id, candidateRevision: candidate.revision, sessionId, medium },
+            { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
+          );
+        }
+        this.readModel.setBench({ worldId: store.worldId, session: opened.session });
+        this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+        await this.refreshConversations(store);
+        await this.openWorldChat(store, msg.conversationId);
+        answer(sessionId, medium);
         return;
       }
       case "world-chat-wrap-up": {
@@ -7699,6 +7778,12 @@ export class Coordinator {
         // So the rail's count matches what wrap-up will actually carry — see ProjectOptions.
         lookAlreadyProposed: bundle.proposals.some((staged) => staged.proposal.kind === "art-direction"),
         look: { version: bundle.artDirection.version, description: bundle.artDirection.description },
+        mediaBlockedReason: (candidate) => {
+          const route = mediaRouteFor(candidate, store.worldId);
+          if (route.kind === "invalid") return route.reason;
+          const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+          return blocking.length > 0 ? explainBlocked(blocking) : null;
+        },
       }),
     );
     this.transport.broadcastSnapshot();

@@ -8,6 +8,8 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
+  CandidateIdSchema,
+  ConversationIdSchema,
   JobIdSchema,
   ProposalIdSchema,
   ShotIdSchema,
@@ -34,6 +36,7 @@ import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { RankedVoiceSchema, VoiceCandidateSchema, VoiceRuntimeStatusSchema } from "./voice.js";
 import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
+import { MediaOpportunityMediumSchema } from "./world-chat.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -111,6 +114,20 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
+  /** Correlated answer to a reviewed chat-to-Bench handoff. It never means Generate was pressed. */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.media-opened"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      candidateId: CandidateIdSchema,
+      requestId: UlidSchema,
+      medium: MediaOpportunityMediumSchema,
+      sessionId: SessionIdSchema.nullable(),
+      reason: z.string().max(500).optional(),
+    })
+    .strict(),
   z
     .object({
       ...base,

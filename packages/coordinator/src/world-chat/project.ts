@@ -227,6 +227,10 @@ export interface ProjectOptions {
    * even when nothing is waiting on the approvals screen.
    */
   look?: CurrentLook;
+  /** Why a media brief cannot be prepared yet, keyed by its durable candidate id. */
+  mediaBlockedReason?: (candidate: WorldChangeCandidate) => string | null;
+  /** Existing Bench handoffs, supplied by projectWorkspace from the fold. */
+  mediaHandoffs?: WorldChatLoaded["mediaHandoffs"];
 }
 
 export function projectPoints(
@@ -235,18 +239,35 @@ export function projectPoints(
 ): WorldChatPoint[] {
   return candidates
     .filter((c) => c.status === "live")
-    .map((candidate) => ({
-      id: candidate.id,
-      kind: candidate.classification === "canon.thread" || candidate.classification === "undecided"
-        ? ("question" as const)
-        : ("point" as const),
-      subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
-      subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
-      text: candidate.title.slice(0, 400),
-      settled: wouldCarry(candidate, options),
-      revision: candidate.revision,
-      ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
-    }));
+    .map((candidate) => {
+      const media = candidate.classification === "media.image-opportunity" ? candidate.draft : null;
+      const handoff = options.mediaHandoffs?.[candidate.id];
+      const blockedReason = media ? options.mediaBlockedReason?.(candidate) ?? null : null;
+      return {
+        id: candidate.id,
+        kind: candidate.classification === "canon.thread" || candidate.classification === "undecided"
+          ? ("question" as const)
+          : ("point" as const),
+        subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
+        subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
+        text: candidate.title.slice(0, 400),
+        settled: wouldCarry(candidate, options),
+        revision: candidate.revision,
+        ...(candidate.groupId ? { groupId: candidate.groupId } : {}),
+        ...(media
+          ? {
+              media: {
+                medium: media.medium,
+                purpose: media.purpose,
+                brief: media.brief,
+                reason: media.reason,
+                ...(handoff?.candidateRevision === candidate.revision ? { sessionId: handoff.sessionId } : {}),
+                ...(blockedReason ? { blockedReason } : {}),
+              },
+            }
+          : {}),
+      };
+    });
 }
 
 /**
@@ -313,7 +334,7 @@ export function projectWorkspace(
     })),
     hasMore: loaded.hasMore,
     seq: loaded.seq,
-    points: projectPoints(loaded.candidates, options),
+    points: projectPoints(loaded.candidates, { ...options, mediaHandoffs: loaded.mediaHandoffs }),
     attachments: loaded.attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,

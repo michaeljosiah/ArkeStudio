@@ -137,3 +137,27 @@ describe("the count under the wrap-up button", () => {
     assert.equal(projectPoints([lookChange()], {})[0]?.settled, true);
   });
 });
+
+describe("media points", () => {
+  it("projects the brief and its existing Bench session", () => {
+    const candidate = lookChange({
+      classification: "media.image-opportunity",
+      subject: { kind: "world" },
+      draft: {
+        medium: "video",
+        target: { kind: "world" },
+        purpose: "concept-video",
+        brief: "A drowned bell rising through black water.",
+        reason: "It wants movement.",
+        dependencies: [],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const sessionId = newId("sess");
+    const [point] = projectPoints([candidate], {
+      mediaHandoffs: { [candidate.id]: { candidateRevision: candidate.revision, sessionId, medium: "video" } },
+    });
+    assert.equal(point?.settled, false, "media does not become a proposal");
+    assert.equal(point?.media?.brief, "A drowned bell rising through black water.");
+    assert.equal(point?.media?.sessionId, sessionId);
+  });
+});
