@@ -487,7 +487,10 @@ export class ChildSupervisor extends EventEmitter {
         resolve();
       }, ms);
       this.sleepTimers.set(timer, resolve);
-      timer.unref?.();
+      // This timer directly settles an awaited startup, backoff, or shutdown promise. Unref'ing
+      // it lets Node exit with that promise unresolved when no other handle happens to be alive
+      // (the Linux test runner exposes this reliably). Periodic background health checks remain
+      // unref'd in scheduleHealthCheck(); awaited lifecycle deadlines must keep the loop alive.
     });
   }
 
