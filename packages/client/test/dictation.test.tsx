@@ -86,8 +86,15 @@ describe("naming what dictation is missing", () => {
 
   it("falls back to the sidecar's own words when the model is fine", () => {
     assert.equal(
-      whyDictationIsOff({ state: "not-started", detail: "Voxa is not running — dictation is off" }, runtime({})),
+      whyDictationIsOff({ state: "not-started", detail: "Voxa is not running — dictation is off" }, null),
       "Voxa is not running — dictation is off",
+    );
+  });
+
+  it("keeps dictation available when Whisper is ready and Kokoro makes aggregate voice unavailable", () => {
+    assert.equal(
+      whyDictationIsOff({ state: "unavailable", detail: "Kokoro failed to load" }, runtime({ state: "ready" })),
+      null,
     );
   });
 });

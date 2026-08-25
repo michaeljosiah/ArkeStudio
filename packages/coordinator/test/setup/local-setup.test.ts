@@ -7,7 +7,14 @@ import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { LocalSetupService, systemTar, type SetupDeps } from "../../src/setup/local-setup.js";
-import { catalogueTotalMb, type CatalogueEntry } from "../../src/setup/catalogue.js";
+import {
+  catalogueTotalMb,
+  isVoxaSetupComponentId,
+  SETUP_CATALOGUE,
+  VOXA_SETUP_COMPONENT_IDS,
+  voxaSetupCompleted,
+  type CatalogueEntry,
+} from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
@@ -111,6 +118,33 @@ function last(events: DomainEvent[]): SetupStatus {
 }
 
 describe("fetching the local runtimes at setup", () => {
+  it("exports the exact Voxa model component identities used by the catalogue", () => {
+    const byId = new Map(SETUP_CATALOGUE.map((entry) => [entry.id, entry]));
+    assert.equal(byId.get(VOXA_SETUP_COMPONENT_IDS.kokoro)?.spec.kind, "files");
+    assert.equal(byId.get(VOXA_SETUP_COMPONENT_IDS.whisper)?.spec.kind, "files");
+    assert.equal(
+      new Set([VOXA_SETUP_COMPONENT_IDS.kokoro, VOXA_SETUP_COMPONENT_IDS.whisper]).size,
+      2,
+    );
+    assert.equal(isVoxaSetupComponentId(VOXA_SETUP_COMPONENT_IDS.kokoro), true);
+    assert.equal(isVoxaSetupComponentId(VOXA_SETUP_COMPONENT_IDS.whisper), true);
+    assert.equal(isVoxaSetupComponentId("kokoro-82m"), false, "the stale model id cannot trigger a restart");
+  });
+
+  it("detects a canonical voice component completion exactly once for the idle restart", () => {
+    const queued = [
+      { id: VOXA_SETUP_COMPONENT_IDS.kokoro, state: "downloading" },
+      { id: VOXA_SETUP_COMPONENT_IDS.whisper, state: "present" },
+    ];
+    const ready = [
+      { id: VOXA_SETUP_COMPONENT_IDS.kokoro, state: "ready" },
+      { id: VOXA_SETUP_COMPONENT_IDS.whisper, state: "present" },
+    ];
+    assert.equal(voxaSetupCompleted(queued, ready), true);
+    assert.equal(voxaSetupCompleted(ready, ready), false, "the final idle publication does not schedule a second restart");
+    assert.equal(voxaSetupCompleted(undefined, [{ id: "kokoro-82m", state: "ready" }]), false);
+  });
+
   it("downloads what is missing, installs the runtime, and reports every component ready", async () => {
     const appRoot = await root();
     const events: DomainEvent[] = [];
@@ -365,12 +399,12 @@ describe("fetching the local runtimes at setup", () => {
     assert.equal(last(events).components[0]!.state, "ready");
   });
 
-  it("repair removes a present model before downloading it again", async () => {
+  it("repair uses the canonical Whisper id and replaces the files Voxa launches", async () => {
     const appRoot = await root();
     const events: DomainEvent[] = [];
-    const voiceCatalogue = catalogue().filter((entry) => entry.id === "weights");
-    const target = join(appRoot, "models", "whisper", "ggml.bin");
-    await mkdir(join(appRoot, "models", "whisper"), { recursive: true });
+    const voiceCatalogue = SETUP_CATALOGUE.filter((entry) => entry.id === VOXA_SETUP_COMPONENT_IDS.whisper);
+    const target = join(appRoot, "models", "whisper-base-en", "ggml-base.en.bin");
+    await mkdir(join(appRoot, "models", "whisper-base-en"), { recursive: true });
     await writeFile(target, bytes(2048));
     const d = deps();
     const svc = new LocalSetupService(d, (event) => events.push(event), {
@@ -381,7 +415,7 @@ describe("fetching the local runtimes at setup", () => {
 
     await svc.detect();
     assert.equal(last(events).components[0]?.state, "present");
-    await svc.repair("weights");
+    await svc.repair(VOXA_SETUP_COMPONENT_IDS.whisper);
     await assert.rejects(readFile(target));
     assert.equal(last(events).components[0]?.state, "queued");
     await svc.run();

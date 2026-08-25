@@ -156,7 +156,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: {},
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3" },
       pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
     },
     {
@@ -165,7 +165,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       capability: "voice-tts",
       displayName: "Kokoro 82M",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: {},
+      limits: { deliveries: ["measured", "urgent"], audioFormat: "wav" },
       pricing: { kind: "unmetered" },
       requires: { memMb: 4000, diskMb: 400 },
     },

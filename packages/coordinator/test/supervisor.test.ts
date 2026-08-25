@@ -138,6 +138,57 @@ describe("ChildSupervisor", () => {
     );
   });
 
+  it("does not restart or spend restart budget after a terminal startup contract failure", async () => {
+    let validations = 0;
+    const sup = new ChildSupervisor({
+      id: "comfyui",
+      command: process.execPath,
+      args: [CHILD],
+      env: { MODE: "healthy" },
+      validateHealth: async () => {
+        validations += 1;
+        return { ok: false, reason: "ComfyUI is below the supported version floor" };
+      },
+      readyTimeoutMs: 10_000,
+      probeIntervalMs: 50,
+      maxRestarts: 3,
+      backoffMs: 10,
+    });
+    const events = collect(sup);
+    try {
+      await sup.start();
+      assert.equal(sup.status, "failed");
+      assert.equal(sup.reason, "ComfyUI is below the supported version floor");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.equal(validations, 1, "the terminal child was not relaunched");
+      assert.equal(events.filter((event) => /restarting/.test(event.reason ?? "")).length, 0);
+      assert.equal(events.filter((event) => event.status === "starting").length, 1);
+    } finally {
+      await sup.stop();
+    }
+  });
+
+  it("observes a child that exits immediately instead of probing it to the startup timeout", async () => {
+    const sup = new ChildSupervisor({
+      id: "comfyui",
+      command: process.execPath,
+      args: [CHILD],
+      env: { MODE: "exit-immediately" },
+      readyTimeoutMs: 10_000,
+      probeIntervalMs: 50,
+      maxRestarts: 0,
+    });
+    const started = Date.now();
+    try {
+      await sup.start();
+      await waitForStatus(sup, "failed", 5_000);
+      assert.match(sup.reason ?? "", /restart budget/);
+      assert.ok(Date.now() - started < 5_000, "the exit was observed rather than timing out");
+    } finally {
+      await sup.stop();
+    }
+  });
+
   it("declares failure with a stated reason when a child never becomes healthy, and kills it (R-5)", async () => {
     const sup = new ChildSupervisor({
       id: "voxa",
@@ -175,6 +226,31 @@ describe("ChildSupervisor", () => {
     );
     assert.match(sup.reason ?? "", /restart budget/);
     await sup.stop();
+  });
+
+  it("restarts a live child whose continuous health stays down", async () => {
+    const sup = new ChildSupervisor({
+      id: "comfyui",
+      command: process.execPath,
+      args: [CHILD],
+      // Startup consumes one request. Every later request fails while the process remains alive.
+      env: { MODE: "healthy", HEALTHY_REQUESTS: "1" },
+      readyTimeoutMs: 10_000,
+      probeIntervalMs: 50,
+      healthIntervalMs: 25,
+      healthFailureThreshold: 2,
+      maxRestarts: 0,
+    });
+    const events = collect(sup);
+    try {
+      await sup.start();
+      await waitForStatus(sup, "failed", 15_000);
+      assert.ok(events.some((event) => event.status === "healthy"));
+      assert.ok(events.some((event) => event.status === "unhealthy" && /continuous health/.test(event.reason ?? "")));
+      assert.match(sup.reason ?? "", /restart budget/);
+    } finally {
+      await sup.stop();
+    }
   });
 
   it("records its child in the ledger while it runs and releases it on exit (R-5)", async () => {

@@ -58,7 +58,9 @@ export class WorldStore {
     private externalEdits: ExternalEdit[],
     private readonly events: WorldStoreEvents,
     private readonly clockFn: () => string,
-  ) {}
+  ) {
+    this.lockHeld = lock !== null;
+  }
 
   private watcher: WorldWatcher | null = null;
   private mutex: Promise<unknown> = Promise.resolve();
@@ -66,6 +68,8 @@ export class WorldStore {
   private verifying = false;
   private verifyAgain = false;
   private closed = false;
+  private lockHeld: boolean;
+  private closePromise: Promise<void> | null = null;
 
   static async open(
     dir: string,
@@ -159,21 +163,11 @@ export class WorldStore {
    * the bundle stays honest (SPEC-004).
    */
   async gateOp<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
     return this.serialise(async () => {
-      /*
-       * Refused once closing has begun (#283).
-       *
-       * `close()` sets this before it takes the serialisation lock, so work queued behind it
-       * arrives here after the world lock has been released. Every caller that guards on "is this
-       * still the open store" is checking the wrong thing during that window: the provider goes on
-       * returning this store until close resolves, so the identity check passes and the write
-       * lands on a world nothing holds the lock for -- next to a newly opened store on the same
-       * journal.
-       *
-       * Guarding it here rather than in each caller, because it is not a property of any of them.
-       * A closed world is not writable, and that is the store's own fact to enforce.
-       */
-      if (this.closed) throw new Error("world is closed");
+      // Admission happened before enqueue so work already ahead of close may drain. This second
+      // check proves the lock still exists when the callback actually reaches the filesystem.
+      this.assertLockHeld();
       this.watcher?.suppress();
       try {
         return await fn();
@@ -190,7 +184,9 @@ export class WorldStore {
    * watcher ownership and post-write rescan (issue #87).
    */
   async ownedWrite<T>(fn: () => Promise<T>): Promise<T> {
+    this.assertWritable();
     return this.serialise(async () => {
+      this.assertLockHeld();
       this.watcher?.suppress();
       try {
         return await fn();
@@ -217,6 +213,11 @@ export class WorldStore {
     return this.scan.meta.worldId;
   }
 
+  /** True as soon as close starts, before the serialization queue releases the world lock. */
+  isClosed(): boolean {
+    return this.closed;
+  }
+
   /**
    * Raise world.json.schemaVersion to `version` if the world is still below it (SPEC-023
    * R-23, issue #403). A no-op when the world already crossed the boundary, so every feature
@@ -230,7 +231,9 @@ export class WorldStore {
 
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
   async commit(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+    this.assertWritable();
     return this.serialise(async () => {
+      this.assertLockHeld();
       this.watcher?.suppress();
       try {
         return await this.commitUnserialised(input, hooks);
@@ -246,6 +249,7 @@ export class WorldStore {
    * outside that envelope.
    */
   async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+    this.assertLockHeld();
     const result = await this.committer.commit(input, hooks);
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     return result;
@@ -297,7 +301,10 @@ export class WorldStore {
     // same undo has to stand in for the same absent accept.
     else if (kind.track === "scene")
       historyPath = `.history/productions/${kind.production}/scenes/${kind.file}/v${version}.json`;
-    else throw new CommitPlanError(`restore is defined for sheets, canon, the bible and scenes, not ${kind.track}`);
+    else
+      throw new CommitPlanError(
+        `restore is defined for sheets, canon, the bible and scenes, not ${kind.track}`,
+      );
 
     const snapshot = await this.readEntity(historyPath);
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
@@ -318,7 +325,12 @@ export class WorldStore {
 
   /** Reserve canon ids under the lock — logged like any other allocation (R-11, R-21). */
   async allocateCanonIds(count: number, source: string): Promise<string[]> {
-    const result = await this.commit({ kind: "canon-id-allocation", source, files: [], allocateCanonIds: count });
+    const result = await this.commit({
+      kind: "canon-id-allocation",
+      source,
+      files: [],
+      allocateCanonIds: count,
+    });
     return result.allocatedCanonIds;
   }
 
@@ -327,9 +339,11 @@ export class WorldStore {
    * so adoption bumps the entity version, stamps, and logs `source: "external-edit"`.
    */
   async reconcileExternalEdit(portablePath: string): Promise<void> {
+    this.assertWritable();
     const edit = this.externalEdits.find((e) => e.path === portablePath);
     if (!edit) return;
     await this.serialise(async () => {
+      this.assertLockHeld();
       this.watcher?.suppress();
       try {
         if (edit.kind === "deleted") {
@@ -378,18 +392,21 @@ export class WorldStore {
 
   /** Rescan from disk and re-save the scan state. */
   async reload(): Promise<WorldBundle> {
+    this.assertWritable();
     await this.serialise(async () => {
+      this.assertLockHeld();
       await this.rescan();
       await this.saveScanState();
     });
     return this.getBundle();
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.watcher?.stop();
     this.watcher = null;
-    await this.serialise(async () => {
+    this.closePromise = this.serialise(async () => {
       try {
         this.index?.close();
       } catch {
@@ -410,10 +427,15 @@ export class WorldStore {
         } catch (err) {
           scanStateFailure = err;
         }
+        // No serialised mutation can still be active here: close itself owns the queue now.
+        // Mark ownership gone before release so even a failing/deposed release cannot leave this
+        // store advertising a write permit it no longer has.
+        this.lockHeld = false;
         await this.lock.release();
         if (scanStateFailure !== undefined) throw scanStateFailure;
       }
     });
+    return this.closePromise;
   }
 
   // ---- internals -----------------------------------------------------------
@@ -422,6 +444,22 @@ export class WorldStore {
     const run = this.mutex.then(fn, fn);
     this.mutex = run.catch(() => {});
     return run;
+  }
+
+  /**
+   * Admit writes synchronously, before they enter the queue.
+   *
+   * A write invoked before close is enqueued before close and is allowed to finish while the lock
+   * is held. `close()` flips `closed` synchronously before enqueueing itself, so a later write is
+   * refused here rather than running behind close after lock release.
+   */
+  private assertWritable(): void {
+    if (this.closed) throw new Error("world is closed");
+    this.assertLockHeld();
+  }
+
+  private assertLockHeld(): void {
+    if (!this.lockHeld) throw new Error(this.closed ? "world is closed" : "world is read-only");
   }
 
   /**

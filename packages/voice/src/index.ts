@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { VoiceCandidate } from "@arke-studio/contracts";
+import { KOKORO_VOICE_MODEL, type VoiceCandidate } from "@arke-studio/contracts";
 
 /**
  * The Voxa sidecar client (SPEC-011): local inference only — cloud speech goes through the
@@ -44,7 +44,7 @@ export const SidecarHealthSchema = z
 export type SidecarHealth = z.infer<typeof SidecarHealthSchema>;
 
 export function compatibleSidecarHealth(health: SidecarHealth, architecture: "x64" | "arm64"): boolean {
-  return health.ok && health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
+  return health.architecture === architecture && health.engines.includes("kokoro") && health.engines.includes("whisper");
 }
 
 /** The four degradation states, each worth distinct copy (§2.10, T-17). */
@@ -62,66 +62,282 @@ export function sidecarState(health: SidecarHealth | null): SidecarState {
     const { model, receivedMb, totalMb } = health.downloading;
     return { state: "downloading", detail: `downloading ${model} — ${Math.round(receivedMb)} of ${Math.round(totalMb)} MB` };
   }
-  if (!health.ok || health.unavailableReason !== undefined) {
-    return { state: "unavailable", detail: health.unavailableReason ?? "a local model failed verification" };
+  if (health.engineStatus.kokoro.ready || health.engineStatus.whisper.ready) {
+    return { state: "ready", detail: `Voxa ${health.version} · ${health.architecture}` };
   }
-  return { state: "ready", detail: `Voxa ${health.version} · ${health.architecture}` };
+  return {
+    state: "unavailable",
+    detail:
+      health.unavailableReason ??
+      health.engineStatus.kokoro.reason ??
+      health.engineStatus.whisper.reason ??
+      "the local speech engines are unavailable",
+  };
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+export type VoxaOperation = "health" | "voices" | "tts" | "stt";
+
+export class VoxaTimeoutError extends Error {
+  readonly code = "VOXA_TIMEOUT";
+
+  constructor(
+    readonly operation: VoxaOperation,
+    readonly timeoutMs: number,
+  ) {
+    super(`voxa: ${operation} timed out after ${timeoutMs} ms`);
+    this.name = "VoxaTimeoutError";
+  }
+}
+
+export class VoxaCancelledError extends Error {
+  readonly code = "VOXA_CANCELLED";
+
+  constructor(readonly operation: VoxaOperation) {
+    super(`voxa: ${operation} was cancelled`);
+    this.name = "VoxaCancelledError";
+  }
+}
+
+export interface VoxaTimeouts {
+  health: number;
+  voices: number;
+  tts: number;
+  stt: number;
+}
+
+export const DEFAULT_VOXA_TIMEOUTS: VoxaTimeouts = {
+  health: 3_000,
+  voices: 5_000,
+  // A safe 450-character chunk takes about 32 seconds on the measured CPU path.
+  tts: 45_000,
+  stt: 60_000,
+};
+
+export interface VoxaRequestOptions {
+  signal?: AbortSignal;
+}
+
+interface SynthesisWaiter {
+  grant: () => void;
+  cancel: () => void;
+}
 
 /**
  * The protocol client (R-1..R-3): /tts, /stt, /voices, /health on loopback. /voice (realtime)
  * is mounted by the sidecar and deliberately unused in v1 (D3).
  */
 export class VoxaClient {
+  private readonly timeouts: VoxaTimeouts;
+  private requests = new AbortController();
+  private disposed = false;
+  private synthesisBusy = false;
+  private readonly synthesisWaiters: SynthesisWaiter[] = [];
+
   constructor(
     private readonly fetchImpl: FetchLike,
-    private readonly baseUrl: string,
-  ) {}
+    private readonly baseUrl: string | (() => string),
+    options: { timeouts?: Partial<VoxaTimeouts> } = {},
+  ) {
+    this.timeouts = { ...DEFAULT_VOXA_TIMEOUTS, ...options.timeouts };
+  }
 
-  async health(): Promise<SidecarHealth | null> {
+  async health(options: VoxaRequestOptions = {}): Promise<SidecarHealth | null> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/health`);
-      if (res.status >= 400) return null;
-      return SidecarHealthSchema.parse(await res.json());
-    } catch {
+      return await this.request("health", "/health", {}, options.signal, async (res) => {
+        if (res.status >= 400) return null;
+        return SidecarHealthSchema.parse(await res.json());
+      });
+    } catch (error) {
+      if (error instanceof VoxaTimeoutError || error instanceof VoxaCancelledError) throw error;
       return null;
     }
   }
 
-  async listVoices(): Promise<LocalVoice[]> {
+  async listVoices(options: VoxaRequestOptions = {}): Promise<LocalVoice[]> {
     try {
-      const res = await this.fetchImpl(`${this.baseUrl}/voices`);
-      if (res.status >= 400) return [];
-      const parsed = z.array(LocalVoiceSchema).safeParse(await res.json());
-      return parsed.success ? parsed.data : [];
-    } catch {
+      return await this.request("voices", "/voices", {}, options.signal, async (res) => {
+        if (res.status >= 400) return [];
+        const parsed = z.array(LocalVoiceSchema).safeParse(await res.json());
+        return parsed.success ? parsed.data : [];
+      });
+    } catch (error) {
+      if (error instanceof VoxaTimeoutError || error instanceof VoxaCancelledError) throw error;
       return [];
     }
   }
 
   /** Local synthesis: no queue, no ledger, zero cost (R-2) — the compute is this machine's. */
-  async synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }): Promise<Uint8Array> {
-    const res = await this.fetchImpl(`${this.baseUrl}/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }),
-    });
-    if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
-    return new Uint8Array(await res.arrayBuffer());
+  async synthesize(
+    input: { voiceId: string; text: string; params?: Record<string, number> },
+    options: VoxaRequestOptions = {},
+  ): Promise<Uint8Array> {
+    const started = Date.now();
+    const lifecycleSignal = this.requests.signal;
+    const release = await this.acquireSynthesis(options.signal, lifecycleSignal, this.timeouts.tts);
+    try {
+      const remainingMs = Math.max(1, this.timeouts.tts - (Date.now() - started));
+      return await this.request(
+        "tts",
+        "/tts",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ voice: input.voiceId, text: input.text, ...input.params }),
+        },
+        options.signal,
+        async (res) => {
+          if (res.status >= 400) throw new Error(`voxa: synthesis failed (HTTP ${res.status})`);
+          return new Uint8Array(await res.arrayBuffer());
+        },
+        lifecycleSignal,
+        remainingMs,
+        this.timeouts.tts,
+      );
+    } finally {
+      release();
+    }
   }
 
   /** Local transcription (R-17): audio never leaves the machine — this URL is loopback. */
-  async transcribe(audio: Uint8Array, contentType: string): Promise<string> {
-    const res = await this.fetchImpl(`${this.baseUrl}/stt`, {
-      method: "POST",
-      headers: { "Content-Type": contentType },
-      body: Buffer.from(audio),
+  async transcribe(audio: Uint8Array, contentType: string, options: VoxaRequestOptions = {}): Promise<string> {
+    return this.request(
+      "stt",
+      "/stt",
+      {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: Buffer.from(audio),
+      },
+      options.signal,
+      async (res) => {
+        if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
+        const body = (await res.json()) as { text?: string };
+        return body.text ?? "";
+      },
+    );
+  }
+
+  /** Cancel active and queued work before replacing the supervised process. Future calls remain valid. */
+  cancelPending(): void {
+    this.requests.abort();
+    if (!this.disposed) this.requests = new AbortController();
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.requests.abort();
+  }
+
+  private resolvedBaseUrl(): string {
+    const value = typeof this.baseUrl === "function" ? this.baseUrl() : this.baseUrl;
+    return value.replace(/\/$/, "");
+  }
+
+  private async request<T>(
+    operation: VoxaOperation,
+    path: string,
+    init: RequestInit,
+    callerSignal: AbortSignal | undefined,
+    read: (response: Response) => Promise<T>,
+    lifecycleSignal: AbortSignal = this.requests.signal,
+    timeoutMs: number = this.timeouts[operation],
+    reportedTimeoutMs: number = timeoutMs,
+  ): Promise<T> {
+    if (this.disposed || lifecycleSignal.aborted || callerSignal?.aborted) {
+      throw new VoxaCancelledError(operation);
+    }
+
+    const controller = new AbortController();
+    let cause: "timeout" | "cancelled" = "cancelled";
+    let rejectAbort: (reason: Error) => void = () => {};
+    const aborted = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
     });
-    if (res.status >= 400) throw new Error(`voxa: transcription failed (HTTP ${res.status})`);
-    const body = (await res.json()) as { text?: string };
-    return body.text ?? "";
+    const cancel = () => {
+      cause = "cancelled";
+      controller.abort();
+      rejectAbort(new VoxaCancelledError(operation));
+    };
+    lifecycleSignal.addEventListener("abort", cancel, { once: true });
+    callerSignal?.addEventListener("abort", cancel, { once: true });
+    const timer = setTimeout(() => {
+      cause = "timeout";
+      controller.abort();
+      rejectAbort(new VoxaTimeoutError(operation, reportedTimeoutMs));
+    }, timeoutMs);
+
+    try {
+      const work = this.fetchImpl(`${this.resolvedBaseUrl()}${path}`, { ...init, signal: controller.signal })
+        .then(read)
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) {
+            throw cause === "timeout"
+              ? new VoxaTimeoutError(operation, reportedTimeoutMs)
+              : new VoxaCancelledError(operation);
+          }
+          throw error;
+        });
+      return await Promise.race([work, aborted]);
+    } finally {
+      clearTimeout(timer);
+      lifecycleSignal.removeEventListener("abort", cancel);
+      callerSignal?.removeEventListener("abort", cancel);
+    }
+  }
+
+  private acquireSynthesis(
+    callerSignal: AbortSignal | undefined,
+    lifecycleSignal: AbortSignal,
+    timeoutMs: number,
+  ): Promise<() => void> {
+    if (this.disposed || lifecycleSignal.aborted || callerSignal?.aborted) {
+      return Promise.reject(new VoxaCancelledError("tts"));
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const cleanup = () => {
+        if (timer !== null) clearTimeout(timer);
+        lifecycleSignal.removeEventListener("abort", waiter.cancel);
+        callerSignal?.removeEventListener("abort", waiter.cancel);
+      };
+      const refuse = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        const index = this.synthesisWaiters.indexOf(waiter);
+        if (index >= 0) this.synthesisWaiters.splice(index, 1);
+        cleanup();
+        reject(error);
+      };
+      const waiter: SynthesisWaiter = {
+        grant: () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          this.synthesisBusy = true;
+          let released = false;
+          resolve(() => {
+            if (released) return;
+            released = true;
+            this.synthesisBusy = false;
+            this.pumpSynthesis();
+          });
+        },
+        cancel: () => refuse(new VoxaCancelledError("tts")),
+      };
+      timer = setTimeout(() => refuse(new VoxaTimeoutError("tts", timeoutMs)), timeoutMs);
+      lifecycleSignal.addEventListener("abort", waiter.cancel, { once: true });
+      callerSignal?.addEventListener("abort", waiter.cancel, { once: true });
+      this.synthesisWaiters.push(waiter);
+      this.pumpSynthesis();
+    });
+  }
+
+  private pumpSynthesis(): void {
+    if (this.synthesisBusy) return;
+    this.synthesisWaiters.shift()?.grant();
   }
 }
 
@@ -142,6 +358,7 @@ export const KOKORO_PRESETS: LocalVoice[] = [
 export function localCandidates(voices: LocalVoice[]): VoiceCandidate[] {
   return voices.map((v) => ({
     provider: "kokoro",
+    model: KOKORO_VOICE_MODEL,
     voiceId: v.id,
     label: v.label,
     attributes: v.attributes,

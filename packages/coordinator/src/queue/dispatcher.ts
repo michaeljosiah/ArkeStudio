@@ -1,5 +1,5 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, extname, join } from "node:path";
 import {
   canDeleteJob,
   credentialKindOf,
@@ -24,6 +24,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal } from "./journal.js";
 import { imageFormatOf, verifyArtifact } from "./verify.js";
+import { atomicWriteFile } from "../world/atomic.js";
 
 /**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
@@ -45,15 +46,27 @@ export interface DispatchImageReference {
   data: Uint8Array;
 }
 
+export interface DispatchVoiceReference {
+  name: string;
+  contentType: "audio/wav" | "audio/mpeg";
+  data: Uint8Array;
+}
+
 export interface DispatchClient {
   readonly declarations: ClientDeclarations;
+  /** Drop source-bound optional transports while keeping the client reusable. */
+  resetTransport?(): void;
+  /** Release optional long-lived transports when the queue shuts down. */
+  dispose?(): void;
   submit(
     key: string,
     request: {
       model: string;
       capability: Capability;
+      signal?: AbortSignal;
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
+      voiceReference?: DispatchVoiceReference;
       idempotencyKey?: string;
       /** The recipe identity frozen at enqueue, so the client can refuse a moved catalogue (R-15). */
       recipe?: RecipeIdentity;
@@ -87,6 +100,10 @@ export interface EnqueueInput {
   provider: string;
   model: string;
   params: Record<string, unknown>;
+  /** Host-only hint. Converted to `params.voiceReference = true` in the durable row. */
+  voiceReference?: boolean;
+  /** Opaque engine instance explicitly approved as a remote voice-upload destination. */
+  voiceUploadConfirmedFor?: string;
   estimatedMicroUsd: number;
   landing?: { dir: string; name?: string };
   /** Frozen recipe identity for a local-recipe dispatch (SPEC-021 §2.11, R-15). */
@@ -120,6 +137,8 @@ export interface JobQueueOptions {
   landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
+  /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
+  readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
@@ -156,6 +175,10 @@ export interface JobQueueOptions {
   /** How long after an offline pause the lane retries by itself (R-17). */
   offlineRetryMs?: number;
   baseConcurrency?: number;
+  /** Provider-specific safe caps. A local GPU runtime normally supplies one here. */
+  providerConcurrency?: Readonly<Record<string, number>>;
+  /** Recovered work for this provider is not pumped until the runtime has settled. */
+  awaitRecoveryReady?: (provider: string) => Promise<boolean>;
   baseIntervalMs?: number;
 }
 
@@ -169,6 +192,14 @@ interface Lane {
   nextAllowedAt: number;
   successStreak: number;
   timer: NodeJS.Timeout | null;
+  recoveryGate: Promise<void> | null;
+  recoveryBlocked: boolean;
+  deferredRecovery: Array<() => Promise<void>>;
+}
+
+interface DurableInlineArtifacts {
+  remoteId: string;
+  artifacts: DispatchArtifact[];
 }
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
@@ -238,12 +269,20 @@ export class JobQueue {
   private readonly pollIntervalMs: number;
   private readonly offlineRetryMs: number;
   private readonly baseConcurrency: number;
+  private readonly providerConcurrency: Readonly<Record<string, number>>;
   private readonly baseIntervalMs: number;
   private disposed = false;
   private accepting = false;
+  private admissionClosed = false;
   private readonly resolvingHeld = new Set<string>();
   private readonly finalizing = new Set<string>();
   private readonly activeRuns = new Set<Promise<void>>();
+  private readonly sleepTimers = new Map<NodeJS.Timeout, () => void>();
+  private readonly retryTimers = new Set<NodeJS.Timeout>();
+  /** Submits without a remote id can still be interrupted, notably queue-backed local speech. */
+  private readonly submitAborts = new Map<string, AbortController>();
+  /** Old spawned-engine runs fenced off before their durable requeue is awaited. */
+  private readonly retiredEngineRuns = new Set<string>();
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = new JobJournal(opts.journalPath);
@@ -255,6 +294,7 @@ export class JobQueue {
     this.pollIntervalMs = opts.pollIntervalMs ?? 1500;
     this.offlineRetryMs = opts.offlineRetryMs ?? 15_000;
     this.baseConcurrency = opts.baseConcurrency ?? 2;
+    this.providerConcurrency = opts.providerConcurrency ?? {};
     this.baseIntervalMs = opts.baseIntervalMs ?? 200;
   }
 
@@ -268,11 +308,14 @@ export class JobQueue {
         fifo: [],
         inFlight: new Set(),
         paused: null,
-        maxConcurrent: this.baseConcurrency,
+        maxConcurrent: this.concurrencyFor(provider),
         minIntervalMs: this.baseIntervalMs,
         nextAllowedAt: 0,
         successStreak: 0,
         timer: null,
+        recoveryGate: null,
+        recoveryBlocked: false,
+        deferredRecovery: [],
       };
       this.lanes.set(provider, lane);
     }
@@ -280,12 +323,13 @@ export class JobQueue {
   }
 
   /** Durable transition: journal first, then memory, then the event (D1). */
-  private async transition(job: Job): Promise<void> {
-    if (this.disposed) return;
+  private async transition(job: Job): Promise<boolean> {
+    if (this.disposed) return false;
     await this.journal.append(job);
-    if (this.disposed) return; // killed mid-write: the journal decides on recovery
+    if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
     this.opts.emit({ at: this.clock(), type: "job.updated", job });
+    return true;
   }
 
   /**
@@ -339,9 +383,19 @@ export class JobQueue {
 
   // ---- enqueue and pump -----------------------------------------------------
 
+  private requireAccepting(): void {
+    if (!this.accepting || this.disposed) throw new Error("the queue is not accepting new work");
+  }
+
+  /** Permanently close admission while allowing already-journalled work to finish. */
+  stopAccepting(): void {
+    this.admissionClosed = true;
+    this.accepting = false;
+  }
+
   /** Durable before any network call (R-1): the returned job is already journalled. */
   async enqueue(input: EnqueueInput): Promise<Job> {
-    if (!this.accepting) throw new Error("the queue is not accepting work yet (recovery first, R-18)");
+    this.requireAccepting();
     // A pre-allocated key that already journalled a job is a redelivery, not a request
     // (SPEC-024 R-19): the crash between a plan's materialised event and this call must land on
     // the same job, never a second spend. Serialised per key — the map check alone was
@@ -363,10 +417,34 @@ export class JobQueue {
   private readonly enqueueingByKey = new Map<string, Promise<Job>>();
 
   private async enqueueNew(input: EnqueueInput): Promise<Job> {
+    if ("speakerFile" in input.params) {
+      throw new Error(
+        "absolute voice clip paths cannot be stored in jobs; use the host voice-reference seam",
+      );
+    }
+    if (
+      input.voiceReference === true &&
+      (typeof input.params["voiceId"] !== "string" || input.params["voiceId"].length === 0)
+    ) {
+      throw new Error("a voice reference requires a voice id");
+    }
+    if (
+      input.voiceReference === true &&
+      input.engine?.source === "user-url" &&
+      input.engine.locality !== "local" &&
+      input.voiceUploadConfirmedFor !== input.engine.instanceId
+    ) {
+      throw new Error("a remote voice upload requires explicit confirmation for this engine destination");
+    }
+    const durableParams = { ...input.params };
+    if (input.voiceReference === true) durableParams["voiceReference"] = true;
     // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
     // is refused with the readiness reason, and nothing is journalled for it.
     const admitted = await this.opts.admit?.(input);
     if (admitted !== undefined && !admitted.ok) throw new Error(admitted.reason);
+    // Admission may probe a runtime. Shutdown can close the queue while that probe is pending;
+    // never mint and return an id after that boundary without a durable journal row behind it.
+    this.requireAccepting();
     const now = this.clock();
     const job: Job = {
       id: `jb_${ulid()}`,
@@ -377,12 +455,15 @@ export class JobQueue {
       capability: input.capability,
       provider: input.provider,
       model: input.model,
-      params: input.params,
+      params: durableParams,
       estimatedMicroUsd: input.estimatedMicroUsd,
       // Identity frozen before the journal line exists (SPEC-021 §2.11): what this job IS can
       // never depend on what the catalogue or Settings hold by the time it runs.
       ...(input.recipe !== undefined ? { recipe: input.recipe } : {}),
       ...(input.engine !== undefined ? { engine: input.engine } : {}),
+      ...(input.voiceUploadConfirmedFor !== undefined
+        ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor }
+        : {}),
       status: "queued",
       providerJobId: null,
       attempt: 0,
@@ -391,7 +472,7 @@ export class JobQueue {
       createdAt: now,
       updatedAt: now,
     };
-    await this.transition(job);
+    if (!(await this.transition(job))) this.requireAccepting();
     this.lane(job.provider).fifo.push(job.id);
     this.pump(job.provider);
     return job;
@@ -400,7 +481,7 @@ export class JobQueue {
   private pump(provider: string): void {
     if (this.disposed) return;
     const lane = this.lane(provider);
-    if (lane.paused) return;
+    if (lane.paused || lane.recoveryGate !== null || lane.recoveryBlocked) return;
     const now = Date.now();
     if (now < lane.nextAllowedAt) {
       this.schedule(lane, lane.nextAllowedAt - now);
@@ -410,10 +491,12 @@ export class JobQueue {
       const jobId = lane.fifo.shift()!;
       const job = this.jobs.get(jobId);
       if (!job || job.status !== "queued") continue;
-      lane.inFlight.add(jobId);
+      const runKey = this.engineRunKey(job);
+      lane.inFlight.add(runKey);
       lane.nextAllowedAt = Date.now() + lane.minIntervalMs;
       const run = this.runJob(job).finally(() => {
-        lane.inFlight.delete(jobId);
+        lane.inFlight.delete(runKey);
+        this.retiredEngineRuns.delete(this.engineRunKey(job));
         this.pump(provider);
         this.activeRuns.delete(run);
       });
@@ -451,10 +534,12 @@ export class JobQueue {
     if (kind === "offline") {
       // Offline resumes by itself when connectivity returns (R-17): the retry is the probe.
       const timer = setTimeout(() => {
+        this.retryTimers.delete(timer);
         if (this.disposed) return;
         const current = this.lane(provider);
         if (current.paused?.kind === "offline") this.resume(provider);
       }, this.offlineRetryMs);
+      this.retryTimers.add(timer);
       timer.unref?.();
     }
   }
@@ -473,7 +558,7 @@ export class JobQueue {
   private rebuildFifo(provider: string): void {
     const lane = this.lane(provider);
     const queued = [...this.jobs.values()]
-      .filter((j) => j.provider === provider && j.status === "queued" && !lane.inFlight.has(j.id))
+      .filter((j) => j.provider === provider && j.status === "queued" && !lane.inFlight.has(this.engineRunKey(j)))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     lane.fifo = queued.map((j) => j.id);
   }
@@ -495,9 +580,10 @@ export class JobQueue {
       this.pauseLane(job.provider, "credential", "no credential stored for this provider");
       return;
     }
-    if (this.jobs.get(job.id)?.status !== "queued") return;
+    if (!this.stillQueued(job)) return;
 
     let imageReferences: DispatchImageReference[] | undefined;
+    let voiceReference: DispatchVoiceReference | undefined;
     const referencePaths = job.params["references"];
     if (Array.isArray(referencePaths) && referencePaths.length > 0) {
       if (!referencePaths.every((path): path is string => typeof path === "string")) {
@@ -523,15 +609,50 @@ export class JobQueue {
         return;
       }
     }
-    if (this.jobs.get(job.id)?.status !== "queued") return;
+    if (job.params["voiceReference"] === true) {
+      if (
+        job.engine?.source === "user-url" &&
+        job.engine.locality !== "local" &&
+        job.voiceUploadConfirmedFor !== job.engine.instanceId
+      ) {
+        await this.terminalize(job, "failed", "the remote voice-upload destination was not explicitly confirmed");
+        return;
+      }
+      const voiceId = job.params["voiceId"];
+      if (typeof voiceId !== "string" || voiceId.length === 0) {
+        await this.terminalize(job, "failed", "voice reference identity is invalid");
+        return;
+      }
+      if (!this.opts.readVoiceReference) {
+        await this.terminalize(job, "failed", "voice reference transport is not configured");
+        return;
+      }
+      try {
+        voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId);
+      } catch (error) {
+        await this.terminalize(
+          job,
+          "failed",
+          error instanceof Error ? error.message : "the voice's recording could not be prepared",
+        );
+        return;
+      }
+    }
+    if (!this.stillQueued(job)) return;
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = { ...job, status: "submitting", attempt: job.attempt + 1, updatedAt: this.clock() };
     await this.transition(submitting);
     if (this.disposed) return;
-    if (this.jobs.get(job.id)?.status !== "submitting") return;
+    if (!this.stillSubmitting(submitting)) return;
 
+    const submitAbort = new AbortController();
+    this.submitAborts.set(job.id, submitAbort);
+    if (this.jobs.get(job.id)?.status !== "submitting") {
+      this.submitAborts.delete(job.id);
+      return;
+    }
     try {
       // ③ the point of uncertainty.
       const accepted = await client.submit(
@@ -539,8 +660,10 @@ export class JobQueue {
         {
           model: job.model,
           capability: job.capability,
+          signal: submitAbort.signal,
           params: job.params,
           ...(imageReferences ? { imageReferences } : {}),
+          ...(voiceReference ? { voiceReference } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
           // What this job IS, frozen before it was journalled (R-15). Carried unconditionally:
           // a client that does not use it ignores it, and one that does can refuse a graph that
@@ -555,12 +678,25 @@ export class JobQueue {
         await client.cancel(key, accepted.remoteId, { jobId: job.id, attempt: submitting.attempt, model: job.model }).catch(() => {});
         return;
       }
+      // A lifecycle replacement can requeue this job while submit is in flight. The accepted id
+      // belongs to the retired process; never let its late response resurrect the old run over
+      // the durable queued row for the replacement process.
+      if (!this.stillSubmitting(submitting)) return;
       if (accepted.artifacts) {
-        await this.landAndSucceed(
+        try {
+          await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
+        } catch (error) {
+          await this.terminalize(
+            submitting,
+            "failed",
+            `the provider completed, but its artifact could not be made durable: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return;
+        }
+        await this.landDurableInline(
           { ...submitting, providerJobId: accepted.remoteId },
           client,
           key,
-          undefined,
           accepted.artifacts,
         );
         return;
@@ -573,7 +709,10 @@ export class JobQueue {
     } catch (err) {
       if (this.disposed) return;
       if (this.jobs.get(job.id)?.status === "cancelled") return; // already terminal by the user
+      if (!this.stillSubmitting(submitting)) return;
       await this.handleSubmitError(submitting, client, err);
+    } finally {
+      if (this.submitAborts.get(job.id) === submitAbort) this.submitAborts.delete(job.id);
     }
   }
 
@@ -631,8 +770,7 @@ export class JobQueue {
     let current = job;
     for (;;) {
       if (this.disposed) return;
-      const cancelled = this.jobs.get(job.id)?.status === "cancelled";
-      if (cancelled) return; // cancel() already terminalized; discard whatever arrives (§2.10)
+      if (!this.stillPolling(current)) return;
       let poll;
       try {
         poll = await client.poll(key, current.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model });
@@ -649,6 +787,7 @@ export class JobQueue {
         continue;
       }
       if (this.disposed) return;
+      if (!this.stillPolling(current)) return;
       if (poll.state === "succeeded") {
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
         return;
@@ -672,7 +811,90 @@ export class JobQueue {
     }
   }
 
+  private stillPolling(job: Job): boolean {
+    const current = this.jobs.get(job.id);
+    return current?.status === "running" &&
+      current.providerJobId === job.providerJobId &&
+      current.attempt === job.attempt &&
+      this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
   // ---- artifacts (§2.9) ----------------------------------------------------
+
+  private inlineArtifactDir(jobId: string): string {
+    return join(dirname(this.opts.journalPath), "inline-artifacts", jobId);
+  }
+
+  /**
+   * Synchronous providers have no remote result to fetch after a restart. Write their bytes into
+   * the queue first, with the manifest written last as the completeness marker; only then may
+   * landing or a recoverable state depend on them.
+   */
+  private async persistInlineArtifacts(
+    jobId: string,
+    remoteId: string,
+    artifacts: readonly DispatchArtifact[],
+  ): Promise<void> {
+    const dir = this.inlineArtifactDir(jobId);
+    const manifest = join(dir, "manifest.json");
+    await rm(toExtendedLength(dir), { recursive: true, force: true });
+    await mkdir(toExtendedLength(dir), { recursive: true });
+    for (const [index, artifact] of artifacts.entries()) {
+      await atomicWriteFile(join(dir, `${index}.bin`), artifact.data);
+    }
+    await atomicWriteFile(
+      manifest,
+      JSON.stringify({
+        remoteId,
+        artifacts: artifacts.map(({ name, contentType }) => ({ name, contentType })),
+      }),
+    );
+  }
+
+  private async readInlineArtifacts(jobId: string): Promise<DurableInlineArtifacts | null> {
+    const dir = this.inlineArtifactDir(jobId);
+    try {
+      const raw = JSON.parse(await readFile(toExtendedLength(join(dir, "manifest.json")), "utf8")) as {
+        remoteId?: unknown;
+        artifacts?: unknown;
+      };
+      if (typeof raw.remoteId !== "string" || !Array.isArray(raw.artifacts) || raw.artifacts.length > 64) {
+        throw new Error("invalid inline artifact manifest");
+      }
+      const artifacts: DispatchArtifact[] = [];
+      for (const [index, value] of raw.artifacts.entries()) {
+        if (
+          typeof value !== "object" || value === null ||
+          typeof (value as { name?: unknown }).name !== "string" ||
+          typeof (value as { contentType?: unknown }).contentType !== "string"
+        ) {
+          throw new Error("invalid inline artifact metadata");
+        }
+        artifacts.push({
+          name: (value as { name: string }).name,
+          contentType: (value as { contentType: string }).contentType,
+          data: new Uint8Array(await readFile(toExtendedLength(join(dir, `${index}.bin`)))),
+        });
+      }
+      return { remoteId: raw.remoteId, artifacts };
+    } catch {
+      await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+      return null;
+    }
+  }
+
+  private async landDurableInline(
+    job: Job,
+    client: DispatchClient,
+    key: string,
+    artifacts: DispatchArtifact[],
+  ): Promise<void> {
+    await this.landAndSucceed(job, client, key, undefined, artifacts);
+    const settled = this.jobs.get(job.id);
+    if (settled && TERMINAL.has(settled.status)) {
+      await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
+    }
+  }
 
   private async landAndSucceed(
     job: Job,
@@ -699,7 +921,7 @@ export class JobQueue {
         return;
       }
       if (this.disposed) return;
-      if (this.jobs.get(job.id)?.status === "cancelled") return; // discard on arrival (§2.10)
+      if (!this.stillActiveRun(job)) return; // cancelled or retired while bytes were in flight
       // Sanitisation before verification (SPEC-021 §2.10): an engine that embeds workflow
       // metadata has it stripped here, and a container the sanitiser cannot process fails the
       // job with the reason — never landed as-is.
@@ -745,7 +967,7 @@ export class JobQueue {
             await writeFile(toExtendedLength(from), artifact.data);
             staged.push({ from, to: join(targetDir, name), rel: `${landing.dir}/${name}` });
           }
-          if (this.disposed) return; // killed during download/staging: nothing visible (R-12)
+          if (this.disposed || !this.stillActiveRun(job)) return; // killed/retired during staging
           for (const s of staged) {
             await rename(toExtendedLength(s.from), toExtendedLength(s.to));
             landed.push(s.rel);
@@ -755,6 +977,7 @@ export class JobQueue {
         }
       });
       if (!available) {
+        if (!this.stillActiveRun(job)) return;
         const waiting: Job = {
           ...job,
           status: "running",
@@ -768,6 +991,7 @@ export class JobQueue {
       }
     }
     if (this.disposed) return;
+    if (!this.stillActiveRun(job)) return;
     const landedJob = { ...job, ...(landed.length > 0 ? { landedFiles: landed } : {}) };
     const needsFollowOn = FOLLOW_ON_TARGETS.has(landedJob.target.kind) && landedJob.landedFiles?.[0] !== undefined;
     await this.terminalize(
@@ -792,6 +1016,7 @@ export class JobQueue {
     error: string | null,
     costMicroUsd?: number,
   ): Promise<void> {
+    if (this.retiredEngineRuns.has(this.engineRunKey(job))) return;
     const terminal: Job = { ...job, status: outcome, error, updatedAt: this.clock() };
     await this.transition(terminal);
     if (this.disposed) return;
@@ -872,6 +1097,10 @@ export class JobQueue {
     if (!job || TERMINAL.has(job.status)) return;
     const lane = this.lane(job.provider);
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
+    const submitAbort = this.submitAborts.get(jobId);
+    submitAbort?.abort();
+    if (submitAbort !== undefined) await Promise.resolve();
+    if (TERMINAL.has(this.jobs.get(jobId)?.status ?? "")) return;
     // Attempt the remote cancel where there is remote work to cancel; best-effort.
     if (job.providerJobId) {
       const client = this.opts.clients[job.provider];
@@ -924,6 +1153,35 @@ export class JobQueue {
     for (const { job } of folded) this.jobs.set(job.id, job);
     const report: ReconcileAction[] = [];
 
+    // Recovery may fold and report immediately, but a provider with a spawned runtime does not
+    // pump or poll recovered work until that runtime is ready. The gate runs in the background so
+    // an importing GPU stack cannot hold the whole application startup hostage.
+    if (this.opts.awaitRecoveryReady) {
+      const providers = new Set(
+        folded
+          .filter(({ job }) => !TERMINAL.has(job.status) && job.status !== "needs-reconciliation")
+          .map(({ job }) => job.provider),
+      );
+      for (const provider of providers) {
+        const lane = this.lane(provider);
+        lane.recoveryBlocked = true;
+        const gate = this.opts
+          .awaitRecoveryReady(provider)
+          .then(
+            (ready) => {
+              lane.recoveryBlocked = !ready;
+            },
+            () => {},
+          )
+          .finally(() => {
+            if (lane.recoveryGate === gate) lane.recoveryGate = null;
+            this.pump(provider);
+          });
+        lane.recoveryGate = gate;
+        this.trackRun(gate);
+      }
+    }
+
     for (const { job, prior } of folded) {
       if (TERMINAL.has(job.status)) {
         // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
@@ -936,10 +1194,37 @@ export class JobQueue {
         ) {
           await this.retryFinalization(job.id);
         } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
-          // Non-reference follow-ons are not replay-safe. Surface the interrupted preparation
-          // honestly instead of duplicating takes or mutating a reference kit on startup.
+          // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
+          // preparation honestly instead of duplicating takes or mutating domain state.
           await this.failFinalization(job);
         }
+        await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
+        continue;
+      }
+      const inline = await this.readInlineArtifacts(job.id);
+      if (inline !== null) {
+        const client = this.opts.clients[job.provider];
+        if (!client) {
+          const reason = `no client for provider "${job.provider}"`;
+          await this.terminalize(job, "failed", reason);
+          report.push({ jobId: job.id, action: "failed", detail: reason });
+          continue;
+        }
+        const recovering: Job = {
+          ...job,
+          providerJobId: inline.remoteId,
+          error: null,
+          updatedAt: this.clock(),
+        };
+        report.push({ jobId: job.id, action: "resumed-polling", detail: "resumed durable inline artifacts" });
+        this.trackRun(
+          this.runAfterRecoveryGate(job.provider, async () => {
+            const current = this.jobs.get(job.id);
+            if (!current || TERMINAL.has(current.status) || current.status === "needs-reconciliation") return;
+            await this.transition({ ...recovering, status: "running", updatedAt: this.clock() });
+            await this.landDurableInline({ ...recovering, status: "running" }, client, "", inline.artifacts);
+          }),
+        );
         continue;
       }
       if (job.status === "needs-reconciliation") {
@@ -969,7 +1254,7 @@ export class JobQueue {
         }
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
         report.push({ jobId: job.id, action: "resumed-polling" });
-        this.trackRun(this.resumePolling(job));
+        this.trackRun(this.runAfterRecoveryGate(job.provider, () => this.resumePolling(job)));
         continue;
       }
       if (job.status === "submitting") {
@@ -991,13 +1276,16 @@ export class JobQueue {
       }
     }
 
-    this.accepting = true; // new work only after every non-terminal job is resolved (R-18)
+    // New work only after every non-terminal job is resolved (R-18), unless shutdown closed
+    // admission while recovery was in flight.
+    if (!this.disposed && !this.admissionClosed) this.accepting = true;
     if (report.length > 0) this.opts.emit({ at: this.clock(), type: "queue.reconciled", report });
     for (const provider of this.lanes.keys()) this.pump(provider);
     return report;
   }
 
   private async resumePolling(job: Job): Promise<void> {
+    if (!this.stillPolling(job)) return;
     const client = this.opts.clients[job.provider];
     const key = await this.keyFor(job.provider);
     if (!client || key === null) {
@@ -1005,6 +1293,28 @@ export class JobQueue {
       return;
     }
     await this.pollToTerminal(job, client, key);
+  }
+
+  private async runAfterRecoveryGate(provider: string, work: () => Promise<void>): Promise<void> {
+    const lane = this.lane(provider);
+    const gate = lane.recoveryGate;
+    if (gate !== null) await gate;
+    if (this.disposed) return;
+    if (lane.recoveryBlocked) {
+      lane.deferredRecovery.push(work);
+      return;
+    }
+    await work();
+  }
+
+  /** A runtime that became ready after a failed startup releases its recovered work. */
+  releaseRecovery(provider: string): void {
+    const lane = this.lane(provider);
+    if (!lane.recoveryBlocked) return;
+    lane.recoveryBlocked = false;
+    const deferred = lane.deferredRecovery.splice(0);
+    for (const work of deferred) this.trackRun(work());
+    this.pump(provider);
   }
 
   /** The unwitnessed-submission window (§2.4 rows ②→③ and ④): observe, never guess (D2). */
@@ -1073,7 +1383,7 @@ export class JobQueue {
     decision: Exclude<ComfyUiRecoveryDecision, { action: "resume" }>,
   ): Promise<ReconcileAction> {
     if (decision.action === "requeue") {
-      await this.requeueSafely(job);
+      await this.requeueSafely(decision.engine ? { ...job, engine: decision.engine } : job);
       return { jobId: job.id, action: "requeued", detail: "the engine was relaunched and holds no old work" };
     }
     if (decision.action === "fail") {
@@ -1103,10 +1413,6 @@ export class JobQueue {
     await this.transition(held);
     this.emitQueueStatus(job.provider);
     return { jobId: job.id, action: "held-for-user", detail: held.error ?? undefined };
-  }
-
-  private needsReferenceFinalization(job: Job): boolean {
-    return REFERENCE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
   }
 
   private needsReplayableFinalization(job: Job): boolean {
@@ -1140,7 +1446,7 @@ export class JobQueue {
   }
 
   private async failFinalization(job: Job): Promise<void> {
-    const error = this.needsReferenceFinalization(job)
+    const error = this.needsReplayableFinalization(job)
       ? "Generation completed, but its result could not be prepared. Retry finalization; this will not contact the provider or charge again."
       : "Generation completed, but its result could not be prepared. Open Activity for details; no additional provider charge was made.";
     const failed: Job = {
@@ -1199,6 +1505,7 @@ export class JobQueue {
     provider: string,
     stillOurs: (job: Job) => boolean,
     reason: string,
+    requeueAs?: (job: Job) => JobEngineIdentity | null,
   ): Promise<Job[]> {
     const orphans = [...this.jobs.values()].filter(
       (job) => job.provider === provider && !TERMINAL.has(job.status) && job.status !== "needs-reconciliation" && !stillOurs(job),
@@ -1206,12 +1513,44 @@ export class JobQueue {
     for (const job of orphans) {
       const lane = this.lane(job.provider);
       lane.fifo = lane.fifo.filter((id) => id !== job.id);
+      const replacement = requeueAs?.(job) ?? null;
+      if (replacement !== null) {
+        const retiredRun = this.engineRunKey(job);
+        this.retiredEngineRuns.add(retiredRun);
+        lane.inFlight.delete(retiredRun);
+        this.submitAborts.get(job.id)?.abort();
+        const requeued: Job = {
+          ...job,
+          engine: replacement,
+          status: "queued",
+          providerJobId: null,
+          step: null,
+          error: null,
+          updatedAt: this.clock(),
+        };
+        // Publish the epoch fence before awaiting disk so old poll/submit continuations stop
+        // immediately. The journal append still precedes the pump that may contact replacement.
+        this.jobs.set(job.id, requeued);
+        await this.transition(requeued);
+        if (!lane.fifo.includes(job.id)) lane.fifo.push(job.id);
+        continue;
+      }
       // Deliberately no remote cancel: the engine that holds this work is the one we can no
       // longer address, and the engine we CAN address never had it.
       await this.terminalize(job, "failed", reason);
     }
     if (orphans.length > 0) this.emitQueueStatus(provider);
+    this.pump(provider);
     return orphans;
+  }
+
+  /** Hold dispatch and recovered polling while a provider's replacement runtime starts. */
+  blockRecovery(provider: string): void {
+    this.lane(provider).recoveryBlocked = true;
+  }
+
+  resetProviderTransport(provider: string): void {
+    this.opts.clients[provider]?.resetTransport?.();
   }
 
   /** The user's answer to strategy C (D4): resubmit with eyes open, or abandon honestly. */
@@ -1253,7 +1592,7 @@ export class JobQueue {
       // Gradual recovery (R-10): interval first, then concurrency.
       if (lane.minIntervalMs > this.baseIntervalMs) {
         lane.minIntervalMs = Math.max(this.baseIntervalMs, Math.floor(lane.minIntervalMs * 0.7));
-      } else if (lane.maxConcurrent < this.baseConcurrency) {
+      } else if (lane.maxConcurrent < this.concurrencyFor(provider)) {
         lane.maxConcurrent += 1;
       }
     }
@@ -1269,20 +1608,66 @@ export class JobQueue {
     return this.opts.getKey(provider);
   }
 
+  private concurrencyFor(provider: string): number {
+    const configured = this.providerConcurrency[provider];
+    return configured !== undefined && Number.isInteger(configured) && configured > 0
+      ? configured
+      : this.baseConcurrency;
+  }
+
+  private stillQueued(job: Job): boolean {
+    const current = this.jobs.get(job.id);
+    return current?.status === "queued" && this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
+  private stillSubmitting(job: Job): boolean {
+    const current = this.jobs.get(job.id);
+    return current?.status === "submitting" && current.attempt === job.attempt && this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
+  private stillActiveRun(job: Job): boolean {
+    const current = this.jobs.get(job.id);
+    return current !== undefined &&
+      !TERMINAL.has(current.status) &&
+      current.status !== "needs-reconciliation" &&
+      current.attempt === job.attempt &&
+      this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
+  private engineRunKey(job: Job): string {
+    return `${job.id}|${job.engine?.source ?? "legacy"}|${job.engine?.instanceId ?? "legacy"}|${job.engine?.processEpoch ?? "legacy"}`;
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, ms);
+      const timer = setTimeout(() => {
+        this.sleepTimers.delete(timer);
+        resolve();
+      }, ms);
+      this.sleepTimers.set(timer, resolve);
       timer.unref?.();
     });
   }
 
   /** Simulated kill for the crash suite, and clean shutdown: no further writes or events. */
   dispose(): void {
+    this.stopAccepting();
     this.disposed = true;
+    for (const client of new Set(Object.values(this.opts.clients))) client.dispose?.();
+    for (const controller of this.submitAborts.values()) controller.abort();
+    this.submitAborts.clear();
     for (const lane of this.lanes.values()) {
       if (lane.timer) clearTimeout(lane.timer);
       lane.timer = null;
+      lane.deferredRecovery = [];
     }
+    for (const [timer, resolve] of this.sleepTimers) {
+      clearTimeout(timer);
+      resolve();
+    }
+    this.sleepTimers.clear();
+    for (const timer of this.retryTimers) clearTimeout(timer);
+    this.retryTimers.clear();
   }
 
   async waitForIdle(): Promise<void> {

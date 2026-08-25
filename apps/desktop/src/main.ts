@@ -1,8 +1,8 @@
 import { execFile, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
@@ -18,12 +18,14 @@ import {
   defaultAppRoot,
   FsWorldProvider,
   ProviderCallStore,
+  readCustomNodeRef,
   SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
   spoolBytes,
   sweepSpool,
   registerExitBackstop,
+  VOXA_SETUP_COMPONENT_IDS,
   type CatalogueEntry,
   type Cipher,
   type DatabaseCtor,
@@ -498,6 +500,11 @@ async function initialize(): Promise<{ port: number }> {
   // Healthy, not merely running: a sidecar still starting reads as absent, which refuses with a
   // remedy instead of failing halfway through a dispatch.
   let voxaSupervisorRef: ChildSupervisor | null = null;
+  const voxaClient = new VoxaClient(
+    (url, init) => fetch(url, init),
+    () => `http://127.0.0.1:${voxaSupervisorRef?.port ?? 0}`,
+  );
+  let voxaRequestsEnabled = true;
   const voxaBaseUrl = (): string | null => {
     const port = voxaSupervisorRef?.port ?? null;
     if (port === null || voxaSupervisorRef?.status !== "healthy") return null;
@@ -543,6 +550,9 @@ async function initialize(): Promise<{ port: number }> {
       recommendedVramMb: recipe.hardware.recommendedVramMb,
       checkpoints: recipe.requires.checkpoints,
       customNodes: recipe.requires.customNodes,
+      ...(recipe.requires.unavailableReason !== undefined
+        ? { unavailableReason: recipe.requires.unavailableReason }
+        : {}),
       nodeClasses: recipeNodeClasses(recipe),
       identity: comfyUiRecipeIdentity(recipe),
     })),
@@ -565,28 +575,47 @@ async function initialize(): Promise<{ port: number }> {
     },
     // The expensive pre-flight read (SPEC-021 §2.5): streamed, so a 10 GB checkpoint never
     // lands in memory whole; null on any read failure, which refuses with the reason.
-    hashFile: (path) =>
+    hashFile: (path, signal) =>
       new Promise<string | null>((resolveHash) => {
         const hash = createHash("sha256");
         const stream = createReadStream(path);
+        let settled = false;
+        const finish = (value: string | null) => {
+          if (settled) return;
+          settled = true;
+          signal?.removeEventListener("abort", abort);
+          resolveHash(value);
+        };
+        const abort = () => {
+          stream.destroy();
+          finish(null);
+        };
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
         stream.on("data", (chunk) => hash.update(chunk));
-        stream.on("end", () => resolveHash(hash.digest("hex")));
-        stream.on("error", () => resolveHash(null));
+        stream.on("end", () => finish(hash.digest("hex")));
+        stream.on("error", () => finish(null));
       }),
     writeTextFile: (path, text) => writeFile(path, text, "utf8"),
+    readNodeRef: (dir) => readCustomNodeRef(dir),
     createSupervisor: (spec) => {
-      const supervisor = new ChildSupervisor(spec, { ledger: childLedger });
-      registerExitBackstop(supervisor);
-      return supervisor;
+      return new ChildSupervisor(spec, { ledger: childLedger });
     },
+    registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
+    createProcessEpoch: () => randomUUID(),
   });
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
-  const comfyUiWeightEntries: CatalogueEntry[] = COMFYUI_RECIPES.map((recipe) => ({
+  const comfyUiWeightEntries: CatalogueEntry[] = COMFYUI_RECIPES.filter(
+    (recipe) => recipe.requires.checkpoints.length > 0 && recipe.requires.unavailableReason === undefined,
+  ).map((recipe) => ({
     id: `comfyui-weights-${recipe.id}`,
     displayName: `${recipe.displayName} · weights`,
-    purpose: `Model files for ${recipe.displayName} — landed in the engine's own models folder`,
+    purpose: `Model files for ${recipe.displayName} — landed in the selected engine's mapped models folder`,
     sizeMb: recipe.requires.checkpoints.reduce((sum, c) => sum + c.sizeMb, 0),
     optional: true,
     requires: ["comfyui-runtime"],
@@ -601,12 +630,11 @@ async function initialize(): Promise<{ port: number }> {
     fetch: (url, init) => fetch(url, init),
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
     voxa: voxaBaseUrl,
+    voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     comfyui: {
       baseUrl: () => comfyUiEngine.baseUrl(),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
-      // The one recipe input that is a file this machine owns. Reading it is the host's business
-      // for the same reason opening a dialog is: the renderer never handles a path (SPEC-001 R-9).
-      readClip: async (path) => new Uint8Array(await readFile(path)),
+      locality: () => comfyUiEngine.engineStatus().locality,
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
       // dependency on a socket library for one optional figure.
@@ -644,9 +672,40 @@ async function initialize(): Promise<{ port: number }> {
   let voxaHealth: SidecarHealth | null = null;
   let endpointCompatible = false;
   let lastRuntimeFailure: VoiceRuntimeFailure | null = voxaSelection.failure;
+  const voxaReadinessWaiters = new Set<(ready: boolean) => void>();
 
-  const voxaPaths = (settings: VoxaSettings) => {
-    const modelRoot = settings.modelRoot ?? join(appRoot, "models");
+  const kokoroReady = (): boolean =>
+    voxaSupervisor.status === "healthy" && voxaHealth?.engineStatus.kokoro.ready === true;
+
+  const settleVoxaReadiness = (): void => {
+    if (kokoroReady()) {
+      for (const waiter of voxaReadinessWaiters) waiter(true);
+      coordinator?.releaseJobRecovery("kokoro");
+      return;
+    }
+    if (voxaSupervisor.status === "failed" || voxaSupervisor.status === "unconfigured") {
+      for (const waiter of voxaReadinessWaiters) waiter(false);
+    }
+  };
+
+  const waitForKokoroReady = (timeoutMs = 120_000): Promise<boolean> => {
+    if (kokoroReady()) return Promise.resolve(true);
+    if (voxaSelection.command === null || voxaSupervisor.status === "failed") return Promise.resolve(false);
+    return new Promise((resolveReady) => {
+      let timer: NodeJS.Timeout;
+      const finish = (ready: boolean) => {
+        clearTimeout(timer);
+        voxaReadinessWaiters.delete(finish);
+        resolveReady(ready);
+      };
+      timer = setTimeout(() => finish(false), timeoutMs);
+      timer.unref?.();
+      voxaReadinessWaiters.add(finish);
+    });
+  };
+
+  const voxaPaths = () => {
+    const modelRoot = join(appRoot, "models");
     const espeakRoot = app.isPackaged
       ? join(process.resourcesPath, "espeak-ng")
       : join(repoRoot, "apps", "desktop", "build-resources", "espeak-ng", process.arch);
@@ -660,7 +719,7 @@ async function initialize(): Promise<{ port: number }> {
     };
   };
   const voxaLaunch = (selection: VoxaSelection, settings: VoxaSettings) => {
-    const paths = voxaPaths(settings);
+    const paths = voxaPaths();
     const advanced = safeVoxaExtraArgs(
       selection.source === "environment"
         ? environmentVoxaArgs(process.env["ARKE_VOXA_ARGS_JSON"])
@@ -707,6 +766,7 @@ async function initialize(): Promise<{ port: number }> {
         voxaHealth = health.data;
         endpointCompatible = true;
         lastRuntimeFailure = null;
+        settleVoxaReadiness();
         return { ok: true };
       },
     },
@@ -714,8 +774,6 @@ async function initialize(): Promise<{ port: number }> {
   );
   voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(opencodeSupervisor, voxaSupervisor);
-  const voxaAt = () =>
-    new VoxaClient((url, init) => fetch(url, init), `http://127.0.0.1:${voxaSupervisor.port ?? 0}`);
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -725,11 +783,12 @@ async function initialize(): Promise<{ port: number }> {
      * Null when no runtime was found at all, which the catalogue reads as "unknown, leave the
      * configured presets alone" rather than "failed, offer nothing".
      */
-    health: () => (voxaSelection.command === null ? Promise.resolve(null) : voxaAt().health()),
-    listVoices: () => voxaAt().listVoices(),
+    health: () =>
+      voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
+    listVoices: () => voxaClient.listVoices(),
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }) =>
-      voxaAt().synthesize(input),
-    transcribe: (audio: Uint8Array, contentType: string) => voxaAt().transcribe(audio, contentType),
+      voxaClient.synthesize(input),
+    transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
   };
 
   const setupEngine = (id: string, healthReady: boolean) => {
@@ -753,9 +812,15 @@ async function initialize(): Promise<{ port: number }> {
   };
 
   const runtimeStatus = (): VoiceRuntimeStatus => {
-    const paths = voxaPaths(voxaSettings);
-    const kokoro = setupEngine("kokoro-82m", voxaHealth?.engineStatus.kokoro.ready ?? false);
-    const whisper = setupEngine("whisper-base-en", voxaHealth?.engineStatus.whisper.ready ?? false);
+    const paths = voxaPaths();
+    const kokoro = setupEngine(VOXA_SETUP_COMPONENT_IDS.kokoro, voxaHealth?.engineStatus.kokoro.ready ?? false);
+    const whisper = setupEngine(VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
+    if (kokoro.state === "unavailable" && voxaHealth?.engineStatus.kokoro.reason) {
+      kokoro.detail = voxaHealth.engineStatus.kokoro.reason;
+    }
+    if (whisper.state === "unavailable" && voxaHealth?.engineStatus.whisper.reason) {
+      whisper.detail = voxaHealth.engineStatus.whisper.reason;
+    }
     const phonemizerReady = existsSync(paths.espeak) && existsSync(paths.espeakData);
     let failure = lastRuntimeFailure;
     if (failure === null && kokoro.state === "verification-failed") failure = "model-verification-failed";
@@ -774,7 +839,9 @@ async function initialize(): Promise<{ port: number }> {
       failure === "whisper-model-missing" ? "Whisper model missing" :
       failure === "model-verification-failed" ? "Model verification failed" :
       failure === "phonemizer-unavailable" ? "Phonemizer unavailable" :
-      voxaSupervisor.status === "healthy" && voxaHealth?.ok ? "Ready" : "Runtime is starting";
+      voxaSupervisor.status === "healthy" && kokoro.state === "ready" && whisper.state === "ready" ? "Ready" :
+      voxaSupervisor.status === "healthy" && (kokoro.state === "ready" || whisper.state === "ready") ? "Partially ready" :
+      "Runtime is starting";
     return {
       source: voxaSelection.source,
       configured: voxaSelection.configured,
@@ -801,11 +868,18 @@ async function initialize(): Promise<{ port: number }> {
   };
 
   const publishRuntimeStatus = async (): Promise<void> => {
-    const health = voxaSelection.command === null ? null : await voxaAt().health();
+    const health =
+      voxaSelection.command === null || !voxaRequestsEnabled
+        ? null
+        : await voxaClient.health().catch(() => null);
     if (health) {
       voxaHealth = health;
       endpointCompatible = health.architecture === expectedArchitecture;
+    } else {
+      voxaHealth = null;
+      endpointCompatible = false;
     }
+    settleVoxaReadiness();
     const runtime = runtimeStatus();
     const status = sidecarState(health);
     coordinator?.emit({
@@ -818,15 +892,24 @@ async function initialize(): Promise<{ port: number }> {
   };
 
   const applyVoxaSettings = async (settings: VoxaSettings): Promise<void> => {
+    voxaRequestsEnabled = false;
+    voxaClient.cancelPending();
     voxaSettings = settings;
     voxaSelection = discoverVoxa(settings);
     voxaHealth = null;
     endpointCompatible = false;
     lastRuntimeFailure = voxaSelection.failure;
     await voxaSupervisor.reconfigure(voxaLaunch(voxaSelection, settings));
+    voxaRequestsEnabled = voxaSupervisor.status === "healthy";
     await publishRuntimeStatus();
   };
-  voxaSupervisor.on("status", () => {
+  voxaSupervisor.on("status", (status: { status: string }) => {
+    if (status.status === "healthy") voxaRequestsEnabled = true;
+    else {
+      voxaRequestsEnabled = false;
+      voxaClient.cancelPending();
+    }
+    settleVoxaReadiness();
     if (coordinator) void publishRuntimeStatus();
   });
 
@@ -987,13 +1070,12 @@ async function initialize(): Promise<{ port: number }> {
       return result.canceled ? [] : result.filePaths;
     },
     // Fetching the local runtimes at setup: the shared Node seams (streamed HTTP, subprocesses).
-    // The ComfyUI runtime entry asks the engine service first (SPEC-021 D10): an install that
-    // already exists — configured, answering, or at a well-known location — is presence, and
-    // the managed copy is never fetched over it.
+    // The ComfyUI runtime entry asks whether an external source was deliberately selected
+    // (SPEC-021 D10). A detected install remains an offer and does not suppress managed Download.
     setup: {
       ...nodeSetupDeps(),
       externallyPresent: async (entryId) =>
-        entryId === "comfyui-runtime" ? comfyUiEngine.externallyPresent() : false,
+        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
     },
     comfyui: {
       service: comfyUiEngine,
@@ -1028,10 +1110,14 @@ async function initialize(): Promise<{ port: number }> {
         },
     voice: {
       sidecar: voxaSidecar,
+      waitUntilReady: waitForKokoroReady,
       sidecarHealth: async () => {
-        const health = voxaSelection.command === null ? null : await voxaAt().health();
+        const health =
+          voxaSelection.command === null || !voxaRequestsEnabled
+            ? null
+            : await voxaClient.health().catch(() => null);
         voxaHealth = health;
-        if (health) endpointCompatible = health.architecture === expectedArchitecture;
+        endpointCompatible = health?.architecture === expectedArchitecture;
         const runtime = runtimeStatus();
         return { ...sidecarState(health), detail: runtime.detail, runtime };
       },
@@ -1062,11 +1148,17 @@ async function initialize(): Promise<{ port: number }> {
       },
       applySettings: applyVoxaSettings,
       restart: async () => {
+        voxaRequestsEnabled = false;
+        voxaClient.cancelPending();
         voxaHealth = null;
         endpointCompatible = false;
         lastRuntimeFailure = voxaSelection.failure;
         await voxaSupervisor.restart();
         await publishRuntimeStatus();
+      },
+      dispose: () => {
+        for (const waiter of voxaReadinessWaiters) waiter(false);
+        voxaClient.dispose();
       },
       localPresets: localCandidates(KOKORO_PRESETS),
       cloudSources: [

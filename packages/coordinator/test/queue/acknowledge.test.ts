@@ -38,7 +38,7 @@ describe("queue command acknowledgement", () => {
     assert.deepEqual(result.failures, [
       {
         index: 1,
-        reason: "This item could not be added to Activity. Check provider settings and try again.",
+        reason: "journal unavailable",
       },
     ]);
   });
@@ -49,6 +49,7 @@ describe("queue command acknowledgement", () => {
     });
     assert.equal(rejected.acceptedJobIds.length, 0);
     assert.equal(rejected.failures.length, 1);
+    assert.equal(rejected.failures[0]?.reason, "no");
     assert.deepEqual(await enqueueInputs([], async () => job("jb_01J8E0000000000000000000J1")), {
       requestedCount: 0,
       acceptedJobIds: [],

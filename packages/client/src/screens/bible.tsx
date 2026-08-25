@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible } from "@arke-studio/contracts";
+import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, cx } from "../components/ui.js";
@@ -142,7 +142,9 @@ export function BibleScreen() {
   const [read, setRead] = useState<{ requestId: string; heading: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
   const narrator = state?.app.narrator ?? null;
-  const narratorLabel = narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
+  const narratorLabel = narrator && !supportsVoiceUse(narrator, "narration")
+    ? DEFAULT_NARRATOR.label
+    : narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label;
   /*
    * Plays the moment it lands, rather than making somebody press twice for the same thing.
    *

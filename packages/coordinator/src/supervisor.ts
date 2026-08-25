@@ -81,6 +81,10 @@ export interface SupervisedSpec {
   /** How long the child has to become healthy before it is declared failed. */
   readyTimeoutMs?: number;
   probeIntervalMs?: number;
+  /** Continue probing after startup. Zero disables continuous health monitoring. */
+  healthIntervalMs?: number;
+  /** Consecutive failed continuous probes before the child is restarted. */
+  healthFailureThreshold?: number;
   /** Restart budget after an unexpected exit; exceeded → failed with a stated reason. */
   maxRestarts?: number;
   backoffMs?: number;
@@ -103,8 +107,6 @@ export async function allocateLoopbackPort(): Promise<number> {
     });
   });
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const pidExists = (pid: number): boolean => {
   try {
@@ -140,6 +142,11 @@ export class ChildSupervisor extends EventEmitter {
   /** Live descendants of the current child (win32 shell shims) — see adoptDescendants. */
   private descendants: DescendantInfo[] = [];
   private healthFailure: string | undefined;
+  /** A terminal startup verdict kills the child deliberately and must never spend restart budget. */
+  private terminalStartupChild: ChildProcess | null = null;
+  private healthTimer: NodeJS.Timeout | null = null;
+  private readonly sleepTimers = new Map<NodeJS.Timeout, () => void>();
+  private consecutiveHealthFailures = 0;
 
   constructor(spec: SupervisedSpec, deps: SupervisorDeps = {}) {
     super();
@@ -150,6 +157,8 @@ export class ChildSupervisor extends EventEmitter {
       healthPath: spec.healthPath ?? "/health",
       readyTimeoutMs: spec.readyTimeoutMs ?? 15_000,
       probeIntervalMs: spec.probeIntervalMs ?? 250,
+      healthIntervalMs: spec.healthIntervalMs ?? 0,
+      healthFailureThreshold: Math.max(1, spec.healthFailureThreshold ?? 3),
       maxRestarts: spec.maxRestarts ?? 3,
       backoffMs: spec.backoffMs ?? 500,
       inheritEnv: spec.inheritEnv ?? true,
@@ -172,6 +181,11 @@ export class ChildSupervisor extends EventEmitter {
     return this.child?.pid ?? null;
   }
 
+  /** Monotonic process-attempt identity for lifecycle consumers such as local job recovery. */
+  get spawnEpoch(): number {
+    return this.launchEpoch;
+  }
+
   /** Tracked descendant pids of the current child — for the exit backstop's sweep. */
   get descendantPids(): number[] {
     return this.descendants.map((d) => d.pid);
@@ -192,6 +206,7 @@ export class ChildSupervisor extends EventEmitter {
     if (this.child !== null) return; // already running — a second start must not double-spawn
     this.stopping = false;
     this.restarts = 0;
+    this.terminalStartupChild = null;
     await this.spawnOnce();
   }
 
@@ -250,6 +265,8 @@ export class ChildSupervisor extends EventEmitter {
     const epoch = ++this.launchEpoch;
     this.setStatus("starting");
     this.healthFailure = undefined;
+    this.clearHealthTimer();
+    this.consecutiveHealthFailures = 0;
     const port = await allocateLoopbackPort();
     if (epoch !== this.launchEpoch || this.stopping) return;
     this._port = port;
@@ -273,6 +290,21 @@ export class ChildSupervisor extends EventEmitter {
     }
     this.child = child;
 
+    // Install exit handling before awaiting the spawn event: a command can spawn and exit in
+    // the same turn. Registering afterwards loses that exit and probes a dead child to timeout.
+    child.once("exit", (code, signal) => {
+      if (child.pid !== undefined) {
+        void this.deps.ledger?.release(child.pid).catch(() => {});
+      }
+      if (this.child === child) this.child = null;
+      if (this.stopping) return;
+      if (this.terminalStartupChild === child) {
+        this.terminalStartupChild = null;
+        return;
+      }
+      void this.handleUnexpectedExit(code, signal);
+    });
+
     // Both pipes are drained whether or not anyone listens: an unread pipe eventually fills
     // and blocks the child's writes. Stdout lines additionally reach the spec's handler —
     // the v2 launch protocol travels there — and are never logged or stored here.
@@ -293,15 +325,6 @@ export class ChildSupervisor extends EventEmitter {
     // OS will actually report for it, or the sweep's identity check would never match.
     this.tether(child, needsShell ? "cmd.exe" : basename(command).toLowerCase());
 
-    child.once("exit", (code, signal) => {
-      if (child.pid !== undefined) {
-        void this.deps.ledger?.release(child.pid).catch(() => {});
-      }
-      if (this.child === child) this.child = null;
-      if (this.stopping) return;
-      void this.handleUnexpectedExit(code, signal);
-    });
-
     const healthy = await this.probeUntilHealthy(child);
     // A superseded attempt owns nothing: the child it probed was already stopped and
     // replaced, and both its verdicts — healthy or failed — describe a process that is no
@@ -310,9 +333,14 @@ export class ChildSupervisor extends EventEmitter {
     if (healthy) {
       this.setStatus("healthy");
       void this.adoptDescendants(child);
+      this.scheduleHealthCheck(child, epoch);
       return;
     }
     // Never became healthy: kill it and report a stated reason, not a silent absence (R-5).
+    // A typed validation failure or startup timeout is terminal for this launch. Mark the child
+    // before killing it so its exit listener cannot race this continuation and consume the
+    // unexpected-exit restart budget (or start a replacement behind the terminal status).
+    this.terminalStartupChild = child;
     await this.forceStop(child);
     if (this.child === child) this.child = null;
     this.setStatus(
@@ -447,6 +475,99 @@ export class ChildSupervisor extends EventEmitter {
     return `http://127.0.0.1:${this._port}${this.spec.healthPath}`;
   }
 
+  private clearHealthTimer(): void {
+    if (this.healthTimer !== null) clearTimeout(this.healthTimer);
+    this.healthTimer = null;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.sleepTimers.delete(timer);
+        resolve();
+      }, ms);
+      this.sleepTimers.set(timer, resolve);
+      timer.unref?.();
+    });
+  }
+
+  private clearSleepTimers(): void {
+    for (const [timer, resolve] of this.sleepTimers) {
+      clearTimeout(timer);
+      resolve();
+    }
+    this.sleepTimers.clear();
+  }
+
+  private async healthCheck(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    let headers: Record<string, string> | undefined;
+    try {
+      headers = this.spec.healthHeaders?.();
+    } catch (err) {
+      return {
+        ok: false,
+        reason: `${this.id} health-header resolver failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    try {
+      const res = await fetch(this.healthUrl(), {
+        signal: AbortSignal.timeout(1_000),
+        ...(headers ? { headers } : {}),
+      });
+      if (!res.ok) return { ok: false, reason: `${this.id} health answered HTTP ${res.status}` };
+      if (!this.spec.validateHealth) return { ok: true };
+      const validation = await this.spec.validateHealth(res);
+      const ok = typeof validation === "boolean" ? validation : validation.ok;
+      if (ok) return { ok: true };
+      return {
+        ok: false,
+        reason:
+          typeof validation === "boolean"
+            ? `${this.id} health contract was not ready`
+            : (validation.reason ?? `${this.id} health contract was not ready`),
+      };
+    } catch {
+      return { ok: false, reason: `${this.id} health did not answer` };
+    }
+  }
+
+  private scheduleHealthCheck(child: ChildProcess, epoch: number): void {
+    if (this.spec.healthIntervalMs <= 0 || this.stopping || this.child !== child) return;
+    this.clearHealthTimer();
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = null;
+      void this.runHealthCheck(child, epoch);
+    }, this.spec.healthIntervalMs);
+    this.healthTimer.unref?.();
+  }
+
+  private async runHealthCheck(child: ChildProcess, epoch: number): Promise<void> {
+    if (epoch !== this.launchEpoch || this.stopping || this.child !== child) return;
+    const result = await this.healthCheck();
+    if (epoch !== this.launchEpoch || this.stopping || this.child !== child) return;
+    if (result.ok) {
+      this.consecutiveHealthFailures = 0;
+      if (this.status !== "healthy") this.setStatus("healthy");
+      this.scheduleHealthCheck(child, epoch);
+      return;
+    }
+
+    this.consecutiveHealthFailures += 1;
+    const threshold = this.spec.healthFailureThreshold;
+    this.setStatus(
+      "unhealthy",
+      `${result.reason}; failed ${this.consecutiveHealthFailures} of ${threshold} continuous health checks`,
+    );
+    if (this.consecutiveHealthFailures < threshold) {
+      this.scheduleHealthCheck(child, epoch);
+      return;
+    }
+
+    // Killing the current child feeds the ordinary unexpected-exit path, preserving its bounded
+    // backoff and restart budget instead of creating a second recovery policy for hung health.
+    await this.forceStop(child);
+  }
+
   private async probeUntilHealthy(child: ChildProcess): Promise<boolean> {
     const deadline = Date.now() + this.spec.readyTimeoutMs;
     while (Date.now() < deadline && !this.stopping && this.child === child) {
@@ -456,6 +577,7 @@ export class ChildSupervisor extends EventEmitter {
       } catch (err) {
         // A broken resolver cannot heal by retrying; report IT, not a misleading timeout.
         this.healthFailure = `${this.id} health-header resolver failed: ${err instanceof Error ? err.message : String(err)}`;
+        this.terminalStartupChild = child;
         return false;
       }
       try {
@@ -474,18 +596,20 @@ export class ChildSupervisor extends EventEmitter {
             // instead of the reason — which is exactly backwards for someone trying to find out
             // what is wrong.
             this.healthFailure = validation.reason;
+            this.terminalStartupChild = child;
             return false;
           }
         }
       } catch {
         /* not up yet */
       }
-      await sleep(this.spec.probeIntervalMs);
+      await this.sleep(this.spec.probeIntervalMs);
     }
     return false;
   }
 
   private async handleUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
+    this.clearHealthTimer();
     // The wrapper exiting says nothing about its grandchildren: they survive it, still
     // holding the old port. Clear them out before deciding whether to restart.
     await this.reapSurvivors();
@@ -496,7 +620,7 @@ export class ChildSupervisor extends EventEmitter {
     }
     this.restarts += 1;
     this.setStatus("unhealthy", `${this.id} exited (${why}); restarting (attempt ${this.restarts})`);
-    await sleep(this.spec.backoffMs * 2 ** (this.restarts - 1));
+    await this.sleep(this.spec.backoffMs * 2 ** (this.restarts - 1));
     if (this.stopping) return;
     await this.spawnOnce();
   }
@@ -504,7 +628,10 @@ export class ChildSupervisor extends EventEmitter {
   /** Graceful stop: signal, wait, then force-kill the process tree. Never leaves an orphan. */
   async stop(): Promise<void> {
     this.stopping = true;
+    this.terminalStartupChild = null;
     this.launchEpoch += 1; // any in-flight spawn continuation is now superseded
+    this.clearHealthTimer();
+    this.clearSleepTimers();
     const child = this.child;
     this.child = null;
     if (child && child.exitCode === null && child.signalCode === null) {
@@ -514,18 +641,19 @@ export class ChildSupervisor extends EventEmitter {
         // dies "gracefully" while its grandchild lives on. Windows has no polite signal to
         // try first, so nothing is lost by taking the whole tree at once.
         await this.forceStop(child);
-        await Promise.race([exited, sleep(2_000)]);
+        await Promise.race([exited, this.sleep(2_000)]);
       } else {
         child.kill();
-        const graceful = await Promise.race([exited.then(() => true), sleep(3_000).then(() => false)]);
+        const graceful = await Promise.race([exited.then(() => true), this.sleep(3_000).then(() => false)]);
         if (!graceful) {
           await this.forceStop(child);
-          await Promise.race([exited, sleep(2_000)]);
+          await Promise.race([exited, this.sleep(2_000)]);
         }
       }
     }
     // Descendants the tree kill could not reach (the wrapper was already dead) die here.
     await this.reapSurvivors();
+    this.clearSleepTimers();
     if (this._status !== "unconfigured") this.setStatus("stopped", `${this.id} stopped`);
   }
 
@@ -541,8 +669,8 @@ export class ChildSupervisor extends EventEmitter {
  * exception, a signal handler that raced. "exit" handlers must be synchronous, so this
  * spawnSyncs taskkill; the kernel leash covers the deaths where not even this runs.
  */
-export function registerExitBackstop(...supervisors: ChildSupervisor[]): void {
-  process.once("exit", () => {
+export function registerExitBackstop(...supervisors: ChildSupervisor[]): () => void {
+  const backstop = () => {
     for (const supervisor of supervisors) {
       // Tracked descendants ride along: when the wrapper is already dead, its pid reaches
       // nothing and the grandchildren are only killable by their own pids.
@@ -559,5 +687,7 @@ export function registerExitBackstop(...supervisors: ChildSupervisor[]): void {
         }
       }
     }
-  });
+  };
+  process.once("exit", backstop);
+  return () => process.off("exit", backstop);
 }

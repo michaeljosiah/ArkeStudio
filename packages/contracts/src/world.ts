@@ -48,6 +48,8 @@ export type SheetStatus = z.infer<typeof SheetStatusSchema>;
 export const VoiceAssignmentSchema = z
   .object({
     provider: z.string().min(1), // "elevenlabs" | "openai" | "voxa" | …
+    /** Concrete TTS model. Optional only for assignments written before SPEC-028. */
+    model: z.string().min(1).optional(),
     voiceId: z.string().min(1),
     label: z.string().optional(),
     assignedAtVersion: z.number().int().min(1),

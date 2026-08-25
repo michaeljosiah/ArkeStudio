@@ -1,10 +1,16 @@
 import type { ClientDeclarations, ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "./clients/anthropic.js";
-import { ComfyUiClient, type ComfyUiPreflight, type EngineBaseUrl, type ProgressSocket } from "./clients/comfyui.js";
+import {
+  ComfyUiClient,
+  type ComfyUiPreflight,
+  type EngineBaseUrl,
+  type EngineLocality,
+  type ProgressSocket,
+} from "./clients/comfyui.js";
 import { ElevenLabsClient } from "./clients/elevenlabs.js";
 import { FalClient } from "./clients/fal.js";
 import { HiggsfieldClient } from "./clients/higgsfield.js";
-import { KokoroClient, type SidecarBaseUrl } from "./clients/kokoro.js";
+import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
 import { captureProviderClient } from "./capture.js";
@@ -24,6 +30,8 @@ export interface ProviderClientDeps {
    * run at all — the Kokoro client is then absent rather than present and always failing.
    */
   voxa?: SidecarBaseUrl;
+  /** Host-owned synthesis path shared with direct Voxa callers, including its global scheduler. */
+  voxaSynthesize?: KokoroSynthesize;
   /**
    * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
@@ -32,12 +40,11 @@ export interface ProviderClientDeps {
   comfyui?: {
     baseUrl: EngineBaseUrl;
     preflight: ComfyUiPreflight;
-    /** Reads a cloned voice's clip so it can be uploaded to the engine (SPEC-022 §2.8). */
-    readClip?: (path: string) => Promise<Uint8Array>;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
     openSocket?: (url: string) => ProgressSocket;
     /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
     freeVramMb?: () => Promise<number | null>;
+    locality?: EngineLocality;
   };
   capture?: ProviderCallCapture;
 }
@@ -79,7 +86,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       : {
           kokoro: captureProviderClient(
             "kokoro",
-            (fetch) => new KokoroClient(fetch, deps.voxa!),
+            (fetch) => new KokoroClient(fetch, deps.voxa!, deps.voxaSynthesize),
             fetchImpl,
             capture,
           ),
@@ -94,9 +101,9 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 fetch,
                 deps.comfyui!.baseUrl,
                 deps.comfyui!.preflight,
-                deps.comfyui!.readClip,
                 deps.comfyui!.openSocket,
                 deps.comfyui!.freeVramMb,
+                deps.comfyui!.locality,
               ),
             fetchImpl,
             capture,

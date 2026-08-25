@@ -12,6 +12,7 @@ import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 
 /**
@@ -730,11 +731,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("assign-voice"),
+      /** Correlates the terminal assignment result; a refusal must not leave Assign spinning. */
+      requestId: UlidSchema,
       worldId: UlidSchema,
       path: z.string().min(1),
       voice: z
         .object({
           provider: z.string().min(1),
+          /** Optional only for an older renderer; the coordinator migrates before writing. */
+          model: z.string().min(1).optional(),
           voiceId: z.string().min(1),
           label: z.string().optional(),
         })
@@ -858,9 +863,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
-  /** Re-run detection, probing and readiness on demand — the Settings refresh. */
+  /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
-  /** Re-hash one recipe's pinned files (§2.5): the "Re-verify" affordance. */
+  /** Re-read node classes and re-hash one recipe's pins (§2.5): the "Re-verify" affordance. */
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
@@ -1176,8 +1181,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       shotId: z.string().min(1),
+      /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
       /** One of DELIVERIES; absent leaves the read at the provider's own default. */
-      delivery: z.string().min(1).optional(),
+      delivery: DeliverySchema.optional(),
     })
     .strict(),
   /**
@@ -1200,7 +1207,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * cannot preview, and a typo should fail at the frame rather than reach that check.
        */
       provider: ProviderIdSchema,
+      model: z.string().min(1),
       voiceId: z.string().min(1),
+      /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /** SPEC-011 R-17: local push-to-talk transcription. Audio goes to loopback, nowhere else. */
@@ -2099,6 +2109,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
+      /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /** A new numbered take from an old take's immutable snapshot. Always exactly one. */
@@ -2109,6 +2121,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
       takeId: TakeIdSchema,
+      /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   z

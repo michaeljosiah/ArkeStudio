@@ -1085,6 +1085,7 @@ describe("domain events and frames", () => {
         worldId: WORLD_ID,
         sheetId: "maren-kest",
         provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
         voiceId: "v1",
       },
       {

@@ -11,7 +11,8 @@ import type { CatalogueEntry } from "../../src/setup/catalogue.js";
 
 /**
  * SPEC-021 §2.4 in the setup service: the tree kind installs a whole runtime atomically,
- * detection always wins over installation (D10), external folders are the user's — per-file
+ * selected external sources win over installation while detection remains an offer (D10),
+ * external folders are the user's — per-file
  * paths, per-file repair, never a recursive delete — and the call-record truncation order
  * finding from issue 354 stays fixed.
  */
@@ -182,7 +183,7 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was downloaded");
   });
 
-  it("detection always wins: an externally present engine is never fetched (D10)", async () => {
+  it("an explicitly selected external engine is never fetched (D10)", async () => {
     const appRoot = await tempDir("arke-tree-");
     const events: DomainEvent[] = [];
     const d = deps({ externallyPresent: true });
@@ -195,6 +196,52 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
     assert.equal(last(events).components[0]!.state, "present");
     await svc.run();
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was downloaded");
+  });
+
+  it("a detected but unselected engine leaves the managed runtime available", async () => {
+    const appRoot = await tempDir("arke-tree-");
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(deps({ externallyPresent: false }), (e) => events.push(e), {
+      appRoot,
+      catalogue: [treeEntry()],
+      throttleMs: 0,
+    });
+    await svc.detect();
+    assert.equal(last(events).components[0]!.state, "available");
+  });
+
+  it("awaits runtime activation before resolving a dependent weights destination", async () => {
+    const appRoot = await tempDir("arke-tree-");
+    const modelsDir = join(appRoot, "comfyui-runtime", "ComfyUI_windows_portable", "ComfyUI", "models");
+    let resolvedModelsDir: string | null = null;
+    const events: DomainEvent[] = [];
+    const d = deps({
+      onTar: async (staged) => {
+        const inner = join(staged, "ComfyUI_windows_portable");
+        await mkdir(join(inner, "ComfyUI"), { recursive: true });
+        await mkdir(join(inner, "python_embeded"), { recursive: true });
+        await writeFile(join(inner, "ComfyUI", "main.py"), "print('comfy')");
+        await writeFile(join(inner, "python_embeded", "python.exe"), "MZ");
+      },
+    });
+    const runtime = { ...treeEntry(), optional: false };
+    const weights = { ...weightsEntry(), optional: false, requires: ["comfyui-runtime"] };
+    const svc = new LocalSetupService(d, (event) => events.push(event), {
+      appRoot,
+      catalogue: [runtime, weights],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => resolvedModelsDir },
+      onComponentReady: async (componentId) => {
+        if (componentId === "comfyui-runtime") resolvedModelsDir = modelsDir;
+      },
+    });
+
+    await svc.run();
+    assert.deepEqual(last(events).components.map((component) => component.state), ["ready", "ready"]);
+    assert.equal(
+      (await stat(join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors"))).isFile(),
+      true,
+    );
   });
 });
 

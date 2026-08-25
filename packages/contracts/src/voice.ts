@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ProductionBundle } from "./client-state.js";
+import type { ManifestModel } from "./manifest.js";
 import type { Sheet } from "./world.js";
 
 /**
@@ -11,16 +12,29 @@ import type { Sheet } from "./world.js";
 export const VoiceCandidateSchema = z
   .object({
     provider: z.string().min(1),
+    /** Concrete TTS model. Provider plus voice id is ambiguous once a provider has two models. */
+    model: z.string().min(1),
     voiceId: z.string().min(1),
     label: z.string().min(1),
     /** Provider metadata as descriptive attributes: age, timbre, accent, pace … */
     attributes: z.array(z.string()),
-    /** Local voices are a fixed catalogue and cannot be cloned (R-6, D4). */
+    /** Whether the selected execution target is this machine. */
     local: z.boolean(),
     canClone: z.boolean(),
+    /** Why this concrete target cannot execute now. Existing assignments remain visible with it. */
+    unavailableReason: z.string().min(1).optional(),
   })
   .strict();
 export type VoiceCandidate = z.infer<typeof VoiceCandidateSchema>;
+
+/** Collision-free transient identity for maps and selection state. */
+export function voiceTargetKey(target: Pick<VoiceCandidate, "provider" | "model" | "voiceId">): string {
+  return JSON.stringify([target.provider, target.model, target.voiceId]);
+}
+
+/** The complete speech-container vocabulary carried by cache and result events. */
+export const VoiceAudioFormatSchema = z.enum(["wav", "mp3", "flac"]);
+export type VoiceAudioFormat = z.infer<typeof VoiceAudioFormatSchema>;
 
 export const VoiceRuntimeSourceSchema = z.enum(["environment", "configured", "bundled", "absent"]);
 export type VoiceRuntimeSource = z.infer<typeof VoiceRuntimeSourceSchema>;
@@ -133,7 +147,10 @@ export function rankVoices(extracted: string[], candidates: VoiceCandidate[]): R
     (a, b) =>
       b.overlap - a.overlap ||
       Number(a.candidate.local) - Number(b.candidate.local) ||
-      a.candidate.label.localeCompare(b.candidate.label),
+      a.candidate.label.localeCompare(b.candidate.label) ||
+      a.candidate.provider.localeCompare(b.candidate.provider) ||
+      a.candidate.model.localeCompare(b.candidate.model) ||
+      a.candidate.voiceId.localeCompare(b.candidate.voiceId),
   );
 }
 
@@ -157,7 +174,16 @@ export const ClonedVoiceSchema = z
     id: z.string().min(1),
     name: z.string().min(1),
     /** World-relative portable path to the clip, resolved to `spk_audio_prompt` at dispatch. */
-    clip: z.string().min(1),
+    clip: z
+      .string()
+      .min(1)
+      .max(400)
+      .refine((value) => !value.startsWith("/") && !/^[a-zA-Z]:/.test(value), "a voice clip path is relative")
+      .refine((value) => !value.includes("\\") && !value.includes("\0") && !value.includes(":"), "a voice clip path is portable")
+      .refine(
+        (value) => value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+        "a voice clip path cannot traverse",
+      ),
     /** Required when a voice is MADE (D3); defaulted here so an older file still reads. */
     description: z.string().default(""),
     attributes: z.array(z.string()).default([]),
@@ -169,6 +195,42 @@ export const ClonedVoiceSchema = z
   })
   .passthrough();
 export type ClonedVoice = z.infer<typeof ClonedVoiceSchema>;
+
+export const CLONED_VOICE_PROVIDER = "comfyui" as const;
+export const CLONED_VOICE_MODEL = "comfyui-cloned-voice" as const;
+export const KOKORO_VOICE_MODEL = "kokoro-82m" as const;
+export const ELEVENLABS_VOICE_MODEL = "eleven_multilingual_v2" as const;
+
+/** Cloned voice narration is intentionally unsupported until long-form queue chunking exists. */
+export function supportsVoiceUse(
+  candidate: { provider: string; model?: string },
+  use: "preview" | "line" | "bench" | "narration",
+): boolean {
+  return use !== "narration" ||
+    candidate.provider !== CLONED_VOICE_PROVIDER ||
+    (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
+}
+
+export type VoiceSourceResolution =
+  | { kind: "catalogue" }
+  | { kind: "cloned"; voice: ClonedVoice }
+  | { kind: "missing-clone" };
+
+/** One authority for deciding whether a target is backed by a world-owned reference clip. */
+export function voiceSourceFor(
+  voices: readonly ClonedVoice[],
+  provider: string,
+  model: string,
+  voiceId: string,
+): VoiceSourceResolution {
+  if (provider !== CLONED_VOICE_PROVIDER || model !== CLONED_VOICE_MODEL) return { kind: "catalogue" };
+  const voice = voices.find((candidate) => candidate.id === voiceId);
+  return voice ? { kind: "cloned", voice } : { kind: "missing-clone" };
+}
+
+export function isClonedVoice(candidate: Pick<VoiceCandidate, "provider" | "model">): boolean {
+  return candidate.provider === CLONED_VOICE_PROVIDER && candidate.model === CLONED_VOICE_MODEL;
+}
 
 /**
  * Parse a library, keeping what parses. A malformed entry costs one voice; refusing the file
@@ -227,7 +289,8 @@ export function newClonedVoice(input: {
   if (!description) {
     return { ok: false, reason: "a cloned voice needs a description — it is what the picker matches on" };
   }
-  if (!input.clip.trim()) return { ok: false, reason: "a cloned voice needs a recording" };
+  const parsedClip = ClonedVoiceSchema.shape.clip.safeParse(input.clip.trim());
+  if (!parsedClip.success) return { ok: false, reason: "a cloned voice needs a safe world-relative recording" };
   if (!input.consent) {
     return { ok: false, reason: "confirm the person speaking agreed to have their voice cloned" };
   }
@@ -236,7 +299,7 @@ export function newClonedVoice(input: {
     voice: {
       id: mintVoiceId(name, input.taken),
       name,
-      clip: input.clip,
+      clip: parsedClip.data,
       description,
       attributes: extractVoiceAttributes(description),
       ...(input.artifactId !== undefined ? { artifactId: input.artifactId } : {}),
@@ -250,17 +313,24 @@ export function newClonedVoice(input: {
  * The library as picker candidates. Local, and never itself cloneable: cloning a clone would
  * copy a copy, and the original recording is already in the library beside it.
  */
-export function clonedVoiceCandidates(voices: readonly ClonedVoice[]): VoiceCandidate[] {
+export function clonedVoiceCandidates(
+  voices: readonly ClonedVoice[],
+  availability: { local?: boolean; unavailableReason?: string } = {},
+): VoiceCandidate[] {
   return voices.map((v) => ({
     // The engine is ComfyUI, running a voice recipe (SPEC-022 §2.1). A cloned voice is addressed
     // like every other candidate — provider plus id — and the recipe is the model behind it, so
     // swapping the engine later is a recipe edit rather than a change to what a voice IS.
-    provider: "comfyui",
+    provider: CLONED_VOICE_PROVIDER,
+    model: CLONED_VOICE_MODEL,
     voiceId: v.id,
     label: v.name,
     attributes: v.attributes,
-    local: true,
+    local: availability.local ?? true,
     canClone: false,
+    ...(availability.unavailableReason !== undefined
+      ? { unavailableReason: availability.unavailableReason }
+      : {}),
   }));
 }
 
@@ -300,8 +370,9 @@ export function previewLineFor(sheet: Sheet, productions: ProductionBundle[]): P
 // Delivery (R-15, D9): shapes a take only; provider-specific; refusals stated
 // ---------------------------------------------------------------------------
 
-export const DELIVERIES = ["measured", "whispered", "breaking", "cold", "warm", "urgent"] as const;
-export type Delivery = (typeof DELIVERIES)[number];
+export const DeliverySchema = z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
+export const DELIVERIES = DeliverySchema.options;
+export type Delivery = z.infer<typeof DeliverySchema>;
 
 const ELEVENLABS_DELIVERY: Record<Delivery, Record<string, number>> = {
   measured: { stability: 0.7, similarity_boost: 0.8, style: 0.2 },
@@ -339,6 +410,23 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
 }
 
+/** Deliveries a concrete model may offer before enqueue; absent means provider defaults only. */
+export function supportedDeliveries(model: Pick<ManifestModel, "limits"> | null | undefined): readonly Delivery[] {
+  return model?.limits.deliveries ?? [];
+}
+
+export function voiceFormatForModel(model: Pick<ManifestModel, "limits">): VoiceAudioFormat {
+  return model.limits.audioFormat ?? "mp3";
+}
+
+/** Resolve assignments written before model identity became durable. */
+export function legacyVoiceModel(provider: string, voiceId: string, clonedVoices: readonly ClonedVoice[] = []): string | null {
+  if (provider === "kokoro") return KOKORO_VOICE_MODEL;
+  if (provider === "elevenlabs") return ELEVENLABS_VOICE_MODEL;
+  if (provider === CLONED_VOICE_PROVIDER && clonedVoices.some((voice) => voice.id === voiceId)) return CLONED_VOICE_MODEL;
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // The narrator — who reads the app's own prose (asked for 2026-08-17)
 // ---------------------------------------------------------------------------
@@ -350,10 +438,16 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
  * this app spends money on one. A cloud narrator is available, and is chosen deliberately with
  * its per-character price stated.
  */
-export const DEFAULT_NARRATOR = { provider: "kokoro", voiceId: "bm_george", label: "George" } as const;
+export const DEFAULT_NARRATOR = {
+  provider: "kokoro",
+  model: KOKORO_VOICE_MODEL,
+  voiceId: "bm_george",
+  label: "George",
+} as const;
 
 export interface NarratorChoice {
   provider: string;
+  model: string;
   voiceId: string;
   label: string | undefined;
   /** True when nobody chose this — the shipped local voice, and free. */
@@ -368,12 +462,28 @@ export interface NarratorChoice {
  * turn every "read aloud" into an error about a voice the user cannot see any more.
  */
 export function narratorFor(
-  stored: { provider: string; voiceId: string; label?: string } | null,
+  stored: { provider: string; model?: string; voiceId: string; label?: string } | null,
   catalogue: readonly VoiceCandidate[],
 ): NarratorChoice {
   if (stored !== null) {
-    const live = catalogue.find((v) => v.provider === stored.provider && v.voiceId === stored.voiceId);
-    if (live) return { provider: live.provider, voiceId: live.voiceId, label: live.label, fallback: false };
+    const model = stored.model ?? (
+      stored.provider === CLONED_VOICE_PROVIDER &&
+      catalogue.some((voice) => isClonedVoice(voice) && voice.voiceId === stored.voiceId)
+        ? CLONED_VOICE_MODEL
+        : legacyVoiceModel(stored.provider, stored.voiceId)
+    );
+    const live = catalogue.find(
+      (v) => v.provider === stored.provider && v.model === model && v.voiceId === stored.voiceId,
+    );
+    if (live) {
+      return {
+        provider: live.provider,
+        model: live.model,
+        voiceId: live.voiceId,
+        label: live.label,
+        fallback: false,
+      };
+    }
   }
   return { ...DEFAULT_NARRATOR, label: DEFAULT_NARRATOR.label as string | undefined, fallback: true };
 }

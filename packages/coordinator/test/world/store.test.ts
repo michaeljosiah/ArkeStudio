@@ -95,10 +95,14 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir, { clock: CLOCK });
     let finishWrite!: () => void;
-    const held = new Promise<void>((resolve) => { finishWrite = resolve; });
+    const held = new Promise<void>((resolve) => {
+      finishWrite = resolve;
+    });
     const write = store.ownedWrite(() => held);
     let closed = false;
-    const close = store.close().then(() => { closed = true; });
+    const close = store.close().then(() => {
+      closed = true;
+    });
 
     await delay(20);
     assert.equal(closed, false);
@@ -109,6 +113,50 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await close;
     const reopened = await WorldStore.open(dir, { clock: CLOCK });
     await reopened.close();
+  });
+
+  it("refuses commit and owned writes after close without running their callbacks", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    await store.close();
+    let called = false;
+
+    await assert.rejects(() => store.commit({ kind: "closed-test", source: "test", files: [] }), /closed/);
+    await assert.rejects(
+      () => store.commitUnserialised({ kind: "closed-test", source: "test", files: [] }),
+      /closed/,
+    );
+    await assert.rejects(() => store.reload(), /closed/);
+    await assert.rejects(() => store.reconcileExternalEdit("characters/maren-kest.md"), /closed/);
+    await assert.rejects(
+      () =>
+        store.ownedWrite(async () => {
+          called = true;
+        }),
+      /closed/,
+    );
+    assert.equal(called, false, "a rejected owned write never reaches the filesystem callback");
+    await store.close();
+  });
+
+  it("does not expose mutation seams on a read-only store", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
+    let called = false;
+    await assert.rejects(
+      () => store.commit({ kind: "read-only-test", source: "test", files: [] }),
+      /read-only/,
+    );
+    await assert.rejects(
+      () =>
+        store.ownedWrite(async () => {
+          called = true;
+        }),
+      /read-only/,
+    );
+    await assert.rejects(() => store.reload(), /read-only/);
+    assert.equal(called, false);
+    await store.close();
   });
 
   it("opens a world with one malformed sheet, listing the failure (R-2)", async () => {

@@ -149,6 +149,7 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.match(modelPriceCopy(model("flux-2-pro")), /\/ megapixel$/);
     for (const local of SHIPPED_MANIFEST.models.filter((m) => m.pricing.kind === "unmetered")) {
       assert.match(modelPriceCopy(local), /unmetered/);
+      assert.doesNotMatch(modelPriceCopy(local), /on this machine/, "runtime selection decides locality");
     }
   });
 

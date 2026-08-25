@@ -42,6 +42,7 @@ export function whyDictationIsOff(
 ): string | null {
   const whisper = runtime?.engineStatus.whisper;
   if (whisper) {
+    if (whisper.state === "ready") return null;
     if (whisper.state === "downloading") return "the dictation model is still downloading";
     if (whisper.state === "missing") return "the dictation model has not been downloaded yet";
     if (whisper.state === "verification-failed") {

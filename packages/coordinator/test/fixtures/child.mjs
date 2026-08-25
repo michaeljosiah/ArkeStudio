@@ -1,5 +1,5 @@
 // Supervised-child stand-in for supervisor tests. Behaviour is driven by env:
-//   MODE=healthy | never-healthy | ignore-stop
+//   MODE=healthy | never-healthy | ignore-stop | exit-immediately
 //   DIE_AFTER_MS=<n> — exit(1) n ms after becoming reachable
 //   PASSWORD=<pw> — speak the OpenCode v2 launch protocol: print `server password <pw>`
 //                   on stdout and answer 401 to any request without matching Basic auth
@@ -8,6 +8,10 @@ import http from "node:http";
 const mode = process.env.MODE ?? "healthy";
 const port = Number(process.env.PORT);
 const password = process.env.PASSWORD;
+const healthyRequests = process.env.HEALTHY_REQUESTS ? Number(process.env.HEALTHY_REQUESTS) : null;
+let requests = 0;
+
+if (mode === "exit-immediately") process.exit(2);
 
 if (password) {
   // The real server prints this before serving; the supervisor's line handler must see it.
@@ -15,6 +19,7 @@ if (password) {
 }
 
 const server = http.createServer((req, res) => {
+  requests += 1;
   if (password) {
     const expected = "Basic " + Buffer.from(`opencode:${password}`).toString("base64");
     if (req.headers.authorization !== expected) {
@@ -23,7 +28,7 @@ const server = http.createServer((req, res) => {
       return;
     }
   }
-  if (mode === "never-healthy") {
+  if (mode === "never-healthy" || (healthyRequests !== null && requests > healthyRequests)) {
     res.writeHead(500);
     res.end("not ready");
   } else {

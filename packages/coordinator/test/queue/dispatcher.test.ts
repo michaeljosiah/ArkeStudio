@@ -4,7 +4,12 @@ import { appendFile, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, Job, LedgerEntry } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { foldJobHistory, JobQueue, type EnqueueInput, type JobQueueOptions } from "../../src/queue/dispatcher.js";
+import {
+  foldJobHistory,
+  JobQueue,
+  type EnqueueInput,
+  type JobQueueOptions,
+} from "../../src/queue/dispatcher.js";
 import { FakeProvider, jpegBytes, pngBytes, truncatedPngBytes, webpBytes } from "./fake-provider.js";
 
 /**
@@ -37,9 +42,13 @@ async function makeHarness(
   opts: {
     getKey?: (p: string) => Promise<string | null>;
     baseConcurrency?: number;
+    providerConcurrency?: Readonly<Record<string, number>>;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
     onTerminal?: (job: Job) => void | Promise<void>;
+    onFinalizationFailure?: JobQueueOptions["onFinalizationFailure"];
     readImageReferences?: JobQueueOptions["readImageReferences"];
+    readVoiceReference?: JobQueueOptions["readVoiceReference"];
+    admit?: JobQueueOptions["admit"];
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -54,9 +63,13 @@ function build(
   opts: {
     getKey?: (p: string) => Promise<string | null>;
     baseConcurrency?: number;
+    providerConcurrency?: Readonly<Record<string, number>>;
     landInWorld?: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
     onTerminal?: (job: Job) => void | Promise<void>;
+    onFinalizationFailure?: JobQueueOptions["onFinalizationFailure"];
     readImageReferences?: JobQueueOptions["readImageReferences"];
+    readVoiceReference?: JobQueueOptions["readVoiceReference"];
+    admit?: JobQueueOptions["admit"];
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -89,7 +102,10 @@ function build(
       }),
     onProviderFault: (provider, message) => faults.push({ provider, message }),
     ...(opts.onTerminal ? { onTerminal: opts.onTerminal } : {}),
+    ...(opts.onFinalizationFailure ? { onFinalizationFailure: opts.onFinalizationFailure } : {}),
     ...(opts.readImageReferences ? { readImageReferences: opts.readImageReferences } : {}),
+    ...(opts.readVoiceReference ? { readVoiceReference: opts.readVoiceReference } : {}),
+    ...(opts.admit ? { admit: opts.admit } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
     backoffCapMs: 20,
@@ -97,6 +113,7 @@ function build(
     offlineRetryMs: 40,
     baseIntervalMs: 1,
     ...(opts.baseConcurrency !== undefined ? { baseConcurrency: opts.baseConcurrency } : {}),
+    ...(opts.providerConcurrency !== undefined ? { providerConcurrency: opts.providerConcurrency } : {}),
   });
   const harness: Harness = {
     queue,
@@ -224,6 +241,44 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
   });
 });
 
+describe("enqueue admission during shutdown", () => {
+  for (const close of ["stop accepting", "dispose"] as const) {
+    it(`refuses work whose admission finishes after ${close}, without returning an unjournalled id`, async () => {
+      let entered!: () => void;
+      const admissionEntered = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let release!: () => void;
+      const admissionPaused = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const h = await makeHarness(
+        {},
+        {
+          admit: async () => {
+            entered();
+            await admissionPaused;
+            return { ok: true };
+          },
+        },
+      );
+      await h.queue.start();
+
+      const enqueuing = h.queue.enqueue(INPUT);
+      await admissionEntered;
+      if (close === "dispose") h.queue.dispose();
+      else h.queue.stopAccepting();
+      release();
+
+      await assert.rejects(enqueuing, /not accepting new work/);
+      await h.queue.drain();
+      assert.equal(await readFile(h.journalPath, "utf8").catch(() => ""), "");
+      assert.deepEqual(h.queue.listJobs(), []);
+      h.queue.dispose();
+    });
+  }
+});
+
 describe("ephemeral provider image references", () => {
   it("resolves bytes before submit, never journals them, and lands synchronous output without polling", async () => {
     const fake = new FakeProvider({});
@@ -264,7 +319,11 @@ describe("ephemeral provider image references", () => {
     const fake = new FakeProvider({});
     const h = await makeHarness(
       { fake },
-      { readImageReferences: async () => { throw new Error("image reference path is invalid"); } },
+      {
+        readImageReferences: async () => {
+          throw new Error("image reference path is invalid");
+        },
+      },
     );
     await h.queue.start();
     const job = await h.queue.enqueue({
@@ -296,6 +355,262 @@ describe("ephemeral provider image references", () => {
   });
 });
 
+describe("ephemeral provider voice references", () => {
+  it("refuses a remote upload without destination-specific confirmation before journalling", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness(
+      { fake },
+      {
+        readVoiceReference: async () => {
+          throw new Error("must not read the clip");
+        },
+      },
+    );
+    await h.queue.start();
+    await assert.rejects(
+      h.queue.enqueue({
+        ...INPUT,
+        provider: "comfyui",
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: { voiceId: "harbour", text: "A line." },
+        voiceReference: true,
+        engine: { source: "user-url", instanceId: "remote-1", locality: "remote" },
+      }),
+      /explicit confirmation.*destination/,
+    );
+    assert.equal(fake.submitCount, 0);
+    assert.equal((await readFile(h.journalPath, "utf8").catch(() => "")).includes("harbour"), false);
+    h.queue.dispose();
+  });
+
+  it("accepts confirmation only for the exact remote engine instance", async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [
+      {
+        name: "speech.wav",
+        contentType: "audio/wav",
+        data: Uint8Array.from([
+          0x52, 0x49, 0x46, 0x46, 38, 0, 0, 0, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20, 16, 0, 0, 0, 1,
+          0, 1, 0, 0x44, 0xac, 0, 0, 0x88, 0x58, 1, 0, 2, 0, 16, 0, 0x64, 0x61, 0x74, 0x61, 2, 0, 0, 0, 0, 0,
+        ]),
+      },
+    ];
+    const h = await makeHarness(
+      { comfyui: fake },
+      {
+        readVoiceReference: async () => ({
+          name: `${"a".repeat(64)}.wav`,
+          contentType: "audio/wav",
+          data: Uint8Array.from([82, 73, 70, 70, 1, 2, 3, 4]),
+        }),
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      provider: "comfyui",
+      model: "comfyui-cloned-voice",
+      capability: "voice-tts",
+      params: { voiceId: "harbour", text: "A line." },
+      voiceReference: true,
+      engine: { source: "user-url", instanceId: "remote-1", locality: "remote" },
+      voiceUploadConfirmedFor: "remote-1",
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    await until(() => {
+      const current = foldedJob(h, job.id);
+      return current?.status === "succeeded" || current?.status === "failed";
+    });
+    assert.equal(foldedJob(h, job.id)?.status, "succeeded", foldedJob(h, job.id)?.error ?? undefined);
+    assert.equal(foldedJob(h, job.id)?.voiceUploadConfirmedFor, "remote-1");
+    assert.equal(fake.submitCount, 1);
+    h.queue.dispose();
+  });
+
+  it("resolves clip bytes before submit while journalling only the voice id and marker", async () => {
+    const fake = new FakeProvider({});
+    fake.inlineArtifacts = [
+      {
+        name: "speech.mp3",
+        contentType: "audio/mpeg",
+        data: Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]),
+      },
+    ];
+    const secret = Uint8Array.from([82, 73, 70, 70, 1, 2, 3, 4]);
+    const h = await makeHarness(
+      { fake },
+      {
+        readVoiceReference: async (_worldId, provider, model, voiceId) => {
+          assert.equal(provider, "fake");
+          assert.equal(model, "seedance-2.0");
+          assert.equal(voiceId, "harbour-glass");
+          return { name: `${"a".repeat(64)}.wav`, contentType: "audio/wav", data: secret };
+        },
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "voice-tts",
+      target: { kind: "bench-take", id: "sess/take" },
+      params: { text: "The tide turns.", voiceId: "harbour-glass", audioFormat: "flac" },
+      voiceReference: true,
+      landing: { dir: ".sessions/sess/media/take" },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    assert.deepEqual(fake.submittedVoiceReference?.data, secret);
+    const journal = await readFile(h.journalPath, "utf8");
+    assert.match(journal, /harbour-glass/);
+    assert.match(journal, /"voiceReference":true/);
+    assert.equal(journal.includes(Buffer.from(secret).toString("base64")), false);
+    assert.equal(/[A-Z]:\\|\/Users\//.test(journal), false);
+    h.queue.dispose();
+  });
+
+  it("lands synchronous paid audio without journalling a synthetic running state", async () => {
+    const elevenlabs = new FakeProvider({});
+    elevenlabs.inlineArtifacts = [
+      {
+        name: "speech.mp3",
+        contentType: "audio/mpeg",
+        data: Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]),
+      },
+    ];
+    const h = await makeHarness({ elevenlabs });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      provider: "elevenlabs",
+      model: "eleven_multilingual_v2",
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      params: { voiceId: "v1", text: "The harbour remembers." },
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    const journal = await readFile(h.journalPath, "utf8");
+    assert.doesNotMatch(journal, /"status":"running"/);
+    assert.equal(elevenlabs.pollCount, 0);
+    assert.ok(await readFile(join(h.worldDir, foldedJob(h, job.id)!.landedFiles![0]!)));
+    h.queue.dispose();
+  });
+
+  it("a crash after inline audio lands recovers the terminal ledger without provider activity", async () => {
+    const elevenlabs = new FakeProvider({});
+    elevenlabs.inlineArtifacts = [
+      {
+        name: "speech.mp3",
+        contentType: "audio/mpeg",
+        data: Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]),
+      },
+    ];
+    const h = await makeHarness({ elevenlabs });
+    await h.queue.start();
+    h.ledger.onAppend = () => {
+      throw new Error("killed before ledger");
+    };
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      provider: "elevenlabs",
+      model: "eleven_multilingual_v2",
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      params: { voiceId: "v1", text: "The harbour remembers." },
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    h.queue.dispose();
+    await h.queue.drain();
+    assert.equal(h.ledger.entries.length, 0);
+    assert.equal(elevenlabs.submitCount, 1);
+
+    h.ledger.onAppend = null;
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((entry) => entry.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(elevenlabs.submitCount, 1);
+    assert.equal(elevenlabs.pollCount, 0);
+    assert.equal(h2.ledger.entries.length, 1);
+    assert.ok(await readFile(join(h.worldDir, foldedJob(h2, job.id)!.landedFiles![0]!)));
+    h2.queue.dispose();
+  });
+
+  it("recovers spooled inline audio after a crash while its world was unavailable", async () => {
+    const elevenlabs = new FakeProvider({});
+    elevenlabs.inlineArtifacts = [
+      {
+        name: "speech.mp3",
+        contentType: "audio/mpeg",
+        data: Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]),
+      },
+    ];
+    const h = await makeHarness({ elevenlabs }, { landInWorld: async () => false });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      provider: "elevenlabs",
+      model: "eleven_multilingual_v2",
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      params: { voiceId: "v1", text: "The harbour remembers." },
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    await until(() => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true);
+    assert.equal(elevenlabs.submitCount, 1);
+    h.queue.dispose();
+    await h.queue.drain();
+
+    const h2 = build(h.journalPath, h.worldDir, { elevenlabs }, {});
+    const report = await h2.queue.start();
+    assert.equal(report.find((entry) => entry.jobId === job.id)?.detail, "resumed durable inline artifacts");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    assert.equal(elevenlabs.submitCount, 1, "the paid request was not repeated");
+    assert.equal(elevenlabs.pollCount, 0, "a synthetic id was never polled");
+    assert.ok(await readFile(join(h2.worldDir, foldedJob(h2, job.id)!.landedFiles![0]!)));
+    h2.queue.dispose();
+  });
+
+  it("fails an unsafe clip read before a provider attempt", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness(
+      { fake },
+      {
+        readVoiceReference: async () => {
+          throw new Error("voice recording escapes the world");
+        },
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "voice-tts",
+      params: { text: "x", voiceId: "unsafe", audioFormat: "flac" },
+      voiceReference: true,
+    });
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.equal(fake.submitCount, 0);
+    assert.equal(foldedJob(h, job.id)?.attempt, 0);
+    h.queue.dispose();
+  });
+
+  it("refuses an absolute speaker path before it can enter the journal", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    await assert.rejects(
+      h.queue.enqueue({
+        ...INPUT,
+        capability: "voice-tts",
+        params: { text: "x", voiceId: "unsafe", speakerFile: String.raw`C:\worlds\voice.wav` },
+      }),
+      /cannot be stored in jobs/,
+    );
+    assert.equal(await readFile(h.journalPath, "utf8").catch(() => ""), "");
+    h.queue.dispose();
+  });
+});
+
 describe("reference finalization after provider success", () => {
   it("retries a failed finalizer without provider or ledger activity", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
@@ -319,10 +634,16 @@ describe("reference finalization after provider success", () => {
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
     await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
-    assert.equal(h.events.some((event) => event.type === "job.ready"), false);
+    assert.equal(
+      h.events.some((event) => event.type === "job.ready"),
+      false,
+    );
     assert.equal(fake.submitCount, 1);
     assert.equal(h.ledger.entries.length, 1);
-    assert.match(foldedJob(h, job.id)?.finalization?.error ?? "", /will not contact the provider or charge again/);
+    assert.match(
+      foldedJob(h, job.id)?.finalization?.error ?? "",
+      /will not contact the provider or charge again/,
+    );
 
     fail = false;
     await Promise.all([h.queue.retryFinalization(job.id), h.queue.retryFinalization(job.id)]);
@@ -534,15 +855,150 @@ describe("reference finalization after provider success", () => {
       updatedAt: "2026-08-04T12:01:00.000Z",
     };
     await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
-    h.ledger.entries.push({ ts: terminal.updatedAt, worldId: terminal.worldId, productionId: terminal.productionId!,
-      jobId: terminal.id, provider: terminal.provider, model: terminal.model, outcome: "succeeded",
-      estimatedMicroUsd: terminal.estimatedMicroUsd, actualMicroUsd: terminal.estimatedMicroUsd,
-      actualSource: "manifest-derived" });
+    h.ledger.entries.push({
+      ts: terminal.updatedAt,
+      worldId: terminal.worldId,
+      productionId: terminal.productionId!,
+      jobId: terminal.id,
+      provider: terminal.provider,
+      model: terminal.model,
+      outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd,
+      actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived",
+    });
     const h2 = h.revive();
     await h2.queue.start();
     assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
     assert.equal(finalizations, 1);
     h2.queue.dispose();
+  });
+
+  it("replays an interrupted voice-line finalization without provider or ledger activity", async () => {
+    const fake = new FakeProvider({});
+    let finalizations = 0;
+    let fail = false;
+    const failed: Job[] = [];
+    const h = await makeHarness(
+      { fake },
+      {
+        onTerminal: () => {
+          finalizations += 1;
+          if (fail) throw new Error("disk busy");
+        },
+        onFinalizationFailure: (job) => failed.push(job),
+      },
+    );
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal: Job = {
+      ...INPUT,
+      id: "jb_01J8E000000000000000000A77",
+      idempotencyKey: "01J8E100000000000000000A77",
+      status: "succeeded",
+      providerJobId: "elevenlabs-a77",
+      attempt: 1,
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      landedFiles: ["productions/saltlight/audio/A77.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push({
+      ts: terminal.updatedAt,
+      worldId: terminal.worldId,
+      productionId: terminal.productionId!,
+      jobId: terminal.id,
+      provider: terminal.provider,
+      model: terminal.model,
+      outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd,
+      actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived",
+    });
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(finalizations, 1);
+    assert.equal(fake.submitCount, 0);
+    assert.equal(h2.ledger.entries.length, 1);
+
+    fail = true;
+    await h2.queue.retryFinalization(terminal.id);
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "failed");
+    assert.match(foldedJob(h2, terminal.id)?.finalization?.error ?? "", /Retry finalization/);
+    assert.equal(failed.at(-1)?.target.kind, "voice-line");
+    fail = false;
+    await h2.queue.retryFinalization(terminal.id);
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(fake.submitCount, 0);
+    assert.equal(h2.ledger.entries.length, 1);
+    h2.queue.dispose();
+  });
+
+  it("a failed voice-line finalization survives restart for an explicit no-charge retry", async () => {
+    const fake = new FakeProvider({});
+    let fail = true;
+    let finalizations = 0;
+    const h = await makeHarness(
+      { fake },
+      {
+        onTerminal: () => {
+          finalizations += 1;
+          if (fail) throw new Error("disk busy");
+        },
+      },
+    );
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal: Job = {
+      ...INPUT,
+      id: "jb_01J8E000000000000000000A78",
+      idempotencyKey: "01J8E100000000000000000A78",
+      status: "succeeded",
+      providerJobId: "elevenlabs-a78",
+      attempt: 1,
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      landedFiles: ["productions/saltlight/audio/A78.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+      error: null,
+      createdAt: "2026-08-04T12:00:00.000Z",
+      updatedAt: "2026-08-04T12:01:00.000Z",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push({
+      ts: terminal.updatedAt,
+      worldId: terminal.worldId,
+      productionId: terminal.productionId!,
+      jobId: terminal.id,
+      provider: terminal.provider,
+      model: terminal.model,
+      outcome: "succeeded",
+      estimatedMicroUsd: terminal.estimatedMicroUsd,
+      actualMicroUsd: terminal.estimatedMicroUsd,
+      actualSource: "manifest-derived",
+    });
+
+    const h2 = h.revive();
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "failed");
+    assert.equal(finalizations, 1);
+    h2.queue.dispose();
+
+    fail = false;
+    const h3 = h2.revive();
+    await h3.queue.start();
+    assert.equal(finalizations, 1, "failed finalization is not replayed automatically every launch");
+    await h3.queue.retryFinalization(terminal.id);
+    assert.equal(foldedJob(h3, terminal.id)?.finalization?.status, "complete");
+    assert.equal(finalizations, 2);
+    assert.equal(fake.submitCount, 0);
+    assert.equal(h3.ledger.entries.length, 1);
+    h3.queue.dispose();
   });
 });
 
@@ -598,7 +1054,10 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     fake.onSubmitAccepted = null;
     const h2 = h.revive();
     const report = await h2.queue.start();
-    assert.deepEqual(report.map((r) => [r.jobId, r.action]), [[job.id, "adopted"]]);
+    assert.deepEqual(
+      report.map((r) => [r.jobId, r.action]),
+      [[job.id, "adopted"]],
+    );
     await until(() => foldedJob(h2, job.id)?.status === "succeeded");
     assert.equal(fake.submitCount, 1, "no second submission — the whole point");
     assert.equal(h2.ledger.entries.length, 1, "exactly one ledger entry");
@@ -621,7 +1080,11 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     fake.submitHangs = false;
     const h2 = h.revive();
     const report = await h2.queue.start();
-    assert.equal(report.find((r) => r.jobId === job.id)?.action, "resubmitted", "lookup said provably absent");
+    assert.equal(
+      report.find((r) => r.jobId === job.id)?.action,
+      "resubmitted",
+      "lookup said provably absent",
+    );
     await until(() => foldedJob(h2, job.id)?.status === "succeeded");
     assert.equal(fake.submitCount, 2, "one hung request, one real resubmission after reconciliation");
     assert.equal(h2.ledger.entries.length, 1);
@@ -727,10 +1190,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     const job3 = await r.queue.enqueue(INPUT);
     await until(() => foldedJob(r, job3.id)?.status === "needs-reconciliation");
     fake3.submitError = null;
-    await Promise.all([
-      r.queue.resolveHeld(job3.id, "resubmit"),
-      r.queue.resolveHeld(job3.id, "resubmit"),
-    ]);
+    await Promise.all([r.queue.resolveHeld(job3.id, "resubmit"), r.queue.resolveHeld(job3.id, "resubmit")]);
     await until(() => foldedJob(r, job3.id)?.status === "succeeded");
     assert.equal(fake3.submitCount, 2, "concurrent decisions authorize only one additional call");
     r.queue.dispose();
@@ -808,7 +1268,11 @@ describe("kill during download and after terminal (§3.2)", () => {
     const h3 = h2.revive();
     h2.queue.dispose();
     const again = await h3.queue.start();
-    assert.equal(again.find((r) => r.jobId === job.id), undefined, "idempotent: a second recovery adds nothing");
+    assert.equal(
+      again.find((r) => r.jobId === job.id),
+      undefined,
+      "idempotent: a second recovery adds nothing",
+    );
     assert.equal(h3.ledger.entries.length, 1);
     h3.queue.dispose();
   });
@@ -824,7 +1288,12 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
 
     const jobs: Job[] = [];
     for (let i = 0; i < 40; i++) jobs.push(await h.queue.enqueue({ ...INPUT, provider: "bad" }));
-    const other = await h.queue.enqueue({ ...INPUT, provider: "good", capability: "image", model: "flux-pro-1.1" });
+    const other = await h.queue.enqueue({
+      ...INPUT,
+      provider: "good",
+      capability: "image",
+      model: "flux-pro-1.1",
+    });
 
     await until(() => h.queue.queueStatus("bad").paused);
     await until(() => foldedJob(h, other.id)?.status === "succeeded");
@@ -833,7 +1302,10 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
     assert.match(h.faults[0]!.message, /401/);
     for (const job of jobs) {
       const now = foldedJob(h, job.id)!;
-      assert.ok(now.status === "queued" || now.status === "submitting", "held, never failed — they were not wrong");
+      assert.ok(
+        now.status === "queued" || now.status === "submitting",
+        "held, never failed — they were not wrong",
+      );
     }
     assert.equal(h.queue.queueStatus("bad").held, 40);
 
@@ -907,8 +1379,31 @@ describe("rate and concurrency (R-10, D8)", () => {
     await h.queue.start();
     const a = await h.queue.enqueue({ ...INPUT, worldId: WORLD });
     const b = await h.queue.enqueue({ ...INPUT, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
-    await until(() => foldedJob(h, a.id)?.status === "succeeded" && foldedJob(h, b.id)?.status === "succeeded");
+    await until(
+      () => foldedJob(h, a.id)?.status === "succeeded" && foldedJob(h, b.id)?.status === "succeeded",
+    );
     assert.equal(fake.maxObservedConcurrent, 1, "one key, one limit, regardless of worlds (D8)");
+    h.queue.dispose();
+  });
+
+  it("a Kokoro override stays at one while other providers retain the global limit", async () => {
+    const kokoro = new FakeProvider({});
+    const h = await makeHarness({ kokoro }, { baseConcurrency: 2, providerConcurrency: { kokoro: 1 } });
+    await h.queue.start();
+    const input = {
+      ...INPUT,
+      capability: "voice-tts" as const,
+      provider: "kokoro",
+      model: "kokoro-82m",
+      params: { voiceId: "af_bella", text: "the harbour remembers" },
+      estimatedMicroUsd: 0,
+    };
+    const first = await h.queue.enqueue(input);
+    const second = await h.queue.enqueue({ ...input, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    await until(
+      () => foldedJob(h, first.id)?.status === "succeeded" && foldedJob(h, second.id)?.status === "succeeded",
+    );
+    assert.equal(kokoro.maxObservedConcurrent, 1);
     h.queue.dispose();
   });
 
@@ -1014,7 +1509,12 @@ describe("artifact verification (R-12, R-13, D12)", () => {
   for (const sample of [
     { label: "JPEG", contentType: "image/jpeg", data: jpegBytes(), extension: "jpg" },
     { label: "WebP", contentType: "image/webp", data: webpBytes(), extension: "webp" },
-    { label: "WebP without provider metadata", contentType: "application/octet-stream", data: webpBytes(), extension: "webp" },
+    {
+      label: "WebP without provider metadata",
+      contentType: "application/octet-stream",
+      data: webpBytes(),
+      extension: "webp",
+    },
   ]) {
     it(`preserves ${sample.label} bytes and extension for character images`, async () => {
       const fake = new FakeProvider({});
@@ -1047,6 +1547,34 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     assert.ok(!entries.some((entry) => String(entry).includes("frame.png")));
     h.queue.dispose();
   });
+
+  it("rejects an MP3 whose first frame is complete but the following frame is truncated", async () => {
+    const fake = new FakeProvider({});
+    const frame = Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]);
+    fake.inlineArtifacts = [
+      {
+        name: "speech.mp3",
+        contentType: "audio/mpeg",
+        data: Uint8Array.from([...frame, ...frame.subarray(0, 100)]),
+      },
+    ];
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12" },
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    await until(() => foldedJob(h, job.id)?.status === "failed");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /MP3 is truncated/);
+    const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
+    assert.equal(
+      entries.some((entry) => String(entry).includes("speech.mp3")),
+      false,
+    );
+    h.queue.dispose();
+  });
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
@@ -1062,6 +1590,34 @@ describe("cancellation (R-14, R-15, D10)", () => {
     assert.equal(fake.cancelCount, 1);
     assert.equal(h.ledger.entries.length, 1);
     assert.equal(h.ledger.entries[0]!.outcome, "cancelled");
+    h.queue.dispose();
+  });
+
+  it("aborts a synchronous submit that has not produced a remote id yet", async () => {
+    let submitSignal: AbortSignal | undefined;
+    const client = new FakeProvider({});
+    client.submit = async (_key, request) => {
+      submitSignal = (request as { signal?: AbortSignal }).signal;
+      await new Promise<void>((_resolve, reject) => {
+        submitSignal?.addEventListener("abort", () => reject(new Error("submit cancelled")), { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const h = await makeHarness({ kokoro: client });
+    await h.queue.start();
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      provider: "kokoro",
+      model: "kokoro-82m",
+      capability: "voice-tts",
+      params: { voiceId: "af_bella", text: "the harbour remembers" },
+      estimatedMicroUsd: 0,
+    });
+    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await h.queue.cancel(job.id);
+    assert.equal(submitSignal?.aborted, true);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
 });
@@ -1164,7 +1720,14 @@ describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () =
   it("refuses a job whose finalization still owes the user an outcome", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.artifacts = [{ name: "main.png", contentType: "image/png", data: pngBytes() }];
-    const h = await makeHarness({ fake }, { onTerminal: () => { throw new Error("preparation failed"); } });
+    const h = await makeHarness(
+      { fake },
+      {
+        onTerminal: () => {
+          throw new Error("preparation failed");
+        },
+      },
+    );
     await h.queue.start();
     const job = await h.queue.enqueue({
       ...INPUT,

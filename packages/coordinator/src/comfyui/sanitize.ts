@@ -5,7 +5,7 @@
  * bytes are cleaned here, before anything lands.
  *
  * The containers handled are a closed set because the recipes are Arke-authored: PNG and WebP
- * for images, MP4 for video. Anything else is refused with the container named — an unknown
+ * for images, MP4 for video, and FLAC for cloned speech. Anything else is refused with the container named — an unknown
  * container from a recipe is a recipe bug to fix, not a leak to permit.
  */
 
@@ -215,6 +215,49 @@ function sanitizeMp4(data: Uint8Array): SanitizeResult {
 }
 
 // ---------------------------------------------------------------------------
+// FLAC: preserve STREAMINFO and audio frames, remove every metadata block that can carry text or
+// pictures. ComfyUI stores prompt/workflow JSON in Vorbis comments; rebuilding the metadata chain
+// also makes the final-block bit truthful after those blocks are removed.
+// ---------------------------------------------------------------------------
+
+function sanitizeFlac(data: Uint8Array): SanitizeResult {
+  if (data.length < 8 || ascii(data, 0, 4) !== "fLaC") {
+    return { ok: false, reason: "flac: bad signature" };
+  }
+  const kept: Array<{ type: number; body: Uint8Array }> = [];
+  let offset = 4;
+  let last = false;
+  let stripped = 0;
+  while (!last) {
+    if (offset + 4 > data.length) return { ok: false, reason: "flac: incomplete metadata header" };
+    const type = data[offset]! & 0x7f;
+    last = (data[offset]! & 0x80) !== 0;
+    const size = data[offset + 1]! << 16 | data[offset + 2]! << 8 | data[offset + 3]!;
+    const end = offset + 4 + size;
+    if (end > data.length) return { ok: false, reason: "flac: a metadata block overruns the file" };
+    if (type === 0) {
+      if (kept.length > 0 || size !== 34) return { ok: false, reason: "flac: invalid STREAMINFO block" };
+      kept.push({ type, body: data.subarray(offset + 4, end) });
+    } else {
+      stripped += 4 + size;
+    }
+    offset = end;
+  }
+  if (kept.length !== 1 || offset + 2 > data.length) return { ok: false, reason: "flac: no audio frame" };
+  const metadata = new Uint8Array(4 + kept[0]!.body.length);
+  metadata[0] = 0x80; // STREAMINFO is now the sole and therefore final metadata block.
+  metadata[1] = 0;
+  metadata[2] = 0;
+  metadata[3] = 34;
+  metadata.set(kept[0]!.body, 4);
+  return {
+    ok: true,
+    data: concat([new TextEncoder().encode("fLaC"), metadata, data.subarray(offset)]),
+    strippedBytes: stripped,
+  };
+}
+
+// ---------------------------------------------------------------------------
 
 function concat(parts: Uint8Array[]): Uint8Array {
   const total = parts.reduce((sum, p) => sum + p.length, 0);
@@ -246,6 +289,7 @@ function writeU32le(data: Uint8Array, offset: number, value: number): void {
  * Unknown containers refuse with the container named (§2.10).
  */
 export function sanitizeComfyUiMedia(name: string, data: Uint8Array): SanitizeResult {
+  if (data.length >= 4 && ascii(data, 0, 4) === "fLaC") return sanitizeFlac(data);
   if (startsWith(data, PNG_SIGNATURE)) return sanitizePng(data);
   if (data.length >= 12 && ascii(data, 0, 4) === "RIFF" && ascii(data, 8, 4) === "WEBP") {
     return sanitizeWebp(data);
