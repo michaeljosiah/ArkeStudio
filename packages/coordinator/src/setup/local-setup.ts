@@ -29,9 +29,8 @@ export interface SetupDeps {
   probeUrl(url: string): Promise<boolean>;
   diskFreeMb(dir: string): Promise<number | null>;
   /**
-   * Whether this component already exists somewhere Arke does not manage (SPEC-021 D10) —
-   * a user-directed engine, a live default port, a well-known install. Consulted before the
-   * component's own files are even looked at, so detection always wins over installation.
+   * Whether the user deliberately selected this component somewhere Arke does not manage
+   * (SPEC-021 D10). Discovery alone is not presence here; it remains an offer beside Download.
    */
   externallyPresent?(entryId: string): Promise<boolean>;
 }
@@ -52,6 +51,8 @@ export interface SetupOptions {
    * then blocked with the reason rather than falling back to a folder the engine never reads.
    */
   externalDirs?: Record<string, () => string | null>;
+  /** Awaited after a newly installed component becomes ready, before dependants are attempted. */
+  onComponentReady?: (componentId: string) => Promise<void>;
 }
 
 interface Live extends SetupComponent {
@@ -128,6 +129,10 @@ export class LocalSetupService {
     this.components.set(id, { ...current, ...patch });
   }
 
+  private async componentReady(id: string): Promise<void> {
+    await this.opts.onComponentReady?.(id).catch(() => {});
+  }
+
   private modelsDir(): string {
     return join(this.opts.appRoot, "models");
   }
@@ -188,8 +193,8 @@ export class LocalSetupService {
   }
 
   private async isPresent(entry: CatalogueEntry): Promise<boolean> {
-    // Detection always wins over installation (SPEC-021 D10): an install Arke does not manage
-    // is presence, and the managed copy is never fetched over it.
+    // A deliberately selected external source wins over installation (SPEC-021 D10). Detection
+    // alone is only an offer and must not suppress the managed runtime option.
     if (await this.deps.externallyPresent?.(entry.id).catch(() => false)) return true;
     const spec = entry.spec;
     if (spec.kind === "installer") {
@@ -348,6 +353,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
+        await this.componentReady(entry.id);
         return;
       }
 
@@ -386,6 +392,7 @@ export class LocalSetupService {
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
+        await this.componentReady(entry.id);
         return;
       }
 
@@ -415,6 +422,7 @@ export class LocalSetupService {
         await rm(toExtendedLength(staged), { force: true }).catch(() => {});
         this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null });
         this.publish();
+        await this.componentReady(entry.id);
         return;
       }
 
@@ -458,6 +466,7 @@ export class LocalSetupService {
         await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
         this.set(entry.id, { state: "ready", bytesDone: received, bytesPerSecond: null, detail: undefined });
         this.publish();
+        await this.componentReady(entry.id);
         return;
       }
 
@@ -471,6 +480,7 @@ export class LocalSetupService {
         this.set(entry.id, { state: "ready", bytesDone: this.components.get(entry.id)?.bytesTotal ?? 0, detail: undefined });
       }
       this.publish();
+      if (pulled.code === 0) await this.componentReady(entry.id);
     } catch (err) {
       if (this.abort.signal.aborted) {
         this.set(entry.id, { state: "queued", bytesPerSecond: null, detail: "stopped" });

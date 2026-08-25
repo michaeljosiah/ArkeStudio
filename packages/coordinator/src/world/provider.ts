@@ -475,6 +475,7 @@ export class FsWorldProvider implements WorldProvider {
     ".webm": "video/webm",
     ".mp3": "audio/mpeg",
     ".wav": "audio/wav",
+    ".flac": "audio/flac",
     ".pdf": "application/pdf",
   };
 

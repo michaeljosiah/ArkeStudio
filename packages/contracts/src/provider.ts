@@ -61,7 +61,7 @@ export type CredentialKind =
 export interface ProviderInfo {
   displayName: string;
   capabilities: Capability[];
-  /** Runs on this machine: unmetered (R-18), and the only kind a runtime gate withholds (R-22). */
+  /** Keyless runtime provider. Concrete engine locality may still be remote (ComfyUI URL). */
   local: boolean;
   credential: CredentialKind;
   /** How the key is entered — a hint for the Settings form, not a behaviour switch. */

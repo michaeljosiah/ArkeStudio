@@ -15,6 +15,7 @@ import {
   MUSIC_DURATION_SEC,
   pricedDuration,
   presetFault,
+  supportedDeliveries,
   tiersFor,
   type BenchMode,
   type BenchParams,
@@ -44,6 +45,7 @@ import {
   subscribeBriefEnhanced,
   subscribeLyricsDrafted,
   subscribeQueueResults,
+  subscribeVoiceUploadConfirmations,
   useBench,
   useClientState,
   useWorld,
@@ -80,7 +82,8 @@ import { posterNameFor } from "../lib/poster.js";
 import { laneRestorePlan } from "../lib/restore.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
-import { usableModels } from "../components/dispatch-bar.js";
+import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
+import { disabledRecipes, usableModels } from "../components/dispatch-bar.js";
 import {
   ReferencePickerDialog,
   characterPickerSources,
@@ -184,6 +187,10 @@ function BenchWorkspace({
   );
 
   const models = useMemo(() => usableModels(state, modeCapability(draft.mode)), [state, draft.mode]);
+  const disabledVoiceRecipes = useMemo(
+    () => (draft.mode === "voice" ? disabledRecipes(state, "voice-tts") : []),
+    [state, draft.mode],
+  );
   const model: ManifestModel | null =
     models.find((m) => m.id === draft.model && m.provider === draft.provider) ?? null;
   const modelName = (provider: string, id: string): string =>
@@ -240,6 +247,7 @@ function BenchWorkspace({
    */
   const soundOnly = speaking || singing;
   const musicParams = draft.params.kind === "music" ? draft.params : null;
+  const voiceDeliveries = draft.params.kind === "voice" ? supportedDeliveries(model) : [];
   const laneTabs = !soundOnly && (frameModes.length > 0 || (draft.mode === "video" && frames.length > 0));
   const [lane, setLane] = useState<"reference" | "keyframe">("reference");
   useEffect(() => {
@@ -259,7 +267,8 @@ function BenchWorkspace({
     // Read through modeCapability rather than spelling each capability again here. Two of the
     // four modes are named differently from the capability they dispatch against, and a second
     // hand-written copy of that mapping is a second place for it to drift.
-    const via = (mode: BenchMode) => availability.find((a) => a.capability === modeCapability(mode))?.via ?? [];
+    const via = (mode: BenchMode) =>
+      availability.find((a) => a.capability === modeCapability(mode))?.via ?? [];
     return { image: via("image"), video: via("video"), voice: via("voice"), music: via("music") } as const;
   }, [state?.app.providers]);
   const [briefExpanded, setBriefExpanded] = useState(false);
@@ -351,6 +360,11 @@ function BenchWorkspace({
   // ---- dispatch + its refusal ----
   const [refusal, setRefusal] = useState<string | null>(null);
   const pendingDispatch = useRef<string | null>(null);
+  const pendingDispatchAction = useRef<{ kind: "dispatch" } | { kind: "rerun"; takeId: string } | null>(null);
+  const [uploadConfirmation, setUploadConfirmation] = useState<{
+    destinationLabel: string;
+    confirmationToken: string;
+  } | null>(null);
   useEffect(
     () =>
       subscribeQueueResults((result) => {
@@ -364,6 +378,23 @@ function BenchWorkspace({
       }),
     [],
   );
+  useEffect(
+    () =>
+      subscribeVoiceUploadConfirmations((confirmation) => {
+        if (confirmation.requestId !== pendingDispatch.current) return;
+        setUploadConfirmation(confirmation);
+      }),
+    [],
+  );
+
+  const dispatchBench = (voiceUploadConfirmedFor?: string) => {
+    pendingDispatchAction.current = { kind: "dispatch" };
+    pendingDispatch.current = sendBenchDispatch(worldId, session.id, voiceUploadConfirmedFor);
+  };
+  const rerunBench = (takeId: string, voiceUploadConfirmedFor?: string) => {
+    pendingDispatchAction.current = { kind: "rerun", takeId };
+    pendingDispatch.current = sendBenchRerun(worldId, session.id, takeId, voiceUploadConfirmedFor);
+  };
 
   // ---- selection ----
   const latest = session.takes[session.takes.length - 1] ?? null;
@@ -415,7 +446,12 @@ function BenchWorkspace({
       );
       for (const token of plan.remove) sendBenchRemoveReference(worldId, session.id, token, lane);
       if (plan.add.length > 0) {
-        sendBenchAddReference(worldId, session.id, plan.add.map((entry) => ({ pick: entry.pick })), lane);
+        sendBenchAddReference(
+          worldId,
+          session.id,
+          plan.add.map((entry) => ({ pick: entry.pick })),
+          lane,
+        );
       }
     }
   };
@@ -476,7 +512,11 @@ function BenchWorkspace({
   const switchMode = (mode: BenchMode) => {
     if (mode === draft.mode) return;
     modeMemory.current[draft.mode] = { provider: draft.provider, model: draft.model, params: draft.params };
-    compose({ ...draft, mode, ...setupForMode(mode, modeMemory.current[mode], usableModels(state, modeCapability(mode))) });
+    compose({
+      ...draft,
+      mode,
+      ...setupForMode(mode, modeMemory.current[mode], usableModels(state, modeCapability(mode))),
+    });
   };
 
   /** The video half of the draft, narrowed once — the callbacks below lose it otherwise. */
@@ -614,8 +654,7 @@ function BenchWorkspace({
    * belong to the two modes that make a picture. Written as `!== "voice"` it silently grew a
    * third member the day music arrived, and a song would have been offered an aspect ratio.
    */
-  const sizedParams =
-    draft.params.kind === "image" || draft.params.kind === "video" ? draft.params : null;
+  const sizedParams = draft.params.kind === "image" || draft.params.kind === "video" ? draft.params : null;
   const aspects = sizedParams !== null ? (model?.limits.aspects ?? []) : [];
   const aspectSelect = (
     <select
@@ -1066,9 +1105,7 @@ function BenchWorkspace({
                 aria-label="Lyrics"
                 className="fy-bench__lyricstext"
                 value={musicParams.lyrics}
-                onChange={(e) =>
-                  compose({ ...draft, params: { ...musicParams, lyrics: e.target.value } })
-                }
+                onChange={(e) => compose({ ...draft, params: { ...musicParams, lyrics: e.target.value } })}
                 placeholder="The words to be sung. Tags on their own lines — [verse], [chorus] — tell the model the shape."
               />
               <div className="fy-bench__lyricsfoot">
@@ -1158,25 +1195,34 @@ function BenchWorkspace({
                   <Waveform size={12} />
                   {draft.params.voiceLabel ?? "choose a voice"}
                 </button>
-                <select
-                  aria-label="Delivery"
-                  className="fy-bench__chip"
-                  value={draft.params.delivery ?? ""}
-                  onChange={(e) => {
-                    const { delivery: _cleared, ...rest } = draft.params as BenchParams & { delivery?: string };
-                    compose({
-                      ...draft,
-                      params: { ...rest, ...(e.target.value ? { delivery: e.target.value } : {}) } as BenchParams,
-                    });
-                  }}
-                >
-                  <option value="">delivery · default</option>
-                  {DELIVERIES.map((delivery) => (
-                    <option key={delivery} value={delivery}>
-                      {delivery}
-                    </option>
-                  ))}
-                </select>
+                {voiceDeliveries.length > 0 ? (
+                  <select
+                    aria-label="Delivery"
+                    className="fy-bench__chip"
+                    value={draft.params.delivery ?? ""}
+                    onChange={(e) => {
+                      const { delivery: _cleared, ...rest } = draft.params as BenchParams & {
+                        delivery?: string;
+                      };
+                      compose({
+                        ...draft,
+                        params: {
+                          ...rest,
+                          ...(e.target.value ? { delivery: e.target.value } : {}),
+                        } as BenchParams,
+                      });
+                    }}
+                  >
+                    <option value="">delivery · default</option>
+                    {DELIVERIES.filter((delivery) => voiceDeliveries.includes(delivery)).map((delivery) => (
+                      <option key={delivery} value={delivery}>
+                        {delivery}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="fy-bench__chip">delivery · default only</span>
+                )}
                 <select
                   aria-label="How many reads"
                   className="fy-bench__chip"
@@ -1184,7 +1230,11 @@ function BenchWorkspace({
                   onChange={(e) =>
                     compose({
                       ...draft,
-                      params: { ...draft.params, kind: "voice", count: Number(e.target.value) } as BenchParams,
+                      params: {
+                        ...draft.params,
+                        kind: "voice",
+                        count: Number(e.target.value),
+                      } as BenchParams,
                     })
                   }
                 >
@@ -1379,7 +1429,8 @@ function BenchWorkspace({
             {models.length === 0 ? (
               /* An empty select is mute; the bar says the repair (dispatch-bar's own words). */
               <span className="fy-bench__nomodel">
-                {`No ${draft.mode} model is available — add a provider key in Settings.`}
+                {disabledVoiceRecipes[0]?.reason ??
+                  `No ${draft.mode} model is available — add a provider key in Settings.`}
               </span>
             ) : (
               <span className="fy-bench__modelwrap">
@@ -1389,7 +1440,28 @@ function BenchWorkspace({
                   value={model ? `${model.provider}/${model.id}` : ""}
                   onChange={(e) => {
                     const chosen = models.find((m) => `${m.provider}/${m.id}` === e.target.value);
-                    if (chosen) compose({ ...draft, provider: chosen.provider, model: chosen.id });
+                    if (!chosen) return;
+                    let params = draft.params;
+                    if (
+                      params.kind === "voice" &&
+                      (params.voiceProvider !== chosen.provider || params.voiceModel !== chosen.id)
+                    ) {
+                      const {
+                        voiceId: _voiceId,
+                        voiceProvider: _voiceProvider,
+                        voiceModel: _voiceModel,
+                        voiceLabel: _voiceLabel,
+                        delivery,
+                        ...rest
+                      } = params;
+                      params = {
+                        ...rest,
+                        ...(delivery !== undefined && chosen.limits.deliveries?.includes(delivery)
+                          ? { delivery }
+                          : {}),
+                      };
+                    }
+                    compose({ ...draft, provider: chosen.provider, model: chosen.id, params });
                   }}
                 >
                   <option value="" disabled>
@@ -1398,6 +1470,15 @@ function BenchWorkspace({
                   {models.map((m) => (
                     <option key={`${m.provider}/${m.id}`} value={`${m.provider}/${m.id}`}>
                       {m.displayName}
+                    </option>
+                  ))}
+                  {disabledVoiceRecipes.map(({ model: disabled, reason }) => (
+                    <option
+                      key={`${disabled.provider}/${disabled.id}`}
+                      value={`${disabled.provider}/${disabled.id}`}
+                      disabled
+                    >
+                      {disabled.displayName} · {reason}
                     </option>
                   ))}
                 </select>
@@ -1434,7 +1515,7 @@ function BenchWorkspace({
                 setRefusal(null);
                 if (pushTimer.current) clearTimeout(pushTimer.current);
                 sendBenchCompose(worldId, session.id, draft);
-                pendingDispatch.current = sendBenchDispatch(worldId, session.id);
+                dispatchBench();
               }}
             >
               {draft.params.kind === "image" && draft.params.count > 1
@@ -1485,7 +1566,7 @@ function BenchWorkspace({
                 type="button"
                 className="fy-bench__rowicon"
                 title="Re-run — a new take from this snapshot"
-                onClick={() => (pendingDispatch.current = sendBenchRerun(worldId, session.id, selected.id))}
+                onClick={() => rerunBench(selected.id)}
               >
                 ↻
               </button>
@@ -1508,15 +1589,20 @@ function BenchWorkspace({
                 // same branch would have been the identical bug a second time, which is why the
                 // condition names both modes that make a sound rather than the one that did.
                 worldSlug ? (
-                  <div className="fy-bench__voicetake" data-testid={selected.request.mode === "music" ? "music-take" : "voice-take"}>
+                  <div
+                    className="fy-bench__voicetake"
+                    data-testid={selected.request.mode === "music" ? "music-take" : "voice-take"}
+                  >
                     <div className="fy-bench__voicehead">
                       <span className="fy-bench__takestate">{`TAKE ${selected.n}`}</span>
-                      {selected.request.params.kind === "voice" && selected.request.params.voiceLabel !== undefined && (
-                        <span className="fy-bench__voicename">{selected.request.params.voiceLabel}</span>
-                      )}
-                      {selected.request.params.kind === "voice" && selected.request.params.delivery !== undefined && (
-                        <span className="fy-bench__voicedelivery">{selected.request.params.delivery}</span>
-                      )}
+                      {selected.request.params.kind === "voice" &&
+                        selected.request.params.voiceLabel !== undefined && (
+                          <span className="fy-bench__voicename">{selected.request.params.voiceLabel}</span>
+                        )}
+                      {selected.request.params.kind === "voice" &&
+                        selected.request.params.delivery !== undefined && (
+                          <span className="fy-bench__voicedelivery">{selected.request.params.delivery}</span>
+                        )}
                       {/* The model, then the length that was actually made — never the ceiling
                           it was asked at (design turn 73). */}
                       {selected.request.params.kind === "music" && (
@@ -1688,17 +1774,39 @@ function BenchWorkspace({
           open={voiceOpen}
           worldId={worldId}
           chosenId={draft.params.kind === "voice" ? draft.params.voiceId : undefined}
+          chosenProvider={
+            draft.params.kind === "voice" ? (draft.params.voiceProvider ?? draft.provider) : undefined
+          }
+          chosenModel={draft.params.kind === "voice" ? (draft.params.voiceModel ?? draft.model) : undefined}
           onClose={() => setVoiceOpen(false)}
           onPick={(voice) => {
+            const chosenModel = models.find(
+              (candidate) => candidate.provider === voice.provider && candidate.id === voice.model,
+            );
+            if (!chosenModel) {
+              setRefusal("That voice's speech model is unavailable — choose another voice.");
+              return;
+            }
             setVoiceOpen(false);
+            const currentParams =
+              draft.params.kind === "voice" ? draft.params : { kind: "voice" as const, count: 1 };
+            const { delivery: currentDelivery, ...withoutDelivery } = currentParams;
+            const keepDelivery =
+              currentDelivery !== undefined &&
+              chosenModel?.limits.deliveries?.includes(currentDelivery) === true;
             compose({
               ...draft,
               // The label rides with the id so a take can name its voice without the catalogue.
-              params: { ...draft.params, kind: "voice", voiceId: voice.voiceId, voiceLabel: voice.label } as BenchParams,
+              params: {
+                ...withoutDelivery,
+                ...(keepDelivery ? { delivery: currentDelivery } : {}),
+                voiceId: voice.voiceId,
+                voiceProvider: voice.provider,
+                voiceModel: voice.model,
+                voiceLabel: voice.label,
+              } as BenchParams,
               // A voice belongs to a provider, so choosing one may change which model reads it.
-              ...(models.some((m) => m.provider === voice.provider)
-                ? { provider: voice.provider, model: models.find((m) => m.provider === voice.provider)!.id }
-                : {}),
+              ...(chosenModel ? { provider: voice.provider, model: chosenModel.id } : {}),
             });
           }}
         />
@@ -1859,6 +1967,23 @@ function BenchWorkspace({
             </div>
           </div>
         )}
+        {uploadConfirmation && (
+          <RemoteVoiceUploadConfirmation
+            destinationLabel={uploadConfirmation.destinationLabel}
+            onCancel={() => {
+              pendingDispatch.current = null;
+              pendingDispatchAction.current = null;
+              setUploadConfirmation(null);
+            }}
+            onConfirm={() => {
+              const action = pendingDispatchAction.current;
+              const token = uploadConfirmation.confirmationToken;
+              setUploadConfirmation(null);
+              if (action?.kind === "rerun") rerunBench(action.takeId, token);
+              else if (action?.kind === "dispatch") dispatchBench(token);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -1940,7 +2065,9 @@ const GENERATING_LOOP = "./bench-generating.mp4";
 
 /** Has this machine asked for less movement? Server-rendered tests have no matchMedia. */
 function stillPreferred(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  return (
+    typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  );
 }
 
 /** The states where work is actually outstanding — the only ones the loop plays for. */

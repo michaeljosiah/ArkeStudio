@@ -17,10 +17,13 @@ export async function enqueueInputs(
   for (const [index, input] of inputs.entries()) {
     try {
       acceptedJobIds.push((await enqueue(input)).id);
-    } catch {
+    } catch (error) {
       failures.push({
         index,
-        reason: "This item could not be added to Activity. Check provider settings and try again.",
+        reason:
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "This item could not be added to Activity. Check provider settings and try again.",
       });
     }
   }

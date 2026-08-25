@@ -20,6 +20,7 @@ import {
   routeFor,
   sizeParamsFor,
   validateReferences,
+  voiceFormatForModel,
   type ArtifactSidecar,
   type BenchReferenceSource,
   type BenchReferenceToken,
@@ -38,6 +39,7 @@ import {
   type SessionId,
   type TaskMode,
   type WorldBundle,
+  voiceSourceFor,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { BenchStore, sessionDir, sessionMediaDir, sessionsDir } from "./store.js";
@@ -405,6 +407,8 @@ export interface BenchEnqueueInput {
   provider: string;
   model: string;
   params: Record<string, unknown>;
+  voiceReference?: boolean;
+  voiceUploadConfirmedFor?: string;
   estimatedMicroUsd: number;
   landing: { dir: string; name?: string };
 }
@@ -553,12 +557,28 @@ export function planBenchDispatch(
   // discovering the direction never applied (SPEC-011 R-15).
   let voiceSettings: Record<string, number> | null = null;
   if (params.kind === "voice" && params.delivery !== undefined) {
+    if (!model.limits.deliveries?.includes(params.delivery as Delivery)) {
+      return { ok: false, reason: `${model.displayName} cannot express "${params.delivery}".` };
+    }
     const mapped = deliveryParams(model.provider, params.delivery as Delivery);
     if (!mapped.ok) return { ok: false, reason: mapped.reason };
     voiceSettings = mapped.params;
   }
   if (params.kind === "voice" && params.voiceId === undefined) {
     return { ok: false, reason: "No voice is chosen — pick one to read this." };
+  }
+  if (params.kind === "voice" && (params.voiceProvider ?? model.provider) !== model.provider) {
+    return { ok: false, reason: "The chosen voice belongs to another provider — pick it again." };
+  }
+  if (params.kind === "voice" && (params.voiceModel ?? model.id) !== model.id) {
+    return { ok: false, reason: "The chosen voice belongs to another speech model — pick it again." };
+  }
+  const voiceSource =
+    params.kind === "voice" && params.voiceId !== undefined
+      ? voiceSourceFor(bundle.clonedVoices, model.provider, model.id, params.voiceId)
+      : { kind: "catalogue" as const };
+  if (voiceSource.kind === "missing-clone") {
+    return { ok: false, reason: "That cloned voice is no longer in this world — choose another voice." };
   }
   // minimax-music-3 requires prompt AND lyrics. Refused here with the missing half named,
   // rather than sent and 422'd: the brief is already guarded above, and words nobody wrote
@@ -691,16 +711,17 @@ export function planBenchDispatch(
         model: model.id,
         params: {
           text: composer.brief,
+          audioFormat: voiceFormatForModel(model),
           ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
           // The delivery is sent in the provider's own vocabulary, or not at all — a row that
           // cannot express one says so rather than having a neighbour's settings guessed at.
           ...(voiceSettings !== null ? { voiceSettings } : {}),
-          // No container choice: the elevenlabs client caches what it is handed as mp3, so a
-          // format control here would change nothing on the wire — and design 70's own rule is
-          // that a control which changes nothing is a control that lies.
+          // No container control: the concrete model declares its format and every downstream
+          // layer consumes that same value.
         },
         estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
+        ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });
     } else {
       // A song (design turn 73). The route asks for two things and neither can be derived from

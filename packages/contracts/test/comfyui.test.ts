@@ -72,10 +72,11 @@ describe("identity frozen onto a job (R-15)", () => {
     const parsed = JobSchema.parse({
       ...job,
       recipe: { id: "comfyui-draft-video", version: 1, templateDigest: DIGEST, dependencyDigest: DIGEST },
-      engine: { source: "user-url", instanceId: "abc123" },
+      engine: { source: "managed", instanceId: "abc123", processEpoch: "process-2" },
     });
     assert.equal(parsed.recipe?.version, 1);
-    assert.equal(parsed.engine?.source, "user-url");
+    assert.equal(parsed.engine?.source, "managed");
+    assert.equal(parsed.engine?.processEpoch, "process-2");
     // A field that is not identity does not ride along silently.
     assert.equal(
       JobSchema.safeParse({ ...job, recipe: { id: "x", version: 1, templateDigest: DIGEST, dependencyDigest: DIGEST, graph: {} } })
@@ -139,6 +140,39 @@ describe("the recovery policy (§2.11) — a table, not a guess", () => {
     }
   });
 
+  it("rebinds recovered spawned work to the replacement process epoch", () => {
+    const replacement: JobEngineIdentity = {
+      source: "managed",
+      instanceId: "same-path",
+      processEpoch: "process-2",
+    };
+    assert.deepEqual(
+      comfyUiRecoveryDecision({
+        status: "running",
+        engine: { source: "managed", instanceId: "same-path", processEpoch: "process-1" },
+        currentInstanceId: "same-path",
+        currentEngine: replacement,
+      }),
+      { action: "requeue", engine: replacement },
+    );
+  });
+
+  it("fails closed when startup cannot prove a spawned process was replaced", () => {
+    const engine: JobEngineIdentity = {
+      source: "managed",
+      instanceId: "same-path",
+      processEpoch: "process-1",
+    };
+    const decision = comfyUiRecoveryDecision({
+      status: "running",
+      engine,
+      currentInstanceId: "same-path",
+      currentEngine: engine,
+    });
+    assert.equal(decision.action, "fail");
+    if (decision.action === "fail") assert.match(decision.reason, /could not prove a replacement/);
+  });
+
   it("a surviving URL engine resumes a running job only on the same instance", () => {
     assert.deepEqual(
       comfyUiRecoveryDecision({ status: "running", engine: at("user-url"), currentInstanceId: "same" }),
@@ -181,6 +215,7 @@ describe("the combined status shape", () => {
       engine: {
         source: "user-path",
         state: "ready",
+        locality: "local",
         location: "C:\\AI\\ComfyUI",
         version: "0.33.1",
         instanceId: "abc",

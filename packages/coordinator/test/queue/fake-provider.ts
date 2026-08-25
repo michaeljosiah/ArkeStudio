@@ -53,6 +53,7 @@ export class FakeProvider implements DispatchClient {
   maxObservedConcurrent = 0;
   readonly submittedKeys: Array<string | undefined> = [];
   submittedReferenceBytes: Uint8Array[] = [];
+  submittedVoiceReference: { name: string; contentType: string; data: Uint8Array } | null = null;
   inlineArtifacts: DispatchArtifact[] | null = null;
 
   /** Scripting hooks. */
@@ -89,12 +90,14 @@ export class FakeProvider implements DispatchClient {
       model: string;
       params: Record<string, unknown>;
       imageReferences?: Array<{ data: Uint8Array }>;
+      voiceReference?: { name: string; contentType: string; data: Uint8Array };
       idempotencyKey?: string;
     },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }> {
     this.submitCount += 1;
     this.submittedKeys.push(request.idempotencyKey);
     this.submittedReferenceBytes = (request.imageReferences ?? []).map((reference) => reference.data);
+    this.submittedVoiceReference = request.voiceReference ?? null;
     this.inFlightNow += 1;
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {

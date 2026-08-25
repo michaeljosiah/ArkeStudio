@@ -1,6 +1,6 @@
-import { rename } from "node:fs/promises";
+import { readdir, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { ulid, type Job, type ShotPlanEntry, type Take, type TakeQc } from "@arke-studio/contracts";
+import { TakeSchema, ulid, type Job, type ShotPlanEntry, type Take, type TakeQc } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -44,6 +44,20 @@ export interface TakeArrivalOptions {
   poster?: TakePosterMaker;
   /** Told why a video take has no picture beside it, for the same reason as the measurement. */
   onPosterUnavailable?: (reason: TakePosterUnavailableReason) => void;
+}
+
+async function takeForJob(store: WorldStore, productionId: string, jobId: string): Promise<Take | null> {
+  const root = join(store.dir, "productions", productionId, "takes");
+  for (const entry of await readdir(toExtendedLength(root), { withFileTypes: true }).catch(() => [])) {
+    if (!entry.isDirectory()) continue;
+    const path = join(root, entry.name, "take.json");
+    const value = await readFile(toExtendedLength(path), "utf8")
+      .then((raw) => JSON.parse(raw) as unknown)
+      .catch(() => null);
+    const parsed = TakeSchema.safeParse(value);
+    if (parsed.success && parsed.data.jobId === jobId && parsed.data.segment === undefined) return parsed.data;
+  }
+  return null;
 }
 
 /**
@@ -119,6 +133,10 @@ export async function recordTakesFromJob(
   actualSource: Take["cost"]["actualSource"] = "manifest-derived",
 ): Promise<Take[]> {
   if (job.status !== "succeeded" || job.productionId === undefined) return [];
+  if (job.target.kind === "voice-line") {
+    const existing = await takeForJob(store, job.productionId, job.id);
+    if (existing !== null) return [existing];
+  }
   const media = job.landedFiles?.[0];
   if (media === undefined) return [];
   const shotPlan = job.params["shotPlan"] as ShotPlanEntry[] | undefined;
@@ -128,19 +146,24 @@ export async function recordTakesFromJob(
   const written: Take[] = [];
 
   await store.gateOp(async () => {
-    const primaryId = `tk_${ulid()}`;
+    // Voice-line finalization is replayable. A deterministic id lets a retry recover the window
+    // after media moved into its take directory but before take.json became durable.
+    const primaryId = job.target.kind === "voice-line" ? `tk_${job.id.slice(3)}` : `tk_${ulid()}`;
     const takeDir = join(store.dir, "productions", job.productionId!, "takes", primaryId);
+    const finalMedia = join(takeDir, mediaName);
     // The landed file moves into the take's own directory — one stored artifact (R-3).
     await atomicWriteFile(join(takeDir, ".keep"), "");
-    await rename(toExtendedLength(join(store.dir, media)), toExtendedLength(join(takeDir, mediaName)));
+    const sourceMedia = join(store.dir, media);
+    const mediaAlreadyMoved = await stat(toExtendedLength(finalMedia)).then((value) => value.isFile()).catch(() => false);
+    if (!mediaAlreadyMoved) await rename(toExtendedLength(sourceMedia), toExtendedLength(finalMedia));
     const { rm } = await import("node:fs/promises");
     await rm(toExtendedLength(join(takeDir, ".keep")), { force: true }).catch(() => {});
     await rm(toExtendedLength(dirname(join(store.dir, media))), { recursive: true, force: true }).catch(() => {});
 
     // Measured once, against the file that arrived, before any take.json exists — a take is
     // immutable, so the only moment to record this is before it is written (#248). Every
-    // failure below is swallowed by design: finalization is not replayable, and a paid clip
-    // must never be lost to a diagnostic that could not run.
+    // failure below is swallowed by design: a paid clip must never be lost to a diagnostic that
+    // could not run, whether or not its domain finalization can later be replayed.
     const qc = await measureArrival(qcApplies(job) ? join(takeDir, mediaName) : null, options);
 
     // The picture every screen shows for this take. Drawn here, beside the clip, for the same

@@ -9,9 +9,13 @@ import {
   type ClientMessage,
   type ClientState,
   type DomainEvent,
+  type Delivery,
   type Frame,
   type HarnessEngine,
   type Job,
+  voiceJobFormat,
+  voiceJobReadIdentity,
+  voiceTargetKey,
   type ProviderCallRecord,
   ProviderIdSchema,
   type ProviderId,
@@ -27,7 +31,15 @@ import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
 /** A conversation nobody has said anything in yet. */
 function emptyGenesis(): StoreState["genesis"][string] {
-  return { turns: [], draft: null, status: null, working: null, runStartedAt: null, attachments: [], refusals: [] };
+  return {
+    turns: [],
+    draft: null,
+    status: null,
+    working: null,
+    runStartedAt: null,
+    attachments: [],
+    refusals: [],
+  };
 }
 
 /**
@@ -138,7 +150,7 @@ interface StoreState {
   voiceCandidates: Record<string, VoiceCandidatesState>;
   /** Every voice the world can read with (design 70) — unranked, and not per sheet. */
   voiceCatalogue: ReadingVoice[] | null;
-  /** SPEC-011: audition results keyed provider/voiceId — cached files replay free. */
+  /** SPEC-011: audition results keyed provider/model/voiceId — cached files replay free. */
   voicePreviews: Record<string, { file: string | null; error: string | null }>;
   voiceAudio: Record<string, Extract<DomainEvent, { type: "voice.audio" }>>;
   /** The pieces of a long read, in order, per request — see the voice.audio branch below. */
@@ -228,6 +240,7 @@ export interface VoiceCandidatesState {
   ranked: RankedVoice[];
   previewLine: { text: string; source: "own-line" | "drafted" | "stock" };
   cloudPreviewMicroUsd: number | null;
+  previewMicroUsdByVoice: Record<string, number>;
 }
 
 let current: StoreState = {
@@ -276,6 +289,13 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 };
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
+export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
+export type VoiceUploadConfirmationRequired = Extract<
+  DomainEvent,
+  { type: "voice.upload-confirmation-required" }
+>;
+const voiceUploadConfirmationListeners = new Set<(result: VoiceUploadConfirmationRequired) => void>();
 const jobReadyListeners = new Set<(job: Job) => void>();
 
 /** A correlated filing request's answer (issue 305): ordered artifact ids, by requestId. */
@@ -326,6 +346,20 @@ export function subscribeQueueResults(listener: (result: QueueEnqueueResult) => 
   return () => queueResultListeners.delete(listener);
 }
 
+export function subscribeVoiceAssignmentResults(
+  listener: (result: VoiceAssignmentResult) => void,
+): () => void {
+  voiceAssignmentListeners.add(listener);
+  return () => voiceAssignmentListeners.delete(listener);
+}
+
+export function subscribeVoiceUploadConfirmations(
+  listener: (result: VoiceUploadConfirmationRequired) => void,
+): () => void {
+  voiceUploadConfirmationListeners.add(listener);
+  return () => voiceUploadConfirmationListeners.delete(listener);
+}
+
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
@@ -341,7 +375,9 @@ export function subscribeSceneRefusals(
 }
 
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
-export function subscribeProductionCreateResults(listener: (result: ProductionCreateResult) => void): () => void {
+export function subscribeProductionCreateResults(
+  listener: (result: ProductionCreateResult) => void,
+): () => void {
   productionCreateListeners.add(listener);
   return () => productionCreateListeners.delete(listener);
 }
@@ -384,6 +420,7 @@ function queueRequest(command: QueueCommand, characterName?: string): string {
   }
   return requestId;
 }
+
 const listeners = new Set<() => void>();
 let bridge: ArkeBridge | null = null;
 let lastSeq = 0;
@@ -488,7 +525,12 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       const productions = state.world.productions.map((p) => {
         if (p.meta.id !== event.productionId) return p;
-        if (event.type === "take.recorded") return { ...p, takes: [...p.takes, event.take] };
+        if (event.type === "take.recorded") {
+          return {
+            ...p,
+            takes: p.takes.some((take) => take.id === event.take.id) ? p.takes : [...p.takes, event.take],
+          };
+        }
         if (event.type === "review.recorded") return { ...p, reviews: [...p.reviews, event.review] };
         return { ...p, selections: { ...p.selections, [event.shotId]: event.selection } };
       });
@@ -563,31 +605,49 @@ function handleFrame(json: string): void {
     const durableVoiceAudio: StoreState["voiceAudio"] = {};
     for (const job of frame.state.app.jobs) {
       if (job.target.kind !== "voice-preview" || typeof job.params["requestId"] !== "string") continue;
-          const requestId = job.params["requestId"] as string;
-          if (job.status !== "succeeded" || !job.landedFiles?.[0]) {
-            if (job.status !== "failed" && job.status !== "cancelled" && job.status !== "needs-reconciliation") continue;
-            durableVoiceAudio[requestId] = {
-              at: job.updatedAt, type: "voice.audio" as const, requestId, worldId: job.worldId,
-              sheetId: String(job.params["sheetId"]), sheetVersion: Number(job.params["sheetVersion"]),
-              purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" as const : "candidate-preview" as const,
-              ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-              provider: "elevenlabs" as const, model: job.model, voiceId: String(job.params["voiceId"]),
-              status: "failed" as const, file: null, cached: false,
-              characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd,
-              error: "Voice synthesis needs attention in Activity.",
-            };
-            continue;
-          }
-          durableVoiceAudio[requestId] = {
-            at: job.updatedAt, type: "voice.audio" as const, requestId,
-            worldId: job.worldId, sheetId: String(job.params["sheetId"]),
-            sheetVersion: Number(job.params["sheetVersion"]),
-            purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" as const : "candidate-preview" as const,
-            ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-            provider: "elevenlabs" as const, model: job.model, voiceId: String(job.params["voiceId"]),
-            status: "ready" as const, file: job.landedFiles[0], cached: true,
-            characterCount: Number(job.params["characterCount"] ?? 0), estimatedMicroUsd: job.estimatedMicroUsd,
-          };
+      const requestId = job.params["requestId"] as string;
+      if (job.status !== "succeeded" || !job.landedFiles?.[0]) {
+        if (job.status !== "failed" && job.status !== "cancelled" && job.status !== "needs-reconciliation")
+          continue;
+        durableVoiceAudio[requestId] = {
+          at: job.updatedAt,
+          type: "voice.audio" as const,
+          requestId,
+          worldId: job.worldId,
+          ...voiceJobReadIdentity(job),
+          sheetVersion: Number(job.params["sheetVersion"]),
+          ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+          provider: job.provider as ProviderId,
+          model: job.model,
+          voiceId: String(job.params["voiceId"]),
+          format: voiceJobFormat(job),
+          status: "failed" as const,
+          file: null,
+          cached: false,
+          characterCount: Number(job.params["characterCount"] ?? 0),
+          estimatedMicroUsd: job.estimatedMicroUsd,
+          error: "Voice synthesis needs attention in Activity.",
+        };
+        continue;
+      }
+      durableVoiceAudio[requestId] = {
+        at: job.updatedAt,
+        type: "voice.audio" as const,
+        requestId,
+        worldId: job.worldId,
+        ...voiceJobReadIdentity(job),
+        sheetVersion: Number(job.params["sheetVersion"]),
+        ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+        provider: job.provider as ProviderId,
+        model: job.model,
+        voiceId: String(job.params["voiceId"]),
+        format: voiceJobFormat(job),
+        status: "ready" as const,
+        file: job.landedFiles[0],
+        cached: true,
+        characterCount: Number(job.params["characterCount"] ?? 0),
+        estimatedMicroUsd: job.estimatedMicroUsd,
+      };
     }
     emitChange({
       ...current,
@@ -625,9 +685,22 @@ function handleFrame(json: string): void {
       const expected = pendingQueueRequests.get(event.requestId);
       if (expected?.command === event.command) {
         pendingQueueRequests.delete(event.requestId);
-        const result = { ...event, ...(expected.characterName ? { characterName: expected.characterName } : {}) };
+        const result = {
+          ...event,
+          ...(expected.characterName ? { characterName: expected.characterName } : {}),
+        };
         for (const listener of queueResultListeners) listener(result);
       }
+    }
+    if (event.type === "voice.upload-confirmation-required") {
+      const expected = pendingQueueRequests.get(event.requestId);
+      if (expected?.command === event.command) {
+        pendingQueueRequests.delete(event.requestId);
+        for (const listener of voiceUploadConfirmationListeners) listener(event);
+      }
+    }
+    if (event.type === "voice.assignment-result") {
+      for (const listener of voiceAssignmentListeners) listener(event);
     }
     if (event.type === "job.ready") {
       for (const listener of jobReadyListeners) listener(event.job);
@@ -844,12 +917,13 @@ function handleFrame(json: string): void {
           ranked: event.ranked,
           previewLine: event.previewLine,
           cloudPreviewMicroUsd: event.cloudPreviewMicroUsd,
+          previewMicroUsdByVoice: event.previewMicroUsdByVoice,
         },
       };
     } else if (event.type === "voice.preview") {
       voicePreviews = {
         ...voicePreviews,
-        [`${event.provider}/${event.voiceId}`]: { file: event.file, error: event.error },
+        [voiceTargetKey(event)]: { file: event.file, error: event.error },
       };
     } else if (event.type === "voice.audio") {
       /*
@@ -1355,7 +1429,14 @@ export function stageSheetEdit(
   /** Characters only: the new `role`, or "" to clear it. Omit to leave it untouched. */
   role?: string,
 ): void {
-  send({ kind: "stage-sheet-edit", worldId, path, summary, sections, ...(role !== undefined ? { role } : {}) });
+  send({
+    kind: "stage-sheet-edit",
+    worldId,
+    path,
+    summary,
+    sections,
+    ...(role !== undefined ? { role } : {}),
+  });
 }
 
 export function stageArtDirectionChange(
@@ -1606,9 +1687,10 @@ export function assignVoice(
   path: string,
   // Any provider the catalogue can offer, which since SPEC-022 includes a cloned voice on
   // `comfyui`. The wire takes a plain string; this stays a provider id so a typo cannot reach it.
-  voice: { provider: ProviderId; voiceId: string; label?: string } | null,
-): void {
-  send({ kind: "assign-voice", worldId, path, voice });
+  voice: { provider: ProviderId; model: string; voiceId: string; label?: string } | null,
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "assign-voice", requestId, worldId, path, voice }) ? requestId : null;
 }
 
 /**
@@ -2080,7 +2162,9 @@ export type ReadingVoice = Extract<DomainEvent, { type: "voice.catalogue" }>["vo
  * against a character's written voice — the wrong question for one that is only reading.
  */
 /** Choose who narrates; null returns to the shipped local voice, which costs nothing. */
-export function setNarrator(voice: { provider: string; voiceId: string; label?: string } | null): void {
+export function setNarrator(
+  voice: { provider: string; model: string; voiceId: string; label?: string } | null,
+): void {
   send({ kind: "set-narrator", voice });
 }
 
@@ -2096,9 +2180,10 @@ export function requestVoiceLine(input: {
   worldId: string;
   productionId: string;
   shotId: string;
-  delivery?: string;
+  delivery?: Delivery;
+  voiceUploadConfirmedFor?: string;
 }): string {
-  const requestId = ulid();
+  const requestId = queueRequest("voice-line");
   send({
     kind: "voice-line",
     requestId,
@@ -2106,6 +2191,9 @@ export function requestVoiceLine(input: {
     productionId: input.productionId,
     shotId: input.shotId,
     ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
+    ...(input.voiceUploadConfirmedFor !== undefined
+      ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor }
+      : {}),
   });
   return requestId;
 }
@@ -2120,7 +2208,9 @@ export function requestVoicePreview(
   sheetId: string,
   /** A provider id. The closed pair here outlived the wire's, and hid cloned voices (SPEC-022). */
   provider: ProviderId,
+  model: string,
   voiceId: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   const requestId = queueRequest("voice-preview");
   send({
@@ -2128,7 +2218,9 @@ export function requestVoicePreview(
     worldId,
     sheetId,
     provider,
+    model,
     voiceId,
+    ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
     requestId,
   });
   return requestId;
@@ -2141,7 +2233,14 @@ export function readSheetSection(
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
 ): string {
-  send({ kind: "read-sheet-section", worldId, sheetId, sectionHeading, requestId, ...(confirmationToken ? { confirmationToken } : {}) });
+  send({
+    kind: "read-sheet-section",
+    worldId,
+    sheetId,
+    sectionHeading,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
   return requestId;
 }
 
@@ -2155,10 +2254,15 @@ export function readBibleSection(
   requestId = queueRequest("read-bible-section"),
   confirmationToken?: string,
 ): string {
-  send({ kind: "read-bible-section", worldId, sectionHeading, requestId, ...(confirmationToken ? { confirmationToken } : {}) });
+  send({
+    kind: "read-bible-section",
+    worldId,
+    sectionHeading,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
   return requestId;
 }
-
 
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
@@ -2227,7 +2331,11 @@ export function useVoiceClips(): Record<string, StagedClip> {
   return useStore().voiceClips;
 }
 
-export function useVoiceCloned(): { voiceId: string | null; label: string | null; reason: string | null } | null {
+export function useVoiceCloned(): {
+  voiceId: string | null;
+  label: string | null;
+  reason: string | null;
+} | null {
   return useStore().voiceCloned;
 }
 
@@ -2309,7 +2417,14 @@ export function proposeSeason(
     question?: string;
     ending?: string;
     direction?: string;
-    arcs?: Array<{ id: string; title: string; note?: string; setup?: string; turn?: string; payoff?: string }>;
+    arcs?: Array<{
+      id: string;
+      title: string;
+      note?: string;
+      setup?: string;
+      turn?: string;
+      payoff?: string;
+    }>;
   },
 ): void {
   send({ kind: "propose-season", worldId, productionId, ...season });
@@ -2372,7 +2487,12 @@ export function saveScene(
 }
 
 /** Undo, at whatever depth: v<n> returns as a new version (turn 97). */
-export function restoreScene(worldId: string, productionId: string, sceneFile: string, version: number): void {
+export function restoreScene(
+  worldId: string,
+  productionId: string,
+  sceneFile: string,
+  version: number,
+): void {
   send({ kind: "restore-scene", worldId, productionId, sceneFile, version });
 }
 
@@ -2483,7 +2603,12 @@ export function planContinue(worldId: string, productionId: string, planId: stri
 }
 
 /** The fresh act that covers an estimate the authorization did not (SPEC-024 R-17). */
-export function planReconfirm(worldId: string, productionId: string, planId: string, passIndex: number): void {
+export function planReconfirm(
+  worldId: string,
+  productionId: string,
+  planId: string,
+  passIndex: number,
+): void {
   send({ kind: "plan-reconfirm", worldId, productionId, planId, passIndex });
 }
 
@@ -2608,7 +2733,15 @@ export function placeOverlay(
   endSec: number,
   lane?: number,
 ): void {
-  send({ kind: "place-overlay", worldId, productionId, artifactId, startSec, endSec, ...(lane !== undefined ? { lane } : {}) });
+  send({
+    kind: "place-overlay",
+    worldId,
+    productionId,
+    artifactId,
+    startSec,
+    endSec,
+    ...(lane !== undefined ? { lane } : {}),
+  });
 }
 
 export function moveOverlay(
@@ -2619,7 +2752,15 @@ export function moveOverlay(
   endSec: number,
   lane?: number,
 ): void {
-  send({ kind: "move-overlay", worldId, productionId, overlayId, startSec, endSec, ...(lane !== undefined ? { lane } : {}) });
+  send({
+    kind: "move-overlay",
+    worldId,
+    productionId,
+    overlayId,
+    startSec,
+    endSec,
+    ...(lane !== undefined ? { lane } : {}),
+  });
 }
 
 /** Two clips over one file: the picture stays put and stops sounding, the sound drops a lane. */
@@ -2664,7 +2805,13 @@ export function exportCut(
   preset: "review-cut" | "master" | "social-excerpt",
   episodeId?: string,
 ): void {
-  send({ kind: "export-cut", worldId, productionId, preset, ...(episodeId !== undefined ? { episodeId } : {}) });
+  send({
+    kind: "export-cut",
+    worldId,
+    productionId,
+    preset,
+    ...(episodeId !== undefined ? { episodeId } : {}),
+  });
 }
 
 export function cancelExport(worldId: string, exportId: string): void {
@@ -2901,7 +3048,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     voiceRuntimeTest: null,
     mainPhotoAcceptance: {},
     characterSheetAcceptance: {},
-  locationViewUpload: {},
+    locationViewUpload: {},
     exportsState: {},
     importReport: null,
     artifactNotices: [],
@@ -2932,6 +3079,11 @@ export function __pendingQueueRequestsForTest(): string[] {
 
 export function __connectionStatusForTest(status: ConnectionStatus): void {
   handleStatus(status);
+}
+
+/** Test hook: install the real send boundary without opening a WebSocket. */
+export function __setBridgeForTest(next: ArkeBridge | null): void {
+  bridge = next;
 }
 
 /**
@@ -3127,7 +3279,9 @@ export function worldChatAttachTarget(worldId: string, conversationId: string): 
 }
 
 /** What this conversation would not take, so the composer can say so on a chip. */
-export function useWorldChatRefusals(conversationId: string | undefined): Array<{ name: string; reason: string }> {
+export function useWorldChatRefusals(
+  conversationId: string | undefined,
+): Array<{ name: string; reason: string }> {
   const refusals = useStore().worldChatRefusals;
   return conversationId ? (refusals[conversationId] ?? []) : [];
 }
@@ -3330,15 +3484,37 @@ export function sendBenchUploadReferences(
 }
 
 /** Returns the requestId so the screen can correlate the queue.enqueue-result. */
-export function sendBenchDispatch(worldId: string, sessionId: string): string {
+export function sendBenchDispatch(
+  worldId: string,
+  sessionId: string,
+  voiceUploadConfirmedFor?: string,
+): string {
   const requestId = queueRequest("bench-dispatch");
-  send({ kind: "bench-dispatch", worldId, sessionId, requestId } as ClientMessage);
+  send({
+    kind: "bench-dispatch",
+    worldId,
+    sessionId,
+    requestId,
+    ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
+  } as ClientMessage);
   return requestId;
 }
 
-export function sendBenchRerun(worldId: string, sessionId: string, takeId: string): string {
+export function sendBenchRerun(
+  worldId: string,
+  sessionId: string,
+  takeId: string,
+  voiceUploadConfirmedFor?: string,
+): string {
   const requestId = queueRequest("bench-rerun");
-  send({ kind: "bench-rerun", worldId, sessionId, requestId, takeId } as ClientMessage);
+  send({
+    kind: "bench-rerun",
+    worldId,
+    sessionId,
+    requestId,
+    takeId,
+    ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
+  } as ClientMessage);
   return requestId;
 }
 
@@ -3365,6 +3541,11 @@ export function sendStageArtifactReference(worldId: string, key: string, artifac
 /** Returns the requestId the artifact.filed-batch answer will carry. */
 export function sendAttachFilesCorrelated(worldId: string, links?: string[]): string {
   const requestId = ulid();
-  send({ kind: "attach-files-correlated", worldId, requestId, ...(links !== undefined ? { links } : {}) } as ClientMessage);
+  send({
+    kind: "attach-files-correlated",
+    worldId,
+    requestId,
+    ...(links !== undefined ? { links } : {}),
+  } as ClientMessage);
   return requestId;
 }

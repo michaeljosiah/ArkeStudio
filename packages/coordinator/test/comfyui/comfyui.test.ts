@@ -5,8 +5,17 @@ import { join } from "node:path";
 import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RuntimeProbes } from "@arke-studio/contracts";
 import { comfyUiRecoveryDecision } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { ComfyUiEngineService, engineInstanceId, type ComfyUiRecipeFacts, type EngineServiceDeps } from "../../src/comfyui/engine.js";
+import {
+  comfyUiChildEnvironment,
+  ComfyUiEngineService,
+  comfyUiUrlIsLoopback,
+  engineInstanceId,
+  type ComfyUiRecipeFacts,
+  type EngineServiceDeps,
+} from "../../src/comfyui/engine.js";
+import { readCustomNodeRef } from "../../src/comfyui/node-ref.js";
 import { sanitizeComfyUiMedia } from "../../src/comfyui/sanitize.js";
+import { verifyArtifact } from "../../src/queue/verify.js";
 import { JobQueue, type EnqueueInput } from "../../src/queue/dispatcher.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -44,7 +53,10 @@ function pngChunk(type: string, payload: Uint8Array): Uint8Array {
   const out = new Uint8Array(12 + payload.length);
   const view = new DataView(out.buffer);
   view.setUint32(0, payload.length);
-  out.set([...type].map((c) => c.charCodeAt(0)), 4);
+  out.set(
+    [...type].map((c) => c.charCodeAt(0)),
+    4,
+  );
   out.set(payload, 8);
   view.setUint32(8 + payload.length, crc32(payload));
   return out;
@@ -53,7 +65,7 @@ function pngChunk(type: string, payload: Uint8Array): Uint8Array {
 function pngWithText(): Uint8Array {
   const signature = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const ihdr = pngChunk("IHDR", new Uint8Array(13));
-  const workflow = pngChunk("tEXt", new TextEncoder().encode("prompt\0{\"1\":{\"class_type\":\"KSampler\"}}"));
+  const workflow = pngChunk("tEXt", new TextEncoder().encode('prompt\0{"1":{"class_type":"KSampler"}}'));
   const international = pngChunk("iTXt", new TextEncoder().encode("workflow\0\0\0\0\0{}"));
   const idat = pngChunk("IDAT", new Uint8Array([1, 2, 3, 4]));
   const iend = pngChunk("IEND", new Uint8Array(0));
@@ -69,13 +81,16 @@ function pngWithText(): Uint8Array {
 }
 
 function u32(data: Uint8Array, at: number): number {
-  return (data[at]! << 24 | data[at + 1]! << 16 | data[at + 2]! << 8 | data[at + 3]!) >>> 0;
+  return ((data[at]! << 24) | (data[at + 1]! << 16) | (data[at + 2]! << 8) | data[at + 3]!) >>> 0;
 }
 
 function mp4Box(type: string, body: Uint8Array): Uint8Array {
   const out = new Uint8Array(8 + body.length);
   new DataView(out.buffer).setUint32(0, out.length);
-  out.set([...type].map((c) => c.charCodeAt(0)), 4);
+  out.set(
+    [...type].map((c) => c.charCodeAt(0)),
+    4,
+  );
   out.set(body, 8);
   return out;
 }
@@ -88,6 +103,69 @@ function concat(...parts: Uint8Array[]): Uint8Array {
     at += part.length;
   }
   return out;
+}
+
+function wavBytes(): Uint8Array {
+  const data = new Uint8Array(46);
+  const view = new DataView(data.buffer);
+  data.set(new TextEncoder().encode("RIFF"), 0);
+  view.setUint32(4, data.length - 8, true);
+  data.set(new TextEncoder().encode("WAVEfmt "), 8);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8_000, true);
+  view.setUint32(28, 16_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  data.set(new TextEncoder().encode("data"), 36);
+  view.setUint32(40, 2, true);
+  data.set([1, 0], 44);
+  return data;
+}
+
+function flacWithComment(): Uint8Array {
+  const streamBody = new Uint8Array(34);
+  const streamView = new DataView(streamBody.buffer);
+  streamView.setUint16(0, 16, false);
+  streamView.setUint16(2, 16, false);
+  const packed = (BigInt(44_100) << 44n) | (15n << 36n) | 16n;
+  streamView.setUint32(10, Number(packed >> 32n), false);
+  streamView.setUint32(14, Number(packed & 0xffffffffn), false);
+  const streamInfo = concat(new Uint8Array([0, 0, 0, 34]), streamBody);
+  const comment = new TextEncoder().encode('prompt={"graph":true}');
+  const commentHead = new Uint8Array([
+    0x84,
+    comment.length >>> 16,
+    (comment.length >>> 8) & 0xff,
+    comment.length & 0xff,
+  ]);
+  const header = new Uint8Array([0xff, 0xf8, 0x69, 0x08, 0, 15]);
+  const frameHead = concat(header, new Uint8Array([testFlacCrc8(header)]));
+  const frameWithoutCrc = concat(frameHead, new Uint8Array([1, 2, 3, 4]));
+  const crc = testFlacCrc16(frameWithoutCrc);
+  const frame = concat(frameWithoutCrc, new Uint8Array([crc >>> 8, crc & 0xff]));
+  return concat(new TextEncoder().encode("fLaC"), streamInfo, commentHead, comment, frame);
+}
+
+function testFlacCrc8(data: Uint8Array): number {
+  let crc = 0;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1)
+      crc = (crc & 0x80) !== 0 ? ((crc << 1) ^ 0x07) & 0xff : (crc << 1) & 0xff;
+  }
+  return crc;
+}
+
+function testFlacCrc16(data: Uint8Array): number {
+  let crc = 0;
+  for (const byte of data) {
+    crc ^= byte << 8;
+    for (let bit = 0; bit < 8; bit += 1)
+      crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x8005) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc;
 }
 
 /** An stco with one entry, pointing at `offset`. */
@@ -119,8 +197,17 @@ describe("landed media loses its embedded workflow (§2.10)", () => {
       new Uint8Array([10, 0, 0, 0]),
       new Uint8Array([0b0000_1100, 0, 0, 0, 1, 0, 0, 1, 0, 0]), // EXIF+XMP flags set
     );
-    const exif = concat(new TextEncoder().encode("EXIF"), new Uint8Array([4, 0, 0, 0]), new TextEncoder().encode("wkfl"));
-    const vp8 = concat(new TextEncoder().encode("VP8 "), new Uint8Array([2, 0, 0, 0]), new Uint8Array([9, 9]), new Uint8Array([0]));
+    const exif = concat(
+      new TextEncoder().encode("EXIF"),
+      new Uint8Array([4, 0, 0, 0]),
+      new TextEncoder().encode("wkfl"),
+    );
+    const vp8 = concat(
+      new TextEncoder().encode("VP8 "),
+      new Uint8Array([2, 0, 0, 0]),
+      new Uint8Array([9, 9]),
+      new Uint8Array([0]),
+    );
     const payload = concat(new TextEncoder().encode("WEBP"), vp8x, exif, vp8);
     const header = concat(new TextEncoder().encode("RIFF"), new Uint8Array(4));
     new DataView(header.buffer).setUint32(4, payload.length, true);
@@ -132,7 +219,9 @@ describe("landed media loses its embedded workflow (§2.10)", () => {
     assert.equal(text.includes("wkfl"), false);
     assert.match(text, /VP8X/);
     // The VP8X metadata flags are cleared to match the chunks no longer present.
-    const vp8xAt = result.data.findIndex((_, i) => new TextDecoder("latin1").decode(result.data.subarray(i, i + 4)) === "VP8X");
+    const vp8xAt = result.data.findIndex(
+      (_, i) => new TextDecoder("latin1").decode(result.data.subarray(i, i + 4)) === "VP8X",
+    );
     assert.equal(result.data[vp8xAt + 8]! & 0b0000_1100, 0);
     // The RIFF size covers exactly what is left.
     const riffSize = new DataView(result.data.buffer, result.data.byteOffset).getUint32(4, true);
@@ -188,7 +277,8 @@ describe("landed media loses its embedded workflow (§2.10)", () => {
     // Two traks, as a video file with an audio track has. A walk that stopped at the first
     // stco would leave the second track's chunks pointing into the bytes that moved.
     const udta = mp4Box("udta", new TextEncoder().encode("prompt-graph-bytes-here"));
-    const trak = (offset: number) => mp4Box("trak", mp4Box("mdia", mp4Box("minf", mp4Box("stbl", stcoBox(offset)))));
+    const trak = (offset: number) =>
+      mp4Box("trak", mp4Box("mdia", mp4Box("minf", mp4Box("stbl", stcoBox(offset)))));
     const ftyp = mp4Box("ftyp", new TextEncoder().encode("isom"));
     // Sized in two passes: the offsets must point into the real mdat payload.
     const draft = mp4Box("moov", concat(trak(0), trak(0), udta));
@@ -217,6 +307,21 @@ describe("landed media loses its embedded workflow (§2.10)", () => {
     assert.match(result.reason, /webm\/matroska/);
     assert.match(result.reason, /refused/);
   });
+
+  it("flac: comments are stripped and the structurally complete audio still verifies", () => {
+    const result = sanitizeComfyUiMedia("voice.flac", flacWithComment());
+    assert.ok(result.ok);
+    if (!result.ok) return;
+    assert.equal(new TextDecoder().decode(result.data).includes("prompt"), false);
+    assert.ok(result.strippedBytes > 0);
+    assert.equal(verifyArtifact({ name: "voice.flac", contentType: "audio/flac", data: result.data }), null);
+  });
+
+  it("refuses a truncated FLAC rather than landing a prefix as playable audio", () => {
+    const result = sanitizeComfyUiMedia("voice.flac", new TextEncoder().encode("fLaC"));
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.reason, /bad signature|incomplete metadata|no audio/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -231,10 +336,22 @@ const FACTS: ComfyUiRecipeFacts[] = [
     version: 1,
     minVramMb: 6000,
     recommendedVramMb: 8000,
-    checkpoints: [{ file: "checkpoints/sd_xl_base_1.0.safetensors", sha256: "a".repeat(64), sizeMb: 6617, url: "https://x/" }],
+    checkpoints: [
+      {
+        file: "checkpoints/sd_xl_base_1.0.safetensors",
+        sha256: "a".repeat(64),
+        sizeMb: 6617,
+        url: "https://x/",
+      },
+    ],
     customNodes: [],
     nodeClasses: ["KSampler", "SaveImage"],
-    identity: { id: "comfyui-draft-image", version: 1, templateDigest: "b".repeat(64), dependencyDigest: "c".repeat(64) },
+    identity: {
+      id: "comfyui-draft-image",
+      version: 1,
+      templateDigest: "b".repeat(64),
+      dependencyDigest: "c".repeat(64),
+    },
   },
 ];
 
@@ -244,20 +361,38 @@ interface FakeEngineWorld {
   fetches: string[];
   spawned: SupervisedSpec[];
   urls: Map<string, { version?: string }>;
+  nodeRefs: Map<string, string | null>;
+  objectInfoUnavailable: boolean;
 }
 
-function engineDeps(world: FakeEngineWorld, appRoot: string): EngineServiceDeps {
+function engineDeps(
+  world: FakeEngineWorld,
+  appRoot: string,
+  recipes: readonly ComfyUiRecipeFacts[] = FACTS,
+): EngineServiceDeps {
+  let processEpoch = 0;
   return {
     appRoot,
-    recipes: FACTS,
+    recipes,
     fetch: async (url) => {
       world.fetches.push(url);
+      if (url === "http://127.0.0.1:51999/system_stats") {
+        return new Response(JSON.stringify({ system: { comfyui_version: "0.33.1" } }), { status: 200 });
+      }
+      if (url === "http://127.0.0.1:51999/object_info") {
+        if (world.objectInfoUnavailable) throw new Error("object info unavailable");
+        return new Response(JSON.stringify({ KSampler: {}, SaveImage: {} }), { status: 200 });
+      }
       for (const [base, behaviour] of world.urls) {
         if (url.startsWith(base)) {
           if (url.endsWith("/system_stats")) {
-            return new Response(JSON.stringify({ system: { comfyui_version: behaviour.version ?? "0.33.1" } }), { status: 200 });
+            return new Response(
+              JSON.stringify({ system: { comfyui_version: behaviour.version ?? "0.33.1" } }),
+              { status: 200 },
+            );
           }
           if (url.endsWith("/object_info")) {
+            if (world.objectInfoUnavailable) throw new Error("object info unavailable");
             return new Response(JSON.stringify({ KSampler: {}, SaveImage: {} }), { status: 200 });
           }
         }
@@ -279,6 +414,7 @@ function engineDeps(world: FakeEngineWorld, appRoot: string): EngineServiceDeps 
     },
     hashFile: async (path) => world.hashes.get(path.replaceAll("\\", "/")) ?? null,
     writeTextFile: async () => {},
+    readNodeRef: async (path) => world.nodeRefs.get(path.replaceAll("\\", "/")) ?? null,
     createSupervisor: (spec) => {
       world.spawned.push(spec);
       const fake = {
@@ -286,17 +422,28 @@ function engineDeps(world: FakeEngineWorld, appRoot: string): EngineServiceDeps 
         port: 51999,
         reason: undefined,
         on: () => fake,
+        off: () => fake,
         start: async () => {},
         stop: async () => {},
       };
       return fake as unknown as ChildSupervisor;
     },
+    registerSupervisorExitBackstop: () => () => {},
+    createProcessEpoch: () => `process-${++processEpoch}`,
     homeDir: "C:/Users/nadia",
   };
 }
 
 function fakeWorld(): FakeEngineWorld {
-  return { files: new Set(), hashes: new Map(), fetches: [], spawned: [], urls: new Map() };
+  return {
+    files: new Set(),
+    hashes: new Map(),
+    fetches: [],
+    spawned: [],
+    urls: new Map(),
+    nodeRefs: new Map(),
+    objectInfoUnavailable: false,
+  };
 }
 
 const NO_SETTINGS: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
@@ -310,7 +457,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(service.engineStatus().source, "absent");
     assert.equal(service.engineStatus().state, "absent");
     assert.equal(service.baseUrl(), null);
-    assert.equal(await service.externallyPresent(), false);
+    assert.equal(await service.externallySelected(), false);
 
     // A well-known folder holding an install becomes an offer, not an installation.
     world.files.add("C:/Users/nadia/ComfyUI/main.py");
@@ -318,7 +465,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     const detected = service.engineStatus().detected;
     assert.equal(detected.length, 1);
     assert.match(detected[0]!.location, /ComfyUI/);
-    assert.equal(await service.externallyPresent(), true);
+    assert.equal(await service.externallySelected(), false, "an offer is not an externally selected engine");
     assert.equal(world.spawned.length, 0, "detection never spawns");
   });
 
@@ -331,6 +478,7 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(status.source, "user-url");
     assert.equal(status.state, "ready");
     assert.equal(status.version, "0.33.1");
+    assert.equal(status.locality, "local");
     assert.equal(world.spawned.length, 0, "a URL is never spawned (D13)");
     assert.equal(service.baseUrl(), "http://127.0.0.1:8188");
 
@@ -340,6 +488,77 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(old.state, "incompatible");
     assert.match(old.detail!, /0\.2\.2/);
     assert.equal(service.baseUrl(), null, "an incompatible engine is not dispatched to");
+  });
+
+  it("classifies a non-loopback URL as remote", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", { version: "0.33.1" });
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: null });
+    assert.equal(service.engineStatus().locality, "remote");
+    assert.equal(service.engineIdentity()?.locality, "remote");
+  });
+
+  it("classifies localhost and a loopback-looking hostname as remote engine identities", async () => {
+    for (const url of ["http://localhost:8188", "http://127.attacker.example:8188"]) {
+      const world = fakeWorld();
+      world.urls.set(url, { version: "0.33.1" });
+      const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+      await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
+      assert.equal(service.engineStatus().locality, "remote", url);
+      assert.equal(service.engineIdentity()?.locality, "remote", url);
+      assert.equal(service.voiceUploadDestination()?.label, new URL(url).host, url);
+    }
+  });
+
+  it("trusts only literal loopback IP hosts", () => {
+    for (const url of ["http://127.0.0.1:8188", "http://[::1]:8188"]) {
+      assert.equal(comfyUiUrlIsLoopback(url), true, url);
+    }
+    for (const url of [
+      "http://localhost:8188",
+      "http://127.0.0.2:8188",
+      "http://127.attacker.example:8188",
+      "http://2130706433:8188",
+      "http://0x7f000001:8188",
+      "http://127.1:8188",
+      "http://[0:0:0:0:0:0:0:1]:8188",
+      "http://[::ffff:127.0.0.1]:8188",
+      "http://10.0.0.4:8188",
+    ]) {
+      assert.equal(comfyUiUrlIsLoopback(url), false, url);
+    }
+  });
+
+  it("names a remote voice destination without exposing URL credentials or request data", async () => {
+    const world = fakeWorld();
+    const url = "https://voice-user:voice-secret@127.attacker.example:8443/private?token=request-secret";
+    world.urls.set("https://voice-user:voice-secret@127.attacker.example:8443", { version: "0.33.1" });
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
+    const destination = service.voiceUploadDestination();
+    assert.equal(destination?.label, "127.attacker.example:8443");
+    assert.equal(destination?.token, service.instanceId());
+    assert.equal(JSON.stringify(destination).includes("voice-secret"), false);
+    assert.equal(JSON.stringify(destination).includes("request-secret"), false);
+    assert.equal(JSON.stringify(destination).includes("/private"), false);
+  });
+
+  it("does not apply this machine's GPU probes to a remote engine", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", { version: "0.33.1" });
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://10.0.0.4:8188",
+      modelsDir: "C:/models",
+    });
+    const recipe = (await service.status({ vramMb: 4096, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!;
+    assert.equal(recipe.state, "unknown");
+    assert.match(recipe.reason ?? "", /Remote engine VRAM could not be measured/);
+    assert.doesNotMatch(recipe.reason ?? "", /This machine has/);
   });
 
   it("a user path with the portable layout is spawned and supervised with metadata disabled", async () => {
@@ -353,8 +572,151 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.match(spec.command!, /python\.exe$/);
     assert.ok(spec.args!.includes("--disable-metadata"), "defence in depth even though landing sanitises");
     assert.ok(spec.args!.includes("--listen"));
+    assert.equal(spec.inheritEnv, false);
+    assert.equal(spec.env?.["HF_HUB_OFFLINE"], "1");
+    assert.equal(spec.env?.["OPENAI_API_KEY"], undefined);
     assert.equal(service.engineStatus().state, "ready");
     assert.equal(service.baseUrl(), "http://127.0.0.1:51999");
+  });
+
+  it("changes process identity when a spawned child restarts at the same filesystem location", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const deps = engineDeps(world, "C:/app");
+    let emitStatus: (() => void) | null = null;
+    let status: "starting" | "healthy" | "unhealthy" = "healthy";
+    let spawnEpoch = 1;
+    deps.createSupervisor = (spec) => {
+      world.spawned.push(spec);
+      const fake = {
+        get status() {
+          return status;
+        },
+        get spawnEpoch() {
+          return spawnEpoch;
+        },
+        port: 51999,
+        reason: undefined,
+        on: (_event: string, listener: () => void) => {
+          emitStatus = listener;
+          return fake;
+        },
+        off: () => fake,
+        start: async () => {
+          status = "starting";
+          emitStatus?.();
+          status = "healthy";
+          emitStatus?.();
+        },
+        stop: async () => {},
+      };
+      return fake as unknown as ChildSupervisor;
+    };
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
+    const first = service.engineIdentity();
+    assert.equal(first?.source, "user-path");
+    assert.ok(first?.processEpoch);
+
+    status = "unhealthy";
+    const notify = emitStatus as (() => void) | null;
+    notify?.();
+    spawnEpoch = 2;
+    status = "starting";
+    notify?.();
+    const replacement = service.engineIdentity();
+    assert.equal(replacement?.instanceId, first?.instanceId, "the location identity stays stable");
+    assert.notEqual(replacement?.processEpoch, first?.processEpoch, "the replacement process is distinct");
+    await service.dispose();
+  });
+
+  it("disposal removes the supervisor listener and process-exit backstop before stopping it", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const calls: string[] = [];
+    const deps = engineDeps(world, "C:/app");
+    deps.createSupervisor = (spec) => {
+      world.spawned.push(spec);
+      const fake = {
+        status: "healthy" as const,
+        port: 51999,
+        reason: undefined,
+        on: () => fake,
+        off: () => {
+          calls.push("off");
+          return fake;
+        },
+        start: async () => {},
+        stop: async () => {
+          calls.push("stop");
+        },
+      };
+      return fake as unknown as ChildSupervisor;
+    };
+    deps.registerSupervisorExitBackstop = () => () => calls.push("backstop");
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
+    await service.dispose();
+    assert.deepEqual(calls, ["backstop", "off", "stop"]);
+  });
+
+  it("joins a paused settings write and cannot start a supervisor after disposal", async () => {
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const deps = engineDeps(world, "C:/app");
+    let writeStarted!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      writeStarted = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writePaused = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    deps.writeTextFile = async () => {
+      writeStarted();
+      await writePaused;
+    };
+    let starts = 0;
+    deps.createSupervisor = (spec) => {
+      world.spawned.push(spec);
+      const fake = {
+        status: "healthy" as const,
+        port: 51999,
+        reason: undefined,
+        on: () => fake,
+        off: () => fake,
+        start: async () => {
+          starts += 1;
+        },
+        stop: async () => {},
+      };
+      return fake as unknown as ChildSupervisor;
+    };
+    const service = new ComfyUiEngineService(deps);
+    const applying = service.applySettings({
+      enginePath: "C:/AI/ComfyUI",
+      engineUrl: null,
+      modelsDir: "C:/models",
+    });
+    await writing;
+
+    let disposeSettled = false;
+    const disposing = service.dispose().finally(() => {
+      disposeSettled = true;
+    });
+    await Promise.resolve();
+    const settledBeforeWrite = disposeSettled;
+    releaseWrite();
+    await Promise.all([applying, disposing]);
+
+    assert.equal(settledBeforeWrite, false, "dispose joins the serialized settings pass");
+    assert.equal(world.spawned.length, 0, "the paused continuation never creates a supervisor");
+    assert.equal(starts, 0);
+    assert.equal(service.baseUrl(), null);
+    assert.equal(service.engineStatus().source, "absent");
   });
 
   it("finds the managed engine inside the archive's wrapper folder, where the installer put it", async () => {
@@ -403,9 +765,33 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
   });
 
   it("instance identity is an opaque digest, stable under trailing-slash and case noise", () => {
-    assert.equal(engineInstanceId("user-path", "C:\\AI\\ComfyUI\\"), engineInstanceId("user-path", "c:\\ai\\comfyui"));
-    assert.notEqual(engineInstanceId("user-path", "C:\\AI\\ComfyUI"), engineInstanceId("user-url", "C:\\AI\\ComfyUI"));
+    assert.equal(
+      engineInstanceId("user-path", "C:\\AI\\ComfyUI\\"),
+      engineInstanceId("user-path", "c:\\ai\\comfyui"),
+    );
+    assert.notEqual(
+      engineInstanceId("user-path", "C:\\AI\\ComfyUI"),
+      engineInstanceId("user-url", "C:\\AI\\ComfyUI"),
+    );
     assert.doesNotMatch(engineInstanceId("user-path", "C:\\AI\\ComfyUI"), /comfyui/i);
+  });
+
+  it("keeps case-sensitive URL paths, queries, and credentials in the opaque identity", () => {
+    const id = (url: string): string => engineInstanceId("user-url", url);
+    assert.notEqual(id("https://voice.example/EngineA"), id("https://voice.example/enginea"));
+    assert.notEqual(
+      id("https://voice.example/EngineA?workspace=North"),
+      id("https://voice.example/EngineA?workspace=north"),
+    );
+    assert.notEqual(
+      id("https://voice-user:first@voice.example/EngineA"),
+      id("https://voice-user:second@voice.example/EngineA"),
+    );
+    assert.equal(
+      id("HTTPS://VOICE.EXAMPLE:443/EngineA?workspace=North"),
+      id("https://voice.example/EngineA?workspace=North"),
+      "scheme, host, and an explicit default port are safe to canonicalise",
+    );
   });
 });
 
@@ -455,6 +841,194 @@ describe("pre-flight names the file and both digests (§2.5, R-9)", () => {
     const status = await service.status(PROBES);
     assert.equal(status.recipes[0]!.state, "ready");
   });
+
+  it("fails closed when the engine changes while a checkpoint is being hashed", async () => {
+    const world = fakeWorld();
+    const file = "C:/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(file);
+    world.urls.set("http://127.0.0.1:8188", {});
+    world.urls.set("http://127.0.0.1:8189", {});
+    let releaseHash!: () => void;
+    const hashing = new Promise<void>((resolve) => {
+      releaseHash = resolve;
+    });
+    const deps = engineDeps(world, "C:/app");
+    deps.hashFile = async () => {
+      await hashing;
+      return "a".repeat(64);
+    };
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:8188",
+      modelsDir: "C:/models",
+    });
+    const preflight = service.preflight("comfyui-draft-image");
+    const switched = service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:8189",
+      modelsDir: "C:/models",
+    });
+    releaseHash();
+    const verdict = await preflight;
+    await switched;
+    assert.equal(verdict.ok, false);
+    if (!verdict.ok)
+      assert.match(verdict.reason, /engine (changed during dependency verification|lifecycle changed)/);
+  });
+
+  it("cancels a long checkpoint scan on disposal instead of holding shutdown open", async () => {
+    const world = fakeWorld();
+    const file = "C:/AI/ComfyUI/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(file);
+    let aborted = false;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const deps = engineDeps(world, "C:/app");
+    deps.hashFile = (_path, signal) =>
+      new Promise((resolve) => {
+        markStarted();
+        if (signal?.aborted) {
+          aborted = true;
+          resolve(null);
+          return;
+        }
+        signal?.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            resolve(null);
+          },
+          { once: true },
+        );
+      });
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
+    const scan = service.preflight("comfyui-draft-image");
+    await started;
+    await service.dispose();
+    const verdict = await scan;
+    assert.equal(aborted, true);
+    assert.equal(verdict.ok, false);
+    if (!verdict.ok) assert.match(verdict.reason, /verification was stopped/);
+  });
+
+  it("Re-verify refreshes node classes as well as dependency hashes", async () => {
+    const world = fakeWorld();
+    const service = await serviceAt(world);
+    const file = "C:/AI/ComfyUI/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(file);
+    world.hashes.set(file, "a".repeat(64));
+    assert.equal((await service.status(PROBES)).recipes[0]!.state, "ready");
+
+    world.objectInfoUnavailable = true;
+    await service.reverify(["comfyui-draft-image"]);
+    const unavailable = await service.status(PROBES);
+    assert.equal(unavailable.recipes[0]!.state, "disabled");
+    assert.match(unavailable.recipes[0]!.reason!, /node catalogue could not be verified/);
+
+    world.objectInfoUnavailable = false;
+    await service.reverify(["comfyui-draft-image"]);
+    assert.equal((await service.status(PROBES)).recipes[0]!.state, "ready");
+    assert.equal(world.spawned.length, 1, "re-verification did not restart the active engine");
+  });
+
+  it("an unreadable custom-node identity fails closed, and an exact clean identity passes", async () => {
+    const nodeRecipe: ComfyUiRecipeFacts = {
+      ...FACTS[0]!,
+      id: "node-recipe",
+      checkpoints: [],
+      customNodes: [{ id: "PinnedNode", pinnedRef: "d".repeat(40) }],
+      nodeClasses: [],
+      identity: { ...FACTS[0]!.identity, id: "node-recipe" },
+    };
+    const world = fakeWorld();
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    const nodeDir = "C:/AI/ComfyUI/ComfyUI/custom_nodes/PinnedNode";
+    world.files.add(nodeDir);
+    world.nodeRefs.set(nodeDir, "d".repeat(40));
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app", [nodeRecipe]));
+    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
+
+    world.nodeRefs.set(nodeDir, null);
+    const unreadable = await service.preflight("node-recipe");
+    assert.equal(unreadable.ok, false);
+    if (!unreadable.ok) assert.match(unreadable.reason, /identity could not be read; it is unverified/);
+    assert.equal((await service.status(PROBES)).recipes[0]!.state, "disabled");
+
+    world.nodeRefs.set(nodeDir, "d".repeat(40));
+    assert.deepEqual(await service.preflight("node-recipe"), { ok: true });
+    assert.equal((await service.status(PROBES)).recipes[0]!.state, "ready");
+  });
+
+  it("a known-incomplete dependency closure is unavailable even when the engine answers", async () => {
+    const recipe: ComfyUiRecipeFacts = {
+      ...FACTS[0]!,
+      id: "blocked-recipe",
+      checkpoints: [],
+      customNodes: [],
+      nodeClasses: [],
+      unavailableReason: "immutable model artifacts are unavailable",
+      identity: { ...FACTS[0]!.identity, id: "blocked-recipe" },
+    };
+    const world = fakeWorld();
+    world.urls.set("http://10.0.0.4:8188", {});
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app", [recipe]));
+    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
+    const status = await service.status(PROBES);
+    assert.equal(status.recipes[0]!.state, "disabled");
+    assert.equal(status.recipes[0]!.reason, "immutable model artifacts are unavailable");
+    assert.deepEqual(await service.preflight("blocked-recipe"), {
+      ok: false,
+      reason: "immutable model artifacts are unavailable",
+    });
+  });
+});
+
+describe("custom-node content identity", () => {
+  const COMMIT = "dedd982ab999633d5296c3e5a152ef772941fb82";
+
+  it("accepts only a full immutable identity written by verified setup", async () => {
+    const dir = await tempDir("arke-node-ref-");
+    await writeFile(join(dir, ".arke-content-id"), `${COMMIT}\n`);
+    assert.equal(await readCustomNodeRef(dir), COMMIT);
+  });
+
+  it("rejects missing, malformed and non-commit identity markers", async () => {
+    const dir = await tempDir("arke-node-ref-");
+    assert.equal(await readCustomNodeRef(dir), null);
+    await writeFile(join(dir, ".arke-content-id"), "main\n");
+    assert.equal(await readCustomNodeRef(dir), null);
+    await writeFile(join(dir, ".arke-content-id"), `${COMMIT}extra\n`);
+    assert.equal(await readCustomNodeRef(dir), null);
+  });
+});
+
+describe("the managed child environment", () => {
+  it("allow-lists runtime variables, strips credentials, and disables model-network fallbacks", () => {
+    const env = comfyUiChildEnvironment({
+      SystemRoot: "C:\\Windows",
+      PATH: "C:\\Windows\\System32",
+      TEMP: "C:\\Temp",
+      OPENAI_API_KEY: "secret",
+      AWS_SECRET_ACCESS_KEY: "secret",
+      HTTP_PROXY: "http://credentialled-proxy.invalid",
+    });
+    assert.deepEqual(
+      { SystemRoot: env["SystemRoot"], PATH: env["PATH"], TEMP: env["TEMP"] },
+      { SystemRoot: "C:\\Windows", PATH: "C:\\Windows\\System32", TEMP: "C:\\Temp" },
+    );
+    assert.equal(env["OPENAI_API_KEY"], undefined);
+    assert.equal(env["AWS_SECRET_ACCESS_KEY"], undefined);
+    assert.equal(env["HTTP_PROXY"], undefined);
+    assert.equal(env["PYTHONNOUSERSITE"], "1");
+    assert.equal(env["HF_HUB_OFFLINE"], "1");
+  });
 });
 
 describe("readiness is one ladder with a specific reason on every rung (§2.12, R-10)", () => {
@@ -466,15 +1040,41 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     const status = await service.status(PROBES);
     assert.equal(status.recipes[0]!.state, "disabled");
     assert.match(status.recipes[0]!.reason!, /cannot verify this engine's files/);
-    assert.doesNotMatch(status.recipes[0]!.reason!, /missing/, "never wording that implies the files are merely missing");
+    assert.doesNotMatch(
+      status.recipes[0]!.reason!,
+      /missing/,
+      "never wording that implies the files are merely missing",
+    );
+  });
+
+  it("fails closed when the engine's node catalogue cannot be read", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:8188", {});
+    world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    world.objectInfoUnavailable = true;
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:8188",
+      modelsDir: "C:/models",
+    });
+    const status = await service.status(PROBES);
+    assert.equal(status.recipes[0]!.state, "disabled");
+    assert.match(status.recipes[0]!.reason!, /node catalogue could not be verified/);
   });
 
   it("VRAM below the floor: both figures and the cloud alternative; unknown stays unknown and dispatchable (D15)", async () => {
     const world = fakeWorld();
-    world.urls.set("http://10.0.0.4:8188", {});
-    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
-    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    world.urls.set("http://127.0.0.1:8188", {});
     world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:8188",
+      modelsDir: "C:/models",
+    });
 
     const small = await service.status({ vramMb: 4096, memMb: 32000, diskFreeMb: 1000 });
     assert.equal(small.recipes[0]!.state, "disabled");
@@ -482,7 +1082,10 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
 
     const unknown = await service.status({ vramMb: null, memMb: 32000, diskFreeMb: 1000 });
     assert.equal(unknown.recipes[0]!.state, "unknown");
-    assert.match(unknown.recipes[0]!.reason!, /VRAM could not be measured\. The 6 GB floor was not checked\./);
+    assert.match(
+      unknown.recipes[0]!.reason!,
+      /VRAM could not be measured\. The 6 GB floor was not checked\./,
+    );
   });
 
   /**
@@ -495,10 +1098,18 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
    */
   async function readiness(freeMb: number | null): Promise<string> {
     const world = fakeWorld();
-    world.urls.set("http://10.0.0.4:8188", {});
-    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app"), freeVramMb: async () => freeMb });
-    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    world.urls.set("http://127.0.0.1:8188", {});
     world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+    world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+    const service = new ComfyUiEngineService({
+      ...engineDeps(world, "C:/app"),
+      freeVramMb: async () => freeMb,
+    });
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:8188",
+      modelsDir: "C:/models",
+    });
     const status = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
     return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
   }
@@ -531,7 +1142,11 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     const world = fakeWorld();
     world.urls.set("http://10.0.0.4:8188", {});
     const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
-    await service.applySettings({ enginePath: null, engineUrl: "http://10.0.0.4:8188", modelsDir: "C:/models" });
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://10.0.0.4:8188",
+      modelsDir: "C:/models",
+    });
     const status = await service.status(PROBES);
     assert.equal(status.recipes[0]!.state, "disabled");
     assert.match(status.recipes[0]!.reason!, /1 of 1 model file missing/);
@@ -549,7 +1164,14 @@ function queueWith(
   extras: {
     admit?: (input: EnqueueInput) => Promise<{ ok: true } | { ok: false; reason: string }>;
     recoverLocal?: (job: Job, prior: Job | undefined) => ReturnType<typeof comfyUiRecoveryDecision> | null;
-    prepareArtifact?: (job: Job, artifact: { name: string; contentType: string; data: Uint8Array }) => { ok: true; artifact: { name: string; contentType: string; data: Uint8Array } } | { ok: false; reason: string };
+    prepareArtifact?: (
+      job: Job,
+      artifact: { name: string; contentType: string; data: Uint8Array },
+    ) =>
+      | { ok: true; artifact: { name: string; contentType: string; data: Uint8Array } }
+      | { ok: false; reason: string };
+    providerConcurrency?: Readonly<Record<string, number>>;
+    awaitRecoveryReady?: (provider: string) => Promise<boolean>;
   } = {},
 ): { queue: JobQueue; events: DomainEvent[]; ledger: LedgerEntry[] } {
   const events: DomainEvent[] = [];
@@ -629,7 +1251,11 @@ describe("enqueue admission refuses with the readiness reason before anything is
 });
 
 describe("recovery consults the per-source policy (§2.11)", () => {
-  async function journalWith(dir: string, status: "running" | "submitting", engine: Job["engine"]): Promise<string> {
+  async function journalWith(
+    dir: string,
+    status: "running" | "submitting",
+    engine: Job["engine"],
+  ): Promise<string> {
     const path = join(dir, "jobs.jsonl");
     const job: Job = {
       id: "jb_01J8E0000000000000000000Z9",
@@ -665,8 +1291,286 @@ describe("recovery consults the per-source policy (§2.11)", () => {
           : null,
     });
     const report = await queue.start();
-    assert.deepEqual(report.map((r) => r.action), ["requeued"]);
+    assert.deepEqual(
+      report.map((r) => r.action),
+      ["requeued"],
+    );
     assert.equal(provider.pollCount, 0, "the old prompt id was never polled");
+    queue.dispose();
+  });
+
+  it("a recovered synchronous local job waits for readiness, then requeues instead of polling its empty map", async () => {
+    const dir = await tempDir("arke-kokoro-q-");
+    const path = join(dir, "jobs.jsonl");
+    const job: Job = {
+      id: "jb_01J8E000000000000000000K70",
+      idempotencyKey: "01J8E100000000000000000K70",
+      worldId: WORLD,
+      target: { kind: "voice-line", id: "sh_12" },
+      capability: "voice-tts",
+      provider: "kokoro",
+      model: "kokoro-82m",
+      params: { voiceId: "af_bella", text: "the harbour remembers" },
+      estimatedMicroUsd: 0,
+      status: "running",
+      providerJobId: "kokoro-old-memory-id",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-18T10:00:00.000Z",
+      updatedAt: "2026-08-18T10:00:01.000Z",
+    };
+    await writeFile(path, `${JSON.stringify(job)}\n`);
+    const provider = new FakeProvider();
+    let ready!: (value: boolean) => void;
+    const gate = new Promise<boolean>((resolve) => {
+      ready = resolve;
+    });
+    const { queue } = queueWith({ kokoro: provider }, path, dir, {
+      recoverLocal: (candidate) => (candidate.provider === "kokoro" ? { action: "requeue" } : null),
+      awaitRecoveryReady: async (candidate) => (candidate === "kokoro" ? gate : true),
+    });
+
+    const report = await queue.start();
+    assert.equal(report[0]?.action, "requeued");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(provider.pollCount, 0);
+    assert.equal(provider.submitCount, 0);
+    ready(true);
+    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
+    assert.equal(
+      await waitFor(() => provider.pollCount === 1, 1_000),
+      true,
+      "only the newly submitted provider id is polled",
+    );
+    queue.dispose();
+  });
+
+  it("keeps recovered Kokoro work blocked when Voxa settles without Kokoro readiness", async () => {
+    const dir = await tempDir("arke-kokoro-blocked-q-");
+    const path = join(dir, "jobs.jsonl");
+    const job: Job = {
+      id: "jb_01J8E000000000000000000K71",
+      idempotencyKey: "01J8E100000000000000000K71",
+      worldId: WORLD,
+      target: { kind: "voice-line", id: "sh_12" },
+      capability: "voice-tts",
+      provider: "kokoro",
+      model: "kokoro-82m",
+      params: { voiceId: "af_bella", text: "the harbour remembers" },
+      estimatedMicroUsd: 0,
+      status: "running",
+      providerJobId: "kokoro-old-memory-id",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-18T10:00:00.000Z",
+      updatedAt: "2026-08-18T10:00:01.000Z",
+    };
+    await writeFile(path, `${JSON.stringify(job)}\n`);
+    const provider = new FakeProvider();
+    const { queue } = queueWith({ kokoro: provider }, path, dir, {
+      recoverLocal: (candidate) => (candidate.provider === "kokoro" ? { action: "requeue" } : null),
+      awaitRecoveryReady: async () => false,
+    });
+
+    await queue.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(queue.listJobs()[0]?.status, "queued");
+    assert.equal(provider.pollCount, 0);
+    assert.equal(provider.submitCount, 0);
+    queue.dispose();
+  });
+
+  it("keeps recovered spooled Kokoro audio behind the same Voxa readiness gate", async () => {
+    const dir = await tempDir("arke-kokoro-spool-q-");
+    const worldDir = await tempDir("arke-kokoro-spool-world-");
+    const path = join(dir, "jobs.jsonl");
+    const provider = new FakeProvider();
+    provider.inlineArtifacts = [{ name: "speech.wav", contentType: "audio/wav", data: wavBytes() }];
+    let worldAvailable = false;
+    const first = new JobQueue({
+      journalPath: path,
+      clients: { kokoro: provider },
+      getKey: async () => "",
+      emit: () => {},
+      ledger: { readJobIds: async () => new Set(), has: async () => false, append: async () => {} },
+      landInWorld: async (_worldId, fn) => {
+        if (!worldAvailable) return false;
+        await fn(worldDir);
+        return true;
+      },
+      pollIntervalMs: 5,
+    });
+    await first.start();
+    const job = await first.enqueue({
+      worldId: WORLD,
+      target: { kind: "voice-line", id: "sh_12" },
+      capability: "voice-tts",
+      provider: "kokoro",
+      model: "kokoro-82m",
+      params: { voiceId: "af_bella", text: "the harbour remembers" },
+      estimatedMicroUsd: 0,
+      landing: { dir: "productions/saltlight/audio" },
+    });
+    assert.equal(
+      await waitFor(
+        () => first.listJobs()[0]?.error?.includes("waiting for the owning world") === true,
+        1_000,
+      ),
+      true,
+    );
+    first.dispose();
+    await first.drain();
+
+    let release!: (ready: boolean) => void;
+    const ready = new Promise<boolean>((resolve) => {
+      release = resolve;
+    });
+    worldAvailable = true;
+    const second = new JobQueue({
+      journalPath: path,
+      clients: { kokoro: provider },
+      getKey: async () => "",
+      emit: () => {},
+      ledger: { readJobIds: async () => new Set(), has: async () => false, append: async () => {} },
+      landInWorld: async (_worldId, fn) => {
+        await fn(worldDir);
+        return true;
+      },
+      awaitRecoveryReady: async () => ready,
+      pollIntervalMs: 5,
+    });
+    await second.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      second.listJobs()[0]?.status,
+      "running",
+      "the pre-crash row remains visible but does no work",
+    );
+    assert.equal(provider.submitCount, 1);
+    assert.equal(provider.pollCount, 0);
+    release(true);
+    assert.equal(await waitFor(() => second.listJobs()[0]?.status === "succeeded", 1_000), true);
+    assert.equal(provider.submitCount, 1);
+    assert.equal(provider.pollCount, 0);
+    assert.equal(second.listJobs()[0]?.id, job.id);
+    second.dispose();
+  });
+
+  it("fail-resolves a legacy running ElevenLabs memory id without polling or charging again", async () => {
+    const dir = await tempDir("arke-eleven-q-");
+    const path = join(dir, "jobs.jsonl");
+    const job: Job = {
+      id: "jb_01J8E000000000000000000E11",
+      idempotencyKey: "01J8E100000000000000000E11",
+      worldId: WORLD,
+      target: { kind: "voice-line", id: "sh_12" },
+      capability: "voice-tts",
+      provider: "elevenlabs",
+      model: "eleven_multilingual_v2",
+      params: { voiceId: "v1", text: "the harbour remembers" },
+      estimatedMicroUsd: 6_000,
+      status: "running",
+      providerJobId: "elevenlabs-old-memory-id",
+      attempt: 1,
+      error: null,
+      createdAt: "2026-08-18T10:00:00.000Z",
+      updatedAt: "2026-08-18T10:00:01.000Z",
+    };
+    await writeFile(path, `${JSON.stringify(job)}\n`);
+    const provider = new FakeProvider();
+    const reason = "the paid response belonged to an earlier process; the job was not submitted again";
+    const { queue, ledger } = queueWith({ elevenlabs: provider }, path, dir, {
+      recoverLocal: (candidate) =>
+        candidate.provider === "elevenlabs" && candidate.status === "running"
+          ? { action: "fail", reason }
+          : null,
+    });
+
+    const report = await queue.start();
+    assert.equal(report[0]?.action, "failed");
+    assert.equal(queue.listJobs()[0]?.status, "failed");
+    assert.match(queue.listJobs()[0]?.error ?? "", /not submitted again/);
+    assert.equal(provider.pollCount, 0);
+    assert.equal(provider.submitCount, 0);
+    assert.equal(ledger.length, 1);
+    queue.dispose();
+  });
+
+  it("does not pump requeued work until the spawned engine is ready", async () => {
+    const dir = await tempDir("arke-cq-");
+    const path = await journalWith(dir, "running", { source: "managed", instanceId: "m1" });
+    const provider = new FakeProvider();
+    let release!: (ready: boolean) => void;
+    const ready = new Promise<boolean>((resolve) => {
+      release = resolve;
+    });
+    const { queue } = queueWith({ comfyui: provider }, path, dir, {
+      recoverLocal: (job) =>
+        job.status === "running" || job.status === "submitting"
+          ? comfyUiRecoveryDecision({ status: job.status, engine: job.engine, currentInstanceId: "m1" })
+          : null,
+      awaitRecoveryReady: async (providerId) => (providerId === "comfyui" ? ready : true),
+    });
+
+    const report = await queue.start();
+    assert.deepEqual(
+      report.map((row) => row.action),
+      ["requeued"],
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(provider.submitCount, 0, "recovery did not race the engine's startup");
+    release(true);
+    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
+    queue.dispose();
+  });
+
+  it("resumes a recovered URL poll when readiness returns after the initial wait", async () => {
+    const dir = await tempDir("arke-cq-");
+    const path = await journalWith(dir, "running", { source: "user-url", instanceId: "same" });
+    const provider = new FakeProvider();
+    provider.remote.set("p-old", {
+      remoteId: "p-old",
+      createdAt: "2026-08-18T10:00:00.000Z",
+      state: "succeeded",
+    });
+    const { queue } = queueWith({ comfyui: provider }, path, dir, {
+      recoverLocal: (job) =>
+        job.status === "running" || job.status === "submitting"
+          ? comfyUiRecoveryDecision({ status: job.status, engine: job.engine, currentInstanceId: "same" })
+          : null,
+      awaitRecoveryReady: async () => false,
+    });
+
+    const report = await queue.start();
+    assert.deepEqual(
+      report.map((row) => row.action),
+      ["resumed-polling"],
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(provider.pollCount, 0);
+    queue.releaseRecovery("comfyui");
+    assert.equal(await waitFor(() => provider.pollCount > 0, 1_000), true);
+    queue.dispose();
+  });
+
+  it("does not run a deferred old-engine poll after that job is retired", async () => {
+    const dir = await tempDir("arke-cq-");
+    const path = await journalWith(dir, "running", { source: "user-url", instanceId: "same" });
+    const provider = new FakeProvider();
+    const { queue } = queueWith({ comfyui: provider }, path, dir, {
+      recoverLocal: (job) =>
+        job.status === "running" || job.status === "submitting"
+          ? comfyUiRecoveryDecision({ status: job.status, engine: job.engine, currentInstanceId: "same" })
+          : null,
+      awaitRecoveryReady: async () => false,
+    });
+
+    await queue.start();
+    await queue.failJobsForRetiredEngine("comfyui", () => false, "the engine changed");
+    queue.releaseRecovery("comfyui");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(provider.pollCount, 0);
+    assert.equal(queue.listJobs()[0]!.status, "failed");
     queue.dispose();
   });
 
@@ -677,7 +1581,11 @@ describe("recovery consults the per-source policy (§2.11)", () => {
     const { queue, ledger } = queueWith({ comfyui: provider }, path, dir, {
       recoverLocal: (job) =>
         job.status === "running" || job.status === "submitting"
-          ? comfyUiRecoveryDecision({ status: job.status, engine: job.engine, currentInstanceId: "new-engine" })
+          ? comfyUiRecoveryDecision({
+              status: job.status,
+              engine: job.engine,
+              currentInstanceId: "new-engine",
+            })
           : null,
     });
     const report = await queue.start();
@@ -710,6 +1618,25 @@ describe("recovery consults the per-source policy (§2.11)", () => {
   });
 });
 
+describe("the ComfyUI provider has one process-wide execution lane", () => {
+  it("serialises work across worlds even when other providers default to two", async () => {
+    const dir = await tempDir("arke-cq-");
+    const provider = new FakeProvider();
+    provider.submitHangs = true;
+    const { queue } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
+      providerConcurrency: { comfyui: 1 },
+    });
+    await queue.start();
+    await queue.enqueue(localInput());
+    await queue.enqueue({ ...localInput(), worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
+    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(provider.submitCount, 1);
+    assert.equal(provider.maxObservedConcurrent, 1);
+    queue.dispose();
+  });
+});
+
 describe("sanitisation runs before landing, and a refusal fails the job (§2.10)", () => {
   it("bytes are rewritten by the hook before verification", async () => {
     const dir = await tempDir("arke-cq-");
@@ -738,7 +1665,9 @@ describe("sanitisation runs before landing, and a refusal fails the job (§2.10)
   it("an unsanitisable container fails the job with the container named", async () => {
     const dir = await tempDir("arke-cq-");
     const provider = new FakeProvider();
-    provider.artifacts = [{ name: "clip.webm", contentType: "video/webm", data: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]) }];
+    provider.artifacts = [
+      { name: "clip.webm", contentType: "video/webm", data: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]) },
+    ];
     const { queue } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
       prepareArtifact: (job, artifact) => {
         if (job.provider !== "comfyui") return { ok: true, artifact };
@@ -779,7 +1708,14 @@ describe("nothing graph-shaped reaches renderer state (R-14, R-1)", () => {
     // folds these straight into ClientState.
     const wire = JSON.stringify(events);
     assert.ok(events.length > 0, "the dispatch emitted events");
-    for (const forbidden of ["class_type", "KSampler", "CheckpointLoaderSimple", "SaveImage", "ckpt_name", "latent_image"]) {
+    for (const forbidden of [
+      "class_type",
+      "KSampler",
+      "CheckpointLoaderSimple",
+      "SaveImage",
+      "ckpt_name",
+      "latent_image",
+    ]) {
       assert.equal(wire.includes(forbidden), false, `"${forbidden}" reached renderer state`);
     }
     // The digests that ARE allowed through are identity, not structure.
@@ -821,13 +1757,20 @@ describe("retiring an engine mid-flight (§2.11)", () => {
     const { queue, ledger } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir);
     await queue.start();
     const mine = await queue.enqueue(localInput());
-    const theirs = await queue.enqueue({ ...localInput(), engine: { source: "user-url", instanceId: "other" } });
+    const theirs = await queue.enqueue({
+      ...localInput(),
+      engine: { source: "user-url", instanceId: "other" },
+    });
     const failed = await queue.failJobsForRetiredEngine(
       "comfyui",
       (job) => job.engine?.instanceId === "abc123",
       "the engine this job ran on is no longer configured — it was not resumed against the new one",
     );
-    assert.deepEqual(failed.map((j) => j.id), [theirs.id], "only the job whose engine retired");
+    assert.deepEqual(
+      failed.map((j) => j.id),
+      [theirs.id],
+      "only the job whose engine retired",
+    );
     const after = queue.listJobs();
     assert.equal(after.find((j) => j.id === theirs.id)!.status, "failed");
     assert.match(after.find((j) => j.id === theirs.id)!.error!, /no longer configured/);
@@ -836,6 +1779,75 @@ describe("retiring an engine mid-flight (§2.11)", () => {
     assert.equal(ledger.find((e) => e.jobId === theirs.id)!.actualSource, "local-zero");
     queue.dispose();
   });
+
+  for (const sample of [
+    { label: "image", capability: "image", model: "comfyui-draft-image", params: { prompt: "x" } },
+    {
+      label: "video",
+      capability: "video",
+      model: "comfyui-draft-video",
+      params: { prompt: "x", durationSec: 2 },
+    },
+    {
+      label: "voice",
+      capability: "voice-tts",
+      model: "comfyui-cloned-voice",
+      params: { text: "x", voiceId: "v" },
+    },
+  ] as const) {
+    it(`requeues an active ${sample.label} job when a spawned process restarts at the same path`, async () => {
+      const dir = await tempDir("arke-cq-");
+      const provider = new FakeProvider();
+      provider.pollState = "running";
+      const { queue, ledger } = queueWith({ comfyui: provider }, join(dir, "jobs.jsonl"), dir, {
+        providerConcurrency: { comfyui: 1 },
+      });
+      await queue.start();
+      const job = await queue.enqueue({
+        ...localInput(),
+        capability: sample.capability,
+        model: sample.model,
+        params: sample.params,
+        recipe: { ...RECIPE_IDENTITY, id: sample.model },
+        engine: { source: "managed", instanceId: "same-path", processEpoch: "process-1" },
+      });
+      assert.equal(
+        await waitFor(
+          () => queue.listJobs().find((candidate) => candidate.id === job.id)?.status === "running",
+          1_000,
+        ),
+        true,
+      );
+
+      queue.blockRecovery("comfyui");
+      const retired = await queue.failJobsForRetiredEngine(
+        "comfyui",
+        (candidate) => candidate.engine?.processEpoch === "process-2",
+        "the engine changed",
+        () => ({ source: "managed", instanceId: "same-path", processEpoch: "process-2" }),
+      );
+      assert.deepEqual(
+        retired.map((candidate) => candidate.id),
+        [job.id],
+      );
+      const queued = queue.listJobs().find((candidate) => candidate.id === job.id)!;
+      assert.equal(queued.status, "queued");
+      assert.equal(queued.providerJobId, null);
+      assert.equal(queued.engine?.processEpoch, "process-2");
+      assert.equal(ledger.length, 0, "retirement is a free rerun, not a terminal outcome");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(provider.submitCount, 1, "the replacement is gated while it starts");
+
+      queue.releaseRecovery("comfyui");
+      assert.equal(await waitFor(() => provider.submitCount === 2, 1_000), true);
+      assert.equal(
+        queue.listJobs().find((candidate) => candidate.id === job.id)?.engine?.processEpoch,
+        "process-2",
+      );
+      assert.equal(provider.maxObservedConcurrent, 1, "the retired run released its process lane");
+      queue.dispose();
+    });
+  }
 });
 
 describe("every local outcome records local-zero, not just the successful one", () => {
@@ -946,7 +1958,10 @@ describe("a local take carries local-zero and its recipe version (§2.9)", () =>
       assert.equal(take.cost.actualSource, "local-zero", take.id);
       assert.equal(take.provenance.recipeVersion, 1, take.id);
     }
-    assert.ok(takes.slice(1).every((t) => t.cost.allocated === true), "segments are allocated shares");
+    assert.ok(
+      takes.slice(1).every((t) => t.cost.allocated === true),
+      "segments are allocated shares",
+    );
     await store.close();
   });
 });

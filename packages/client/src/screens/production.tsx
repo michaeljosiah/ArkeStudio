@@ -23,7 +23,11 @@ import {
   productionShape,
   promptFor,
   STANDARD_ASPECTS,
+  DELIVERIES,
+  legacyVoiceModel,
+  supportedDeliveries,
   type CompiledPass,
+  type Delivery,
   type PlanState,
   worldSheets,
   type Scene,
@@ -63,6 +67,7 @@ import { Composer } from "../components/composer.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { ClipPlayButton, clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { planForScene } from "../lib/scene-plan.js";
@@ -75,7 +80,13 @@ import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
 import { mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
-import { MIN_CLIP_SEC, applyClipDrag, snapPointsFor, type ClipGesture, type ClipPlacement } from "../lib/clip-drag.js";
+import {
+  MIN_CLIP_SEC,
+  applyClipDrag,
+  snapPointsFor,
+  type ClipGesture,
+  type ClipPlacement,
+} from "../lib/clip-drag.js";
 import {
   acceptTake,
   cancelExport,
@@ -111,6 +122,7 @@ import {
   useWorld,
   requestVoiceLine,
   subscribeQueueResults,
+  subscribeVoiceUploadConfirmations,
 } from "../lib/store.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
@@ -122,7 +134,10 @@ import {
  * Another production's scoped material is absent — selecting audio by kind alone would put one
  * production's scratch takes in every other production's Audio screen.
  */
-function artifactsFor<T extends { production?: string }>(artifacts: readonly T[], productionId: string | undefined): T[] {
+function artifactsFor<T extends { production?: string }>(
+  artifacts: readonly T[],
+  productionId: string | undefined,
+): T[] {
   return artifacts.filter((a) => a.production === undefined || a.production === productionId);
 }
 
@@ -173,7 +188,10 @@ export function takeMediaPath(prodId: string, take: { id: string; media?: string
  * reconstruction from number and slug, which goes blind the moment a file's name stops
  * matching. Null means the bundle predates the record; the senders skip rather than guess.
  */
-export function sceneFileOf(production: { sceneFiles: Record<string, string> } | null | undefined, scene: Scene): string | null {
+export function sceneFileOf(
+  production: { sceneFiles: Record<string, string> } | null | undefined,
+  scene: Scene,
+): string | null {
   return production?.sceneFiles[scene.id] ?? null;
 }
 
@@ -198,10 +216,13 @@ export function ProductionLayout() {
   const cut = production ? deriveCut(production) : null;
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
-    (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue")
-      .length ?? 0);
+    (production?.scenes
+      .flatMap((s) => s.shots)
+      .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue").length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
-  const guestCount = prodId ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length : 0;
+  const guestCount = prodId
+    ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
+    : 0;
   const base = `/w/${worldId}/p/${prodId}`;
   /*
    * Folded (82a, then turn 101): the Cut opens the world's artifacts beside it, and the width has
@@ -311,7 +332,11 @@ export function ProductionLayout() {
           >
             <PanelLeft size={14} />
           </button>
-          <button type="button" className="fy-prodrail__switch" onClick={() => navigate(`/w/${worldId}/productions`)}>
+          <button
+            type="button"
+            className="fy-prodrail__switch"
+            onClick={() => navigate(`/w/${worldId}/productions`)}
+          >
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
               <div className="fy-prodrail__switchsub">{switchSub}</div>
@@ -401,9 +426,11 @@ export function ProductionCastScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const [drafting, setDrafting] = useState<{ type: "character" | "location" | "faction"; name: string; sentence: string } | null>(
-    null,
-  );
+  const [drafting, setDrafting] = useState<{
+    type: "character" | "location" | "faction";
+    name: string;
+    sentence: string;
+  } | null>(null);
 
   if (!world || !production) {
     return (
@@ -421,14 +448,17 @@ export function ProductionCastScreen() {
   );
   // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
   const owned = world.artifacts.filter((a) => a.production === production.meta.id);
-  const kindLabel = (sheet: Sheet) => (sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction");
+  const kindLabel = (sheet: Sheet) =>
+    sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction";
 
   const card = (sheet: Sheet, guest: boolean) => (
     <button
       key={sheet.id}
       type="button"
       className="fy-gridcard fy-gridcard--media fy-gridcard--fixed"
-      onClick={() => navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}`)}
+      onClick={() =>
+        navigate(`/w/${worldId}/${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${sheet.id}`)
+      }
     >
       <div className="fy-gridcard__frame" style={{ height: 210 }}>
         <Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} />
@@ -436,7 +466,10 @@ export function ProductionCastScreen() {
       <div className="fy-gridcard__pad">
         <div className="fy-gridcard__title">
           <span className="fy-gridcard__name">{sheet.name}</span>
-          <span className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`} style={{ width: 6, height: 6 }} />
+          <span
+            className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`}
+            style={{ width: 6, height: 6 }}
+          />
         </div>
         <div className="fy-gridcard__body">{sheet.role ?? sheet.region ?? kindLabel(sheet)}</div>
         <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
@@ -446,14 +479,18 @@ export function ProductionCastScreen() {
     </button>
   );
 
-  const columns = (n: number) => ({ gridTemplateColumns: `repeat(${Math.min(Math.max(n, 2), 4)}, minmax(0, 1fr))` });
+  const columns = (n: number) => ({
+    gridTemplateColumns: `repeat(${Math.min(Math.max(n, 2), 4)}, minmax(0, 1fr))`,
+  });
 
   return (
     <div data-screen="production-cast">
       <div className="fy-corner">
         <Button
           variant="primary"
-          onClick={() => setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)}
+          onClick={() =>
+            setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)
+          }
         >
           New guest
         </Button>
@@ -473,7 +510,8 @@ export function ProductionCastScreen() {
         <Card className="scr-form">
           <div className="scr-field">
             <label className="scr-field__label">
-              A guest of {production.meta.title} — a full sheet, kept out of the world's cast until you promote it
+              A guest of {production.meta.title} — a full sheet, kept out of the world's cast until you
+              promote it
             </label>
             <div style={{ display: "flex", gap: "var(--space-2)", marginBottom: 8 }}>
               {(["character", "location", "faction"] as const).map((type) => (
@@ -493,7 +531,9 @@ export function ProductionCastScreen() {
             />
           </div>
           <div className="scr-field">
-            <label className="scr-field__label">One sentence — the agent drafts the rest inside the sketch</label>
+            <label className="scr-field__label">
+              One sentence — the agent drafts the rest inside the sketch
+            </label>
             <Textarea
               rows={2}
               value={drafting.sentence}
@@ -540,7 +580,10 @@ export function ProductionCastScreen() {
       ) : (
         <div className="fy-cardgrid" style={columns(guests.length + pendingGuests.length)}>
           {pendingGuests.map((p) => (
-            <div key={p.proposalId} className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet">
+            <div
+              key={p.proposalId}
+              className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet"
+            >
               <div className="fy-gridcard__frame" style={{ height: 210 }} />
               <div className="fy-gridcard__pad">
                 <div className="fy-gridcard__title">
@@ -562,7 +605,10 @@ export function ProductionCastScreen() {
       </div>
       {fromWorld.length === 0 ? (
         <div style={{ padding: "0 90px" }}>
-          <EmptyState title="The world has no cast yet" hint="Everything this production cites would be its own." />
+          <EmptyState
+            title="The world has no cast yet"
+            hint="Everything this production cites would be its own."
+          />
         </div>
       ) : (
         <div className="fy-cardgrid" style={columns(fromWorld.length)}>
@@ -643,7 +689,9 @@ export function ProductionDashboardScreen() {
     // The design shows the neighbourhood of the chapter in hand, not the whole book —
     // the chapter tree is one click away for that.
     const windowStart =
-      inHandIdx >= 0 ? Math.max(0, Math.min(inHandIdx - 1, chapters.length - 4)) : Math.max(0, chapters.length - 4);
+      inHandIdx >= 0
+        ? Math.max(0, Math.min(inHandIdx - 1, chapters.length - 4))
+        : Math.max(0, chapters.length - 4);
     const nearby = chapters.slice(windowStart, windowStart + 4);
     return (
       <div className="fy-prodmain" data-screen="production-dashboard">
@@ -721,7 +769,10 @@ export function ProductionDashboardScreen() {
   const latest = [...production.takes]
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt))
     .slice(0, 4);
-  const recentDecided = production.takes.filter((t) => decisions[t.id] !== "pending").slice(-3).reverse();
+  const recentDecided = production.takes
+    .filter((t) => decisions[t.id] !== "pending")
+    .slice(-3)
+    .reverse();
 
   return (
     <div className="fy-prodmain" data-screen="production-dashboard">
@@ -742,8 +793,8 @@ export function ProductionDashboardScreen() {
             worldId={worldId!}
             prodId={prodId!}
             onOpen={(path, opening) =>
-            navigate(`/w/${worldId}/p/${prodId}${path}`, opening ? { state: { opening } } : {})
-          }
+              navigate(`/w/${worldId}/p/${prodId}${path}`, opening ? { state: { opening } } : {})
+            }
           />
           {/* Below the frame's content, not above it: 53b opens on the production's own name and
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
@@ -756,7 +807,9 @@ export function ProductionDashboardScreen() {
           <div className="fy-dashrow">
             <div className="fy-threadcard">
               <div className="fy-threadcard__head">
-                <span className="fy-threadcard__label">AWAITING REVIEW · {pending.length} TAKE{pending.length === 1 ? "" : "S"}</span>
+                <span className="fy-threadcard__label">
+                  AWAITING REVIEW · {pending.length} TAKE{pending.length === 1 ? "" : "S"}
+                </span>
               </div>
               <div className="fy-threadcard__title">
                 {pending.length > 0 ? "Takes are back and waiting on your eye" : "Nothing waits on you"}
@@ -795,7 +848,9 @@ export function ProductionDashboardScreen() {
                     Scene {nextGap.scene.number} · {nextGap.shot.title} · {seconds(nextGap.shot.durationSec)}
                   </div>
                   <div style={{ marginTop: 10 }}>
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>Open in Generate</Button>
+                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                      Open in Generate
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -805,13 +860,21 @@ export function ProductionDashboardScreen() {
             <div className="fy-listhead">
               Latest clips
               {/* The same keyboard rule as the chapter link: a destination is a button, not a span. */}
-              <button type="button" className="fy-linkbtn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+              <button
+                type="button"
+                className="fy-linkbtn"
+                onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+              >
                 All {production.takes.length} takes
               </button>
             </div>
             <div className="fy-cliprow">
               {latest.map((t) => (
-                <div key={t.id} className="fy-clip" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
+                <div
+                  key={t.id}
+                  className="fy-clip"
+                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}
+                >
                   <div className="fy-clip__frame">
                     <Portrait
                       worldSlug={world.meta.slug}
@@ -821,10 +884,25 @@ export function ProductionDashboardScreen() {
                   </div>
                   <div className="fy-clip__meta">
                     <span className={`fy-dot fy-dot--${decisionTone(decisions[t.id])}`} />
-                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       {t.coversShots.map((s) => s.replace("sh_", "shot ")).join(", ")}
                     </span>
-                    <span className="fy-mono">{seconds(t.coversShots.reduce((sum, id) => sum + (shots.find((s) => s.id === id)?.durationSec ?? 0), 0))}</span>
+                    <span className="fy-mono">
+                      {seconds(
+                        t.coversShots.reduce(
+                          (sum, id) => sum + (shots.find((s) => s.id === id)?.durationSec ?? 0),
+                          0,
+                        ),
+                      )}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -960,13 +1038,25 @@ function DayOne({
       <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
         <button type="button" className="fy-radio" style={{ flex: 1 }} onClick={() => onOpen("/scenes/new")}>
           <div style={{ font: "600 13px var(--font-sans)" }}>Write the first scene</div>
-          <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 4 }}>
+          <div
+            style={{
+              font: "400 11.5px/1.5 var(--font-sans)",
+              color: "var(--muted-foreground)",
+              marginTop: 4,
+            }}
+          >
             Straight to a scene you can shoot.
           </div>
         </button>
         <button type="button" className="fy-radio" style={{ flex: 1 }} onClick={() => onOpen("/story")}>
           <div style={{ font: "600 13px var(--font-sans)" }}>Shape the whole thing first</div>
-          <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 4 }}>
+          <div
+            style={{
+              font: "400 11.5px/1.5 var(--font-sans)",
+              color: "var(--muted-foreground)",
+              marginTop: 4,
+            }}
+          >
             Decide what it is before writing any of it.
           </div>
         </button>
@@ -1006,48 +1096,51 @@ export function ProductionChatScreen() {
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
-          worldId={worldId}
-          productionId={prodId}
-          openingNote="Develop · opening…"
-          eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
-          heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
-          placeholder="Say what this is — what happens, who it costs, how it ends…"
-          emptyLine={
-            shape?.isEpisodic
-              ? "Nothing decided yet. Say what this season answers, how it ends, and what its episodes are — everything you settle here lands in Season."
-              : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
-          }
-          footer={
-            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="fy-mono">in context:</span>
-              <span className="fy-pill">
-                all {production?.scenes.length ?? 0} scene{(production?.scenes.length ?? 0) === 1 ? "" : "s"}
-              </span>
-              <span className="fy-pill">{cast} cast sheets</span>
-              {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
-              <span style={{ flex: 1 }} />
-              {/* Where what is being said ends up, named and reachable from where it is said. */}
-              <NavLink to={`/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`} className="fy-linkbtn">
-                {details} &rarr;
-              </NavLink>
-            </div>
-          }
-          pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
-          {...(opening ? { openWith: opening } : {})}
-          {...(staged
-            ? {
-                side: (
-                  <StagedDecision
-                    worldId={worldId}
-                    subject={shape?.isEpisodic ? "the season" : "the overview"}
-                    staged={staged}
-                    writes={`the gate writes ${file} · nothing else moves`}
-                    onAccepted={() => navigate(detailsPath)}
-                  />
-                ),
-              }
-            : {})}
-        />
+        worldId={worldId}
+        productionId={prodId}
+        openingNote="Develop · opening…"
+        eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
+        heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
+        placeholder="Say what this is — what happens, who it costs, how it ends…"
+        emptyLine={
+          shape?.isEpisodic
+            ? "Nothing decided yet. Say what this season answers, how it ends, and what its episodes are — everything you settle here lands in Season."
+            : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
+        }
+        footer={
+          <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <span className="fy-mono">in context:</span>
+            <span className="fy-pill">
+              all {production?.scenes.length ?? 0} scene{(production?.scenes.length ?? 0) === 1 ? "" : "s"}
+            </span>
+            <span className="fy-pill">{cast} cast sheets</span>
+            {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
+            <span style={{ flex: 1 }} />
+            {/* Where what is being said ends up, named and reachable from where it is said. */}
+            <NavLink
+              to={`/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`}
+              className="fy-linkbtn"
+            >
+              {details} &rarr;
+            </NavLink>
+          </div>
+        }
+        pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
+        {...(opening ? { openWith: opening } : {})}
+        {...(staged
+          ? {
+              side: (
+                <StagedDecision
+                  worldId={worldId}
+                  subject={shape?.isEpisodic ? "the season" : "the overview"}
+                  staged={staged}
+                  writes={`the gate writes ${file} · nothing else moves`}
+                  onAccepted={() => navigate(detailsPath)}
+                />
+              ),
+            }
+          : {})}
+      />
     </div>
   );
 }
@@ -1081,7 +1174,10 @@ function OverviewStoryScreen() {
   );
   /** Every field the staged proposal would change, flattened out of its per-target review. */
   const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
-  const spineLines = (story?.spine ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const spineLines = (story?.spine ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   return (
     <div className="fy-story" data-screen="story-overview">
       {/* The details, not a conversation (turn 88): what the thread settled, read and worked
@@ -1124,7 +1220,9 @@ function OverviewStoryScreen() {
               {production?.treatment && (
                 <div className="fy-draftcard">
                   <div className="fy-eyebrow-sm">TREATMENT</div>
-                  <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}>
+                  <div
+                    style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
+                  >
                     {production.treatment}
                   </div>
                 </div>
@@ -1137,11 +1235,15 @@ function OverviewStoryScreen() {
             />
           )}
         </div>
-        <div style={{ flex: "none", padding: "14px 36px 22px", display: "flex", gap: 10, alignItems: "center" }}>
+        <div
+          style={{ flex: "none", padding: "14px 36px 22px", display: "flex", gap: 10, alignItems: "center" }}
+        >
           <NavLink to={`/w/${worldId}/p/${prodId}/story`} className="fy-linkbtn">
             &larr; Production Chat
           </NavLink>
-          <span className="fy-mono">the overview steers scene and chapter drafting · it never overwrites a scene you have locked</span>
+          <span className="fy-mono">
+            the overview steers scene and chapter drafting · it never overwrites a scene you have locked
+          </span>
         </div>
       </div>
       {/* The rail beside a details screen holds what is staged against it (turn 86/88) — the
@@ -1150,7 +1252,9 @@ function OverviewStoryScreen() {
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>Waiting on you</div>
           <span className="fy-mono" style={{ color: staged ? "var(--warning)" : undefined }}>
-            {staged ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}` : "nothing staged"}
+            {staged
+              ? `${stagedFields.length} change${stagedFields.length === 1 ? "" : "s"}`
+              : "nothing staged"}
           </span>
         </div>
         {staged ? (
@@ -1161,7 +1265,9 @@ function OverviewStoryScreen() {
                   <span className="fy-eyebrow-sm">{field.field}</span>
                   <Badge tone="warning">would change</Badge>
                 </div>
-                <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>{field.proposed ?? "(removed)"}</div>
+                <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
+                  {field.proposed ?? "(removed)"}
+                </div>
                 {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
               </div>
             ))}
@@ -1225,7 +1331,9 @@ export function ScenesScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const totalSec = production?.scenes.reduce((s, sc) => s + sc.shots.reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ?? 0;
+  const totalSec =
+    production?.scenes.reduce((s, sc) => s + sc.shots.reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
+    0;
   return (
     <div className="fy-prodmain" data-screen="scenes">
       <div className="fy-h1row">
@@ -1260,10 +1368,13 @@ export function ScenesScreen() {
                 <div style={{ minWidth: 0 }}>
                   <div className="fy-row__name">
                     {scene.number} · {scene.title}
-                    <span className={`fy-dot fy-dot--${covered === scene.shots.length && scene.shots.length > 0 ? "ok" : "warn"}`} />
+                    <span
+                      className={`fy-dot fy-dot--${covered === scene.shots.length && scene.shots.length > 0 ? "ok" : "warn"}`}
+                    />
                   </div>
                   <div className="fy-row__sub">
-                    {scene.shots.length} shots · {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0))}
+                    {scene.shots.length} shots ·{" "}
+                    {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0))}
                     {scene.inherits?.location ? ` · @${scene.inherits.location}` : ""}
                     {scene.inherits?.timeOfDay ? ` · ${scene.inherits.timeOfDay}` : ""}
                   </div>
@@ -1280,7 +1391,10 @@ export function ScenesScreen() {
           })}
         </div>
       ) : (
-        <EmptyState title="No scenes yet" hint="Draft a scene and its shots inherit location, time and tone." />
+        <EmptyState
+          title="No scenes yet"
+          hint="Draft a scene and its shots inherit location, time and tone."
+        />
       )}
     </div>
   );
@@ -1366,9 +1480,12 @@ export function SceneDetailScreen() {
   }
   const slug = world?.meta.slug;
   const totalSec = scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0);
-  const model = (state?.app.manifest?.models ?? []).find(
-    (m) => m.id === state?.app.routing.defaults["video"] && m.capability === "video",
-  ) ?? (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ?? null;
+  const model =
+    (state?.app.manifest?.models ?? []).find(
+      (m) => m.id === state?.app.routing.defaults["video"] && m.capability === "video",
+    ) ??
+    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
+    null;
   const boardStale = scene.board !== undefined && scene.board.version < scene.version;
   return (
     <div className="fy-prodmain" data-screen="scene-detail" style={{ minHeight: "100%" }}>
@@ -1385,14 +1502,25 @@ export function SceneDetailScreen() {
               there and land through the same gate as everything else. It opens in place now
               rather than on World Chat (turn 94) — a pattern a person has learned twice already
               should not stop working at the level where the writing happens. */}
-          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/scenes/${scene.id}`)}>
+          <Button
+            variant="ghost"
+            onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/scenes/${scene.id}`)}
+          >
             Talk it through
           </Button>
           <span className="fy-seg">
-            <button type="button" className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")} onClick={() => setTab("shots")}>
+            <button
+              type="button"
+              className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")}
+              onClick={() => setTab("shots")}
+            >
               Shots
             </button>
-            <button type="button" className={cx("fy-seg__item", tab === "board" && "fy-seg__item--active")} onClick={() => setTab("board")}>
+            <button
+              type="button"
+              className={cx("fy-seg__item", tab === "board" && "fy-seg__item--active")}
+              onClick={() => setTab("board")}
+            >
               Board
             </button>
           </span>
@@ -1412,11 +1540,22 @@ export function SceneDetailScreen() {
           <SceneSynopsis worldId={worldId!} prodId={prodId!} scene={scene} />
         </div>
         <div className="fy-inherits" style={{ marginTop: 8 }} title="Shots inherit these">
-          {scene.inherits?.location && <span className="fy-pill">@{scene.inherits.location}{scene.inherits.timeOfDay ? `, ${scene.inherits.timeOfDay}` : ""}</span>}
-          {!scene.inherits?.location && scene.inherits?.timeOfDay && <span className="fy-pill">{scene.inherits.timeOfDay}</span>}
+          {scene.inherits?.location && (
+            <span className="fy-pill">
+              @{scene.inherits.location}
+              {scene.inherits.timeOfDay ? `, ${scene.inherits.timeOfDay}` : ""}
+            </span>
+          )}
+          {!scene.inherits?.location && scene.inherits?.timeOfDay && (
+            <span className="fy-pill">{scene.inherits.timeOfDay}</span>
+          )}
           {scene.inherits?.tone && <span className="fy-pill">Tone · {scene.inherits.tone}</span>}
           <span className="fy-pill">{productionAspect(production.meta)} · from the production</span>
-          {model && <span className="fy-mono">{model.displayName} · max {model.limits.maxDurationSec ?? "∞"}s / clip</span>}
+          {model && (
+            <span className="fy-mono">
+              {model.displayName} · max {model.limits.maxDurationSec ?? "∞"}s / clip
+            </span>
+          )}
         </div>
       </div>
       {tab === "shots" ? (
@@ -1453,8 +1592,15 @@ export function SceneDetailScreen() {
             <div className="fy-boardcard">
               <div className="fy-boardcard__head">
                 {scene.board ? `Board v${scene.board.version}` : "No board"}
-                <span className="fy-boardcard__state" style={{ color: boardStale ? "var(--warning)" : "var(--success)" }}>
-                  {scene.board ? (boardStale ? `stale — scene is at v${scene.version}` : "in step with shots") : ""}
+                <span
+                  className="fy-boardcard__state"
+                  style={{ color: boardStale ? "var(--warning)" : "var(--success)" }}
+                >
+                  {scene.board
+                    ? boardStale
+                      ? `stale — scene is at v${scene.version}`
+                      : "in step with shots"
+                    : ""}
                 </span>
               </div>
               <div className="fy-boardcard__body">Frames, order, timings and labels, ready for dispatch.</div>
@@ -1466,8 +1612,8 @@ export function SceneDetailScreen() {
             <div className="fy-boardcard fy-boardcard--quiet">
               <div className="fy-boardcard__head">Where it goes</div>
               <div className="fy-boardcard__body">
-                In one-pass dispatch this sheet rides along as the scene reference. Per-shot dispatch sends each frame
-                instead.
+                In one-pass dispatch this sheet rides along as the scene reference. Per-shot dispatch sends
+                each frame instead.
               </div>
             </div>
             <div style={{ display: "grid", gap: 8 }}>
@@ -1510,7 +1656,9 @@ export function NewSceneScreen() {
     <div className="fy-prodmain" data-screen="new-scene">
       <div className="fy-h1row">
         <h1 className="fy-h1">New scene</h1>
-        <span className="fy-h1row__meta">a draft arrives as a proposal · accepting creates the shots, dispatches nothing</span>
+        <span className="fy-h1row__meta">
+          a draft arrives as a proposal · accepting creates the shots, dispatches nothing
+        </span>
       </div>
       <DegradedBanner component="harness" />
       <div className="scr-form" style={{ maxWidth: 620 }}>
@@ -1649,10 +1797,15 @@ function TakesView({
             {shot.title} · {seconds(shot.durationSec)}
           </span>
           <span className="fy-h1row__push" />
-          <span className="fy-mono">{acceptedCount} of {shots.length} accepted</span>
+          <span className="fy-mono">
+            {acceptedCount} of {shots.length} accepted
+          </span>
         </div>
         {takes.length === 0 ? (
-          <EmptyState title="No takes yet" hint="Generate this shot and its takes arrive here, side by side." />
+          <EmptyState
+            title="No takes yet"
+            hint="Generate this shot and its takes arrive here, side by side."
+          />
         ) : (
           <div className="fy-takegrid">
             {takes.map((t, i) => {
@@ -1679,7 +1832,9 @@ function TakesView({
                   <span className="fy-take__foot">
                     <span className="fy-take__name">Take {i + 1}</span>
                     <span style={{ flex: 1 }} />
-                    <span className="fy-mono">{t.id === accepted ? "✓ SELECTED" : seconds(shot.durationSec)}</span>
+                    <span className="fy-mono">
+                      {t.id === accepted ? "✓ SELECTED" : seconds(shot.durationSec)}
+                    </span>
                   </span>
                 </button>
               );
@@ -1688,7 +1843,9 @@ function TakesView({
         )}
         {scenes.length > 1 && (
           <>
-            <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>SCENES</div>
+            <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>
+              SCENES
+            </div>
             <div className="fy-takechips">
               {scenes.map((sc) => (
                 <button
@@ -1707,7 +1864,9 @@ function TakesView({
           </>
         )}
         {/* Every shot, one chip away — where you are in the scene, said out loud (turn 102). */}
-        <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>EVERY SHOT</div>
+        <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>
+          EVERY SHOT
+        </div>
         <div className="fy-takechips">
           {shots.map((s) => {
             const done = acceptedTakeId(production, s.id) !== null;
@@ -1724,7 +1883,9 @@ function TakesView({
               >
                 <span
                   className="fy-dot"
-                  style={{ background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)" }}
+                  style={{
+                    background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)",
+                  }}
                 />
                 Shot {s.number}
               </button>
@@ -1754,7 +1915,13 @@ function TakesView({
             onClick={() => {
               const sheet = picked ? Object.keys(picked.provenance.sheets)[0] : undefined;
               if (worldId && prodId && picked && sheet)
-                rejectTake(worldId, prodId, picked.id, { sheet, field: "appearance", note: "rejected in review" }, shotId ?? undefined);
+                rejectTake(
+                  worldId,
+                  prodId,
+                  picked.id,
+                  { sheet, field: "appearance", note: "rejected in review" },
+                  shotId ?? undefined,
+                );
             }}
           >
             Reject
@@ -1821,8 +1988,10 @@ export function GenerateScreen() {
     takes[takes.length - 1] ??
     null;
   const slug = world?.meta.slug;
-  const model = (state?.app.manifest?.models ?? []).find((m) => m.id === state?.app.routing.defaults["video"]) ??
-    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ?? null;
+  const model =
+    (state?.app.manifest?.models ?? []).find((m) => m.id === state?.app.routing.defaults["video"]) ??
+    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
+    null;
 
   /*
    * Which lens the workspace opens on (turn 102). Takes are the thing here: once something has
@@ -1871,7 +2040,10 @@ export function GenerateScreen() {
     const i = scene.shots.findIndex((s) => s.id === shot.id);
     return i > 0 ? scene.shots[i - 1]! : null;
   })();
-  const prevAccepted = prevShot && production ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id)) : null;
+  const prevAccepted =
+    prevShot && production
+      ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id))
+      : null;
   const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
   // Strict frame behaviour is promised exactly where the route supports and receives it (issue
   // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
@@ -1898,10 +2070,18 @@ export function GenerateScreen() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span className="fy-seg">
             <span className="fy-seg__item fy-seg__item--active">Shot</span>
-            <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
+            <button
+              type="button"
+              className="fy-seg__item"
+              onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+            >
               Scene
             </button>
-            <button type="button" className="fy-seg__item" onClick={() => setSearchParams({ view: "stills" }, { replace: true })}>
+            <button
+              type="button"
+              className="fy-seg__item"
+              onClick={() => setSearchParams({ view: "stills" }, { replace: true })}
+            >
               Contact sheet
             </button>
           </span>
@@ -1946,17 +2126,26 @@ export function GenerateScreen() {
               <Portrait worldSlug={slug} path={sheetPortraitPath(s.id)} label={s.name} radius={0} />
             </div>
           ))}
-          <button type="button" className="fy-refstrip__add" title="References ride from the kits" onClick={() => navigate(`/w/${worldId}/cast`)}>
+          <button
+            type="button"
+            className="fy-refstrip__add"
+            title="References ride from the kits"
+            onClick={() => navigate(`/w/${worldId}/cast`)}
+          >
             <Plus size={14} />
           </button>
         </div>
         <div className="fy-mono" style={{ marginTop: 6 }}>
-          {shot ? `${shot.id.replace("sh_", "shot ")}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}` : ""}
+          {shot
+            ? `${shot.id.replace("sh_", "shot ")}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}`
+            : ""}
         </div>
         <div className="fy-gen__label" style={{ marginTop: 16 }}>
           Frames{" "}
           <span className="fy-mono">
-            {frameRoute !== null ? "start travels on the first-frame route" : "steering only · no frame route on this model"}
+            {frameRoute !== null
+              ? "start travels on the first-frame route"
+              : "steering only · no frame route on this model"}
           </span>
         </div>
         {world && (
@@ -1968,13 +2157,22 @@ export function GenerateScreen() {
         <div className="fy-framerow">
           {boundaryFrame ? (
             <div className="fy-frame">
-              <Portrait worldSlug={slug} path={`artifacts/${boundaryFrame.file}`} label="Start frame" radius={0} />
-              <span className="fy-frame__tag">START · BOUNDARY FRAME{frameRoute !== null ? "" : " (STEERS ONLY)"}</span>
+              <Portrait
+                worldSlug={slug}
+                path={`artifacts/${boundaryFrame.file}`}
+                label="Start frame"
+                radius={0}
+              />
+              <span className="fy-frame__tag">
+                START · BOUNDARY FRAME{frameRoute !== null ? "" : " (STEERS ONLY)"}
+              </span>
             </div>
           ) : prevFrame ? (
             <div className="fy-frame">
               <Portrait worldSlug={slug} path={prevFrame} label="Start frame" radius={0} />
-              <span className="fy-frame__tag">START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME (PREVIEW)</span>
+              <span className="fy-frame__tag">
+                START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME (PREVIEW)
+              </span>
             </div>
           ) : (
             <div className="fy-frame fy-frame--empty">START · FROM THE BOARD</div>
@@ -1982,14 +2180,23 @@ export function GenerateScreen() {
           <div className="fy-frame fy-frame--empty">END · OPTIONAL</div>
         </div>
         {shot && production && world && scene && (
-          <GeneratePromptEditor world={world} production={production} scene={scene} shot={shot} worldId={worldId!} prodId={prodId!} />
+          <GeneratePromptEditor
+            world={world}
+            production={production}
+            scene={scene}
+            shot={shot}
+            worldId={worldId!}
+            prodId={prodId!}
+          />
         )}
         <div className="fy-paramrow">
           {/* The production's delivery aspect (issue 389), never a hard-coded landscape. */}
           <span className="fy-param">{production ? productionAspect(production.meta) : "16:9"}</span>
           <span className="fy-param">720p</span>
           {shot && <span className="fy-param">{seconds(shot.durationSec)}</span>}
-          {frameRoute !== null && boundaryFrame && <span className="fy-param">opens on its boundary frame</span>}
+          {frameRoute !== null && boundaryFrame && (
+            <span className="fy-param">opens on its boundary frame</span>
+          )}
         </div>
         <div className="fy-gen__cta">
           {model && (
@@ -2018,7 +2225,12 @@ export function GenerateScreen() {
               </span>
             </div>
             <div className="fy-viewer">
-              <Portrait worldSlug={slug} path={takeMediaPath(production!.meta.id, take) ?? ""} label={`Take: first frame`} radius={0} />
+              <Portrait
+                worldSlug={slug}
+                path={takeMediaPath(production!.meta.id, take) ?? ""}
+                label={`Take: first frame`}
+                radius={0}
+              />
               <span className="fy-playbtn" aria-hidden style={{ pointerEvents: "none" }}>
                 <Play size={22} />
               </span>
@@ -2039,12 +2251,20 @@ export function GenerateScreen() {
                 Accept take
               </Button>
               <Button
-                disabled={Object.keys(take.provenance.sheets).length === 0 || decisions[take.id] === "rejected"}
+                disabled={
+                  Object.keys(take.provenance.sheets).length === 0 || decisions[take.id] === "rejected"
+                }
                 title="A rejection cites the sheet the take drifted from"
                 onClick={() => {
                   const sheet = Object.keys(take.provenance.sheets)[0];
                   if (worldId && prodId && sheet)
-                    rejectTake(worldId, prodId, take.id, { sheet, field: "appearance", note: "rejected in review" }, shotId ?? undefined);
+                    rejectTake(
+                      worldId,
+                      prodId,
+                      take.id,
+                      { sheet, field: "appearance", note: "rejected in review" },
+                      shotId ?? undefined,
+                    );
                 }}
               >
                 Reject · cite the sheet
@@ -2054,7 +2274,10 @@ export function GenerateScreen() {
             </div>
           </>
         ) : (
-          <EmptyState title="No takes for this shot yet" hint="Dispatch sends the shot out; takes land here for review." />
+          <EmptyState
+            title="No takes for this shot yet"
+            hint="Dispatch sends the shot out; takes land here for review."
+          />
         )}
       </div>
       <div className="fy-gen__takes">
@@ -2069,11 +2292,19 @@ export function GenerateScreen() {
             onClick={() => setSelectedTakeId(t.id)}
           >
             <div className="fy-taketile__frame">
-              <Portrait worldSlug={slug} path={takeMediaPath(production!.meta.id, t) ?? ""} label={`take ${i + 1}`} radius={0} />
+              <Portrait
+                worldSlug={slug}
+                path={takeMediaPath(production!.meta.id, t) ?? ""}
+                label={`take ${i + 1}`}
+                radius={0}
+              />
             </div>
             <div className="fy-taketile__meta">
               <span>{i + 1}</span>
-              <span className={`fy-dot fy-dot--${decisionTone(decisions[t.id])}`} style={{ width: 5, height: 5 }} />
+              <span
+                className={`fy-dot fy-dot--${decisionTone(decisions[t.id])}`}
+                style={{ width: 5, height: 5 }}
+              />
             </div>
           </button>
         ))}
@@ -2106,9 +2337,13 @@ function GeneratePromptEditor({
     <>
       <div className="fy-gen__label" style={{ marginTop: 16 }}>
         Prompt <span className="fy-mono">assembled from the world, edit freely</span>
-
         <span
-          style={{ marginLeft: "auto", font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer" }}
+          style={{
+            marginLeft: "auto",
+            font: "400 11px var(--font-sans)",
+            color: "var(--muted-foreground)",
+            cursor: "pointer",
+          }}
           onClick={() => {
             const stem = sceneFileOf(production, scene);
             if (!stem) return;
@@ -2146,9 +2381,8 @@ function GeneratePromptEditor({
           color: "var(--muted-foreground)",
         }}
       >
-        Added at dispatch, not editable here: a numbered line per reference image naming its
-        subject and what it references, and — for video —{" "}
-        <span className="fy-mono">no subtitles</span>
+        Added at dispatch, not editable here: a numbered line per reference image naming its subject and what
+        it references, and — for video — <span className="fy-mono">no subtitles</span>
         {shot.audio?.kind === "silence" ? (
           <>
             {" "}
@@ -2157,8 +2391,7 @@ function GeneratePromptEditor({
         ) : (
           <>
             {" "}
-            (plus <span className="fy-mono">no background music</span> where the cut carries its own
-            score)
+            (plus <span className="fy-mono">no background music</span> where the cut carries its own score)
           </>
         )}
         .
@@ -2249,7 +2482,9 @@ function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
             {state.next.kind === "await-continue" && (
               <Button
                 variant="primary"
-                onClick={() => planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+                onClick={() =>
+                  planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)
+                }
               >
                 Continue · pass {state.next.passIndex} ·{" "}
                 {usd(state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0)}
@@ -2258,7 +2493,14 @@ function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
             {state.next.kind === "await-reconfirm" && (
               <Button
                 variant="primary"
-                onClick={() => planReconfirm(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)}
+                onClick={() =>
+                  planReconfirm(
+                    worldId,
+                    prodId,
+                    state.planId,
+                    (state.next as { passIndex: number }).passIndex,
+                  )
+                }
               >
                 Reconfirm · pass {state.next.passIndex} runs past the {usd(state.capMicroUsd)} cap
               </Button>
@@ -2304,7 +2546,8 @@ function GenerateDrawer({
   // The same function the coordinator executes, on the same inputs (issue 244) — so the number
   // under the button is the number that will be spent, not a summary of one.
   const plan = useMemo(
-    () => (world && production && model ? planForScene({ world, production, scene, model }, "whole-scene") : null),
+    () =>
+      world && production && model ? planForScene({ world, production, scene, model }, "whole-scene") : null,
     [world, production, scene, model],
   );
   const shots = scene.shots.length;
@@ -2323,7 +2566,9 @@ function GenerateDrawer({
           <div className="fy-gendrawer__model">{model?.displayName ?? "No model available"}</div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
             <span className="fy-mono">ESTIMATED</span>
-            <span className="fy-gendrawer__cost">{plan ? usd(plan.wholeScene.totalEstimatedMicroUsd) : "—"}</span>
+            <span className="fy-gendrawer__cost">
+              {plan ? usd(plan.wholeScene.totalEstimatedMicroUsd) : "—"}
+            </span>
           </div>
           <div className="fy-mono" style={{ marginTop: 6 }}>
             {shots} shot{shots === 1 ? "" : "s"} · {seconds(totalSec)} · attempt one
@@ -2372,7 +2617,8 @@ export function DispatchDialogScreen() {
   // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
   // plan derives from the tier. Both travel from here so the dialog and the job agree.
   const resolution =
-    choice.resolution ?? (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
+    choice.resolution ??
+    (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
 
   // The whole plan, computed live from the world — the same function the coordinator executes.
   const plans = useMemo(() => {
@@ -2397,7 +2643,14 @@ export function DispatchDialogScreen() {
     if (!world || !production || !scene || !model || !plans) return null;
     const compile = (plan: typeof plans.perShot, chainWholeSceneFrames = false) => {
       try {
-        return compilePasses({ productionId: production.meta.id, scene, plan, model, world, chainWholeSceneFrames });
+        return compilePasses({
+          productionId: production.meta.id,
+          scene,
+          plan,
+          model,
+          world,
+          chainWholeSceneFrames,
+        });
       } catch {
         return null;
       }
@@ -2430,14 +2683,17 @@ export function DispatchDialogScreen() {
   const overlongPasses = plans?.wholeScene.warnings.overlongPasses ?? [];
   const warningRows: Array<{ key: string; text: string }> = [];
   if (warnings) {
-    for (const s of warnings.shotsWithoutFrame) warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
+    for (const s of warnings.shotsWithoutFrame)
+      warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
     // Issue 154: strict frame behaviour is promised exactly where the route receives it — the
     // shot opens on its durable boundary still, and the references that stepped aside are named.
     for (const f of warnings.framedShots)
       warningRows.push({
         key: `bf-${f.shotId}`,
         text: `shot ${f.number} opens on its boundary frame${
-          f.setAside.length > 0 ? ` — ${f.setAside.join(", ")} step aside, the frame route takes one image` : ""
+          f.setAside.length > 0
+            ? ` — ${f.setAside.join(", ")} step aside, the frame route takes one image`
+            : ""
         }`,
       });
     for (const f of warnings.staleFrames)
@@ -2454,7 +2710,8 @@ export function DispatchDialogScreen() {
         text: `${a.model} cannot deliver ${a.aspect} — it offers ${a.supported.join(", ")} — this blocks dispatch`,
       });
     }
-    for (const name of warnings.sketchCitations) warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
+    for (const name of warnings.sketchCitations)
+      warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
     for (const d of warnings.droppedReferences) {
       warningRows.push({
         key: `dr-${d.sheetId}-${d.referenceRole ?? "primary"}`,
@@ -2465,12 +2722,17 @@ export function DispatchDialogScreen() {
       });
     }
     for (const g of warnings.staleModelSheets) warningRows.push({ key: `st-${g}`, text: g });
-    for (const name of warnings.retiredCitations) warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
-    for (const u of warnings.unknownMentions) warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });
+    for (const name of warnings.retiredCitations)
+      warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
+    for (const u of warnings.unknownMentions)
+      warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });
     // SPEC-020 R-6: the mention resolved, and the sheet belongs to another production. Named,
     // never blocked — borrowing somebody else's one-off is unusual, not wrong.
     for (const g of warnings.foreignGuests)
-      warningRows.push({ key: `fg-${g.name}`, text: `${g.name} belongs to ${g.owner}, not to this production` });
+      warningRows.push({
+        key: `fg-${g.name}`,
+        text: `${g.name} belongs to ${g.owner}, not to this production`,
+      });
     for (const o of warnings.overriddenStale)
       warningRows.push({
         key: `ov-${o.shotId}`,
@@ -2508,7 +2770,8 @@ export function DispatchDialogScreen() {
           </h1>
           {scene && (
             <span className="fy-h1row__meta">
-              {scene.title} · {scene.shots.length} shots · {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 4), 0))}
+              {scene.title} · {scene.shots.length} shots ·{" "}
+              {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 4), 0))}
             </span>
           )}
           <span className="fy-h1row__push" />
@@ -2518,7 +2781,11 @@ export function DispatchDialogScreen() {
         </div>
         <div className="fy-choicerow">
           {(production?.scenes ?? []).map((s, i) => (
-            <Button key={s.id} variant={i === sceneIdx ? "primary" : "secondary"} onClick={() => setSceneIdx(i)}>
+            <Button
+              key={s.id}
+              variant={i === sceneIdx ? "primary" : "secondary"}
+              onClick={() => setSceneIdx(i)}
+            >
               {s.title}
             </Button>
           ))}
@@ -2551,7 +2818,8 @@ export function DispatchDialogScreen() {
         )}
         {world && model && (
           <Callout title={`World look · v${world.artDirection.version}`}>
-            Inherited from this world and carried in the prompt. {model.accepts.referenceImages === 0
+            Inherited from this world and carried in the prompt.{" "}
+            {model.accepts.referenceImages === 0
               ? `${model.displayName} accepts no reference images. Those images are omitted; only existing sheet descriptions and art-direction text remain.`
               : "Identity references remain distinct from the world's style treatment."}
           </Callout>
@@ -2571,16 +2839,16 @@ export function DispatchDialogScreen() {
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
               {overlong.map((shot) => (
                 <li key={shot.shotId}>
-                  shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"} makes at
-                  most {seconds(shot.longestSec)}
-                  {shot.becauseReferences ? " on the reference route this shot will take" : ""}. Shorten the shot,
-                  split it, or pick another model.
+                  shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"}{" "}
+                  makes at most {seconds(shot.longestSec)}
+                  {shot.becauseReferences ? " on the reference route this shot will take" : ""}. Shorten the
+                  shot, split it, or pick another model.
                 </li>
               ))}
               {overlongPasses.map((pass) => (
                 <li key={`pass-${pass.passIndex}`}>
-                  scene pass {pass.passIndex} runs {seconds(pass.durationSec)} — the longest this route makes is{" "}
-                  {seconds(pass.longestSec)}
+                  scene pass {pass.passIndex} runs {seconds(pass.durationSec)} — the longest this route makes
+                  is {seconds(pass.longestSec)}
                   {pass.becauseReferences ? ", because the pass carries references" : ""}.
                 </li>
               ))}
@@ -2588,7 +2856,10 @@ export function DispatchDialogScreen() {
           </Callout>
         )}
         {warningRows.length > 0 ? (
-          <Callout tone="warning" title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}>
+          <Callout
+            tone="warning"
+            title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}
+          >
             <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
               {warningRows.map((w) => (
                 <li key={w.key}>{w.text}</li>
@@ -2596,14 +2867,18 @@ export function DispatchDialogScreen() {
             </ul>
           </Callout>
         ) : (
-          plans && <Callout title="Clean dispatch">Every cited sheet is locked and current; every reference rides.</Callout>
+          plans && (
+            <Callout title="Clean dispatch">
+              Every cited sheet is locked and current; every reference rides.
+            </Callout>
+          )
         )}
         {/* The bar says which model and why it cannot run; this says what that costs you here,
             rather than leaving the two dispatch cards to vanish without explanation. */}
         {!model && (
           <Callout tone="warning" title="Nothing to dispatch with">
-            The model this production is set to cannot run. Pick one above, or fix it in Settings —
-            nothing is re-routed for you.
+            The model this production is set to cannot run. Pick one above, or fix it in Settings — nothing is
+            re-routed for you.
           </Callout>
         )}
         {plans && overlong.length === 0 && !plans.perShot.warnings.payloadOverflow && (
@@ -2611,15 +2886,18 @@ export function DispatchDialogScreen() {
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Per shot</div>
               <div className="fy-boardcard__body">
-                One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per shot.
+                One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per
+                shot.
               </div>
               <div className="fy-boardcard__mono">
                 est. {usd(plans.perShot.totalEstimatedMicroUsd)}
                 {compiled?.perShot?.map((pass) => (
                   <span key={pass.target.coversShots.join("-")}>
                     {"\n"}
-                    {pass.target.kind === "shot" ? `shot ${pass.target.coversShots[0]!.replace("sh_", "")}` : "pass"} ·{" "}
-                    {passRow(pass)}
+                    {pass.target.kind === "shot"
+                      ? `shot ${pass.target.coversShots[0]!.replace("sh_", "")}`
+                      : "pass"}{" "}
+                    · {passRow(pass)}
                   </span>
                 ))}
               </div>
@@ -2628,7 +2906,15 @@ export function DispatchDialogScreen() {
                   variant="primary"
                   onClick={() => {
                     if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(worldId, prodId, sceneFile, "per-shot", model.id, resolution, choice.tier);
+                      dispatchScene(
+                        worldId,
+                        prodId,
+                        sceneFile,
+                        "per-shot",
+                        model.id,
+                        resolution,
+                        choice.tier,
+                      );
                       navigate(`/w/${worldId}/p/${prodId}/generate`);
                     }
                   }}
@@ -2639,23 +2925,28 @@ export function DispatchDialogScreen() {
             </div>
             <div className="fy-boardcard" style={{ flex: 1 }}>
               <div className="fy-boardcard__head">Whole scene</div>
-              <div className="fy-boardcard__body">Best motion continuity — but a retry re-runs its whole pass.</div>
+              <div className="fy-boardcard__body">
+                Best motion continuity — but a retry re-runs its whole pass.
+              </div>
               {plans.wholeScene.pack.ok && overlongPasses.length > 0 ? (
                 <div className="fy-boardcard__body" style={{ color: "var(--destructive)" }}>
-                  pass {overlongPasses[0]!.passIndex} runs {seconds(overlongPasses[0]!.durationSec)} — the longest this
-                  route makes is {seconds(overlongPasses[0]!.longestSec)}
-                  {overlongPasses[0]!.becauseReferences ? ", because the pass carries references" : ""}. Shorten a
-                  shot or pick another model.
+                  pass {overlongPasses[0]!.passIndex} runs {seconds(overlongPasses[0]!.durationSec)} — the
+                  longest this route makes is {seconds(overlongPasses[0]!.longestSec)}
+                  {overlongPasses[0]!.becauseReferences ? ", because the pass carries references" : ""}.
+                  Shorten a shot or pick another model.
                 </div>
               ) : plans.wholeScene.pack.ok ? (
                 <>
                   <div className="fy-boardcard__mono">
-                    {plans.wholeScene.pack.passes.length} pass{plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}
+                    {plans.wholeScene.pack.passes.length} pass
+                    {plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}
                     {model!.limits.maxDurationSec ?? "∞"}s cap
                     {plans.wholeScene.pack.passes.map((p, i) => (
                       <span key={p.index}>
                         {"\n"}pass {p.index} · shots {p.plan.map((e) => e.number).join(", ")}
-                        {compiled?.wholeScene?.[i] ? ` · ${passRow(compiled.wholeScene[i]!)}` : ` · ${seconds(p.durationSec)}`}
+                        {compiled?.wholeScene?.[i]
+                          ? ` · ${passRow(compiled.wholeScene[i]!)}`
+                          : ` · ${seconds(p.durationSec)}`}
                       </span>
                     ))}
                   </div>
@@ -2664,7 +2955,15 @@ export function DispatchDialogScreen() {
                       variant="primary"
                       onClick={() => {
                         if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(worldId, prodId, sceneFile, "whole-scene", model.id, resolution, choice.tier);
+                          dispatchScene(
+                            worldId,
+                            prodId,
+                            sceneFile,
+                            "whole-scene",
+                            model.id,
+                            resolution,
+                            choice.tier,
+                          );
                           navigate(`/w/${worldId}/p/${prodId}/generate`);
                         }
                       }}
@@ -2674,44 +2973,66 @@ export function DispatchDialogScreen() {
                     {/* SPEC-024: a plan chains each pass behind the previous pass's boundary
                         frame — offered exactly where a route exists to receive one, priced from
                         the CHAINED compile, because that is what the plan authorizes. */}
-                    {model && frameDispatchFor(model, 1) !== null && plans.wholeScene.pack.passes.length > 1 && compiled?.chained && (
-                      <>
-                        <div className="fy-boardcard__mono">
-                          {compiled.chained.map((pass, i) => (
-                            <span key={pass.target.coversShots.join("-")}>
-                              {"\n"}plan pass {i} · {passRow(pass)}
-                            </span>
-                          ))}
-                        </div>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            if (worldId && prodId && sceneFile && model) {
-                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "review-gated", resolution, choice.tier);
-                            }
-                          }}
-                        >
-                          Plan · continuity chain · ask before each pass
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          onClick={() => {
-                            if (worldId && prodId && sceneFile && model) {
-                              dispatchScenePlanned(worldId, prodId, sceneFile, "whole-scene", model.id, "pre-authorized", resolution, choice.tier);
-                            }
-                          }}
-                        >
-                          Plan · continuity chain · pre-authorize{" "}
-                          {usd(compiled.chained.reduce((sum, pass) => sum + pass.estimatedMicroUsd, 0))}
-                        </Button>
-                      </>
-                    )}
+                    {model &&
+                      frameDispatchFor(model, 1) !== null &&
+                      plans.wholeScene.pack.passes.length > 1 &&
+                      compiled?.chained && (
+                        <>
+                          <div className="fy-boardcard__mono">
+                            {compiled.chained.map((pass, i) => (
+                              <span key={pass.target.coversShots.join("-")}>
+                                {"\n"}plan pass {i} · {passRow(pass)}
+                              </span>
+                            ))}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              if (worldId && prodId && sceneFile && model) {
+                                dispatchScenePlanned(
+                                  worldId,
+                                  prodId,
+                                  sceneFile,
+                                  "whole-scene",
+                                  model.id,
+                                  "review-gated",
+                                  resolution,
+                                  choice.tier,
+                                );
+                              }
+                            }}
+                          >
+                            Plan · continuity chain · ask before each pass
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              if (worldId && prodId && sceneFile && model) {
+                                dispatchScenePlanned(
+                                  worldId,
+                                  prodId,
+                                  sceneFile,
+                                  "whole-scene",
+                                  model.id,
+                                  "pre-authorized",
+                                  resolution,
+                                  choice.tier,
+                                );
+                              }
+                            }}
+                          >
+                            Plan · continuity chain · pre-authorize{" "}
+                            {usd(compiled.chained.reduce((sum, pass) => sum + pass.estimatedMicroUsd, 0))}
+                          </Button>
+                        </>
+                      )}
                   </div>
                 </>
               ) : (
                 <Callout tone="warning" title="Whole-scene unavailable">
-                  shot {plans.wholeScene.pack.oversizeShot.number} runs {plans.wholeScene.pack.oversizeShot.durationSec}s — longer than
-                  the {plans.wholeScene.pack.oversizeShot.capSec}s cap, and half a shot cannot be reviewed.
+                  shot {plans.wholeScene.pack.oversizeShot.number} runs{" "}
+                  {plans.wholeScene.pack.oversizeShot.durationSec}s — longer than the{" "}
+                  {plans.wholeScene.pack.oversizeShot.capSec}s cap, and half a shot cannot be reviewed.
                 </Callout>
               )}
             </div>
@@ -2727,16 +3048,45 @@ export function VoiceLineDialogScreen() {
   const { worldId, prodId } = useParams();
   const [params] = useSearchParams();
   const { world, production } = useProduction(worldId, prodId);
+  const clientState = useStore().state;
   const navigate = useNavigate();
-  const spoken = production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.line && s.audio.speaker) ?? [];
+  const spoken =
+    production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.line && s.audio.speaker) ?? [];
   // The shot the row asked for. Without this the dialog showed whichever line came first, so
   // pressing Generate beside one character opened another character's line.
   const asked = params.get("shot");
   const shot = spoken.find((s) => s.id === asked) ?? spoken[0];
   const speaker = shot?.audio?.speaker ? world?.sheets.find((c) => c.id === shot.audio!.speaker) : undefined;
+  const voiceModel = speaker?.voice
+    ? clientState?.app.manifest?.models.find(
+        (model) =>
+          model.provider === speaker.voice!.provider &&
+          model.capability === "voice-tts" &&
+          model.id ===
+            (speaker.voice!.model ??
+              legacyVoiceModel(speaker.voice!.provider, speaker.voice!.voiceId, world?.clonedVoices ?? [])),
+      )
+    : undefined;
+  const voiceDeliveries = supportedDeliveries(voiceModel);
+  const voiceReadiness =
+    speaker?.voice && voiceModel?.provider === "comfyui"
+      ? clientState?.app.comfyui?.recipes.find((recipe) => recipe.recipeId === voiceModel.id)
+      : null;
+  const voiceUnavailableReason =
+    voiceReadiness?.state === "disabled" ||
+    (voiceReadiness?.state === "unknown" && clientState?.app.comfyui?.engine.locality === "local")
+      ? (voiceReadiness.reason ?? "The assigned voice recipe is not ready.")
+      : voiceModel === undefined && speaker?.voice
+        ? "The assigned voice model is no longer available."
+        : null;
   const [sending, setSending] = useState(false);
+  const [delivery, setDelivery] = useState<Delivery | "">("");
   const [refusal, setRefusal] = useState<string | null>(null);
   const pending = useRef<string | null>(null);
+  const [uploadConfirmation, setUploadConfirmation] = useState<{
+    destinationLabel: string;
+    confirmationToken: string;
+  } | null>(null);
   useEffect(
     () =>
       subscribeQueueResults((result) => {
@@ -2748,6 +3098,26 @@ export function VoiceLineDialogScreen() {
       }),
     [navigate, worldId, prodId],
   );
+  useEffect(
+    () =>
+      subscribeVoiceUploadConfirmations((confirmation) => {
+        if (confirmation.requestId !== pending.current) return;
+        setUploadConfirmation(confirmation);
+      }),
+    [],
+  );
+  const generateLine = (voiceUploadConfirmedFor?: string) => {
+    if (!worldId || !prodId || !shot) return;
+    setRefusal(null);
+    setSending(true);
+    pending.current = requestVoiceLine({
+      worldId,
+      productionId: prodId,
+      shotId: shot.id,
+      ...(delivery ? { delivery } : {}),
+      ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
+    });
+  };
   return (
     <div className="fy-dialogwrap" data-screen="voice-line-dialog">
       <div className="fy-dialog" style={{ maxWidth: 560 }}>
@@ -2764,15 +3134,27 @@ export function VoiceLineDialogScreen() {
         {shot && speaker ? (
           <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
             <div style={{ width: 56, height: 64, flex: "none" }}>
-              <Portrait worldSlug={world?.meta.slug} path={sheetPortraitPath(speaker.id)} label={speaker.name} radius={8} />
+              <Portrait
+                worldSlug={world?.meta.slug}
+                path={sheetPortraitPath(speaker.id)}
+                label={speaker.name}
+                radius={8}
+              />
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ font: "600 14px var(--font-sans)" }}>{speaker.name}</div>
-              <div style={{ font: "400 13px/1.5 var(--font-sans)", color: "var(--muted-foreground)", fontStyle: "italic", marginTop: 2 }}>
+              <div
+                style={{
+                  font: "400 13px/1.5 var(--font-sans)",
+                  color: "var(--muted-foreground)",
+                  fontStyle: "italic",
+                  marginTop: 2,
+                }}
+              >
                 “{shot.audio!.line}”
               </div>
               <div className="fy-mono" style={{ marginTop: 4 }}>
-                voice · {speaker.voice ? `${speaker.voice.label ?? speaker.voice.voiceId} (${speaker.voice.provider})` : "none assigned"}
+                {`voice · ${speaker.voice ? `${speaker.voice.label ?? speaker.voice.voiceId} (${speaker.voice.provider})` : "none assigned"}`}
               </div>
             </div>
           </div>
@@ -2780,26 +3162,63 @@ export function VoiceLineDialogScreen() {
           <EmptyState title="No spoken lines in this production yet" />
         )}
         {refusal !== null && <p className="fy-refusal">{refusal}</p>}
+        {voiceUnavailableReason !== null && (
+          <p className="fy-refusal">Assigned voice unavailable · {voiceUnavailableReason}</p>
+        )}
+        {speaker?.voice &&
+          (voiceDeliveries.length > 0 ? (
+            <select
+              aria-label="Delivery"
+              className="fy-bench__chip"
+              value={delivery}
+              onChange={(event) => setDelivery(event.target.value as Delivery | "")}
+            >
+              <option value="">delivery · default</option>
+              {DELIVERIES.filter((item) => voiceDeliveries.includes(item)).map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="fy-mono">delivery · provider default only</span>
+          ))}
         <div>
           <Button
             variant="primary"
             data-testid="voice-line-generate"
-            disabled={shot === undefined || speaker === undefined || speaker.voice === undefined || sending}
+            disabled={
+              shot === undefined ||
+              speaker === undefined ||
+              speaker.voice === undefined ||
+              voiceUnavailableReason !== null ||
+              sending
+            }
             title={
               speaker !== undefined && speaker.voice === undefined
                 ? `${speaker.name} has no assigned voice — choose one on their sheet`
-                : undefined
+                : (voiceUnavailableReason ?? undefined)
             }
-            onClick={() => {
-              if (!worldId || !prodId || !shot) return;
-              setRefusal(null);
-              setSending(true);
-              pending.current = requestVoiceLine({ worldId, productionId: prodId, shotId: shot.id });
-            }}
+            onClick={() => generateLine()}
           >
             {sending ? "Generating…" : "Generate line"}
           </Button>
         </div>
+        {uploadConfirmation && (
+          <RemoteVoiceUploadConfirmation
+            destinationLabel={uploadConfirmation.destinationLabel}
+            onCancel={() => {
+              pending.current = null;
+              setSending(false);
+              setUploadConfirmation(null);
+            }}
+            onConfirm={() => {
+              const token = uploadConfirmation.confirmationToken;
+              setUploadConfirmation(null);
+              generateLine(token);
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -2848,7 +3267,12 @@ function ArtifactPanel({
         <span className="fy-artpanel__title">Artifacts</span>
         <span className="fy-mono">{artifacts.length}</span>
         <span className="fy-h1row__push" />
-        <Button variant="outline" size="sm" disabled={worldId === undefined} onClick={() => worldId && uploadArtifacts(worldId)}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={worldId === undefined}
+          onClick={() => worldId && uploadArtifacts(worldId)}
+        >
           Upload
         </Button>
       </div>
@@ -3115,7 +3539,8 @@ function ClipLanes({
     if (artifact === undefined) return { ok: false, why: "this clip cites nothing this world has" };
     if (artifact.kind !== "video") return { ok: false, why: `a ${artifact.kind} has no sound to split` };
     if (artifact.mediaInfo === undefined) return { ok: false, why: "not measured yet — try again shortly" };
-    if (!artifact.mediaInfo.hasAudio) return { ok: false, why: "measured as silent, so there is nothing to split" };
+    if (!artifact.mediaInfo.hasAudio)
+      return { ok: false, why: "measured as silent, so there is nothing to split" };
     return { ok: true, why: "" };
   })();
   const rejoinable = menu !== null && (menu.clip.audio ?? "keep") === "mute";
@@ -3304,7 +3729,13 @@ function useCutTransport(totalSec: number): Transport {
   const timeRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  useTransport({ playing, durationSec: totalSec, timeRef, onTime: setTime, onEnded: () => setPlaying(false) });
+  useTransport({
+    playing,
+    durationSec: totalSec,
+    timeRef,
+    onTime: setTime,
+    onEnded: () => setPlaying(false),
+  });
   const seek = useCallback(
     (seconds: number) => {
       const at = Math.min(Math.max(0, seconds), totalSec);
@@ -3339,8 +3770,7 @@ function CutPreview({
     setPlaying(true);
   }, [restartToken]);
 
-  const srcFor = (span: PlaybackSpan | null) =>
-    span?.path && slug ? mediaUrl(slug, span.path) : null;
+  const srcFor = (span: PlaybackSpan | null) => (span?.path && slug ? mediaUrl(slug, span.path) : null);
 
   /*
    * The sync runs on its own frame loop off `timeRef`, not off `time`.
@@ -3393,7 +3823,13 @@ function CutPreview({
 
   return (
     <div className="fy-cutviewer">
-      <video ref={video} className="fy-cutviewer__video" playsInline muted style={{ opacity: showing === null ? 0 : 1 }} />
+      <video
+        ref={video}
+        className="fy-cutviewer__video"
+        playsInline
+        muted
+        style={{ opacity: showing === null ? 0 : 1 }}
+      />
       {showing === null && (
         <span className="fy-cutviewer__empty">{current ? current.label : "nothing here yet"}</span>
       )}
@@ -3443,7 +3879,10 @@ function TrimStrip({
   ceiling: ReturnType<typeof trimCeilingSec> | null;
 }) {
   // Something must survive the trim, so the last whole step before the ceiling is the ceiling here.
-  const maxTrim = ceiling?.ok && ceiling.ceilingSec !== undefined ? Math.max(0, ceiling.ceilingSec - TRIM_STEP_SEC) : undefined;
+  const maxTrim =
+    ceiling?.ok && ceiling.ceilingSec !== undefined
+      ? Math.max(0, ceiling.ceilingSec - TRIM_STEP_SEC)
+      : undefined;
   const trimmable = ceiling?.ok === true;
   const commit = (next: number) => {
     if (next !== trim) setShotTrim(worldId, prodId, shotId, next);
@@ -3482,7 +3921,11 @@ function TrimStrip({
           −
         </button>
         <span
-          className={cx("fy-trim__value", trimmable && "fy-trim__value--drag", drag.dragging && "fy-trim__value--dragging")}
+          className={cx(
+            "fy-trim__value",
+            trimmable && "fy-trim__value--drag",
+            drag.dragging && "fy-trim__value--dragging",
+          )}
           onPointerDown={trimmable ? drag.onPointerDown : undefined}
           role={trimmable ? "slider" : undefined}
           aria-label={trimmable ? "trim in" : undefined}
@@ -3526,7 +3969,9 @@ function SpineCutTrack({
   cut: ReturnType<typeof deriveSpineCut>;
   production: Parameters<typeof trimCeilingSec>[0];
 }) {
-  const clips = cut.segments.filter((seg): seg is SpineCutSegment & { shotId: string } => seg.kind === "clip" && !!seg.shotId);
+  const clips = cut.segments.filter(
+    (seg): seg is SpineCutSegment & { shotId: string } => seg.kind === "clip" && !!seg.shotId,
+  );
   const [picked, setPicked] = useState<string | null>(null);
   // The screen opens on a clip rather than on nothing: an empty strip below a full lane reads as
   // a control that is missing rather than one that is waiting.
@@ -3551,14 +3996,23 @@ function SpineCutTrack({
                   aria-pressed={isSelected}
                   onClick={() => seg.shotId && setPicked(seg.shotId)}
                 >
-                  <Portrait worldSlug={slug} path={seg.media ? posterize(seg.media.path) : ""} label={`SC ${seg.sceneNumber}`} radius={0} />
+                  <Portrait
+                    worldSlug={slug}
+                    path={seg.media ? posterize(seg.media.path) : ""}
+                    label={`SC ${seg.sceneNumber}`}
+                    radius={0}
+                  />
                   <span className="fy-cutseg__tag">SC {seg.sceneNumber}</span>
                 </button>
               );
             }
             if (seg.kind === "slate") {
               return (
-                <div key={`${seg.kind}-${i}`} className="fy-cutseg fy-cutseg--gap fy-cutseg--gap-warn" style={{ flex: span }}>
+                <div
+                  key={`${seg.kind}-${i}`}
+                  className="fy-cutseg fy-cutseg--gap fy-cutseg--gap-warn"
+                  style={{ flex: span }}
+                >
                   {seg.label}
                 </div>
               );
@@ -3613,7 +4067,9 @@ function StoryCutTrack({
   const ceiling = selected?.takeId ? trimCeilingSec(production, selected.shot.id, selected.takeId) : null;
   const trim = selected ? (production.selections[selected.shot.id]?.trimInSec ?? 0) : 0;
   // Absent is "not measured", never zero, so an unprobed take simply does not state a length.
-  const takeSec = selected?.takeId ? production.takeMediaInfo[selected.takeId]?.mediaInfo.durationSec : undefined;
+  const takeSec = selected?.takeId
+    ? production.takeMediaInfo[selected.takeId]?.mediaInfo.durationSec
+    : undefined;
 
   const scenes: { number: number; span: number }[] = [];
   for (const e of cut.entries) {
@@ -3638,7 +4094,14 @@ function StoryCutTrack({
       continue;
     }
     if (scenesWithCoverage.has(e.sceneNumber)) {
-      lane.push({ kind: "gap", label: `shot ${e.shot.number}`, span: e.durationSec, warn: true, scene: e.sceneNumber, key: e.shot.id });
+      lane.push({
+        kind: "gap",
+        label: `shot ${e.shot.number}`,
+        span: e.durationSec,
+        warn: true,
+        scene: e.sceneNumber,
+        key: e.shot.id,
+      });
       continue;
     }
     const last = lane[lane.length - 1];
@@ -3748,95 +4211,111 @@ export function CutScreen() {
     totalSec,
   );
 
-
   return (
     <div className="fy-cutcols" data-screen="cut">
       <ArtifactPanel worldId={worldId} artifacts={world?.artifacts ?? []} slug={slug} />
       <div className="fy-prodmain" style={{ minHeight: "100%" }}>
-      <div className="fy-h1row">
-        <h1 className="fy-h1">The cut</h1>
-        <span className="fy-h1row__meta">
-          {spineCut
-            ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
-            : cut
-              ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
-              : ""}
-          {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
-        </span>
-        <span className="fy-h1row__push" />
-        <Button onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}>
-          Export cut…
-        </Button>
-      </div>
-      <CutPreview
-        slug={slug}
-        spans={spans}
-        totalSec={totalSec}
-        restartToken={watchToken}
-        transport={transport}
-      />
-      <div className="fy-timeline">
-        <CutScrubber totalSec={totalSec} transport={transport} />
-        <div className="fy-tracks">
-          {totalSec > 0 && (
-            <div className="fy-playhead" style={{ left: `${Math.min(100, (transport.time / totalSec) * 100)}%` }} aria-hidden />
-          )}
-        {worldId && prodId && production && cut ? (
-          spineCut ? (
-            <SpineCutTrack worldId={worldId} prodId={prodId} slug={slug} cut={spineCut} production={production} />
-          ) : (
-            <StoryCutTrack worldId={worldId} prodId={prodId} slug={slug} cut={cut} production={production} />
-          )
-        ) : null}
-        {/*
-          * The A row that used to sit here listed the world's audio artifacts and could do
-          * nothing with them — audio now lands on a lane like everything else, so a row that
-          * only ever described the inventory would be repeating the panel beside it.
-          */}
-        {worldId && prodId && (
-          <ClipLanes
-            worldId={worldId}
-            prodId={prodId}
-            slug={slug}
-            totalSec={totalSec}
-            clips={production?.cut.overlays ?? []}
-            artifacts={world?.artifacts ?? []}
-            snapPoints={snapPoints}
-          />
-        )}
-        </div>
-        <div className="fy-cutfoot">
-          <span className="fy-mono">
+        <div className="fy-h1row">
+          <h1 className="fy-h1">The cut</h1>
+          <span className="fy-h1row__meta">
             {spineCut
-              ? `${spineCut.segments.filter((seg) => seg.kind === "clip").length} of ${spineCut.segments.filter((seg) => seg.kind !== "black").length} anchors covered`
+              ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
               : cut
-                ? `${cut.covered} of ${cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
+                ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
                 : ""}
+            {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
           </span>
           <span className="fy-h1row__push" />
-          {spineCut
-            ? spineCut.blackSec > 0 && (
-                <span className="fy-warnchip">
-                  <span className="fy-dot fy-dot--warn" />
-                  {spineCut.segments.filter((seg) => seg.kind === "black").length} black · {seconds(spineCut.blackSec)} uncovered
-                </span>
-              )
-            : cut &&
-              cut.gaps > 0 && (
-                <span className="fy-warnchip">
-                  <span className="fy-dot fy-dot--warn" />
-                  {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} · {seconds(cut.uncoveredSec)} uncovered
-                </span>
-              )}
+          <Button onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>
+          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}>
+            Export cut…
+          </Button>
         </div>
-      </div>
-      <div style={{ marginTop: "auto" }}>
-        <span className="fy-mono">
-          the cut is a projection — it recomputes from shot selections; restoring an earlier cut means restoring the
-          selections that produced it
-        </span>
-      </div>
+        <CutPreview
+          slug={slug}
+          spans={spans}
+          totalSec={totalSec}
+          restartToken={watchToken}
+          transport={transport}
+        />
+        <div className="fy-timeline">
+          <CutScrubber totalSec={totalSec} transport={transport} />
+          <div className="fy-tracks">
+            {totalSec > 0 && (
+              <div
+                className="fy-playhead"
+                style={{ left: `${Math.min(100, (transport.time / totalSec) * 100)}%` }}
+                aria-hidden
+              />
+            )}
+            {worldId && prodId && production && cut ? (
+              spineCut ? (
+                <SpineCutTrack
+                  worldId={worldId}
+                  prodId={prodId}
+                  slug={slug}
+                  cut={spineCut}
+                  production={production}
+                />
+              ) : (
+                <StoryCutTrack
+                  worldId={worldId}
+                  prodId={prodId}
+                  slug={slug}
+                  cut={cut}
+                  production={production}
+                />
+              )
+            ) : null}
+            {/*
+             * The A row that used to sit here listed the world's audio artifacts and could do
+             * nothing with them — audio now lands on a lane like everything else, so a row that
+             * only ever described the inventory would be repeating the panel beside it.
+             */}
+            {worldId && prodId && (
+              <ClipLanes
+                worldId={worldId}
+                prodId={prodId}
+                slug={slug}
+                totalSec={totalSec}
+                clips={production?.cut.overlays ?? []}
+                artifacts={world?.artifacts ?? []}
+                snapPoints={snapPoints}
+              />
+            )}
+          </div>
+          <div className="fy-cutfoot">
+            <span className="fy-mono">
+              {spineCut
+                ? `${spineCut.segments.filter((seg) => seg.kind === "clip").length} of ${spineCut.segments.filter((seg) => seg.kind !== "black").length} anchors covered`
+                : cut
+                  ? `${cut.covered} of ${cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
+                  : ""}
+            </span>
+            <span className="fy-h1row__push" />
+            {spineCut
+              ? spineCut.blackSec > 0 && (
+                  <span className="fy-warnchip">
+                    <span className="fy-dot fy-dot--warn" />
+                    {spineCut.segments.filter((seg) => seg.kind === "black").length} black ·{" "}
+                    {seconds(spineCut.blackSec)} uncovered
+                  </span>
+                )
+              : cut &&
+                cut.gaps > 0 && (
+                  <span className="fy-warnchip">
+                    <span className="fy-dot fy-dot--warn" />
+                    {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} · {seconds(cut.uncoveredSec)} uncovered
+                  </span>
+                )}
+          </div>
+        </div>
+        <div style={{ marginTop: "auto" }}>
+          <span className="fy-mono">
+            the cut is a projection — it recomputes from shot selections; restoring an earlier cut means
+            restoring the selections that produced it
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -3855,8 +4334,9 @@ export function AudioScreen() {
   const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
   const voLines = isStory
     ? []
-    : (production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ??
-      []);
+    : (production?.scenes
+        .flatMap((s) => s.shots)
+        .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ?? []);
   const speakerOf = (id: string | undefined) => world?.sheets.find((c) => c.id === id);
   return (
     <div className="fy-prodmain" data-screen="audio" style={{ minHeight: "100%" }}>
@@ -3875,72 +4355,84 @@ export function AudioScreen() {
         )}
       </div>
       {!isStory && (
-      <div>
-        <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-          DIALOGUE
-        </div>
-        {voLines.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no spoken lines in the shots yet</div>}
-        {voLines.map((s) => {
-          const speaker = speakerOf(s.audio?.speaker);
-          // The most recent spoken take covering this shot, if one has been made.
-          const read = production
-            ? [...takesForShot(production, s.id)].reverse().find((t) => t.kind === "voice")
-            : undefined;
-          return (
-            <div key={s.id} className="fy-audiorow">
-              {/* Nothing is generated for these lines yet, so there is no circle to press —
+        <div>
+          <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
+            DIALOGUE
+          </div>
+          {voLines.length === 0 && (
+            <div className="fy-mono" style={{ padding: "10px 0" }}>
+              no spoken lines in the shots yet
+            </div>
+          )}
+          {voLines.map((s) => {
+            const speaker = speakerOf(s.audio?.speaker);
+            // The most recent spoken take covering this shot, if one has been made.
+            const read = production
+              ? [...takesForShot(production, s.id)].reverse().find((t) => t.kind === "voice")
+              : undefined;
+            return (
+              <div key={s.id} className="fy-audiorow">
+                {/* Nothing is generated for these lines yet, so there is no circle to press —
                   the status dot carries that, rather than a button that cannot sound. */}
-              <div className="fy-audiorow__id">
-                <div className="fy-audiorow__title">
-                  {speaker?.name ?? s.audio?.kind}, “{s.audio?.line}”
+                <div className="fy-audiorow__id">
+                  <div className="fy-audiorow__title">
+                    {speaker?.name ?? s.audio?.kind}, “{s.audio?.line}”
+                  </div>
+                  <div className="fy-audiorow__sub">
+                    {s.id.replace("sh_", "shot ")}
+                    {speaker ? ` · voice: ${speaker.name} sheet v${speaker.version}` : ""}
+                    {speaker?.voice ? ` · ${speaker.voice.provider}` : ""}
+                  </div>
                 </div>
-                <div className="fy-audiorow__sub">
-                  {s.id.replace("sh_", "shot ")}
-                  {speaker ? ` · voice: ${speaker.name} sheet v${speaker.version}` : ""}
-                  {speaker?.voice ? ` · ${speaker.voice.provider}` : ""}
+                <div className="fy-audiorow__wave">
+                  <Wave seed={s.id + (s.audio?.line ?? "")} />
                 </div>
-              </div>
-              <div className="fy-audiorow__wave">
-                <Wave seed={s.id + (s.audio?.line ?? "")} />
-              </div>
-              {/* What is actually here. "not generated" was hardcoded, so a line that had been
+                {/* What is actually here. "not generated" was hardcoded, so a line that had been
                   read landed in the production and the row went on claiming nothing existed —
                   with no way to hear it. */}
-              {read === undefined ? (
-                <span className="fy-audiorow__status">
-                  <span className="fy-dot fy-dot--warn" />
-                  not generated
-                </span>
-              ) : (
-                <span className="fy-audiorow__status">
-                  <span className="fy-dot fy-dot--ok" />
-                  {read.completedAt ? "read" : "reading…"}
-                </span>
-              )}
-              {read?.media && world ? (
-                <ClipPlayButton
-                  small
-                  clip={{
-                    id: `take:${read.id}`,
-                    url: mediaUrl(world.meta.slug, `productions/${prodId}/takes/${read.id}/${read.media}`),
-                    title: `${speaker?.name ?? "line"} · ${s.id.replace("sh_", "shot ")}`,
-                    sub: `voice line · ${speaker?.voice?.label ?? speaker?.voice?.provider ?? "voice"}`,
-                  }}
-                />
-              ) : null}
-              <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line?shot=${encodeURIComponent(s.id)}`)}>
-                {read === undefined ? "Generate" : "Again"}
-              </Button>
-            </div>
-          );
-        })}
-      </div>
+                {read === undefined ? (
+                  <span className="fy-audiorow__status">
+                    <span className="fy-dot fy-dot--warn" />
+                    not generated
+                  </span>
+                ) : (
+                  <span className="fy-audiorow__status">
+                    <span className="fy-dot fy-dot--ok" />
+                    {read.completedAt ? "read" : "reading…"}
+                  </span>
+                )}
+                {read?.media && world ? (
+                  <ClipPlayButton
+                    small
+                    clip={{
+                      id: `take:${read.id}`,
+                      url: mediaUrl(world.meta.slug, `productions/${prodId}/takes/${read.id}/${read.media}`),
+                      title: `${speaker?.name ?? "line"} · ${s.id.replace("sh_", "shot ")}`,
+                      sub: `voice line · ${speaker?.voice?.label ?? speaker?.voice?.provider ?? "voice"}`,
+                    }}
+                  />
+                ) : null}
+                <Button
+                  onClick={() =>
+                    navigate(`/w/${worldId}/p/${prodId}/generate/voice-line?shot=${encodeURIComponent(s.id)}`)
+                  }
+                >
+                  {read === undefined ? "Generate" : "Again"}
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       )}
       <div>
         <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
           {isStory ? "AUDIO ARTIFACTS" : "BEDS AND STEMS"}
         </div>
-        {linked.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>no audio artifacts yet — imports land here</div>}
+        {linked.length === 0 && (
+          <div className="fy-mono" style={{ padding: "10px 0" }}>
+            no audio artifacts yet — imports land here
+          </div>
+        )}
         {linked.map((a) => (
           <div key={a.id} className="fy-audiorow">
             <ClipPlayButton
@@ -3976,7 +4468,13 @@ export function AudioScreen() {
       <div className="fy-scenefoot">
         <span className="fy-h1row__push" />
         <span
-          style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)", cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 3 }}
+          style={{
+            font: "400 11px var(--font-sans)",
+            color: "var(--muted-foreground)",
+            cursor: "pointer",
+            textDecoration: "underline",
+            textUnderlineOffset: 3,
+          }}
           onClick={() => navigate(`/w/${worldId}/cast`)}
         >
           Voice picker
@@ -4009,7 +4507,10 @@ type ExportView =
   | { kind: "spine"; cut: ReturnType<typeof deriveSpineCut> };
 
 function exportViewFor(
-  world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] } | null | undefined,
+  world:
+    | { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
+    | null
+    | undefined,
   production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
 ): ExportView {
   const spine = production?.spine;
@@ -4027,12 +4528,15 @@ function exportViewFor(
 /** What the review will actually contain, in the exporter's terms rather than the screen's. */
 function reviewNotes(cut: ReturnType<typeof deriveSpineCut>): string[] {
   const notes: string[] = [];
-  if (cut.slateSec > 0) notes.push(`${seconds(cut.slateSec)} is a labelled slate naming the shot that is missing`);
+  if (cut.slateSec > 0)
+    notes.push(`${seconds(cut.slateSec)} is a labelled slate naming the shot that is missing`);
   // Plain black carries no label: the exporter draws text on slates only.
   if (cut.blackSec > 0) notes.push(`${seconds(cut.blackSec)} is plain black, anchored to no shot at all`);
   if (cut.unanchoredShotIds.length > 0) {
     const n = cut.unanchoredShotIds.length;
-    notes.push(`${n} shot${n === 1 ? "" : "s"} anchored nowhere in the song, so ${n === 1 ? "it is" : "they are"} not in the film at all`);
+    notes.push(
+      `${n} shot${n === 1 ? "" : "s"} anchored nowhere in the song, so ${n === 1 ? "it is" : "they are"} not in the film at all`,
+    );
   }
   if (cut.problems.length > 0) {
     notes.push(`unresolved: ${[...new Set(cut.problems.map((p) => p.kind))].sort().join(", ")}`);
@@ -4072,9 +4576,15 @@ export function ExportsScreen() {
    */
   const blocked = refusal !== null || view.kind === "no-track" || view.kind === "silent";
   const presetCopy: Record<string, { label: string; sub: string }> = {
-    "review-cut": { label: "Review cut", sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest` },
+    "review-cut": {
+      label: "Review cut",
+      sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest`,
+    },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
-    "social-excerpt": { label: "Social excerpt", sub: `${PRESETS["social-excerpt"].width}×${PRESETS["social-excerpt"].height} · 9:16 · captions` },
+    "social-excerpt": {
+      label: "Social excerpt",
+      sub: `${PRESETS["social-excerpt"].width}×${PRESETS["social-excerpt"].height} · 9:16 · captions`,
+    },
   };
   const boardPath = production?.scenes.find((s) => s.board)?.board?.image;
   return (
@@ -4119,7 +4629,9 @@ export function ExportsScreen() {
                 </span>
                 <span className="fy-mono">
                   {seconds(episodeCut.totalSec)} · {episodeCut.covered} of {episodeCut.entries.length} covered
-                  {episodeCut.gaps > 0 ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates` : ""}
+                  {episodeCut.gaps > 0
+                    ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates`
+                    : ""}
                 </span>
                 {episodeRefusal ? (
                   <span className="fy-mono" style={{ color: "var(--destructive)" }}>
@@ -4139,128 +4651,137 @@ export function ExportsScreen() {
         </div>
       )}
       {!isStory && (
-      <>
-      <div>
-        <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-          DELIVERED
-        </div>
-        {mine.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing delivered yet</div>}
-        {mine.map(([id, e]) => (
-          <div key={id} className="fy-exportrow">
-            <div className="fy-exportrow__thumb">
-              <Portrait
-                worldSlug={world?.meta.slug}
-                path={boardPath && production ? `productions/${production.meta.id}/${boardPath}` : ""}
-                label="cut"
-                radius={0}
-              />
+        <>
+          <div>
+            <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
+              DELIVERED
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="fy-exportrow__title">
-                {production?.meta.title}
-                {e.episodeId !== undefined
-                  ? ` · ${production?.episodes.find((ep) => ep.id === e.episodeId)?.title ?? e.episodeId}`
-                  : ""}{" "}
-                · render {id.slice(0, 8)}
+            {mine.length === 0 && (
+              <div className="fy-mono" style={{ padding: "10px 0" }}>
+                nothing delivered yet
               </div>
-              <div className="fy-exportrow__sub">
-                {e.status}
-                {e.status === "running" ? ` · ${Math.round(e.percent)}%` : ""}
-                {e.output ? ` · ${e.output}` : ""}
-                {e.error ? ` · ${e.error}` : ""}
-              </div>
-            </div>
-            {e.status === "running" && (
-              <Button variant="ghost" onClick={() => worldId && cancelExport(worldId, id)}>
-                Cancel
-              </Button>
             )}
-          </div>
-        ))}
-      </div>
-      <div>
-        <div className="fy-eyebrow-sm">NEW EXPORT</div>
-        <div className="fy-radiorow">
-          {(Object.keys(presetCopy) as Array<keyof typeof PRESETS>).map((p) => (
-            <button key={p} type="button" className={cx("fy-radio", preset === p && "fy-radio--on")} onClick={() => setPreset(p)}>
-              <div className="fy-radio__head">
-                <span className="fy-radio__dot" />
-                {presetCopy[p]!.label}
+            {mine.map(([id, e]) => (
+              <div key={id} className="fy-exportrow">
+                <div className="fy-exportrow__thumb">
+                  <Portrait
+                    worldSlug={world?.meta.slug}
+                    path={boardPath && production ? `productions/${production.meta.id}/${boardPath}` : ""}
+                    label="cut"
+                    radius={0}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="fy-exportrow__title">
+                    {production?.meta.title}
+                    {e.episodeId !== undefined
+                      ? ` · ${production?.episodes.find((ep) => ep.id === e.episodeId)?.title ?? e.episodeId}`
+                      : ""}{" "}
+                    · render {id.slice(0, 8)}
+                  </div>
+                  <div className="fy-exportrow__sub">
+                    {e.status}
+                    {e.status === "running" ? ` · ${Math.round(e.percent)}%` : ""}
+                    {e.output ? ` · ${e.output}` : ""}
+                    {e.error ? ` · ${e.error}` : ""}
+                  </div>
+                </div>
+                {e.status === "running" && (
+                  <Button variant="ghost" onClick={() => worldId && cancelExport(worldId, id)}>
+                    Cancel
+                  </Button>
+                )}
               </div>
-              <div className="fy-radio__sub">{presetCopy[p]!.sub}</div>
-            </button>
-          ))}
-        </div>
-        {view.kind === "no-track" && (
-          <div className="fy-notecard">
-            <span className="fy-dot fy-dot--warn" />
-            The spine names a track this world does not have, so there is nothing to measure or cut against. Assign a
-            track again — the anchors are unaffected.
+            ))}
           </div>
-        )}
-        {view.kind === "silent" && (
-          <div className="fy-notecard">
-            <span className="fy-dot fy-dot--warn" />
-            The master track has no audio stream, so there is no song to cut against. Assign a track that carries audio
-            — nothing else about the production changes.
-          </div>
-        )}
-        {view.kind === "unmeasured" && (
-          <div className="fy-notecard">
-            <span className="fy-dot fy-dot--warn" />
-            The master track has not been measured yet, so its length is not known here. Exporting measures it first and
-            renders against it — or says why it cannot be read. Nothing about the production changes either way.
-          </div>
-        )}
-        {view.kind === "spine" &&
-          (() => {
-            /*
-             * One sentence about what the review will contain, built from the cut rather than
-             * written per case. Three rounds were spent on copy that described a state the screen
-             * was not in -- gaps promised as labelled when only slates carry labels, shots
-             * anchored nowhere omitted from both the film and the warning, a refusal naming the
-             * master while another preset was selected.
-             */
-            const notes = reviewNotes(view.cut);
-            if (refusal === null && notes.length === 0) return null;
-            return (
+          <div>
+            <div className="fy-eyebrow-sm">NEW EXPORT</div>
+            <div className="fy-radiorow">
+              {(Object.keys(presetCopy) as Array<keyof typeof PRESETS>).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={cx("fy-radio", preset === p && "fy-radio--on")}
+                  onClick={() => setPreset(p)}
+                >
+                  <div className="fy-radio__head">
+                    <span className="fy-radio__dot" />
+                    {presetCopy[p]!.label}
+                  </div>
+                  <div className="fy-radio__sub">{presetCopy[p]!.sub}</div>
+                </button>
+              ))}
+            </div>
+            {view.kind === "no-track" && (
               <div className="fy-notecard">
                 <span className="fy-dot fy-dot--warn" />
-                {refusal !== null && (
-                  <>
-                    {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}.{" "}
-                  </>
-                )}
-                {notes.length > 0 ? (
-                  <>
-                    A review cut renders anyway: {notes.join("; ")}. An unfinished film still reviews.
-                  </>
-                ) : (
-                  <>A review cut renders the whole song as it stands.</>
-                )}
+                The spine names a track this world does not have, so there is nothing to measure or cut
+                against. Assign a track again — the anchors are unaffected.
               </div>
-            );
-          })()}
-        {view.kind === "scene-order" && cut && cut.gaps > 0 && (
-          <div className="fy-notecard">
-            <span className="fy-dot fy-dot--warn" />
-            The cut has {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} ({seconds(cut.uncoveredSec)}). They export as black
-            slates carrying their labels and durations — an unfinished film still reviews.
+            )}
+            {view.kind === "silent" && (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                The master track has no audio stream, so there is no song to cut against. Assign a track that
+                carries audio — nothing else about the production changes.
+              </div>
+            )}
+            {view.kind === "unmeasured" && (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                The master track has not been measured yet, so its length is not known here. Exporting
+                measures it first and renders against it — or says why it cannot be read. Nothing about the
+                production changes either way.
+              </div>
+            )}
+            {view.kind === "spine" &&
+              (() => {
+                /*
+                 * One sentence about what the review will contain, built from the cut rather than
+                 * written per case. Three rounds were spent on copy that described a state the screen
+                 * was not in -- gaps promised as labelled when only slates carry labels, shots
+                 * anchored nowhere omitted from both the film and the warning, a refusal naming the
+                 * master while another preset was selected.
+                 */
+                const notes = reviewNotes(view.cut);
+                if (refusal === null && notes.length === 0) return null;
+                return (
+                  <div className="fy-notecard">
+                    <span className="fy-dot fy-dot--warn" />
+                    {refusal !== null && (
+                      <>
+                        {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}
+                        .{" "}
+                      </>
+                    )}
+                    {notes.length > 0 ? (
+                      <>A review cut renders anyway: {notes.join("; ")}. An unfinished film still reviews.</>
+                    ) : (
+                      <>A review cut renders the whole song as it stands.</>
+                    )}
+                  </div>
+                );
+              })()}
+            {view.kind === "scene-order" && cut && cut.gaps > 0 && (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                The cut has {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} ({seconds(cut.uncoveredSec)}). They
+                export as black slates carrying their labels and durations — an unfinished film still reviews.
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
+              <span className="fy-mono">renders locally · no provider call</span>
+              <span className="fy-h1row__push" />
+              <Button
+                variant="primary"
+                disabled={blocked}
+                onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
+              >
+                {runtimeSec === undefined ? "Export" : <>Export · {seconds(runtimeSec)}</>}
+              </Button>
+            </div>
           </div>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-          <span className="fy-mono">renders locally · no provider call</span>
-          <span className="fy-h1row__push" />
-          <Button
-            variant="primary"
-            disabled={blocked}
-            onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
-          >
-            {runtimeSec === undefined ? "Export" : <>Export · {seconds(runtimeSec)}</>}
-          </Button>
-        </div>
-      </div>
-      </>
+        </>
       )}
       {isStory && (
         <EmptyState
@@ -4270,8 +4791,8 @@ export function ExportsScreen() {
       )}
       <div className="fy-scenefoot">
         <span className="fy-mono">
-          world export: a folder that reopens identically elsewhere — history kept, caches and locks stay behind · lands
-          under ArkeStudio\exports
+          world export: a folder that reopens identically elsewhere — history kept, caches and locks stay
+          behind · lands under ArkeStudio\exports
         </span>
         <span className="fy-h1row__push" />
         <Button variant="ghost" onClick={() => worldId && exportWorld(worldId)}>
@@ -4328,7 +4849,9 @@ function ContactSheet({
       {stills.length === 0 ? (
         <EmptyState title="No stills yet" hint="Frames and stills land here as they are generated." />
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}
+        >
           {stills.map((take) => {
             const decision = decisions[take.id];
             const shotId = take.coversShots[0];
@@ -4371,7 +4894,13 @@ function ContactSheet({
                       onClick={() => {
                         const sheet = Object.keys(take.provenance.sheets)[0];
                         if (worldId && prodId && sheet)
-                          rejectTake(worldId, prodId, take.id, { sheet, field: "appearance", note: "rejected from the contact sheet" }, shotId);
+                          rejectTake(
+                            worldId,
+                            prodId,
+                            take.id,
+                            { sheet, field: "appearance", note: "rejected from the contact sheet" },
+                            shotId,
+                          );
                       }}
                     >
                       Reject

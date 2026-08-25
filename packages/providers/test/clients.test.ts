@@ -120,6 +120,41 @@ describe("declarations are honest per provider (T-9)", () => {
   });
 });
 
+describe("synchronous speech returns artifacts to the durable queue path", () => {
+  it("ElevenLabs returns paid MP3 bytes inline and keeps no poll-cache dependency", async () => {
+    const mp3 = Uint8Array.from([0xff, 0xfb, 0x90, 0, ...Array.from({ length: 413 }, () => 0)]);
+    const client = new ElevenLabsClient(async () => new Response(mp3, { status: 200 }));
+    const submitted = await client.submit("xi-key", {
+      model: "eleven_multilingual_v2",
+      capability: "voice-tts",
+      params: { voiceId: "v1", text: "The harbour remembers." },
+    });
+    assert.deepEqual(submitted.artifacts, [{ name: "speech.mp3", contentType: "audio/mpeg", data: mp3 }]);
+    assert.match((await client.poll("xi-key", submitted.remoteId)).error ?? "", /returned by submit/);
+  });
+
+  it("passes queue cancellation into an in-flight ElevenLabs request", async () => {
+    let signal: AbortSignal | undefined;
+    const client = new ElevenLabsClient(async (_url, init) => {
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    });
+    const controller = new AbortController();
+    const submitting = client.submit("xi-key", {
+      model: "eleven_multilingual_v2",
+      capability: "voice-tts",
+      signal: controller.signal,
+      params: { voiceId: "v1", text: "The harbour remembers." },
+    });
+    await Promise.resolve();
+    assert.equal(signal, controller.signal);
+    controller.abort();
+    await assert.rejects(submitting, /aborted/);
+  });
+});
+
 describe("openai image submission", () => {
   it("sends only fields the endpoint takes, so a neutral param cannot 400 the job", async () => {
     // Read from a real failure: params carried `references: []` — a FAL concept — and OpenAI
@@ -917,7 +952,14 @@ describe("fal's queue is keyed on the app, not the route", () => {
 });
 
 describe("local speech rides the same queue as the cloud (design 70)", () => {
-  const WAV = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45, 9, 9]);
+  const WAV = (() => {
+    const out = Buffer.alloc(52);
+    out.write("RIFF", 0); out.writeUInt32LE(44, 4); out.write("WAVE", 8);
+    out.write("fmt ", 12); out.writeUInt32LE(16, 16); out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
+    out.writeUInt32LE(8000, 24); out.writeUInt32LE(16000, 28); out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
+    out.write("data", 36); out.writeUInt32LE(8, 40);
+    return new Uint8Array(out);
+  })();
   const okFetch = (seen: { url?: string; body?: string }) =>
     (async (url: string, init?: { body?: string }) => {
       seen.url = String(url);
@@ -938,12 +980,12 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     assert.equal(seen.url, "http://127.0.0.1:7777/tts");
     // The sidecar's own vocabulary: `voice`, and the shaping flattened alongside it.
     assert.deepEqual(JSON.parse(seen.body ?? "{}"), { voice: "af_heart", text: "the tide-clock", speed: 0.92 });
-    // Synchronous engine, but it still produces a real job with a real id — which is the whole
-    // point of it being here rather than bypassing the queue.
-    assert.equal((await client.poll("", submitted.remoteId)).state, "succeeded");
-    const artifacts = await client.fetchArtifacts("", submitted.remoteId);
+    // Synchronous bytes go inline to the queue's durable landing path; no process-memory id is
+    // presented as recoverable work.
+    const artifacts = submitted.artifacts!;
     assert.equal(artifacts[0]?.name, "speech.wav");
     assert.equal(artifacts[0]?.contentType, "audio/wav");
+    assert.match((await client.poll("", submitted.remoteId)).error ?? "", /returned by submit/);
   });
 
   it("refuses with the remedy when local voice is not running", async () => {
@@ -956,6 +998,77 @@ describe("local speech rides the same queue as the cloud (design 70)", () => {
     assert.deepEqual(await client.validateKey(), [
       { capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" },
     ]);
+  });
+
+  it("probes Kokoro engine readiness rather than treating HTTP 200 as availability", async () => {
+    const client = new KokoroClient(
+      async () => new Response(JSON.stringify({
+        ok: true,
+        engineStatus: { kokoro: { ready: false, reason: "Kokoro weights failed to load" } },
+      }), { status: 200 }),
+      () => "http://127.0.0.1:7777",
+    );
+    assert.deepEqual(await client.validateKey(), [
+      { capability: "voice-tts", available: false, reason: "Kokoro weights failed to load" },
+    ]);
+  });
+
+  it("accepts Kokoro readiness even when another engine makes aggregate health false", async () => {
+    const client = new KokoroClient(
+      async () => new Response(JSON.stringify({
+        ok: false,
+        engineStatus: { kokoro: { ready: true }, whisper: { ready: false } },
+      }), { status: 200 }),
+      () => "http://127.0.0.1:7777",
+    );
+    assert.deepEqual(await client.validateKey(), [{ capability: "voice-tts", available: true }]);
+  });
+
+  it("can route queue-backed synthesis through the host's shared Voxa scheduler", async () => {
+    let rawFetches = 0;
+    const spoken: Array<{ voiceId: string; text: string; params?: Record<string, number> }> = [];
+    const client = new KokoroClient(
+      async () => {
+        rawFetches += 1;
+        throw new Error("the provider fetch should not own synthesis when the host adapter is present");
+      },
+      () => "http://127.0.0.1:7777",
+      async (input) => {
+        spoken.push(input);
+        return WAV;
+      },
+    );
+
+    await client.submit("", {
+      model: "kokoro-82m",
+      params: { voiceId: "af_bella", text: "under the harbour", voiceSettings: { speed: 0.9 } },
+    } as never);
+    assert.equal(rawFetches, 0);
+    assert.deepEqual(spoken, [{ voiceId: "af_bella", text: "under the harbour", params: { speed: 0.9 } }]);
+  });
+
+  it("passes queue cancellation to the host's shared Voxa scheduler", async () => {
+    let signal: AbortSignal | undefined;
+    const client = new KokoroClient(
+      async () => { throw new Error("raw fetch must not run"); },
+      () => "http://127.0.0.1:7777",
+      async (_input, options) => {
+        signal = options?.signal;
+        return new Promise<Uint8Array>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+        });
+      },
+    );
+    const controller = new AbortController();
+    const pending = client.submit("", {
+      model: "kokoro-82m",
+      capability: "voice-tts",
+      signal: controller.signal,
+      params: { voiceId: "af_bella", text: "under the harbour" },
+    });
+    controller.abort();
+    await assert.rejects(pending, /cancelled/);
+    assert.equal(signal, controller.signal);
   });
 
   it("will not file bytes that are not a WAV", async () => {

@@ -43,6 +43,10 @@ import {
   type ConversationId,
   type WorldChatCheckReceipt,
   type Job,
+  voiceJobFormat,
+  voiceJobReadIdentity,
+  voiceJobIsCandidatePreview,
+  CLONED_VOICE_MODEL,
   type LedgerEntry,
   type ModelManifest,
   type ProviderId,
@@ -57,6 +61,10 @@ import {
   deliveryParams as mapDelivery,
   type Delivery,
   narratorFor,
+  voiceFormatForModel,
+  legacyVoiceModel,
+  voiceSourceFor,
+  supportsVoiceUse,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -126,7 +134,14 @@ import {
   verifyCandidates,
   type RawCandidate,
 } from "./artifacts/extraction.js";
-import { ATTACHABLE_EXTENSIONS, ATTACHABLE_IMAGE_EXTENSIONS, backfillMediaInfo, fileArtifact, fileGeneratedArtifact, importFolder } from "./artifacts/filing.js";
+import {
+  ATTACHABLE_EXTENSIONS,
+  ATTACHABLE_IMAGE_EXTENSIONS,
+  backfillMediaInfo,
+  fileArtifact,
+  fileGeneratedArtifact,
+  importFolder,
+} from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
@@ -142,7 +157,11 @@ const BENCH_POSTER_BACKFILL_MS = 5_000;
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
-  const body = createHash("sha256").update(`${candidateId}:${revision}`).digest("hex").slice(0, 26).toUpperCase();
+  const body = createHash("sha256")
+    .update(`${candidateId}:${revision}`)
+    .digest("hex")
+    .slice(0, 26)
+    .toUpperCase();
   return `sess_${body}` as SessionId;
 }
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
@@ -163,6 +182,7 @@ import {
   normalizeSpeechText,
   authoritativeBibleSpeech,
   authoritativeSheetSpeech,
+  cachedVoiceAudioLooksRight,
   previewCacheFile,
   speechCacheFile,
   VoiceService,
@@ -181,7 +201,7 @@ import {
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
-import { imageFormatOf } from "./queue/verify.js";
+import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
 import {
@@ -254,7 +274,12 @@ import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
-import { SETUP_CATALOGUE, type CatalogueEntry } from "./setup/catalogue.js";
+import {
+  SETUP_CATALOGUE,
+  VOXA_SETUP_COMPONENT_IDS,
+  voxaSetupCompleted,
+  type CatalogueEntry,
+} from "./setup/catalogue.js";
 import { sanitizeComfyUiMedia } from "./comfyui/sanitize.js";
 import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
@@ -536,6 +561,8 @@ export interface CoordinatorOptions {
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
   voice?: {
     sidecar: SidecarLike | null;
+    /** Wait for recovered Kokoro work until Voxa can actually synthesize. */
+    waitUntilReady?: () => Promise<boolean>;
     /** Poll the sidecar's degradation state; null health = not started. */
     sidecarHealth?: () => Promise<{
       state: "not-started" | "downloading" | "unavailable" | "ready";
@@ -546,6 +573,7 @@ export interface CoordinatorOptions {
     chooseExecutable?: () => Promise<string | null>;
     applySettings?: (settings: import("@arke-studio/contracts").VoxaSettings) => Promise<void>;
     restart?: () => Promise<void>;
+    dispose?: () => void;
     localPresets: VoiceCandidate[];
     cloudSources: CloudVoiceSource[];
   };
@@ -621,6 +649,10 @@ export class Coordinator {
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
   private readonly setup: LocalSetupService | null;
+  private readonly lifecycleDisposers = new Set<() => void>();
+  private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
+  private comfyUiSetupWork: Promise<void> = Promise.resolve();
+  private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
@@ -635,10 +667,56 @@ export class Coordinator {
    * and abandoned ten times should not accumulate ten temp files: staging past the cap discards
    * the oldest, and cancelling discards its own.
    */
-  private readonly stagedClips = new Map<string, { path: string; fileName: string }>();
+  private readonly stagedClips = new Map<string, { path: string; fileName: string; worldId: string }>();
 
   /** How many staged clips a dialog may leave behind before the oldest is dropped. */
   private static readonly MAX_STAGED_CLIPS = 8;
+
+  /** The same recipe verdict used by Settings and enqueue admission, projected onto voice rows. */
+  private async comfyUiVoiceAvailability(): Promise<{ local: boolean; unavailableReason?: string }> {
+    const service = this.opts.comfyui?.service;
+    if (!service) {
+      return { local: true, unavailableReason: "Cloned voice rendering is unavailable in this build." };
+    }
+    const status = await service
+      .status(this.readModel.getState().app.runtime?.probes ?? null)
+      .catch(() => null);
+    if (status === null) {
+      return { local: true, unavailableReason: "Cloned voice readiness could not be verified." };
+    }
+    const local = status.engine.locality === "local";
+    const recipe = status.recipes.find((candidate) => candidate.recipeId === CLONED_VOICE_MODEL);
+    if (!recipe) return { local, unavailableReason: "The cloned voice recipe is not shipped in this build." };
+    if (recipe.state === "disabled") {
+      return { local, unavailableReason: recipe.reason ?? "The cloned voice recipe is not ready." };
+    }
+    if (recipe.state === "unknown" && status.engine.locality === "local") {
+      return { local, unavailableReason: recipe.reason ?? "The cloned voice recipe readiness is unknown." };
+    }
+    return { local };
+  }
+
+  /** Stop before readiness, clip reads, reservations or jobs when a cloned clip would leave. */
+  private requireVoiceUploadConfirmation(input: {
+    worldId: string;
+    requestId: string;
+    command: QueueCommand;
+    voiceUploadConfirmedFor?: string;
+  }): boolean {
+    const destination = this.opts.comfyui?.service.voiceUploadDestination() ?? null;
+    if (destination === null) return false;
+    if (input.voiceUploadConfirmedFor === destination.token) return false;
+    this.emit({
+      at: this.nowIso(),
+      type: "voice.upload-confirmation-required",
+      requestId: input.requestId,
+      worldId: input.worldId,
+      command: input.command,
+      destinationLabel: destination.label,
+      confirmationToken: destination.token,
+    });
+    return true;
+  }
   /**
    * Narrate a passage of the world, whichever document it came from (2026-08-24).
    *
@@ -658,6 +736,7 @@ export class Coordinator {
     frameKind: QueueCommand;
     worldId: string;
     requestId: string;
+    /** Approval for this paid read only; never a remote voice-upload destination approval. */
     confirmationToken?: string;
     /** Already resolved and normalised by the caller — this method never reads a document. */
     text: string;
@@ -683,16 +762,12 @@ export class Coordinator {
     // many characters who have no voice assigned.
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const narratorVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
-    const narrator = narratorFor(
-      narratorSettings?.narrator ?? null,
-      await this.voiceService.catalogue(narratorVoices),
-    );
-    if (narrator.provider !== "kokoro" && narrator.provider !== "elevenlabs") {
-      fail("The narrator's voice is not available — choose another in Settings.", text.length);
-      return;
-    }
-    const speaking = { provider: narrator.provider, voiceId: narrator.voiceId };
-    if (speaking.provider === "kokoro") {
+    const narrationCatalogue = (
+      await this.voiceService.catalogue(narratorVoices, await this.comfyUiVoiceAvailability())
+    ).filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
+    if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
       try {
         /*
          * Emit each piece as it lands rather than one clip at the end (2026-08-24).
@@ -706,52 +781,138 @@ export class Coordinator {
           // A single-piece read stays exactly what it was: one event, no part numbers.
           if (piece.total < 2) return;
           streamed += 1;
-          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
-            provider: "kokoro", model: "kokoro-82m", voiceId: speaking.voiceId, status: "ready",
-            file: piece.file, cached: false, characterCount: text.length, estimatedMicroUsd: 0,
-            part: piece.index, parts: piece.total } as DomainEvent);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId,
+            ...identity,
+            provider: "kokoro",
+            model: speaking.model,
+            voiceId: speaking.voiceId,
+            format: "wav",
+            status: "ready",
+            file: piece.file,
+            cached: false,
+            characterCount: text.length,
+            estimatedMicroUsd: 0,
+            part: piece.index,
+            parts: piece.total,
+          } as DomainEvent);
         });
         // The joined clip, for a cache hit next time and for anything that wants one file. A
         // streamed read has already been heard, so this closes it rather than announcing it.
         if (streamed === 0) {
-          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
-            provider: "kokoro", model: "kokoro-82m", voiceId: speaking.voiceId, status: "ready",
-            file: result.file, cached: result.cached, characterCount: text.length,
-            estimatedMicroUsd: 0 } as DomainEvent);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId,
+            ...identity,
+            provider: "kokoro",
+            model: speaking.model,
+            voiceId: speaking.voiceId,
+            format: "wav",
+            status: "ready",
+            file: result.file,
+            cached: result.cached,
+            characterCount: text.length,
+            estimatedMicroUsd: 0,
+          } as DomainEvent);
         }
-      } catch (error) { fail(error instanceof Error ? error.message : "Local voice failed.", text.length); }
+      } catch (error) {
+        fail(error instanceof Error ? error.message : "Local voice failed.", text.length);
+      }
       return;
     }
-    const model = this.opts.manifest?.models.find((candidate) => candidate.provider === "elevenlabs" && candidate.capability === "voice-tts");
-    if (!model) { fail("ElevenLabs voice is unavailable.", text.length); return; }
-    const file = speechCacheFile({ provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, text, format: "mp3" });
-    try {
-      const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(file))));
-      const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
-      if (!mp3) throw new Error("invalid cache");
-      this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
-        provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId, status: "ready",
-        file, cached: true, characterCount: text.length, estimatedMicroUsd: 0 } as DomainEvent);
+    const model = this.opts.manifest?.models.find(
+      (candidate) =>
+        candidate.provider === speaking.provider &&
+        candidate.id === speaking.model &&
+        candidate.capability === "voice-tts",
+    );
+    if (!model) {
+      fail(`${speaking.provider} voice is unavailable.`, text.length);
       return;
-    } catch { /* confirmation required */ }
+    }
+    const format = voiceFormatForModel(model);
+    const file = speechCacheFile({
+      provider: model.provider,
+      model: model.id,
+      voiceId: speaking.voiceId,
+      text,
+      format,
+    });
+    try {
+      const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file)))));
+      if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
+      this.emit({
+        at: new Date().toISOString(),
+        type: "voice.audio",
+        requestId,
+        ...identity,
+        provider: model.provider,
+        model: model.id,
+        voiceId: speaking.voiceId,
+        format,
+        status: "ready",
+        file,
+        cached: true,
+        characterCount: text.length,
+        estimatedMicroUsd: 0,
+      } as DomainEvent);
+      return;
+    } catch {
+      /* confirmation required */
+    }
     const estimate = estimateMicroUsd(model, { characters: text.length });
     const token = createHash("sha256").update(`${subject.id}\n${subject.version}\n${file}`).digest("hex");
-    const enqueued: EnqueueInput = { worldId, target: { kind: "voice-preview", id: `${subject.id}/elevenlabs/${speaking.voiceId}` },
-      capability: "voice-tts", provider: "elevenlabs", model: model.id,
-      params: { voiceId: speaking.voiceId, text, requestId, purpose,
+    const enqueued: EnqueueInput = {
+      worldId,
+      target: {
+        kind: "voice-preview",
+        id: `${subject.id}/${model.provider}/${model.id}/${speaking.voiceId}`,
+      },
+      capability: "voice-tts",
+      provider: model.provider,
+      model: model.id,
+      params: {
+        voiceId: speaking.voiceId,
+        text,
+        audioFormat: format,
+        requestId,
+        purpose,
         ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
-        sheetVersion: subject.version, sectionHeading, characterCount: text.length },
-      estimatedMicroUsd: estimate, landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! } };
+        sheetVersion: subject.version,
+        sectionHeading,
+        characterCount: text.length,
+      },
+      estimatedMicroUsd: estimate,
+      landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! },
+    };
     if (input.confirmationToken !== token) {
       this.pendingVoiceReads.set(requestId, { token, input: enqueued });
-      this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId, ...identity,
-        provider: "elevenlabs", model: model.id, voiceId: speaking.voiceId,
-        status: "confirmation-required", file: null, cached: false, characterCount: text.length,
-        estimatedMicroUsd: estimate, confirmationToken: token } as DomainEvent);
+      this.emit({
+        at: new Date().toISOString(),
+        type: "voice.audio",
+        requestId,
+        ...identity,
+        provider: model.provider,
+        model: model.id,
+        voiceId: speaking.voiceId,
+        format,
+        status: "confirmation-required",
+        file: null,
+        cached: false,
+        characterCount: text.length,
+        estimatedMicroUsd: estimate,
+        confirmationToken: token,
+      } as DomainEvent);
       return;
     }
     const pending = this.pendingVoiceReads.get(requestId);
-    if (!pending || pending.token !== token) { fail("The read request changed; review it again.", text.length); return; }
+    if (!pending || pending.token !== token) {
+      fail("The read request changed; review it again.", text.length);
+      return;
+    }
     this.pendingVoiceReads.delete(requestId);
     const queued = await this.enqueueBatch(requestId, input.frameKind, [pending.input]);
     if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", text.length);
@@ -772,19 +933,36 @@ export class Coordinator {
     bytes: Uint8Array,
     fileName: string,
     extension: string,
+    worldId: string,
   ): Promise<{ ok: true; clipId: string; seconds: number | null } | { ok: false; reason: string }> {
     if (!CLONEABLE_AUDIO_EXTENSIONS.has(extension)) {
-      return { ok: false, reason: `${fileName} is not audio this can clone — use ${[...CLONEABLE_AUDIO_EXTENSIONS].join(" or ")}` };
+      return {
+        ok: false,
+        reason: `${fileName} is not audio this can clone — use ${[...CLONEABLE_AUDIO_EXTENSIONS].join(" or ")}`,
+      };
     }
     if (!audioBytesLookRight(bytes, extension)) {
-      return { ok: false, reason: `that file is named .${extension} but its contents are not ${extension} audio` };
+      return {
+        ok: false,
+        reason: `that file is named .${extension} but its contents are not ${extension} audio`,
+      };
+    }
+    const contentType = extension === "wav" ? "audio/wav" : "audio/mpeg";
+    if (verifyArtifact({ name: fileName, contentType, data: bytes }) !== null) {
+      return {
+        ok: false,
+        reason: `that ${extension.toUpperCase()} is incomplete or has no playable audio data`,
+      };
     }
     const seconds = wavSeconds(bytes);
     // Only WAV states its own length cheaply, so this is the clip whose length can be checked.
     // An MP3 goes through with `seconds: null` rather than being refused on a guess — the format
     // hint on 74c asks for three seconds, and what cannot be read is not enforced as if it were.
     if (seconds !== null && seconds < MIN_CLONE_SECONDS) {
-      return { ok: false, reason: `that clip is ${seconds.toFixed(1)}s — a voice needs ${MIN_CLONE_SECONDS} seconds or more to clone from` };
+      return {
+        ok: false,
+        reason: `that clip is ${seconds.toFixed(1)}s — a voice needs ${MIN_CLONE_SECONDS} seconds or more to clone from`,
+      };
     }
     const clipId = `clip_${ulid()}`;
     const dir = join(tmpdir(), "arke-voice-clips");
@@ -797,7 +975,7 @@ export class Coordinator {
       if (oldest.done) break;
       await this.dropStagedClip(oldest.value);
     }
-    this.stagedClips.set(clipId, { path, fileName });
+    this.stagedClips.set(clipId, { path, fileName, worldId });
     return { ok: true, clipId, seconds };
   }
 
@@ -899,7 +1077,12 @@ export class Coordinator {
       if (!probe) continue;
       this.providerTools.set(
         id as ProviderId,
-        new ProviderToolService(id as ProviderId, probe, (status) => this.emitToolStatus(status), this.appLog),
+        new ProviderToolService(
+          id as ProviderId,
+          probe,
+          (status) => this.emitToolStatus(status),
+          this.appLog,
+        ),
       );
     }
     this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
@@ -955,6 +1138,27 @@ export class Coordinator {
               if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
               return readContainedImageReferences(store.dir, paths);
             },
+            readVoiceReference: async (worldId, provider, model, voiceId) => {
+              const prepare = async (store: WorldStore) => {
+                const source = voiceSourceFor(store.getBundle().clonedVoices, provider, model, voiceId);
+                if (source.kind !== "cloned") {
+                  throw new Error("That cloned voice is no longer in this world — choose another voice.");
+                }
+                const clip = await clipFor(store, source.voice);
+                if (!clip) {
+                  throw new Error(
+                    "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
+                  );
+                }
+                return clip;
+              };
+              if (this.opts.provider.withWorldStore) {
+                return this.opts.provider.withWorldStore(worldId, prepare);
+              }
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
+              return prepare(store);
+            },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),
             onFinalizationFailure: (job) => {
@@ -983,12 +1187,25 @@ export class Coordinator {
             // Per-source recovery for local-engine jobs (SPEC-021 §2.11): the pure decision
             // table over the identity frozen at enqueue, against the engine resolved now.
             recoverLocal: (job) => {
-              if (job.provider !== "comfyui") return null;
               if (job.status !== "running" && job.status !== "submitting") return null;
+              // Kokoro's old ids represented bytes held only in this process. Voxa restarts with
+              // Arke, so recovered work is a safe free re-run, never a poll of the fresh map.
+              if (job.provider === "kokoro") return { action: "requeue" };
+              // Before inline artifacts, ElevenLabs journalled a synthetic running id after the
+              // paid response. Its bytes are gone and another call may charge, so fail honestly.
+              if (job.provider === "elevenlabs" && job.status === "running") {
+                return {
+                  action: "fail",
+                  reason:
+                    "the paid ElevenLabs response belonged to an earlier Arke process and its audio is unavailable; the job was not submitted again",
+                };
+              }
+              if (job.provider !== "comfyui") return null;
               return comfyUiRecoveryDecision({
                 status: job.status,
                 engine: job.engine,
                 currentInstanceId: this.opts.comfyui?.service.instanceId() ?? null,
+                currentEngine: this.opts.comfyui?.service.engineIdentity() ?? null,
               });
             },
             // Landed-media sanitisation (SPEC-021 §2.10): strip embedded workflow metadata
@@ -999,6 +1216,16 @@ export class Coordinator {
               if (!result.ok) return result;
               return { ok: true, artifact: { ...artifact, data: result.data } };
             },
+            // One GPU process, one execution lane unless measured evidence supports more.
+            providerConcurrency: { comfyui: 1, kokoro: 1 },
+            // Recovery folds immediately, but recovered local work cannot reach a child that is
+            // still importing its runtime. URL engines resolve synchronously and return at once.
+            awaitRecoveryReady: async (provider) =>
+              provider === "comfyui"
+                ? ((await this.opts.comfyui?.service.waitUntilReady()) ?? false)
+                : provider === "kokoro"
+                  ? ((await this.opts.voice?.waitUntilReady?.()) ?? false)
+                  : true,
           })
         : null;
     this.voiceService = opts.voice
@@ -1014,7 +1241,9 @@ export class Coordinator {
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
       onMessage: (msg) => {
-        const updateCommand = msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
+        if (this.stopping) return;
+        const updateCommand =
+          msg.kind === "install-update-and-restart" || msg.kind === "install-update-on-close";
         // Every handler answers its own failures; this is the backstop. One that throws instead
         // used to become an unhandled rejection, which Node is entitled to exit on — a single
         // malformed or stale frame could take the studio down with it, and the log would say
@@ -1074,11 +1303,7 @@ export class Coordinator {
               // The snapshot carries it too: a window that opens mid-download still sees it.
               if (event.type === "setup.status") {
                 const previous = this.readModel.getState().app.setup;
-                const completedVoiceModel = event.setup.components.some((component) => {
-                  if (component.id !== "kokoro-82m" && component.id !== "whisper-base-en") return false;
-                  const before = previous?.components.find((item) => item.id === component.id)?.state;
-                  return component.state === "ready" && before !== "ready" && before !== "present";
-                });
+                const completedVoiceModel = voxaSetupCompleted(previous?.components, event.setup.components);
                 this.readModel.setSetup(event.setup);
                 if (completedVoiceModel) this.voiceModelsChanged = true;
                 if (!event.setup.running && this.voiceModelsChanged) {
@@ -1096,6 +1321,7 @@ export class Coordinator {
               // Weight entries land in the folder the engine actually reads: the same
               // resolver detection, launch and pre-flight use, so nothing can disagree.
               externalDirs: { "comfyui-models": () => this.opts.comfyui?.service.modelsDir() ?? null },
+              onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
             },
           )
         : null;
@@ -1109,6 +1335,28 @@ export class Coordinator {
 
   private readonly askService: AskService | null;
   private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
+
+  private onSetupComponentReady(componentId: string): Promise<void> {
+    const prefix = "comfyui-weights-";
+    if (componentId !== "comfyui-runtime" && !componentId.startsWith(prefix)) return Promise.resolve();
+    const work = this.comfyUiSetupWork
+      .catch(() => {})
+      .then(async () => {
+        const service = this.opts.comfyui?.service;
+        if (!service || !this.appSettings || this.stopping) return;
+        if (componentId === "comfyui-runtime") {
+          const settings = await this.appSettings.load();
+          await service.applySettings(settings.comfyui);
+        } else {
+          // Weight completion changes dependency facts, not launch configuration. Re-hash and
+          // refresh the node catalogue in place so an active engine and its jobs are not killed.
+          await service.reverify([componentId.slice(prefix.length)]);
+        }
+      });
+    this.comfyUiSetupWork = work.catch(() => {});
+    this.trackBackground(this.comfyUiSetupWork);
+    return work;
+  }
 
   getState(): ClientState {
     const state = this.readModel.getState();
@@ -1345,9 +1593,14 @@ export class Coordinator {
     // combined readiness, and keeping it published as the supervised child moves through
     // starting → healthy → failed. Both in the background: the app never waits on an engine.
     if (this.opts.comfyui) {
-      this.opts.comfyui.service.subscribe(() => {
-        this.trackBackground(this.refreshComfyUi().catch(() => {}));
+      const unsubscribe = this.opts.comfyui.service.subscribe(() => {
+        this.trackBackground(
+          this.retireAndReleaseComfyUi()
+            .then(() => this.refreshComfyUi())
+            .catch(() => {}),
+        );
       });
+      this.lifecycleDisposers.add(unsubscribe);
       this.trackBackground(this.refreshComfyUi().catch(() => {}));
     }
 
@@ -1365,6 +1618,7 @@ export class Coordinator {
       void pollSidecar();
       const timer = setInterval(() => void pollSidecar(), 20_000);
       timer.unref?.();
+      this.lifecycleTimers.add(timer);
     }
 
     // Stored keys reach the harness child as spawn environment before its first spawn
@@ -1427,7 +1681,13 @@ export class Coordinator {
     // the first holding a store the second has already replaced, and an unconditional abort here
     // would cancel the current world's pass and start one against a store that is already closed
     // (Codex round 1).
-    if (store && this.opts.mediaProbe && !this.stopping && this.stillOpen(store) && this.backfillStore !== store) {
+    if (
+      store &&
+      this.opts.mediaProbe &&
+      !this.stopping &&
+      this.stillOpen(store) &&
+      this.backfillStore !== store
+    ) {
       /*
        * One pass per store, and reopening the same world joins the one already running.
        *
@@ -1476,8 +1736,6 @@ export class Coordinator {
       });
   }
 
-
-
   /**
    * Put right what a crash left behind, before anything can be done to it (#70 §7.2, phase 1).
    *
@@ -1496,11 +1754,7 @@ export class Coordinator {
       const outcome = await recoverConversations(store.dir, now);
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
-      if (
-        outcome.repaired.length > 0 ||
-        outcome.sweptTombstones.length > 0 ||
-        wrapUps.repaired.length > 0
-      ) {
+      if (outcome.repaired.length > 0 || outcome.sweptTombstones.length > 0 || wrapUps.repaired.length > 0) {
         // Counts only. Conversation identities are operational state and do not enter the log
         // (R-45, §18.2) — what a reader needs from this line is that repair happened at all.
         void this.appLog?.append({
@@ -1616,14 +1870,22 @@ export class Coordinator {
   private async onJobTerminal(job: Job): Promise<void> {
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
+        const readIdentity = voiceJobReadIdentity(job);
         this.emit({
-          at: new Date().toISOString(), type: "voice.audio", requestId: job.params["requestId"] as string,
-          worldId: job.worldId, sheetId: String(job.params["sheetId"]),
+          at: new Date().toISOString(),
+          type: "voice.audio",
+          requestId: job.params["requestId"] as string,
+          worldId: job.worldId,
+          ...readIdentity,
           sheetVersion: Number(job.params["sheetVersion"]),
-          purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" : "candidate-preview",
           ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-          provider: "elevenlabs", model: job.model, voiceId: String(job.params["voiceId"]),
-          status: "failed", file: null, cached: false,
+          provider: job.provider as ProviderId,
+          model: job.model,
+          voiceId: String(job.params["voiceId"]),
+          format: voiceJobFormat(job),
+          status: "failed",
+          file: null,
+          cached: false,
           characterCount: Number(job.params["characterCount"] ?? 0),
           estimatedMicroUsd: job.estimatedMicroUsd,
           error: "Voice synthesis failed. Open Activity for details.",
@@ -1659,7 +1921,12 @@ export class Coordinator {
           toExtendedLength(join(store.dir, landed)),
           this.opts.takePosterMaker,
           (reason) => {
-            void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+            void this.appLog?.append({
+              kind: "take.poster-unavailable",
+              jobId: job.id,
+              targetKind: job.target.kind,
+              reason,
+            });
           },
         );
         const info = this.opts.mediaProbe
@@ -1714,8 +1981,7 @@ export class Coordinator {
           const sheet = sheetId ? bundle.sheets.find((s) => s.id === sheetId) : undefined;
           const alreadyReviewed = bundle.referenceReviews.some((review) => review.takeId === take.id);
           const frozen = job.params["provenance"] as
-            | { sheets?: Record<string, number>; anchorFile?: string }
-            | undefined;
+            { sheets?: Record<string, number>; anchorFile?: string } | undefined;
           const sheetVersion = sheetId ? frozen?.sheets?.[sheetId] : undefined;
           // Unless the slot was claimed after this job began (PR review). A sheet uploaded while
           // the generation was in flight is the later decision of the two, and it was made by a
@@ -1727,7 +1993,14 @@ export class Coordinator {
             : null;
           const claimed = designatedSince ? designatedCompilation(designatedSince) : null;
           const outranked = claimed !== null && claimed.compiledAt > job.createdAt;
-          if (sheet && sheetId && !alreadyReviewed && !outranked && frozen?.anchorFile && sheetVersion !== undefined) {
+          if (
+            sheet &&
+            sheetId &&
+            !alreadyReviewed &&
+            !outranked &&
+            frozen?.anchorFile &&
+            sheetVersion !== undefined
+          ) {
             const review = referenceReviewDecision(store.now(), take, "accept");
             await acceptCharacterSheet(store, sheet, {
               file: `takes/${take.id}/${take.media}`,
@@ -1759,7 +2032,12 @@ export class Coordinator {
             ...(this.opts.takeQcAnalyzer !== undefined ? { analyzer: this.opts.takeQcAnalyzer } : {}),
             ...(this.opts.takePosterMaker !== undefined ? { poster: this.opts.takePosterMaker } : {}),
             onPosterUnavailable: (reason) => {
-              void this.appLog?.append({ kind: "take.poster-unavailable", jobId: job.id, targetKind: job.target.kind, reason });
+              void this.appLog?.append({
+                kind: "take.poster-unavailable",
+                jobId: job.id,
+                targetKind: job.target.kind,
+                reason,
+              });
             },
             // Why a measurement is missing, and nothing else: no media path, no prompt, no world
             // prose, no provider payload. A diagnostic about a clip is not a place to leak one.
@@ -1789,28 +2067,41 @@ export class Coordinator {
       }
       if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
         // The audition is ready; the landed file IS the cache entry (R-10).
-        const [sheetId, provider, voiceId] = (job.target.id ?? "").split("/");
-        if (!sheetId || !provider || !voiceId)
-          throw new Error("voice preview finalization target is unavailable");
-        this.emit({
-          at: new Date().toISOString(),
-          type: "voice.preview",
-          worldId: job.worldId,
-          sheetId,
-          provider,
-          voiceId,
-          file: job.landedFiles[0],
-          error: null,
-        });
+        const sheetId = (job.target.id ?? "").split("/")[0];
+        const voiceId = typeof job.params["voiceId"] === "string" ? job.params["voiceId"] : "";
+        if (!sheetId || !voiceId) throw new Error("voice preview finalization target is unavailable");
+        const readIdentity = voiceJobReadIdentity(job);
+        // This event feeds the character picker. Document narration has no candidate sheet.
+        if (voiceJobIsCandidatePreview(job)) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.preview",
+            worldId: job.worldId,
+            sheetId,
+            provider: job.provider as ProviderId,
+            model: job.model,
+            voiceId,
+            format: voiceJobFormat(job),
+            file: job.landedFiles[0],
+            error: null,
+          });
+        }
         if (typeof job.params["requestId"] === "string") {
           this.emit({
-            at: new Date().toISOString(), type: "voice.audio", requestId: job.params["requestId"] as string,
-            worldId: job.worldId, sheetId: String(job.params["sheetId"]),
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: job.params["requestId"] as string,
+            worldId: job.worldId,
+            ...readIdentity,
             sheetVersion: Number(job.params["sheetVersion"]),
-            purpose: job.params["purpose"] === "sheet-section" ? "sheet-section" : "candidate-preview",
             ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
-            provider: "elevenlabs", model: job.model, voiceId,
-            status: "ready", file: job.landedFiles[0], cached: false,
+            provider: job.provider as ProviderId,
+            model: job.model,
+            voiceId,
+            format: voiceJobFormat(job),
+            status: "ready",
+            file: job.landedFiles[0],
+            cached: false,
             characterCount: Number(job.params["characterCount"] ?? 0),
             estimatedMicroUsd: job.estimatedMicroUsd,
           });
@@ -1840,19 +2131,13 @@ export class Coordinator {
   ): Promise<void> {
     if (!this.appSettings || !this.opts.comfyui) return;
     const settings = await this.appSettings.setComfyUi(patch);
+    this.jobQueue?.resetProviderTransport("comfyui");
     await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
     // Work in flight against the engine that just stopped being the configured one is failed
     // here, with the reason (SPEC-021 §2.11). Without this the poll loop keeps asking the NEW
     // engine about a prompt id only the OLD one ever issued — which reads as "the engine no
     // longer knows this prompt" and looks like the engine lost the job.
-    const now = this.opts.comfyui.service.instanceId();
-    await this.jobQueue
-      ?.failJobsForRetiredEngine(
-        "comfyui",
-        (job) => job.engine === undefined || job.engine.instanceId === now,
-        "the engine this job ran on is no longer configured — it was not resumed against the new one",
-      )
-      .catch(() => []);
+    await this.retireAndReleaseComfyUi();
     await this.setup?.detect().catch(() => {});
     await this.refreshComfyUi();
   }
@@ -1860,10 +2145,41 @@ export class Coordinator {
   /** Publish the combined engine + recipe readiness (SPEC-021 §2.12), whole each time. */
   private async refreshComfyUi(): Promise<void> {
     const service = this.opts.comfyui?.service;
-    if (!service) return;
+    if (!service || this.stopping) return;
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
     const status = await service.status(probes);
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
+  }
+
+  private retireAndReleaseComfyUi(): Promise<void> {
+    const work = this.comfyUiLifecycleWork
+      .catch(() => {})
+      .then(async () => {
+        const service = this.opts.comfyui?.service;
+        if (!service || this.stopping) return;
+        const now = service.engineIdentity();
+        const spawned = now?.source === "managed" || now?.source === "user-path";
+        if (service.baseUrl() === null) this.jobQueue?.resetProviderTransport("comfyui");
+        if (spawned && service.baseUrl() === null) {
+          this.jobQueue?.blockRecovery("comfyui");
+        }
+        await this.jobQueue
+          ?.failJobsForRetiredEngine(
+            "comfyui",
+            (job) =>
+              job.engine === undefined ||
+              (job.engine.source !== "user-url" && job.engine.processEpoch === undefined) ||
+              (job.engine?.instanceId === now?.instanceId && job.engine?.processEpoch === now?.processEpoch),
+            "the engine this job ran on is no longer configured — it was not resumed against the new one",
+            spawned && now !== null
+              ? (job) => (job.engine?.source === "managed" || job.engine?.source === "user-path" ? now : null)
+              : undefined,
+          )
+          .catch(() => []);
+        if (service.baseUrl() !== null) this.jobQueue?.releaseRecovery("comfyui");
+      });
+    this.comfyUiLifecycleWork = work.catch(() => {});
+    return work;
   }
 
   /**
@@ -1874,6 +2190,11 @@ export class Coordinator {
   async enqueueJob(input: EnqueueInput): Promise<Job> {
     if (!this.jobQueue) throw new Error("dispatch is not configured (no app root or provider clients)");
     return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
+  }
+
+  /** Release recovered work when a host-owned runtime reports capability readiness. */
+  releaseJobRecovery(provider: string): void {
+    this.jobQueue?.releaseRecovery(provider);
   }
 
   /**
@@ -1935,13 +2256,18 @@ export class Coordinator {
         command,
         "The job queue is unavailable. Try again after restarting the studio.",
       );
-      return { accepted: false, reason: "The job queue is unavailable. Try again after restarting the studio." };
+      return {
+        accepted: false,
+        reason: "The job queue is unavailable. Try again after restarting the studio.",
+      };
     }
     if (inputs.length === 0) {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
       return { accepted: true };
     }
-    const outcome = await enqueueInputs(inputs, (input) => this.jobQueue!.enqueue(this.freezeLocalIdentity(input)));
+    const outcome = await enqueueInputs(inputs, (input) =>
+      this.jobQueue!.enqueue(this.freezeLocalIdentity(input)),
+    );
     this.emitEnqueueResult(
       requestId,
       command,
@@ -1949,7 +2275,10 @@ export class Coordinator {
       outcome.acceptedJobIds,
       outcome.failures,
     );
-    return { accepted: outcome.acceptedJobIds.length > 0, ...(outcome.failures[0]?.reason ? { reason: outcome.failures[0].reason } : {}) };
+    return {
+      accepted: outcome.acceptedJobIds.length > 0,
+      ...(outcome.failures[0]?.reason ? { reason: outcome.failures[0].reason } : {}),
+    };
   }
 
   /**
@@ -2433,7 +2762,9 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: refusalDetail(`${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`),
+                detail: refusalDetail(
+                  `${staged.openChoices[0]!.question} It is waiting on the proposals screen, where you can answer it.`,
+                ),
               });
               continue;
             }
@@ -2442,7 +2773,13 @@ export class Coordinator {
             if (landed(outcome) && staged) {
               // The conversation's own account of what became of its propositions (§6.5).
               await recordResolution(store, staged, "accepted", () => at);
-              this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+              this.emit({
+                at,
+                type: "proposal.resolved",
+                worldId: msg.worldId,
+                proposalId,
+                outcome: "accepted",
+              });
             } else if (!landed(outcome)) {
               /*
                * Not written, so not left proposed either — the same taking-back Accept all does.
@@ -2469,7 +2806,9 @@ export class Coordinator {
                 conversationId: msg.conversationId,
                 requestId: msg.requestId,
                 reason: "unknown",
-                detail: refusalDetail(`This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`),
+                detail: refusalDetail(
+                  `This could not be written, so it is back above: ${explainAcceptRefusal(outcome)}.`,
+                ),
               });
             }
           }
@@ -2482,8 +2821,9 @@ export class Coordinator {
             conversationId: msg.conversationId,
             requestId: msg.requestId,
             reason,
-            detail:
-              refusalDetail(err instanceof WrapUpError ? err.message : "This could not be written, so nothing was."),
+            detail: refusalDetail(
+              err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
+            ),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2510,8 +2850,11 @@ export class Coordinator {
             conversationId: msg.conversationId,
             requestId: msg.requestId,
             reason: err instanceof WrapUpError ? err.reason : "unknown",
-            detail:
-              refusalDetail(err instanceof WrapUpError ? err.message : "That point could not be dropped, so it was left alone."),
+            detail: refusalDetail(
+              err instanceof WrapUpError
+                ? err.message
+                : "That point could not be dropped, so it was left alone.",
+            ),
           });
         }
         // The list counts live points and orders by what is waiting, so it moves when one goes.
@@ -2540,7 +2883,8 @@ export class Coordinator {
           answer(null, "image", "That media brief is no longer in this conversation.");
           return;
         }
-        const candidateMedium = candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
+        const candidateMedium =
+          candidate.classification === "media.image-opportunity" ? candidate.draft.medium : "image";
         if (candidate.revision !== msg.expectedCandidateRevision) {
           answer(null, candidateMedium, "That media brief changed. Review the latest version and try again.");
           await this.openWorldChat(store, msg.conversationId);
@@ -2557,17 +2901,25 @@ export class Coordinator {
           return;
         }
         const bundle = store.getBundle();
-        const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+        const blocking = blockingDependencies(
+          candidate,
+          bundle,
+          bundle.proposals.map((staged) => staged.proposal),
+          loaded.candidates,
+        );
         if (blocking.length > 0) {
           answer(null, medium, explainBlocked(blocking));
           return;
         }
         const prior = loaded.mediaHandoffs[candidate.id];
-        const sessionId = prior?.candidateRevision === candidate.revision
-          ? prior.sessionId
-          : mediaSessionId(candidate.id, candidate.revision);
+        const sessionId =
+          prior?.candidateRevision === candidate.revision
+            ? prior.sessionId
+            : mediaSessionId(candidate.id, candidate.revision);
         const settings = this.appSettings ? await this.appSettings.load() : null;
-        const routed = this.opts.manifest ? modelForCapability(this.opts.manifest, settings?.routing, medium) : undefined;
+        const routed = this.opts.manifest
+          ? modelForCapability(this.opts.manifest, settings?.routing, medium)
+          : undefined;
         const enabled = routed && settings?.models.disabled.includes(routed.id) !== true ? routed : null;
         const opened = await openBenchSession(store.dir, () => this.nowIso(), {
           sessionId,
@@ -2580,7 +2932,13 @@ export class Coordinator {
         }
         if (prior?.candidateRevision !== candidate.revision) {
           await new WorldChatStore(conversationDir(store.dir, msg.conversationId)).append(
-            { type: "media.handoff-created", candidateId: candidate.id, candidateRevision: candidate.revision, sessionId, medium },
+            {
+              type: "media.handoff-created",
+              candidateId: candidate.id,
+              candidateRevision: candidate.revision,
+              sessionId,
+              medium,
+            },
             { at: this.nowIso(), requestId: `media-handoff:${candidate.id}:${candidate.revision}` },
           );
         }
@@ -2627,7 +2985,13 @@ export class Coordinator {
               if (!landed(outcome)) return explainAcceptRefusal(outcome);
               if (staged) {
                 await recordResolution(store, staged, "accepted", () => at);
-                this.emit({ at, type: "proposal.resolved", worldId: msg.worldId, proposalId, outcome: "accepted" });
+                this.emit({
+                  at,
+                  type: "proposal.resolved",
+                  worldId: msg.worldId,
+                  proposalId,
+                  outcome: "accepted",
+                });
               }
               return null;
             },
@@ -2654,10 +3018,11 @@ export class Coordinator {
             reason,
             // Every WrapUpError message is already written for a person to read; anything else is
             // ours to explain and not theirs to decode.
-            detail:
-              refusalDetail(err instanceof WrapUpError
+            detail: refusalDetail(
+              err instanceof WrapUpError
                 ? err.message
-                : "This did not finish. Check the proposals before trying again — some of them may already be there."),
+                : "This did not finish. Check the proposals before trying again — some of them may already be there.",
+            ),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -2813,19 +3178,21 @@ export class Coordinator {
           }
           const worldQueryUrl = await this.worldQuery.start();
           // Fire and watch: progress and the final status arrive as events (R-13).
-          this.trackBackground(this.authoring
-            .run(
-              store,
-              gate,
-              {
-                worldId: msg.worldId,
-                proposalId,
-                purpose: "authoring",
-                instruction: msg.instruction,
-              },
-              worldQueryUrl,
-            )
-            .then(() => this.refreshWorldSnapshot(msg.worldId)));
+          this.trackBackground(
+            this.authoring
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId,
+                  purpose: "authoring",
+                  instruction: msg.instruction,
+                },
+                worldQueryUrl,
+              )
+              .then(() => this.refreshWorldSnapshot(msg.worldId)),
+          );
         } catch {
           this.transport.broadcastSnapshot();
         }
@@ -2881,26 +3248,28 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         // Fire and watch: the result arrives as one canon.answer event, refusals included.
-        this.trackBackground((async () => {
-          const worldQueryUrl =
-            this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
-          const fallback: import("@arke-studio/contracts").AskResult = {
-            outcome: "unavailable",
-            reason: "authoring is not configured",
-            searched: 0,
-            closest: [],
-          };
-          const result = this.askService
-            ? await this.askService.ask(store, msg.question, worldQueryUrl)
-            : fallback;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "canon.answer",
-            worldId: msg.worldId,
-            askId: msg.askId,
-            result,
-          });
-        })());
+        this.trackBackground(
+          (async () => {
+            const worldQueryUrl =
+              this.askService && this.opts.adapter ? await this.worldQuery.start() : undefined;
+            const fallback: import("@arke-studio/contracts").AskResult = {
+              outcome: "unavailable",
+              reason: "authoring is not configured",
+              searched: 0,
+              closest: [],
+            };
+            const result = this.askService
+              ? await this.askService.ask(store, msg.question, worldQueryUrl)
+              : fallback;
+            this.emit({
+              at: new Date().toISOString(),
+              type: "canon.answer",
+              worldId: msg.worldId,
+              askId: msg.askId,
+              result,
+            });
+          })(),
+        );
         return;
       }
       case "canon-search": {
@@ -3051,27 +3420,29 @@ export class Coordinator {
           // proposal; without it, the skeleton with the author's sentence still stands.
           if (this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
-            this.trackBackground(this.authoring
-              .run(
-                store,
-                gate,
-                {
-                  worldId: msg.worldId,
-                  proposalId: draft.proposal.id,
-                  purpose: "authoring",
-                  instruction: `${draft.scope}\n\nDraft the full ${msg.sheetType} sheet in ${draft.path} from this seed: "${msg.sentence}". Fill every section the file already has headings for; keep the name "${msg.name}"; leave canonRules and links as they are.`,
-                },
-                worldQueryUrl,
-              )
-              // Settled after the draft lands, so what is settled is the written sheet and not
-              // the empty skeleton it started as — but settled either way. A drafting agent
-              // that throws (no model, a dead session, a token budget spent) used to skip the
-              // settle with the rejection, and the skeleton it never filled went to Needs you
-              // asking the author to approve a decision they had already made by pressing
-              // Begin. The sentence they typed is in the file; the sketch stands without help.
-              .catch(() => {})
-              .then(() => settle())
-              .then(() => this.refreshWorldSnapshot(msg.worldId)));
+            this.trackBackground(
+              this.authoring
+                .run(
+                  store,
+                  gate,
+                  {
+                    worldId: msg.worldId,
+                    proposalId: draft.proposal.id,
+                    purpose: "authoring",
+                    instruction: `${draft.scope}\n\nDraft the full ${msg.sheetType} sheet in ${draft.path} from this seed: "${msg.sentence}". Fill every section the file already has headings for; keep the name "${msg.name}"; leave canonRules and links as they are.`,
+                  },
+                  worldQueryUrl,
+                )
+                // Settled after the draft lands, so what is settled is the written sheet and not
+                // the empty skeleton it started as — but settled either way. A drafting agent
+                // that throws (no model, a dead session, a token budget spent) used to skip the
+                // settle with the rejection, and the skeleton it never filled went to Needs you
+                // asking the author to approve a decision they had already made by pressing
+                // Begin. The sentence they typed is in the file; the sketch stands without help.
+                .catch(() => {})
+                .then(() => settle())
+                .then(() => this.refreshWorldSnapshot(msg.worldId)),
+            );
           } else {
             await settle();
           }
@@ -3116,12 +3487,91 @@ export class Coordinator {
         // A human's direct action, not a draft: the person clicking Assign is the approval, so
         // this commits straight through rather than staging a proposal for them to re-accept.
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        if (msg.voice) {
-          const available = (await this.voiceService?.catalogue().catch(() => [])) ?? [];
-          if (!available.some((voice) => voice.provider === msg.voice!.provider && voice.voiceId === msg.voice!.voiceId)) return;
+        const result = (status: "assigned" | "cleared" | "refused", reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "voice.assignment-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            status,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          result("refused", "That world is not open — reopen it and choose the voice again.");
+          return;
         }
-        await applyVoiceAssignment(store, { path: msg.path, voice: msg.voice }).catch(() => {});
+        let assigned: { provider: string; model: string; voiceId: string; label?: string } | null = null;
+        if (msg.voice) {
+          if (!this.voiceService) {
+            result("refused", "Voice assignment is unavailable in this build.");
+            return;
+          }
+          const available = await this.voiceService
+            .catalogue(store.getBundle().clonedVoices, await this.comfyUiVoiceAvailability())
+            .catch(() => null);
+          if (available === null) {
+            result("refused", "The voice catalogue could not be read — try again.");
+            return;
+          }
+          const requestedModel =
+            msg.voice.model ??
+            legacyVoiceModel(msg.voice.provider, msg.voice.voiceId, store.getBundle().clonedVoices) ??
+            undefined;
+          const selected =
+            requestedModel === undefined
+              ? undefined
+              : available.find(
+                  (voice) =>
+                    voice.provider === msg.voice!.provider &&
+                    voice.model === requestedModel &&
+                    voice.voiceId === msg.voice!.voiceId,
+                );
+          if (requestedModel === undefined || selected === undefined) {
+            result("refused", "That voice is no longer available — choose another voice.");
+            return;
+          }
+          if (selected.unavailableReason !== undefined) {
+            result("refused", selected.unavailableReason);
+            return;
+          }
+          const model = this.opts.manifest?.models.find(
+            (candidate) =>
+              candidate.provider === msg.voice!.provider &&
+              candidate.capability === "voice-tts" &&
+              (requestedModel === undefined || candidate.id === requestedModel),
+          );
+          if (!model) {
+            result("refused", `No ${msg.voice.provider} voice model is available.`);
+            return;
+          }
+          const source = voiceSourceFor(
+            store.getBundle().clonedVoices,
+            msg.voice.provider,
+            model.id,
+            msg.voice.voiceId,
+          );
+          const clip =
+            source.kind === "cloned"
+              ? await clipFor(store, source.voice)
+              : source.kind === "catalogue"
+                ? true
+                : null;
+          if (!clip) {
+            result(
+              "refused",
+              "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
+            );
+            return;
+          }
+          assigned = { ...msg.voice, model: model.id };
+        }
+        try {
+          await applyVoiceAssignment(store, { path: msg.path, voice: assigned });
+        } catch (error) {
+          result("refused", error instanceof Error ? error.message : "The voice could not be assigned.");
+          return;
+        }
+        result(msg.voice ? "assigned" : "cleared");
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3193,16 +3643,22 @@ export class Coordinator {
       }
       case "clear-credential": {
         if (!this.credentials) return;
-        await this.credentials.clear(msg.provider).catch(() => {});
-        this.providerService.setConfigured(msg.provider, false);
-        if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
-          void this.refreshHarnessEnv();
+        try {
+          await this.credentials.clear(msg.provider);
+          this.providerService.setConfigured(msg.provider, false);
+          if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
+            void this.refreshHarnessEnv();
+          }
+          this.emit({
+            at: new Date().toISOString(),
+            type: "provider.status",
+            providers: this.providerService.list(),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
+          this.reportProviderFault(msg.provider, `the key was not cleared — ${message}`);
         }
-        this.emit({
-          at: new Date().toISOString(),
-          type: "provider.status",
-          providers: this.providerService.list(),
-        });
         return;
       }
       case "validate-provider": {
@@ -3354,20 +3810,43 @@ export class Coordinator {
         // Who reads the app's prose aloud. Null returns to the shipped local voice, which is
         // the whole point of a default: pressing "read aloud" must never spend by accident.
         if (!this.appSettings) return;
-        const saved = await this.appSettings.setNarrator(msg.voice);
+        let narrator = msg.voice;
+        if (narrator !== null) {
+          if (!this.voiceService) return;
+          const clonedVoices = this.opts.provider.openStore?.()?.getBundle().clonedVoices ?? [];
+          const model = narrator.model ?? legacyVoiceModel(narrator.provider, narrator.voiceId, clonedVoices);
+          if (model === null) return;
+          const available = (
+            await this.voiceService
+              .catalogue(clonedVoices, await this.comfyUiVoiceAvailability())
+              .catch(() => [])
+          ).find(
+            (voice) =>
+              voice.provider === narrator!.provider &&
+              voice.model === model &&
+              voice.voiceId === narrator!.voiceId &&
+              supportsVoiceUse(voice, "narration") &&
+              voice.unavailableReason === undefined,
+          );
+          if (!available) return;
+          narrator = { ...narrator, model };
+        }
+        const saved = await this.appSettings.setNarrator(narrator);
         this.emit({ at: new Date().toISOString(), type: "narrator.changed", voice: saved.narrator });
         return;
       }
       case "set-appearance-theme": {
         if (!this.appSettings) return;
-        this.appearanceWrite = this.appearanceWrite.catch(() => {}).then(async () => {
-          const settings = await this.appSettings!.setAppearanceTheme(msg.preference);
-          this.emit({
-            at: new Date().toISOString(),
-            type: "appearance.changed",
-            preference: settings.appearance.theme,
+        this.appearanceWrite = this.appearanceWrite
+          .catch(() => {})
+          .then(async () => {
+            const settings = await this.appSettings!.setAppearanceTheme(msg.preference);
+            this.emit({
+              at: new Date().toISOString(),
+              type: "appearance.changed",
+              preference: settings.appearance.theme,
+            });
           });
-        });
         await this.appearanceWrite;
         return;
       }
@@ -3434,14 +3913,17 @@ export class Coordinator {
         if (!offered) return;
         const isUrl = /^https?:\/\//i.test(offered.location);
         await this.applyComfyUiPatch(
-          isUrl ? { engineUrl: offered.location, enginePath: null } : { enginePath: offered.location, engineUrl: null },
+          isUrl
+            ? { engineUrl: offered.location, enginePath: null }
+            : { enginePath: offered.location, engineUrl: null },
         );
         return;
       }
       case "comfyui-refresh": {
         if (!this.appSettings || !this.opts.comfyui) return;
-        const settings = await this.appSettings.load();
-        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+        // Settings already applied when they changed. Refresh measures the active engine in
+        // place, including both /object_info and immutable dependency identity.
+        await this.opts.comfyui.service.reverify().catch(() => {});
         await this.setup?.detect().catch(() => {});
         await this.refreshComfyUi();
         return;
@@ -3449,13 +3931,13 @@ export class Coordinator {
       case "comfyui-verify-recipe": {
         const service = this.opts.comfyui?.service;
         if (!service) return;
-        await service.preflight(msg.recipeId).catch(() => {});
+        await service.reverify([msg.recipeId]).catch(() => {});
         await this.refreshComfyUi();
         return;
       }
       case "repair-voice-models": {
-        await this.setup?.repair("kokoro-82m");
-        await this.setup?.repair("whisper-base-en");
+        await this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro);
+        await this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.whisper);
         await this.setup?.run();
         return;
       }
@@ -3464,7 +3946,11 @@ export class Coordinator {
         return;
       }
       case "test-local-voice": {
-        const base = { at: new Date().toISOString(), type: "voice.runtime-test" as const, requestId: msg.requestId };
+        const base = {
+          at: new Date().toISOString(),
+          type: "voice.runtime-test" as const,
+          requestId: msg.requestId,
+        };
         this.emit({ ...base, status: "testing", detail: "Testing Voxa voice synthesis", audioBase64: null });
         try {
           const sidecar = this.opts.voice?.sidecar;
@@ -3497,7 +3983,9 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         const requestId = msg.requestId;
-        const answer = (result: { disposition: "created"; slug: string } | { disposition: "failed"; reason: string }) => {
+        const answer = (
+          result: { disposition: "created"; slug: string } | { disposition: "failed"; reason: string },
+        ) => {
           // Only a correlated request gets a correlated answer; a legacy frame keeps the old
           // snapshot-only contract.
           if (!requestId) return;
@@ -3580,19 +4068,21 @@ export class Coordinator {
           await this.refreshWorldSnapshot(msg.worldId);
           if (this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
-            this.trackBackground(this.authoring
-              .run(
-                store,
-                gate,
-                {
-                  worldId: msg.worldId,
-                  proposalId: draft.proposalId,
-                  purpose: "authoring",
-                  instruction: draft.instruction,
-                },
-                worldQueryUrl,
-              )
-              .then(() => this.refreshWorldSnapshot(msg.worldId)));
+            this.trackBackground(
+              this.authoring
+                .run(
+                  store,
+                  gate,
+                  {
+                    worldId: msg.worldId,
+                    proposalId: draft.proposalId,
+                    purpose: "authoring",
+                    instruction: draft.instruction,
+                  },
+                  worldQueryUrl,
+                )
+                .then(() => this.refreshWorldSnapshot(msg.worldId)),
+            );
           }
         } catch {
           this.transport.broadcastSnapshot();
@@ -3763,7 +4253,12 @@ export class Coordinator {
               ...(msg.arcs !== undefined ? { arcs: msg.arcs } : {}),
             },
           });
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {
           this.transport.broadcastSnapshot();
@@ -3786,7 +4281,12 @@ export class Coordinator {
               ...(msg.scenes !== undefined ? { scenes: msg.scenes } : {}),
             },
           });
-          this.emit({ at: new Date().toISOString(), type: "proposal.staged", worldId: msg.worldId, proposalId });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.staged",
+            worldId: msg.worldId,
+            proposalId,
+          });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch {
           this.transport.broadcastSnapshot();
@@ -3859,21 +4359,23 @@ export class Coordinator {
             proposalId: staged.id,
           });
           const worldQueryUrl = await this.worldQuery.start();
-          this.trackBackground(this.authoring
-            .run(
-              store,
-              gate,
-              {
-                worldId: msg.worldId,
-                proposalId: staged.id,
-                purpose: "drafting",
-                instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
-                  store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
-                )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
-              },
-              worldQueryUrl,
-            )
-            .then(() => this.refreshWorldSnapshot(msg.worldId)));
+          this.trackBackground(
+            this.authoring
+              .run(
+                store,
+                gate,
+                {
+                  worldId: msg.worldId,
+                  proposalId: staged.id,
+                  purpose: "drafting",
+                  instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
+                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
+                  )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+                },
+                worldQueryUrl,
+              )
+              .then(() => this.refreshWorldSnapshot(msg.worldId)),
+          );
         } catch {
           this.transport.broadcastSnapshot();
         }
@@ -3926,7 +4428,9 @@ export class Coordinator {
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
             production: {
-              ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+              ...(production.meta.musicPolicy !== undefined
+                ? { musicPolicy: production.meta.musicPolicy }
+                : {}),
               failureModes: production.meta.failureModes,
             },
             sheets: bundle.sheets,
@@ -4205,7 +4709,9 @@ export class Coordinator {
             // The production's own standing constraints, merged with the world's inside planning
             // (#244). Passed as the record rather than looked up there, because planning is pure.
             production: {
-              ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
+              ...(production.meta.musicPolicy !== undefined
+                ? { musicPolicy: production.meta.musicPolicy }
+                : {}),
               failureModes: production.meta.failureModes,
             },
             sheets: bundle.sheets,
@@ -4243,7 +4749,11 @@ export class Coordinator {
           dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
-          void this.appLog?.append({ kind: "dispatch.refused", reason, detail: { sceneFile: msg.sceneFile } });
+          void this.appLog?.append({
+            kind: "dispatch.refused",
+            reason,
+            detail: { sceneFile: msg.sceneFile },
+          });
           this.rejectEnqueue(msg.requestId, msg.kind, reason);
           return;
         }
@@ -4278,8 +4788,9 @@ export class Coordinator {
             // preserves its trim on disk, and both read models replace the whole selection with
             // this payload — so a hard-coded zero made every observer contradict the file until
             // the next snapshot, and left an inaccurate line in the durable audit log.
-            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
-              ?.selections[msg.shotId] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
+            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.selections[
+              msg.shotId
+            ] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
           // Continuity's durable half (issue 154): the accept promised the following shot a
           // start frame — cut the actual picture, file it with provenance, and point the
@@ -4354,8 +4865,9 @@ export class Coordinator {
             // Read back rather than assembled here, for the same reason accept-take reads it
             // back: both read models replace the whole selection with this payload, so a value
             // guessed at here would contradict the file until the next snapshot.
-            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)
-              ?.selections[msg.shotId] ?? { acceptedTakeId: null, trimInSec: msg.trimInSec },
+            selection: store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.selections[
+              msg.shotId
+            ] ?? { acceptedTakeId: null, trimInSec: msg.trimInSec },
           });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (err) {
@@ -4454,125 +4966,200 @@ export class Coordinator {
         this.exportsInFlight.add(exportKey);
         let started = false;
         try {
-        const runner = this.opts.ffmpeg;
-        const emitProgress = (
-          exportId: string,
-          status: "running" | "done" | "cancelled" | "failed",
-          percent: number,
-          output: string | null,
-          error: string | null,
-        ) =>
-          this.emit({
-            at: new Date().toISOString(),
-            type: "export.progress",
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
-            exportId,
-            status,
-            percent,
-            output,
-            error,
-          });
-        if (!runner) {
-          emitProgress(
-            "ex_none",
-            "failed",
-            0,
-            null,
-            "export needs ffmpeg — bundled in packaged builds (SPEC-016); set ARKE_FFMPEG to use one now",
-          );
-          return;
-        }
-        /*
-         * A production cut to a track renders against the song, not against scene order (#253).
-         *
-         * The spine assembly existed and nothing called it, so exporting a spine production
-         * still produced the scene-order cut with no master under it -- a renderer that was
-         * unreachable from the product it was written for (Codex round 1). The old path stays
-         * exactly as it was for everything else, which is most productions.
-         */
-        const spine = production.spine;
-        const trackArtifact = spine
-          ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
-          : undefined;
-        const trackFile = trackArtifact?.file;
-
-        /*
-         * The measurement recorded when the track was assigned, before asking ffprobe again.
-         *
-         * Artifacts are immutable and travel with the world, so their mediaInfo is as true on the
-         * machine that opens the folder as on the one that filed it. Requiring a probe anyway
-         * refused every spine export on a machine with ffmpeg but no ffprobe -- a world that
-         * already knows how long its song is, declining to export because it could not re-measure
-         * something that cannot have changed (Codex round 4).
-         */
-        const trackPath =
-          trackFile !== undefined ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile))) : null;
-        // The id is allocated before the first thing that can fail. A probe that throws on the
-        // way to ffprobe used to escape the handler with no export event at all, so the user's
-        // click did nothing visible and only the transport backstop logged it (Codex round 6).
-        const attemptId = `ex_${ulid()}`;
-        const probed =
-          trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
-            ? await this.opts.mediaProbe.info(trackPath).catch(() => null)
-            : null;
-        /*
-         * A spine export takes the whole measurement or none of it (Codex round 5).
-         *
-         * The duration-only fallback that used to sit here supplied a length while leaving audio
-         * presence unknown, which walked straight past the silent-master guard below and put the
-         * missing stream back in front of ffmpeg -- reintroducing, one round later, exactly the
-         * state the previous round had refused. A length is not a measurement when what the graph
-         * needs to know is whether there is a track to mix.
-         */
-        const trackInfo = trackArtifact?.mediaInfo ?? probed;
-        const trackDurationSec = trackInfo?.durationSec ?? null;
-
-        // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
-        // one as "ex_none" let a second production's failure overwrite the first in the client's
-        // export map, and the first screen then showed no failed attempt at all (Codex round 4).
-        if (spine && trackFile !== undefined && trackInfo === null) {
-          emitProgress(
-            attemptId,
-            "failed",
-            0,
-            null,
-            "export needs the master track measured — no stored measurement and ffprobe could not make one (SPEC-016)",
-          );
-          return;
-        }
-        if (spine && trackInfo !== null && !trackInfo.hasAudio) {
-          emitProgress(attemptId, "failed", 0, null, "the master track has no audio stream — assign a track that does");
-          return;
-        }
-
-        /*
-         * One episode's deliverable (SPEC-023 R-24, issue #396): the refusal is said before the
-         * encode, by name — an empty episode, a contradictory membership, or a spine production
-         * (which is cut against its track, and no episode-to-spine range authority exists yet).
-         * Gaps do not refuse: they become labelled slates, exactly as the production-wide cut
-         * treats them, so one episode's gaps never misreport another's.
-         */
-        if (msg.episodeId !== undefined) {
-          const refusal = episodeExportRefusals(production, msg.episodeId);
-          if (refusal) {
-            emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
+          const runner = this.opts.ffmpeg;
+          const emitProgress = (
+            exportId: string,
+            status: "running" | "done" | "cancelled" | "failed",
+            percent: number,
+            output: string | null,
+            error: string | null,
+          ) =>
+            this.emit({
+              at: new Date().toISOString(),
+              type: "export.progress",
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
+              exportId,
+              status,
+              percent,
+              output,
+              error,
+            });
+          if (!runner) {
+            emitProgress(
+              "ex_none",
+              "failed",
+              0,
+              null,
+              "export needs ffmpeg — bundled in packaged builds (SPEC-016); set ARKE_FFMPEG to use one now",
+            );
             return;
           }
-          const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
-          const plan = buildExportPlan(deriveEpisodeCut(production, msg.episodeId), msg.preset);
+          /*
+           * A production cut to a track renders against the song, not against scene order (#253).
+           *
+           * The spine assembly existed and nothing called it, so exporting a spine production
+           * still produced the scene-order cut with no master under it -- a renderer that was
+           * unreachable from the product it was written for (Codex round 1). The old path stays
+           * exactly as it was for everything else, which is most productions.
+           */
+          const spine = production.spine;
+          const trackArtifact = spine
+            ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
+            : undefined;
+          const trackFile = trackArtifact?.file;
+
+          /*
+           * The measurement recorded when the track was assigned, before asking ffprobe again.
+           *
+           * Artifacts are immutable and travel with the world, so their mediaInfo is as true on the
+           * machine that opens the folder as on the one that filed it. Requiring a probe anyway
+           * refused every spine export on a machine with ffmpeg but no ffprobe -- a world that
+           * already knows how long its song is, declining to export because it could not re-measure
+           * something that cannot have changed (Codex round 4).
+           */
+          const trackPath =
+            trackFile !== undefined
+              ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile)))
+              : null;
+          // The id is allocated before the first thing that can fail. A probe that throws on the
+          // way to ffprobe used to escape the handler with no export event at all, so the user's
+          // click did nothing visible and only the transport backstop logged it (Codex round 6).
+          const attemptId = `ex_${ulid()}`;
+          const probed =
+            trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
+              ? await this.opts.mediaProbe.info(trackPath).catch(() => null)
+              : null;
+          /*
+           * A spine export takes the whole measurement or none of it (Codex round 5).
+           *
+           * The duration-only fallback that used to sit here supplied a length while leaving audio
+           * presence unknown, which walked straight past the silent-master guard below and put the
+           * missing stream back in front of ffmpeg -- reintroducing, one round later, exactly the
+           * state the previous round had refused. A length is not a measurement when what the graph
+           * needs to know is whether there is a track to mix.
+           */
+          const trackInfo = trackArtifact?.mediaInfo ?? probed;
+          const trackDurationSec = trackInfo?.durationSec ?? null;
+
+          // A refusal is an attempt with an outcome, so it gets an id of its own. Reporting every
+          // one as "ex_none" let a second production's failure overwrite the first in the client's
+          // export map, and the first screen then showed no failed attempt at all (Codex round 4).
+          if (spine && trackFile !== undefined && trackInfo === null) {
+            emitProgress(
+              attemptId,
+              "failed",
+              0,
+              null,
+              "export needs the master track measured — no stored measurement and ffprobe could not make one (SPEC-016)",
+            );
+            return;
+          }
+          if (spine && trackInfo !== null && !trackInfo.hasAudio) {
+            emitProgress(
+              attemptId,
+              "failed",
+              0,
+              null,
+              "the master track has no audio stream — assign a track that does",
+            );
+            return;
+          }
+
+          /*
+           * One episode's deliverable (SPEC-023 R-24, issue #396): the refusal is said before the
+           * encode, by name — an empty episode, a contradictory membership, or a spine production
+           * (which is cut against its track, and no episode-to-spine range authority exists yet).
+           * Gaps do not refuse: they become labelled slates, exactly as the production-wide cut
+           * treats them, so one episode's gaps never misreport another's.
+           */
+          if (msg.episodeId !== undefined) {
+            const refusal = episodeExportRefusals(production, msg.episodeId);
+            if (refusal) {
+              emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
+              return;
+            }
+            const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
+            const plan = buildExportPlan(deriveEpisodeCut(production, msg.episodeId), msg.preset);
+            const stamp = new Date()
+              .toISOString()
+              .replace(/[-:TZ.]/g, "")
+              .slice(0, 14);
+            const stem = production.episodeFiles[episode.id] ?? episode.id;
+            const handle = runExport(
+              store.dir,
+              (stage) => buildFfmpegArgs(plan, store.dir, stage),
+              // The episode stem keeps filenames collision-free across episodes; the stamp keeps
+              // retries from overwriting what a person may already have sent on.
+              `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+              runner,
+              (percent) => emitProgress(handle.id, "running", percent, null, null),
+            );
+            this.exports.set(handle.id, handle);
+            emitProgress(handle.id, "running", 0, null, null);
+            started = true;
+            this.trackBackground(
+              handle.done.then((result) => {
+                this.exports.delete(handle.id);
+                this.exportsInFlight.delete(exportKey);
+                if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
+                else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+                else emitProgress(handle.id, "failed", 0, null, result.error);
+              }),
+            );
+            return;
+          }
+
+          let buildArgs: (stage: string) => string[];
+          if (spine && trackFile !== undefined && trackDurationSec !== null) {
+            const spineCut = deriveSpineCut(production, spine, trackDurationSec);
+            const refusal = spineExportRefusals(spineCut, msg.preset);
+            if (refusal) {
+              // Said before the encode rather than after somebody has sent the file on.
+              emitProgress(
+                attemptId,
+                "failed",
+                0,
+                null,
+                `cut is not ready for ${msg.preset}: ${refusal.detail}`,
+              );
+              return;
+            }
+            const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
+            buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage);
+          } else {
+            if (spine && trackDurationSec === null) {
+              // Falling through silently would export a spine production as though it had none.
+              emitProgress(
+                attemptId,
+                "failed",
+                0,
+                null,
+                "export needs the master track measured — ffprobe could not read it (SPEC-016)",
+              );
+              return;
+            }
+            /*
+             * Placed clips reach the export or they are decoration (82a binding 4). Both halves are
+             * resolved against the world's artifacts, so one citing something filed since is
+             * dropped rather than rendered as an absence — and picture and sound are resolved
+             * separately because a lane holds either, and one clip can contribute both.
+             */
+            const artifacts = store.getBundle().artifacts;
+            const overlays = exportOverlays(production.cut.overlays, artifacts);
+            const audio = exportAudioClips(production.cut.overlays, artifacts);
+            const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
+            buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
+          }
           const stamp = new Date()
             .toISOString()
             .replace(/[-:TZ.]/g, "")
             .slice(0, 14);
-          const stem = production.episodeFiles[episode.id] ?? episode.id;
           const handle = runExport(
             store.dir,
-            (stage) => buildFfmpegArgs(plan, store.dir, stage),
-            // The episode stem keeps filenames collision-free across episodes; the stamp keeps
-            // retries from overwriting what a person may already have sent on.
-            `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+            buildArgs,
+            `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
             runner,
             (percent) => emitProgress(handle.id, "running", percent, null, null),
           );
@@ -4582,73 +5169,14 @@ export class Coordinator {
           this.trackBackground(
             handle.done.then((result) => {
               this.exports.delete(handle.id);
+              // Released when the encode ends, not when this handler returns: the claim covers the
+              // running export too, or a second click during it launches a duplicate.
               this.exportsInFlight.delete(exportKey);
               if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
               else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
               else emitProgress(handle.id, "failed", 0, null, result.error);
             }),
           );
-          return;
-        }
-
-        let buildArgs: (stage: string) => string[];
-        if (spine && trackFile !== undefined && trackDurationSec !== null) {
-          const spineCut = deriveSpineCut(production, spine, trackDurationSec);
-          const refusal = spineExportRefusals(spineCut, msg.preset);
-          if (refusal) {
-            // Said before the encode rather than after somebody has sent the file on.
-            emitProgress(attemptId, "failed", 0, null, `cut is not ready for ${msg.preset}: ${refusal.detail}`);
-            return;
-          }
-          const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
-          buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage);
-        } else {
-          if (spine && trackDurationSec === null) {
-            // Falling through silently would export a spine production as though it had none.
-            emitProgress(
-              attemptId,
-              "failed",
-              0,
-              null,
-              "export needs the master track measured — ffprobe could not read it (SPEC-016)",
-            );
-            return;
-          }
-          /*
-           * Placed clips reach the export or they are decoration (82a binding 4). Both halves are
-           * resolved against the world's artifacts, so one citing something filed since is
-           * dropped rather than rendered as an absence — and picture and sound are resolved
-           * separately because a lane holds either, and one clip can contribute both.
-           */
-          const artifacts = store.getBundle().artifacts;
-          const overlays = exportOverlays(production.cut.overlays, artifacts);
-          const audio = exportAudioClips(production.cut.overlays, artifacts);
-          const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
-          buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
-        }
-        const stamp = new Date()
-          .toISOString()
-          .replace(/[-:TZ.]/g, "")
-          .slice(0, 14);
-        const handle = runExport(
-          store.dir,
-          buildArgs,
-          `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
-          runner,
-          (percent) => emitProgress(handle.id, "running", percent, null, null),
-        );
-        this.exports.set(handle.id, handle);
-        emitProgress(handle.id, "running", 0, null, null);
-        started = true;
-        this.trackBackground(handle.done.then((result) => {
-          this.exports.delete(handle.id);
-          // Released when the encode ends, not when this handler returns: the claim covers the
-          // running export too, or a second click during it launches a duplicate.
-          this.exportsInFlight.delete(exportKey);
-          if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
-          else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
-          else emitProgress(handle.id, "failed", 0, null, result.error);
-        }));
         } finally {
           if (!started) this.exportsInFlight.delete(exportKey);
         }
@@ -4696,7 +5224,10 @@ export class Coordinator {
       case "bench-set-title": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
-        await bench.store.append({ type: "title-set", title: msg.title }, { at: this.nowIso(), requestId: msg.requestId });
+        await bench.store.append(
+          { type: "title-set", title: msg.title },
+          { at: this.nowIso(), requestId: msg.requestId },
+        );
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
@@ -4744,7 +5275,11 @@ export class Coordinator {
           // The tile predicted this refusal with the same shared functions; landing here means
           // a racing client. The refreshed workspace shows what held — recorded, not silent.
           if (outcome.outcome === "refused") {
-            void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+            void this.appLog?.append({
+              kind: "bench.reference-refused",
+              worldId: msg.worldId,
+              reason: outcome.reason,
+            });
           }
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
@@ -4778,7 +5313,9 @@ export class Coordinator {
         }).catch(() => [] as readonly string[]);
         const artifactIds: Array<string | null> = [];
         for (const sourcePath of paths) {
-          artifactIds.push(await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }));
+          artifactIds.push(
+            await this.fileOne(msg.worldId, sourcePath, { allowLarge: msg.allowLarge ?? false }),
+          );
         }
         // The answer carries ordered ids whatever happens next: filing survives a cancelled
         // picker, and attaching is a separate act the budget may refuse per item.
@@ -4806,7 +5343,11 @@ export class Coordinator {
           });
           // Filed but not attached is a real outcome — recorded, never swallowed.
           if (outcome.outcome === "refused") {
-            void this.appLog?.append({ kind: "bench.reference-refused", worldId: msg.worldId, reason: outcome.reason });
+            void this.appLog?.append({
+              kind: "bench.reference-refused",
+              worldId: msg.worldId,
+              reason: outcome.reason,
+            });
           }
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
@@ -4817,7 +5358,11 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!store || !bench) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "The bench is unavailable. Reopen the world and try again.");
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "The bench is unavailable. Reopen the world and try again.",
+          );
           return;
         }
         const fromTake =
@@ -4838,6 +5383,51 @@ export class Coordinator {
         if (!plan.ok) {
           this.rejectEnqueue(msg.requestId, msg.kind, plan.reason);
           return;
+        }
+        const hasClonedVoice = plan.inputs.some(
+          (input) => input.provider === "comfyui" && input.voiceReference === true,
+        );
+        if (
+          hasClonedVoice &&
+          this.requireVoiceUploadConfirmation({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            command: msg.kind,
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
+          })
+        )
+          return;
+        if (hasClonedVoice) {
+          const availability = await this.comfyUiVoiceAvailability();
+          if (availability.unavailableReason !== undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, availability.unavailableReason);
+            return;
+          }
+        }
+        const voiceUploadConfirmedFor =
+          "voiceUploadConfirmedFor" in msg ? msg.voiceUploadConfirmedFor : undefined;
+        for (const input of plan.inputs) {
+          if (input.voiceReference === true && voiceUploadConfirmedFor !== undefined) {
+            input.voiceUploadConfirmedFor = voiceUploadConfirmedFor;
+          }
+        }
+        for (const input of plan.inputs) {
+          if (input.voiceReference !== true) continue;
+          const voiceId = input.params["voiceId"];
+          const source =
+            typeof voiceId === "string"
+              ? voiceSourceFor(store.getBundle().clonedVoices, input.provider, input.model, voiceId)
+              : { kind: "missing-clone" as const };
+          if (source.kind !== "cloned" || !(await clipFor(store, source.voice))) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
+            );
+            return;
+          }
         }
         // The reservation is fsynced BEFORE any job exists — the record that authorizes spend.
         // A resent command finds its requestId already in the log and must not enqueue twice.
@@ -4871,7 +5461,13 @@ export class Coordinator {
             await bench.store.append({ type: "take-job", takeId: reserved.id, jobId }, { at: this.nowIso() });
           }
         }
-        this.emitEnqueueResult(msg.requestId, msg.kind, outcome.requestedCount, outcome.acceptedJobIds, outcome.failures);
+        this.emitEnqueueResult(
+          msg.requestId,
+          msg.kind,
+          outcome.requestedCount,
+          outcome.acceptedJobIds,
+          outcome.failures,
+        );
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
@@ -4930,7 +5526,10 @@ export class Coordinator {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
         if (bench.session.takes.some((t) => t.id === msg.takeId && t.disposition === "open")) {
-          await bench.store.append({ type: "take-discarded", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+          await bench.store.append(
+            { type: "take-discarded", takeId: msg.takeId },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
@@ -4938,7 +5537,10 @@ export class Coordinator {
       case "bench-clear-view": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
-        await bench.store.append({ type: "take-cleared", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+        await bench.store.append(
+          { type: "take-cleared", takeId: msg.takeId },
+          { at: this.nowIso(), requestId: msg.requestId },
+        );
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
@@ -5003,7 +5605,10 @@ export class Coordinator {
           { agent: "lyricist", answerKey: "lyrics", maxChars: LYRICS_MAX_CHARS },
         );
         const drafted = await lyricist(
-          lyricistBrief({ description: msg.description, ...(msg.style !== undefined ? { style: msg.style } : {}) }),
+          lyricistBrief({
+            description: msg.description,
+            ...(msg.style !== undefined ? { style: msg.style } : {}),
+          }),
         ).catch(() => null);
         void this.appLog?.append({
           kind: drafted ? "bench.lyrics-drafted" : "bench.lyrics-unavailable",
@@ -5044,7 +5649,10 @@ export class Coordinator {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
         if (bench.session.takes.some((t) => t.id === msg.takeId)) {
-          await bench.store.append({ type: "take-selected", takeId: msg.takeId }, { at: this.nowIso(), requestId: msg.requestId });
+          await bench.store.append(
+            { type: "take-selected", takeId: msg.takeId },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
         }
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
@@ -5058,7 +5666,10 @@ export class Coordinator {
         // clearing the slot later deletes the pointer and the artifact stays where it was.
         const landed = await store
           .gateOp(async () => {
-            await rm(toExtendedLength(join(store.dir, stagedReferenceDir(msg.key))), { recursive: true, force: true });
+            await rm(toExtendedLength(join(store.dir, stagedReferenceDir(msg.key))), {
+              recursive: true,
+              force: true,
+            });
             await atomicWriteFile(
               join(store.dir, stagedReferenceDir(msg.key), "artifact.json"),
               Buffer.from(JSON.stringify({ file: artifact.file }), "utf8"),
@@ -5181,6 +5792,11 @@ export class Coordinator {
             seconds: null,
             reason,
           });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || store.isClosed()) {
+          refuse("That world is no longer open.");
+          return;
+        }
         let bytes: Uint8Array;
         let fileName: string;
         if (msg.source.from === "recorded") {
@@ -5198,14 +5814,22 @@ export class Coordinator {
             refuse("choosing a file needs the desktop app — a browser session cannot open the file picker");
             return;
           }
-          const paths = await pick({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }).catch(() => [] as readonly string[]);
+          const paths = await pick({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }).catch(
+            () => [] as readonly string[],
+          );
           const chosen = paths[0];
           // Cancelling the host dialog is not a refusal to report: the dialog is simply still
           // sitting on 74c with nothing chosen, which is where it already was.
           if (chosen === undefined) {
             this.emit({
-              at: this.nowIso(), type: "voice.clip-staged", worldId: msg.worldId, requestId: msg.requestId,
-              clipId: null, fileName: null, seconds: null, reason: null,
+              at: this.nowIso(),
+              type: "voice.clip-staged",
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              clipId: null,
+              fileName: null,
+              seconds: null,
+              reason: null,
             });
             return;
           }
@@ -5218,9 +5842,18 @@ export class Coordinator {
           }
         }
         const extension = extname(fileName).slice(1).toLowerCase();
-        const staged = await this.stageClip(bytes, fileName, extension);
+        if (!this.stillOpen(store) || store.isClosed()) {
+          refuse("That world is no longer open.");
+          return;
+        }
+        const staged = await this.stageClip(bytes, fileName, extension, msg.worldId);
         if (!staged.ok) {
           refuse(staged.reason);
+          return;
+        }
+        if (!this.stillOpen(store) || store.isClosed()) {
+          await this.dropStagedClip(staged.clipId);
+          refuse("That world is no longer open.");
           return;
         }
         this.emit({
@@ -5244,19 +5877,21 @@ export class Coordinator {
         // throw: the clone dialog states the refusal in the words newClonedVoice chose, and the
         // rules live in one place rather than being re-stated here (SPEC-022 §2.3, D3).
         const store = this.opts.provider.openStore?.();
-        if (!store) {
+        if (!store || store.worldId !== msg.worldId || store.isClosed()) {
+          const staged = this.stagedClips.get(msg.clipId);
+          if (staged?.worldId === msg.worldId) await this.dropStagedClip(msg.clipId);
           this.emit({
             at: new Date().toISOString(),
             type: "voice.cloned",
             worldId: msg.worldId,
             voiceId: null,
             label: null,
-            reason: "Open the world first.",
+            reason: "That world is no longer open.",
           });
           return;
         }
         const clip = this.stagedClips.get(msg.clipId);
-        if (!clip) {
+        if (!clip || clip.worldId !== msg.worldId) {
           this.emit({
             at: new Date().toISOString(),
             type: "voice.cloned",
@@ -5286,7 +5921,7 @@ export class Coordinator {
         // staging rather than a second attempt against a temp file that may since have gone.
         await this.dropStagedClip(msg.clipId);
         // The library is in the bundle, so the picker sees the new voice on the next snapshot.
-        if (made.ok) await this.refreshWorldSnapshot(msg.worldId);
+        if (made.ok) this.refreshIfStillOpen(store);
         return;
       }
       case "file-artifact": {
@@ -5352,9 +5987,12 @@ export class Coordinator {
       case "import-folder": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        const report = await importFolder(store, msg.sourcePath, this.opts.mediaProbe, () => !this.stillOpen(store) || this.stopping).catch(
-          () => null,
-        );
+        const report = await importFolder(
+          store,
+          msg.sourcePath,
+          this.opts.mediaProbe,
+          () => !this.stillOpen(store) || this.stopping,
+        ).catch(() => null);
         if (report) {
           this.emit({ at: new Date().toISOString(), type: "import.report", worldId: msg.worldId, ...report });
           await this.refreshWorldSnapshot(msg.worldId);
@@ -5505,7 +6143,9 @@ export class Coordinator {
         if (!this.voiceService) return;
         const store = this.opts.provider.openStore?.();
         const bundle = store?.getBundle();
-        const voices = await this.voiceService.catalogue(bundle?.clonedVoices ?? []).catch(() => []);
+        const voices = await this.voiceService
+          .catalogue(bundle?.clonedVoices ?? [], await this.comfyUiVoiceAvailability())
+          .catch(() => []);
         const sheets = bundle?.sheets ?? [];
         this.emit({
           at: new Date().toISOString(),
@@ -5514,7 +6154,13 @@ export class Coordinator {
           voices: voices.map((v) => ({
             ...v,
             usedBy: sheets
-              .filter((sheet) => sheet.voice?.provider === v.provider && sheet.voice?.voiceId === v.voiceId)
+              .filter((sheet) => {
+                if (sheet.voice?.provider !== v.provider || sheet.voice.voiceId !== v.voiceId) return false;
+                const assignedModel =
+                  sheet.voice.model ??
+                  legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, bundle?.clonedVoices ?? []);
+                return assignedModel === v.model;
+              })
               .map((sheet) => sheet.name),
           })),
         });
@@ -5536,7 +6182,9 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That shot has no spoken line.");
           return;
         }
-        const sheet = shot.audio.speaker ? bundle.sheets.find((c) => c.id === shot.audio!.speaker) : undefined;
+        const sheet = shot.audio.speaker
+          ? bundle.sheets.find((c) => c.id === shot.audio!.speaker)
+          : undefined;
         if (!sheet) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The speaker is no longer in the cast.");
           return;
@@ -5544,14 +6192,59 @@ export class Coordinator {
         const voice = sheet.voice;
         if (!voice) {
           // The sheet is where a voice is given, and saying so names the place to go.
-          this.rejectEnqueue(msg.requestId, msg.kind, `${sheet.name} has no assigned voice — choose one on their sheet.`);
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            `${sheet.name} has no assigned voice — choose one on their sheet.`,
+          );
           return;
         }
+        const resolvedModel =
+          voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, bundle.clonedVoices) ?? undefined;
         const model = this.opts.manifest?.models.find(
-          (m) => m.provider === voice.provider && m.capability === "voice-tts",
+          (m) =>
+            m.provider === voice.provider &&
+            m.capability === "voice-tts" &&
+            (resolvedModel === undefined || m.id === resolvedModel),
         );
         if (!model) {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
+          return;
+        }
+        const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
+        if (
+          source.kind === "cloned" &&
+          this.requireVoiceUploadConfirmation({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            command: msg.kind,
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
+          })
+        )
+          return;
+        if (model.provider === "comfyui") {
+          const availability = await this.comfyUiVoiceAvailability();
+          if (availability.unavailableReason !== undefined) {
+            this.rejectEnqueue(msg.requestId, msg.kind, availability.unavailableReason);
+            return;
+          }
+        }
+        if (source.kind === "missing-clone") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That cloned voice is no longer in this world — choose another voice.",
+          );
+          return;
+        }
+        if (source.kind === "cloned" && !(await clipFor(store, source.voice))) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That voice's recording is missing or unsafe — re-clone it, or choose another voice.",
+          );
           return;
         }
         // A delivery this provider cannot express is stated and travels with the job rather
@@ -5559,6 +6252,14 @@ export class Coordinator {
         let deliveryParams: Record<string, number> | null = null;
         let deliveryNotice: string | null = null;
         if (msg.delivery !== undefined) {
+          if (!model.limits.deliveries?.includes(msg.delivery)) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              `${model.displayName} cannot express "${msg.delivery}".`,
+            );
+            return;
+          }
           const mapped = mapDelivery(voice.provider, msg.delivery as Delivery);
           if (mapped.ok) deliveryParams = mapped.params;
           else deliveryNotice = mapped.reason;
@@ -5574,9 +6275,17 @@ export class Coordinator {
             deliveryParams,
             deliveryNotice,
             model,
+            ...(source.kind === "cloned" ? { voiceReference: true } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
           });
         } catch (err) {
-          this.rejectEnqueue(msg.requestId, msg.kind, err instanceof Error ? err.message : "The line could not be prepared.");
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            err instanceof Error ? err.message : "The line could not be prepared.",
+          );
           return;
         }
         await this.enqueueBatch(msg.requestId, msg.kind, [input]);
@@ -5588,7 +6297,13 @@ export class Coordinator {
         const sheet = store.getBundle().sheets.find((s) => s.id === msg.sheetId);
         if (!sheet) return;
         await this.voiceService
-          .candidates(msg.worldId, store.getBundle(), sheet, this.opts.manifest ?? null)
+          .candidates(
+            msg.worldId,
+            store.getBundle(),
+            sheet,
+            this.opts.manifest ?? null,
+            await this.comfyUiVoiceAvailability(),
+          )
           .catch(() => {});
         return;
       }
@@ -5605,20 +6320,36 @@ export class Coordinator {
           return;
         }
         const line = previewLineFor(sheet, bundle.productions);
-        const candidate = (await this.voiceService.catalogue(bundle.clonedVoices)).find(
-          (entry) => entry.provider === msg.provider && entry.voiceId === msg.voiceId,
+        const source = voiceSourceFor(bundle.clonedVoices, msg.provider, msg.model, msg.voiceId);
+        if (
+          source.kind === "cloned" &&
+          this.requireVoiceUploadConfirmation({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            command: msg.kind,
+            ...(msg.voiceUploadConfirmedFor !== undefined
+              ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+              : {}),
+          })
+        )
+          return;
+        const candidate = (
+          await this.voiceService.catalogue(bundle.clonedVoices, await this.comfyUiVoiceAvailability())
+        ).find(
+          (entry) =>
+            entry.provider === msg.provider && entry.model === msg.model && entry.voiceId === msg.voiceId,
         );
         if (!candidate) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
           return;
         }
-        // kokoro answers synchronously off the sidecar; everything else — cloud or a local recipe —
-        // goes through the queue below.
-        if (msg.provider !== "kokoro" && msg.provider !== "elevenlabs" && msg.provider !== "comfyui") {
-          this.rejectEnqueue(msg.requestId, msg.kind, "Choose an available voice again.");
+        if (candidate.unavailableReason !== undefined) {
+          this.rejectEnqueue(msg.requestId, msg.kind, candidate.unavailableReason);
           return;
         }
-        if (msg.provider === "kokoro") {
+        // Kokoro answers synchronously off the sidecar; every catalogue-backed queued provider,
+        // cloud or local recipe, follows the model lookup below without a vendor allow-list.
+        if (msg.provider === "kokoro" && msg.model === "kokoro-82m") {
           // Local: sidecar synthesis, no queue, no ledger, zero cost (R-2).
           try {
             const result = await this.voiceService.localSpeech(store, msg.voiceId, line.text);
@@ -5631,8 +6362,9 @@ export class Coordinator {
               sheetVersion: sheet.version,
               purpose: "candidate-preview",
               provider: msg.provider,
-              model: "kokoro-82m",
+              model: msg.model,
               voiceId: msg.voiceId,
+              format: "wav",
               status: "ready",
               file: result.file,
               cached: result.cached,
@@ -5650,8 +6382,9 @@ export class Coordinator {
               sheetVersion: sheet.version,
               purpose: "candidate-preview",
               provider: "kokoro",
-              model: "kokoro-82m",
+              model: msg.model,
               voiceId: msg.voiceId,
+              format: "wav",
               status: "failed",
               file: null,
               cached: false,
@@ -5663,12 +6396,21 @@ export class Coordinator {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
-        // Cloud: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
-        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, "mp3");
+        const model = this.opts.manifest?.models.find(
+          (m) => m.provider === msg.provider && m.id === msg.model && m.capability === "voice-tts",
+        );
+        if (!model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `No ${msg.provider} voice model is available.`);
+          return;
+        }
+        // Queued providers: cache hit replays free; a miss dispatches through the queue (R-2, R-10).
+        const format = voiceFormatForModel(model);
+        const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, format, model.id);
         try {
-          const bytes = await readFile(toExtendedLength(join(store.dir, fromPortable(cached))));
-          const mp3 = bytes.subarray(0, 3).toString("ascii") === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0);
-          if (!mp3) throw new Error("invalid cache");
+          const bytes = new Uint8Array(
+            await readFile(toExtendedLength(join(store.dir, fromPortable(cached)))),
+          );
+          if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
           this.emit({
             at: new Date().toISOString(),
             type: "voice.audio",
@@ -5677,9 +6419,10 @@ export class Coordinator {
             sheetId: msg.sheetId,
             sheetVersion: sheet.version,
             purpose: "candidate-preview",
-            provider: "elevenlabs",
-            model: "eleven_multilingual_v2",
+            provider: msg.provider,
+            model: model.id,
             voiceId: msg.voiceId,
+            format,
             status: "ready",
             file: cached,
             cached: true,
@@ -5691,20 +6434,20 @@ export class Coordinator {
         } catch {
           /* miss → enqueue */
         }
-        const model = this.opts.manifest?.models.find(
-          (m) => m.provider === msg.provider && m.capability === "voice-tts",
-        );
-        if (!model) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "No cloud voice model is available for this provider.");
-          return;
-        }
         // A cloned voice speaks from a clip, so the clip has to exist before a job is enqueued.
         // Missing means the recording was deleted from under the library: reported with the reason
         // rather than dispatched into a take that cannot finish (SPEC-022 §1.3).
-        let speakerFile: string | undefined;
-        if (msg.provider === "comfyui") {
-          const voice = bundle.clonedVoices.find((v) => v.id === msg.voiceId);
-          const clip = voice ? await clipFor(store, voice) : null;
+        let voiceReference = false;
+        if (source.kind === "missing-clone") {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "That cloned voice is no longer in this world — choose another voice.",
+          );
+          return;
+        }
+        if (source.kind === "cloned") {
+          const clip = await clipFor(store, source.voice);
           if (clip === null) {
             this.rejectEnqueue(
               msg.requestId,
@@ -5713,7 +6456,7 @@ export class Coordinator {
             );
             return;
           }
-          speakerFile = clip;
+          voiceReference = true;
         }
         const request = this.voiceService.queuedPreviewRequest({
           worldId: msg.worldId,
@@ -5722,7 +6465,10 @@ export class Coordinator {
           voiceId: msg.voiceId,
           line,
           model,
-          ...(speakerFile !== undefined ? { speakerFile } : {}),
+          ...(voiceReference ? { voiceReference: true } : {}),
+          ...(msg.voiceUploadConfirmedFor !== undefined
+            ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor }
+            : {}),
         });
         request.input.params = {
           ...request.input.params,
@@ -5734,11 +6480,25 @@ export class Coordinator {
         };
         const queued = await this.enqueueBatch(msg.requestId, msg.kind, [request.input]);
         if (!queued.accepted) {
-          this.emit({ at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-            worldId: msg.worldId, sheetId: sheet.id, sheetVersion: sheet.version, purpose: "candidate-preview",
-            provider: "elevenlabs", model: model.id, voiceId: msg.voiceId, status: "failed", file: null,
-            cached: false, characterCount: normalizeSpeechText(line.text).length, estimatedMicroUsd: request.input.estimatedMicroUsd,
-            error: queued.reason ?? "Voice preview could not be queued." });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetId: sheet.id,
+            sheetVersion: sheet.version,
+            purpose: "candidate-preview",
+            provider: msg.provider,
+            model: model.id,
+            voiceId: msg.voiceId,
+            format,
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: normalizeSpeechText(line.text).length,
+            estimatedMicroUsd: request.input.estimatedMicroUsd,
+            error: queued.reason ?? "Voice preview could not be queued.",
+          });
         }
         return;
       }
@@ -5746,22 +6506,48 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
         const bible = store.getBundle().bible;
-        const failBible = (error: string, characters = 0) => this.emit({
-          at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-          worldId: msg.worldId, sheetVersion: bible.version, purpose: "bible-section",
-          sectionHeading: msg.sectionHeading, provider: "kokoro", model: "kokoro-82m",
-          voiceId: "unassigned", status: "failed", file: null, cached: false,
-          characterCount: characters, estimatedMicroUsd: 0, error,
-        } as DomainEvent);
-        if (!bible.present) { failBible("There is no bible in this world yet."); return; }
+        const failBible = (error: string, characters = 0) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetVersion: bible.version,
+            purpose: "bible-section",
+            sectionHeading: msg.sectionHeading,
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        if (!bible.present) {
+          failBible("There is no bible in this world yet.");
+          return;
+        }
         let bibleText: string;
-        try { bibleText = authoritativeBibleSpeech(bible.text, msg.sectionHeading).text; }
-        catch (error) { failBible(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
+        try {
+          bibleText = authoritativeBibleSpeech(bible.text, msg.sectionHeading).text;
+        } catch (error) {
+          failBible(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          return;
+        }
         await this.narrateSection({
-          store, frameKind: msg.kind, worldId: msg.worldId, requestId: msg.requestId,
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: bibleText, purpose: "bible-section", sectionHeading: msg.sectionHeading,
-          subject: { id: "bible", version: bible.version }, fail: failBible,
+          text: bibleText,
+          purpose: "bible-section",
+          sectionHeading: msg.sectionHeading,
+          subject: { id: "bible", version: bible.version },
+          fail: failBible,
         });
         return;
       }
@@ -5770,25 +6556,55 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
         const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
         let resolved: ReturnType<typeof authoritativeSheetSpeech> | null = null;
-        try { if (sheet) resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); } catch { /* emitted below */ }
+        try {
+          if (sheet) resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading);
+        } catch {
+          /* emitted below */
+        }
         const text = resolved?.text ?? "";
-        const fail = (error: string) => this.emit({
-          at: new Date().toISOString(), type: "voice.audio", requestId: msg.requestId,
-          worldId: msg.worldId, sheetId: msg.sheetId, sheetVersion: sheet?.version ?? 1,
-          purpose: "sheet-section", sectionHeading: msg.sectionHeading,
-          provider: sheet?.voice?.provider === "elevenlabs" ? "elevenlabs" : "kokoro",
-          model: sheet?.voice?.provider === "elevenlabs" ? "eleven_multilingual_v2" : "kokoro-82m",
-          voiceId: sheet?.voice?.voiceId ?? "unassigned", status: "failed", file: null,
-          cached: false, characterCount: text.length, estimatedMicroUsd: 0, error,
-        } as DomainEvent);
-        if (!sheet) { fail("The character is no longer available."); return; }
-        try { resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading); }
-        catch (error) { fail(error instanceof Error ? error.message : "Read aloud is unavailable."); return; }
+        const fail = (error: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            sheetVersion: sheet?.version ?? 1,
+            purpose: "sheet-section",
+            sectionHeading: msg.sectionHeading,
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: text.length,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        if (!sheet) {
+          fail("The character is no longer available.");
+          return;
+        }
+        try {
+          resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading);
+        } catch (error) {
+          fail(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          return;
+        }
         await this.narrateSection({
-          store, frameKind: msg.kind, worldId: msg.worldId, requestId: msg.requestId,
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: resolved.text, purpose: "sheet-section", sectionHeading: msg.sectionHeading,
-          subject: { id: sheet.id, version: sheet.version }, sheetId: sheet.id, fail,
+          text: resolved.text,
+          purpose: "sheet-section",
+          sectionHeading: msg.sectionHeading,
+          subject: { id: sheet.id, version: sheet.version },
+          sheetId: sheet.id,
+          fail,
         });
         return;
       }
@@ -6020,7 +6836,9 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await store
-          .gateOp(async () => rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true }))
+          .gateOp(async () =>
+            rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true }),
+          )
           .catch(() => {});
         await this.dropStagedReference(store, stagedReferenceKey("world-image"));
         await this.refreshWorldSnapshot(msg.worldId);
@@ -6508,7 +7326,9 @@ export class Coordinator {
           // Deleted between the two checks. The candidate we just wrote is the only trace, and
           // there is no longer anywhere to see it, so it goes rather than lingering unreachable.
           await store
-            .ownedWrite(() => rm(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", file))))
+            .ownedWrite(() =>
+              rm(toExtendedLength(join(store.dir, "references", msg.sheetId, "candidates", file))),
+            )
             .catch(() => {});
           report("failed", false, "The main photo was not changed because the character is unavailable.");
           return;
@@ -6524,7 +7344,9 @@ export class Coordinator {
           return;
         }
         if (result.cleanupError) {
-          void this.appLog?.append(mainPhotoLogRecord(msg.worldId, msg.sheetId, "candidate-cleanup", "upload"));
+          void this.appLog?.append(
+            mainPhotoLogRecord(msg.worldId, msg.sheetId, "candidate-cleanup", "upload"),
+          );
           report("accepted", true);
           return;
         }
@@ -6694,7 +7516,11 @@ export class Coordinator {
         const establishing = kit ? orderedLocationViews(kit)[0] : undefined;
         const anchorFile = msg.establishing === true ? undefined : establishing?.file;
         if (anchorFile === undefined && msg.establishing !== true && establishing !== undefined) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "This location has no accepted establishing view to anchor to.");
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "This location has no accepted establishing view to anchor to.",
+          );
           return;
         }
         let requests;
@@ -6773,7 +7599,9 @@ export class Coordinator {
         this.refreshIfStillOpen(store);
         report(
           take ? "landed" : "failed",
-          take ? undefined : "The view was not added because its permanent copy could not be made. Try again.",
+          take
+            ? undefined
+            : "The view was not added because its permanent copy could not be made. Try again.",
         );
         return;
       }
@@ -7087,7 +7915,9 @@ export class Coordinator {
         let requests;
         try {
           requests = angles.map(
-            (angle) => tileRequest(store.getBundle().meta, sheet, kit, model, angle, store.getBundle().artDirection).input,
+            (angle) =>
+              tileRequest(store.getBundle().meta, sheet, kit, model, angle, store.getBundle().artDirection)
+                .input,
           );
         } catch {
           this.rejectEnqueue(
@@ -7451,7 +8281,9 @@ export class Coordinator {
   /** Every bench-take job of this world, as the facts recovery joins on. */
   private benchJobFacts(worldId: string): BenchRecoveryJobFacts[] {
     return this.getState()
-      .app.jobs.filter((job) => job.worldId === worldId && job.target.kind === "bench-take" && job.target.id !== undefined)
+      .app.jobs.filter(
+        (job) => job.worldId === worldId && job.target.kind === "bench-take" && job.target.id !== undefined,
+      )
       .map((job) => ({
         jobId: job.id,
         targetId: job.target.id!,
@@ -7478,9 +8310,9 @@ export class Coordinator {
       this.transport.broadcastSnapshot();
       return;
     }
-    const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () => this.nowIso()).catch(
-      () => false,
-    );
+    const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () =>
+      this.nowIso(),
+    ).catch(() => false);
     const session = touched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
     await this.backfillBenchPosters(store, session);
     this.readModel.setBench({ worldId: store.worldId, session });
@@ -7505,7 +8337,13 @@ export class Coordinator {
       session.takes.flatMap((take) =>
         take.media === undefined
           ? []
-          : [{ id: take.id, file: take.media.file, dir: join(store.dir, sessionMediaDir(session.id, take.id)) }],
+          : [
+              {
+                id: take.id,
+                file: take.media.file,
+                dir: join(store.dir, sessionMediaDir(session.id, take.id)),
+              },
+            ],
       ),
       this.opts.takePosterMaker,
       {
@@ -7533,7 +8371,10 @@ export class Coordinator {
    * WITH media and cost, and recording it twice would race the landing.
    */
   private async recordBenchTerminal(job: Job): Promise<void> {
-    const [sessionId, takeId] = (job.target.id ?? "").split("/") as [SessionId | undefined, string | undefined];
+    const [sessionId, takeId] = (job.target.id ?? "").split("/") as [
+      SessionId | undefined,
+      string | undefined,
+    ];
     if (!sessionId || !takeId) return;
     const bench = await this.benchFor(job.worldId, sessionId);
     if (!bench) return;
@@ -7731,7 +8572,11 @@ export class Coordinator {
         // still satisfies what §8.2 actually requires: somewhere outside the world.
         const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
         if (this.opts.adapter) {
-          await writeSessionFiles(this.opts.adapter, cwd, this.sessionInput(url ? { worldQueryUrl: url } : {}));
+          await writeSessionFiles(
+            this.opts.adapter,
+            cwd,
+            this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          );
         }
         return { cwd, leaseToken: lease.token };
       },
@@ -7793,7 +8638,13 @@ export class Coordinator {
       },
       describeEntry: (context) => describeEntryContext(context, store.getBundle()),
       onTurnFailed: ({ conversationId, runId, cause }) => {
-        void this.appLog?.append({ level: "warn", event: "world-chat.turn-failed", conversationId, runId, cause });
+        void this.appLog?.append({
+          level: "warn",
+          event: "world-chat.turn-failed",
+          conversationId,
+          runId,
+          cause,
+        });
       },
       onProgress: (conversationId, label) => {
         this.emit({
@@ -7870,7 +8721,12 @@ export class Coordinator {
         mediaBlockedReason: (candidate) => {
           const route = mediaRouteFor(candidate, store.worldId);
           if (route.kind === "invalid") return route.reason;
-          const blocking = blockingDependencies(candidate, bundle, bundle.proposals.map((staged) => staged.proposal), loaded.candidates);
+          const blocking = blockingDependencies(
+            candidate,
+            bundle,
+            bundle.proposals.map((staged) => staged.proposal),
+            loaded.candidates,
+          );
           return blocking.length > 0 ? explainBlocked(blocking) : null;
         },
       }),
@@ -8024,20 +8880,32 @@ export class Coordinator {
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    // Close both doors synchronously. Handlers already past the transport remain tracked below,
+    // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
+    this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
+      const transportStopped = this.transport.stop();
       this.setup?.dispose();
-      this.jobQueue?.dispose();
+      for (const dispose of this.lifecycleDisposers) dispose();
+      this.lifecycleDisposers.clear();
+      for (const timer of this.lifecycleTimers) clearInterval(timer);
+      this.lifecycleTimers.clear();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.
       this.backfillAbort?.abort();
-      // In-flight frames answer first, then the door shuts: no new work can arrive during the
-      // drains below. Transport.stop() was written and never called, so a stopped coordinator
-      // went on listening — invisible in the packaged app, where the process exits regardless,
-      // and the reason a stop-and-restart in one process could never bind its port again.
+      // The door is already closing, so once it has stopped there can be no additions to this
+      // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
+      await transportStopped;
       await Promise.allSettled(this.activeMessages);
-      await this.transport.stop();
+      await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
+
+      // Message handlers have now either committed their queue rows or recorded their refusal.
+      // Only now may queue disposal cancel execution and suppress further journal transitions.
+      this.jobQueue?.dispose();
+      this.opts.voice?.dispose?.();
+      await this.opts.comfyui?.service.dispose().catch(() => {});
       await Promise.allSettled(this.backgroundWork);
       await Promise.allSettled(this.carrying.values());
       await this.appearanceWrite;

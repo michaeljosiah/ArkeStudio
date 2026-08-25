@@ -370,6 +370,9 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
  * somewhere wrong.
  */
 export function jobOrigin(job: Job): JobOrigin | null {
+  if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
+    return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };
+  }
   const reference = REFERENCE_ORIGINS[job.target.kind];
   if (reference) {
     // Every reference target id is the sheet's slug followed by whatever distinguishes this
@@ -420,7 +423,7 @@ export interface SpendSummary {
   mixed: boolean;
   reportedEntries: number;
   derivedEntries: number;
-  /** Local runs: unmetered, counted, never $0.00 line items (R-12, D9). */
+  /** Unmetered runs: counted, never $0.00 line items (R-12, D9). */
   unmeteredRuns: number;
   byProvider: Array<{ provider: string; microUsd: number; entries: number; unmetered: boolean }>;
 }

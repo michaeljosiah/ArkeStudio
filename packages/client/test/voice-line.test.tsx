@@ -5,7 +5,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __applyForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
@@ -70,6 +70,61 @@ describe("the voice-line dialog", () => {
     assert.doesNotMatch(html, /Voice generation arrives with SPEC-011/);
   });
 
+  it("offers only deliveries the assigned model declares", () => {
+    const prodId = production()?.meta.id;
+    if (prodId === undefined) return;
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: FIXTURE_STATE.app.manifest
+          ? {
+              ...FIXTURE_STATE.app.manifest,
+              models: [
+                ...FIXTURE_STATE.app.manifest.models,
+                {
+                  id: "eleven_multilingual_v2",
+                  provider: "elevenlabs",
+                  capability: "voice-tts",
+                  displayName: "Eleven Multilingual v2",
+                  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+                  limits: { deliveries: ["measured", "urgent"] },
+                  pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+                },
+              ],
+            }
+          : {
+              manifestVersion: 1,
+              generated: "2026-08-25",
+              models: [
+                {
+                  id: "eleven_multilingual_v2",
+                  provider: "elevenlabs",
+                  capability: "voice-tts",
+                  displayName: "Eleven Multilingual v2",
+                  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+                  limits: { deliveries: ["measured", "urgent"] },
+                  pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+                },
+              ],
+            },
+      },
+      world: {
+        ...FIXTURE_STATE.world!,
+        sheets: FIXTURE_STATE.world!.sheets.map((sheet) =>
+          sheet.voice
+            ? { ...sheet, voice: { ...sheet.voice, provider: "elevenlabs", model: "eleven_multilingual_v2" } }
+            : sheet,
+        ),
+      },
+    };
+    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/generate/voice-line`, state);
+    assert.match(html, /aria-label="Delivery"/);
+    assert.match(html, />measured</);
+    assert.match(html, />urgent</);
+    assert.doesNotMatch(html, />breaking</);
+  });
+
   it("will not dispatch for a speaker with no voice, and says where one is given", () => {
     // A sheet is where a voice is assigned, so the refusal names the sheet rather than the
     // button — there is nothing to press until somebody goes there.
@@ -85,6 +140,71 @@ describe("the voice-line dialog", () => {
     const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/generate/voice-line`, voiceless);
     assert.match(html, /has no assigned voice/);
   });
+
+  it("shows an existing unready cloned assignment and disables production composition", () => {
+    const prodId = production()?.meta.id;
+    if (prodId === undefined) return;
+    const clonedModel = {
+      id: "comfyui-cloned-voice",
+      provider: "comfyui" as const,
+      capability: "voice-tts" as const,
+      displayName: "Local Cloned Voice",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxPromptChars: 400, audioFormat: "flac" as const },
+      pricing: { kind: "unmetered" as const },
+    };
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: {
+          ...(FIXTURE_STATE.app.manifest ?? { manifestVersion: 1, generated: "2026-08-25", models: [] }),
+          models: [...(FIXTURE_STATE.app.manifest?.models ?? []), clonedModel],
+        },
+        comfyui: {
+          engine: {
+            source: "absent",
+            state: "absent",
+            locality: "local",
+            location: null,
+            version: null,
+            instanceId: null,
+            detail: null,
+            detected: [],
+          },
+          recipes: [{
+            recipeId: clonedModel.id,
+            recipeVersion: 1,
+            displayName: clonedModel.displayName,
+            capability: "voice-tts",
+            state: "disabled",
+            reason: "Cloned voice setup is unavailable in this build.",
+          }],
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      },
+      world: {
+        ...FIXTURE_STATE.world!,
+        clonedVoices: [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav" } as never],
+        sheets: FIXTURE_STATE.world!.sheets.map((sheet) => ({
+          ...sheet,
+          voice: {
+            provider: "comfyui",
+            model: clonedModel.id,
+            voiceId: "harbour",
+            label: "Harbour",
+            assignedAtVersion: sheet.version,
+          },
+        })),
+      },
+    };
+    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/generate/voice-line`, state);
+    assert.match(html, /voice · Harbour \(comfyui\)/);
+    assert.match(html, /Assigned voice unavailable/);
+    assert.match(html, /Cloned voice setup is unavailable in this build/);
+    const at = html.indexOf('data-testid="voice-line-generate"');
+    assert.ok(at >= 0 && html.slice(at, html.indexOf(">", at)).includes("disabled"));
+  });
 });
 
 /**
@@ -95,7 +215,15 @@ describe("the voice-line dialog", () => {
 describe("choosing a character's voice", () => {
   const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
   const candidate = (voiceId: string, provider: string, local: boolean) => ({
-    candidate: { provider, voiceId, label: voiceId, attributes: ["warm"], local, canClone: !local },
+    candidate: {
+      provider,
+      model: provider === "kokoro" ? "kokoro-82m" : "eleven_multilingual_v2",
+      voiceId,
+      label: voiceId,
+      attributes: ["warm"],
+      local,
+      canClone: !local,
+    },
     matched: [],
     overlap: 0,
   });
@@ -109,6 +237,7 @@ describe("choosing a character's voice", () => {
       ],
       previewLine: { text: "the verse, under the water", source: "own-line" as const },
       cloudPreviewMicroUsd: 30000,
+      previewMicroUsdByVoice: {},
     },
   };
 
@@ -132,6 +261,58 @@ describe("choosing a character's voice", () => {
       voiceCandidates: candidates,
     });
     assert.match(html, /class="fy-voicelist"/);
+  });
+
+  it("keeps the current unready clone visible, with Preview and Assign disabled", () => {
+    const baseSheet = FIXTURE_STATE.world!.sheets[0]!;
+    const clone = {
+      candidate: {
+        provider: "comfyui",
+        model: "comfyui-cloned-voice",
+        voiceId: "harbour",
+        label: "Harbour",
+        attributes: ["warm"],
+        local: true,
+        canClone: false,
+        unavailableReason: "Cloned voice setup is unavailable in this build.",
+      },
+      matched: [],
+      overlap: 0,
+    };
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        clonedVoices: [{ id: "harbour", name: "Harbour", clip: "voices/harbour.wav" } as never],
+        sheets: FIXTURE_STATE.world!.sheets.map((sheet) =>
+          sheet.id === baseSheet.id
+            ? {
+                ...sheet,
+                voice: {
+                  provider: "comfyui",
+                  model: "comfyui-cloned-voice",
+                  voiceId: "harbour",
+                  label: "Harbour",
+                  assignedAtVersion: sheet.version,
+                },
+              }
+            : sheet,
+        ),
+      },
+    };
+    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, state, {
+      voiceCandidates: {
+        [sheetId]: {
+          ...candidates[sheetId],
+          ranked: [clone],
+        },
+      },
+    });
+    assert.match(html, /Harbour/);
+    assert.match(html, /current/);
+    assert.match(html, /Cloned voice setup is unavailable in this build/);
+    assert.match(html, /<button[^>]*disabled=""[^>]*>Preview · free<\/button>/);
+    assert.match(html, /<button[^>]*disabled=""[^>]*>Assigned<\/button>/);
   });
 });
 
@@ -170,6 +351,79 @@ describe("the narrator in Settings", () => {
   });
 });
 
+describe("remote ComfyUI locality", () => {
+  it("names a non-loopback URL as remote", () => {
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        comfyui: {
+          engine: {
+            source: "user-url",
+            state: "ready",
+            locality: "remote",
+            location: "http://10.0.0.4:8188",
+            version: "0.33.1",
+            instanceId: "remote-1",
+            detail: null,
+            detected: [],
+          },
+          recipes: [],
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      },
+    };
+    const html = render("/settings/local-runtime?group=comfyui", state);
+    assert.match(html, /Your URL · never spawned · remote/);
+  });
+
+  it("keeps managed Download beside a detected but unselected install", () => {
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        comfyui: {
+          engine: {
+            source: "absent",
+            state: "absent",
+            locality: "local",
+            location: null,
+            version: null,
+            instanceId: null,
+            detail: null,
+            detected: [{ location: "C:\\AI\\ComfyUI", version: null }],
+          },
+          recipes: [],
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+        setup: {
+          running: false,
+          diskFreeMb: 100000,
+          components: [{
+            id: "comfyui-runtime",
+            displayName: "ComfyUI",
+            purpose: "Runs image and video recipes",
+            sizeMb: 2034,
+            state: "available",
+            bytesDone: 0,
+            bytesTotal: 2034 * 1024 * 1024,
+            bytesPerSecond: null,
+          }],
+        },
+      },
+    };
+    __setStateForTest(state, { setupStatus: state.app.setup });
+    const html = renderToString(
+      <MemoryRouter initialEntries={["/settings/local-runtime?group=comfyui"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    assert.match(html, /data-testid="comfyui-detected"/);
+    assert.match(html, /data-testid="comfyui-managed-option"/);
+    assert.match(html, />Download<\/button>/);
+  });
+});
+
 describe("the narrator round trip", () => {
   /**
    * The write reached settings.json and the row never changed: the reducer existed on the
@@ -190,6 +444,46 @@ describe("the narrator round trip", () => {
       voice: null,
     });
     assert.equal(cleared.app.narrator, null);
+  });
+});
+
+describe("bible read restoration", () => {
+  it("restores bible purpose without inventing a sheet id", () => {
+    const requestId = "01J8F3K2QW9VZX4N7M0RTYB6HZ";
+    const job = {
+      id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HZ",
+      idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HY",
+      worldId: FIXTURE_WORLD_ID,
+      target: { kind: "voice-preview", id: "bible/elevenlabs/eleven-v2/roger" },
+      capability: "voice-tts",
+      provider: "elevenlabs",
+      model: "eleven-v2",
+      params: {
+        requestId,
+        purpose: "bible-section",
+        sectionHeading: "The tide",
+        sheetVersion: 2,
+        voiceId: "roger",
+        audioFormat: "mp3",
+      },
+      estimatedMicroUsd: 10,
+      status: "succeeded",
+      providerJobId: "remote-1",
+      attempt: 1,
+      landedFiles: [".cache/voice-previews/read.mp3"],
+      error: null,
+      createdAt: "2026-08-25T12:00:00.000Z",
+      updatedAt: "2026-08-25T12:00:01.000Z",
+    } satisfies ClientState["app"]["jobs"][number];
+    __setStateForTest(FIXTURE_STATE);
+    __handleFrameForTest({
+      kind: "snapshot",
+      seq: 2,
+      state: { ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, jobs: [job] } },
+    });
+    const restored = __stateForTest().voiceAudio[requestId];
+    assert.equal(restored?.purpose, "bible-section");
+    assert.equal(restored && "sheetId" in restored, false);
   });
 });
 

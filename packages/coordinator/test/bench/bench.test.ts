@@ -967,8 +967,14 @@ describe("reading a line on the bench (design 70)", () => {
     capability: "voice-tts",
     displayName: "Test Voice",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: {},
+    limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"] },
     pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  const VOICE_SIBLING: ManifestModel = {
+    ...VOICE,
+    id: "test-tts-sibling",
+    displayName: "Test Voice Sibling",
+    limits: { deliveries: ["urgent"], audioFormat: "wav" },
   };
   /** A local row, which maps far fewer deliveries than the cloud one. */
   const LOCAL: ManifestModel = {
@@ -976,12 +982,21 @@ describe("reading a line on the bench (design 70)", () => {
     id: "test-local-tts",
     provider: "kokoro",
     displayName: "Local Voice",
+    limits: { deliveries: ["measured", "urgent"] },
+    pricing: { kind: "unmetered" },
+  };
+  const CLONED: ManifestModel = {
+    ...VOICE,
+    id: "comfyui-cloned-voice",
+    provider: "comfyui",
+    displayName: "Local Cloned Voice",
+    limits: { maxPromptChars: 400, audioFormat: "flac" },
     pricing: { kind: "unmetered" },
   };
   const MANIFEST_3: ModelManifest = {
     manifestVersion: 1,
     generated: "2026-08-17",
-    models: [IMAGE_MODEL, VOICE, LOCAL],
+    models: [IMAGE_MODEL, VOICE_SIBLING, VOICE, LOCAL, CLONED],
   };
   const LINE = "The tide-clock keeps the drowned god's hours.";
 
@@ -999,7 +1014,16 @@ describe("reading a line on the bench (design 70)", () => {
       },
       { at: CLOCK() },
     );
-    return planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST_3, {
+    const bundle = model.provider === "comfyui"
+      ? {
+          ...store.getBundle(),
+          clonedVoices: [{
+            id: "harbour-glass", name: "Harbour glass", clip: "voices/harbour-glass.wav",
+            description: "Low and dry", attributes: ["low", "dry"], consent: true, created: CLOCK(),
+          }],
+        }
+      : store.getBundle();
+    return planBenchDispatch((await opened.store.fold())!, bundle, MANIFEST_3, {
       worldId: store.worldId,
       requestId: "v1",
       at: CLOCK(),
@@ -1007,7 +1031,12 @@ describe("reading a line on the bench (design 70)", () => {
   }
 
   it("sends the words themselves, and prices them exactly", async () => {
-    const plan = await planVoice(VOICE, { voiceId: "vale", voiceLabel: "Vale" });
+    const plan = await planVoice(VOICE, {
+      voiceId: "vale",
+      voiceProvider: VOICE.provider,
+      voiceModel: VOICE.id,
+      voiceLabel: "Vale",
+    });
     assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
     if (plan.ok) {
       const params = plan.inputs[0]!.params;
@@ -1018,7 +1047,20 @@ describe("reading a line on the bench (design 70)", () => {
       // guess; the characters are already typed.
       assert.equal(plan.inputs[0]!.estimatedMicroUsd, LINE.length * 300);
       assert.equal(plan.inputs[0]!.capability, "voice-tts", "the mode is voice; the capability is not");
+      assert.equal(plan.inputs[0]!.model, VOICE.id, "a sibling model earlier in the manifest cannot take the voice");
+      assert.equal(plan.inputs[0]!.params["audioFormat"], "mp3");
+      assert.equal(plan.reserved[0]!.request.params.kind === "voice" && plan.reserved[0]!.request.params.voiceModel, VOICE.id);
     }
+  });
+
+  it("refuses a voice target from a sibling model behind the same provider", async () => {
+    const plan = await planVoice(VOICE, {
+      voiceId: "vale",
+      voiceProvider: VOICE.provider,
+      voiceModel: VOICE_SIBLING.id,
+    });
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /another speech model/);
   });
 
   it("refuses a delivery the provider cannot express, rather than dropping it", async () => {
@@ -1037,6 +1079,20 @@ describe("reading a line on the bench (design 70)", () => {
     const plan = await planVoice(VOICE, {});
     assert.equal(plan.ok, false);
     if (!plan.ok) assert.match(plan.reason, /No voice is chosen/);
+  });
+
+  it("resolves a cloned voice to the host reference seam without a clip path", async () => {
+    const plan = await planVoice(CLONED, {
+      voiceId: "harbour-glass",
+      voiceProvider: "comfyui",
+      voiceModel: "comfyui-cloned-voice",
+      voiceLabel: "Harbour glass",
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (!plan.ok) return;
+    assert.equal(plan.inputs[0]!.voiceReference, true);
+    assert.equal("voiceReference" in plan.inputs[0]!.params, false);
+    assert.equal("speakerFile" in plan.inputs[0]!.params, false);
   });
 
   it("asks for N reads the way image asks for N stills", async () => {

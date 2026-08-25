@@ -175,6 +175,10 @@ export const ModelLimitsSchema = z
      * silently cut at the end loses the shot list rather than the adjectives.
      */
     maxPromptChars: z.number().int().min(1).optional(),
+    /** Delivery directions this concrete speech model has a measured wire mapping for. */
+    deliveries: z.array(z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"])).optional(),
+    /** Generated speech container, consumed consistently by cache, verification, media, and events. */
+    audioFormat: z.enum(["wav", "mp3", "flac"]).optional(),
   })
   .strict();
 export type ModelLimits = z.infer<typeof ModelLimitsSchema>;
@@ -917,7 +921,8 @@ export function modelPriceCopy(model: ManifestModel): string {
   const pricing = model.pricing;
   switch (pricing.kind) {
     case "unmetered":
-      return "on this machine · unmetered";
+      // Locality belongs to the selected runtime. A ComfyUI URL may be another machine.
+      return "unmetered";
     case "perSecond":
       return `${formatMicroUsd(pricing.microUsdPerSecond)} / second`;
     case "perImage":

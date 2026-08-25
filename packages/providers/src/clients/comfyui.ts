@@ -26,6 +26,7 @@ import { ProviderRequestRejectedError } from "../types.js";
 
 /** Where the engine is listening right now, or null when none is configured and healthy. */
 export type EngineBaseUrl = () => string | null;
+export type EngineLocality = () => "local" | "remote";
 
 /**
  * What a recipe is doing while it counts, by capability.
@@ -63,6 +64,10 @@ export type ComfyUiPreflight = (
  */
 export const COMFYUI_VERSION_FLOOR = "0.3.45";
 
+function isRedirect(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
 /** "0.33.1" ≥ "0.3.45"? Numeric segment compare; anything unparseable compares as unknown. */
 export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSION_FLOOR): boolean | null {
   const parse = (v: string): number[] | null => {
@@ -93,18 +98,19 @@ const INTERNAL_PARAMS = new Set([
   /*
    * Everything a voice dispatch carries, taken from a real job rather than guessed.
    *
-   * `voiceId` is the job's own subject and `speakerFile` is a path on THIS machine that only
-   * becomes a graph value once uploaded. The rest — the correlation id, what the line is for,
+   * `voiceId` is the job's own subject and `voiceReference` only marks that the queue must attach
+   * ephemeral host-read bytes. The rest — the correlation id, what the line is for,
    * whose sheet it came from and how long it is — are the coordinator's bookkeeping, the exact
    * analogue of `provenance` on an image job. Only `text` and `seed` are controls of the recipe.
    */
   "voiceId",
-  "speakerFile",
+  "voiceReference",
   "requestId",
   "purpose",
   "sheetId",
   "sheetVersion",
   "characterCount",
+  "audioFormat",
   "references",
   "referenceRoles",
   "artDirection",
@@ -155,12 +161,6 @@ export class ComfyUiClient implements ProviderClient {
     private readonly baseUrl: EngineBaseUrl,
     private readonly preflight: ComfyUiPreflight,
     /**
-     * Reads a speaker clip off this machine, for the one recipe whose input is a file the app
-     * owns. Optional because every other recipe is text-to-something and never touches the disk;
-     * a voice dispatch without it refuses by name rather than uploading nothing.
-     */
-    private readonly readClip?: (path: string) => Promise<Uint8Array>,
-    /**
      * Opens the engine's progress socket (SPEC-021 D16). Injected so the tests can drive it, and
      * optional because progress is the one thing a dispatch works perfectly well without.
      */
@@ -175,6 +175,8 @@ export class ComfyUiClient implements ProviderClient {
      * device is the host's to ask.
      */
     private readonly freeVramMb?: () => Promise<number | null>,
+    /** The device probe belongs to this computer and is invalid for a remote URL engine. */
+    private readonly engineLocality: EngineLocality = () => "local",
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -182,6 +184,25 @@ export class ComfyUiClient implements ProviderClient {
   /** What each live prompt is doing, so a count can be named without naming a node (R-1). */
   private readonly stages = new Map<string, string>();
   private socket: ProgressSocket | null = null;
+  private socketBase: string | null = null;
+  private disposed = false;
+
+  private closeSocket(): void {
+    const socket = this.socket;
+    this.socket = null;
+    this.socketBase = null;
+    if (socket) {
+      socket.onMessage = null;
+      socket.onClose = null;
+      try {
+        socket.close();
+      } catch {
+        /* progress is optional; a half-open socket must not fail lifecycle work */
+      }
+    }
+    this.steps.clear();
+    this.stages.clear();
+  }
 
   /**
    * Listen to the engine say what it is doing.
@@ -192,12 +213,18 @@ export class ComfyUiClient implements ProviderClient {
    * Failing to open it is not a dispatch failure: the job runs, and `poll` simply has no figure.
    */
   private listen(base: string): void {
-    if (this.socket || !this.openSocket) return;
+    if (this.disposed || !this.openSocket) return;
+    if (this.socket && this.socketBase === base) return;
+    if (this.socket) this.closeSocket();
     try {
       const socket = this.openSocket(`${base.replace(/^http/, "ws")}/ws?clientId=arke-studio`);
       this.socket = socket;
+      this.socketBase = base;
       socket.onClose = () => {
-        this.socket = null;
+        if (this.socket === socket) {
+          this.socket = null;
+          this.socketBase = null;
+        }
       };
       socket.onMessage = (raw: string) => {
         try {
@@ -222,7 +249,17 @@ export class ComfyUiClient implements ProviderClient {
       };
     } catch {
       this.socket = null;
+      this.socketBase = null;
     }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.closeSocket();
+  }
+
+  resetTransport(): void {
+    this.closeSocket();
   }
 
   private require(): string {
@@ -238,7 +275,7 @@ export class ComfyUiClient implements ProviderClient {
    * floor. What it cannot prove — files, nodes — is readiness's business, not this probe's.
    */
   async validateKey(): Promise<CapabilityProbe[]> {
-    const capabilities = ["image", "video"] as const;
+    const capabilities = ["image", "video", "voice-tts"] as const;
     const base = this.baseUrl();
     if (base === null) {
       return capabilities.map((capability) => ({
@@ -305,14 +342,13 @@ export class ComfyUiClient implements ProviderClient {
       if (text === undefined || text.length === 0) {
         throw new Error(`comfyui: ${recipe.displayName} needs a line to speak`);
       }
-      const clip = params["speakerFile"];
-      if (typeof clip !== "string" || clip.length === 0) {
+      const clip = request.voiceReference;
+      if (!clip) {
         throw new Error(`comfyui: ${recipe.displayName} needs the voice's own recording`);
       }
-      // Still the path on this machine. `submit` uploads it and swaps in the engine's own
-      // filename, because `LoadAudio.audio` is a dropdown over the engine's input directory and
-      // a path from here means nothing on the other side of the wire.
-      return { ...seedValue, text, speakerFile: clip };
+      // A placeholder only. `submit` uploads the ephemeral bytes and swaps in the engine's own
+      // filename before graph substitution; no host path exists at this layer.
+      return { ...seedValue, text, speakerFile: clip.name };
     }
     const prompt = typeof params["prompt"] === "string" ? params["prompt"] : undefined;
     if (prompt === undefined || prompt.length === 0) {
@@ -370,31 +406,34 @@ export class ComfyUiClient implements ProviderClient {
    * a clip this machine owns has to cross the wire before the graph can reference it. ComfyUI's
    * upload endpoint is `/upload/image` for audio too — the name is the engine's, not a mistake.
    *
-   * `overwrite` keeps the directory from filling with `harbour-glass (1).wav` on every preview:
-   * the clip is content the app owns and a re-upload of the same voice is the same bytes.
+   * The name is content-addressed before it reaches this client, so two worlds cannot overwrite
+   * each other's reference clips and repeated use of identical bytes remains stable.
    */
-  private async uploadClip(base: string, clipPath: string): Promise<string> {
-    if (!this.readClip) {
-      throw new Error("comfyui: this build cannot read a voice recording from disk");
+  private async uploadClip(
+    base: string,
+    clip: NonNullable<SubmitRequest["voiceReference"]>,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!/^[0-9a-f]{64}\.(wav|mp3)$/.test(clip.name)) {
+      throw new ProviderRequestRejectedError("comfyui: the voice recording has no safe content-addressed name");
     }
-    let bytes: Uint8Array;
-    try {
-      bytes = await this.readClip(clipPath);
-    } catch {
-      // The path is the app's own and R-1 keeps node ids out of user-facing errors; a path is
-      // the same kind of detail, so this names the clip rather than where it lives.
-      throw new ProviderRequestRejectedError("comfyui: that voice's recording could not be read");
-    }
-    // Both separators: the clip path is this machine's, and on Windows that is backslashes —
-    // splitting on "/" alone uploads the whole path as the filename.
-    const name = clipPath.split(/[\\/]/).pop() ?? "voice.wav";
     const form = new FormData();
     // Copied into a plain ArrayBuffer: a Uint8Array view can sit on a larger pooled buffer, and
     // handing Blob the view's buffer would upload whatever else is in it.
-    const body = bytes.slice().buffer as ArrayBuffer;
-    form.append("image", new Blob([body], { type: "audio/wav" }), name);
+    const body = clip.data.slice().buffer as ArrayBuffer;
+    form.append("image", new Blob([body], { type: clip.contentType }), clip.name);
     form.append("overwrite", "true");
-    const response = await this.fetchImpl(`${base}/upload/image`, { method: "POST", body: form });
+    const response = await this.fetchImpl(`${base}/upload/image`, {
+      method: "POST",
+      redirect: "manual",
+      body: form,
+      ...(signal !== undefined ? { signal } : {}),
+    });
+    if (isRedirect(response.status)) {
+      throw new ProviderRequestRejectedError(
+        `comfyui: the engine redirected the voice recording upload (HTTP ${response.status}); Arke refused to send it to another destination`,
+      );
+    }
     if (!response.ok) {
       throw new ProviderRequestRejectedError(
         `comfyui: the engine would not accept the voice recording (HTTP ${response.status})`,
@@ -423,7 +462,7 @@ export class ComfyUiClient implements ProviderClient {
    */
   private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
     const need = recipe.hardware.minVramMb;
-    if (!this.freeVramMb || need <= 0) return;
+    if (this.engineLocality() === "remote" || !this.freeVramMb || need <= 0) return;
     const first = await this.freeVramMb().catch(() => null);
     // Unknown stays unknown and dispatches (SPEC-021 D15): a card this build cannot measure is
     // not a card this build may refuse.
@@ -443,8 +482,12 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   async submit(_key: string, request: SubmitRequest, _context?: ProviderCallContext): Promise<SubmitResult> {
+    if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const recipe = comfyUiRecipeById(request.model);
     if (!recipe) throw new Error(`comfyui: "${request.model}" is not a shipped recipe`);
+    if (recipe.capability === "voice-tts" && request.params["audioFormat"] !== "flac") {
+      throw new ProviderRequestRejectedError("comfyui: the cloned-voice recipe output format must be FLAC");
+    }
     // The freeze is only half the guarantee (R-15). A job journalled before an app update
     // carries the identity it was planned, priced and accepted as; this build ships whatever
     // the catalogue now holds. Running the current graph under the old job's name is exactly
@@ -479,14 +522,21 @@ export class ComfyUiClient implements ProviderClient {
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.
     if (recipe.capability === "voice-tts") {
-      values["speakerFile"] = await this.uploadClip(base, String(values["speakerFile"]));
+      values["speakerFile"] = await this.uploadClip(base, request.voiceReference!, request.signal);
     }
     const graph = substituteRecipeParams(recipe, values);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
+      redirect: "manual",
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: graph, client_id: "arke-studio" }),
     });
+    if (isRedirect(status)) {
+      throw new ProviderRequestRejectedError(
+        `comfyui: the engine redirected prompt submission (HTTP ${status}); Arke refused to send it to another destination`,
+      );
+    }
     const promptId = (body as { prompt_id?: string } | null)?.prompt_id;
     if (status >= 400 || !promptId) {
       const errors = (body as { node_errors?: Record<string, unknown> } | null)?.node_errors;
@@ -511,6 +561,7 @@ export class ComfyUiClient implements ProviderClient {
    * with that said.
    */
   async poll(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<PollResult> {
+    if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const base = this.require();
     this.listen(base);
     const queue = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
@@ -556,13 +607,21 @@ export class ComfyUiClient implements ProviderClient {
    * names, because "whatever else the graph touched" is exactly the surface R-1 closed.
    */
   async fetchArtifacts(_key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]> {
+    if (this.disposed) throw new Error("comfyui: the provider client is disposed");
     const model = context?.model;
     const recipe = model !== undefined ? comfyUiRecipeById(model) : null;
     if (!recipe) {
       throw new Error("comfyui: cannot select the authoritative output without the recipe id");
     }
     const base = this.require();
-    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/history/${remoteId}`, {});
+    const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/history/${remoteId}`, {
+      redirect: "manual",
+    });
+    if (isRedirect(status)) {
+      throw new Error(
+        `comfyui: the engine redirected output history (HTTP ${status}); Arke refused to follow it`,
+      );
+    }
     if (status >= 400) throw new Error(`comfyui: the engine answered HTTP ${status} to /history`);
     const entry = (body as Record<string, unknown> | null)?.[remoteId] as
       | { outputs?: Record<string, Record<string, unknown>> }
@@ -591,7 +650,12 @@ export class ComfyUiClient implements ProviderClient {
       const url =
         `${base}/view?filename=${encodeURIComponent(file.filename)}` +
         `&subfolder=${encodeURIComponent(file.subfolder)}&type=${encodeURIComponent(file.type)}`;
-      const res = await this.fetchImpl(url, {});
+      const res = await this.fetchImpl(url, { redirect: "manual" });
+      if (isRedirect(res.status)) {
+        throw new Error(
+          `comfyui: the engine redirected the download for "${file.filename}" (HTTP ${res.status}); Arke refused to follow it`,
+        );
+      }
       if (res.status >= 400) throw new Error(`comfyui: fetching "${file.filename}" answered HTTP ${res.status}`);
       const data = new Uint8Array(await res.arrayBuffer());
       const ext = (file.filename.split(".").pop() ?? "bin").toLowerCase();
@@ -621,6 +685,7 @@ export class ComfyUiClient implements ProviderClient {
    * work on a shared engine, or a prompt already terminal — is left exactly alone.
    */
   async cancel(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<void> {
+    if (this.disposed) return;
     const base = this.require();
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
     if (status >= 400) throw new Error(`comfyui: the engine answered HTTP ${status} to /queue`);

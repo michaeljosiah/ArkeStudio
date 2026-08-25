@@ -328,9 +328,8 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
   });
 
   it("does not commit a measurement to a world that closed while it was probing", async () => {
-    // The case five rounds kept finding one guard at a time: the probe outlives the gate, and
-    // gateOp does not refuse work on a closed store — it commits without the world's lock.
-    // Written as a test rather than a sixth guard, so the next path to forget it fails here.
+    // The probe outlives the gate, so the store itself must refuse the eventual write once close
+    // begins. Written against the store invariant rather than relying only on a caller predicate.
     const { store } = await open();
     try {
       const song = await sourceFile("switched-away.mp3", "the world moved on mid-probe");
@@ -401,6 +400,23 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
       "one copy; what it is used for is the links",
     );
     await store.close();
+  });
+
+  it("does not deduplicate against metadata whose media has changed", async () => {
+    const { dir, store } = await open();
+    try {
+      const source = await sourceFile("hash-guard.txt", "original bytes");
+      const first = await fileArtifact(store, { sourcePath: source });
+      assert.equal(first.outcome, "filed");
+      await writeFile(join(dir, "artifacts", first.artifact.file), "different bytes");
+
+      const second = await fileArtifact(store, { sourcePath: source });
+      assert.equal(second.outcome, "filed");
+      assert.notEqual(second.artifact.id, first.artifact.id);
+      assert.equal(await readFile(join(dir, "artifacts", second.artifact.file), "utf8"), "original bytes");
+    } finally {
+      await store.close();
+    }
   });
 
   it("a large file states its size before anything is copied (R-6)", async () => {

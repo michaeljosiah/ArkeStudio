@@ -353,7 +353,7 @@ export async function stageGuestPromotion(
  */
 export async function applyVoiceAssignment(
   store: WorldStore,
-  input: { path: string; voice: { provider: string; voiceId: string; label?: string } | null },
+  input: { path: string; voice: { provider: string; model: string; voiceId: string; label?: string } | null },
 ): Promise<CommitResult> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
@@ -367,6 +367,7 @@ export async function applyVoiceAssignment(
   } else {
     const assignment: VoiceAssignment = {
       provider: input.voice.provider,
+      model: input.voice.model,
       voiceId: input.voice.voiceId,
       ...(input.voice.label !== undefined ? { label: input.voice.label } : {}),
       // The commit bumps the sheet to base + 1; the assignment lands at that version.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   buildExportPlan,
@@ -713,6 +713,37 @@ describe("take QC at arrival (#248)", () => {
     await store.close();
   });
 
+  it("voice-line finalization is idempotent after both media-move and take-write crash windows", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const job: Job = {
+      ...shotJob(landed),
+      capability: "voice-tts",
+      target: { kind: "voice-line", id: "sh_12", coversShots: ["sh_12"] },
+      params: { text: "the verse", voiceId: "af_bella" },
+    };
+    const takeId = `tk_${job.id.slice(3)}`;
+    const takeDir = join(dir, "productions", "saltlight", "takes", takeId);
+    await mkdir(takeDir, { recursive: true });
+    await rename(join(dir, landed), join(takeDir, "output-1.mp4"));
+
+    const first = await recordTakesFromJob(store, job, 0);
+    const second = await recordTakesFromJob(store, job, 0);
+    const discovered = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
+    const persisted = discovered.getBundle().productions
+      .find((production) => production.meta.id === "saltlight")?.takes
+      .filter((take) => take.jobId === job.id) ?? [];
+    await discovered.close();
+    const matchingTakeDirs = (await readdir(join(dir, "productions", "saltlight", "takes")))
+      .filter((entry) => entry === takeId);
+    await store.close();
+    assert.equal(first[0]?.id, takeId);
+    assert.equal(first.length, 1);
+    assert.deepEqual(second, first);
+    assert.equal(persisted.length, 1);
+    assert.deepEqual(matchingTakeDirs, [takeId]);
+  });
+
   /**
    * How the take was made, kept with it (2026-08-17). The dispatch carries the duration, the
    * aspect and the resolution; arrival kept none of them, so nothing on disk said how to make
@@ -802,7 +833,7 @@ describe("take QC at arrival (#248)", () => {
     );
     assert.equal(asked, 0, "a voice line is never a picture");
 
-    // And a thrown extraction is survivable: finalization is not replayable, so a diagnostic
+    // And a thrown extraction is survivable: shot finalization is not replayable, so a diagnostic
     // that fails must never cost a paid take.
     const landed = await landPass(dir);
     const takes = await recordTakesFromJob(store, shotJob(landed), 400000, {

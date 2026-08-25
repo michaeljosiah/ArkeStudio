@@ -120,6 +120,8 @@ import {
   type SetupComponent,
   type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
+  legacyVoiceModel,
+  supportsVoiceUse,
 } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -2119,12 +2121,18 @@ function VoiceDetail({
       </div>
       <VoicePickerDialog
         open={narratorOpen}
+        use="narration"
         {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
         chosenId={narrator?.voiceId}
+        chosenProvider={narrator?.provider}
+        chosenModel={
+          narrator?.model ??
+          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
+        }
         onClose={() => setNarratorOpen(false)}
         onPick={(voice: ReadingVoice) => {
           setNarratorOpen(false);
-          setNarrator({ provider: voice.provider, voiceId: voice.voiceId, label: voice.label });
+          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
         }}
       />
 
@@ -2205,6 +2213,7 @@ function engineTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
  */
 function ComfyUiDetail() {
   const { state } = useStore();
+  const setup = useSetup();
   const comfyui = state?.app.comfyui ?? null;
   const [urlDraft, setUrlDraft] = useState("");
   const engine = comfyui?.engine ?? null;
@@ -2216,8 +2225,13 @@ function ComfyUiDetail() {
         : engine?.source === "managed"
           ? "Arke-managed"
           : "Not installed";
+  const sourceWithLocality = engine?.source === "user-url" && engine.locality === "remote"
+    ? `${sourceLabel} · remote`
+    : sourceLabel;
   const recipes = comfyui?.recipes ?? [];
   const ready = recipes.filter((r) => r.state === "ready").length;
+  const managedRuntime = setup?.components.find((component) => component.id === "comfyui-runtime");
+  const managedAvailable = engine?.source === "absent" && managedRuntime !== undefined;
   return (
     <div data-testid="comfyui-engine">
       <RuntimeHead
@@ -2230,7 +2244,7 @@ function ComfyUiDetail() {
         <div className="fy-rt__eyebrow">ENGINE</div>
         <div className="fy-set__field">
           <span className="fy-rt__path">
-            {sourceLabel}
+            {sourceWithLocality}
             {engine?.version ? ` · v${engine.version}` : ""}
             {engine?.location ? ` · ${engine.location}` : ""}
           </span>
@@ -2263,6 +2277,22 @@ function ComfyUiDetail() {
           </button>
         </div>
       ))}
+      {managedAvailable && (
+        <div className="fy-set__why" data-testid="comfyui-managed-option">
+          <span className="fy-set__dot" />
+          <span>Arke-managed ComfyUI · {managedRuntime.sizeMb} MB download</span>
+          <button
+            type="button"
+            className="fy-set__link"
+            disabled={managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"}
+            onClick={() => setupRetry(managedRuntime.id)}
+          >
+            {managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"
+              ? "installing…"
+              : "Download"}
+          </button>
+        </div>
+      )}
       <div className="fy-rt__keyline">
         <div className="fy-rt__eyebrow">URL</div>
         <div className="fy-set__field">
@@ -2589,6 +2619,7 @@ export function SettingsLocalRuntimeScreen() {
   const runtime = state?.app.runtime ?? null;
   const voiceRuntime = state?.app.voiceRuntime ?? null;
   const narrator = state?.app.narrator ?? null;
+  const displayedNarrator = narrator && supportsVoiceUse(narrator, "narration") ? narrator : null;
   const comfyui = state?.app.comfyui ?? null;
   // The catalogue is fetched per world; Settings uses whichever world is open.
   const worldIdForVoices = state?.world?.meta.worldId;
@@ -2687,7 +2718,7 @@ export function SettingsLocalRuntimeScreen() {
           {current === "voice" && (
             <VoiceDetail
               voiceRuntime={voiceRuntime}
-              narrator={narrator}
+              narrator={displayedNarrator}
               health={state?.app.health.voice}
               worldIdForVoices={worldIdForVoices}
             />
@@ -3294,8 +3325,7 @@ export function ActivityScreen() {
                 ))}
               {spend.unmeteredRuns > 0 && (
                 <div className="fy-mono" style={{ marginTop: 12 }}>
-                  {spend.unmeteredRuns} local run{spend.unmeteredRuns === 1 ? "" : "s"} — unmetered, this machine's
-                  compute
+                  {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"} — no provider charge
                 </div>
               )}
               <div className="fy-notecard" style={{ background: "var(--background)" }}>
@@ -3356,7 +3386,7 @@ export function ActivityScreen() {
             </>
           )}
           <div className="fy-mono" style={{ marginTop: 12 }}>
-            local runs are free · the local runtimes don't meter
+            unmetered runtimes report no provider charge
           </div>
           <div style={{ flex: 1 }} />
           <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>

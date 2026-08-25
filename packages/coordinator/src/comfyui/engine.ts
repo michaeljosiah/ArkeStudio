@@ -36,6 +36,8 @@ export interface ComfyUiRecipeFacts {
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
+  /** A known-incomplete immutable dependency closure. It is never treated as an empty one. */
+  unavailableReason?: string;
   nodeClasses: readonly string[];
   identity: RecipeIdentity;
 }
@@ -48,12 +50,16 @@ export interface EngineServiceDeps {
   /** Immediate subdirectory names, or empty when the path is not a readable directory. */
   listDirectories: (path: string) => Promise<string[]>;
   /** sha256 hex of the file's bytes, or null when unreadable. The expensive pre-flight read. */
-  hashFile: (path: string) => Promise<string | null>;
+  hashFile: (path: string, signal?: AbortSignal) => Promise<string | null>;
   /** For the extra-model-paths mapping a spawned engine needs when `modelsDir` is overridden. */
   writeTextFile: (path: string, text: string) => Promise<void>;
-  /** The pinned ref a custom-node checkout is at, or null when unknowable. Unused while D11 ships zero nodes. */
-  readNodeRef?: (dir: string) => Promise<string | null>;
+  /** The immutable source/content identity marker of a custom-node archive, or null when unknowable. */
+  readNodeRef: (dir: string) => Promise<string | null>;
   createSupervisor: (spec: SupervisedSpec) => ChildSupervisor;
+  /** Registers the synchronous process-exit backstop and returns its required unsubscribe. */
+  registerSupervisorExitBackstop: (supervisor: ChildSupervisor) => () => void;
+  /** Mints a per-process epoch without exposing a pid in job or renderer state. */
+  createProcessEpoch: () => string;
   /**
    * Free graphics memory right now, in MB, or null where the device cannot be asked
    * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
@@ -92,10 +98,69 @@ function meetsFloor(version: string): boolean | null {
   return true;
 }
 
+/**
+ * Canonicalise only the URL components whose spelling cannot change endpoint semantics.
+ * Userinfo, path, query and fragment stay byte-for-byte as entered: reverse proxies may treat
+ * all of them as case-sensitive, and credentials must remain part of the opaque identity.
+ */
+function urlInstanceLocation(location: string): string {
+  const trimmed = location.trim();
+  try {
+    const parsed = new URL(trimmed);
+    const raw = /^([a-z][a-z\d+.-]*):\/\/([^/?#]*)(.*)$/is.exec(trimmed);
+    if (raw === null) return trimmed;
+    const authority = raw[2]!;
+    const userinfoEnd = authority.lastIndexOf("@");
+    const userinfo = userinfoEnd < 0 ? "" : authority.slice(0, userinfoEnd + 1);
+    // `protocol` and `host` canonicalise scheme/host case and omit an explicit default port.
+    return `${parsed.protocol}//${userinfo}${parsed.host}${raw[3]!}`;
+  } catch {
+    // Invalid configured values are still distinct without guessing which parts are safe.
+    return trimmed;
+  }
+}
+
 /** Opaque digest of the resolved location (§2.11): answers "same engine?" without saying where. */
 export function engineInstanceId(source: string, location: string): string {
-  const normalized = location.trim().replace(/[\\/]+$/, "").toLowerCase();
+  const normalized =
+    source === "user-url"
+      ? urlInstanceLocation(location)
+      : location
+          .trim()
+          .replace(/[\\/]+$/, "")
+          .toLowerCase();
   return createHash("sha256").update(`${source}|${normalized}`, "utf8").digest("hex").slice(0, 16);
+}
+
+/**
+ * The host spelling from the URL's raw authority, before WHATWG canonicalisation.
+ *
+ * `new URL("http://2130706433")` reports `127.0.0.1`. That is useful browser behaviour and the
+ * wrong security boundary: only an address the user literally wrote as Arke's two accepted
+ * loopback literals may inherit the biometric-upload promise made for this machine.
+ */
+function rawUrlHostname(value: string): string | null {
+  const authority = /^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i.exec(value.trim())?.[1];
+  if (authority === undefined) return null;
+  const hostAndPort = authority.slice(authority.lastIndexOf("@") + 1);
+  if (hostAndPort.startsWith("[")) {
+    const close = hostAndPort.indexOf("]");
+    return close < 0 ? null : hostAndPort.slice(1, close);
+  }
+  const colon = hostAndPort.lastIndexOf(":");
+  return colon < 0 ? hostAndPort : hostAndPort.slice(0, colon);
+}
+
+/** A URL engine is local only for the literal IP hosts `127.0.0.1` and `::1`. */
+export function comfyUiUrlIsLoopback(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const parsed = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const raw = rawUrlHostname(value)?.toLowerCase();
+    return (raw === "127.0.0.1" && parsed === "127.0.0.1") || (raw === "::1" && parsed === "::1");
+  } catch {
+    return false;
+  }
 }
 
 const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
@@ -110,10 +175,46 @@ const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
  */
 const RECLAIMABLE_VRAM_MB = 4096;
 
+/**
+ * ComfyUI needs a few ordinary Windows process variables, not Electron's credentials and service
+ * configuration. The offline switches are defence in depth: every dispatchable model is already
+ * present and verified, so a node trying to download at generation time must fail instead.
+ */
+export function comfyUiChildEnvironment(host: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const allowed = [
+    "SystemRoot",
+    "WINDIR",
+    "COMSPEC",
+    "PATH",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "CUDA_PATH",
+  ] as const;
+  const env: Record<string, string> = {};
+  for (const name of allowed) {
+    const value = host[name];
+    if (value !== undefined && value !== "") env[name] = value;
+  }
+  if (env["SystemRoot"] === undefined) env["SystemRoot"] = "C:\\Windows";
+  env["PYTHONNOUSERSITE"] = "1";
+  env["HF_HUB_OFFLINE"] = "1";
+  env["TRANSFORMERS_OFFLINE"] = "1";
+  env["HF_DATASETS_OFFLINE"] = "1";
+  env["NO_PROXY"] = "127.0.0.1,localhost";
+  return env;
+}
+
 export class ComfyUiEngineService {
   private settings: ComfyUiSettings = { enginePath: null, engineUrl: null, modelsDir: null };
   private resolved: ResolvedEngine = { source: "absent", root: null, url: null, problem: null };
   private supervisor: ChildSupervisor | null = null;
+  private supervisorStatusListener: (() => void) | null = null;
+  private supervisorExitBackstop: (() => void) | null = null;
   private detected: ComfyUiDetectedInstall[] = [];
   /** What the engine last reported to /system_stats — version and reachability. */
   private probed: { version: string | null; reachable: boolean; detail: string | null } = {
@@ -125,15 +226,41 @@ export class ComfyUiEngineService {
   private nodeClasses: Set<string> | null = null;
   /** The last pre-flight verdict per recipe (§2.5): a mismatch disables until re-verified. */
   private readonly verification = new Map<string, { ok: boolean; reason?: string }>();
+  private verificationGeneration = 0;
+  /** Recipes invalidated by setup/restart and awaiting a healthy engine for verification. */
+  private readonly pendingVerification = new Set<string>();
+  private verificationWork: Promise<void> = Promise.resolve();
+  /** Streamed checkpoint reads are cancelled when their lifecycle can no longer publish. */
+  private hashAbort = new AbortController();
+  /** Opaque identity replaced for every spawned process, including same-path restarts. */
+  private currentProcessEpoch: string | null = null;
   private readonly subscribers = new Set<() => void>();
+  private readonly readinessWaiters = new Set<(ready: boolean) => void>();
   private disposed = false;
+  private disposePromise: Promise<void> | null = null;
 
   constructor(private readonly deps: EngineServiceDeps) {}
 
   /** Notified whenever the engine's state moves (a supervised child restarting, failing…). */
   subscribe(listener: () => void): () => void {
+    if (this.disposed) return () => {};
     this.subscribers.add(listener);
     return () => this.subscribers.delete(listener);
+  }
+
+  private invalidateVerification(
+    recipeIds: readonly string[] = this.deps.recipes.map((recipe) => recipe.id),
+  ): void {
+    this.verificationGeneration += 1;
+    for (const recipeId of recipeIds) {
+      this.verification.delete(recipeId);
+      this.pendingVerification.add(recipeId);
+    }
+  }
+
+  private cancelHashing(): void {
+    this.hashAbort.abort();
+    this.hashAbort = new AbortController();
   }
 
   // ---- resolution (§2.2) ---------------------------------------------------
@@ -221,7 +348,10 @@ export class ComfyUiEngineService {
       "C:\\AI\\ComfyUI",
     ].filter((p) => p.length > 3);
     for (const candidate of candidates) {
-      if ((await this.portableLayout(candidate)) || (await this.deps.fileExists(join(candidate, "main.py")))) {
+      if (
+        (await this.portableLayout(candidate)) ||
+        (await this.deps.fileExists(join(candidate, "main.py")))
+      ) {
         found.push({ location: candidate, version: null });
       }
     }
@@ -260,8 +390,9 @@ export class ComfyUiEngineService {
   // ---- supervision (§2.8) --------------------------------------------------
 
   private async startSupervision(root: string): Promise<void> {
+    if (this.disposed) return;
     const layout = await this.portableLayout(root);
-    if (layout === null) return; // resolve() already recorded the problem
+    if (layout === null || this.disposed) return; // resolve() already recorded the problem
     const args = ["-s", layout.main, "--port", "{port}", "--listen", "127.0.0.1", "--disable-metadata"];
     // A models override reaches a spawned engine through an extra-model-paths file — the
     // engine must actually read the folder verification hashes, or R-8's "no re-download"
@@ -282,6 +413,7 @@ export class ComfyUiEngineService {
           "",
         ].join("\n"),
       );
+      if (this.disposed) return;
       args.push("--extra-model-paths-config", yamlPath);
     }
     const supervisor = this.deps.createSupervisor({
@@ -291,25 +423,68 @@ export class ComfyUiEngineService {
       healthPath: "/system_stats",
       readyTimeoutMs: 120_000, // a cold engine imports torch; a minute is not a hang
       probeIntervalMs: 1_000,
+      healthIntervalMs: 15_000,
+      healthFailureThreshold: 3,
+      env: comfyUiChildEnvironment(),
+      inheritEnv: false,
       validateHealth: async (response) => {
-        const body = (await response.json().catch(() => null)) as
-          | { system?: { comfyui_version?: unknown } }
-          | null;
+        const body = (await response.json().catch(() => null)) as {
+          system?: { comfyui_version?: unknown };
+        } | null;
         const version = body?.system?.comfyui_version;
         if (typeof version !== "string") {
-          return { ok: false, reason: `the engine did not report a ComfyUI version — Arke supports ${VERSION_FLOOR} and later` };
+          return {
+            ok: false,
+            reason: `the engine did not report a ComfyUI version — Arke supports ${VERSION_FLOOR} and later`,
+          };
         }
         if (meetsFloor(version) !== true) {
-          return { ok: false, reason: `ComfyUI ${version} is older than the ${VERSION_FLOOR} floor Arke supports` };
+          return {
+            ok: false,
+            reason: `ComfyUI ${version} is older than the ${VERSION_FLOOR} floor Arke supports`,
+          };
         }
         this.probed = { version, reachable: true, detail: null };
         return { ok: true };
       },
     });
-    supervisor.on("status", () => {
-      if (!this.disposed) void this.publish();
-    });
+    type SpawnAwareSupervisor = ChildSupervisor & { spawnEpoch?: number };
+    const observedEpoch = (): number | null => {
+      const epoch = (supervisor as SpawnAwareSupervisor).spawnEpoch;
+      return typeof epoch === "number" && epoch > 0 ? epoch : null;
+    };
+    // The first epoch belongs to the launch `start()` is about to perform. Every later
+    // `starting` event from this same supervisor is an automatic replacement process at the
+    // same path, whose queue and history are empty even though instanceId is unchanged.
+    const createProcessEpoch = this.deps.createProcessEpoch;
+    this.currentProcessEpoch = createProcessEpoch();
+    let currentSupervisorEpoch = observedEpoch();
+    const statusListener = () => {
+      if (this.disposed) return;
+      if (supervisor.status === "starting") {
+        const epoch = observedEpoch();
+        if (epoch !== null && epoch !== currentSupervisorEpoch) {
+          currentSupervisorEpoch = epoch;
+          this.currentProcessEpoch = createProcessEpoch();
+        }
+      } else if (supervisor.status === "failed") {
+        // Fence a child that died without a replacement. Jobs bind to this tombstone epoch and
+        // stay queued until a later healthy process publishes another epoch.
+        this.currentProcessEpoch = createProcessEpoch();
+      }
+      if (supervisor.status !== "healthy") {
+        this.cancelHashing();
+        this.nodeClasses = null;
+        this.invalidateVerification();
+      }
+      void this.verifyPending()
+        .then(() => this.publish())
+        .catch(() => {});
+    };
+    supervisor.on("status", statusListener);
     this.supervisor = supervisor;
+    this.supervisorStatusListener = statusListener;
+    this.supervisorExitBackstop = this.deps.registerSupervisorExitBackstop(supervisor);
     // Fire and observe, never await: start() resolves only after the health probe settles, and
     // a cold engine imports torch for a minute or two. Settings answers now with "starting",
     // and the status subscription publishes every transition as it happens (R-6).
@@ -319,7 +494,13 @@ export class ComfyUiEngineService {
   private async stopSupervision(): Promise<void> {
     const supervisor = this.supervisor;
     this.supervisor = null;
+    const statusListener = this.supervisorStatusListener;
+    this.supervisorStatusListener = null;
+    this.supervisorExitBackstop?.();
+    this.supervisorExitBackstop = null;
+    if (supervisor && statusListener) supervisor.off("status", statusListener);
     if (supervisor) await supervisor.stop().catch(() => {});
+    this.currentProcessEpoch = null;
   }
 
   // ---- the public surface --------------------------------------------------
@@ -334,6 +515,12 @@ export class ComfyUiEngineService {
    * process holding a port, invisible to stop() and to dispose().
    */
   applySettings(settings: ComfyUiSettings): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    // Invalidate immediately, before the serialized stop/resolve work begins: an in-flight
+    // checkpoint hash must not publish an old engine's verdict while this change waits its turn.
+    this.cancelHashing();
+    this.nodeClasses = null;
+    this.invalidateVerification();
     const next = this.settingsWork.then(
       () => this.applySettingsOnce(settings),
       () => this.applySettingsOnce(settings),
@@ -345,14 +532,24 @@ export class ComfyUiEngineService {
   private settingsWork: Promise<void> = Promise.resolve();
 
   private async applySettingsOnce(settings: ComfyUiSettings): Promise<void> {
+    if (this.disposed) return;
+    this.nodeClasses = null;
+    this.invalidateVerification();
     this.settings = settings;
     await this.stopSupervision();
-    this.nodeClasses = null;
-    this.verification.clear();
+    if (this.disposed) {
+      this.resolved = { source: "absent", root: null, url: null, problem: null };
+      return;
+    }
     this.probed = { version: null, reachable: false, detail: null };
     this.resolved = await this.resolve();
+    if (this.disposed) return;
     this.detected = this.resolved.source === "absent" ? await this.detectExisting() : [];
-    if ((this.resolved.source === "user-path" || this.resolved.source === "managed") && this.resolved.problem === null) {
+    if (this.disposed) return;
+    if (
+      (this.resolved.source === "user-path" || this.resolved.source === "managed") &&
+      this.resolved.problem === null
+    ) {
       await this.startSupervision(this.resolved.root!);
     }
     if (this.resolved.source === "user-url") {
@@ -390,7 +587,51 @@ export class ComfyUiEngineService {
   engineIdentity(): JobEngineIdentity | null {
     const id = this.instanceId();
     if (id === null || this.resolved.source === "absent") return null;
-    return { source: this.resolved.source, instanceId: id };
+    if (this.resolved.source === "user-url") {
+      return {
+        source: this.resolved.source,
+        instanceId: id,
+        locality: this.engineLocality(),
+      };
+    }
+    if (this.currentProcessEpoch === null) return null;
+    return {
+      source: this.resolved.source,
+      instanceId: id,
+      locality: "local",
+      processEpoch: this.currentProcessEpoch,
+    };
+  }
+
+  /** The remote destination a renderer may explicitly approve, without URL secrets or paths. */
+  voiceUploadDestination(): { token: string; label: string } | null {
+    const identity = this.engineIdentity();
+    if (identity?.source !== "user-url" || identity.locality !== "remote" || this.resolved.url === null)
+      return null;
+    try {
+      // `host` is canonical ASCII host + port. It excludes userinfo, path, query and fragment.
+      const label = new URL(this.resolved.url).host;
+      return label.length > 0 ? { token: identity.instanceId, label } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Wait for a spawned child to settle without making coordinator startup wait on it. */
+  waitUntilReady(timeoutMs = 120_000): Promise<boolean> {
+    if (this.baseUrl() !== null) return Promise.resolve(true);
+    if (this.disposed || this.engineStatus().state !== "starting") return Promise.resolve(false);
+    return new Promise((resolveReady) => {
+      let timer: NodeJS.Timeout;
+      const finish = (ready: boolean) => {
+        clearTimeout(timer);
+        this.readinessWaiters.delete(finish);
+        resolveReady(ready);
+      };
+      timer = setTimeout(() => finish(false), timeoutMs);
+      timer.unref?.();
+      this.readinessWaiters.add(finish);
+    });
   }
 
   /** The models folder every path resolves against (§2.4) — one resolver, everywhere. */
@@ -401,16 +642,30 @@ export class ComfyUiEngineService {
     return join(root, "ComfyUI", "models");
   }
 
-  /** Whether an engine exists without the managed install — the setup entry's detection-first check (D10). */
-  async externallyPresent(): Promise<boolean> {
+  /** Whether a source has been deliberately selected instead of the managed runtime. */
+  async externallySelected(): Promise<boolean> {
     if (this.settings.engineUrl !== null || this.settings.enginePath !== null) return true;
-    return (await this.detectExisting()).length > 0;
+    return false;
+  }
+
+  private engineLocality(): "local" | "remote" {
+    return this.resolved.source === "user-url" &&
+      this.resolved.url !== null &&
+      !comfyUiUrlIsLoopback(this.resolved.url)
+      ? "remote"
+      : "local";
   }
 
   engineStatus(): ComfyUiEngineStatus {
     const { source, root, url, problem } = this.resolved;
     const location =
-      source === "user-url" ? url : source === "user-path" ? root : source === "managed" ? this.managedLocation() : null;
+      source === "user-url"
+        ? url
+        : source === "user-path"
+          ? root
+          : source === "managed"
+            ? this.managedLocation()
+            : null;
     let state: ComfyUiEngineStatus["state"];
     let detail: string | null = null;
     if (source === "absent") {
@@ -420,7 +675,11 @@ export class ComfyUiEngineService {
       detail = problem;
     } else if (source === "user-url") {
       state = this.probed.reachable ? (this.floorOk() ? "ready" : "incompatible") : "unreachable";
-      detail = this.probed.reachable ? (this.floorOk() ? null : this.floorDetail()) : (this.probed.detail ?? "the engine did not answer");
+      detail = this.probed.reachable
+        ? this.floorOk()
+          ? null
+          : this.floorDetail()
+        : (this.probed.detail ?? "the engine did not answer");
     } else {
       const supervisor = this.supervisor;
       switch (supervisor?.status) {
@@ -443,6 +702,7 @@ export class ComfyUiEngineService {
     return {
       source,
       state,
+      locality: this.engineLocality(),
       location,
       version: this.probed.version,
       instanceId: this.instanceId(),
@@ -477,31 +737,69 @@ export class ComfyUiEngineService {
   async preflight(recipeId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     const recipe = this.deps.recipes.find((r) => r.id === recipeId);
     if (!recipe) return { ok: false, reason: `"${recipeId}" is not a shipped recipe` };
+    type Verdict = { ok: true } | { ok: false; reason: string };
+    const generation = this.verificationGeneration;
+    const hashSignal = this.hashAbort.signal;
+    const record = (verdict: Verdict, complete = true): Verdict => {
+      if (generation !== this.verificationGeneration) {
+        return {
+          ok: false,
+          reason: "the engine changed during dependency verification; re-verification is required",
+        };
+      }
+      this.verification.set(recipeId, verdict);
+      if (complete) this.pendingVerification.delete(recipeId);
+      return verdict;
+    };
+    if (recipe.unavailableReason !== undefined) {
+      const verdict = { ok: false as const, reason: recipe.unavailableReason };
+      return record(verdict);
+    }
+    if (this.baseUrl() === null) {
+      const verdict = { ok: false as const, reason: "the ComfyUI engine is not ready" };
+      return record(verdict, false);
+    }
     const dir = this.modelsDir();
-    // A recipe that pins no checkpoints has nothing in that folder to verify. The cloned-voice
-    // recipe is the first of these: its weights are fetched by the custom node into the engine's
-    // own cache, never into `models/`, so demanding the mapping refused it for the absence of
-    // files it does not use.
+    const engineRoot = this.resolved.root;
+    // A recipe that legitimately pins no checkpoints has nothing in that folder to verify.
+    // A known-incomplete closure is refused above; an empty list can never stand in for a node's
+    // undeclared generation-time download.
     if (dir === null && recipe.checkpoints.length > 0) {
       const verdict = {
         ok: false as const,
-        reason: "Arke cannot verify this engine's files — map its models folder in Settings to enable local recipes",
+        reason:
+          "Arke cannot verify this engine's files — map its models folder in Settings to enable local recipes",
       };
-      this.verification.set(recipeId, verdict);
-      return verdict;
+      return record(verdict);
     }
     for (const checkpoint of dir === null ? [] : recipe.checkpoints) {
       const path = join(dir!, checkpoint.file);
       if (!(await this.deps.fileExists(path))) {
-        const verdict = { ok: false as const, reason: `${checkpoint.file} is missing from the models folder` };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        const verdict = {
+          ok: false as const,
+          reason: `${checkpoint.file} is missing from the models folder`,
+        };
+        return record(verdict);
       }
-      const found = await this.deps.hashFile(path);
+      if (generation !== this.verificationGeneration) {
+        return {
+          ok: false,
+          reason: "the engine changed during dependency verification; re-verification is required",
+        };
+      }
+      const found = await this.deps.hashFile(path, hashSignal);
+      if (hashSignal.aborted) {
+        return {
+          ok: false,
+          reason: "dependency verification was stopped because the engine lifecycle changed",
+        };
+      }
       if (found === null) {
-        const verdict = { ok: false as const, reason: `${checkpoint.file} could not be read for verification` };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        const verdict = {
+          ok: false as const,
+          reason: `${checkpoint.file} could not be read for verification`,
+        };
+        return record(verdict);
       }
       if (found.toLowerCase() !== checkpoint.sha256.toLowerCase()) {
         const verdict = {
@@ -510,11 +808,9 @@ export class ComfyUiEngineService {
             `${checkpoint.file} does not match its pinned version — ` +
             `expected sha256 ${checkpoint.sha256.slice(0, 8)}…, found sha256 ${found.slice(0, 8)}…`,
         };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        return record(verdict);
       }
     }
-    const engineRoot = this.resolved.root;
     /*
      * Where this engine keeps its custom nodes.
      *
@@ -525,50 +821,106 @@ export class ComfyUiEngineService {
      * nothing to check and the refusal stands.
      */
     const customNodesDir =
-      engineRoot !== null ? join(engineRoot, "ComfyUI", "custom_nodes") : dir !== null ? join(dir, "..", "custom_nodes") : null;
+      engineRoot !== null
+        ? join(engineRoot, "ComfyUI", "custom_nodes")
+        : dir !== null
+          ? join(dir, "..", "custom_nodes")
+          : null;
     for (const node of recipe.customNodes) {
       if (customNodesDir === null) {
         const verdict = {
           ok: false as const,
           reason: `custom node ${node.id} cannot be verified on a URL engine — map its models folder in Settings (SPEC-021 D13)`,
         };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        return record(verdict);
       }
       const nodeDir = join(customNodesDir, node.id);
       if (!(await this.deps.fileExists(nodeDir))) {
         const verdict = { ok: false as const, reason: `custom node ${node.id} is missing from the engine` };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        return record(verdict);
       }
-      const ref = (await this.deps.readNodeRef?.(nodeDir)) ?? null;
-      if (ref !== null && ref !== node.pinnedRef) {
+      if (generation !== this.verificationGeneration) {
+        return {
+          ok: false,
+          reason: "the engine changed during dependency verification; re-verification is required",
+        };
+      }
+      const ref = await this.deps.readNodeRef(nodeDir).catch(() => null);
+      if (generation !== this.verificationGeneration) {
+        return {
+          ok: false,
+          reason: "the engine changed during dependency verification; re-verification is required",
+        };
+      }
+      if (ref === null) {
+        const verdict = {
+          ok: false as const,
+          reason: `custom node ${node.id} source/content identity could not be read; it is unverified`,
+        };
+        return record(verdict);
+      }
+      if (ref.toLowerCase() !== node.pinnedRef.toLowerCase()) {
         const verdict = {
           ok: false as const,
           reason: `custom node ${node.id} is at ${ref.slice(0, 10)}, not the pinned ${node.pinnedRef.slice(0, 10)}`,
         };
-        this.verification.set(recipeId, verdict);
-        return verdict;
+        return record(verdict);
       }
     }
-    this.verification.set(recipeId, { ok: true });
-    return { ok: true };
+    return record({ ok: true });
+  }
+
+  /**
+   * Invalidate and re-check dependency identity after setup. If the child is still starting, the
+   * pending set is consumed by its healthy transition instead of falsely publishing readiness.
+   */
+  async reverify(recipeIds?: readonly string[]): Promise<void> {
+    if (this.disposed) return;
+    this.cancelHashing();
+    this.nodeClasses = null;
+    this.invalidateVerification(recipeIds);
+    await this.runVerificationWork(() => this.verifyPending(true));
+    await this.publish();
+  }
+
+  private runVerificationWork(work: () => Promise<void>): Promise<void> {
+    const next = this.verificationWork.then(work, work);
+    this.verificationWork = next.catch(() => {});
+    return next;
+  }
+
+  private async verifyPending(hashDependencies = false): Promise<void> {
+    if (this.disposed || this.baseUrl() === null || this.pendingVerification.size === 0) return;
+    const base = this.baseUrl()!;
+    const generation = this.verificationGeneration;
+    const nodeClasses = await this.loadNodeClasses(base);
+    if (generation !== this.verificationGeneration || base !== this.baseUrl()) return;
+    this.nodeClasses = nodeClasses;
+    if (hashDependencies) {
+      for (const recipeId of this.pendingVerification) await this.preflight(recipeId);
+    }
   }
 
   // ---- readiness (§2.12) ---------------------------------------------------
 
   /** The one combined result. `probes` may be null when hardware was never measured. */
   async status(probes: RuntimeProbes | null): Promise<ComfyUiStatus> {
-    const engine = this.engineStatus();
-    const base = this.baseUrl();
-    if (engine.state === "ready" && base !== null && this.nodeClasses === null) {
-      this.nodeClasses = await this.loadNodeClasses(base);
+    for (;;) {
+      const generation = this.verificationGeneration;
+      const engine = this.engineStatus();
+      const base = this.baseUrl();
+      if (engine.state === "ready" && base !== null && this.nodeClasses === null) {
+        const nodeClasses = await this.loadNodeClasses(base);
+        if (generation !== this.verificationGeneration || base !== this.baseUrl()) continue;
+        this.nodeClasses = nodeClasses;
+      }
+      const recipes: RecipeReadiness[] = [];
+      for (const recipe of this.deps.recipes) {
+        recipes.push(await this.recipeReadiness(recipe, engine, probes));
+      }
+      if (generation !== this.verificationGeneration) continue;
+      return { engine, recipes, checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
     }
-    const recipes: RecipeReadiness[] = [];
-    for (const recipe of this.deps.recipes) {
-      recipes.push(await this.recipeReadiness(recipe, engine, probes));
-    }
-    return { engine, recipes, checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
   }
 
   private async recipeReadiness(
@@ -589,6 +941,9 @@ export class ComfyUiEngineService {
       ...(cloudAlternative !== undefined ? { cloudAlternative } : {}),
     });
 
+    // A known-incomplete closure is a hard dependency refusal, not an empty dependency set.
+    if (recipe.unavailableReason !== undefined) return disabled(recipe.unavailableReason);
+
     // 1 · The engine itself.
     if (engine.state === "absent") return disabled("no ComfyUI engine is configured or installed");
     if (engine.state === "unreachable") return disabled("the engine did not answer");
@@ -605,11 +960,14 @@ export class ComfyUiEngineService {
     }
 
     // 3 · The compatibility probe, per recipe (D14): a missing node names itself.
-    if (this.nodeClasses !== null) {
-      const missing = recipe.nodeClasses.filter((cls) => !this.nodeClasses!.has(cls));
-      if (missing.length > 0) {
-        return disabled(`this engine has no ${missing[0]} node — ComfyUI ${VERSION_FLOOR} or later is required`);
-      }
+    if (this.nodeClasses === null) {
+      return disabled("the engine's node catalogue could not be verified");
+    }
+    const missing = recipe.nodeClasses.filter((cls) => !this.nodeClasses!.has(cls));
+    if (missing.length > 0) {
+      return disabled(
+        `this engine has no ${missing[0]} node — ComfyUI ${VERSION_FLOOR} or later is required`,
+      );
     }
 
     // 4 · Weights, at the resolved location — presence, not yet bytes (§2.5 hashes at dispatch).
@@ -621,21 +979,25 @@ export class ComfyUiEngineService {
       }
       if (missing > 0) {
         const total = recipe.checkpoints.length;
-        return disabled(`${missing} of ${total} model file${total === 1 ? "" : "s"} missing from the models folder`);
+        return disabled(
+          `${missing} of ${total} model file${total === 1 ? "" : "s"} missing from the models folder`,
+        );
       }
     }
 
     // 5 · A pin mismatch found at pre-flight disables until re-verified (§2.5).
-    const verified = this.verification.get(recipe.id);
-    if (verified !== undefined && !verified.ok) return disabled(verified.reason ?? "verification failed");
+    const verified = this.verification.get(recipe.id) ?? (await this.preflight(recipe.id));
+    if (!verified.ok) return disabled(verified.reason ?? "verification failed");
 
     // 6 · Hardware (§2.7): both figures when measured; unknown stays unknown and dispatches (D15).
-    const vram = probes?.vramMb ?? null;
+    // Desktop probes describe this computer. Applying them to a non-loopback URL would report
+    // this machine's card as if it belonged to the remote engine.
+    const vram = engine.locality === "remote" ? null : (probes?.vramMb ?? null);
     if (vram === null) {
       return {
         ...base,
         state: "unknown",
-        reason: `VRAM could not be measured. The ${gb(recipe.minVramMb)} floor was not checked.`,
+        reason: `${engine.locality === "remote" ? "Remote engine" : "VRAM"} VRAM could not be measured. The ${gb(recipe.minVramMb)} floor was not checked.`,
       };
     }
     if (vram < recipe.minVramMb) {
@@ -663,7 +1025,10 @@ export class ComfyUiEngineService {
      * from the too-small case above — that card will never be big enough, this one is busy —
      * even though both disable, because both mean pressing Generate buys a wait, not a take.
      */
-    const free = this.deps.freeVramMb ? await this.deps.freeVramMb().catch(() => null) : null;
+    const free =
+      engine.locality === "remote" || !this.deps.freeVramMb
+        ? null
+        : await this.deps.freeVramMb().catch(() => null);
     if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
       return disabled(
         `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
@@ -681,7 +1046,14 @@ export class ComfyUiEngineService {
   }
 
   private async publish(): Promise<void> {
-    this.deps.onStatus?.(this.engineStatus());
+    if (this.disposed) return;
+    const engine = this.engineStatus();
+    if (this.baseUrl() !== null) {
+      for (const waiter of this.readinessWaiters) waiter(true);
+    } else if (engine.state !== "starting") {
+      for (const waiter of this.readinessWaiters) waiter(false);
+    }
+    this.deps.onStatus?.(engine);
     for (const listener of this.subscribers) {
       try {
         listener();
@@ -692,7 +1064,19 @@ export class ComfyUiEngineService {
   }
 
   async dispose(): Promise<void> {
+    if (this.disposePromise !== null) return this.disposePromise;
     this.disposed = true;
-    await this.stopSupervision();
+    this.hashAbort.abort();
+    this.resolved = { source: "absent", root: null, url: null, problem: null };
+    for (const waiter of this.readinessWaiters) waiter(false);
+    this.subscribers.clear();
+    this.disposePromise = (async () => {
+      // A settings pass may be between resolving a portable layout and assigning its supervisor.
+      // Join that serialized pass before the final stop so no continuation can spawn afterwards.
+      await this.settingsWork;
+      this.resolved = { source: "absent", root: null, url: null, problem: null };
+      await this.stopSupervision();
+    })();
+    return this.disposePromise;
   }
 }

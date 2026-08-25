@@ -4,11 +4,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
+import { KokoroClient } from "@arke-studio/providers";
+import { VoxaClient } from "@arke-studio/voice";
 import { environmentVoxaArgs, safeVoxaExtraArgs, selectVoxa, validateVoxaExecutable } from "../src/voxa-runtime.js";
 
 const settings = (executablePath: string | null = null) => ({
   executablePath,
-  modelRoot: null,
   extraArgs: [],
 });
 
@@ -69,5 +70,40 @@ describe("Voxa discovery", () => {
       safeVoxaExtraArgs(["--acceleration", "cpu", "--host", "0.0.0.0", "--port=80", "--trace"]),
       ["--acceleration", "cpu", "--trace"],
     );
+  });
+});
+
+describe("Voxa synthesis wiring", () => {
+  it("shares one synthesis lane between direct and queue-backed Kokoro", async () => {
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45, 9, 9]);
+    let active = 0;
+    let peak = 0;
+    const voxa = new VoxaClient(
+      async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return new Response(wav, { status: 200 });
+      },
+      "http://127.0.0.1:7777",
+      { timeouts: { tts: 1_000 } },
+    );
+    const queued = new KokoroClient(
+      async () => {
+        throw new Error("queue synthesis must use the shared Voxa client");
+      },
+      () => "http://127.0.0.1:7777",
+      (input) => voxa.synthesize(input),
+    );
+
+    await Promise.all([
+      voxa.synthesize({ voiceId: "af_bella", text: "direct preview" }),
+      queued.submit("", {
+        model: "kokoro-82m",
+        params: { voiceId: "af_bella", text: "queue take" },
+      } as never),
+    ]);
+    assert.equal(peak, 1);
   });
 });
