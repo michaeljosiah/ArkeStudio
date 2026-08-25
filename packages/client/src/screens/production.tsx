@@ -4001,14 +4001,14 @@ export function AudioScreen() {
  * derived from the same value. A state that is not in this union cannot be rendered, and a
  * sentence cannot outlive the condition it was written for.
  */
-type ExportView =
+export type ExportView =
   | { kind: "scene-order" }
   | { kind: "no-track" }
   | { kind: "unmeasured" }
   | { kind: "silent"; durationSec: number }
   | { kind: "spine"; cut: ReturnType<typeof deriveSpineCut> };
 
-function exportViewFor(
+export function exportViewFor(
   world: { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] } | null | undefined,
   production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
 ): ExportView {
@@ -4040,7 +4040,7 @@ function reviewNotes(cut: ReturnType<typeof deriveSpineCut>): string[] {
   return notes;
 }
 
-export function ExportsScreen() {
+export function ExportsScreen({ initialPreset = "review-cut" }: { initialPreset?: keyof typeof PRESETS } = {}) {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const exportsState = useExports();
@@ -4051,7 +4051,7 @@ export function ExportsScreen() {
   const cut = production ? deriveCut(production) : null;
   const view = exportViewFor(world, production);
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
-  const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
+  const [preset, setPreset] = useState<keyof typeof PRESETS>(initialPreset);
   /*
    * Runtime, block and refusal all read from the one view, so none can describe a state the screen
    * is not in. The song's length is the runtime wherever there is a song (design 60, binding).
