@@ -36,6 +36,7 @@ directories:
   output: release
 files:
   - dist/**
+  - assets/**
   - package.json
   # The Claude Agent SDK declares per-platform optionalDependencies that each carry a ~312MB
   # `claude.exe` — the whole Claude Code runtime — under "© Anthropic PBC. All rights reserved".
@@ -83,11 +84,14 @@ extraResources:
   - from: ../../THIRD-PARTY-NOTICES.md
     to: THIRD-PARTY-NOTICES.md
 win:
+  icon: assets/arke-studio.ico
   target:
     - target: nsis
   # Signing (§2.7): supplied via environment on the signing machine — never committed.
   #   WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD, or signtoolOptions for an HSM token.
 nsis:
+  installerIcon: assets/arke-studio.ico
+  uninstallerIcon: assets/arke-studio.ico
   buildUniversalInstaller: false
   oneClick: false
   perMachine: false

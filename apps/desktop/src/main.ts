@@ -104,6 +104,7 @@ const repoRoot = resolve(__dirname, "../../..");
 const clientIndex = isDev
   ? join(repoRoot, "packages/client/dist/index.html")
   : join(process.resourcesPath, "client/index.html");
+const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
 const appRoot = defaultAppRoot();
@@ -325,6 +326,7 @@ async function createWindow(): Promise<void> {
     height: 900,
     minWidth: 1024,
     minHeight: 640,
+    icon: appIcon,
     show: false,
     backgroundColor: palette.background,
     titleBarStyle: "hidden",
