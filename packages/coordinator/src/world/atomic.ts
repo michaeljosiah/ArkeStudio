@@ -1,5 +1,5 @@
 import { open, mkdir, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "./paths.js";
 
@@ -14,8 +14,27 @@ import { toExtendedLength } from "./paths.js";
 
 const RETRY_DELAYS_MS = [0, 50, 100, 200, 400, 800];
 const RETRYABLE = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
+const fileMutationTails = new Map<string, Promise<void>>();
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Serialize an in-process load-modify-persist transaction with every other user of this path. */
+export async function serializeFileMutation<T>(path: string, mutation: () => Promise<T>): Promise<T> {
+  const absolute = resolve(path);
+  const key = process.platform === "win32" ? absolute.toLowerCase() : absolute;
+  const previous = fileMutationTails.get(key) ?? Promise.resolve();
+  const result = previous.then(mutation);
+  const tail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  fileMutationTails.set(key, tail);
+  try {
+    return await result;
+  } finally {
+    if (fileMutationTails.get(key) === tail) fileMutationTails.delete(key);
+  }
+}
 
 export interface AtomicDeps {
   /** Injectable for the retry unit tests; defaults to fs.rename with prefixing. */
@@ -43,12 +62,9 @@ export async function withTransientRetry<T>(operation: () => Promise<T>): Promis
   throw lastError;
 }
 
-export async function renameWithRetry(
-  from: string,
-  to: string,
-  deps: AtomicDeps = {},
-): Promise<void> {
-  const doRename = deps.rename ?? ((f: string, t: string) => rename(toExtendedLength(f), toExtendedLength(t)));
+export async function renameWithRetry(from: string, to: string, deps: AtomicDeps = {}): Promise<void> {
+  const doRename =
+    deps.rename ?? ((f: string, t: string) => rename(toExtendedLength(f), toExtendedLength(t)));
   await withTransientRetry(() => doRename(from, to));
 }
 
@@ -56,7 +72,11 @@ export async function renameWithRetry(
  * Write `content` to `path` atomically: temp file in the same directory, flushed to disk,
  * renamed into place with retry. UTF-8, no BOM; callers are responsible for LF content.
  */
-export async function atomicWriteFile(path: string, content: string | Uint8Array, deps: AtomicDeps = {}): Promise<void> {
+export async function atomicWriteFile(
+  path: string,
+  content: string | Uint8Array,
+  deps: AtomicDeps = {},
+): Promise<void> {
   const dir = dirname(path);
   await mkdir(toExtendedLength(dir), { recursive: true });
   const tmp = join(dir, `.tmp-${ulid()}`);

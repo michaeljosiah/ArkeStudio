@@ -13,7 +13,7 @@ import type { TakeQc } from "@arke-studio/contracts";
  *
  * **Best-effort.** ffmpeg is bundled with the packaged desktop build and absent almost
  * everywhere else, so the analyzer is injected and its absence is ordinary. Nothing here may
- * fail a take: finalization is not replayable (SPEC-013), which makes a thrown exception in
+ * fail a take: most production finalization is not replayable (SPEC-013), which makes a thrown exception in
  * this file a paid generation the user cannot recover.
  *
  * **Non-authoritative.** Adjacent-frame duplication cannot distinguish a provider's stutter

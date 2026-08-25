@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
 import { dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
 import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
@@ -28,13 +29,39 @@ import type { FetchLike } from "../src/types.js";
 
 const OK_PREFLIGHT = async () => ({ ok: true }) as const;
 const BASE = () => "http://127.0.0.1:8188";
+const VOICE_REFERENCE = {
+  name: `${"a".repeat(64)}.wav`,
+  contentType: "audio/wav" as const,
+  data: Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]),
+};
 
 interface Recorded {
   url: string;
   method: string;
   body: unknown;
+  redirect?: RequestRedirect;
   /** The upload's filename, when the request carried a form rather than JSON. */
   filename?: string;
+}
+
+async function listen(server: Server): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    const failed = (error: Error): void => reject(error);
+    server.once("error", failed);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", failed);
+      resolve();
+    });
+  });
+  const address = server.address();
+  assert.ok(address !== null && typeof address !== "string");
+  return `http://127.0.0.1:${address.port}`;
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 }
 
 /** A fetch fake that records what was sent: route → {status, body}, matched in order. */
@@ -52,6 +79,7 @@ function engineFake(routes: Array<{ match: RegExp; status: number; body?: unknow
       url,
       method: init?.method ?? "GET",
       body: typeof init?.body === "string" ? JSON.parse(init.body) : null,
+      ...(init?.redirect !== undefined ? { redirect: init.redirect } : {}),
       ...(uploaded instanceof File ? { filename: uploaded.name } : {}),
     });
     const hit = routes.find((r) => r.match.test(url));
@@ -130,19 +158,24 @@ describe("the recipe catalogue projects into the manifest like any other model",
     }
   });
 
-  it("the cloned voice declares its node and fetches its own weights (SPEC-022)", () => {
+  it("the cloned voice stays unavailable until its complete immutable dependency closure is catalogued", () => {
     const voice = comfyUiRecipeById("comfyui-cloned-voice")!;
     assert.equal(voice.capability, "voice-tts");
     assert.equal(voice.requires.customNodes[0]?.id, "TTS-Audio-Suite");
-    // No checkpoint entries: the engine node fetches IndexTTS 2.5 itself on first use. That is a
-    // real difference from every other recipe and is why it is asserted rather than assumed.
+    // No invented files or hashes: production readiness refuses this recipe, so the node cannot
+    // perform the old undeclared first-generation download.
     assert.deepEqual(voice.requires.checkpoints, []);
+    assert.match(voice.requires.unavailableReason ?? "", /immutable TTS-Audio-Suite archive/);
+    assert.match(voice.requires.unavailableReason ?? "", /hashed IndexTTS 2\.5 model files/);
     // 8 GB, not the 6 GB first shipped: the model measured 5.44 GB on a Python harness and the
     // recipe still could not finish on a 10 GB card, because the engine hosting it costs more and
     // the machine had 3.36 GB already spoken for. The floor carries that headroom because the
     // gate compares against TOTAL VRAM (SPEC-022 §2.6).
     assert.equal(voice.hardware.minVramMb, 8000);
     assert.match(voice.hardware.floorSource, /measured through ComfyUI/);
+    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === voice.id)!;
+    assert.deepEqual(row.limits.deliveries, undefined, "the current graph exposes provider-default delivery only");
+    assert.equal(JSON.stringify(voice.graph).includes("emotionAlpha"), false);
   });
 });
 
@@ -266,10 +299,10 @@ describe("recipe identity (§2.11)", () => {
 // ---------------------------------------------------------------------------
 
 describe("the compatibility probe is the API floor (D14)", () => {
-  it("no engine → both capabilities unavailable with the remedy, not an ENOENT", async () => {
+  it("no engine → every capability is unavailable with the remedy, not an ENOENT", async () => {
     const client = new ComfyUiClient(engineFake([]).fetch, () => null, OK_PREFLIGHT);
     const probes = await client.validateKey("");
-    assert.equal(probes.length, 2);
+    assert.equal(probes.length, 3);
     assert.ok(probes.every((p) => !p.available && /no ComfyUI engine/.test(p.reason ?? "")));
   });
 
@@ -289,13 +322,14 @@ describe("the compatibility probe is the API floor (D14)", () => {
     assert.ok(probes.every((p) => !p.available && /did not report/.test(p.reason ?? "")));
   });
 
-  it("a modern engine unlocks both capabilities", async () => {
+  it("a modern engine unlocks every advertised capability", async () => {
     const { fetch } = engineFake([
       { match: /system_stats/, status: 200, body: { system: { comfyui_version: "0.33.1" } } },
     ]);
     assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey(""), [
       { capability: "image", available: true },
       { capability: "video", available: true },
+      { capability: "voice-tts", available: true },
     ]);
   });
 
@@ -911,10 +945,9 @@ describe("the cloned-voice recipe on the wire", () => {
   const VOICE_PARAMS = {
     voiceId: "harbour-glass",
     text: "The tide turns when it turns.",
-    speakerFile: "C:/worlds/embers/voices/harbour-glass.wav",
+    audioFormat: "flac",
+    voiceReference: true,
   };
-  const CLIP = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45]);
-  const readClip = async (): Promise<Uint8Array> => CLIP;
   const ROUTES = [
     { match: /\/upload\/image$/, status: 200, body: { name: "harbour-glass.wav", subfolder: "" } },
     { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v1", node_errors: {} } },
@@ -924,12 +957,14 @@ describe("the cloned-voice recipe on the wire", () => {
     // `LoadAudio.audio` is a dropdown over the engine's input directory, so a path from this
     // machine means nothing there. Passing one through produced a graph the engine rejected.
     const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
       params: VOICE_PARAMS,
+      voiceReference: VOICE_REFERENCE,
     });
     assert.equal(calls.some((c) => c.url.endsWith("/upload/image") && c.method === "POST"), true, "clip was never uploaded");
+    assert.equal(calls.find((c) => c.url.endsWith("/upload/image"))?.redirect, "manual");
     const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
       prompt: Record<string, { inputs: Record<string, unknown> }>;
     };
@@ -940,10 +975,11 @@ describe("the cloned-voice recipe on the wire", () => {
   it("uploads before it submits, never after", async () => {
     // The name has to exist on the engine before the graph naming it is queued.
     const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
       params: VOICE_PARAMS,
+      voiceReference: VOICE_REFERENCE,
     });
     const order = calls.map((c) => c.url);
     assert.equal(
@@ -957,10 +993,11 @@ describe("the cloned-voice recipe on the wire", () => {
       { match: /\/upload\/image$/, status: 200, body: { name: "clip.wav", subfolder: "arke" } },
       { match: /\/prompt$/, status: 200, body: { prompt_id: "p-v2", node_errors: {} } },
     ]);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
       params: VOICE_PARAMS,
+      voiceReference: VOICE_REFERENCE,
     });
     const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
       prompt: Record<string, { inputs: Record<string, unknown> }>;
@@ -968,18 +1005,125 @@ describe("the cloned-voice recipe on the wire", () => {
     assert.equal(posted.prompt["1"]!.inputs["audio"], "arke/clip.wav");
   });
 
-  it("names the clip by its basename on a Windows path too", async () => {
-    // The clip path is this machine's, and on Windows that is backslashes. Splitting on "/"
-    // alone sent the whole path as the upload filename — and every test here used a
-    // forward-slash path, so the suite stayed green while the shipped platform broke.
+  it("uploads only the content-addressed name, never a host path", async () => {
     const { fetch, calls } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
-      params: { ...VOICE_PARAMS, speakerFile: String.raw`C:\worlds\embers\voices\harbour-glass.wav` },
+      params: VOICE_PARAMS,
+      voiceReference: VOICE_REFERENCE,
     });
     const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
-    assert.equal(upload.filename, "harbour-glass.wav");
+    assert.equal(upload.filename, VOICE_REFERENCE.name);
+    assert.equal(upload.filename.includes("worlds"), false);
+  });
+
+  it("refuses a non-content-addressed upload name before provider I/O", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: VOICE_PARAMS,
+        voiceReference: { ...VOICE_REFERENCE, name: "harbour-glass.wav" },
+      }),
+      /safe content-addressed name/,
+    );
+    assert.equal(calls.length, 0);
+  });
+
+  it("does not replay clip bytes to the target of an HTTP 307", async (t) => {
+    let redirectedRequests = 0;
+    let redirectedBytes = 0;
+    const redirected = createServer((request, response) => {
+      redirectedRequests += 1;
+      request.on("data", (chunk: Buffer) => {
+        redirectedBytes += chunk.byteLength;
+      });
+      request.on("end", () => {
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ name: VOICE_REFERENCE.name, subfolder: "" }));
+      });
+    });
+    const redirectedUrl = await listen(redirected);
+    t.after(() => closeServer(redirected));
+
+    let uploadBytes = 0;
+    const engine = createServer((request, response) => {
+      request.on("data", (chunk: Buffer) => {
+        uploadBytes += chunk.byteLength;
+      });
+      request.on("end", () => {
+        response.writeHead(307, { Location: `${redirectedUrl}/stolen-upload` });
+        response.end();
+      });
+    });
+    const engineUrl = await listen(engine);
+    t.after(() => closeServer(engine));
+
+    await assert.rejects(
+      new ComfyUiClient(
+        (url, init) => fetch(url, init),
+        () => engineUrl,
+        OK_PREFLIGHT,
+      ).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: VOICE_PARAMS,
+        voiceReference: VOICE_REFERENCE,
+      }),
+      /redirected the voice recording upload \(HTTP 307\)/,
+    );
+    assert.ok(
+      uploadBytes > VOICE_REFERENCE.data.byteLength,
+      "the first server received the multipart upload",
+    );
+    assert.equal(redirectedRequests, 0, "fetch did not resend the POST to the redirect target");
+    assert.equal(redirectedBytes, 0, "the redirect target received none of the clip bytes");
+  });
+
+  it("does not follow redirects for prompt submission or voice-output downloads", async () => {
+    const promptFake = engineFake([
+      {
+        match: /\/upload\/image$/,
+        status: 200,
+        body: { name: VOICE_REFERENCE.name, subfolder: "" },
+      },
+      { match: /\/prompt$/, status: 307, body: {} },
+    ]);
+    await assert.rejects(
+      new ComfyUiClient(promptFake.fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-cloned-voice",
+        capability: "voice-tts",
+        params: VOICE_PARAMS,
+        voiceReference: VOICE_REFERENCE,
+      }),
+      /redirected prompt submission \(HTTP 307\)/,
+    );
+    assert.equal(promptFake.calls.find((call) => call.url.endsWith("/prompt"))?.redirect, "manual");
+
+    const downloadFake = engineFake([
+      {
+        match: /\/history\/p-v1$/,
+        status: 200,
+        body: {
+          "p-v1": {
+            outputs: {
+              "5": { audio: [{ filename: "voice.flac", subfolder: "", type: "output" }] },
+            },
+          },
+        },
+      },
+      { match: /\/view\?/, status: 307, body: {} },
+    ]);
+    await assert.rejects(
+      new ComfyUiClient(downloadFake.fetch, BASE, OK_PREFLIGHT).fetchArtifacts("", "p-v1", {
+        model: "comfyui-cloned-voice",
+      }),
+      /redirected the download.*HTTP 307/,
+    );
+    assert.equal(downloadFake.calls.find((call) => call.url.includes("/history/"))?.redirect, "manual");
+    assert.equal(downloadFake.calls.find((call) => call.url.includes("/view?"))?.redirect, "manual");
   });
 
   it("takes every key a real voice dispatch carries", async () => {
@@ -990,7 +1134,7 @@ describe("the cloned-voice recipe on the wire", () => {
      * whole envelope belongs in one test so the next addition fails here and not on a machine.
      */
     const { fetch } = engineFake(ROUTES);
-    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
       params: {
@@ -1002,6 +1146,7 @@ describe("the cloned-voice recipe on the wire", () => {
         sheetVersion: 5,
         characterCount: 174,
       },
+      voiceReference: VOICE_REFERENCE,
     });
   });
 
@@ -1009,10 +1154,11 @@ describe("the cloned-voice recipe on the wire", () => {
     // This recipe has no `prompt` param at all: a line is spoken verbatim, never described.
     const { fetch } = engineFake(ROUTES);
     await assert.rejects(
-      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, readClip).submit("", {
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
         model: "comfyui-cloned-voice",
         capability: "voice-tts",
-        params: { voiceId: "v", speakerFile: "c.wav" },
+        params: { voiceId: "v", audioFormat: "flac", voiceReference: true },
+        voiceReference: VOICE_REFERENCE,
       }),
       /needs a line to speak/,
     );
@@ -1021,22 +1167,23 @@ describe("the cloned-voice recipe on the wire", () => {
   it("does not put a file on the engine for a job pre-flight refuses", async () => {
     const { fetch, calls } = engineFake(ROUTES);
     await assert.rejects(
-      new ComfyUiClient(fetch, BASE, async () => ({ ok: false as const, reason: "pinned node drifted" }), readClip).submit(
+      new ComfyUiClient(fetch, BASE, async () => ({ ok: false as const, reason: "pinned node drifted" })).submit(
         "",
-        { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS },
+        { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS, voiceReference: VOICE_REFERENCE },
       ),
     );
     assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false);
   });
 
-  it("says so when the clip cannot be read, rather than uploading nothing", async () => {
-    const { fetch } = engineFake(ROUTES);
+  it("refuses when the queue did not attach confined clip bytes", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
     await assert.rejects(
-      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => {
-        throw new Error("ENOENT");
-      }).submit("", { model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS }),
-      /recording could not be read/,
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-cloned-voice", capability: "voice-tts", params: VOICE_PARAMS,
+      }),
+      /needs the voice's own recording/,
     );
+    assert.equal(calls.length, 0);
   });
 });
 
@@ -1048,14 +1195,21 @@ describe("the cloned-voice recipe on the wire", () => {
  * node's own count, and it never carries the node's id.
  */
 describe("progress from the engine's socket", () => {
-  function socketFake(): { open: (url: string) => ProgressSocket; send: (msg: unknown) => void; urls: string[] } {
+  function socketFake(): {
+    open: (url: string) => ProgressSocket;
+    send: (msg: unknown) => void;
+    urls: string[];
+    closed: string[];
+  } {
     const urls: string[] = [];
+    const closed: string[] = [];
     let live: ProgressSocket | null = null;
     return {
       urls,
+      closed,
       open: (url) => {
         urls.push(url);
-        live = { onMessage: null, onClose: null, close: () => {} };
+        live = { onMessage: null, onClose: null, close: () => closed.push(url) };
         return live;
       },
       send: (msg) => live?.onMessage?.(JSON.stringify(msg)),
@@ -1073,11 +1227,12 @@ describe("progress from the engine's socket", () => {
       ...RUNNING,
     ]);
     const sock = socketFake();
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, async () => new Uint8Array([1]), sock.open);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     await client.submit("", {
       model: "comfyui-cloned-voice",
       capability: "voice-tts",
-      params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+      params: { voiceId: "v", text: "A line.", audioFormat: "flac", voiceReference: true },
+      voiceReference: VOICE_REFERENCE,
     });
     await client.poll("", "p-1");
     assert.equal(sock.urls[0], "ws://127.0.0.1:8188/ws?clientId=arke-studio");
@@ -1092,7 +1247,7 @@ describe("progress from the engine's socket", () => {
     // is being counted is the unlabelled bar D16 refuses, so it reports state only.
     const { fetch } = engineFake(RUNNING);
     const sock = socketFake();
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     await client.poll("", "p-1");
     sock.send({ type: "progress", data: { prompt_id: "p-1", value: 20, max: 25 } });
     assert.equal((await client.poll("", "p-1")).step, undefined);
@@ -1102,7 +1257,7 @@ describe("progress from the engine's socket", () => {
     // R-1: no node id reaches a user, and `step.stage` is rendered verbatim on a row.
     const { fetch } = engineFake(RUNNING);
     const sock = socketFake();
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     await client.poll("", "p-1");
     sock.send({ type: "progress", data: { prompt_id: "p-1", value: 3, max: 10, node: "4" } });
     const result = await client.poll("", "p-1");
@@ -1114,7 +1269,7 @@ describe("progress from the engine's socket", () => {
     // position or elapsed time — is exactly what the original exclusion refused.
     const { fetch } = engineFake(RUNNING);
     const sock = socketFake();
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     const result = await client.poll("", "p-1");
     assert.equal(result.state, "running");
     assert.equal(result.step, undefined);
@@ -1124,7 +1279,7 @@ describe("progress from the engine's socket", () => {
   it("forgets a prompt's count when it finishes", async () => {
     const { fetch } = engineFake(RUNNING);
     const sock = socketFake();
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, sock.open);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
     await client.poll("", "p-1");
     sock.send({ type: "progress", data: { prompt_id: "p-1", value: 9, max: 10 } });
     sock.send({ type: "execution_success", data: { prompt_id: "p-1" } });
@@ -1134,10 +1289,42 @@ describe("progress from the engine's socket", () => {
   it("keeps dispatching when the socket cannot be opened", async () => {
     // Progress is the one thing a dispatch works perfectly well without.
     const { fetch } = engineFake(RUNNING);
-    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, () => {
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, () => {
       throw new Error("no socket here");
     });
     assert.equal((await client.poll("", "p-1")).state, "running");
+  });
+
+  it("replaces a progress socket when the engine source changes and closes it on dispose", async () => {
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    let base = "http://127.0.0.1:8188";
+    const client = new ComfyUiClient(fetch, () => base, OK_PREFLIGHT, sock.open);
+    await client.poll("", "p-1");
+    base = "http://127.0.0.1:8288";
+    await client.poll("", "p-1");
+    assert.deepEqual(sock.urls, [
+      "ws://127.0.0.1:8188/ws?clientId=arke-studio",
+      "ws://127.0.0.1:8288/ws?clientId=arke-studio",
+    ]);
+    assert.deepEqual(sock.closed, ["ws://127.0.0.1:8188/ws?clientId=arke-studio"]);
+    client.dispose();
+    assert.deepEqual(sock.closed, [
+      "ws://127.0.0.1:8188/ws?clientId=arke-studio",
+      "ws://127.0.0.1:8288/ws?clientId=arke-studio",
+    ]);
+    await assert.rejects(client.poll("", "p-1"), /provider client is disposed/);
+  });
+
+  it("can close a source-bound socket immediately while keeping the client reusable", async () => {
+    const { fetch } = engineFake(RUNNING);
+    const sock = socketFake();
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, sock.open);
+    await client.poll("", "p-1");
+    client.resetTransport();
+    assert.deepEqual(sock.closed, ["ws://127.0.0.1:8188/ws?clientId=arke-studio"]);
+    await client.poll("", "p-1");
+    assert.equal(sock.urls.length, 2);
   });
 });
 
@@ -1152,16 +1339,16 @@ describe("making room on the graphics card", () => {
   const VOICE = {
     model: "comfyui-cloned-voice" as const,
     capability: "voice-tts" as const,
-    params: { voiceId: "v", text: "A line.", speakerFile: "c.wav" },
+    params: { voiceId: "v", text: "A line.", audioFormat: "flac", voiceReference: true },
+    voiceReference: VOICE_REFERENCE,
   };
   const ROUTES = [
     { match: /\/free$/, status: 200, body: {} },
     { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
     { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
   ];
-  const clip = async (): Promise<Uint8Array> => new Uint8Array([1]);
   const client = (free: () => Promise<number | null>, fetch: FetchLike) =>
-    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, clip, undefined, free);
+    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free);
 
   it("dispatches when the card cannot be measured", async () => {
     // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
@@ -1169,6 +1356,20 @@ describe("making room on the graphics card", () => {
     const { fetch, calls } = engineFake(ROUTES);
     await client(async () => null, fetch).submit("", VOICE);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false, "nothing to free when nothing is known");
+  });
+
+  it("does not apply this machine's free-memory probe to a remote engine", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(
+      fetch,
+      BASE,
+      OK_PREFLIGHT,
+      undefined,
+      async () => 1,
+      () => "remote",
+    ).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true);
   });
 
   it("leaves the engine's model cache alone when there is already room", async () => {

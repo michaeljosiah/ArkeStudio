@@ -317,6 +317,14 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
       }),
     );
     assert.equal(sectionRead?.path, `/w/${WORLD}/cast/timi-j`);
+    const bibleRead = jobOrigin(
+      job({
+        status: "failed",
+        target: { kind: "voice-preview", id: "bible/elevenlabs/eleven-v2/rachel" },
+        params: { purpose: "bible-section", sectionHeading: "The tide" },
+      }),
+    );
+    assert.equal(bibleRead?.path, `/w/${WORLD}/bible`);
     // Every reference kind the queue can finalize is one Activity can route home, or the row it
     // leaves behind is the dead end this issue was about.
     for (const kind of REFERENCE_FINALIZATION_TARGETS) {

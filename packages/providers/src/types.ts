@@ -15,10 +15,14 @@ import type {
 export interface SubmitRequest {
   model: string;
   capability: Capability;
+  /** Host cancellation for work still inside a synchronous submit. Never serialized or sent. */
+  signal?: AbortSignal;
   /** Coordinator-neutral parameters; each client must validate and map its provider boundary. */
   params: Record<string, unknown>;
   /** Ephemeral verified bytes, resolved immediately before submission and never journalled. */
   imageReferences?: PreparedImageReference[];
+  /** A host-read voice reference, resolved immediately before submission and never journalled. */
+  voiceReference?: PreparedVoiceReference;
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
   /**
@@ -33,6 +37,13 @@ export interface SubmitRequest {
 export interface PreparedImageReference {
   name: string;
   contentType: "image/png" | "image/jpeg" | "image/webp";
+  data: Uint8Array;
+}
+
+export interface PreparedVoiceReference {
+  /** Opaque, content-addressed upload name. It carries no world, character, or local path. */
+  name: string;
+  contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
 }
 
@@ -135,7 +146,7 @@ export interface ProviderCallCapture {
 
 export interface VoiceCatalogueClient extends ProviderClient {
   listVoicesCatalog(key: string): Promise<
-    Array<{ provider: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
+    Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   >;
 }
 
@@ -153,6 +164,10 @@ export interface ProviderClient {
   poll(key: string, remoteId: string, context?: ProviderCallContext): Promise<PollResult>;
   fetchArtifacts(key: string, remoteId: string, context?: ProviderCallContext): Promise<FetchedArtifact[]>;
   cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
+  /** Drop source-bound optional transports while keeping the client reusable. */
+  resetTransport?(): void;
+  /** Release optional long-lived transports. No provider call may occur after this. */
+  dispose?(): void;
   lookupByKey?(key: string, idempotencyKey: string, context?: ProviderCallContext): Promise<{ remoteId: string } | null>;
   listRecent?(key: string, context?: ProviderCallContext): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>>;
 }

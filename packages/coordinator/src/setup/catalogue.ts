@@ -108,6 +108,27 @@ const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
 
 const COMFYUI_VERSION = "0.33.1";
 
+/** Canonical setup identities for the two model directories Voxa reads at launch. */
+export const VOXA_SETUP_COMPONENT_IDS = {
+  kokoro: "tts-kokoro-82m",
+  whisper: "stt-whisper-base-en",
+} as const;
+
+export function isVoxaSetupComponentId(id: string): boolean {
+  return id === VOXA_SETUP_COMPONENT_IDS.kokoro || id === VOXA_SETUP_COMPONENT_IDS.whisper;
+}
+
+export function voxaSetupCompleted(
+  previous: readonly { id: string; state: string }[] | undefined,
+  current: readonly { id: string; state: string }[],
+): boolean {
+  return current.some((component) => {
+    if (!isVoxaSetupComponentId(component.id) || component.state !== "ready") return false;
+    const before = previous?.find((item) => item.id === component.id)?.state;
+    return before !== "ready" && before !== "present";
+  });
+}
+
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
     id: "ollama-runtime",
@@ -123,7 +144,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     },
   },
   {
-    id: "tts-kokoro-82m",
+    id: VOXA_SETUP_COMPONENT_IDS.kokoro,
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines on this machine, in the six preset voices",
     sizeMb: 400,
@@ -144,7 +165,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     },
   },
   {
-    id: "stt-whisper-base-en",
+    id: VOXA_SETUP_COMPONENT_IDS.whisper,
     displayName: "Whisper base.en · dictation",
     purpose: "Turns your speech into text, without the audio leaving this machine",
     // The small English model, deliberately: enough to dictate an instruction, and a fraction
@@ -193,16 +214,15 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       },
     },
   },
-  // The ComfyUI engine (SPEC-021 §2.4, D10). Optional and detection-first: presence is
-  // answered by the engine service before this directory is even looked at, so an existing
-  // install — user-directed, answering on the default port, or at a well-known location — means
-  // this is NEVER fetched. Pinned to a release with the release's own published sha256; the
+  // The ComfyUI engine (SPEC-021 §2.4, D10). Optional and selection-first: a source the user
+  // deliberately selected is reused, while mere detection remains an offer and does not suppress
+  // this managed option. Pinned to a release with the release's own published sha256; the
   // NVIDIA build only, said on the row (§1.4). The archive is 7z, which the resolved System32
   // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
   {
     id: "comfyui-runtime",
     displayName: "ComfyUI",
-    purpose: "Runs the local image and video recipes — used, never fetched, when you already have one",
+    purpose: "Runs image and video recipes — install managed, or explicitly reuse another engine",
     sizeMb: 2034,
     // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the

@@ -441,8 +441,13 @@ describe("the bench in voice mode (design 70)", () => {
     capability: "voice-tts",
     displayName: "Test Voice",
     accepts: { referenceImages: 0, referenceRoles: false, startFrame: false, endFrame: false },
-    limits: {},
+    limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"] },
     pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+  };
+  const TTS_SIBLING: ManifestModel = {
+    ...TTS,
+    id: "test-tts-sibling",
+    displayName: "Test Voice Sibling",
   };
   const LINE = "The tide-clock keeps the drowned god's hours.";
 
@@ -453,7 +458,7 @@ describe("the bench in voice mode (design 70)", () => {
       ...base,
       app: {
         ...base.app,
-        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, TTS] },
+        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, TTS_SIBLING, TTS] },
         // The controls exist only for a model the key can actually reach, so the key has to be
         // in the fixture — the same gate that keeps unusable rows out of the dropdown.
         providers: [
@@ -518,9 +523,75 @@ describe("the bench in voice mode (design 70)", () => {
   });
 
   it("names the chosen voice on the control once one is picked", () => {
-    const html = render({ voiceId: "vale", voiceLabel: "Vale", delivery: "measured" });
+    const html = render({
+      voiceId: "vale",
+      voiceProvider: TTS.provider,
+      voiceModel: TTS.id,
+      voiceLabel: "Vale",
+      delivery: "measured",
+    });
     assert.match(html, />Vale</);
     assert.doesNotMatch(html, /choose a voice/);
+  });
+
+  it("shows provider defaults only when the model declares no measured delivery", () => {
+    const state = voiceState({ voiceId: "clone", voiceProvider: "comfyui", voiceLabel: "Clone" });
+    const clone: ManifestModel = {
+      ...TTS,
+      id: "comfyui-cloned-voice",
+      provider: "comfyui",
+      displayName: "Local Cloned Voice",
+      limits: { maxPromptChars: 400, audioFormat: "flac" },
+      pricing: { kind: "unmetered" },
+    };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
+      ...state,
+      app: {
+        ...state.app,
+        manifest: { ...state.app.manifest!, models: [...state.app.manifest!.models, clone] },
+        comfyui: {
+          engine: { source: "managed", state: "ready", locality: "local", location: null, version: "1", instanceId: "x", detail: null, detected: [] },
+          recipes: [{ recipeId: clone.id, recipeVersion: 1, displayName: clone.displayName, capability: "voice-tts", state: "ready" }],
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      },
+      bench: {
+        ...state.bench!,
+        session: { ...state.bench!.session, composer: { ...state.bench!.session.composer, provider: clone.provider, model: clone.id } },
+      },
+    });
+    assert.match(html, /delivery · default only/);
+    assert.doesNotMatch(html, /aria-label="Delivery"/);
+  });
+
+  it("does not carry an old provider's delivery onto a cloned voice", () => {
+    const state = voiceState({ voiceId: "clone", voiceProvider: "comfyui", voiceLabel: "Clone", delivery: "breaking" });
+    const clone: ManifestModel = {
+      ...TTS,
+      id: "comfyui-cloned-voice",
+      provider: "comfyui",
+      displayName: "Local Cloned Voice",
+      limits: { maxPromptChars: 400, audioFormat: "flac" },
+      pricing: { kind: "unmetered" },
+    };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, {
+      ...state,
+      app: {
+        ...state.app,
+        manifest: { ...state.app.manifest!, models: [...state.app.manifest!.models, clone] },
+        comfyui: {
+          engine: { source: "managed", state: "ready", locality: "local", location: null, version: "1", instanceId: "x", detail: null, detected: [] },
+          recipes: [{ recipeId: clone.id, recipeVersion: 1, displayName: clone.displayName, capability: "voice-tts", state: "ready" }],
+          checkedAt: "2026-08-25T12:00:00.000Z",
+        },
+      },
+      bench: {
+        ...state.bench!,
+        session: { ...state.bench!.session, composer: { ...state.bench!.session.composer, provider: clone.provider, model: clone.id } },
+      },
+    });
+    assert.match(html, /delivery · default only/);
+    assert.doesNotMatch(html, /<option[^>]*>breaking<\/option>/);
   });
 });
 

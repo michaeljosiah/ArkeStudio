@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { ClipStep, NameStep } from "../src/components/clone-voice-dialog.js";
+import { VoicePickerDialog } from "../src/components/voice-picker.js";
+import { __setStateForTest } from "../src/lib/store.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
 import { type StagedClip } from "../src/lib/store.js";
 import { encodeWav, toBase64 } from "../src/lib/wav.js";
 
@@ -126,6 +129,47 @@ describe("the clone dialog", () => {
     for (const name of [...render().matchAll(/class="([^"]+)"/g)].flatMap((m) => m[1]!.split(/\s+/))) {
       if (name.startsWith("fy-clone")) assert.equal(CSS.includes(`.${name}`), true, `${name} has no style`);
     }
+  });
+});
+
+describe("voice picker identity", () => {
+  it("keeps equal voice ids under different providers and models as distinct selection keys", () => {
+    __setStateForTest(FIXTURE_STATE, {
+      voiceCatalogue: [
+        { provider: "elevenlabs", model: "eleven-v2", voiceId: "same", label: "Cloud v2", attributes: [], local: false, canClone: false, usedBy: [] },
+        { provider: "elevenlabs", model: "eleven-v3", voiceId: "same", label: "Cloud v3", attributes: [], local: false, canClone: false, usedBy: [] },
+        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "same", label: "Clone", attributes: [], local: true, canClone: false, usedBy: [] },
+      ],
+    });
+    const markup = renderToString(
+      <VoicePickerDialog
+        open
+        chosenId="same"
+        chosenProvider="elevenlabs"
+        chosenModel="eleven-v3"
+        onClose={noop}
+        onPick={noop}
+      />,
+    );
+    assert.equal((markup.match(/fy-voices__row--on/g) ?? []).length, 1);
+    assert.match(markup, /Cloud v2/);
+    assert.match(markup, /Cloud v3/);
+    assert.match(markup, /Clone/);
+    assert.match(markup, /fy-voices__picked">Cloud v3/);
+  });
+
+  it("filters cloned voices out of narration until that use is implemented", () => {
+    __setStateForTest(FIXTURE_STATE, {
+      voiceCatalogue: [
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "same", label: "Preset", attributes: [], local: true, canClone: false, usedBy: [] },
+        { provider: "comfyui", model: "comfyui-cloned-voice", voiceId: "clone", label: "Clone", attributes: [], local: true, canClone: false, usedBy: [] },
+      ],
+    });
+    const markup = renderToString(
+      <VoicePickerDialog open use="narration" chosenId={undefined} onClose={noop} onPick={noop} />,
+    );
+    assert.match(markup, /Preset/);
+    assert.doesNotMatch(markup, />Clone</);
   });
 });
 

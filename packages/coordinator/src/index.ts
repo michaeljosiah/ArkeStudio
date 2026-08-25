@@ -259,14 +259,25 @@ export {
 } from "./sheets/authoring.js";
 export { AuthoringService, describeActionClass, settlePermission } from "./harness/authoring.js";
 export { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
-export { SETUP_CATALOGUE, catalogueTotalMb, type CatalogueEntry, type DownloadFile } from "./setup/catalogue.js";
+export {
+  SETUP_CATALOGUE,
+  VOXA_SETUP_COMPONENT_IDS,
+  catalogueTotalMb,
+  isVoxaSetupComponentId,
+  voxaSetupCompleted,
+  type CatalogueEntry,
+  type DownloadFile,
+} from "./setup/catalogue.js";
 export { nodeSetupDeps } from "./setup/node-deps.js";
 export {
+  comfyUiChildEnvironment,
+  comfyUiUrlIsLoopback,
   ComfyUiEngineService,
   engineInstanceId,
   type ComfyUiRecipeFacts,
   type EngineServiceDeps,
 } from "./comfyui/engine.js";
+export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";

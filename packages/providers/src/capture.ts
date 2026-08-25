@@ -264,6 +264,8 @@ export function captureProviderClient(
     fetchArtifacts: (key, remoteId, context) =>
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
+    ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
+    ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
     ...(client.lookupByKey
       ? {
           lookupByKey: (key: string, idempotencyKey: string, context?: ProviderCallContext) =>

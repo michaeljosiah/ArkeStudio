@@ -135,7 +135,9 @@ export function extract(bundle: WorldBundle): Extraction {
         sourceId: sheet.id,
         sourceVersion: sheet.voice.assignedAtVersion,
         targetKind: "voice",
-        targetId: `${sheet.voice.provider}/${sheet.voice.voiceId}`,
+        targetId: sheet.voice.model
+          ? `${sheet.voice.provider}/${sheet.voice.model}/${sheet.voice.voiceId}`
+          : `${sheet.voice.provider}/${sheet.voice.voiceId}`,
         targetVersion: null,
         relation: "voice-assignment",
         productionId: null,

@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clonedVoiceCandidates,
+  KOKORO_VOICE_MODEL,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
-  PROVIDERS,
   rankVoices,
   splitBible,
   type ClonedVoice,
@@ -16,12 +16,16 @@ import {
   type PreviewLine,
   type Sheet,
   type VoiceCandidate,
+  type VoiceAudioFormat,
+  voiceFormatForModel,
+  voiceTargetKey,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { flacProblem, verifyArtifact } from "../queue/verify.js";
 
 /**
  * The voice service (SPEC-011): a unified catalogue over local presets and cloud voices
@@ -130,6 +134,9 @@ export function splitForSpeech(text: string, max = LOCAL_SPEECH_CHUNK): string[]
  */
 export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
   if (parts.length === 0) throw new Error("Nothing to join.");
+  for (const part of parts) {
+    if (!cachedVoiceAudioLooksRight(part, "wav")) throw new Error("Voxa returned invalid audio.");
+  }
   if (parts.length === 1) return parts[0]!;
   const dataOf = (buf: Uint8Array): { header: Uint8Array; data: Uint8Array } => {
     const view = Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
@@ -141,7 +148,7 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
       const id = view.toString("ascii", at, at + 4);
       const size = view.readUInt32LE(at + 4);
       if (id === "data") {
-        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, Math.min(at + 8 + size, buf.length)) };
+        return { header: buf.subarray(0, at + 8), data: buf.subarray(at + 8, at + 8 + size) };
       }
       at += 8 + size + (size % 2); // chunks are word-aligned
     }
@@ -217,10 +224,16 @@ export interface SpeechSpec {
    * flac joins wav and mp3 (SPEC-022): ComfyUI's SaveAudio writes it, and a cache key that could
    * not spell the format a provider actually returns would point at a file that never exists.
    */
-  format: "wav" | "mp3" | "flac";
+  format: VoiceAudioFormat;
   language?: string;
   params?: Record<string, number>;
 }
+
+const FORMAT_CONTENT_TYPE: Record<VoiceAudioFormat, string> = {
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  flac: "audio/flac",
+};
 
 export function speechCacheFile(spec: SpeechSpec): string {
   const key = createHash("sha256")
@@ -236,15 +249,12 @@ export function speechCacheFile(spec: SpeechSpec): string {
  * that was not Kokoro was filed as ElevenLabs, so a second *local* provider landed on the cloud
  * key and two providers' previews of the same voice id and line collided (SPEC-022 §2.7).
  */
-// No comfyui row: the voice recipe does not exist yet, and naming an id the manifest cannot
-// resolve mints cache keys against a model nothing can dispatch. Absent falls through to the
-// provider's own name, which is honest until the recipe lands with its real id.
-/** What a provider's preview lands as. ComfyUI's SaveAudio writes FLAC; the cloud rows write mp3. */
-const PREVIEW_FORMAT: Record<string, "wav" | "mp3" | "flac"> = {
-  kokoro: "wav",
-  comfyui: "flac",
-  elevenlabs: "mp3",
-};
+// Legacy callers may omit a model. Known pre-recipe providers resolve through this migration map;
+// new providers key under their own id rather than borrowing another provider's cache namespace.
+export function cachedVoiceAudioLooksRight(data: Uint8Array, format: VoiceAudioFormat): boolean {
+  if (format === "flac") return flacProblem(data) === null;
+  return verifyArtifact({ name: `voice.${format}`, contentType: FORMAT_CONTENT_TYPE[format], data }) === null;
+}
 
 const PREVIEW_MODEL: Record<string, string> = {
   kokoro: "kokoro-82m",
@@ -255,7 +265,7 @@ export function previewCacheFile(
   provider: string,
   voiceId: string,
   line: string,
-  ext: string,
+  format: VoiceAudioFormat,
   model?: string,
 ): string {
   return speechCacheFile({
@@ -265,7 +275,7 @@ export function previewCacheFile(
     model: model ?? PREVIEW_MODEL[provider] ?? provider,
     voiceId,
     text: line,
-    format: ext === "wav" ? "wav" : ext === "flac" ? "flac" : "mp3",
+    format,
   });
 }
 
@@ -284,7 +294,10 @@ export class VoiceService {
    * bundle supplies them; the caller that has none (the narrator, resolved before a world is
    * open) supplies nothing and gets the two catalogues that do not depend on one.
    */
-  async catalogue(clonedVoices: readonly ClonedVoice[] = []): Promise<VoiceCandidate[]> {
+  async catalogue(
+    clonedVoices: readonly ClonedVoice[] = [],
+    clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
+  ): Promise<VoiceCandidate[]> {
     let local = this.deps.localPresets;
     if (this.deps.sidecar) {
       /*
@@ -305,11 +318,14 @@ export class VoiceService {
        */
       const health = await this.deps.sidecar.health().catch(() => null);
       const speechEngine = health === null ? "unknown" : health.engineStatus.kokoro.ready ? "ready" : "down";
-      if (speechEngine === "down") return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices)];
+      if (speechEngine === "down") {
+        return [...(await this.cloudVoices()), ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
+      }
       const live = await this.deps.sidecar.listVoices().catch(() => []);
       if (live.length > 0) {
         local = live.map((v) => ({
           provider: "kokoro",
+          model: KOKORO_VOICE_MODEL,
           voiceId: v.id,
           label: v.label,
           attributes: v.attributes,
@@ -321,7 +337,7 @@ export class VoiceService {
         }));
       }
     }
-    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices)];
+    return [...(await this.cloudVoices()), ...local, ...clonedVoiceCandidates(clonedVoices, clonedAvailability)];
   }
 
   /** The keyed cloud catalogues, which are unaffected by whatever the local engine is doing. */
@@ -336,16 +352,30 @@ export class VoiceService {
   }
 
   /** Rank the catalogue against the sheet's written voice (R-7): emits voice.candidates. */
-  async candidates(worldId: string, bundle: WorldBundle, sheet: Sheet, manifest: ModelManifest | null): Promise<void> {
+  async candidates(
+    worldId: string,
+    bundle: WorldBundle,
+    sheet: Sheet,
+    manifest: ModelManifest | null,
+    clonedAvailability: { local?: boolean; unavailableReason?: string } = {},
+  ): Promise<void> {
     const written = sheet.sections.find((s) => s.heading === "Voice · written")?.body ?? "";
     const extracted = extractVoiceAttributes(written);
-    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices));
+    const ranked = rankVoices(extracted, await this.catalogue(bundle.clonedVoices, clonedAvailability));
     const line = previewLineFor(sheet, bundle.productions);
-    // By capability and locality, never by vendor name: this asked for ElevenLabs specifically,
-    // so a third `voice-tts` row was simply not found (SPEC-022 §2.7). What the picker needs here
-    // is the priced cloud row — a local row is unmetered and would quote every read at nothing.
-    const voiceModel =
-      manifest?.models.find((m) => m.capability === "voice-tts" && !PROVIDERS[m.provider].local) ?? null;
+    const previewMicroUsdByVoice = Object.fromEntries(
+      ranked.flatMap(({ candidate }): Array<[string, number]> => {
+        const model = manifest?.models.find(
+          (entry) =>
+            entry.provider === candidate.provider &&
+            entry.id === candidate.model &&
+            entry.capability === "voice-tts",
+        );
+        return model
+          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: line.text.length })]]
+          : [];
+      }),
+    );
     this.deps.emit({
       at: this.now(),
       type: "voice.candidates",
@@ -355,7 +385,13 @@ export class VoiceService {
       ranked,
       previewLine: line,
       // Stated before any preview that will incur a charge (R-10): per-line cloud cost.
-      cloudPreviewMicroUsd: voiceModel ? estimateMicroUsd(voiceModel, { characters: line.text.length }) : null,
+      // Legacy clients read one aggregate figure. Use it only when every priced candidate agrees;
+      // otherwise null is safer than quoting one sibling model for another.
+      cloudPreviewMicroUsd: (() => {
+        const prices = [...new Set(Object.values(previewMicroUsdByVoice).filter((price) => price > 0))];
+        return prices.length === 1 ? prices[0]! : null;
+      })(),
+      previewMicroUsdByVoice,
     });
   }
 
@@ -376,11 +412,11 @@ export class VoiceService {
   ): Promise<{ file: string; cached: boolean }> {
     const normalized = normalizeSpeechText(text);
     if (normalized.length === 0) throw new Error("Nothing to read yet.");
-    const rel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: normalized, format: "wav" });
+    const rel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: normalized, format: "wav" });
     const abs = join(store.dir, rel);
     try {
       const bytes = await readFile(toExtendedLength(abs));
-      if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WAVE") {
+      if (cachedVoiceAudioLooksRight(bytes, "wav")) {
         return { file: rel, cached: true };
       }
     } catch {
@@ -399,7 +435,7 @@ export class VoiceService {
     const rendered: Uint8Array[] = [];
     for (const [index, chunk] of chunks.entries()) {
       const part = await this.deps.sidecar.synthesize({ voiceId, text: chunk });
-      if (part.length < 12 || Buffer.from(part).toString("ascii", 0, 4) !== "RIFF") {
+      if (!cachedVoiceAudioLooksRight(part, "wav")) {
         throw new Error("Voxa returned invalid audio.");
       }
       rendered.push(part);
@@ -410,7 +446,7 @@ export class VoiceService {
        * through, and the pieces are already separate files.
        */
       if (onPart) {
-        const partRel = speechCacheFile({ provider: "kokoro", model: "kokoro-82m", voiceId, text: chunk, format: "wav" });
+        const partRel = speechCacheFile({ provider: "kokoro", model: KOKORO_VOICE_MODEL, voiceId, text: chunk, format: "wav" });
         await store.gateOp(async () => {
           await atomicWriteFile(join(store.dir, partRel), part);
         });
@@ -444,16 +480,30 @@ export class VoiceService {
     line: PreviewLine;
     model: ManifestModel;
     /**
-     * The reference clip, already resolved and uploaded to the engine, for a voice whose identity
-     * IS a clip. Absent for a catalogue voice, where the id alone names it.
+     * Marks a voice whose identity is a world clip. The queue resolves and confines its bytes
+     * immediately before provider I/O; no absolute path enters this request.
      */
-    speakerFile?: string;
+    voiceReference?: boolean;
+    /**
+     * Opaque remote engine instance approved for this clip upload. This is destination approval,
+     * not the separate paid read-aloud confirmation token.
+     */
+    voiceUploadConfirmedFor?: string;
   }): { input: EnqueueInput; cacheFile: string } {
-    const { worldId, sheet, provider, voiceId, line, model, speakerFile } = input;
+    const {
+      worldId,
+      sheet,
+      provider,
+      voiceId,
+      line,
+      model,
+      voiceReference,
+      voiceUploadConfirmedFor,
+    } = input;
     const normalized = normalizeSpeechText(line.text);
     // The format the provider actually returns, not a guess: ComfyUI's SaveAudio writes FLAC, and
     // keying an mp3 path for it would cache a hit that never matches the bytes on disk.
-    const format = PREVIEW_FORMAT[provider] ?? "mp3";
+    const format = voiceFormatForModel(model);
     // The caller's provider, not a hardcoded one: this used to key the cache under "elevenlabs"
     // regardless, so a second provider's preview of the same voice id and line would have replayed
     // ElevenLabs' audio (SPEC-022 §2.7).
@@ -463,15 +513,17 @@ export class VoiceService {
       cacheFile,
       input: {
         worldId,
-        target: { kind: "voice-preview", id: `${sheet.id}/${provider}/${voiceId}` },
+        target: { kind: "voice-preview", id: `${sheet.id}/${provider}/${model.id}/${voiceId}` },
         capability: "voice-tts",
         provider,
         model: model.id,
         params: {
           voiceId,
           text: normalized,
-          ...(speakerFile !== undefined ? { speakerFile } : {}),
+          audioFormat: format,
         },
+        ...(voiceReference === true ? { voiceReference: true } : {}),
+        ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
         estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
@@ -522,9 +574,15 @@ export function voiceLineRequest(input: {
   deliveryParams: Record<string, number> | null;
   deliveryNotice: string | null;
   model: ManifestModel;
+  voiceReference?: boolean;
+  voiceUploadConfirmedFor?: string;
 }): EnqueueInput {
   const voice = input.sheet.voice;
   if (!voice) throw new Error(`${input.sheet.name} has no assigned voice — assign one on the sheet first`);
+  const assignedModel = voice.model;
+  if (voice.provider !== input.model.provider || (assignedModel !== undefined && assignedModel !== input.model.id)) {
+    throw new Error("The assigned voice no longer matches its speech model — choose the voice again.");
+  }
   return {
     worldId: input.worldId,
     productionId: input.productionId,
@@ -535,10 +593,15 @@ export function voiceLineRequest(input: {
     params: {
       voiceId: voice.voiceId,
       text: input.text,
+      audioFormat: voiceFormatForModel(input.model),
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
     estimatedMicroUsd: estimateMicroUsd(input.model, { characters: input.text.length }),
     landing: { dir: `productions/${input.productionId}/audio` },
+    ...(input.voiceReference === true ? { voiceReference: true } : {}),
+    ...(input.voiceUploadConfirmedFor !== undefined
+      ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor }
+      : {}),
   };
 }

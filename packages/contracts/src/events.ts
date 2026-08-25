@@ -18,7 +18,7 @@ import {
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
-import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
+import { ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
@@ -33,7 +33,12 @@ import {
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
-import { RankedVoiceSchema, VoiceCandidateSchema, VoiceRuntimeStatusSchema } from "./voice.js";
+import {
+  RankedVoiceSchema,
+  VoiceAudioFormatSchema,
+  VoiceCandidateSchema,
+  VoiceRuntimeStatusSchema,
+} from "./voice.js";
 import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
@@ -320,6 +325,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /**
+   * A cloned recording would cross to a user-directed remote ComfyUI engine. The renderer must
+   * show the safe destination label, then echo the opaque instance token on the retried action.
+   * No job exists and no clip has been read for provider transport when this is emitted.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.upload-confirmation-required"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      command: QueueCommandSchema,
+      destinationLabel: z.string().min(1).max(512),
+      confirmationToken: z.string().min(1).max(256),
+    })
+    .strict(),
+
   /** Result of the deliberate main-photo acceptance action (SPEC-017 R-12, issue #71). */
   z
     .object({
@@ -388,9 +410,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       ...base,
       type: z.literal("voice.catalogue"),
       worldId: UlidSchema.optional(),
-      voices: z.array(
-        VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict(),
-      ),
+      voices: z.array(VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict()),
+    })
+    .strict(),
+  /** A direct voice assignment committed or refused. Every request receives exactly one result. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voice.assignment-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      status: z.enum(["assigned", "cleared", "refused"]),
+      reason: z.string().min(1).optional(),
     })
     .strict(),
   /** Who reads the app's prose aloud changed; null is the shipped local voice. */
@@ -407,6 +438,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       previewLine: z.object({ text: z.string(), source: z.enum(["own-line", "drafted", "stock"]) }).strict(),
       /** Stated before any preview that will incur a charge (R-10); null when no cloud model. */
       cloudPreviewMicroUsd: z.number().int().min(0).nullable(),
+      /** Exact preflight price by concrete provider/model/voice target. */
+      previewMicroUsdByVoice: z.record(z.string(), z.number().int().min(0)).default({}),
     })
     .strict(),
   /** Correlated synthesis result for candidate previews and authoritative sheet reads. */
@@ -435,9 +468,10 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        */
       part: z.number().int().min(0).optional(),
       parts: z.number().int().min(1).optional(),
-      provider: z.enum(["kokoro", "elevenlabs"]),
+      provider: ProviderIdSchema,
       model: z.string().min(1),
       voiceId: z.string().min(1),
+      format: VoiceAudioFormatSchema,
       status: z.enum(["confirmation-required", "ready", "failed"]),
       file: z.string().nullable(),
       cached: z.boolean(),
@@ -454,8 +488,10 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("voice.preview"),
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      provider: z.string().min(1),
+      provider: ProviderIdSchema,
+      model: z.string().min(1),
       voiceId: z.string().min(1),
+      format: VoiceAudioFormatSchema,
       file: z.string().nullable(),
       error: z.string().nullable(),
     })

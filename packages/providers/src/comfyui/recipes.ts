@@ -78,6 +78,12 @@ export interface ComfyUiRecipe {
   requires: {
     checkpoints: readonly RecipeCheckpoint[];
     customNodes: readonly RecipeCustomNode[];
+    /**
+     * A shipped graph whose complete immutable dependency closure is not yet known cannot be
+     * offered as ready. This is deliberately data on the recipe rather than a UI exception: the
+     * coordinator, picker and enqueue admission all consume the same refusal.
+     */
+    unavailableReason?: string;
   };
   hardware: {
     minVramMb: number;
@@ -291,10 +297,6 @@ const CLONED_VOICE: ComfyUiRecipe = {
     // Internal because the user picks a VOICE, never a filename.
     speakerFile: { kind: "string", internal: true, required: true, maxChars: 260, bind: [["1", "audio"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["4", "seed"]] },
-    // The delivery lever (SPEC-022 §2.5): emo_alpha under the node's own name. The eight-float
-    // vector needs IndexTTSEmotionOptionsNode, a fifth node this recipe deliberately does not wire
-    // in v1 — one honest control beats five that were never measured.
-    emotionAlpha: { kind: "int", internal: true, min: 0, max: 100, bind: [["3", "emotion_alpha"]] },
   },
   graph: {
     "1": { class_type: "LoadAudio", inputs: { audio: "" } },
@@ -374,19 +376,23 @@ const CLONED_VOICE: ComfyUiRecipe = {
         opt_narrator: ["2", 0],
       },
     },
-    // SaveAudio writes FLAC. Named rather than defaulted-into: a take's format is the recipe's
-    // decision, and `verifyArtifact` checks the container it is told to expect.
+    // Core SaveAudio supports FLAC (not WAV). FLAC is therefore the declared end-to-end contract:
+    // provider metadata, sanitizer, verifier, cache and media server all consume this output.
     "5": { class_type: "SaveAudio", inputs: { audio: ["4", 0], filename_prefix: "arke_voice" } },
   },
   outputNode: "5",
   requires: {
-    // No checkpoints entry: the engine node fetches IndexTTS 2.5 from Hugging Face on first use
-    // into the engine's own cache, which is the one weight path Arke does not resolve. ~10.2 GB.
-    // SPEC-022 §2.11 records why this differs from every other recipe.
+    // The old path delegated roughly 10.2 GB of model and auxiliary downloads to the node at
+    // first generation. SPEC-028 forbids that. The repository does not yet contain exact URLs,
+    // sizes and sha256 digests for that closure, nor a digest-pinned archive containing the node
+    // and its locked Python dependencies, so this recipe remains explicitly unavailable rather
+    // than pretending an empty checkpoint list is ready.
     checkpoints: [],
     customNodes: [
       { id: "TTS-Audio-Suite", pinnedRef: "dedd982ab999633d5296c3e5a152ef772941fb82" },
     ],
+    unavailableReason:
+      "Cloned voice setup is unavailable in this build: the immutable TTS-Audio-Suite archive, locked Python dependencies, and complete hashed IndexTTS 2.5 model files are not published in the setup catalogue.",
   },
   hardware: {
     // Raised from 6000 after the first end-to-end dispatch through ComfyUI failed to finish on a
@@ -575,7 +581,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     displayName: CLONED_VOICE.displayName,
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     // maxPromptChars is the LINE's cap, not a prompt's — the words are the content (turn 70).
-    limits: { maxPromptChars: 2000 },
+    limits: { maxPromptChars: 400, audioFormat: "flac" },
     // Unmetered, and therefore no per-character figure: a local read costs nothing, where an
     // ElevenLabs row states an exact price (SPEC-022 §1.3, turn 70's no-tilde rule).
     pricing: { kind: "unmetered" },

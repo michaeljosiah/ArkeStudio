@@ -92,8 +92,12 @@ export function disabledRecipes(
   for (const model of manifest.models) {
     if (model.capability !== capability || model.provider !== "comfyui") continue;
     const readiness = recipeReadinessFor(state, model.id);
-    if (readiness?.state === "disabled") {
-      out.push({ model, reason: readiness.reason ?? "not ready on this machine" });
+    const unreadyVoice =
+      capability === "voice-tts" &&
+      readiness?.state === "unknown" &&
+      state?.app.comfyui?.engine.locality === "local";
+    if (readiness?.state === "disabled" || unreadyVoice) {
+      out.push({ model, reason: readiness.reason ?? "not ready for dispatch" });
     }
   }
   return out;
@@ -116,10 +120,17 @@ export function usableModels(
     if (!unlocked.has(model.provider) && PROVIDERS[model.provider].local !== true) return false;
     // A local recipe below readiness is not usable — it stays visible in the picker as a
     // disabled row with its measured reason (disabledRecipes), and coordinator admission
-    // refuses it regardless (SPEC-021 R-16). `unknown` runs: the floor was not checkable (D15).
+    // refuses it regardless (SPEC-021 R-16). Unknown image/video hardware still runs (D15);
+    // cloned voice stays off until this build has proven the full use can complete.
     if (model.provider === "comfyui") {
       const readiness = recipeReadinessFor(state, model.id);
-      if (readiness?.state === "disabled") return false;
+      if (
+        readiness === null ||
+        readiness.state === "disabled" ||
+        (capability === "voice-tts" &&
+          readiness.state === "unknown" &&
+          state?.app.comfyui?.engine.locality === "local")
+      ) return false;
     }
     return true;
   });

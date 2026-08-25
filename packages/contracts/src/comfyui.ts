@@ -49,6 +49,8 @@ export const ComfyUiEngineStatusSchema = z
   .object({
     source: ComfyUiEngineSourceSchema,
     state: ComfyUiEngineStateSchema,
+    /** Actual data locality. A user URL is local only for literal `127.0.0.1` or `::1`. */
+    locality: z.enum(["local", "remote"]),
     location: z.string().min(1).nullable(),
     /** `system.comfyui_version` as reported; null until an engine has answered. */
     version: z.string().min(1).nullable(),
@@ -90,13 +92,19 @@ export const RecipeIdentitySchema = z
 export type RecipeIdentity = z.infer<typeof RecipeIdentitySchema>;
 
 /**
- * Which engine this job was dispatched against. The instance id is the same opaque digest the
- * engine status carries — job rows reach the renderer, so an absolute path may not (§2.11).
+ * Which engine this job was dispatched against. The instance id is the same opaque location
+ * digest the engine status carries — job rows reach the renderer, so an absolute path may not
+ * (§2.11). Spawned engines additionally freeze the process epoch: a replacement at the same
+ * filesystem location has a new in-memory queue and is therefore a different execution target.
  */
 export const JobEngineIdentitySchema = z
   .object({
     source: z.enum(["user-path", "user-url", "managed"]),
     instanceId: z.string().min(1),
+    /** Optional only for jobs written before destination locality was frozen. */
+    locality: z.enum(["local", "remote"]).optional(),
+    /** Opaque per-process identity; omitted for URL engines and legacy job rows. */
+    processEpoch: z.string().min(1).optional(),
   })
   .strict();
 export type JobEngineIdentity = z.infer<typeof JobEngineIdentitySchema>;
@@ -139,8 +147,8 @@ export type ComfyUiStatus = z.infer<typeof ComfyUiStatusSchema>;
 // ---------------------------------------------------------------------------
 
 export type ComfyUiRecoveryDecision =
-  /** The engine died with Arke; the relaunched engine provably holds no old work. Free re-run. */
-  | { action: "requeue" }
+  /** The spawned process died; its replacement provably holds no old work. Free re-run. */
+  | { action: "requeue"; engine?: JobEngineIdentity }
   /** The engine survived and it is the same instance: the recorded id still means something. */
   | { action: "resume" }
   /** The honest user decision (D12): the duplicate costs GPU time, and the copy must say so. */
@@ -157,21 +165,37 @@ export function comfyUiRecoveryDecision(input: {
   status: "running" | "submitting";
   engine: JobEngineIdentity | undefined;
   currentInstanceId: string | null;
+  currentEngine?: JobEngineIdentity | null;
 }): ComfyUiRecoveryDecision {
-  const { status, engine, currentInstanceId } = input;
+  const { status, engine, currentInstanceId, currentEngine } = input;
   // A job with no frozen identity predates this contract. Nothing can be proven about which
   // engine it belonged to, so the honest decision is the user's.
   if (engine === undefined) return { action: "hold" };
   if (engine.source === "managed" || engine.source === "user-path") {
+    if (engine.processEpoch !== undefined && currentEngine !== undefined && currentEngine !== null) {
+      if (
+        currentEngine.source !== engine.source ||
+        currentEngine.instanceId !== engine.instanceId ||
+        currentEngine.processEpoch === engine.processEpoch
+      ) {
+        return {
+          action: "fail",
+          reason:
+            "the spawned engine lifecycle could not prove a replacement process; the job was not resumed or duplicated",
+        };
+      }
+    }
     // Spawned engines do not survive Arke; their queue and history were in-memory and are gone.
-    return { action: "requeue" };
+    return {
+      action: "requeue",
+      ...(currentEngine !== undefined && currentEngine !== null ? { engine: currentEngine } : {}),
+    };
   }
   // A user-directed URL genuinely survives an Arke restart — but only as the same instance.
   if (currentInstanceId === null || currentInstanceId !== engine.instanceId) {
     return {
       action: "fail",
-      reason:
-        "the engine this job ran on is no longer configured — it was not resumed against the new one",
+      reason: "the engine this job ran on is no longer configured — it was not resumed against the new one",
     };
   }
   return status === "running" ? { action: "resume" } : { action: "hold" };

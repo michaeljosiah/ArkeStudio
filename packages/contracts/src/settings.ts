@@ -70,15 +70,23 @@ export const AppearanceSettingsSchema = z
   .strict();
 export type AppearanceSettings = z.infer<typeof AppearanceSettingsSchema>;
 
-export const VoxaSettingsSchema = z
+const VoxaSettingsValueSchema = z
   .object({
     executablePath: z.string().min(1).nullable().default(null),
-    /** null uses `%APP_ROOT%/models`, where local setup writes verified model files. */
-    modelRoot: z.string().min(1).nullable().default(null),
     /** Advanced arguments are always discrete spawn arguments, never a shell command line. */
     extraArgs: z.array(z.string()).default([]),
   })
   .strict();
+
+/**
+ * Voxa models have one managed root. Strip the former half-supported override while preserving
+ * the rest of a persisted Voxa block; the next settings write completes the migration on disk.
+ */
+export const VoxaSettingsSchema = z.preprocess((value) => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+  const { modelRoot: _modelRoot, ...migrated } = value as Record<string, unknown>;
+  return migrated;
+}, VoxaSettingsValueSchema);
 export type VoxaSettings = z.infer<typeof VoxaSettingsSchema>;
 
 /**
@@ -152,6 +160,8 @@ export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
 export const NarratorSettingsSchema = z
   .object({
     provider: z.string().min(1),
+    /** Optional only for narrator choices persisted before concrete voice targets. */
+    model: z.string().min(1).optional(),
     voiceId: z.string().min(1),
     label: z.string().min(1).optional(),
   })
@@ -195,7 +205,7 @@ const AppSettingsObjectSchema = z
         (value) => (VoxaSettingsSchema.safeParse(value).success ? value : {}),
         VoxaSettingsSchema,
       )
-      .default({ executablePath: null, modelRoot: null, extraArgs: [] }),
+      .default({ executablePath: null, extraArgs: [] }),
     /** Where the ComfyUI engine is (SPEC-021 §2.2); guarded the same way voxa is. */
     comfyui: z
       .preprocess(

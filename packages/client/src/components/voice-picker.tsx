@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { supportsVoiceUse, voiceTargetKey } from "@arke-studio/contracts";
 import { requestVoiceCatalogue, useStore, type ReadingVoice } from "../lib/store.js";
 import { cx } from "./ui.js";
 import { User, Waveform, X } from "./icons.js";
@@ -15,6 +16,9 @@ export function VoicePickerDialog({
   open,
   worldId,
   chosenId,
+  chosenProvider,
+  chosenModel,
+  use = "bench",
   onClose,
   onPick,
 }: {
@@ -22,34 +26,59 @@ export function VoicePickerDialog({
   /** Absent in Settings, where no world need be open — only `usedBy` depends on one. */
   worldId?: string;
   chosenId: string | undefined;
+  chosenProvider?: string;
+  chosenModel?: string;
+  use?: "bench" | "narration";
   onClose: () => void;
   onPick: (voice: ReadingVoice) => void;
 }) {
   const catalogue = useStore().voiceCatalogue;
   const [where, setWhere] = useState<"all" | "cloud" | "local">("all");
-  const [pick, setPick] = useState<string | undefined>(chosenId);
+  const fallbackChosen = chosenId === undefined
+    ? undefined
+    : (catalogue ?? []).find(
+        (voice) =>
+          voice.voiceId === chosenId &&
+          (chosenProvider === undefined || voice.provider === chosenProvider) &&
+          (chosenModel === undefined || voice.model === chosenModel),
+      );
+  const chosenKey =
+    chosenId === undefined
+      ? undefined
+      : chosenProvider !== undefined && chosenModel !== undefined
+        ? voiceTargetKey({ provider: chosenProvider, model: chosenModel, voiceId: chosenId })
+        : fallbackChosen
+          ? voiceTargetKey(fallbackChosen)
+          : undefined;
+  const [pick, setPick] = useState<string | undefined>(chosenKey);
 
   useEffect(() => {
     if (open) requestVoiceCatalogue(worldId);
   }, [open, worldId]);
   useEffect(() => {
-    if (open) setPick(chosenId);
-  }, [open, chosenId]);
+    if (open) setPick(chosenKey);
+  }, [open, chosenKey]);
 
   const rows = useMemo(
     () =>
-      (catalogue ?? []).filter((v: ReadingVoice) => (where === "all" ? true : where === "local" ? v.local : !v.local)),
-    [catalogue, where],
+      (catalogue ?? [])
+        .filter((v: ReadingVoice) => supportsVoiceUse(v, use))
+        .filter((v: ReadingVoice) => (where === "all" ? true : where === "local" ? v.local : !v.local)),
+    [catalogue, where, use],
+  );
+  const visibleCatalogue = useMemo(
+    () => (catalogue ?? []).filter((v: ReadingVoice) => supportsVoiceUse(v, use)),
+    [catalogue, use],
   );
   const counts = useMemo(
     () => ({
-      all: catalogue?.length ?? 0,
-      cloud: (catalogue ?? []).filter((v: ReadingVoice) => !v.local).length,
-      local: (catalogue ?? []).filter((v: ReadingVoice) => v.local).length,
+      all: visibleCatalogue.length,
+      cloud: visibleCatalogue.filter((v: ReadingVoice) => !v.local).length,
+      local: visibleCatalogue.filter((v: ReadingVoice) => v.local).length,
     }),
-    [catalogue],
+    [visibleCatalogue],
   );
-  const chosen = rows.find((v: ReadingVoice) => v.voiceId === pick);
+  const chosen = rows.find((v: ReadingVoice) => voiceTargetKey(v) === pick);
 
   if (!open) return null;
   return (
@@ -82,10 +111,15 @@ export function VoicePickerDialog({
           )}
           {rows.map((voice) => (
             <button
-              key={`${voice.provider}:${voice.voiceId}`}
+              key={voiceTargetKey(voice)}
               type="button"
-              className={cx("fy-voices__row", pick === voice.voiceId && "fy-voices__row--on")}
-              onClick={() => setPick(voice.voiceId)}
+              disabled={voice.unavailableReason !== undefined}
+              title={voice.unavailableReason}
+              className={cx(
+                "fy-voices__row",
+                pick === voiceTargetKey(voice) && "fy-voices__row--on",
+              )}
+              onClick={() => setPick(voiceTargetKey(voice))}
             >
               <Waveform size={12} />
               <span className="fy-voices__name">{voice.label}</span>
@@ -98,7 +132,9 @@ export function VoicePickerDialog({
                   {voice.usedBy.join(", ")}
                 </span>
               )}
-              <span className="fy-voices__where">{voice.local ? "on this machine" : voice.provider}</span>
+              <span className="fy-voices__where">
+                {voice.unavailableReason ?? (voice.local ? "on this machine" : voice.provider)}
+              </span>
             </button>
           ))}
         </div>
@@ -112,9 +148,9 @@ export function VoicePickerDialog({
             type="button"
             className="fy-voices__use"
             data-testid="voice-use"
-            disabled={chosen === undefined}
+            disabled={chosen === undefined || chosen.unavailableReason !== undefined}
             onClick={() => {
-              if (chosen) onPick(chosen);
+              if (chosen !== undefined && chosen.unavailableReason === undefined) onPick(chosen);
             }}
           >
             Read with this voice

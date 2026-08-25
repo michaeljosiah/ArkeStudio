@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { tempDir } from "../tmp.js";
 import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { AppLog } from "../../src/app-log.js";
@@ -63,6 +63,118 @@ describe("credential storage (R-5, R-8, §3.2)", () => {
     await store.set("fal", KEY);
     assert.equal(registry.scrub(`about to send ${KEY} upstream`), `about to send ${REDACTED} upstream`);
   });
+
+  it("serializes Promise.all mutations across stores without losing either credential", async () => {
+    const dir = await tempDir("arke-cred-");
+    const path = join(dir, "credentials.dat");
+    const first = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {});
+    const second = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {});
+    await first.set("fal", KEY);
+
+    // Both old store instances cached this same shape. Start the second mutation only once the
+    // first reaches ACL hardening: this avoids coupling the lost-update proof to its temp bug.
+    await Promise.all([first.configuredProviders(), second.configuredProviders()]);
+    let updateReachedAcl!: () => void;
+    const updateAtAcl = new Promise<void>((resolve) => {
+      updateReachedAcl = resolve;
+    });
+    const orderedFirst = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () =>
+      updateReachedAcl(),
+    );
+    await orderedFirst.configuredProviders();
+    await Promise.all([
+      orderedFirst.set("openai", "sk-openai-concurrent-1234567890"),
+      updateAtAcl.then(() => second.set("anthropic", "sk-anthropic-concurrent-1234567890")),
+    ]);
+
+    const reopened = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {});
+    assert.deepEqual((await reopened.configuredProviders()).sort(), ["anthropic", "fal", "openai"]);
+    assert.equal(await reopened.get("openai"), "sk-openai-concurrent-1234567890");
+    assert.equal(await reopened.get("anthropic"), "sk-anthropic-concurrent-1234567890");
+  });
+
+  it("reports malformed JSON and schema without replacing the credential source", async () => {
+    const dir = await tempDir("arke-cred-");
+    const path = join(dir, "credentials.dat");
+    const cases = [
+      { source: '{"version":1,"entries":', message: /contains malformed JSON/ },
+      { source: JSON.stringify({ version: 1, entries: { fal: 42 } }), message: /current schema/ },
+    ];
+
+    for (const testCase of cases) {
+      await writeFile(path, testCase.source, "utf8");
+      const store = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {});
+      await assert.rejects(() => store.configuredProviders(), testCase.message);
+      await assert.rejects(() => store.set("openai", "sk-openai-new-1234567890"), testCase.message);
+      assert.equal(await readFile(path, "utf8"), testCase.source);
+    }
+  });
+
+  it("uses a fresh same-directory temp name for every write and avoids stale-name collisions", async () => {
+    const dir = await tempDir("arke-cred-");
+    const path = join(dir, "credentials.dat");
+    const stale = join(dir, `.tmp-credentials-${process.pid}`);
+    await writeFile(stale, "stale staging file", "utf8");
+    const staged: string[] = [];
+    const store = new CredentialStore(path, fakeCipher, new SecretRegistry(), async (candidate) => {
+      staged.push(candidate);
+    });
+
+    await store.set("fal", KEY);
+    await store.set("openai", "sk-openai-second-1234567890");
+
+    assert.equal(await readFile(stale, "utf8"), "stale staging file");
+    assert.equal(staged.length, 2);
+    assert.equal(dirname(staged[0]!), dir, "staging stays on the target filesystem");
+    assert.match(basename(staged[0]!), /^\.tmp-credentials\.dat-[0-9a-f-]+$/);
+    assert.notEqual(staged[0], staged[1], "each transaction owns a unique staging path");
+    assert.deepEqual(
+      (await readdir(dir)).filter((entry) => entry.startsWith(".tmp-credentials.dat-")),
+      [],
+      "successful transactions leave no staging files",
+    );
+  });
+
+  it("fails the transaction on ACL failure and preserves the previous valid file", async () => {
+    const dir = await tempDir("arke-cred-");
+    const path = join(dir, "credentials.dat");
+    const original = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {});
+    await original.set("fal", KEY);
+    const before = await readFile(path, "utf8");
+    const failing = new CredentialStore(path, fakeCipher, new SecretRegistry(), async () => {
+      throw new Error("ACL hardening failed");
+    });
+
+    await assert.rejects(() => failing.set("openai", "sk-openai-unsaved-1234567890"), /ACL hardening failed/);
+    await assert.rejects(() => failing.clear("fal"), /ACL hardening failed/);
+    assert.equal(await readFile(path, "utf8"), before, "the hardened previous inode remains the live file");
+    assert.equal(await original.get("fal"), KEY);
+    assert.equal(
+      await original.get("openai"),
+      null,
+      "a failed transaction is never reported through the store",
+    );
+    assert.deepEqual(
+      (await readdir(dir)).filter((entry) => entry.startsWith(".tmp-credentials.dat-")),
+      [],
+      "the rejected staging file is cleaned up",
+    );
+  });
+
+  it("writes no credential bytes and creates no live file when initial ACL hardening fails", async () => {
+    const dir = await tempDir("arke-cred-");
+    const path = join(dir, "credentials.dat");
+    let stagedContent: string | null = null;
+    const store = new CredentialStore(path, fakeCipher, new SecretRegistry(), async (staged) => {
+      stagedContent = await readFile(staged, "utf8");
+      throw new Error("ACL hardening failed");
+    });
+
+    await assert.rejects(() => store.set("fal", KEY), /ACL hardening failed/);
+    assert.equal(stagedContent, "", "ACL hardening precedes writing even encrypted credential bytes");
+    await assert.rejects(() => readFile(path), { code: "ENOENT" });
+    assert.deepEqual(await readdir(dir), [], "the empty rejected staging file is removed");
+  });
 });
 
 describe("redaction at the logging boundary (R-7, §3.2)", () => {
@@ -123,7 +235,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         providerTools: [],
         manifest: null,
         routing: { defaults: {}, faults: [] },
-    models: { disabled: [] },
+        models: { disabled: [] },
         presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
@@ -137,7 +249,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         drift: [],
         agents: [],
         harnessModels: [],
-      harnessInfo: null,
+        harnessInfo: null,
         queues: [],
         setup: null,
         update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },

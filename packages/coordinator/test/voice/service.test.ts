@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -20,8 +20,28 @@ import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { AppSettingsFile } from "../../src/app-settings.js";
+import { verifyArtifact } from "../../src/queue/verify.js";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
+
+function wav(samples: number[] = [1, 2, 3, 4]): Uint8Array {
+  const out = Buffer.alloc(44 + samples.length * 2);
+  out.write("RIFF", 0, "ascii");
+  out.writeUInt32LE(out.length - 8, 4);
+  out.write("WAVE", 8, "ascii");
+  out.write("fmt ", 12, "ascii");
+  out.writeUInt32LE(16, 16);
+  out.writeUInt16LE(1, 20);
+  out.writeUInt16LE(1, 22);
+  out.writeUInt32LE(24_000, 24);
+  out.writeUInt32LE(48_000, 28);
+  out.writeUInt16LE(2, 32);
+  out.writeUInt16LE(16, 34);
+  out.write("data", 36, "ascii");
+  out.writeUInt32LE(samples.length * 2, 40);
+  samples.forEach((sample, index) => out.writeInt16LE(sample, 44 + index * 2));
+  return new Uint8Array(out);
+}
 
 const ELEVEN_MODEL: ManifestModel = {
   id: "eleven_multilingual_v2",
@@ -69,7 +89,7 @@ function fakeSidecar(engine: "ready" | "down" | "unreachable" = "ready") {
     },
     synthesize: async (input: { voiceId: string; text: string }) => {
       calls.push(`tts:${input.voiceId}`);
-      return new Uint8Array([82, 73, 70, 70, 0, 0, 0, 0, 87, 65, 86, 69]);
+      return wav();
     },
     transcribe: async () => {
       calls.push("stt");
@@ -96,7 +116,7 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
     const file = await service.localPreview(store, SHEET, "af_bella", line);
     assert.match(file, /^\.cache\/voice-previews\/[0-9a-f]{24}\.wav$/);
     const bytes = await readFile(join(dir, file));
-    assert.equal(bytes.length, 12);
+    assert.equal(verifyArtifact({ name: "preview.wav", contentType: "audio/wav", data: bytes }), null);
     assert.deepEqual(sidecar.calls, ["tts:af_bella"], "one synthesis, no queue, no ledger — zero cost");
 
     const again = await service.localPreview(store, SHEET, "af_bella", line);
@@ -105,8 +125,55 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
     await store.close();
   });
 
-  it("an ElevenLabs line goes through the queue, idempotency-protected, and writes one ledger entry", async () => {
-    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+  it("rejects a structurally truncated cache hit and replaces it with complete local audio", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const sidecar = fakeSidecar();
+    const service = new VoiceService({
+      sidecar,
+      localPresets: [],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+      clock: CLOCK,
+    });
+    const line = { text: "the verse, under the water", source: "own-line" as const };
+    const file = await service.localPreview(store, SHEET, "af_bella", line);
+    sidecar.calls.length = 0;
+    await writeFile(join(dir, file), Buffer.from("RIFF\u0008\u0000\u0000\u0000WAVE", "binary"));
+
+    const result = await service.localPreview(store, SHEET, "af_bella", line);
+    assert.equal(result, file);
+    assert.deepEqual(sidecar.calls, ["tts:af_bella"]);
+    assert.equal(
+      verifyArtifact({ name: "preview.wav", contentType: "audio/wav", data: await readFile(join(dir, result)) }),
+      null,
+    );
+    await store.close();
+  });
+
+  it("refuses newly synthesized WAV bytes whose body is incomplete", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    const service = new VoiceService({
+      sidecar: {
+        ...fakeSidecar(),
+        synthesize: async () => Uint8Array.from([0x52, 0x49, 0x46, 0x46, 8, 0, 0, 0, 0x57, 0x41, 0x56, 0x45]),
+      },
+      localPresets: [],
+      cloudSources: [],
+      getKey: async () => null,
+      emit: () => {},
+    });
+    await assert.rejects(
+      service.localSpeech(store, "af_bella", "fresh but broken"),
+      /invalid audio/,
+    );
+    await store.close();
+  });
+
+  it("an ElevenLabs line goes through the queue with a durable local key and writes one ledger entry", async () => {
+    const fake = new FakeProvider({});
     const queueDir = await tempDir("arke-voiceq-");
     const worldDir = await tempDir("arke-voicew-");
     const ledger: LedgerEntry[] = [];
@@ -144,7 +211,8 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
     const job = await queue.enqueue(request);
     assert.equal(job.provider, "elevenlabs");
     assert.equal(job.estimatedMicroUsd, 26 * 300, "estimated from characters × manifest price");
-    assert.ok(job.idempotencyKey.length === 26, "idempotency-protected before submission (R-2)");
+    assert.ok(job.idempotencyKey.length === 26, "the queue's durable request identity exists before submission (R-2)");
+    assert.equal(fake.submittedKeys[0], undefined, "ElevenLabs does not falsely receive an unsupported idempotency key");
     const start = Date.now();
     while (queue.listJobs().find((j) => j.id === job.id)?.status !== "succeeded") {
       if (Date.now() - start > 3000) throw new Error("job did not finish");
@@ -246,22 +314,6 @@ describe("long text is spoken in pieces, because one long request fells the engi
 });
 
 describe("joining the pieces back into one clip", () => {
-  const wav = (samples: number[]) => {
-    const out = Buffer.alloc(44 + samples.length * 2);
-    out.write("RIFF", 0, "ascii");
-    out.writeUInt32LE(out.length - 8, 4);
-    out.write("WAVE", 8, "ascii");
-    out.write("fmt ", 12, "ascii");
-    out.writeUInt32LE(16, 16);
-    out.writeUInt16LE(1, 20); out.writeUInt16LE(1, 22);
-    out.writeUInt32LE(24_000, 24); out.writeUInt32LE(48_000, 28);
-    out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34);
-    out.write("data", 36, "ascii");
-    out.writeUInt32LE(samples.length * 2, 40);
-    samples.forEach((s, i) => out.writeInt16LE(s, 44 + i * 2));
-    return new Uint8Array(out);
-  };
-
   it("concatenates the audio and rewrites both sizes a player reads", () => {
     const joined = Buffer.from(concatWav([wav([1, 2]), wav([3, 4, 5])]));
     assert.equal(joined.toString("ascii", 0, 4), "RIFF");
@@ -305,7 +357,7 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
     new VoiceService({
       sidecar,
       localPresets: [
-        { provider: "kokoro", voiceId: "af_bella", label: "Bella", attributes: [], local: true, canClone: false },
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "af_bella", label: "Bella", attributes: [], local: true, canClone: false },
       ],
       cloudSources: [],
       getKey: async () => null,
@@ -343,6 +395,17 @@ describe("the catalogue does not offer a voice the engine cannot speak", () => {
     ]);
     assert.equal(voices.length, 1, "a cloud-cloned voice does not depend on the local runtime");
   });
+
+  it("keeps an unready cloned voice visible with its shared readiness reason", async () => {
+    const voices = await service(fakeSidecar("ready")).catalogue(
+      [{ id: "cv_1", name: "Timi", clip: "voices/timi.wav", attributes: [] } as never],
+      { local: false, unavailableReason: "the cloned voice recipe is hard-disabled" },
+    );
+    const clone = voices.find((voice) => voice.voiceId === "cv_1");
+    assert.ok(clone);
+    assert.equal(clone.local, false);
+    assert.equal(clone.unavailableReason, "the cloned voice recipe is hard-disabled");
+  });
 });
 
 describe("candidates and the stated preview cost (R-7, R-10)", () => {
@@ -355,7 +418,7 @@ describe("candidates and the stated preview cost (R-7, R-10)", () => {
         {
           provider: "elevenlabs",
           list: async () => [
-            { provider: "elevenlabs", voiceId: "v1", label: "Harbour", attributes: ["low", "even"], local: false, canClone: true },
+            { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "v1", label: "Harbour", attributes: ["low", "even"], local: false, canClone: true },
           ],
         },
       ],
@@ -382,11 +445,44 @@ describe("candidates and the stated preview cost (R-7, R-10)", () => {
     );
   });
 
+  it("prices equal voice ids independently for two models behind one provider", async () => {
+    const events: DomainEvent[] = [];
+    const expensive = {
+      ...ELEVEN_MODEL,
+      id: "eleven-v3",
+      displayName: "Eleven v3",
+      pricing: { kind: "perCharacter" as const, microUsdPerCharacter: 500 },
+    };
+    const service = new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [{
+        provider: "elevenlabs",
+        list: async () => [
+          { provider: "elevenlabs", model: expensive.id, voiceId: "same", label: "Same v3", attributes: [], local: false, canClone: true },
+          { provider: "elevenlabs", model: ELEVEN_MODEL.id, voiceId: "same", label: "Same v2", attributes: [], local: false, canClone: true },
+        ],
+      }],
+      getKey: async () => "key",
+      emit: (event) => events.push(event),
+    });
+    await service.candidates("01J8F3K2QW9VZX4N7M0RTYB6HC", { productions: [] } as unknown as WorldBundle, SHEET, {
+      manifestVersion: 1,
+      generated: "2026-08-25",
+      models: [expensive, ELEVEN_MODEL],
+    });
+    const event = events.find((candidate) => candidate.type === "voice.candidates");
+    assert.ok(event && event.type === "voice.candidates");
+    const length = event.previewLine.text.length;
+    assert.equal(event.previewMicroUsdByVoice[JSON.stringify(["elevenlabs", expensive.id, "same"])], length * 500);
+    assert.equal(event.previewMicroUsdByVoice[JSON.stringify(["elevenlabs", ELEVEN_MODEL.id, "same"])], length * 300);
+  });
+
   it("an unkeyed cloud source contributes nothing; the catalogue stays uniform", async () => {
     const service = new VoiceService({
       sidecar: null,
       localPresets: [
-        { provider: "kokoro", voiceId: "af_bella", label: "Bella", attributes: ["low"], local: true, canClone: false },
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "af_bella", label: "Bella", attributes: ["low"], local: true, canClone: false },
       ],
       cloudSources: [
         {
@@ -475,6 +571,20 @@ describe("the preview cache key", () => {
     assert.equal(speechCacheFile(base), speechCacheFile({ ...base, text: " hello harbour " }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, model: "kokoro-82m-v2" }));
     assert.notEqual(speechCacheFile(base), speechCacheFile({ ...base, format: "mp3" }));
+  });
+
+  it("includes delivery parameters in cache identity", () => {
+    const base = {
+      provider: "elevenlabs",
+      model: "eleven_multilingual_v2",
+      voiceId: "v1",
+      text: "hello",
+      format: "mp3" as const,
+    };
+    assert.notEqual(
+      speechCacheFile(base),
+      speechCacheFile({ ...base, params: { stability: 0.7 } }),
+    );
   });
 });
 
@@ -613,6 +723,39 @@ describe("a spoken line reaches the queue (built 2026-08-17)", () => {
       /has no assigned voice/,
     );
   });
+
+  it("marks a cloned line for host resolution without putting a path in the job", () => {
+    const cloned = {
+      ...SPEAKER,
+      voice: {
+        provider: "comfyui",
+        model: "comfyui-cloned-voice",
+        voiceId: "harbour-glass",
+        label: "Harbour glass",
+        assignedAtVersion: 4,
+      },
+    } as Sheet;
+    const request = voiceLineRequest({
+      worldId: "w",
+      productionId: "saltlight",
+      shotId: "sh_12",
+      sheet: cloned,
+      text: "the verse, under the water",
+      deliveryParams: null,
+      deliveryNotice: null,
+      model: {
+        ...LOCAL_MODEL,
+        id: "comfyui-cloned-voice",
+        provider: "comfyui",
+        limits: { audioFormat: "flac" },
+      },
+      voiceReference: true,
+    });
+    assert.equal(request.voiceReference, true);
+    assert.equal("voiceReference" in request.params, false);
+    assert.equal(request.params["audioFormat"], "flac");
+    assert.equal("speakerFile" in request.params, false);
+  });
 });
 
 describe("the narrator survives a restart (found live, 2026-08-17)", () => {
@@ -645,7 +788,7 @@ describe("cloned voices join the catalogue", () => {
     new VoiceService({
       sidecar: null,
       localPresets: [
-        { provider: "kokoro", voiceId: "bm_george", label: "George", attributes: ["low", "gravel"], local: true, canClone: false },
+        { provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", label: "George", attributes: ["low", "gravel"], local: true, canClone: false },
       ],
       cloudSources: [],
       getKey: async () => null,
@@ -695,7 +838,7 @@ describe("a cloned voice previews like any other queued voice", () => {
     capability: "voice-tts",
     displayName: "Local · Cloned Voice",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    limits: { maxPromptChars: 2000 },
+    limits: { maxPromptChars: 400, audioFormat: "flac" },
     pricing: { kind: "unmetered" },
   };
   const svc = () =>
@@ -710,10 +853,16 @@ describe("a cloned voice previews like any other queued voice", () => {
       voiceId: "harbour-glass",
       line,
       model: RECIPE,
-      speakerFile: "C:/worlds/undersong/voices/harbour-glass.wav",
+      voiceReference: true,
+      voiceUploadConfirmedFor: "remote-instance-1",
     });
     assert.equal(input.provider, "comfyui");
-    assert.equal(input.params["speakerFile"], "C:/worlds/undersong/voices/harbour-glass.wav");
+    assert.equal(input.voiceReference, true);
+    assert.equal(input.voiceUploadConfirmedFor, "remote-instance-1");
+    assert.equal("confirmationToken" in input, false, "paid read approval is a different token");
+    assert.equal("voiceReference" in input.params, false);
+    assert.equal(input.params["audioFormat"], "flac");
+    assert.equal(JSON.stringify(input).includes("C:/worlds"), false, "no absolute path enters the job");
     // Unmetered: a local read states no price where an ElevenLabs row states an exact figure.
     assert.equal(input.estimatedMicroUsd, 0);
     // FLAC, because that is what SaveAudio writes — an mp3 key would cache a hit that never
@@ -725,7 +874,7 @@ describe("a cloned voice previews like any other queued voice", () => {
     const s = svc();
     const local = s.queuedPreviewRequest({
       worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "comfyui",
-      voiceId: "v1", line, model: RECIPE, speakerFile: "clip.wav",
+      voiceId: "v1", line, model: RECIPE, voiceReference: true,
     });
     const cloud = s.queuedPreviewRequest({
       worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "elevenlabs",
@@ -739,6 +888,6 @@ describe("a cloned voice previews like any other queued voice", () => {
       worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", sheet: SHEET, provider: "elevenlabs",
       voiceId: "v1", line, model: ELEVEN_MODEL,
     });
-    assert.ok(!("speakerFile" in input.params), "an id names a catalogue voice; a clip would be noise");
+    assert.equal(input.voiceReference, undefined, "an id names a catalogue voice; a clip would be noise");
   });
 });

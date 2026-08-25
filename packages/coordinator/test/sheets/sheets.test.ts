@@ -246,11 +246,12 @@ describe("voice and links (R-4, R-15, D10)", () => {
     // The human clicking Assign is the approval — it commits directly, no gate round-trip.
     await applyVoiceAssignment(store, {
       path: "characters/bray-half-hitch.md",
-      voice: { provider: "elevenlabs", voiceId: "v_rope", label: "Rope and rum" },
+      voice: { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "v_rope", label: "Rope and rum" },
     });
     const sheet = store.getBundle().sheets.find((s) => s.id === "bray-half-hitch");
     assert.equal(sheet?.version, 7);
     assert.equal(sheet?.voice?.voiceId, "v_rope");
+    assert.equal(sheet?.voice?.model, "eleven_multilingual_v2");
     assert.equal(sheet?.voice?.assignedAtVersion, 7, "the assignment records the version it landed at");
     await store.close();
   });

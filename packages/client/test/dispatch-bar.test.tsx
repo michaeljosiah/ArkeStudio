@@ -143,6 +143,7 @@ describe("local recipes read the same readiness the coordinator enforces (SPEC-0
                 engine: {
                   source: "user-path",
                   state: readiness === "disabled" ? "ready" : "ready",
+                  locality: "local",
                   location: "C:\\AI\\ComfyUI",
                   version: "0.33.1",
                   instanceId: "abc",
@@ -183,6 +184,10 @@ describe("local recipes read the same readiness the coordinator enforces (SPEC-0
     assert.ok(usableModels(withRecipe("ready"), "image").some((m) => m.id === RECIPE.id));
     assert.ok(usableModels(withRecipe("unknown"), "image").some((m) => m.id === RECIPE.id));
     assert.equal(disabledRecipes(withRecipe("ready"), "image").length, 0);
+  });
+
+  it("does not offer a local recipe before its readiness snapshot arrives", () => {
+    assert.equal(usableModels(withRecipe(null), "image").some((model) => model.id === RECIPE.id), false);
   });
 
   it("a routed default that lost readiness is shown stranded with the measured reason, never key advice", () => {

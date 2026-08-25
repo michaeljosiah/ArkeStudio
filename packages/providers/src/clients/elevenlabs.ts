@@ -17,7 +17,6 @@ export class ElevenLabsClient implements ProviderClient {
     reportsCost: false,
   };
 
-  private readonly completed = new Map<string, { artifacts: FetchedArtifact[] }>();
   private counter = 0;
 
   constructor(
@@ -73,26 +72,26 @@ export class ElevenLabsClient implements ProviderClient {
         text: String(request.params["text"] ?? ""),
         ...(request.params["voiceSettings"] !== undefined ? { voice_settings: request.params["voiceSettings"] } : {}),
       }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status === 401 || res.status === 403) {
       throw new Error(`elevenlabs: the credential was rejected (HTTP ${res.status})`);
     }
     if (res.status >= 400) throw new Error(`elevenlabs: synthesis failed (HTTP ${res.status})`);
     const data = new Uint8Array(await res.arrayBuffer());
-    this.completed.set(remoteId, { artifacts: [{ name: "speech.mp3", contentType: "audio/mpeg", data }] });
-    return { remoteId, acceptedAt: new Date().toISOString() };
+    return {
+      remoteId,
+      acceptedAt: new Date().toISOString(),
+      artifacts: [{ name: "speech.mp3", contentType: "audio/mpeg", data }],
+    };
   }
 
-  async poll(_key: string, remoteId: string): Promise<PollResult> {
-    return this.completed.has(remoteId)
-      ? { state: "succeeded" }
-      : { state: "failed", error: "elevenlabs: unknown request id (synchronous API)" };
+  async poll(_key: string, _remoteId: string): Promise<PollResult> {
+    return { state: "failed", error: "elevenlabs: synchronous results must be returned by submit" };
   }
 
-  async fetchArtifacts(_key: string, remoteId: string): Promise<FetchedArtifact[]> {
-    const hit = this.completed.get(remoteId);
-    if (!hit) throw new Error("elevenlabs: no cached result for this id");
-    return hit.artifacts;
+  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
+    throw new Error("elevenlabs: synchronous artifacts are returned by submit");
   }
 
   async cancel(): Promise<void> {
@@ -101,7 +100,7 @@ export class ElevenLabsClient implements ProviderClient {
 
   /** The cloud voice catalogue (SPEC-011 R-6): labels plus descriptive attributes for matching. */
   async listVoicesCatalog(key: string): Promise<
-    Array<{ provider: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
+    Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
   > {
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/voices`, {
       headers: this.headers(key),
@@ -114,6 +113,7 @@ export class ElevenLabsClient implements ProviderClient {
       .filter((v) => typeof v.voice_id === "string" && typeof v.name === "string")
       .map((v) => ({
         provider: "elevenlabs",
+        model: "eleven_multilingual_v2",
         voiceId: v.voice_id!,
         label: v.name!,
         attributes: Object.values(v.labels ?? {}).map((s) => s.toLowerCase()),

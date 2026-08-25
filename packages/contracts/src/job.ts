@@ -57,6 +57,7 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
  */
 export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
+  "voice-line",
   "voice-preview",
   /** A bench take (issue 305): media lands in the session, the log records hash/info/cost. */
   "bench-take",
@@ -92,11 +93,14 @@ export const JobSchema = z
      */
     recipe: RecipeIdentitySchema.optional(),
     /**
-     * Which engine it was dispatched against, as source kind and opaque instance digest —
-     * job rows reach the renderer, so never a path (SPEC-021 §2.11). Recovery policy reads
-     * this; an old prompt id is never polled against a different engine.
+     * Which engine it was dispatched against, as source kind, opaque instance digest and (for
+     * spawned engines) process epoch — job rows reach the renderer, so never a path
+     * (SPEC-021 §2.11). Recovery policy reads this; an old prompt id is never polled against a
+     * different engine, including a replacement process launched from the same path.
      */
     engine: JobEngineIdentitySchema.optional(),
+    /** Opaque engine instance explicitly approved for a biometric voice upload. */
+    voiceUploadConfirmedFor: z.string().min(1).optional(),
     status: JobStatusSchema,
     /**
      * What the engine is counting right now (SPEC-021 D16), or null when it counts nothing.
@@ -139,6 +143,32 @@ export const JobSchema = z
   })
   .strict();
 export type Job = z.infer<typeof JobSchema>;
+
+/** The output format frozen in a voice job, with legacy provider defaults for older journals. */
+export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "mp3" | "flac" {
+  const format = job.params["audioFormat"];
+  if (format === "wav" || format === "mp3" || format === "flac") return format;
+  return job.provider === "kokoro" ? "wav" : job.provider === "comfyui" ? "flac" : "mp3";
+}
+
+/** Rebuild the document identity frozen into a durable voice-preview job. */
+export function voiceJobReadIdentity(job: Pick<Job, "params">): {
+  purpose: "candidate-preview" | "sheet-section" | "bible-section";
+  sheetId?: string;
+} {
+  const rawPurpose = job.params["purpose"];
+  const purpose = rawPurpose === "sheet-section" || rawPurpose === "bible-section"
+    ? rawPurpose
+    : "candidate-preview";
+  if (purpose === "bible-section") return { purpose };
+  const sheetId = job.params["sheetId"];
+  return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
+}
+
+/** Only character auditions feed `voice.preview`; document reads feed `voice.audio` alone. */
+export function voiceJobIsCandidatePreview(job: Pick<Job, "params">): boolean {
+  return voiceJobReadIdentity(job).purpose === "candidate-preview";
+}
 
 /** One provider's queue state (SPEC-009 R-8, R-11): paused-with-reason, and what is held. */
 export const QueueStatusSchema = z

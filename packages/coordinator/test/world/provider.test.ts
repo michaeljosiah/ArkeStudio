@@ -163,6 +163,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await mkdir(mediaDir, { recursive: true });
     await writeFile(join(mediaDir, "portrait.jpg"), "jpeg");
     await writeFile(join(mediaDir, "portrait.webp"), "webp");
+    await writeFile(join(mediaDir, "voice.flac"), "flac");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
 
     assert.equal(
@@ -172,6 +173,10 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     assert.equal(
       (await provider.serveMedia("the-undersong", "references/maren-kest/takes/tk_formats/portrait.webp"))?.contentType,
       "image/webp",
+    );
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "references/maren-kest/takes/tk_formats/voice.flac"))?.contentType,
+      "audio/flac",
     );
     await provider.close();
   });

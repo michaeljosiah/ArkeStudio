@@ -36,6 +36,7 @@ export { redactComfyUiBody } from "./comfyui/redact.js";
 export { ElevenLabsClient } from "./clients/elevenlabs.js";
 export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";
+export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";

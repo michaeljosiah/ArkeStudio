@@ -14,6 +14,7 @@ import { MediaInfoSchema } from "./media.js";
 import { PROVIDERS, type Capability } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
 import { TakeCostSchema } from "./take.js";
+import { DeliverySchema } from "./voice.js";
 
 /**
  * The bench (issue 305; design turns 68–69): one picture or one shot made with no production
@@ -94,10 +95,14 @@ export const BenchVoiceParamsSchema = z
     kind: z.literal("voice"),
     /** The provider's own id for the voice reading this. Absent until one is chosen. */
     voiceId: z.string().min(1).optional(),
+    /** Provider half of picker identity; prevents equal voice ids selecting each other. */
+    voiceProvider: z.string().min(1).optional(),
+    /** Concrete model half of picker identity. Optional only for existing session logs. */
+    voiceModel: z.string().min(1).optional(),
     /** What the picker showed, kept so a take can name its voice without the catalogue. */
     voiceLabel: z.string().min(1).optional(),
     /** One of DELIVERIES (voice.ts); the row maps it, or states that it cannot. */
-    delivery: z.string().min(1).optional(),
+    delivery: DeliverySchema.optional(),
     /** How many reads one press asks for — each its own numbered take, as images are. */
     count: z.number().int().min(1).max(4),
   })

@@ -3,6 +3,12 @@ import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequ
 
 /** Where the Voxa sidecar is listening, or null when it is not running. */
 export type SidecarBaseUrl = () => string | null;
+/** Queue-backed calls receive the desktop's single Voxa client, so all Kokoro work shares its lane. */
+export type KokoroSynthesize = (input: {
+  voiceId: string;
+  text: string;
+  params?: Record<string, number>;
+}, options?: { signal?: AbortSignal }) => Promise<Uint8Array>;
 
 /**
  * Kokoro — local speech, through the Voxa sidecar (design 70).
@@ -29,12 +35,12 @@ export class KokoroClient implements ProviderClient {
     reportsCost: false,
   };
 
-  private readonly completed = new Map<string, FetchedArtifact[]>();
   private counter = 0;
 
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl: SidecarBaseUrl,
+    private readonly synthesize?: KokoroSynthesize,
   ) {}
 
   /**
@@ -55,11 +61,23 @@ export class KokoroClient implements ProviderClient {
       return [{ capability: "voice-tts", available: false, reason: "the Voxa sidecar is not running" }];
     }
     try {
-      const res = await this.fetchImpl(`${base}/health`, { method: "GET" });
+      const res = await this.fetchImpl(`${base}/health`, {
+        method: "GET",
+        signal: AbortSignal.timeout(3_000),
+      });
       if (res.status >= 400) {
         return [{ capability: "voice-tts", available: false, reason: `the Voxa sidecar answered HTTP ${res.status}` }];
       }
-      return [{ capability: "voice-tts", available: true }];
+      const body = (await res.json().catch(() => null)) as {
+        engineStatus?: { kokoro?: { ready?: unknown; reason?: unknown } };
+      } | null;
+      const kokoro = body?.engineStatus?.kokoro;
+      if (kokoro?.ready === true) return [{ capability: "voice-tts", available: true }];
+      if (kokoro?.ready === false) {
+        const reason = typeof kokoro.reason === "string" ? kokoro.reason : "Kokoro is not ready";
+        return [{ capability: "voice-tts", available: false, reason }];
+      }
+      return [{ capability: "voice-tts", available: false, reason: "the Voxa health response omitted Kokoro readiness" }];
     } catch (err) {
       return [
         { capability: "voice-tts", available: false, reason: `the Voxa sidecar could not be reached: ${String(err)}` },
@@ -75,32 +93,41 @@ export class KokoroClient implements ProviderClient {
     // The delivery arrives already mapped to this engine's own vocabulary — Kokoro shapes pace
     // and nothing else, and a delivery it cannot express refused before reaching here.
     const shaping = (request.params["voiceSettings"] ?? {}) as Record<string, number>;
-    const res = await this.fetchImpl(`${base}/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ voice: voiceId, text, ...shaping }),
-    });
-    if (res.status >= 400) throw new Error(`kokoro: synthesis failed (HTTP ${res.status})`);
-    const data = new Uint8Array(await res.arrayBuffer());
+    const directSynthesis = this.synthesize;
+    const data = directSynthesis
+      ? await directSynthesis(
+          { voiceId, text, params: shaping },
+          request.signal === undefined ? undefined : { signal: request.signal },
+        )
+      : await this.fetchImpl(`${base}/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ voice: voiceId, text, ...shaping }),
+          signal: request.signal === undefined
+            ? AbortSignal.timeout(45_000)
+            : AbortSignal.any([request.signal, AbortSignal.timeout(45_000)]),
+        }).then(async (res) => {
+          if (res.status >= 400) throw new Error(`kokoro: synthesis failed (HTTP ${res.status})`);
+          return new Uint8Array(await res.arrayBuffer());
+        });
     // The sidecar answers with RIFF/WAVE; anything else means the port belongs to something
     // that is not Voxa, which is worth saying before the bytes are filed as a take.
     const riff = data.length > 12 && data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46;
     if (!riff) throw new Error("kokoro: the sidecar did not answer with a WAV");
     const remoteId = `kokoro-${++this.counter}-${data.byteLength}`;
-    this.completed.set(remoteId, [{ name: "speech.wav", contentType: "audio/wav", data }]);
-    return { remoteId, acceptedAt: new Date().toISOString() };
+    return {
+      remoteId,
+      acceptedAt: new Date().toISOString(),
+      artifacts: [{ name: "speech.wav", contentType: "audio/wav", data }],
+    };
   }
 
-  async poll(_key: string, remoteId: string): Promise<PollResult> {
-    return this.completed.has(remoteId)
-      ? { state: "succeeded" }
-      : { state: "failed", error: "kokoro: unknown request id (synchronous engine)" };
+  async poll(_key: string, _remoteId: string): Promise<PollResult> {
+    return { state: "failed", error: "kokoro: synchronous results must be returned by submit" };
   }
 
-  async fetchArtifacts(_key: string, remoteId: string): Promise<FetchedArtifact[]> {
-    const hit = this.completed.get(remoteId);
-    if (!hit) throw new Error("kokoro: no cached result for this id");
-    return hit;
+  async fetchArtifacts(_key: string, _remoteId: string): Promise<FetchedArtifact[]> {
+    throw new Error("kokoro: synchronous artifacts are returned by submit");
   }
 
   async cancel(): Promise<void> {

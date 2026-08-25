@@ -271,6 +271,7 @@ export class ReadModel {
         return;
       }
       case "voice.audio":
+      case "voice.assignment-result":
         return;
       case "update.status": {
         this.state = { ...this.state, app: { ...this.state.app, update: event.update } };
@@ -310,7 +311,7 @@ export class ReadModel {
       case "take.recorded": {
         this.mutateProduction(event.worldId, event.productionId, (p) => ({
           ...p,
-          takes: [...p.takes, event.take],
+          takes: p.takes.some((take) => take.id === event.take.id) ? p.takes : [...p.takes, event.take],
         }));
         return;
       }
