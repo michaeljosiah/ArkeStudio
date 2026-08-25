@@ -286,7 +286,27 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
 
   it("keeps the rendered client preview anchor-ordered when scenes are reordered", async () => {
     const before = spineState("audio", true);
-    const beforeCut = renderCut(before);
+    const beforeProduction = before.world!.productions[0]!;
+    beforeProduction.scenes[0]!.shots = beforeProduction.scenes[0]!.shots.filter(
+      (shot) => shot.id !== "sh_13",
+    );
+    beforeProduction.scenes[1]!.shots[0] = {
+      id: "sh_13",
+      number: 13,
+      title: "The lamps answer",
+      description: "The lamps flare and settle.",
+      durationSec: 6,
+    };
+    assert.deepEqual(
+      beforeProduction.scenes.map((scene) => scene.id),
+      ["sc_04", "sc_05"],
+    );
+    assert.deepEqual(
+      beforeProduction.scenes.map((scene) => scene.shots.map((shot) => shot.id)),
+      [["sh_12"], ["sh_13"]],
+    );
+    const validatedBefore = ClientStateSchema.parse(before);
+    const beforeCut = renderCut(validatedBefore);
     const beforeLane = spineLane(beforeCut);
     assert.deepEqual(beforeLane, [
       "fy-cutseg fy-cutseg--gap fy-cutseg--gap-warn:SHOT 13 · The lamps answer · 6.0s",
@@ -296,7 +316,7 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
     ]);
     assert.match(beforeCut.textContent ?? "", /20s · 14s of 20s covered · cut to the track/);
 
-    const after = structuredClone(before) as ClientState;
+    const after = structuredClone(validatedBefore) as ClientState;
     const production = after.world!.productions[0]!;
     production.scenes[0]!.order = 2;
     production.scenes[1]!.order = 1;
