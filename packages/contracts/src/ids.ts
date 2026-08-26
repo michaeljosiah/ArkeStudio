@@ -144,6 +144,14 @@ export const CanonIdSchema = z.string().regex(/^CANON-\d{3,}$/, "expected CANON-
 /** Scene / shot ids are human-numbered within their production: sc_04, sh_12. */
 export const SceneIdSchema = z.string().regex(/^sc_[a-z0-9-]+$/, "expected sc_<n>");
 export const ShotIdSchema = z.string().regex(/^sh_[a-z0-9-]+$/, "expected sh_<n>");
+/**
+ * Scene-flow identity (SPEC-029 R-2): nodes, sequence edges, and storyboard groups inside one
+ * scene's canonical graph. Stable across labels, reorder, layout, and grouping — an edge id
+ * survives while its semantic connection survives, and a group id survives a rename.
+ */
+export const SceneFlowNodeIdSchema = z.string().regex(/^sfn_[a-z0-9-]+$/, "expected sfn_<token>");
+export const SceneFlowEdgeIdSchema = z.string().regex(/^sfe_[a-z0-9-]+$/, "expected sfe_<token>");
+export const StoryboardGroupIdSchema = z.string().regex(/^sbg_[a-z0-9-]+$/, "expected sbg_<token>");
 /** Episode ids are slug-derived and stable at creation (SPEC-023 R-12): ep_the-missing-night. */
 export const EpisodeIdSchema = z.string().regex(/^ep_[a-z0-9-]+$/, "expected ep_<slug>");
 
