@@ -1757,12 +1757,17 @@ export function SettingsSignInScreen() {
   const auth = state?.app.vendorAuth ?? null;
   const harnessReady = state?.app.health.harness.status === "healthy";
   useEffect(() => {
-    if (harnessReady) {
-      refreshVendorAuth();
-      // The default model's provider is which vendor authoring uses (R-10).
-      listHarnessModels();
-    }
+    if (harnessReady) refreshVendorAuth();
   }, [harnessReady]);
+  // The default model's provider is which vendor authoring uses (R-10) — and it can change
+  // while health stays healthy, because signing in or out changes the catalog. Keyed on the
+  // stored connections, so the label follows the sign-in that just landed.
+  const storedConnections = (auth?.vendors ?? [])
+    .map((v) => `${v.id}:${v.connections.flatMap((c) => (c.kind === "stored" ? [c.id] : [])).join(",")}`)
+    .join("|");
+  useEffect(() => {
+    if (harnessReady) listHarnessModels();
+  }, [harnessReady, storedConnections]);
   const authoringProvider = state?.app.harnessModels.find((m) => m.isDefault === true)?.provider ?? null;
   if (!auth || !auth.available) {
     return (

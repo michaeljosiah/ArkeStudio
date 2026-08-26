@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { OpenCodeV2Adapter } from "../src/v2/opencode-v2-adapter.js";
 import { normalizeAttempt, normalizeAttemptStatus, normalizeIntegration } from "../src/v2/vendor-auth.js";
-import { OpenCodeError } from "../src/http.js";
+import { errorDetailFrom, OpenCodeError } from "../src/http.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 
 /**
@@ -237,7 +237,21 @@ describe("vendor-auth over the wire (SPEC-030 §2.2, §3.2)", () => {
     stub.failNextOAuthBegin = "methodID not found";
     await assert.rejects(
       () => adapter.beginVendorOAuth("openai", "no-such-method"),
-      (err: unknown) => err instanceof OpenCodeError && /methodID not found/.test(err.message),
+      (err: unknown) =>
+        err instanceof OpenCodeError && err.detail === "InvalidRequestError: methodID not found",
     );
+  });
+
+  it("reads the v2 error envelope into human detail — the route never has to stand in for it", () => {
+    // The measured v2 shape ({_tag, message}) and the v1 shape both parse; junk falls back.
+    assert.equal(
+      errorDetailFrom(JSON.stringify({ _tag: "InvalidRequestError", message: "methodID not found" })),
+      "InvalidRequestError: methodID not found",
+    );
+    assert.equal(
+      errorDetailFrom(JSON.stringify({ name: "NotFound", data: { message: "no such session" } })),
+      "NotFound: no such session",
+    );
+    assert.equal(errorDetailFrom("plain text"), "plain text");
   });
 });

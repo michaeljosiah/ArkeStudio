@@ -18,9 +18,13 @@ import {
   type VendorAuthServiceOptions,
 } from "../../src/harness/vendor-auth.js";
 import { AuthoringService } from "../../src/harness/authoring.js";
+import { Coordinator } from "../../src/coordinator.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
-import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
+import { makeTempRoot, makeTempWorld, WORLD_ID } from "../world/helpers.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 /**
  * The vendor sign-in service (SPEC-030 §3.1) over a scripted adapter: the surface filter, the
@@ -393,6 +397,73 @@ describe("marking a connection that needs sign-in (R-13, R-14)", () => {
   });
 });
 
+describe("review round 2026-08-26: races, releases and retained refusals", () => {
+  it("a rejection from a superseded begin does not fail the sign-in that replaced it", async () => {
+    const adapter = fakeAdapter();
+    let rejectFirst: ((err: Error) => void) | null = null;
+    let calls = 0;
+    adapter.beginVendorOAuth = async (_integrationId, _methodId) => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise((_resolve, reject) => {
+          rejectFirst = reject;
+        });
+      }
+      return adapter.attempt;
+    };
+    const { service, published } = makeService(adapter);
+    const first = service.beginOAuth("openai", "browser");
+    await service.beginOAuth("xai", "device");
+    rejectFirst!(new Error("the old flow died"));
+    await first;
+    const last = published.at(-1)!;
+    assert.equal(last.signIn?.vendor, "xai");
+    assert.equal(last.signIn?.phase, "waiting");
+  });
+
+  it("a wait that gives up releases the harness's side of the attempt", async () => {
+    const adapter = fakeAdapter();
+    adapter.attempt = { ...adapter.attempt, expiresAt: Date.now() - 60_000 };
+    const { service, published } = makeService(adapter);
+    await service.beginOAuth("openai", "browser");
+    await until(() => published.at(-1)!.signIn?.phase === "failed");
+    await until(() => adapter.cancelCalls.includes("con_1"));
+  });
+
+  it("a refused removal keeps its reason across the refresh that follows", async () => {
+    const adapter = fakeAdapter();
+    adapter.integrations = [
+      vendor({
+        id: "openai",
+        name: "OpenAI",
+        methods: [OAUTH_METHOD],
+        connections: [{ kind: "stored", id: "cred_9", label: "default" }],
+      }),
+    ];
+    adapter.removeVendorCredential = async () => {
+      throw new Error("the harness refused");
+    };
+    const { service, published } = makeService(adapter);
+    await service.refresh();
+    await service.remove("openai", "cred_9");
+    const last = published.at(-1)!;
+    assert.equal(last.reason, "the harness refused");
+    assert.equal(last.vendors[0]?.connections.length, 1, "the connection is still shown");
+  });
+
+  it("an adapter error's stated detail is what reaches the screen, never the route", async () => {
+    const adapter = fakeAdapter();
+    adapter.beginVendorOAuth = async () => {
+      const err = new Error("OpenCode POST /api/integration/openai/connect/oauth → 400 Bad Request");
+      (err as Error & { detail: string }).detail = "InvalidRequestError: methodID not found";
+      throw err;
+    };
+    const { service, published } = makeService(adapter);
+    await service.beginOAuth("openai", "no-such");
+    assert.equal(published.at(-1)!.signIn?.detail, "InvalidRequestError: methodID not found");
+  });
+});
+
 describe("R-13's classifier", () => {
   it("matches exactly the refresh-failure shapes and nothing broader", () => {
     assert.equal(isAuthShapedFailure("provider.auth"), true);
@@ -403,6 +474,58 @@ describe("R-13's classifier", () => {
     assert.equal(isAuthShapedFailure(""), false);
     assert.equal(isAuthShapedFailure(null), false);
     assert.equal(isAuthShapedFailure(undefined), false);
+  });
+});
+
+describe("the audit log never holds sign-in material (R-1)", () => {
+  it("vendor-auth.status is transient: a device code in its instructions reaches no file", async () => {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    await provider.loadWorld(WORLD_ID);
+    const changeLogPath = join(root, "logs", "changes.jsonl");
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      changeLogPath,
+      appVersion: "test",
+      appRoot: root,
+    });
+    await coordinator.start(0);
+    try {
+      coordinator.emit({
+        at: new Date().toISOString(),
+        type: "vendor-auth.status",
+        auth: {
+          available: true,
+          reason: null,
+          carry: "none",
+          carryDetail: null,
+          vendors: [],
+          signIn: {
+            vendor: "openai",
+            method: "ChatGPT Pro/Plus (headless)",
+            phase: "waiting",
+            instructions: "Enter code: AAAA-BBBBB",
+            codeEntry: false,
+            detail: null,
+          },
+        },
+      });
+      // A control event, so the assertion cannot pass because nothing was written at all.
+      coordinator.emit({ at: new Date().toISOString(), type: "provider.status", providers: [] });
+      const deadline = Date.now() + 5_000;
+      let written = "";
+      while (Date.now() < deadline) {
+        written = await readFile(changeLogPath, "utf8").catch(() => "");
+        if (written.includes("provider.status")) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      assert.ok(written.includes("provider.status"), "the control event landed in the audit log");
+      assert.ok(!written.includes("AAAA-BBBBB"), "the device code is in no line Arke writes");
+      assert.ok(!written.includes("vendor-auth.status"), "the whole event stays out of the audit log");
+    } finally {
+      await coordinator.stop();
+    }
   });
 });
 

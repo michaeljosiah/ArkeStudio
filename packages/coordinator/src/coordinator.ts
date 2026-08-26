@@ -279,7 +279,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
-import { VendorAuthService } from "./harness/vendor-auth.js";
+import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
   SETUP_CATALOGUE,
@@ -1455,7 +1455,10 @@ export class Coordinator {
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&
       parsed.type !== "update.status" &&
-      parsed.type !== "voice.runtime-test"
+      parsed.type !== "voice.runtime-test" &&
+      // Transient too — and a device flow's instructions carry the one-time code, which an
+      // append-only audit file must never hold (SPEC-030 R-1).
+      parsed.type !== "vendor-auth.status"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
@@ -8793,6 +8796,9 @@ export class Coordinator {
           runId,
           cause,
         });
+        // The same marking the authoring wiring does (SPEC-030 R-13): the recovery screen the
+        // failure message points at must already say which connection needs sign-in.
+        if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
       onProgress: (conversationId, label) => {
         this.emit({

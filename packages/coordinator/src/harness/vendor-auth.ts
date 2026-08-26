@@ -194,12 +194,13 @@ export class VendorAuthService {
     const methodLabel =
       this.vendors.find((v) => v.id === vendor)?.methods.find((m) => m.id === methodId)?.label ?? methodId;
     // Published before the first await, so the screen moves the instant the button is pressed.
-    this.inFlight = { vendor, methodLabel, attempt: null, timer: null, consecutivePollErrors: 0 };
+    const flight: InFlight = { vendor, methodLabel, attempt: null, timer: null, consecutivePollErrors: 0 };
+    this.inFlight = flight;
     this.setSignIn({ vendor, method: methodLabel, phase: "waiting", instructions: null, codeEntry: false, detail: null });
     try {
       const attempt = await adapter.beginVendorOAuth(vendor, methodId, answers);
-      if (this.inFlight?.vendor !== vendor) return; // replaced or cancelled while beginning
-      this.inFlight.attempt = attempt;
+      if (this.inFlight !== flight) return; // replaced or cancelled while beginning
+      flight.attempt = attempt;
       this.setSignIn({
         vendor,
         method: methodLabel,
@@ -212,7 +213,8 @@ export class VendorAuthService {
       void this.opts.log?.append({ kind: "vendor.sign-in-begun", vendor, method: methodId });
       this.schedulePoll();
     } catch (err) {
-      this.failSignIn(messageOf(err));
+      // A rejection from a superseded request must not fail the sign-in that replaced it.
+      if (this.inFlight === flight) this.failSignIn(messageOf(err));
     }
   }
 
@@ -224,14 +226,16 @@ export class VendorAuthService {
     this.opts.registerSecret?.(key);
     const methodLabel =
       this.vendors.find((v) => v.id === vendor)?.methods.find((m) => m.kind === "key")?.label ?? "API key";
-    this.inFlight = { vendor, methodLabel, attempt: null, timer: null, consecutivePollErrors: 0 };
+    const flight: InFlight = { vendor, methodLabel, attempt: null, timer: null, consecutivePollErrors: 0 };
+    this.inFlight = flight;
     this.setSignIn({ vendor, method: methodLabel, phase: "waiting", instructions: null, codeEntry: false, detail: null });
     try {
       await adapter.connectVendorKey(vendor, key, answers);
+      if (this.inFlight !== flight) return;
       void this.opts.log?.append({ kind: "vendor.key-connected", vendor });
       await this.settleSuccess(vendor);
     } catch (err) {
-      this.failSignIn(messageOf(err));
+      if (this.inFlight === flight) this.failSignIn(messageOf(err));
     }
   }
 
@@ -266,14 +270,21 @@ export class VendorAuthService {
   async remove(vendor: string, credentialId: string): Promise<void> {
     const adapter = this.adapterWithAuth();
     if (!adapter?.removeVendorCredential) return;
+    let refusal: string | null = null;
     try {
       await adapter.removeVendorCredential(credentialId);
       this.needsSignIn.delete(vendor);
       void this.opts.log?.append({ kind: "vendor.connection-removed", vendor });
     } catch (err) {
-      this.reason = messageOf(err);
+      refusal = messageOf(err);
     }
     await this.refresh();
+    if (refusal !== null) {
+      // Re-applied AFTER the refresh, which clears `reason` on success — otherwise the refused
+      // sign-out would leave the connection sitting there with no word of why.
+      this.reason = refusal;
+      this.publish();
+    }
   }
 
   /**
@@ -373,6 +384,9 @@ export class VendorAuthService {
   private failSignIn(detail: string): void {
     const flight = this.inFlight;
     this.clearInFlight();
+    // A wait that gave up locally can leave the harness's side still pending — the bind-blocked
+    // attempt is exactly that shape — so the attempt is released here, not only on cancel.
+    if (flight?.attempt) void this.releaseAttempt(flight.vendor, flight.attempt.attemptId);
     if (flight) {
       this.setSignIn({
         vendor: flight.vendor,
@@ -415,7 +429,16 @@ export class VendorAuthService {
   }
 }
 
+/**
+ * The human half of an adapter error. Adapter errors carry the harness's stated reason in
+ * `detail`; their `message` leads with the method and route, which is an implementation
+ * surface no screen should repeat — and it names the harness, which R-5 keeps out of sight.
+ */
 function messageOf(err: unknown): string {
+  if (err !== null && typeof err === "object" && "detail" in err) {
+    const detail = (err as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail.length > 0) return detail;
+  }
   return err instanceof Error ? err.message : String(err);
 }
 
