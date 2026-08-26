@@ -1925,6 +1925,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-026 | The page medium — panels, pages, the derived book, and document export | 004, 010, 011, 012, 013, 017, 023 · amends 012, 023 |
 | SPEC-027 | The child's drawing — keeping it, tidying it, painting it, and proving it is still theirs | 004, 013, 015, 017, 026 |
 | SPEC-028 | Local inference completion — speech, generated media, and the Settings abstraction | 008, 009, 011, 016, 018, 021, 022 · amends 011, 016, 018, 021, 022 |
+| SPEC-029 | Graph-backed scenes — one canonical flow behind Storyboard, Flow, and storyboard rendering | 002, 004, 012, 013, 019, 023, 024 · amends 012, 013, 019, 023, 024 |
 | SPEC-030 | Vendor sign-in — the person's own model subscriptions, through the harness | 001, 005, 008 · amends 005 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
