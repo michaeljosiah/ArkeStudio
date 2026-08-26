@@ -1593,6 +1593,10 @@ export function setupRetry(componentId: string): void {
   send({ kind: "setup-retry", componentId });
 }
 
+export function setupRepair(componentId: string): void {
+  send({ kind: "setup-repair", componentId });
+}
+
 export function setupCancel(): void {
   send({ kind: "setup-cancel" });
 }

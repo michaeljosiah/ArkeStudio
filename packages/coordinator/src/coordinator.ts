@@ -71,6 +71,8 @@ import {
   legacyVoiceModel,
   voiceSourceFor,
   supportsVoiceUse,
+  COMFYUI_WEIGHTS_COMPONENT_PREFIX,
+  isComfyUiWeightsComponent,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -1494,8 +1496,7 @@ export class Coordinator {
   private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
-    const prefix = "comfyui-weights-";
-    if (componentId !== "comfyui-runtime" && !componentId.startsWith(prefix)) return Promise.resolve();
+    if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
     const work = this.comfyUiSetupWork
       .catch(() => {})
       .then(async () => {
@@ -1507,7 +1508,7 @@ export class Coordinator {
         } else {
           // Weight completion changes dependency facts, not launch configuration. Re-hash and
           // refresh the node catalogue in place so an active engine and its jobs are not killed.
-          await service.reverify([componentId.slice(prefix.length)]);
+          await service.reverify([componentId.slice(COMFYUI_WEIGHTS_COMPONENT_PREFIX.length)]);
         }
       });
     this.comfyUiSetupWork = work.catch(() => {});
@@ -3581,6 +3582,12 @@ export class Coordinator {
       }
       case "setup-retry": {
         this.setup?.retry(msg.componentId);
+        return;
+      }
+      case "setup-repair": {
+        // repair() re-queues the component; run() is what actually goes and gets it.
+        await this.setup?.repair(msg.componentId).catch(() => {});
+        await this.setup?.run();
         return;
       }
       case "setup-cancel": {
