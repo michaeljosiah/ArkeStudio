@@ -2359,8 +2359,11 @@ function GeneratePromptEditor({
   worldId: string;
   prodId: string;
 }) {
-  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot);
-  const current = promptFor(world.meta, world.sheets, scene, shot);
+  // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
+  // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
+  const current = promptFor(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
   const stale = overrideStaleAgainst(shot, world.sheets);
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? current.text;

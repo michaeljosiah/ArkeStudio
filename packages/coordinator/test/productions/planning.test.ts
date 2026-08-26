@@ -926,13 +926,15 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
-  it("keeps overridden per-shot and pass beats verbatim", async () => {
+  it("keeps overridden prompt bodies verbatim in per-shot and pass assembly", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const override = "Whatever the director wrote, including their own room and camera.";
     const overridden: Shot = {
       ...shot(1, 5, "@maren-kest grips the rail"),
       camera: "At the rail desk, facing the mouth; MCU",
+      intent: "Claustrophobic and watchful",
+      beats: [{ span: "0–5s", text: "The camera hesitates" }],
       promptOverride: { text: override, sheetVersions: {} },
     };
     const ordinary: Shot = { ...shot(2, 5, "@maren-kest turns inland"), camera: "At the lamp housing; wide" };
@@ -976,9 +978,13 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
   it("omits a block with nothing to say rather than emitting it empty", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
-    const bare: Shot = shot(1, 6, "@maren-kest grips the rail");
+    const bare: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      intent: "   ",
+      beats: [{ span: "  ", text: "not emitted" }, { span: "0–2s", text: "   " }],
+    };
     const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([bare]), shot: bare });
-    assert.equal(blocks.direction, "", "no camera and no audio produces no direction block");
+    assert.equal(blocks.direction, "", "blank intent and timing, no camera and no audio produce no direction block");
     const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([bare]), bare);
     assert.ok(!/\n\n\n/.test(prompt), "an omitted block leaves no blank paragraph behind");
     await store.close();
@@ -1693,7 +1699,7 @@ describe("standing constraints (#244, design turn 59)", () => {
 });
 
 /**
- * Nine camera fields, a negative and two sound fields that never left the disk (2026-08-23).
+ * Authored shot direction that must leave the disk and reach generation.
  *
  * `framing` appeared nowhere in `planning.ts`. A director set a size, an angle, a lens, a focus,
  * a movement, a pace, a light, a time of day and a grade on the shot sheet; all nine were
@@ -1702,7 +1708,7 @@ describe("standing constraints (#244, design turn 59)", () => {
  * and so were `audio.ambience` and `audio.effects`. Every one is authored intent with no effect,
  * which is the failure this file's whole vocabulary exists to prevent.
  */
-describe("the shot's structured camera, negatives and sound (2026-08-23)", () => {
+describe("the shot's cinematic intent, timing, structured camera, negatives and sound", () => {
   const scene = (shots: Shot[]): Scene => ({
     id: "sc_91",
     number: 91,
@@ -1712,6 +1718,64 @@ describe("the shot's structured camera, negatives and sound (2026-08-23)", () =>
     version: 1,
     inherits: { location: "the-vigil", timeOfDay: "night" },
     shots,
+  });
+
+  it("puts cinematic intent before explicit camera, then keeps authored timing in order", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      intent: "Held, not slow — she is deciding whether to have heard it.",
+      camera: "slow push-in, medium close-up",
+      beats: [
+        { span: " 0–2s ", text: " Nothing moves. " },
+        { span: "2–6s", text: "She turns toward the bell" },
+      ],
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.equal(
+      blocks.direction,
+      "Cinematic intent (infer unset camera choices from this; explicit camera settings win): " +
+        "Held, not slow — she is deciding whether to have heard it. " +
+        "slow push-in, medium close-up. Shot timing 0–2s: Nothing moves. " +
+        "Shot timing 2–6s: She turns toward the bell.",
+    );
+    await store.close();
+  });
+
+  it("keeps cinematic intent but drops temporal rows from a still prompt", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      intent: "A held breath",
+      beats: [{ span: "0–6s", text: "She crosses the room" }],
+    };
+    const blocks = assembleBlocks({
+      world: bundle.meta,
+      sheets: bundle.sheets,
+      scene: scene([s]),
+      shot: s,
+      capability: "image",
+    });
+    assert.match(blocks.direction, /infer unset camera choices from this/);
+    assert.ok(!blocks.direction.includes("Shot timing"), "one still cannot depict a temporal sequence");
+    await store.close();
+  });
+
+  it("keeps authored question and exclamation punctuation", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const s: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      intent: "Will she run?",
+      beats: [{ span: "0–6s", text: "Hold the tension!" }],
+    };
+    const blocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: scene([s]), shot: s });
+    assert.match(blocks.direction, /Will she run\?/);
+    assert.match(blocks.direction, /Hold the tension!/);
+    assert.ok(!/[?!]\./.test(blocks.direction), `authored punctuation is terminated once: ${blocks.direction}`);
+    await store.close();
   });
 
   it("says the framing a director set, resolved against the scene's defaults", async () => {

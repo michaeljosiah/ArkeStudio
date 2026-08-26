@@ -481,9 +481,8 @@ the watch. Six columns since 1747…</div>
           They are free text on purpose: sizes and movements are display vocabulary, so a new word
           never needs the file format to change. Above them sits <code>intent</code> — how the shot
           should <em>feel</em>. "Held, not slow — she is deciding whether to have heard it." The
-          camera is meant to be inferred from it, with hand settings winning.
-          <span class="pill pill--part">partly built</span> Edited, versioned and saved, but
-          nothing that assembles a shot's instructions reads it.
+          assembled prompt carries that as cinematic intent and says that explicit camera settings
+          win, so the model fills only the choices the author left open.
         </p>
 
         <h4>The rest of a shot</h4>
@@ -503,9 +502,9 @@ the watch. Six columns since 1747…</div>
           <dt>beats</dt>
           <dd>
             Timing rows — a label like "0–3s" against a line of what happens. A label,
-            deliberately, not a machine timeline.
-            <span class="pill pill--part">partly built</span> Stored, not yet read by anything that
-            builds a generation.
+            deliberately, not a machine timeline. Each row travels inside that shot's generated
+            video direction; it creates neither a pass boundary nor another shot, and a still
+            receives no temporal rows.
           </dd>
           <dt>continuity</dt>
           <dd>

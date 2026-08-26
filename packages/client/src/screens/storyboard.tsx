@@ -7,6 +7,7 @@ import {
   overrideStaleAgainst,
   parseMentions,
   productionAspect,
+  productionShape,
   promptFor,
   sceneDeleteBlockers,
   sceneFindings,
@@ -681,8 +682,11 @@ export function ShotSheetScreen() {
   const takes = takesForShot(production, shot.id);
   const accepted = acceptedTakeId(production, shot.id);
   const state = cardState(shot, takes.length, accepted !== null);
-  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot);
-  const current = promptFor(world.meta, world.sheets, scene, shot);
+  // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
+  // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
+  const current = promptFor(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
   const stale = overrideStaleAgainst(shot, world.sheets);
   const promptValue = promptDraft ?? current.text;
   const mentioned = parseMentions(shot.description);
