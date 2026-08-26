@@ -146,8 +146,12 @@ export const OPENCODE2_MIN_BUILD = 17_444;
  * Anchored end to end, and that is the whole point: a substring match reads the trusted name out
  * of an untrusted compound channel, so `0.0.0-tui-beta-202606261840` would pass the allowlist
  * built to exclude it. Only the complete shape counts as a channel.
+ *
+ * The `0.0.0` is literal too. The build counter belongs to that series and to nothing else, so a
+ * prerelease of some other line — `1.18.0-beta-202606261840`, `0.1.0-dev-20000` — carries a
+ * number this floor cannot read. Stable v2 arrives through the major check above, not here.
  */
-const V2_BUILD_CHANNELS = /^\d+\.\d+\.\d+-(?:next|beta|dev)-(\d+)$/;
+const V2_BUILD_CHANNELS = /^0\.0\.0-(?:next|beta|dev)-(\d+)$/;
 
 /** Whether a discovered v2 version satisfies the pinned-contract gate. */
 export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {

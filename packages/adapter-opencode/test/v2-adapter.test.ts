@@ -550,6 +550,10 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
     // A compound channel that merely CONTAINS a trusted name is still untrusted — an
     // unanchored match would read "beta-202606261840" out of it and clear the floor on a date.
     assert.equal(meetsV2Gate("0.0.0-tui-beta-202606261840"), false);
+    // The counter belongs to the 0.0.0 series. A prerelease of another line numbers by its own
+    // rules, so its suffix is not a build this floor can compare against.
+    assert.equal(meetsV2Gate("1.18.0-beta-202606261840"), false);
+    assert.equal(meetsV2Gate("0.1.0-dev-20000"), false);
   });
 
   it("prefers v2, falls back to v1, and honours the Settings escape hatch", async () => {
