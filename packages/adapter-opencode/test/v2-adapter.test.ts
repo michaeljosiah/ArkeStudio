@@ -523,15 +523,37 @@ describe("v2 session config (issue 327 §7)", () => {
 });
 
 describe("v2 discovery and the build gate (issue 327 §3)", () => {
-  it("gates on the next-build number, and lets stable 2.x through", () => {
+  it("gates on the prerelease build number, and lets stable 2.x through", () => {
     assert.equal(meetsV2Gate("0.0.0-next-17444"), true);
     assert.equal(meetsV2Gate("0.0.0-next-17443"), false);
     assert.equal(meetsV2Gate("2.0.0"), true);
     // A 2.x prerelease restarts the build counter; the major check must win over the
-    // next-branch or a current binary reads as older than the beta pin.
+    // channel branch or a current binary reads as older than the beta pin.
     assert.equal(meetsV2Gate("2.0.0-next-3"), true);
     assert.equal(meetsV2Gate("1.18.10"), false);
     assert.equal(meetsV2Gate(null), false);
+  });
+
+  it("reads the build number across the renamed channels, off one counter", () => {
+    // Upstream moved the prerelease channel from `next-` to `beta-` after the pin was measured
+    // (2026-08-26: dist-tags beta=0.0.0-beta-18314, latest=0.0.0-beta-17823, dev=0.0.0-dev-18326,
+    // all `bin: opencode2`). The counter continues, so a rename must not read as "too old" —
+    // that rejected every currently installed v2 as absent.
+    assert.equal(meetsV2Gate("0.0.0-beta-18314"), true);
+    assert.equal(meetsV2Gate("0.0.0-beta-17823"), true);
+    assert.equal(meetsV2Gate("0.0.0-dev-18326"), true);
+    // The floor still applies within a renamed channel.
+    assert.equal(meetsV2Gate("0.0.0-beta-17443"), false);
+    // Channels that number differently are not trusted against the floor: this one is a
+    // date, and a wildcarded channel match would clear any build number ever pinned.
+    assert.equal(meetsV2Gate("0.0.0-tui-v2-202606261840"), false);
+    // A compound channel that merely CONTAINS a trusted name is still untrusted — an
+    // unanchored match would read "beta-202606261840" out of it and clear the floor on a date.
+    assert.equal(meetsV2Gate("0.0.0-tui-beta-202606261840"), false);
+    // The counter belongs to the 0.0.0 series. A prerelease of another line numbers by its own
+    // rules, so its suffix is not a build this floor can compare against.
+    assert.equal(meetsV2Gate("1.18.0-beta-202606261840"), false);
+    assert.equal(meetsV2Gate("0.1.0-dev-20000"), false);
   });
 
   it("prefers v2, falls back to v1, and honours the Settings escape hatch", async () => {

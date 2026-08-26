@@ -129,23 +129,40 @@ export async function discoverOpenCode(opts: DiscoveryOptions = {}): Promise<Dis
 }
 
 /**
- * The v2 build floor. Beta versions are `0.0.0-next-<build>`, which no semver comparison
+ * The v2 build floor. Prereleases are `0.0.0-<channel>-<build>`, which no semver comparison
  * orders usefully, so the gate reads the build number. The floor is the build every wire
  * shape in the v2 backing was measured against (issue 327 §3); a binary older than the pin
  * is treated as absent, with the reason surfaced by the caller.
  */
 export const OPENCODE2_MIN_BUILD = 17_444;
 
+/**
+ * The prerelease channels the build number can be trusted from. Upstream renamed the channel
+ * mid-beta — the pin is `0.0.0-next-17444`, while `beta` and `latest` now publish
+ * `0.0.0-beta-<build>` — off ONE monotonic counter, so a channel name change must not read as
+ * "older than the pin". Named rather than wildcarded because other channels number differently:
+ * `0.0.0-tui-v2-202606261840` would clear any floor on a date-shaped build.
+ *
+ * Anchored end to end, and that is the whole point: a substring match reads the trusted name out
+ * of an untrusted compound channel, so `0.0.0-tui-beta-202606261840` would pass the allowlist
+ * built to exclude it. Only the complete shape counts as a channel.
+ *
+ * The `0.0.0` is literal too. The build counter belongs to that series and to nothing else, so a
+ * prerelease of some other line — `1.18.0-beta-202606261840`, `0.1.0-dev-20000` — carries a
+ * number this floor cannot read. Stable v2 arrives through the major check above, not here.
+ */
+const V2_BUILD_CHANNELS = /^0\.0\.0-(?:next|beta|dev)-(\d+)$/;
+
 /** Whether a discovered v2 version satisfies the pinned-contract gate. */
 export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {
   if (version === null) return false;
-  // A stable release (2.x and beyond) postdates every next-build — and its own prereleases
+  // A stable release (2.x and beyond) postdates every prerelease build — and its own prereleases
   // ("2.0.0-next-3") restart the build counter, so the major check must run FIRST or the
-  // next-branch below rejects a current binary as older than the beta pin.
+  // channel branch below rejects a current binary as older than the beta pin.
   const major = /^(\d+)\./.exec(version);
   if (major && Number(major[1]) >= 2) return true;
-  const next = /next-(\d+)/.exec(version);
-  return next !== null && Number(next[1]) >= minBuild;
+  const build = V2_BUILD_CHANNELS.exec(version);
+  return build !== null && Number(build[1]) >= minBuild;
 }
 
 interface GatedDiscovery {

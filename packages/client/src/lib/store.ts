@@ -1613,8 +1613,10 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string): void {
-  send({ kind: "plan-founding-build", genesisId, requestId });
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+  // The same look the press will send: the review's master-look note is only true if it asks
+  // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
+  send({ kind: "plan-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
 }
 
 export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {
@@ -2191,14 +2193,14 @@ export function generateLocationView(
 export function acceptLocationView(
   worldId: string,
   sheetId: string,
-  takeId: string,
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
   input: { name: string; establishing?: boolean; replaceExistingName?: boolean },
 ): void {
   send({
     kind: "accept-location-view",
     worldId,
     sheetId,
-    takeId,
+    selection,
     name: input.name,
     ...(input.establishing !== undefined ? { establishing: input.establishing } : {}),
     ...(input.replaceExistingName !== undefined ? { replaceExistingName: input.replaceExistingName } : {}),

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { landed, ProposalManager } from "../../src/gate/proposals.js";
+import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -246,6 +247,54 @@ describe("a proposal whose own commit is what moved the world", () => {
     assert.ok(
       journal.split("\n").filter(Boolean).some((l) => (JSON.parse(l) as { proposalId?: string }).proposalId === again.id),
       "a restart can tell this apart from an intent that created nothing",
+    );
+  });
+});
+
+/**
+ * The half the gate could not fix on its own (issue 519, 2026-08-26).
+ *
+ * `listOpen` honoured the tombstone; the world scan did not, and the scan is what every screen
+ * renders. So a founding build — which accepts several proposals in quick succession under its
+ * own write pressure, and so reliably loses a delete to a busy handle — landed a world whose hub
+ * read `3 AWAITING YOU`, whose cast read `drafted · awaiting your yes`, and whose Needs you
+ * listed three decisions the author had already made. SPEC-031 R-25 and R-30 say a build leaves
+ * nothing awaiting; the data was right and only the accounting was wrong.
+ */
+describe("the world snapshot agrees with the gate about what is open", () => {
+  it("does not count a settled proposal whose directory survived", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    const proposalDir = join(dir, ".proposals", staged.id);
+    const manifest = await readFile(join(proposalDir, "proposal.json"), "utf8");
+    assert.equal((await gate.accept(staged.id)).status, "accepted");
+
+    // What a busy handle leaves behind: the change is live, and the folder is still there with
+    // its tombstone. Rebuilt rather than held, because whether a delete can be blocked at all
+    // is the platform's business and this rule is not.
+    await mkdir(proposalDir, { recursive: true });
+    await writeFile(join(proposalDir, "proposal.json"), manifest, "utf8");
+    await writeFile(
+      join(proposalDir, "settled.json"),
+      JSON.stringify({ commitId: "cm_whatever", at: CLOCK() }) + "\n",
+      "utf8",
+    );
+
+    const scan = await scanWorld(dir);
+    assert.deepEqual(
+      scan.bundle.proposals.filter((p) => p.proposal.id === staged.id),
+      [],
+      "the author is not asked again for a yes already given",
+    );
+  });
+
+  it("still reports a proposal nobody has decided", async () => {
+    const { dir, gate } = await open();
+    const staged = await stageOne(gate);
+    const scan = await scanWorld(dir);
+    assert.ok(
+      scan.bundle.proposals.some((p) => p.proposal.id === staged.id),
+      "an open decision is still a decision to make",
     );
   });
 });

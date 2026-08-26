@@ -52,6 +52,7 @@ import {
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { readBible } from "./bible.js";
 import { projectReview } from "../gate/review.js";
+import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 
@@ -268,6 +269,18 @@ export async function readWorldMeta(dir: string): Promise<WorldMeta> {
   return WorldMetaSchema.parse(parsed);
 }
 
+/**
+ * Take kinds whose generation lands in `candidates/`, and whose take therefore owns a copy of a
+ * file this scan would otherwise read back as loose (issue 274).
+ *
+ * Named as a set rather than tested one kind at a time: this was written when main photos were
+ * the only thing that landed there, location views were added to `candidates/` later, and every
+ * accepted view came back as an unreviewed candidate waiting for a decision it had already had.
+ * The remaining kinds land in `incoming/`, so listing them here would only risk a look's
+ * basename suppressing an unrelated upload that happened to match it.
+ */
+const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", "location-view"]);
+
 export async function scanWorld(dir: string): Promise<ScanResult> {
   const meta = await readWorldMeta(dir);
   const problems: WorldProblem[] = [];
@@ -377,7 +390,7 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     // a second creative result, and must not reappear after restart if queue state is absent.
     const generatedSources = new Set(
       sheetTakes
-        .filter((take) => take.kind === "main-photo" && take.jobId !== undefined)
+        .filter((take) => CANDIDATE_BACKED_TAKE_KINDS.has(take.kind) && take.jobId !== undefined)
         .map((take) =>
           typeof take.params["sourceCandidate"] === "string"
             ? take.params["sourceCandidate"]
@@ -652,6 +665,13 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
 
   const proposals: StagedProposal[] = [];
   for (const pid of await listDir(join(dir, ".proposals"))) {
+    // A settled proposal is over, whatever is still on disk. `accept` writes the tombstone and
+    // then deletes best-effort, so a directory that lost its delete to a busy handle lingers with
+    // the decision already recorded — and a founding build, accepting several in quick succession
+    // under its own write pressure, leaves a whole set of them. Counting those would ask the
+    // author again for a yes already given (SPEC-031 R-25, R-30). The gate's `listOpen` reads the
+    // same file; this is the other reader, and every screen renders this snapshot.
+    if (await exists(join(dir, ".proposals", pid, SETTLED_FILE))) continue;
     if (!(await exists(join(dir, ".proposals", pid, "proposal.json")))) continue;
     const proposal = await tryParse(`.proposals/${pid}/proposal.json`, (raw) => ProposalSchema.parse(JSON.parse(raw)));
     if (!proposal) continue;

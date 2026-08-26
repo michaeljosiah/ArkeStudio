@@ -1,7 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ffprobeArgs, parseFfprobeJson, type MediaProbe } from "@arke-studio/coordinator";
+import { ffprobeArgs, parseFfprobeJson, type MediaProbe, type ProbeOptions } from "@arke-studio/coordinator";
 import type { MediaInfo } from "@arke-studio/contracts";
 
 /**
@@ -63,8 +63,14 @@ export function resolveFfprobe(input: {
  * would have to be caught and turned back into null at each of them.
  */
 export function createFfprobe(ffprobe: string, spawn: SpawnLike = nodeSpawn, timeoutMs = 20_000): MediaProbe {
-  const run = (absolutePath: string): Promise<MediaInfo | null> =>
+  const run = (absolutePath: string, opts: ProbeOptions = {}): Promise<MediaInfo | null> =>
     new Promise((resolve) => {
+      // Nothing is spawned for a measurement already withdrawn: the caller cancelled because the
+      // world is going away, and a child started now would hold it open for the full timeout.
+      if (opts.signal?.aborted === true) {
+        resolve(null);
+        return;
+      }
       const child = spawn(ffprobe, ffprobeArgs(absolutePath), { windowsHide: true });
       let stdout = "";
       let settled = false;
@@ -72,6 +78,7 @@ export function createFfprobe(ffprobe: string, spawn: SpawnLike = nodeSpawn, tim
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", onAbort);
         resolve(value);
       };
       const timer = setTimeout(() => {
@@ -80,6 +87,19 @@ export function createFfprobe(ffprobe: string, spawn: SpawnLike = nodeSpawn, tim
         child.kill();
         finish(null);
       }, timeoutMs);
+      /*
+       * Cancellation kills the process; it does not merely stop waiting for it (issue 288).
+       *
+       * The handle is the whole point. A caller aborts because the world this file lives in is
+       * closing and about to be moved, and on Windows a directory cannot be renamed while a
+       * process holds a file inside it open — so an abort that left ffprobe running would
+       * "cancel" the measurement and leave the hazard exactly where it was.
+       */
+      const onAbort = (): void => {
+        child.kill();
+        finish(null);
+      };
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
 
       child.stdout?.on("data", (chunk: Buffer) => {
         // Bounded: a well-formed answer is a few hundred bytes, and anything much larger is a
@@ -91,8 +111,8 @@ export function createFfprobe(ffprobe: string, spawn: SpawnLike = nodeSpawn, tim
     });
 
   return {
-    async durationSec(absolutePath) {
-      return (await run(absolutePath))?.durationSec ?? null;
+    async durationSec(absolutePath, opts) {
+      return (await run(absolutePath, opts))?.durationSec ?? null;
     },
     info: run,
   };

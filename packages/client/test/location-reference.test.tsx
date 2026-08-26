@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { MAX_ACTIVE_LOCATION_VIEWS, type ClientState, type LocationView, type ReferenceKit, type Take } from "@arke-studio/contracts";
+import {
+  MAX_ACTIVE_LOCATION_VIEWS,
+  type ClientState,
+  type Job,
+  type LocationView,
+  type ReferenceKit,
+  type Take,
+} from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -68,11 +75,22 @@ function candidate(name?: string): Take {
   };
 }
 
-function render(kits: ReferenceKit[], takes: Take[] = []): string {
+function render(
+  kits: ReferenceKit[],
+  takes: Take[] = [],
+  loose: { candidates?: string[]; jobs?: Job[] } = {},
+): string {
   const world = FIXTURE_STATE.world!;
   const state: ClientState = {
     ...FIXTURE_STATE,
-    world: { ...world, referenceKits: kits, referenceTakes: takes, referenceReviews: [] },
+    app: { ...FIXTURE_STATE.app, jobs: loose.jobs ?? [] },
+    world: {
+      ...world,
+      referenceKits: kits,
+      referenceTakes: takes,
+      referenceReviews: [],
+      referenceCandidates: loose.candidates ? { "the-vigil": loose.candidates } : {},
+    },
   };
   __setStateForTest(state);
   return renderToString(
@@ -221,6 +239,68 @@ describe("the location reference tab (#243)", () => {
       assert.ok(html.includes(establishing.file), `${where} should show the establishing view`);
       assert.ok(!html.includes("the-vigil/head-front.png"), `${where} must not reach for a character's front tile`);
     }
+  });
+
+  /**
+   * Issue 274. A generated view lands in `candidates/` and becomes a take when its job
+   * finalizes; v0.5.0 finalized without recording one and reported complete, so the picture was
+   * on disk, paid for, and invisible to a screen that only ever read takes.
+   */
+  describe("a candidate whose take was never recorded", () => {
+    const CANDIDATE = "references/the-vigil/candidates/location-view-msnq84u3-1.png";
+    const strandedJob = (over: Partial<Job> = {}): Job => ({
+      id: "jb_01KZPR883W8B49PZTR1GE3F1S4",
+      idempotencyKey: "01KZPR883W8B49PZTR1GE3F1S5",
+      worldId: WORLD_ID,
+      target: { kind: "location-view-candidate", id: "the-vigil/msnq84u3/1" },
+      capability: "image",
+      provider: "openai",
+      model: "gpt-image-2",
+      params: { references: [], locationView: { name: "Establishing view" } },
+      estimatedMicroUsd: 53000,
+      status: "succeeded",
+      providerJobId: "img-msnq84u3",
+      attempt: 1,
+      landedFiles: [CANDIDATE],
+      finalization: { status: "complete", error: null, updatedAt: "2026-08-10T21:12:08.834Z" },
+      error: null,
+      createdAt: "2026-08-10T21:11:27.100Z",
+      updatedAt: "2026-08-10T21:12:08.834Z",
+      ...over,
+    });
+
+    it("waits on a name beside the takes, under the name its generation asked for", () => {
+      const html = render([], [], { candidates: [CANDIDATE], jobs: [strandedJob()] });
+      assert.ok(html.includes("A view is waiting on you"));
+      assert.ok(html.includes(CANDIDATE), "the bytes on disk are what is shown");
+      assert.ok(html.includes("gpt-image-2"), "and it says what made them");
+      assert.match(html, /value="Establishing view"/, "the name the generation asked for opens the field");
+      // Nothing distinguishes it from a take-backed candidate: accepting is what records the
+      // take, so the recovery never has to be explained.
+      assert.ok(html.includes("UNREVIEWED"));
+      // Rejecting is a decision recorded against a take, and there is no take to record it on.
+      const waiting = html.slice(html.indexOf("A view is waiting on you"));
+      assert.ok(!waiting.includes(">Reject<"), "no reject where there is nothing to record it against");
+    });
+
+    it("shows nothing for a candidate no succeeded job landed — an Accept that could only refuse", () => {
+      const orphan = render([], [], { candidates: [CANDIDATE] });
+      assert.ok(!orphan.includes("A view is waiting on you"));
+
+      // Nor while its finalization is still running: that is a take about to exist.
+      const inflight = render([], [], {
+        candidates: [CANDIDATE],
+        jobs: [strandedJob({ finalization: { status: "pending", error: null, updatedAt: "2026-08-10T21:12:08.834Z" } })],
+      });
+      assert.ok(!inflight.includes("A view is waiting on you"));
+    });
+
+    it("drops out the moment a take owns the same job, rather than offering it twice", () => {
+      const take = { ...candidate("Establishing view"), jobId: strandedJob().id as Take["jobId"] };
+      const html = render([], [take], { candidates: [CANDIDATE], jobs: [strandedJob()] });
+      assert.ok(!html.includes(CANDIDATE), "the loose copy is the take's own source, not a second candidate");
+      assert.equal(html.match(/UNREVIEWED/g)?.length, 1);
+    });
   });
 
   it("says what to do first when there is nothing at all", () => {

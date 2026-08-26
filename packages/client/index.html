@@ -12,10 +12,16 @@
       PDF from that origin, and object-src has no default of its own — it falls back to
       `default-src 'self'`, which refuses the embed and leaves an empty frame with nothing on
       screen or in the console to say the policy was what stopped it.
+
+      `frame-src` names it because `object-src` alone was not enough (issue 530): an `<object>`
+      holding a PDF is *framing* to Chromium, and framing is governed by `frame-src`, which has
+      no default of its own either. Permitting the origin under one directive and not the other
+      left the embed refused exactly as before — the console said which directive had done it,
+      the empty frame did not.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'self' http://127.0.0.1:* http://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arke Studio</title>

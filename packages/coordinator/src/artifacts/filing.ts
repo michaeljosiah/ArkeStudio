@@ -597,6 +597,20 @@ async function measureInto(
 /** Committed in bounded batches so an interrupted pass keeps what it already learned. */
 const BACKFILL_BATCH = 8;
 
+/** One signal that aborts when either does. `AbortSignal.any` is newer than this repo's engines. */
+function bothOf(a: AbortSignal | undefined, b: AbortSignal): AbortSignal {
+  if (!a) return b;
+  const merged = new AbortController();
+  if (a.aborted || b.aborted) {
+    merged.abort();
+    return merged.signal;
+  }
+  const stop = (): void => merged.abort();
+  a.addEventListener("abort", stop, { once: true });
+  b.addEventListener("abort", stop, { once: true });
+  return merged.signal;
+}
+
 /**
  * Whether a staged artifact really is a file inside `artifacts/`.
  *
@@ -627,8 +641,27 @@ export async function backfillMediaInfo(
   } = {},
 ): Promise<{ measured: number; deferred: boolean }> {
   const { signal, stillOpen, onMeasured } = opts;
-  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false;
+  // `isClosed` as well as the caller's two: a world can begin closing without this pass's owner
+  // hearing about it — archiving closes the store itself — and the files after that one are work
+  // whose every write is already refused.
+  const abandoned = (): boolean => signal?.aborted === true || stillOpen?.() === false || store.isClosed();
   if (!probe.info) return { measured: 0, deferred: false };
+
+  /*
+   * The probe is cancelled by the store's own close, not only by this pass's signal (issue 288).
+   *
+   * Between files this pass stops on either signal; *inside* a file it is a child process holding
+   * the world open, and archiving closes the store and then renames the folder. Combining the two
+   * here means the close that precedes the rename kills the probe as a side effect — no caller
+   * has to know which world's pass is running, which is what made every version of that
+   * bookkeeping in the coordinator go wrong.
+   *
+   * Combined by hand rather than with `AbortSignal.any`, which arrived in Node 20.3 while this
+   * repo's engines declare 20.0. On 20.0-20.2 the call throws, the coordinator's `startBackfill`
+   * swallows the rejection, and the result is a build that quietly never measures legacy media —
+   * the exact failure this pass exists to fix, hidden behind the mechanism meant to make it safe.
+   */
+  const probeOpts = { signal: bothOf(signal, store.closingSignal) };
 
   /*
    * Probe outside the gate, write in batches (Codex rounds 1 and 2).
@@ -771,7 +804,7 @@ export async function backfillMediaInfo(
     // and the world can close inside it.
     if (abandoned()) break;
     attempted += 1;
-    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe);
+    const info = await measureMediaInfo(store, `artifacts/${artifact.file}`, probe, probeOpts);
     if (info !== null) batch.push({ file: artifact.file, info, hash: artifact.hash });
     /*
      * Flushed on attempts, not successes (Codex round 3): one readable track followed by a run of

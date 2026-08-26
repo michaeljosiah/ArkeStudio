@@ -124,6 +124,7 @@ import {
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
   type ComfyUiEngineStatus,
+  type LedgerEntry,
   type LocalRuntimeStatus,
   type NarratorSettings,
   type ManifestModel,
@@ -941,10 +942,24 @@ export function NewWorldScreen() {
     if (buildPressed && buildPlan !== undefined && buildPlan.plan === null) setBuildPressed(false);
   }, [buildPressed, buildPlan]);
 
+  // A preview can settle while the review is open, and it is the review's own answer that
+  // changes: an unsettled preview carries if it lands before the press (SPEC-031 R-54). The
+  // plan is asked again so the screen never states a loss the build is about to contradict.
+  const previewStatusAtPlan = useRef<string | null>(null);
+  useEffect(() => {
+    if (step !== "review" || buildPressed) return;
+    const status = previewJob?.status ?? null;
+    if (previewStatusAtPlan.current === status) return;
+    previewStatusAtPlan.current = status;
+    planRequestRef.current = ulid();
+    planFoundingBuild(genesisId, planRequestRef.current, lookForBuild);
+  }, [step, buildPressed, previewJob?.status, lookForBuild, genesisId]);
+
   const enterReview = (lookText: string) => {
     setLookForBuild(lookText);
+    previewStatusAtPlan.current = previewJob?.status ?? null;
     planRequestRef.current = ulid();
-    planFoundingBuild(genesisId, planRequestRef.current);
+    planFoundingBuild(genesisId, planRequestRef.current, lookText);
     setStep("review");
   };
 
@@ -1437,6 +1452,12 @@ export function NewWorldScreen() {
               )}
               {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
                 <div style={{ marginTop: 9 }}>
+                  {/* The build never makes a master look (SPEC-031 R-18): the world gets this
+                      preview or none. Said beside the control that answers it, not left for an
+                      empty plate on Art direction months later (issue 521). */}
+                  <div className="fy-mono" style={{ fontSize: 9.5, marginBottom: 7 }}>
+                    without one, this world has no master look
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
@@ -3734,7 +3755,28 @@ export function ActivityScreen() {
     }
     return null;
   };
-  const spend = state ? spendSummary(state.app.ledger, state.app.spend?.settings.periodDays ?? 7, new Date()) : null;
+  // Spend obeys the screen's scope like every other collection here (issue 305 §8). Bench jobs
+  // omit productionId but keep worldId, so their ledger entries are world-owned already; what was
+  // missing was reading that. The threshold alert below stays app-wide deliberately — it is one
+  // durable app setting about one app-wide rolling total, not a per-world figure.
+  //
+  // The ledger cannot use `scoped` as it stands, because it is the one collection here whose
+  // scope is not always a world id. A founding look preview is paid for before any world exists,
+  // and while the job is re-associated to the world at Begin, the ledger entry keeps the genesis
+  // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
+  // The build holds the join, so read it: dropping those entries would underreport every world
+  // that was founded from a paid preview.
+  const genesisForActiveWorld = new Set(
+    (state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
+  );
+  const inScope = (entry: LedgerEntry): boolean =>
+    scope === "all" ||
+    activeWorldId === null ||
+    entry.worldId === activeWorldId ||
+    genesisForActiveWorld.has(entry.worldId);
+  const spend = state
+    ? spendSummary(state.app.ledger.filter(inScope), state.app.spend?.settings.periodDays ?? 7, new Date())
+    : null;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);
   const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));

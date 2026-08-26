@@ -150,9 +150,16 @@ export function characterPickerSources(
   }
   const nameOf = new Map(world.sheets.map((sheet) => [sheet.id, sheet.name]));
   const rows: PickerSource[] = [];
-  const add = (sheetId: string, file: string, what: string): void => {
+  /*
+   * Two ways in, because this world holds paths in both shapes. A kit names its files relative
+   * to the sheet (`head-front.png`, `looks/coat.png`); `referenceCandidates` holds them
+   * world-relative already, the way the scan emits them. Passing one where the other is meant
+   * built `references/<id>/references/<id>/candidates/…`, and every candidate row pointed at a
+   * file that does not exist — pickable, and broken the moment it was carried.
+   */
+  const addPath = (sheetId: string, path: string, what: string): void => {
+    const file = path.split("/").pop() ?? path;
     if (!/\.(png|jpg|jpeg|webp)$/i.test(file)) return; // a path alone cannot price a clip
-    const path = `references/${sheetId}/${file}`;
     // The identity this session already knows wins (Codex round 1). A session that picked the
     // picture before an artifact existed for it — a world opened after this shipped replays old
     // finalizations, which file one — carries it as `file:<path>`. Switching the row to the
@@ -169,12 +176,15 @@ export function characterPickerSources(
       kind: "image",
       name: `${nameOf.get(sheetId) ?? sheetId} · ${what}`,
       imagePath: path,
-      meta: [what, file.split("/").pop()].filter(Boolean).join(" · "),
+      meta: [what, file].filter(Boolean).join(" · "),
       durationSec: 0,
       ...(token !== undefined ? { existingToken: token, active: active.has(token) } : {}),
       pick: artifact ? { source: "artifact", artifactId: artifact.id } : { source: "world-file", path },
     });
   };
+  /** The kit's own shape: a file named relative to `references/<sheetId>/`. */
+  const add = (sheetId: string, file: string, what: string): void =>
+    addPath(sheetId, `references/${sheetId}/${file}`, what);
 
   for (const kit of world.referenceKits) {
     if (kit.mainPhoto?.file) add(kit.sheetId, kit.mainPhoto.file, "identity");
@@ -187,8 +197,8 @@ export function characterPickerSources(
     const sheetId = take.reference?.sheetId;
     if (sheetId && take.media) add(sheetId, `takes/${take.id}/${take.media}`, "take");
   }
-  for (const [sheetId, files] of Object.entries(world.referenceCandidates)) {
-    for (const file of files) add(sheetId, file, "candidate · not reviewed");
+  for (const [sheetId, paths] of Object.entries(world.referenceCandidates)) {
+    for (const path of paths) addPath(sheetId, path, "candidate · not reviewed");
   }
   return rows;
 }

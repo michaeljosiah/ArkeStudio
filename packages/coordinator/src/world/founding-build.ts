@@ -172,6 +172,17 @@ interface ImageRoute {
   referenceImages: number;
 }
 
+/**
+ * The look as the author left the words step (R-3): absent keeps the conversation's,
+ * non-empty is their rewrite, the empty string is "Decide later" — founded with none.
+ * The review and the press read it the same way, or the review would answer R-54's carry
+ * question against words the world is not founded on.
+ */
+function effectiveLook(folded: GenesisBlueprint, look: string | undefined): string | undefined {
+  if (look === undefined) return folded.look;
+  return look.trim() === "" ? undefined : look.trim();
+}
+
 export class FoundingBuildService {
   /** Builds this process knows about, keyed by worldId. */
   private readonly builds = new Map<string, ActiveBuild>();
@@ -222,7 +233,42 @@ export class FoundingBuildService {
     return { route: { model, referenceImages }, notes };
   }
 
-  async plan(genesisId: string, requestId: string): Promise<void> {
+  /**
+   * The review's note for the image nobody is told about (issue 521), or null when a preview
+   * carries. Two images can be missing from a founded world; key art has said so since R-5 and
+   * the master look said nothing, even though the build refuses to make one by rule (R-18, D11)
+   * and the control that answers it — See the look — is one screen back and costs about a
+   * nickel. Stating it at the review is when it is cheapest to act on.
+   */
+  private async masterLookNote(genesisId: string, foundedLook: string | undefined): Promise<string | null> {
+    if ((await this.carriablePreview(genesisId, foundedLook)) !== null) return null;
+    const latest = this.ports
+      .scopedJobs(genesisId)
+      .filter((job) => job.target.kind === "look-preview")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    const words = typeof latest?.params["lookText"] === "string" ? latest.params["lookText"].trim() : undefined;
+    const founded = foundedLook?.trim() ?? "";
+    // An unsettled preview is not a preview the author has, and it is not one they have lost
+    // either: it carries if it lands first, and Begin cancels it if it does not (runWorld).
+    // Reporting it as never made would be contradicted by the world it founds, so the review
+    // states the condition and the screen asks again the moment it settles.
+    if (
+      words === founded &&
+      (latest?.status === "queued" ||
+        latest?.status === "submitting" ||
+        latest?.status === "running" ||
+        latest?.status === "needs-reconciliation")
+    ) {
+      return "The look preview has not settled yet — it carries only if it lands before you press.";
+    }
+    // R-54 refuses a preview of words that were rewritten, and a world founded on the rewrite
+    // has no master look either. Said as the reason it is, not as a preview never made.
+    return latest?.status === "succeeded" && words !== undefined && words !== founded
+      ? "The look changed after the preview was made — it will not carry, and this world will be founded without a master look."
+      : "No look preview was made — this world will be founded without a master look.";
+  }
+
+  async plan(genesisId: string, requestId: string, look?: string): Promise<void> {
     const refuse = (reason: string) =>
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -247,6 +293,8 @@ export class FoundingBuildService {
     if (!this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
+    const masterLook = await this.masterLookNote(genesisId, effectiveLook(blueprint, look));
+    if (masterLook !== null) notes.push(masterLook);
     if (!keyArtBriefSettled(blueprint.keyArt)) {
       // Named while it can still be answered, not invented from a logline (R-5, row 9a).
       notes.push("The world's one image was never settled — key art will not be made.");
@@ -314,14 +362,12 @@ export class FoundingBuildService {
     }
 
     const folded = await foldBlueprint(sandbox);
-    // The look as the author left the words step (R-3): absent keeps the conversation's,
-    // non-empty is their rewrite, the empty string is "Decide later" — founded with none.
-    const effectiveLook = look === undefined ? folded.look : look.trim() === "" ? undefined : look.trim();
+    const founded = effectiveLook(folded, look);
     const blueprint: GenesisBlueprint = {
       ...folded,
-      ...(effectiveLook !== undefined ? { look: effectiveLook } : {}),
+      ...(founded !== undefined ? { look: founded } : {}),
     };
-    if (effectiveLook === undefined) delete (blueprint as { look?: string }).look;
+    if (founded === undefined) delete (blueprint as { look?: string }).look;
     if (blueprint.name === undefined) {
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -792,6 +838,49 @@ export class FoundingBuildService {
   }
 
   /**
+   * The preview that would become v1's master look, or null — R-54's carry test on its own,
+   * so the review can ask before the press exactly what the build answers after it (issue 521).
+   * A world whose answer is null is founded with no master look, and that is worth saying while
+   * the control that fixes it is still one screen back.
+   */
+  private async carriablePreview(
+    genesisId: string,
+    foundedLook: string | undefined,
+  ): Promise<{ image: string; extension: string } | null> {
+    if (foundedLook === undefined) return null;
+    const sandbox = await this.ports.genesisDir(genesisId).catch(() => null);
+    if (sandbox === null) return null;
+    let generatedFrom: string | undefined;
+    try {
+      const raw = await readFile(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META)), "utf8");
+      generatedFrom = (JSON.parse(raw) as { look?: string }).look;
+    } catch {
+      return null; // no preview was ever made — SPEC-017 R-2 treats a look with no image as ordinary
+    }
+    if (generatedFrom === undefined || generatedFrom.trim() !== foundedLook.trim()) return null;
+    // The image must be the one a SUCCEEDED preview job actually made of these words — the
+    // sandbox is the agent's own working directory, and files alone cannot prove the author
+    // pressed and approved anything (R-51, R-54). The job is the receipt: it exists only
+    // through the pressed frame, and its lookText is what the picture was really made from.
+    const receipts = this.ports
+      .scopedJobs(genesisId)
+      .filter((job) => job.target.kind === "look-preview")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const latest = receipts[0];
+    if (latest === undefined || latest.status !== "succeeded") return null;
+    if (typeof latest.params["lookText"] !== "string" || latest.params["lookText"].trim() !== foundedLook.trim()) {
+      return null;
+    }
+    // The landed name follows the bytes (FORMAT_PRESERVING_IMAGE_TARGETS), so the file is
+    // whatever the job says it landed — and the carried copy keeps that extension.
+    const landed = latest.landedFiles?.[0];
+    if (landed === undefined) return null;
+    const image = join(sandbox, fromPortable(landed));
+    if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return null;
+    return { image, extension: landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png" };
+  }
+
+  /**
    * A kept preview is not made twice (SPEC-031 R-54, D9, D11): the carried image becomes art
    * direction v1's master look — but ONLY when the look text it was generated from is the
    * look the world was founded on. A preview of rejected words is not carried: a wrong master
@@ -800,38 +889,9 @@ export class FoundingBuildService {
   private async carryLookPreview(active: ActiveBuild): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== active.record.worldId) return;
-    const foundedLook = active.record.blueprint.look;
-    if (foundedLook === undefined) return;
-    const sandbox = await this.ports.genesisDir(active.record.genesisId).catch(() => null);
-    if (sandbox === null) return;
-    let generatedFrom: string | undefined;
-    try {
-      const raw = await readFile(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META)), "utf8");
-      generatedFrom = (JSON.parse(raw) as { look?: string }).look;
-    } catch {
-      return; // no preview was ever made — SPEC-017 R-2 treats a look with no image as ordinary
-    }
-    if (generatedFrom === undefined || generatedFrom.trim() !== foundedLook.trim()) return;
-    // The image must be the one a SUCCEEDED preview job actually made of these words — the
-    // sandbox is the agent's own working directory, and files alone cannot prove the author
-    // pressed and approved anything (R-51, R-54). The job is the receipt: it exists only
-    // through the pressed frame, and its lookText is what the picture was really made from.
-    const receipts = this.ports
-      .scopedJobs(active.record.genesisId)
-      .filter((job) => job.target.kind === "look-preview")
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const latest = receipts[0];
-    if (latest === undefined || latest.status !== "succeeded") return;
-    if (typeof latest.params["lookText"] !== "string" || latest.params["lookText"].trim() !== foundedLook.trim()) {
-      return;
-    }
-    // The landed name follows the bytes (FORMAT_PRESERVING_IMAGE_TARGETS), so the file is
-    // whatever the job says it landed — and the carried copy keeps that extension.
-    const landed = latest.landedFiles?.[0];
-    if (landed === undefined) return;
-    const image = join(sandbox, fromPortable(landed));
-    if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return;
-    const extension = landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png";
+    const carried = await this.carriablePreview(active.record.genesisId, active.record.blueprint.look);
+    if (carried === null) return;
+    const { image, extension } = carried;
     const destination = masterLookFile(active.record.artDirectionVersion, extension);
     await store.gateOp(async () => {
       await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
