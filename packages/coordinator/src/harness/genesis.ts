@@ -160,12 +160,18 @@ export class GenesisService {
       // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
       // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
       // door can go and look something up before there is any world to scope a lookup to.
-      await writeSessionFiles(this.adapter, dir, this.opts.sessionInput({}));
+      const preparationId = await writeSessionFiles(this.adapter, dir, this.opts.sessionInput({}));
       try {
-        const session = await this.adapter.createSession({ purpose: "drafting", cwd: dir, agent: "world-author" });
+        const session = await this.adapter.createSession({
+          purpose: "drafting",
+          cwd: dir,
+          agent: "world-author",
+          preparationId,
+        });
         sessionId = session.sessionId;
         this.sessions.set(genesisId, sessionId);
       } catch (err) {
+        this.adapter.abandonSessionPreparation?.(preparationId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }

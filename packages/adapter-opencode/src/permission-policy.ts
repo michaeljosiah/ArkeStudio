@@ -10,22 +10,25 @@ import {
 
 export interface SessionPermissionPolicy {
   readonly confinement: AgentConfinement;
-  readonly denyUnknown: boolean;
 }
 
-/** Prepared settings keyed by cwd so concurrent session setup cannot cross-wire policy. */
+/** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
 export class PreparedSessionPolicies {
-  private readonly byCwd = new Map<string, SessionConfigInput>();
+  private readonly byId = new Map<string, SessionConfigInput>();
 
   prepare(input: SessionConfigInput): void {
-    if (input.sessionCwd !== undefined) this.byCwd.set(input.sessionCwd, input);
+    if (input.preparationId !== undefined) this.byId.set(input.preparationId, input);
   }
 
-  take(agentName: string | undefined, cwd: string | undefined): SessionPermissionPolicy | null {
-    if (cwd === undefined) return null;
-    const input = this.byCwd.get(cwd);
-    this.byCwd.delete(cwd);
+  take(agentName: string | undefined, preparationId: string | undefined): SessionPermissionPolicy | null {
+    if (preparationId === undefined) return null;
+    const input = this.byId.get(preparationId);
+    this.byId.delete(preparationId);
     return input === undefined ? null : sessionPermissionPolicy(agentName, input);
+  }
+
+  abandon(preparationId: string): void {
+    this.byId.delete(preparationId);
   }
 }
 
@@ -38,9 +41,6 @@ export function sessionPermissionPolicy(
   if (!member) return null;
   return {
     confinement: confinementFor(member, { web: input.researchWeb === true }),
-    // OpenCode may ask about future tools for authoring agents. Read-only agents fail closed:
-    // an unknown action must not become a path around their smaller allowlist.
-    denyUnknown: member.readOnly === true,
   };
 }
 
@@ -66,7 +66,6 @@ export function assessMappedPermission(
       ? { status: "allowed" }
       : { status: "denied", reason: `${intent} is denied by the active confinement` };
   }
-  return policy.denyUnknown
-    ? { status: "denied", reason: "unknown actions are denied for read-only agents" }
-    : { status: "ask" };
+  // OpenCode's documented future-tool behavior: ask, but never silently apply an old grant.
+  return { status: "ask" };
 }

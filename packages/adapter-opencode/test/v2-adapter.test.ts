@@ -320,8 +320,13 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       const readOnlyCwd = "C:\\worlds\\world-chat";
-      adapter.prepareSession({ sessionCwd: readOnlyCwd, researchWeb: true });
-      const readOnly = await adapter.createSession({ purpose: "world-chat", cwd: readOnlyCwd, agent: "world-builder" });
+      adapter.prepareSession({ preparationId: "prep_read", researchWeb: true });
+      const readOnly = await adapter.createSession({
+        purpose: "world-chat",
+        cwd: readOnlyCwd,
+        agent: "world-builder",
+        preparationId: "prep_read",
+      });
       const assess = (actionClass: string) =>
         adapter.assessPermission({
           sessionId: readOnly.sessionId,
@@ -332,11 +337,16 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       assert.equal(assess("edit"), "denied");
       assert.equal(assess("shell"), "denied");
       assert.equal(assess("external_directory"), "denied");
-      assert.equal(assess("future-tool"), "denied");
+      assert.equal(assess("future-tool"), "ask");
 
       const authorCwd = "C:\\worlds\\authoring";
-      adapter.prepareSession({ sessionCwd: authorCwd, researchWeb: false });
-      const author = await adapter.createSession({ purpose: "authoring", cwd: authorCwd, agent: "scene-writer" });
+      adapter.prepareSession({ preparationId: "prep_author", researchWeb: false });
+      const author = await adapter.createSession({
+        purpose: "authoring",
+        cwd: authorCwd,
+        agent: "scene-writer",
+        preparationId: "prep_author",
+      });
       assert.equal(
         adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_web", actionClass: "websearch" })
           .status,
@@ -356,17 +366,26 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
-  it("keeps concurrently prepared v2 confinement with the cwd it was prepared for", async () => {
+  it("keeps concurrent v2 preparations distinct even when they share a cwd", async () => {
     const adapter = makeAdapter();
     try {
       await adapter.init();
-      const webCwd = "C:\\worlds\\web-on";
-      const offlineCwd = "C:\\worlds\\web-off";
-      adapter.prepareSession({ sessionCwd: webCwd, researchWeb: true });
-      adapter.prepareSession({ sessionCwd: offlineCwd, researchWeb: false });
+      const cwd = "C:\\worlds\\shared";
+      adapter.prepareSession({ preparationId: "prep_web", researchWeb: true });
+      adapter.prepareSession({ preparationId: "prep_offline", researchWeb: false });
 
-      const web = await adapter.createSession({ purpose: "authoring", cwd: webCwd, agent: "sheet-editor" });
-      const offline = await adapter.createSession({ purpose: "authoring", cwd: offlineCwd, agent: "sheet-editor" });
+      const web = await adapter.createSession({
+        purpose: "authoring",
+        cwd,
+        agent: "sheet-editor",
+        preparationId: "prep_web",
+      });
+      const offline = await adapter.createSession({
+        purpose: "authoring",
+        cwd,
+        agent: "sheet-editor",
+        preparationId: "prep_offline",
+      });
       assert.equal(
         adapter.assessPermission({ sessionId: web.sessionId, permissionId: "per_web_on", actionClass: "webfetch" })
           .status,

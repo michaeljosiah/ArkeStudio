@@ -9,8 +9,8 @@ import { skillFor, type Skill } from "./skills.js";
  * grammar is the adapter's job, and each adapter does it differently; deciding it is not.
  */
 export interface SessionConfigInput {
-  /** The directory this preparation belongs to; correlates concurrent session setup. */
-  sessionCwd?: string;
+  /** Opaque one-use correlation between preparation and the session it configures. */
+  preparationId?: string;
   /** The world-query MCP server URL (loopback), when a world is open. */
   worldQueryUrl?: string;
   /** Concrete model for authoring, e.g. "anthropic/claude-sonnet-5" or "ollama/llama3.3". */

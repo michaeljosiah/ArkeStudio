@@ -123,7 +123,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly subscribers = new Set<AsyncQueue<HarnessEvent>>();
   private ready: Readiness = { ready: false, reason: "not initialised" };
-  /** Prepared settings keyed by cwd so concurrent session setup cannot cross-wire options. */
+  /** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
   private readonly pending = new Map<string, SessionConfigInput>();
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
@@ -147,7 +147,11 @@ export class ClaudeAdapter implements HarnessAdapter {
    * misconfiguration, which is what let it go unnoticed.
    */
   prepareSession(input: SessionConfigInput): void {
-    if (input.sessionCwd !== undefined) this.pending.set(input.sessionCwd, input);
+    if (input.preparationId !== undefined) this.pending.set(input.preparationId, input);
+  }
+
+  abandonSessionPreparation(preparationId: string): void {
+    this.pending.delete(preparationId);
   }
 
   async init(): Promise<void> {
@@ -170,13 +174,14 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const prepared = input.preparationId === undefined ? {} : this.pending.get(input.preparationId);
+    if (input.preparationId !== undefined) this.pending.delete(input.preparationId);
+    if (prepared === undefined) throw new Error("session preparation is missing or was already consumed");
     const agentName = input.agent ?? "sheet-editor";
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
     if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
-    const prepared = this.pending.get(input.cwd) ?? {};
-    this.pending.delete(input.cwd);
     /*
      * From the session that was just prepared, not from how the adapter was built (codex,
      * 2026-08-23).

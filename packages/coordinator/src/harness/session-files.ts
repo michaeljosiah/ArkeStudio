@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -15,16 +16,23 @@ import { atomicWriteFile } from "../world/atomic.js";
  * solve them differently.
  */
 export async function writeSessionFiles(
-  adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession">,
+  adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession" | "abandonSessionPreparation">,
   dir: string,
   input: SessionConfigInput = {},
-): Promise<void> {
-  const prepared = { ...input, sessionCwd: dir };
+): Promise<string> {
+  const preparationId = randomUUID();
+  const prepared = { ...input, preparationId };
   // Both seams, always. A harness takes its settings as files or as call options, and a
   // caller offering only one silently configures nothing for the harnesses using the other.
-  adapter.prepareSession?.(prepared);
-  for (const file of adapter.sessionFiles?.(prepared) ?? []) {
-    await atomicWriteFile(join(dir, file.name), file.contents);
+  try {
+    adapter.prepareSession?.(prepared);
+    for (const file of adapter.sessionFiles?.(prepared) ?? []) {
+      await atomicWriteFile(join(dir, file.name), file.contents);
+    }
+    return preparationId;
+  } catch (error) {
+    adapter.abandonSessionPreparation?.(preparationId);
+    throw error;
   }
 }
 

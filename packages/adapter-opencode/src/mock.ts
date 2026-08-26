@@ -33,6 +33,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
   private readonly sessionPolicies = new Map<string, SessionPermissionPolicy | null>();
   private readonly preparedPolicies = new PreparedSessionPolicies();
   readonly permissionDecisions: PermissionDecision[] = [];
+  permissionAckStatus: PermissionAck["status"] = "confirmed";
   private disposed = false;
 
   capabilities(): ReadonlySet<HarnessCapability> {
@@ -53,6 +54,10 @@ export class MockHarnessAdapter implements HarnessAdapter {
     this.preparedPolicies.prepare(input);
   }
 
+  abandonSessionPreparation(preparationId: string): void {
+    this.preparedPolicies.abandon(preparationId);
+  }
+
   readiness(): Readiness {
     return this.disposed ? { ready: false, reason: "mock disposed" } : { ready: true };
   }
@@ -71,7 +76,11 @@ export class MockHarnessAdapter implements HarnessAdapter {
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     const sessionId = `sess_mock_${++this.sessions}_${input.purpose}`;
-    this.sessionPolicies.set(sessionId, this.preparedPolicies.take(input.agent, input.cwd));
+    const policy = this.preparedPolicies.take(input.agent, input.preparationId);
+    if (input.preparationId !== undefined && policy === null) {
+      throw new Error("session preparation is missing or was already consumed");
+    }
+    this.sessionPolicies.set(sessionId, policy);
     this.push({ type: "session.created", sessionId });
     return { sessionId };
   }
@@ -112,7 +121,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
       permissionId: decision.permissionId,
       decision: decision.decision,
     });
-    return { permissionId: decision.permissionId, status: "confirmed" };
+    return { permissionId: decision.permissionId, status: this.permissionAckStatus };
   }
 
   assessPermission(request: PermissionRequest): PermissionAssessment {

@@ -481,8 +481,13 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     const grants = new GrantStore(root);
     await grants.remember("webfetch", CLOCK());
     const adapter = new MockHarnessAdapter();
-    adapter.prepareSession?.({ sessionCwd: root, researchWeb: true });
-    const session = await adapter.createSession({ purpose: "authoring", cwd: root, agent: "sheet-editor" });
+    adapter.prepareSession?.({ preparationId: "prep_allowed", researchWeb: true });
+    const session = await adapter.createSession({
+      purpose: "authoring",
+      cwd: root,
+      agent: "sheet-editor",
+      preparationId: "prep_allowed",
+    });
     const events: DomainEvent[] = [];
 
     await settlePermission(adapter, grants, (e) => events.push(e), {
@@ -508,8 +513,13 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     const grants = new GrantStore(root);
     await grants.remember("edit", CLOCK());
     const adapter = new MockHarnessAdapter();
-    adapter.prepareSession?.({ sessionCwd: root });
-    const session = await adapter.createSession({ purpose: "world-chat", cwd: root, agent: "world-builder" });
+    adapter.prepareSession?.({ preparationId: "prep_denied" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_denied",
+    });
     const events: DomainEvent[] = [];
     const defects: Array<{ adapter: string; sessionId: string; reason: string }> = [];
 
@@ -554,8 +564,13 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     const grants = new GrantStore(root);
     await grants.remember("future-tool", CLOCK());
     const adapter = new MockHarnessAdapter();
-    adapter.prepareSession?.({ sessionCwd: root });
-    const session = await adapter.createSession({ purpose: "authoring", cwd: root, agent: "sheet-editor" });
+    adapter.prepareSession?.({ preparationId: "prep_unknown" });
+    const session = await adapter.createSession({
+      purpose: "authoring",
+      cwd: root,
+      agent: "sheet-editor",
+      preparationId: "prep_unknown",
+    });
     const events: DomainEvent[] = [];
 
     const result = await settlePermission(adapter, grants, (event) => events.push(event), {
@@ -567,5 +582,48 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     assert.equal(result, "pending");
     assert.equal(adapter.permissionDecisions.length, 0, "an unmapped action cannot be silently granted");
     assert.equal(events.at(-1)?.type, "permission.pending");
+  });
+
+  it("does not claim an automatic denial settled until the harness confirms it", async () => {
+    const root = await tempDir("arke-grants-");
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "unconfirmed";
+    adapter.prepareSession?.({ preparationId: "prep_unconfirmed" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_unconfirmed",
+    });
+    const events: DomainEvent[] = [];
+
+    const result = await settlePermission(adapter, new GrantStore(root), (event) => events.push(event), {
+      sessionId: session.sessionId,
+      permissionId: "p-unconfirmed",
+      actionClass: "edit",
+    });
+
+    assert.equal(result, "retry");
+    assert.equal(events.length, 0, "no settled or pending event is emitted without acknowledgement");
+  });
+
+  it("retires an automatic decision when the harness says the request is stale", async () => {
+    const root = await tempDir("arke-grants-");
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "stale";
+    adapter.prepareSession?.({ preparationId: "prep_stale" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_stale",
+    });
+
+    const result = await settlePermission(adapter, new GrantStore(root), () => {}, {
+      sessionId: session.sessionId,
+      permissionId: "p-stale",
+      actionClass: "edit",
+    });
+    assert.equal(result, "gone");
   });
 });

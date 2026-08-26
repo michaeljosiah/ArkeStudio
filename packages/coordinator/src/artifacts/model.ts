@@ -56,8 +56,13 @@ export function makeAdapterExtractor(
     if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await writeSessionFiles(adapter, sandbox, sessionInput({}));
-    const session = await adapter.createSession({ purpose: "extraction", cwd: sandbox, agent: "extraction" });
+    const preparationId = await writeSessionFiles(adapter, sandbox, sessionInput({}));
+    const session = await adapter
+      .createSession({ purpose: "extraction", cwd: sandbox, agent: "canon-author", preparationId })
+      .catch((error) => {
+        adapter.abandonSessionPreparation?.(preparationId);
+        throw error;
+      });
     // Making the sandbox and opening the session takes long enough to be stopped inside — on a
     // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever
     // dispatched, rather than starting one nobody is waiting for.

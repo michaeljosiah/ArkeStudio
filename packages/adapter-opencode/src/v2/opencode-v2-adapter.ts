@@ -197,7 +197,15 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     this.preparedPolicies.prepare(input);
   }
 
+  abandonSessionPreparation(preparationId: string): void {
+    this.preparedPolicies.abandon(preparationId);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
+    if (input.preparationId !== undefined && permissionPolicy === null) {
+      throw new Error("session preparation is missing or was already consumed");
+    }
     const location = input.cwd;
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
@@ -223,7 +231,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
-      permissionPolicy: this.preparedPolicies.take(input.agent, input.cwd),
+      permissionPolicy,
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -422,6 +430,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       };
       this.turnListeners.add(listener);
     });
+    if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
   }
 

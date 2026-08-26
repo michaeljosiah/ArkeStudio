@@ -28,6 +28,8 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
+  /** The one-use preparation returned by the coordinator's session-file step. */
+  preparationId?: string;
   /**
    * The working directory the session runs in — for authoring, the proposal directory, never
    * the world root (SPEC-005). Absolute path; the adapter scopes every request to it.
@@ -227,6 +229,8 @@ export interface HarnessAdapter {
    * Called with the same input, immediately before that session's `createSession`.
    */
   prepareSession?(input: SessionConfigInput): void;
+  /** Forget a preparation whose file write or caller failed before session creation. */
+  abandonSessionPreparation?(preparationId: string): void;
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;

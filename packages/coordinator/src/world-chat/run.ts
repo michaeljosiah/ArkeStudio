@@ -67,9 +67,9 @@ export interface RunDeps {
     conversationId: ConversationId;
     runId: RunId;
     attachmentIds: readonly ChatAttachmentId[];
-  }) => Promise<{ cwd: string; leaseToken: string }>;
+  }) => Promise<{ cwd: string; leaseToken: string; preparationId?: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
-  release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
+  release: (input: { conversationId: ConversationId; runId: RunId; preparationId?: string }) => Promise<void>;
   /** Receipts this run produced, in order. */
   receiptsFor: (runId: RunId) => readonly WorldChatCheckReceipt[];
   /** Run the coordinator's own check plan for one draft and return what it found. */
@@ -454,14 +454,19 @@ export class WorldChatRunner {
     }
 
     const linked = attachmentIds as readonly ChatAttachmentId[];
-    const { cwd, leaseToken } = await this.deps.prepare({
+    const { cwd, leaseToken, preparationId } = await this.deps.prepare({
       conversationId,
       runId,
       attachmentIds: linked,
     });
 
     try {
-      const session = await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
+      const session = await adapter.createSession({
+        purpose: "world-chat",
+        cwd,
+        agent: "world-builder",
+        ...(preparationId !== undefined ? { preparationId } : {}),
+      });
       const timeoutMs = this.deps.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
 
       const progress = this.deps.onProgress
@@ -572,7 +577,11 @@ export class WorldChatRunner {
       return { status: "failed", reason: safeDetail(err) };
     } finally {
       this.cancelling.delete(conversationId);
-      await this.deps.release({ conversationId, runId });
+      await this.deps.release({
+        conversationId,
+        runId,
+        ...(preparationId !== undefined ? { preparationId } : {}),
+      });
     }
   }
 

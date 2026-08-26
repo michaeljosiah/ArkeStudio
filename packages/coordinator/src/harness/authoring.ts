@@ -175,16 +175,22 @@ export class AuthoringService {
     if (sessionId === undefined) {
       // Studio writes the session's configuration — roster, tool denials, the world-query MCP
       // registration — into the working directory (R-5). Never a credential (R-6).
-      await writeSessionFiles(this.adapter, proposalDir, this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}));
+      const preparationId = await writeSessionFiles(
+        this.adapter,
+        proposalDir,
+        this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+      );
       try {
         const session = await this.adapter.createSession({
           purpose: input.purpose,
           cwd: proposalDir,
           agent: this.opts.agentForPurpose(input.purpose),
+          preparationId,
         });
         sessionId = session.sessionId;
         this.sessions.set(input.proposalId, sessionId);
       } catch (err) {
+        this.adapter.abandonSessionPreparation?.(preparationId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
@@ -350,7 +356,7 @@ export async function settlePermission(
   emit: (event: DomainEvent) => void,
   request: PermissionRequest,
   recordDefect?: (defect: PermissionConfinementDefect) => void | Promise<void>,
-): Promise<"pending" | "settled"> {
+): Promise<"gone" | "pending" | "retry" | "settled"> {
   const at = new Date().toISOString();
   const assessment = adapter.assessPermission?.(request) ?? {
     status: "denied" as const,
@@ -364,11 +370,13 @@ export async function settlePermission(
         reason: assessment.reason,
       }),
     ).catch(() => {});
-    await adapter.respondToPermission?.({
+    const ack = await adapter.respondToPermission?.({
       permissionId: request.permissionId,
       decision: "reject",
       message: "Denied by Arke Studio's active confinement.",
     });
+    if (ack?.status === "stale" || ack?.status === "duplicate") return "gone";
+    if (ack?.status !== "confirmed") return "retry";
     emit({
       at,
       type: "permission.settled",
@@ -379,7 +387,9 @@ export async function settlePermission(
     return "settled";
   }
   if (assessment.status === "allowed" && (await grants.covers(request.actionClass))) {
-    await adapter.respondToPermission?.({ permissionId: request.permissionId, decision: "always" });
+    const ack = await adapter.respondToPermission?.({ permissionId: request.permissionId, decision: "always" });
+    if (ack?.status === "stale" || ack?.status === "duplicate") return "gone";
+    if (ack?.status !== "confirmed") return "retry";
     emit({
       at,
       type: "permission.settled",

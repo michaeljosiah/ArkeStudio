@@ -186,7 +186,15 @@ export class OpenCodeAdapter implements HarnessAdapter {
     this.preparedPolicies.prepare(input);
   }
 
+  abandonSessionPreparation(preparationId: string): void {
+    this.preparedPolicies.abandon(preparationId);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
+    if (input.preparationId !== undefined && permissionPolicy === null) {
+      throw new Error("session preparation is missing or was already consumed");
+    }
     const body: Record<string, unknown> = {
       ...(input.agent ? { agent: input.agent } : {}),
       ...(input.cwd ? { location: { directory: input.cwd.replaceAll("\\", "/") } } : {}),
@@ -213,7 +221,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       purpose: input.purpose,
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
-      permissionPolicy: this.preparedPolicies.take(input.agent, input.cwd),
+      permissionPolicy,
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -425,6 +433,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       };
       this.turnListeners.add(listener);
     });
+    if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
   }
 

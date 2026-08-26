@@ -17,6 +17,7 @@ import {
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
+  type PermissionRequest,
   type HealthComponent,
   buildExportPlan,
   exportAudioClips,
@@ -655,6 +656,8 @@ export class Coordinator {
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
   private readonly pendingPermissions = new Map<string, string>();
+  /** Unconfirmed automatic decisions retry without turning a denied action into a user prompt. */
+  private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
@@ -1633,32 +1636,51 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (adapter && this.grants) {
       const grants = this.grants;
+      const handlePermission = async (request: PermissionRequest, recordDefect: boolean): Promise<void> => {
+        const settlement = await settlePermission(
+          adapter,
+          grants,
+          (e) => this.emit(e),
+          request,
+          recordDefect
+            ? (defect) =>
+                this.appLog?.append({
+                  level: "warn",
+                  event: "harness.permission-confinement-defect",
+                  ...defect,
+                })
+            : undefined,
+        );
+        if (settlement === "retry") {
+          if (this.stopping) return;
+          if (this.permissionRetryTimers.has(request.permissionId)) return;
+          const timer = setTimeout(() => {
+            this.permissionRetryTimers.delete(request.permissionId);
+            if (!this.stopping) void handlePermission(request, false);
+          }, 1_000);
+          timer.unref?.();
+          this.permissionRetryTimers.set(request.permissionId, timer);
+          return;
+        }
+        const retry = this.permissionRetryTimers.get(request.permissionId);
+        if (retry) clearTimeout(retry);
+        this.permissionRetryTimers.delete(request.permissionId);
+        if (settlement === "pending") this.pendingPermissions.set(request.permissionId, request.actionClass);
+        else this.pendingPermissions.delete(request.permissionId);
+      };
       void (async () => {
         try {
           for await (const event of adapter.streamEvents()) {
             if (event.type === "permission.requested") {
-              const settlement = await settlePermission(
-                adapter,
-                grants,
-                (e) => this.emit(e),
+              await handlePermission(
                 {
                   sessionId: event.sessionId,
                   permissionId: event.permissionId,
                   actionClass: event.actionClass,
                   ...(event.detail !== undefined ? { detail: event.detail } : {}),
                 },
-                (defect) =>
-                  this.appLog?.append({
-                    level: "warn",
-                    event: "harness.permission-confinement-defect",
-                    ...defect,
-                  }),
+                true,
               );
-              if (settlement === "pending") {
-                this.pendingPermissions.set(event.permissionId, event.actionClass);
-              } else {
-                this.pendingPermissions.delete(event.permissionId);
-              }
             }
           }
         } catch {
@@ -8609,15 +8631,17 @@ export class Coordinator {
         // still satisfies what §8.2 actually requires: somewhere outside the world.
         const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
         if (this.opts.adapter) {
-          await writeSessionFiles(
+          const preparationId = await writeSessionFiles(
             this.opts.adapter,
             cwd,
             this.sessionInput(url ? { worldQueryUrl: url } : {}),
           );
+          return { cwd, leaseToken: lease.token, preparationId };
         }
         return { cwd, leaseToken: lease.token };
       },
-      release: async ({ conversationId, runId }) => {
+      release: async ({ conversationId, runId, preparationId }) => {
+        if (preparationId !== undefined) this.opts.adapter?.abandonSessionPreparation?.(preparationId);
         const token = tokenByRun.get(runId);
         if (token) {
           this.worldQuery.detachLease(token);
@@ -8927,6 +8951,8 @@ export class Coordinator {
       this.lifecycleDisposers.clear();
       for (const timer of this.lifecycleTimers) clearInterval(timer);
       this.lifecycleTimers.clear();
+      for (const timer of this.permissionRetryTimers.values()) clearTimeout(timer);
+      this.permissionRetryTimers.clear();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

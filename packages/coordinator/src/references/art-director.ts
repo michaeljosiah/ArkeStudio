@@ -63,8 +63,18 @@ export function makeArtDirector(
   return async (brief) => {
     const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await writeSessionFiles(adapter, sandbox, sessionInput({}));
-    const session = await adapter.createSession({ purpose: "art-prompt", cwd: sandbox, agent: options.agent ?? "art-director" });
+    const preparationId = await writeSessionFiles(adapter, sandbox, sessionInput({}));
+    const session = await adapter
+      .createSession({
+        purpose: "art-prompt",
+        cwd: sandbox,
+        agent: options.agent ?? "art-director",
+        preparationId,
+      })
+      .catch((error) => {
+        adapter.abandonSessionPreparation?.(preparationId);
+        throw error;
+      });
 
     let finalText = "";
     const abort = new AbortController();
