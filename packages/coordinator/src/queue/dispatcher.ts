@@ -209,6 +209,9 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-sheet",
   "character-look",
   "reference-tile",
+  // The look preview may be promoted to the master look (SPEC-031 R-54); a JPEG under a
+  // .png name would then be carried under a name its bytes contradict.
+  "look-preview",
 ]);
 const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,

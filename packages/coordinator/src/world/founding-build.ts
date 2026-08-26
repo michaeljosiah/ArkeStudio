@@ -94,6 +94,10 @@ export interface FoundingBuildPorts {
   carryAttachments(genesisId: string, worldId: string): Promise<void>;
   /** Re-associate the conversation's jobs with the world it became (SPEC-031 R-55). */
   adoptScopedJobs(genesisId: string, worldId: string): Promise<void>;
+  /** The conversation's own jobs, for the carry's provenance check (R-54). */
+  scopedJobs(genesisId: string): Job[];
+  /** Cancel the conversation's in-flight jobs — a preview mid-air at Begin is not waited for. */
+  cancelScopedJobs(genesisId: string): Promise<void>;
   /** Author a staged sheet with the harness when it is ready; resolves when the draft landed. */
   authorSheet(
     store: WorldStore,
@@ -776,6 +780,10 @@ export class FoundingBuildService {
     // The world files were written by the press itself (they hold this record); what is left
     // is what the conversation was handed. Filing dedups by hash, so a crashed pass re-runs.
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
+    // A preview still generating at Begin is cancelled, not waited for: its landing could
+    // arrive after the sandbox sweep and resurrect the directory, and an image that was not
+    // on disk when the author pressed is not an image the author approved (R-54).
+    await this.ports.cancelScopedJobs(active.record.genesisId).catch(() => {});
     await this.carryLookPreview(active);
     // The conversation's own spend follows it into the world (SPEC-031 R-55): the preview's
     // job re-associates; its ledger entry keeps the scope the money was spent under, joinable
@@ -803,10 +811,28 @@ export class FoundingBuildService {
     } catch {
       return; // no preview was ever made — SPEC-017 R-2 treats a look with no image as ordinary
     }
-    if (generatedFrom === undefined || generatedFrom !== foundedLook) return;
-    const image = join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_NAME);
+    if (generatedFrom === undefined || generatedFrom.trim() !== foundedLook.trim()) return;
+    // The image must be the one a SUCCEEDED preview job actually made of these words — the
+    // sandbox is the agent's own working directory, and files alone cannot prove the author
+    // pressed and approved anything (R-51, R-54). The job is the receipt: it exists only
+    // through the pressed frame, and its lookText is what the picture was really made from.
+    const receipts = this.ports
+      .scopedJobs(active.record.genesisId)
+      .filter((job) => job.target.kind === "look-preview")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const latest = receipts[0];
+    if (latest === undefined || latest.status !== "succeeded") return;
+    if (typeof latest.params["lookText"] !== "string" || latest.params["lookText"].trim() !== foundedLook.trim()) {
+      return;
+    }
+    // The landed name follows the bytes (FORMAT_PRESERVING_IMAGE_TARGETS), so the file is
+    // whatever the job says it landed — and the carried copy keeps that extension.
+    const landed = latest.landedFiles?.[0];
+    if (landed === undefined) return;
+    const image = join(sandbox, fromPortable(landed));
     if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return;
-    const destination = masterLookFile(active.record.artDirectionVersion, ".png");
+    const extension = landed.slice(landed.lastIndexOf(".")).toLowerCase() || ".png";
+    const destination = masterLookFile(active.record.artDirectionVersion, extension);
     await store.gateOp(async () => {
       await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
       // Still v1, written before anything has read it: the record the world was founded

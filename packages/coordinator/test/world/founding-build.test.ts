@@ -180,6 +180,8 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
     gate: () => provider.gate(),
     carryAttachments: async () => {},
     adoptScopedJobs: async () => {},
+    scopedJobs: (genesisId) => [...queue.jobs.values()].filter((job) => job.worldId === genesisId),
+    cancelScopedJobs: async () => {},
     authorSheet: async () => {},
     enqueue: (input) => queue.enqueue(input),
     jobById: (jobId) => queue.jobs.get(jobId),
@@ -520,7 +522,31 @@ describe("the founding build (SPEC-031)", () => {
       join(sandbox, "previews", "look-preview.json"),
       JSON.stringify({ look: "salt-bleached watercolour, cold light off the water" }) + "\n",
     );
-    await h.service.begin("gen-preview", ulid());
+    // The receipt: only a succeeded preview JOB proves a person pressed and paid — files in
+    // the agent's own sandbox prove nothing (R-51, R-54).
+    const now = new Date().toISOString();
+    const receipt = JobSchema.parse({
+      id: newId("jb"),
+      idempotencyKey: ulid(),
+      worldId: "gen-preview",
+      target: { kind: "look-preview", id: "gen-preview" },
+      capability: "image",
+      provider: "fal",
+      model: "test-image",
+      params: { lookText: "salt-bleached watercolour, cold light off the water" },
+      estimatedMicroUsd: 40000,
+      status: "succeeded",
+      providerJobId: null,
+      attempt: 1,
+      error: null,
+      landedFiles: ["previews/look-preview.png"],
+      createdAt: now,
+      updatedAt: now,
+    });
+    h.queue.jobs.set(receipt.id, receipt);
+    // The author's words at Begin arrive as the look override, whitespace and all — the
+    // carry test normalizes rather than failing on a trailing space (review round 3).
+    await h.service.begin("gen-preview", ulid(), "salt-bleached watercolour, cold light off the water ");
     await waitFor(() => h.lastState()?.status === "completed");
 
     const store = h.provider.openStore()!;
@@ -546,6 +572,26 @@ describe("the founding build (SPEC-031)", () => {
       join(sandbox, "previews", "look-preview.json"),
       JSON.stringify({ look: "neon brutalism, hard flash, wet asphalt" }) + "\n",
     );
+    const now = new Date().toISOString();
+    const receipt = JobSchema.parse({
+      id: newId("jb"),
+      idempotencyKey: ulid(),
+      worldId: "gen-stale-look",
+      target: { kind: "look-preview", id: "gen-stale-look" },
+      capability: "image",
+      provider: "fal",
+      model: "test-image",
+      params: { lookText: "neon brutalism, hard flash, wet asphalt" },
+      estimatedMicroUsd: 40000,
+      status: "succeeded",
+      providerJobId: null,
+      attempt: 1,
+      error: null,
+      landedFiles: ["previews/look-preview.png"],
+      createdAt: now,
+      updatedAt: now,
+    });
+    h.queue.jobs.set(receipt.id, receipt);
     await h.service.begin("gen-stale-look", ulid());
     await waitFor(() => h.lastState()?.status === "completed");
 

@@ -1388,8 +1388,10 @@ export function NewWorldScreen() {
             </div>
           )}
           {/* The look, previewable while the conversation is still a conversation (SPEC-031
-              §1.10): the agent proposed the words; the press and the spend are the author's. */}
-          {blueprint?.look !== undefined && (
+              §1.10): the agent proposed the words; the press and the spend are the author's.
+              Build mode only — the legacy create path sweeps the sandbox without a carry,
+              and the card must not promise one. */}
+          {buildMode && blueprint?.look !== undefined && (
             <div className="fy-draftcard" style={{ padding: "12px 14px" }}>
               <div className="fy-mono" style={{ fontSize: 10 }}>
                 THE LOOK
@@ -1412,12 +1414,18 @@ export function NewWorldScreen() {
                 </>
               )}
               {previewRunning && <Loading inline label="making the look" />}
-              {previewJob?.status === "failed" && (
+              {(previewJob?.status === "failed" ||
+                previewJob?.status === "cancelled" ||
+                previewJob?.status === "needs-reconciliation") && (
                 <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
-                  the preview failed{previewJob.error ? ` — ${previewJob.error}` : ""}
+                  {previewJob.status === "cancelled"
+                    ? "the preview was cancelled"
+                    : previewJob.status === "needs-reconciliation"
+                      ? "the preview is held in Activity"
+                      : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
                 </div>
               )}
-              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewStale) && (
+              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
                 <div style={{ marginTop: 9 }}>
                   <Button
                     variant="outline"

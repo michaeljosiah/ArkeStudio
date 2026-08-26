@@ -219,7 +219,7 @@ import {
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
-import { WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
+import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
@@ -1351,6 +1351,18 @@ export class Coordinator {
                 if (job.worldId === genesisId) await this.jobQueue?.adoptWorld(job.id, worldId);
               }
             },
+            scopedJobs: (genesisId) =>
+              (this.jobQueue?.listJobs() ?? []).filter((job) => job.worldId === genesisId),
+            cancelScopedJobs: async (genesisId) => {
+              for (const job of this.jobQueue?.listJobs() ?? []) {
+                if (
+                  job.worldId === genesisId &&
+                  (job.status === "queued" || job.status === "submitting" || job.status === "running")
+                ) {
+                  await this.jobQueue?.cancel(job.id).catch(() => {});
+                }
+              }
+            },
             authorSheet: async (store, gate, input) => {
               if (!this.authoring || this.opts.adapter?.readiness().ready !== true) return;
               const worldQueryUrl = await this.worldQuery.start();
@@ -1975,6 +1987,10 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
+    // A conversation-scoped job (SPEC-031 R-55) has no world to finalize into: its landing
+    // was the sandbox, and looking its scope up as a world would scan every world's meta
+    // just to throw. The genesis rail reads the job row itself.
+    if (!UlidSchema.safeParse(job.worldId).success) return;
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
         const readIdentity = voiceJobReadIdentity(job);
@@ -3344,6 +3360,18 @@ export class Coordinator {
       }
       case "genesis-discard": {
         this.genesis?.release(msg.genesisId);
+        // A conversation-scoped job still in flight is cancelled with its conversation
+        // (SPEC-031 row 16): the queue then discards a late delivery rather than landing it
+        // into a sandbox this sweep is about to remove — and would otherwise re-create.
+        // The ledger keeps whatever the cancellation cost; that is the correct record.
+        for (const job of this.jobQueue?.listJobs() ?? []) {
+          if (
+            job.worldId === msg.genesisId &&
+            (job.status === "queued" || job.status === "submitting" || job.status === "running")
+          ) {
+            await this.jobQueue?.cancel(job.id).catch(() => {});
+          }
+        }
         // Anything still being carried into the new world finishes first — otherwise Begin
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
@@ -3372,15 +3400,30 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "No image model is available. Check provider settings.");
           return;
         }
+        // One preview at a time (R-51): a second press while one is in flight would be a
+        // second spend for one picture, and its landing could contradict the metadata.
+        const inFlight = this.jobQueue
+          ?.listJobs()
+          .some(
+            (job) =>
+              job.worldId === msg.genesisId &&
+              job.target.kind === "look-preview" &&
+              (job.status === "queued" || job.status === "submitting" || job.status === "running"),
+          );
+        if (inFlight === true) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "A look preview is already being made.");
+          return;
+        }
         const request = lookPreviewRequest(msg.genesisId, blueprint.look, model);
         // The exact look text is durable BEFORE the job exists (R-53): without it, Begin
         // could not tell a preview of the founded look from a preview of rejected words —
         // and it would have to either install rejected art or discard valid art (R-54).
         // A stale image from an earlier preview goes with it, so metadata and picture can
         // never disagree about which generation they describe.
-        await rm(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_NAME)), { force: true }).catch(
-          () => {},
-        );
+        for (const extension of KEY_ART_EXTENSIONS) {
+          const stale = LOOK_PREVIEW_NAME.replace(/\.png$/, extension);
+          await rm(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, stale)), { force: true }).catch(() => {});
+        }
         await atomicWriteFile(
           join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META),
           JSON.stringify({ look: blueprint.look, requestId: msg.requestId, at: new Date().toISOString() }) + "\n",
