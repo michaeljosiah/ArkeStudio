@@ -277,16 +277,23 @@ describe("what opens", () => {
     assert.ok(embed, "the host's own PDF viewer, in the frame");
     assert.equal(embed.getAttribute("type"), "application/pdf");
     assert.match(embed.getAttribute("aria-label") ?? "", /series-bible\.pdf/);
-    assert.match(embed.textContent ?? "", /No PDF viewer here/, "a named fallback, not a blank rectangle");
+    assert.match(
+      embed.textContent ?? "",
+      /Could not display this PDF/,
+      "a fallback that says what is known — these children stand in for any failure, a refused load included",
+    );
     /*
-     * `object-src` has no default of its own: it falls back to `default-src 'self'`, which
-     * refuses a loopback embed and leaves an empty frame with nothing on screen or in the console
-     * to say the policy was what stopped it. Named, like `img-src` and `media-src` before it.
+     * Neither `object-src` nor `frame-src` has a default of its own: both fall back to
+     * `default-src 'self'`, which refuses a loopback embed and leaves an empty frame. Both are
+     * needed, because an `<object>` holding a PDF is framing to Chromium — naming only
+     * `object-src` left the load blocked under `frame-src` (issue 530).
      */
     const policy = /content="([^"]*)"/.exec(readFileSync(join(here, "../index.html"), "utf8"))?.[1] ?? "";
-    const objectSrc = /object-src ([^;"]*)/.exec(policy)?.[1] ?? "";
-    for (const origin of ["http://127.0.0.1:*", "http://localhost:*"]) {
-      assert.ok(objectSrc.includes(origin), `object-src must allow ${origin}`);
+    for (const directive of ["object-src", "frame-src"]) {
+      const allowed = new RegExp(`${directive} ([^;"]*)`).exec(policy)?.[1] ?? "";
+      for (const origin of ["http://127.0.0.1:*", "http://localhost:*"]) {
+        assert.ok(allowed.includes(origin), `${directive} must allow ${origin}`);
+      }
     }
     assert.ok(
       frame?.querySelector('button[aria-label="Download series-bible.pdf"]'),

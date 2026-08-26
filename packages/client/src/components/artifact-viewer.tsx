@@ -181,13 +181,18 @@ function Stage({
       return <TextStage worldSlug={worldSlug} path={path} name={name} />;
     case "pdf":
       /*
-       * `<object>` rather than `<iframe>`, for its fallback: a host with no PDF viewer renders
-       * the children instead of a blank rectangle, and the save control in the head above is
-       * still the way out either way.
+       * `<object>` rather than `<iframe>`, for its fallback: a host that does not render the PDF
+       * renders the children instead of a blank rectangle, and the save control in the head above
+       * is still the way out either way.
+       *
+       * The note says what is known and no more (issue 530). These children stand in for *any*
+       * failure to render — a refused load included — so the earlier "No PDF viewer here" asserted
+       * a cause it could not see. It was wrong the first time it ever showed: the load had been
+       * blocked by `frame-src`, and the note sent the reader hunting for a missing viewer.
        */
       return (
         <object className="fy-artview__pdf" type="application/pdf" data={src} aria-label={`${name} — PDF`}>
-          <Failed note="No PDF viewer here" />
+          <Failed note="Could not display this PDF" onRetry={onRetry} />
         </object>
       );
     default:
