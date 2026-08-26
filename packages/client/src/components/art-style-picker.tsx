@@ -76,11 +76,14 @@ export function ArtStyleWords({
   value,
   onChange,
   label = "Words for this look",
+  provenance,
 }: {
   selectedId: string | null;
   value: string;
   onChange: (text: string) => void;
   label?: string;
+  /** Overrides the seed line — the genesis step passes it when the conversation proposed the words. */
+  provenance?: string;
 }) {
   const preset = selectedId === null ? undefined : presetById(selectedId);
   const seeded = preset !== undefined && value.trim() === preset.description;
@@ -89,11 +92,13 @@ export function ArtStyleWords({
       <div className="fy-styles__wordshead">
         <span>{label}</span>
         <span className="fy-styles__seed">
-          {preset === undefined
-            ? "YOUR OWN WORDS"
-            : seeded
-              ? `SEEDED BY ${preset.name.toUpperCase()}`
-              : `SEEDED BY ${preset.name.toUpperCase()} · EDITED`}
+          {provenance !== undefined
+            ? provenance
+            : preset === undefined
+              ? "YOUR OWN WORDS"
+              : seeded
+                ? `SEEDED BY ${preset.name.toUpperCase()}`
+                : `SEEDED BY ${preset.name.toUpperCase()} · EDITED`}
         </span>
       </div>
       <Textarea

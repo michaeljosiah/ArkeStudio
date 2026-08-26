@@ -1,23 +1,26 @@
-import { readFile } from "node:fs/promises";
 import { writeSessionFiles, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
 import {
   GenesisDraftSchema,
   type DomainEvent,
+  type GenesisBlueprint,
   type GenesisDraft,
   type HarnessAdapter,
 } from "@arke-studio/contracts";
 import { GENESIS_ATTACHMENTS_DIR, sandboxAttachments } from "../artifacts/genesis-attachments.js";
+import { blueprintSaysSomething, foldBlueprint, sameBlueprint } from "./blueprint.js";
 import { sessionTokenBudget } from "./token-budget.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { THINKING_LABEL, WRITING_LABEL, workingLabel } from "../world-chat/project.js";
 
 /**
- * Genesis conversations (prototype 12a): a world that does not exist yet is shaped in a
- * sandbox directory by the world-author agent. The protocol is file-based like everything
- * else here — after each reply the agent maintains draft.json, and that file is the
- * "world so far" rail. Nothing lands until Begin-in-this-world walks the draft through the
- * ordinary creation gates; abandoning the conversation costs a directory delete.
+ * Genesis conversations (prototype 12a; SPEC-031 §1.3): a world that does not exist yet is
+ * shaped in a sandbox directory by the world-author agent. The protocol is file-based like
+ * everything else here — after each reply the agent maintains a blueprint: draft.json for
+ * identity, look, bible and threads, and one small file per character, place and faction
+ * under draft/. The fold over that directory is the "world so far" rail. Nothing lands until
+ * Begin-in-this-world walks the blueprint through the ordinary creation gates; abandoning
+ * the conversation costs a directory delete.
  */
 
 export interface GenesisOptions {
@@ -53,33 +56,60 @@ const FALLBACK_TOKEN_BUDGET = 120_000;
 /** The follow-up that asks for the draft alone is short work; it does not get the full clock. */
 const DRAFT_ASK_MS = 5 * 60_000;
 
-/** Asked only when the agent replied without touching draft.json. */
+/** Asked only when the agent replied without touching the blueprint. */
 const DRAFT_REQUEST = `Now write ./draft.json for the world as it stands after that reply, and return its
 contents as your whole message — JSON only, no prose, no code fence. Same shape as before:
 
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
- "characters": [{"name": "...", "line": "one line on who they are"}],
- "locations": [{"name": "...", "line": "one line on the place"}],
+ "look": "how this world should look, in your own words",
  "threads": ["an open question worth pulling later"],
- "bible": "a few paragraphs of prose: the through-line, the shape, what it is about"}
+ "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
+ "keyArt": {"subject": "what the world's one image holds", "moment": "the moment it catches",
+  "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
 Omit anything not settled. If nothing has been settled yet, return {}.`;
 
-/** Sent once, ahead of the first user message — the draft.json contract. */
+/** Sent once, ahead of the first user message — the blueprint contract (SPEC-031 §1.3). */
 const PROTOCOL = `You are shaping a brand-new story world in conversation with its author. Reply briefly and
 concretely — offer names, textures and consequences, ask one good question at a time, and never
 bury the author in lore.
 
-After EVERY reply, write the current state of the draft to ./draft.json (overwrite it) with
-exactly this shape, omitting fields you have not settled yet:
+You keep the plan for this world as small files, so the studio can build the world the moment
+the author says go. After EVERY reply, bring the files up to date with what was actually
+discussed — and touch only the files that reply changed.
+
+./draft.json — the world itself (overwrite it), omitting fields you have not settled yet:
 
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
- "characters": [{"name": "...", "line": "one line on who they are"}],
- "locations": [{"name": "...", "line": "one line on the place"}],
+ "look": "how everything this world renders should look, in your own words — palette, light, medium, mood",
  "threads": ["an open question worth pulling later"],
- "bible": "a few paragraphs of prose: the through-line, the shape, what it is about"}
+ "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
+ "keyArt": {"subject": "what the world's one image holds", "moment": "the moment it catches",
+  "stakes": "what is at stake in it", "characters": ["names of cast members in frame"],
+  "location": "the place in frame, if one"}}
 
-Everything in draft.json is proposed, not settled — keep it small and true to what was
+./draft/characters/<slug>.json — one file per character, and likewise
+./draft/locations/<slug>.json and ./draft/factions/<slug>.json. Pick a short lowercase slug
+when the entity first appears and never rename the file: the filename is the identity, and the
+name inside it can change freely. A character file:
+
+{"name": "...", "line": "one line on who they are",
+ "description": "a short paragraph of who they are in this story",
+ "brief": {"apparentAge": "...", "build": "...", "colouring": "...", "hair": "...",
+  "wardrobe": "...", "bearing": "...", "defaultExpression": "..."}}
+
+A location's brief instead holds {"establishingView": "what one establishing view of it holds",
+"hour": "...", "weather": "...", "season": "..."}. A faction file has no brief. A brief holds
+subject facts only — who or what would be in a picture. Never style, medium, lens or anything
+aimed at an image model; the look covers that once, for everything. If the author takes an
+entity back out of the story, set "withdrawn": true in its file.
+
+Propose "look" yourself once tone and genre have settled — your reading of everything
+discussed, which the author sees and can rewrite. Keep quiet track of what is still blank —
+premise, cast, places, the through-line, the look, and the world's one image — and when the
+conversation has room, raise the most valuable blank as your one question.
+
+Everything in these files is proposed, not settled — keep them small and true to what was
 actually discussed.
 
 "bible" is the exception to keeping it small, and the one field written to be read rather than
@@ -171,8 +201,10 @@ export class GenesisService {
       }
     }
 
-    // What the rail already holds, so we can tell a draft the agent updated from one it ignored.
-    const draftBefore = await this.readDraft(dir);
+    // What the rail already holds, so we can tell a blueprint the agent updated from one it
+    // ignored. The fold covers draft.json and every entity file — a turn that only touched
+    // one character's file still reads as a change.
+    const blueprintBefore = await foldBlueprint(dir);
 
     this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
 
@@ -267,30 +299,26 @@ export class GenesisService {
       if (replyText.trim().length > 0) {
         this.emit({ at: at(), type: "genesis.turn", genesisId, role: "gate", text: replyText.trim() });
       }
-      // The draft the agent wrote, if it wrote one. Asking a model to hold a conversation AND
-      // keep a file up to date gets the conversation and not the file most of the time — so
-      // when the file has not moved, we ask for the draft on its own and write it ourselves.
-      // The file stays the record either way; only who typed it changes.
-      let draft = await this.readDraft(dir);
-      if (draft === null || sameDraft(draft, draftBefore)) {
+      // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
+      // conversation AND keep files up to date gets the conversation and not the files most
+      // of the time — so when nothing moved, we ask for draft.json on its own and write it
+      // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
+      // the entity files fail one at a time rather than taking the world with them.
+      let blueprint = await foldBlueprint(dir);
+      if (sameBlueprint(blueprint, blueprintBefore)) {
         const recovered = await this.askForDraft(sessionId, dir);
-        if (recovered !== null) draft = recovered;
+        if (recovered !== null) blueprint = await foldBlueprint(dir);
       }
-      if (draft !== null && !sameDraft(draft, draftBefore)) {
-        this.emit({ at: at(), type: "genesis.draft", genesisId, draft });
+      if (!sameBlueprint(blueprint, blueprintBefore) && blueprintSaysSomething(blueprint)) {
+        this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
       }
     }
     status(final.state, final.detail);
   }
 
-  /** The draft as it stands on disk. Absent or malformed reads as no draft, never as an error. */
-  private async readDraft(dir: string): Promise<GenesisDraft | null> {
-    try {
-      const parsed = GenesisDraftSchema.safeParse(JSON.parse(await readFile(join(dir, "draft.json"), "utf8")));
-      return parsed.success ? parsed.data : null;
-    } catch {
-      return null;
-    }
+  /** The blueprint as it stands on disk — Begin folds through this, not through the events. */
+  async blueprint(dir: string): Promise<GenesisBlueprint> {
+    return foldBlueprint(dir);
   }
 
   /**
@@ -333,6 +361,8 @@ function saysSomething(draft: GenesisDraft): boolean {
     draft.logline !== undefined ||
     draft.tone !== undefined ||
     draft.genre !== undefined ||
+    draft.look !== undefined ||
+    draft.keyArt !== undefined ||
     draft.characters.length > 0 ||
     draft.locations.length > 0 ||
     draft.threads.length > 0 ||
@@ -341,11 +371,6 @@ function saysSomething(draft: GenesisDraft): boolean {
     // path threw away the one field that took the whole conversation to write.
     draft.bible !== undefined
   );
-}
-
-/** Two drafts are the same when they say the same thing — the rail should not flicker. */
-function sameDraft(a: GenesisDraft | null, b: GenesisDraft | null): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**

@@ -120,6 +120,7 @@ import {
   type SetupComponent,
   type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
+  blueprintCoverage,
   legacyVoiceModel,
   supportsVoiceUse,
 } from "@arke-studio/contracts";
@@ -679,6 +680,10 @@ export function NewWorldScreen() {
   const [step, setStep] = useState<"draft" | "look" | "words">("draft");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [look, setLook] = useState("");
+  // Where the words came from: the conversation's own proposal, or a preset seed. The look
+  // step arrives pre-filled with the agent's words when it proposed some (SPEC-031 R-3) —
+  // the preset grid stays one press away as the override, never the only way in.
+  const [lookSource, setLookSource] = useState<"conversation" | "preset" | null>(null);
   const seededRef = useRef(false);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
@@ -689,7 +694,7 @@ export function NewWorldScreen() {
   const g = useGenesis()[genesisId];
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
-  const draft = g?.draft ?? null;
+  const blueprint = g?.blueprint ?? null;
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
@@ -699,14 +704,16 @@ export function NewWorldScreen() {
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
-  const shownName = name.trim() || draft?.name?.trim() || "";
-  const shownLogline = logline.trim() || draft?.logline?.trim() || "";
-  const shownTone = tone.trim() || draft?.tone?.trim() || "";
-  const shownGenre = genre.trim() || draft?.genre?.trim() || "";
-  const draftCharacters = (draft?.characters ?? []).filter((c) => c.name !== charSeed?.name);
-  const draftLocations = (draft?.locations ?? []).filter((l) => l.name !== locSeed?.name);
-  const railCharacters = [...(charSeed ? [charSeed] : []), ...draftCharacters.map((c) => ({ name: c.name, sentence: c.line }))];
-  const railLocations = [...(locSeed ? [locSeed] : []), ...draftLocations.map((l) => ({ name: l.name, sentence: l.line }))];
+  const shownName = name.trim() || blueprint?.name?.trim() || "";
+  const shownLogline = logline.trim() || blueprint?.logline?.trim() || "";
+  const shownTone = tone.trim() || blueprint?.tone?.trim() || "";
+  const shownGenre = genre.trim() || blueprint?.genre?.trim() || "";
+  const oneLine = (e: { line?: string; description?: string }) => e.line ?? e.description ?? "";
+  const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
+  const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
+  const railCharacters = [...(charSeed ? [charSeed] : []), ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c) }))];
+  const railLocations = [...(locSeed ? [locSeed] : []), ...draftLocations.map((l) => ({ name: l.name, sentence: oneLine(l) }))];
+  const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
@@ -730,16 +737,16 @@ export function NewWorldScreen() {
       // sketch that changes by typing in it.
       for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence, true);
       for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence, true);
-      for (const t of (draft?.threads ?? []).slice(0, 4)) {
+      for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
       genesisDiscard(genesisId);
     }
     navigate(`/w/${worldId}`, { replace: true });
-  }, [submittedName, state?.world, navigate, railCharacters, railLocations, draft, genesisId]);
+  }, [submittedName, state?.world, navigate, railCharacters, railLocations, blueprint, genesisId]);
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
-  const entries = 1 + railCharacters.length + railLocations.length + (draft?.threads.length ?? 0);
+  const entries = 1 + railCharacters.length + railLocations.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
     setSubmittedName(shownName);
@@ -752,7 +759,7 @@ export function NewWorldScreen() {
       // The conversation's own prose, kept as the world's bible. Not shown on this screen and
       // not confirmed separately: pressing Begin is the yes, and the bible is the one file the
       // author can rewrite immediately without asking anyone.
-      ...(draft?.bible && draft.bible.trim().length > 0 ? { bible: draft.bible.trim() } : {}),
+      ...(blueprint?.bible && blueprint.bible.trim().length > 0 ? { bible: blueprint.bible.trim() } : {}),
       // Whatever was handed to the conversation follows it in. Sent always, not only when
       // something is attached: the sandbox is the source of truth for what is waiting, and the
       // screen's idea of it can lag an event behind.
@@ -798,6 +805,7 @@ export function NewWorldScreen() {
                   // The preset seeds the words and is then forgotten. Re-picking the same one
                   // rewrites the draft; that is what picking it again means.
                   setLook(seedFrom(preset));
+                  setLookSource("preset");
                   setStep("words");
                 }}
               />
@@ -822,12 +830,20 @@ export function NewWorldScreen() {
                 <i />
                 <i />
               </div>
-              <h1 className="fy-artstep__h1">The preset writes a first draft.</h1>
+              <h1 className="fy-artstep__h1">
+                {lookSource === "conversation" ? "The conversation proposed this look." : "The preset writes a first draft."}
+              </h1>
               <p className="fy-artstep__lede">
-                These are the words that ride along with every generation. Edit them, or replace
-                them entirely. A preset seeds the text; it never locks it.
+                {lookSource === "conversation"
+                  ? "Drawn from the tone, genre and story you just settled. These words ride along with every generation — edit them, replace them, or pick a preset instead."
+                  : "These are the words that ride along with every generation. Edit them, or replace them entirely. A preset seeds the text; it never locks it."}
               </p>
-              <ArtStyleWords selectedId={presetId} value={look} onChange={setLook} />
+              <ArtStyleWords
+                selectedId={presetId}
+                value={look}
+                onChange={setLook}
+                {...(lookSource === "conversation" ? { provenance: "PROPOSED IN CONVERSATION" } : {})}
+              />
               <div className="fy-artstep__reaches">
                 <div className="fy-prov__eyebrow">WHAT THIS LOOK REACHES</div>
                 <div>The world image · generated later, from the hub</div>
@@ -1038,6 +1054,32 @@ export function NewWorldScreen() {
               {entries} entr{entries === 1 ? "y" : "ies"} · all proposed
             </span>
           </div>
+          {/* Coverage (SPEC-031 R-7): what is covered and what is open, as labels and counts.
+              The world's one image is on the list so a missing key-art brief is visible while
+              it can still be answered, not as a line on the completion notice. */}
+          {coverage && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {(
+                [
+                  { label: "premise", covered: coverage.premise },
+                  { label: `cast ${coverage.cast}`, covered: coverage.cast > 0 },
+                  { label: `places ${coverage.places}`, covered: coverage.places > 0 },
+                  { label: "through-line", covered: coverage.throughLine },
+                  { label: "look", covered: coverage.look },
+                  { label: "key image", covered: coverage.keyArt },
+                ] as const
+              ).map((c) => (
+                <span
+                  key={c.label}
+                  className="fy-pill"
+                  style={c.covered ? undefined : { opacity: 0.55 }}
+                >
+                  {c.label}
+                  {c.covered ? "" : " · open"}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
             <div
               style={{
@@ -1124,7 +1166,7 @@ export function NewWorldScreen() {
               ))}
             </div>
           )}
-          {(draft?.threads.length ?? 0) > 0 && (
+          {(blueprint?.threads.length ?? 0) > 0 && (
             <div className="fy-draftcard" style={{ padding: "12px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 6, height: 6 }} />
@@ -1132,7 +1174,7 @@ export function NewWorldScreen() {
                 <span className="fy-mono">pull one to keep going</span>
               </div>
               <div style={{ font: "400 12px/1.7 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
-                {draft!.threads.slice(0, 4).map((t, i) => (
+                {blueprint!.threads.slice(0, 4).map((t, i) => (
                   <div key={i}>{t}</div>
                 ))}
               </div>
@@ -1140,9 +1182,31 @@ export function NewWorldScreen() {
           )}
           <div style={{ flex: 1, minHeight: 16 }} />
           <div style={{ display: "grid", gap: 8 }}>
-            <Button variant="primary" disabled={!canCreate} onClick={() => setStep("look")}>
+            <Button
+              variant="primary"
+              disabled={!canCreate}
+              onClick={() => {
+                const proposed = blueprint?.look?.trim();
+                if (proposed && look.trim().length === 0) {
+                  // The conversation proposed the look; the step opens on its words, not on
+                  // a grid of presets that never heard the conversation.
+                  setLook(proposed);
+                  setLookSource("conversation");
+                  setPresetId(null);
+                  setStep("words");
+                } else {
+                  setStep("look");
+                }
+              }}
+            >
               {submittedName ? "Creating…" : "Begin in this world"}
             </Button>
+            {/* A bound is stated, never enforced in silence (SPEC-031 R-8). */}
+            {(railCharacters.length > 4 || railLocations.length > 4) && (
+              <div className="fy-mono" style={{ textAlign: "center", color: "var(--warning)" }}>
+                Begin seeds the first 4 of each · the rest stay in the plan
+              </div>
+            )}
             <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
               One more question — how it should look — then the hub. Everything arrives as sketches:
               lock what holds, discard what doesn't.

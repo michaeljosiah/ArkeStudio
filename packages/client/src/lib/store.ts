@@ -33,7 +33,7 @@ import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 function emptyGenesis(): StoreState["genesis"][string] {
   return {
     turns: [],
-    draft: null,
+    blueprint: null,
     status: null,
     working: null,
     runStartedAt: null,
@@ -110,7 +110,8 @@ interface StoreState {
     string,
     {
       turns: Array<{ role: "user" | "gate"; text: string; at: string }>;
-      draft: import("@arke-studio/contracts").GenesisDraft | null;
+      /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
+      blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
       detail?: string;
       /** The turn in flight, one verb at a time — cleared when the turn settles. */
@@ -779,9 +780,9 @@ function handleFrame(json: string): void {
           turns: [...g.turns, { role: event.role, text: event.text, at: event.at }],
         },
       };
-    } else if (event.type === "genesis.draft") {
+    } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, draft: event.draft } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
     } else if (event.type === "genesis.status") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {

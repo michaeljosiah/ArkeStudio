@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, HarnessAdapter, HarnessEvent } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -49,9 +49,19 @@ function draftingAdapter(): HarnessAdapter & { created: string[] } {
             name: "The Undersong",
             logline: "A drowned god still sings beneath the harbour.",
             tone: "quiet dread",
-            characters: [{ name: "Maren Kest", line: "Tide-caller, the last one" }],
+            look: "salt-bleached watercolour, cold light off the water",
             threads: ["Who governs what the water leaves behind?"],
             surplus: "ignored by the tolerant schema",
+          }),
+        );
+        // One entity, one file — the blueprint shape (SPEC-031 R-1).
+        await mkdir(join(cwd, "draft", "characters"), { recursive: true });
+        await writeFile(
+          join(cwd, "draft", "characters", "maren-kest.json"),
+          JSON.stringify({
+            name: "Maren Kest",
+            line: "Tide-caller, the last one",
+            brief: { apparentAge: "around forty", hair: "grey-streaked, salt-stiff" },
           }),
         );
         push({ type: "message.completed", sessionId: input.sessionId, text: "Named it The Undersong — who hears the song first?" });
@@ -216,11 +226,14 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
       turns.map((t) => (t.type === "genesis.turn" ? t.role : "")),
       ["user", "gate"],
     );
-    const draft = events.find((e) => e.type === "genesis.draft");
-    assert.ok(draft && draft.type === "genesis.draft");
-    assert.equal(draft.draft.name, "The Undersong");
-    assert.equal(draft.draft.characters[0]!.name, "Maren Kest");
-    assert.ok(!("surplus" in draft.draft), "unknown keys are stripped, not fatal");
+    const folded = events.find((e) => e.type === "genesis.blueprint");
+    assert.ok(folded && folded.type === "genesis.blueprint");
+    assert.equal(folded.blueprint.name, "The Undersong");
+    assert.equal(folded.blueprint.look, "salt-bleached watercolour, cold light off the water");
+    assert.equal(folded.blueprint.characters[0]!.name, "Maren Kest");
+    assert.equal(folded.blueprint.characters[0]!.slug, "maren-kest", "the filename is the identity");
+    assert.equal(folded.blueprint.characters[0]!.brief?.apparentAge, "around forty");
+    assert.ok(!("surplus" in folded.blueprint), "unknown keys are stripped, not fatal");
 
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"]);
@@ -317,9 +330,14 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
 
     await genesis.run(dir, "gen-talk", "A lighthouse that only appears in fog.");
 
-    const draft = events.find((e) => e.type === "genesis.draft");
-    assert.ok(draft && draft.type === "genesis.draft", "the rail is populated even so");
-    assert.equal(draft.draft.name, "The Pallid Beacon");
+    const folded = events.find((e) => e.type === "genesis.blueprint");
+    assert.ok(folded && folded.type === "genesis.blueprint", "the rail is populated even so");
+    assert.equal(folded.blueprint.name, "The Pallid Beacon");
+    assert.equal(
+      folded.blueprint.locations[0]?.name,
+      "The Pallid Beacon",
+      "a pre-blueprint draft's entity arrays still fold",
+    );
     // The file is still the record — whoever typed it.
     const onDisk = JSON.parse(await readFile(join(dir, "draft.json"), "utf8")) as { name?: string };
     assert.equal(onDisk.name, "The Pallid Beacon");
@@ -377,7 +395,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
 
     await genesis.run(dir, "gen-empty", "Tell me about fog.");
 
-    assert.ok(!events.some((e) => e.type === "genesis.draft"), "nothing settled, nothing emitted");
+    assert.ok(!events.some((e) => e.type === "genesis.blueprint"), "nothing settled, nothing emitted");
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"], "and it is still a completed turn");
   });
