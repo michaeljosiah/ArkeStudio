@@ -10,6 +10,8 @@ import { toExtendedLength } from "../world/paths.js";
  */
 
 export interface FfmpegRunner {
+  /** Host path to the redistributed font every generated slate uses. */
+  slateFont: string;
   /** Run one encode; resolve on success, reject on failure, honour the signal for cancel. */
   run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal): Promise<void>;
 }

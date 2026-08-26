@@ -405,7 +405,7 @@ describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
     assert.equal(entry.durationSec, 6, "the slot is still the authored duration: trim is not a boundary");
 
     // What the encoder is actually told, which is the half that can silently export the wrong shot.
-    const args = buildFfmpegArgs(buildExportPlan(deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!), "review-cut"), "/w", "/out.mp4");
+    const args = buildFfmpegArgs(buildExportPlan(deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!), "review-cut"), "/w", "/out.mp4", "/fonts/Geist-Regular.ttf");
     const ss = args.indexOf("-ss");
     assert.equal(args[ss + 1], "8");
     assert.equal(args[args.indexOf("-to") + 1], "12");
@@ -463,7 +463,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
     assert.ok(slates.length > 0);
     assert.match((slates[0] as { label: string }).label, /SHOT \d+ .*s/);
 
-    const args = buildFfmpegArgs(plan, "/world", "/world/out.mp4");
+    const args = buildFfmpegArgs(plan, "/world", "/world/out.mp4", "/fonts/Geist-Regular.ttf");
     assert.equal(args.filter((a) => a === "-filter_complex").length, 1, "exactly one encode (D11)");
     assert.ok(args.join(" ").includes(`concat=n=${plan.items.length}`));
     assert.ok(args.some((a) => a.includes("drawtext")), "slates carry their labels");
@@ -480,17 +480,19 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
       totalSec: 4,
     };
     const okRunner: FfmpegRunner = {
+      slateFont: "/fonts/Geist-Regular.ttf",
       run: async (args) => {
         await writeFile(args[args.length - 1]!, "rendered");
       },
     };
-    const done = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage), "review.mp4", okRunner, () => {});
+    const done = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage, "/fonts/Geist-Regular.ttf"), "review.mp4", okRunner, () => {});
     const result = await done.done;
     assert.equal(result.status, "done");
     assert.ok(await stat(join(worldDir, "exports", "review.mp4")));
 
     let release: () => void = () => {};
     const slowRunner: FfmpegRunner = {
+      slateFont: "/fonts/Geist-Regular.ttf",
       run: (args, _p, signal) =>
         new Promise((resolvePromise, reject) => {
           void writeFile(args[args.length - 1]!, "partial");
@@ -498,7 +500,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
           signal.addEventListener("abort", () => reject(new Error("aborted")));
         }),
     };
-    const cancelled = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage), "cancelled.mp4", slowRunner, () => {});
+    const cancelled = runExport(worldDir, (stage) => buildFfmpegArgs(plan, worldDir, stage, "/fonts/Geist-Regular.ttf"), "cancelled.mp4", slowRunner, () => {});
     cancelled.cancel();
     const cancelledResult = await cancelled.done;
     release();

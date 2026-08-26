@@ -17,7 +17,7 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | better-sqlite3 (native index binding) | MIT | Attribution here. Compiled per target architecture. |
 | SQLite | Public domain | None. |
 | Electron | MIT | Attribution here; Chromium/Node notices ship inside Electron's own LICENSES file, included in the installer. |
-| Geist / Geist Mono fonts | OFL-1.1 | Font files unmodified; OFL text retained. Not sold separately. |
+| Geist / Geist Mono fonts | OFL-1.1 | Font files unmodified; OFL text retained at `licenses/LICENSE.Geist.txt`. The desktop redistributes Geist Regular v1.7.2 as `resources/fonts/Geist-Regular.ttf` so ffmpeg slates never depend on host font discovery. Not sold separately. |
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
 

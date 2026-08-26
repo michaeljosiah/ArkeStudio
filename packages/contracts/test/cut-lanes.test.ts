@@ -185,17 +185,25 @@ describe("which clips are known to carry sound", () => {
 });
 
 describe("the arguments sound produces", () => {
+  const font = "C:\\Program Files\\Arke Studio\\fonts\\Geist-Regular.ttf";
   const argsFor = (
     overlays: Parameters<typeof buildExportPlan>[2],
     audio: Parameters<typeof buildExportPlan>[3],
-  ) => buildFfmpegArgs(buildExportPlan(cut, "review-cut", overlays, audio), "/w", "/out.mp4");
+  ) => buildFfmpegArgs(buildExportPlan(cut, "review-cut", overlays, audio), "/w", "/out.mp4", font);
   const graphOf = (a: string[]) => a[a.indexOf("-filter_complex") + 1] ?? "";
+
+  it("pins every slate to the redistributed font with Windows filter escaping", () => {
+    const slateCut = { entries: [{ durationSec: 6, label: "SHOT 1", media: null }], totalSec: 6 } as unknown as DerivedCut;
+    const graph = graphOf(buildFfmpegArgs(buildExportPlan(slateCut, "review-cut"), "/w", "/out.mp4", font));
+    assert.match(graph, /drawtext=fontfile='C\\:\/Program Files\/Arke Studio\/fonts\/Geist-Regular\.ttf':text=/);
+    assert.doesNotMatch(graph, /drawtext=text=/, "host font discovery is never the fallback");
+  });
 
   it("emits no audio map at all when nothing placed carries sound", () => {
     const plain = argsFor([], []);
     assert.equal(plain.includes("[aout]"), false);
     assert.equal(plain.includes("-c:a"), false);
-    assert.deepEqual(plain, buildFfmpegArgs(buildExportPlan(cut, "review-cut"), "/w", "/out.mp4"));
+    assert.deepEqual(plain, buildFfmpegArgs(buildExportPlan(cut, "review-cut"), "/w", "/out.mp4", font));
   });
 
   it("delays one sound to where it was placed and conforms it to the film", () => {

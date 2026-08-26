@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
@@ -56,6 +56,7 @@ import {
 import { BackgroundNotificationController } from "./background-notifications.js";
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
+import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -129,6 +130,13 @@ function ffmpegPath(): string | null {
   if (process.env["ARKE_FFMPEG"]) return process.env["ARKE_FFMPEG"];
   const bundled = app.isPackaged ? join(process.resourcesPath, "ffmpeg", "ffmpeg.exe") : null;
   return bundled !== null && existsSync(bundled) ? bundled : null;
+}
+
+/** The unmodified OFL font shipped for ffmpeg slates, beside the desktop assets in dev. */
+function slateFontPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "fonts", "Geist-Regular.ttf")
+    : join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf");
 }
 
 /**
@@ -1011,21 +1019,7 @@ async function initialize(): Promise<{ port: number }> {
     // absence is stated, never silent.
     ...(ffmpegPath() !== null
       ? {
-          ffmpeg: {
-            run: (args: string[], onProgress: (p: number) => void, signal: AbortSignal) =>
-              new Promise<void>((resolvePromise, reject) => {
-                const child = spawn(ffmpegPath()!, args, { windowsHide: true });
-                signal.addEventListener("abort", () => child.kill("SIGKILL"));
-                child.stderr.on("data", (chunk: Buffer) => {
-                  const m = /time=(\d+):(\d+):(\d+)/.exec(chunk.toString());
-                  if (m) onProgress(Math.min(99, Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])));
-                });
-                child.on("error", reject);
-                child.on("exit", (code) =>
-                  code === 0 ? resolvePromise() : reject(new Error(`ffmpeg exited ${code}`)),
-                );
-              }),
-          },
+          ffmpeg: createExportFfmpegRunner(ffmpegPath()!, slateFontPath()),
           // The same binary, a different job (#248): arrival-time motion QC reads frame hashes
           // and writes no media. The bounded runner lives in take-qc.ts so it can be tested
           // without a real ffmpeg on the machine running the tests.

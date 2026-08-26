@@ -33,6 +33,7 @@ const CLIP = {
 };
 
 describe("spine export", () => {
+  const font = "C:\\Program Files\\Arke Studio\\fonts\\Geist-Regular.ttf";
   it("quantises boundaries so error cannot accumulate across a long cut", () => {
     // Sixty contiguous 1.02s segments: rounding each length independently makes a 61.2s song
     // export as 60s, truncated by its own -t.
@@ -62,7 +63,7 @@ describe("spine export", () => {
     const plan = buildSpineExportPlan(cutOf([silent], 4), "review-cut", "a/m.mp3");
     assert.equal(plan.items[0]!.type === "clip" ? plan.items[0]!.audio : "n/a", null);
     // Referencing an absent audio input fails the whole export, not the one shot.
-    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /\[0:a\]/);
+    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font)), /\[0:a\]/);
   });
 
   it("does not let a percent sign in a shot title fail the review cut", () => {
@@ -71,7 +72,9 @@ describe("spine export", () => {
       "review-cut",
       "a/m.mp3",
     );
-    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /drawtext=expansion=none:/);
+    const graph = filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font));
+    assert.match(graph, /drawtext=expansion=none:/);
+    assert.match(graph, /fontfile='C\\:\/Program Files\/Arke Studio\/fonts\/Geist-Regular\.ttf'/);
   });
 
   it("drops a segment too short to be a frame", () => {
@@ -87,7 +90,7 @@ describe("spine export", () => {
 
   it("puts the master under the whole export and ends the encode when the song does", () => {
     const plan = buildSpineExportPlan(cutOf([CLIP], 4), "review-cut", "audio/master.mp3");
-    const args = buildSpineFfmpegArgs(plan, "/w", "/out.mp4");
+    const args = buildSpineFfmpegArgs(plan, "/w", "/out.mp4", font);
     assert.ok(args.includes("/w/audio/master.mp3"));
     const filters = filtersOf(args);
     assert.match(filters, /\[1:a\]anull\[aout\]/);
@@ -97,13 +100,13 @@ describe("spine export", () => {
   it("mutes a clip's own audio by default", () => {
     const plan = buildSpineExportPlan(cutOf([CLIP], 4), "review-cut", "audio/master.mp3");
     assert.equal(plan.items[0]!.type === "clip" ? plan.items[0]!.audio : "n/a", null);
-    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /amix/);
+    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font)), /amix/);
   });
 
   it("rides kept clip audio under the master at its stated gain, without ducking the song", () => {
     const kept = { ...CLIP, startSec: 10, endSec: 14, hasAudio: true, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
     const plan = buildSpineExportPlan(cutOf([{ kind: "black", startSec: 0, endSec: 10, label: "" }, kept], 14), "review-cut", "audio/master.mp3");
-    const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4");
+    const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font);
     const filters = filtersOf(args);
     assert.match(filters, /adelay=10000:all=1,volume=-9dB/);
     // normalize=0 is load-bearing: amix's default divides by input count, which would pull the
@@ -117,7 +120,7 @@ describe("spine export", () => {
     const unprobed = { ...CLIP, clipAudio: { mode: "keep-diegetic" as const, gainDb: -9 } };
     const plan = buildSpineExportPlan(cutOf([unprobed], 4), "review-cut", "a/m.mp3");
     assert.equal(plan.items[0]!.type === "clip" ? plan.items[0]!.audio : "n/a", null);
-    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /amix/);
+    assert.doesNotMatch(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font)), /amix/);
   });
 
   it("conforms each clip's render to its planned length, not to its own source length", () => {
@@ -130,12 +133,12 @@ describe("spine export", () => {
       media: { path: "productions/p/takes/t/clip.mp4", inSec: 0, outSec: 1.02 },
     }));
     const plan = buildSpineExportPlan(cutOf(segs, 3.06), "review-cut", "a/m.mp3");
-    const filters = filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4"));
+    const filters = filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font));
     for (const item of plan.items) {
       assert.match(filters, new RegExp(`tpad=stop_mode=clone:stop_duration=${item.durationSec},trim=duration=${item.durationSec}`));
     }
     // The source read never crosses the window it was given, whatever the conform needs.
-    const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4");
+    const args = buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font);
     assert.deepEqual(args.slice(args.indexOf("-ss"), args.indexOf("-ss") + 4), ["-ss", "0", "-to", "1.02"]);
   });
 
@@ -155,7 +158,7 @@ describe("spine export", () => {
     );
     const clip = plan.items.find((i) => i.type === "clip")!;
     assert.equal(clip.type === "clip" ? clip.audio?.atSec : -1, 0);
-    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /adelay=0:all=1/);
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font)), /adelay=0:all=1/);
   });
 
   it("renders a review cut with its holes and refuses a master with the same holes", () => {
@@ -179,7 +182,7 @@ describe("spine export", () => {
     const plan = buildSpineExportPlan(cut, "review-cut", "artifacts/silent.mp4");
     // The graph always maps the master's audio, which is exactly why the coordinator checks the
     // stream exists before it gets here.
-    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4")), /\[1:a\]anull\[aout\]/);
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font)), /\[1:a\]anull\[aout\]/);
   });
 
   it("refuses a master that would silently drop a shot anchored nowhere", () => {
@@ -198,7 +201,7 @@ describe("spine export", () => {
 
   it("windows a clip's audio exactly like its picture", () => {
     const seg = { ...CLIP, media: { path: "productions/p/takes/t/pass.mp4", inSec: 12, outSec: 16 } };
-    const args = buildSpineFfmpegArgs(buildSpineExportPlan(cutOf([seg], 4), "review-cut", "a/m.mp3"), "/w", "/o.mp4");
+    const args = buildSpineFfmpegArgs(buildSpineExportPlan(cutOf([seg], 4), "review-cut", "a/m.mp3"), "/w", "/o.mp4", font);
     const ss = args.indexOf("-ss");
     assert.deepEqual(args.slice(ss, ss + 6), ["-ss", "12", "-to", "16", "-i", "/w/productions/p/takes/t/pass.mp4"]);
   });

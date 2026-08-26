@@ -64,6 +64,12 @@ for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
 for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);
 }
+for (const [path, reason] of [
+  ["apps/desktop/assets/Geist-Regular.ttf", "the redistributed Geist slate font is absent"],
+  ["licenses/LICENSE.Geist.txt", "the redistributed Geist slate font has no retained OFL text in licenses/"],
+]) {
+  if (!existsSync(join(repoRoot, path))) failures.push(reason);
+}
 
 if (existsSync(buildResources)) {
   for (const entry of readdirSync(buildResources, { withFileTypes: true })) {

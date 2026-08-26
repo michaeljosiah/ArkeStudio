@@ -71,6 +71,11 @@ export default async function verifyPackagedRuntimes(context) {
   if (verifyManifest(ffmpegDir).arch !== arch) {
     throw new Error(`resources/ffmpeg was staged for a different architecture than ${arch}`);
   }
+  for (const fontFile of ["Geist-Regular.ttf", "LICENSE.Geist.txt"]) {
+    if (!existsSync(join(resources, "fonts", fontFile))) {
+      throw new Error(`resources/fonts is missing ${fontFile} — export slates cannot rely on host fonts`);
+    }
+  }
 
   /*
    * The bundled v2 harness (issue 327 §9). Same stance as ffmpeg above: an extraResources
