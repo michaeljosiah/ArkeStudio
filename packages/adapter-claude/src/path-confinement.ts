@@ -94,7 +94,20 @@ export async function confinePath(
   root: string,
   raw: string,
 ): Promise<{ inside: true; resolved: string } | { inside: false; resolved: string }> {
-  const absolute = isAbsolute(raw) ? resolve(raw) : resolve(root, raw);
+  /*
+   * The root is resolved here too, not just at session creation.
+   *
+   * Resolving one side and not the other compares two different spellings of the same place,
+   * and it fails by REFUSING work that was inside all along — silently, and only on machines
+   * whose paths happen to need resolving. Caught by CI: GitHub's Windows runner puts an 8.3
+   * short name (`RUNNER~1`) in its temp path, and every in-directory case failed there while
+   * passing on a developer machine whose paths have no short names in them.
+   *
+   * {@link resolveRoot} at session creation stays, because the canonical root is what the trace
+   * should show. This makes a caller that forgets it wrong about nothing.
+   */
+  const base = await realpathOfNearestExisting(resolve(root));
+  const absolute = isAbsolute(raw) ? resolve(raw) : resolve(base, raw);
   const resolved = await realpathOfNearestExisting(absolute);
-  return isWithin(root, resolved) ? { inside: true, resolved } : { inside: false, resolved };
+  return isWithin(base, resolved) ? { inside: true, resolved } : { inside: false, resolved };
 }

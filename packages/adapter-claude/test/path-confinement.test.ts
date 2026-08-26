@@ -118,6 +118,30 @@ describe("what a permitted tool may be pointed at", () => {
     }
   });
 
+  it("resolves BOTH sides, so a root that itself needs resolving still contains its own files", async () => {
+    // Resolving the target and not the root compares two spellings of the same place and refuses
+    // work that was inside all along. Caught by CI rather than here: GitHub's Windows runner puts
+    // an 8.3 short name (`RUNNER~1`) in its temp path, so every in-directory case failed there
+    // while passing on a machine whose paths need no resolving. A symlinked root is the portable
+    // way to reproduce that asymmetry.
+    const real = await tempDir("arke-claude-real-");
+    const link = `${real}-link`;
+    try {
+      await symlink(real, link, "dir");
+    } catch {
+      return; // Windows without Developer Mode; the rule is unchanged.
+    }
+    try {
+      const decision = await decideTool(readOnly, "Read", {
+        input: { file_path: join(link, "notes.md") },
+        root: link,
+      });
+      assert.deepEqual(decision, { allow: true }, "a file inside the root is inside the root");
+    } finally {
+      await rm(link, { recursive: true, force: true });
+    }
+  });
+
   it("treats the working directory itself as inside — Glob's optional path is the ordinary case", async () => {
     assert.deepEqual(await decide(readOnly, "Glob", { pattern: "**/*.md" }), { allow: true });
     assert.deepEqual(await decide(readOnly, "Glob", { pattern: "**/*.md", path: CWD }), { allow: true });
