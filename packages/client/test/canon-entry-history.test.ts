@@ -22,6 +22,7 @@ function refsFor(worldId: string, source: string, canonRevision = 1): DomainEven
     entryId: "CANON-001",
     citedBy: { sheets: [], entries: [], productions: [] },
     history: [{ ts: "2026-08-26T11:00:00.000Z", entity: "canon/CANON-001", source }],
+    historyTruncated: false,
     canonRevision,
     ripples: [],
   } as DomainEvent;

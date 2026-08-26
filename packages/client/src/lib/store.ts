@@ -101,6 +101,8 @@ export interface CanonRefsState {
    * empty for an entry the moment a bulk write fills the window.
    */
   history: ChangeRecord[];
+  /** Whether older records exist beyond the ones held here, so the panel can say so. */
+  historyTruncated: boolean;
   /** The canon revision this answer describes — how a late one is told from a current one. */
   canonRevision: number;
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
@@ -1159,6 +1161,7 @@ function handleFrame(json: string): void {
           [event.entryId]: {
             citedBy: event.citedBy,
             history: event.history,
+            historyTruncated: event.historyTruncated,
             canonRevision: event.canonRevision,
             ripples: event.ripples,
           },

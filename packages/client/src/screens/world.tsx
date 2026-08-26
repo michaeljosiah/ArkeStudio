@@ -3660,6 +3660,11 @@ export function CanonEntryScreen() {
               </div>
             </div>
           ))}
+          {detail?.historyTruncated === true && (
+            <div className="fy-mono" style={{ padding: "9px 0" }}>
+              older changes not shown
+            </div>
+          )}
         </div>
         {detail && detail.ripples.length > 0 && (
           <div className="fy-draftcard">

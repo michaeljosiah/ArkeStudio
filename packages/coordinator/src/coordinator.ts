@@ -3769,13 +3769,15 @@ export class Coordinator {
         // handled concurrently, so an entry left open across an accept has two of these in flight
         // and the older can emit last (PR 540 review); the revision says which answer is which.
         const canonRevision = store.getBundle().meta.canonRevision;
+        const history = await changesForEntity(store.dir, `canon/${msg.entryId}`);
         this.emit({
           at: new Date().toISOString(),
           type: "canon.refs",
           worldId: msg.worldId,
           entryId: msg.entryId,
           citedBy: { sheets: refs.sheets, entries: refs.entries, productions: refs.productions },
-          history: await changesForEntity(store.dir, `canon/${msg.entryId}`),
+          history: history.records,
+          historyTruncated: history.truncated,
           canonRevision,
           ripples: ripples.map((r) => ({ kind: r.kind, summary: r.summary, targets: r.targets })),
         });

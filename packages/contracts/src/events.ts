@@ -1104,12 +1104,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         })
         .strict(),
       /**
-       * Every change line for this entry, oldest first — read per entity, not sliced off a
-       * global tail (issue 289). `ClientState.changes` is a recent-activity window, so a bulk
-       * write like a migration pushes older records out of it and an entry's History panel
-       * reports nothing while its records sit intact on disk.
+       * This entry's change lines, oldest first — read per entity, not sliced off a global tail
+       * (issue 289). `ClientState.changes` is a recent-activity window, so a bulk write like a
+       * migration pushes older records out of it and an entry's History panel reports nothing
+       * while its records sit intact on disk.
+       *
+       * Bounded, and `historyTruncated` says when the bound bit. An entry with more changes than
+       * one response should carry is a real thing, and a screen showing a window of a history as
+       * though it were the whole of it is the same untruth this issue is about.
        */
       history: z.array(ChangeRecordSchema),
+      /** Whether older records for this entry exist beyond the ones carried here. */
+      historyTruncated: z.boolean(),
       /**
        * The canon revision this answer describes. Answering reads the change log, so two asked
        * of the same entry can be in flight at once and the older can come back last; the reader
