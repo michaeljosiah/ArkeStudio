@@ -8,6 +8,7 @@ import {
   JobSchema,
   REFERENCE_FINALIZATION_TARGETS,
   UlidSchema,
+  keyArtBriefProse,
   imageConstraintSuffix,
   stagedReferenceKey,
   LedgerEntrySchema,
@@ -220,6 +221,7 @@ import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
 import { WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
+import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
   LOOK_PREVIEW_DIR,
   LOOK_PREVIEW_META,
@@ -6853,6 +6855,33 @@ export class Coordinator {
           return;
         }
         const bundle = store.getBundle();
+        // The world's key image draws on the bible and the cast, not the logline and two
+        // adjectives (SPEC-031 R-58) — wherever a founding conversation left a brief. The
+        // same assembly serves the build and this Regenerate alike (R-62): the brief says
+        // which characters appear, their anchors ride as identity references, a named drop
+        // is recorded before dispatch, and the staged style image is never displaced (R-59,
+        // R-60).
+        const brief = await readKeyArtBrief(store.dir);
+        const staged = stagedFor(bundle, stagedReferenceKey("world-image"), model)[0];
+        const assembly =
+          brief !== null
+            ? await assembleKeyArt(store, bundle, brief, model, staged)
+            : {
+                // A world has no reference kit, so without a brief the staged image is the
+                // only reference key art can ever carry — role style, as before.
+                references: staged !== undefined ? [staged] : [],
+                referenceRoles: staged !== undefined ? [{ file: staged, role: "style" }] : [],
+                carried: [],
+                dropped: [],
+                sheets: {},
+              };
+        if (assembly.dropped.length > 0) {
+          void this.appLog?.append({
+            kind: "world-image.references-dropped",
+            worldId: msg.worldId,
+            dropped: assembly.dropped,
+          });
+        }
         // Ask the harness to write the prompt, and carry on without it if it cannot. A writing
         // model turns "a drowned god still sings" into light, material and lens; the plain
         // assembly is a weaker prompt, but it is a prompt, and a picture still gets made.
@@ -6862,6 +6891,9 @@ export class Coordinator {
         // to it is a decision about this picture, and rewriting it would discard that decision.
         const authored = "prompt" in msg ? msg.prompt?.trim() : undefined;
         let prompt: string | null = null;
+        const castInFrame = assembly.carried
+          .filter((reference) => reference.role === "identity")
+          .map((reference) => reference.name);
         if (authored === undefined && this.opts.adapter?.readiness().ready) {
           const director = makeArtDirector(
             this.opts.adapter,
@@ -6874,7 +6906,13 @@ export class Coordinator {
             .filter((c) => c.status !== "open")
             .slice(0, 6)
             .map((c) => c.title);
-          prompt = await director(worldBrief(bundle.meta, canonLines)).catch(() => null);
+          prompt = await director(
+            worldBrief(bundle.meta, canonLines, {
+              ...(bundle.bible.present ? { bible: bundle.bible.text } : {}),
+              ...(brief !== null ? { keyArtBrief: keyArtBriefProse(brief) } : {}),
+              cast: castInFrame,
+            }),
+          ).catch(() => null);
           void this.appLog?.append({
             kind: prompt ? "world-image.prompt-written" : "world-image.prompt-unavailable",
             worldId: msg.worldId,
@@ -6885,18 +6923,27 @@ export class Coordinator {
         // sharing one landing name would be four charges and one file — the defect the character
         // candidates were numbered to fix, and there is no reason for this path to relearn it.
         const count = ("count" in msg ? msg.count : undefined) ?? 1;
-        // A world has no reference kit, so a staged image is the only reference key art can ever
-        // carry — and it goes in only when there is one, because an empty references field is one
-        // more thing a provider has to know to ignore, and OpenAI answers unknown fields with 400.
-        const stagedKeyArt = stagedFor(bundle, stagedReferenceKey("world-image"), model);
+        const extras = {
+          // What this was made from (R-61): the look's version rides in params.artDirection
+          // already; the sheets each carried reference was frozen at ride here.
+          provenance: {
+            canonRevision: bundle.meta.canonRevision,
+            artDirectionVersion: bundle.artDirection.version,
+            sheets: assembly.sheets,
+          },
+          dropped: assembly.dropped,
+        };
         const requests = Array.from({ length: count }, (_, index) =>
-          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }, stagedKeyArt),
+          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }, assembly.referenceRoles, extras),
         );
         // The suffix survives every branch (#244, round 3): composing constraints upstream in
         // worldImageRequest bound only the fallback, so the directed path — the normal one —
         // quietly dropped them until the precedence moved into one place.
         const words = keyArtPrompt({
-          composed: String(requests[0]!.params["prompt"]),
+          composed:
+            brief !== null
+              ? `${keyArtComposition({ meta: bundle.meta, direction: bundle.artDirection, bible: bundle.bible.present ? bundle.bible.text : "", brief, cast: castInFrame })}${imageConstraintSuffix(bundle.artDirection)}`
+              : String(requests[0]!.params["prompt"]),
           description: bundle.artDirection.description,
           suffix: imageConstraintSuffix(bundle.artDirection),
           ...(authored !== undefined ? { authored } : {}),

@@ -18,6 +18,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { FoundingBuildService, type FoundingBuildPorts } from "../../src/world/founding-build.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import { readKit } from "../../src/references/kit.js";
+import { assembleKeyArt, readKeyArtBrief } from "../../src/references/key-art-references.js";
 
 /**
  * The founding build, end to end against a real world on disk (SPEC-031 §4). The queue is
@@ -437,6 +438,77 @@ describe("the founding build (SPEC-031)", () => {
     const maren = bundle.sheets.find((sheet) => sheet.name === "Maren Kest")!;
     const kit = (await readKit(h.provider.openStore()!, maren.id))?.kit;
     assert.ok(kit?.mainPhoto?.file, "the paid work is the anchor, not a stranded pending take");
+  });
+
+  it("key art carries the cast the brief names, in brief order, and drops the surplus by name (rows 18, 21)", async (t) => {
+    // Two reference slots, three named characters and a named place: two anchors ride in the
+    // brief's own order; the rest are dropped and named, never silently truncated (R-60).
+    const twoSlot: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 2 } };
+    const h = await makeHarness(t, {
+      manifest: { manifestVersion: 1, generated: "2026-08-26", models: [twoSlot] },
+    });
+    const sandbox = await makeSandbox(h.root, "gen-keyart");
+    await writeFile(
+      join(sandbox, "draft.json"),
+      JSON.stringify({
+        name: "The Undersong",
+        logline: "A drowned god still sings beneath the harbour.",
+        look: "salt-bleached watercolour",
+        bible: "The sea keeps what the town will not say aloud, and Maren is done keeping it with it.",
+        threads: [],
+        keyArt: {
+          subject: "The cast at the tideline as the bell answers",
+          characters: ["Maren Kest", "Brother Ellum", "The Warden"],
+          location: "The Vigil",
+        },
+      }),
+    );
+    await writeFile(
+      join(sandbox, "draft", "characters", "the-warden.json"),
+      JSON.stringify({ name: "The Warden", line: "Keeps the harbour gate" }),
+    );
+    await h.service.begin("gen-keyart", ulid());
+    await waitFor(() => h.lastState()?.status === "completed");
+
+    const keyArtJob = [...h.queue.jobs.values()].find((job) => job.target.kind === "world-image")!;
+    const references = keyArtJob.params["references"] as string[];
+    const roles = keyArtJob.params["referenceRoles"] as Array<{ file: string; role: string }>;
+    assert.equal(references.length, 2, "the route's slots are respected");
+    assert.match(references[0]!, /^references\/maren-kest\//, "brief order, first");
+    assert.match(references[1]!, /^references\/brother-ellum\//, "brief order, second");
+    assert.ok(roles.every((role) => role.role === "identity"));
+    const dropped = keyArtJob.params["droppedReferences"] as Array<{ name: string; reason: string }>;
+    assert.ok(dropped.some((d) => d.name === "The Warden" && /2 reference images/.test(d.reason)), "the surplus is named");
+    assert.ok(dropped.some((d) => d.name === "The Vigil"), "the place that did not fit is named too");
+    const prompt = String(keyArtJob.params["prompt"]);
+    assert.match(prompt, /the town will not say aloud/, "the prompt draws on the bible (R-58)");
+    assert.match(prompt, /Maren Kest, Brother Ellum/, "and names the cast actually in frame");
+    assert.match(prompt, /The cast at the tideline/, "and the brief's subject");
+    const provenance = keyArtJob.params["provenance"] as { sheets: Record<string, number> };
+    assert.ok(Object.keys(provenance.sheets).length === 2, "each carried reference's frozen version rides (R-61)");
+
+    // Row 21: regeneration outside the build assembles references identically — the same
+    // function reads the same durable brief from the world's own build record.
+    const store = h.provider.openStore()!;
+    const brief = await readKeyArtBrief(store.dir);
+    assert.ok(brief, "the brief survives the conversation in the build record");
+    const again = await assembleKeyArt(store, store.getBundle(), brief, twoSlot);
+    assert.deepEqual(again.references, references, "same assembly, either path (R-62)");
+  });
+
+  it("every anchor failed: key art is still made, from the lore and the look alone (row 20)", async (t) => {
+    const h = await makeHarness(t);
+    await makeSandbox(h.root, "gen-noanchors");
+    h.queue.failWhen = (input) => input.target.kind === "main-photo-candidate";
+    await h.service.begin("gen-noanchors", ulid());
+    await waitFor(() => h.lastState()?.status === "completed");
+
+    const state = h.lastState()!;
+    assert.equal(state.items.find((item) => item.key === "key-art:world")?.state, "landed", "fewer references is a weaker picture, not a refused one");
+    const keyArtJob = [...h.queue.jobs.values()].find((job) => job.target.kind === "world-image")!;
+    assert.equal(keyArtJob.params["references"], undefined, "no anchors, no references field");
+    const dropped = keyArtJob.params["droppedReferences"] as Array<{ name: string; reason: string }>;
+    assert.ok(dropped.some((d) => d.name === "Maren Kest" && /no accepted main photo/.test(d.reason)), "the drop is named before dispatch (row 19)");
   });
 
   it("a kept preview carries in as v1's master look; the build generates none itself (rows 14, 17)", async (t) => {

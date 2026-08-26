@@ -10,7 +10,6 @@ import {
   compileBuildItems,
   foldFoundingBuild,
   imageConstraintSuffix,
-  keyArtBriefProse,
   keyArtBriefSettled,
   locationBriefProse,
   newId,
@@ -50,8 +49,9 @@ import { acceptCharacterSheet, acceptLocationView, readKit } from "../references
 import { acceptMainPhoto } from "../references/main-photo.js";
 import { LOOK_PREVIEW_DIR, LOOK_PREVIEW_META, LOOK_PREVIEW_NAME, masterLookFile } from "../references/master-look.js";
 import { adoptKeyArtCandidate } from "../references/key-art.js";
+import { assembleKeyArt, keyArtComposition } from "../references/key-art-references.js";
 import { pendingReferenceTake, recordReferenceTake, referenceReviewDecision } from "../references/takes.js";
-import { keyArtPrompt, worldImageRequest } from "../references/world-image.js";
+import { KEY_ART_EXTENSIONS, WORLD_IMAGE_STEM, keyArtPrompt, worldImageRequest } from "../references/world-image.js";
 
 /**
  * The founding build (SPEC-031): the blueprint folded, every precondition checked before the
@@ -1087,12 +1087,39 @@ export class FoundingBuildService {
       }
       case "key-art": {
         if (!keyArtBriefSettled(blueprint.keyArt)) throw new Error("the key-art brief was never settled");
-        const request = worldImageRequest(bundle.meta, model, bundle.artDirection);
+        const brief = blueprint.keyArt!;
+        // The same assembly Regenerate uses (R-62): the cast's landed anchors ride as
+        // identity references, a named character whose anchor failed is dropped and named,
+        // and with no anchors at all the picture is still made from the lore and the look.
+        const assembly = await assembleKeyArt(store, bundle, brief, model);
+        if (assembly.dropped.length > 0) {
+          this.ports.log({
+            kind: "build.key-art-references-dropped",
+            worldId: active.record.worldId,
+            dropped: assembly.dropped,
+          });
+        }
+        const cast = assembly.carried
+          .filter((reference) => reference.role === "identity")
+          .map((reference) => reference.name);
+        const request = worldImageRequest(bundle.meta, model, bundle.artDirection, { index: 0, count: 1 }, assembly.referenceRoles, {
+          provenance: {
+            canonRevision: bundle.meta.canonRevision,
+            artDirectionVersion: bundle.artDirection.version,
+            sheets: assembly.sheets,
+          },
+          dropped: assembly.dropped,
+        });
         const words = keyArtPrompt({
-          composed: String(request.params["prompt"]),
+          composed: `${keyArtComposition({
+            meta: bundle.meta,
+            direction: bundle.artDirection,
+            bible: blueprint.bible ?? "",
+            brief,
+            cast,
+          })}${imageConstraintSuffix(bundle.artDirection)}`,
           description: bundle.artDirection.description,
           suffix: imageConstraintSuffix(bundle.artDirection),
-          authored: keyArtBriefProse(blueprint.keyArt!),
         });
         return { ...request, params: { ...request.params, prompt: words } };
       }
@@ -1253,8 +1280,17 @@ export class FoundingBuildService {
       }
       case "key-art": {
         const adopted = await adoptKeyArtCandidate(store);
-        if (!adopted && store.getBundle().keyArt === null) {
-          throw new Error("no key-art candidate landed to adopt");
+        if (!adopted) {
+          // Nothing waiting is a landing only when the art is already on disk from an
+          // earlier pass — checked against the filesystem, never a scan that may lag.
+          const already = (
+            await Promise.all(
+              KEY_ART_EXTENSIONS.map((extension) =>
+                stat(toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${extension}`))).catch(() => null),
+              ),
+            )
+          ).some((info) => info?.isFile() === true);
+          if (!already) throw new Error("no key-art candidate landed to adopt");
         }
         await this.ports.refreshWorldList().catch(() => {});
         return;
