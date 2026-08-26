@@ -251,9 +251,9 @@ export class ClaudeAdapter implements HarnessAdapter {
        * Resolved once, here, rather than per call.
        *
        * Every path argument is judged against this, and judging it against the UNRESOLVED cwd
-       * would be a string test wearing a boundary's clothes — a working directory reached
-       * through a symlink (or, on Windows, an 8.3 short name) would fail to contain its own
-       * files, and every honest call inside it would be refused.
+       * would be a string test wearing a boundary's clothes: a working directory reached through
+       * a symlink would fail to contain its own files, and every honest call inside it would be
+       * refused.
        */
       root: await resolveRoot(input.cwd),
       agentName,

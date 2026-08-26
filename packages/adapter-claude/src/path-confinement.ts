@@ -23,6 +23,13 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
  * - Case is folded on Windows only. The same file is reachable as `C:\Users\…` and `c:\users\…`
  *   there and those are two different files on Linux, so folding everywhere would open on one
  *   platform exactly what it closes on the other.
+ *
+ * KNOWN, and safe in the direction it fails: Node's `realpath` does NOT expand Windows 8.3 short
+ * names — measured, `AR1317~1` comes back as `AR1317~1`. So a short-form path to a file that IS
+ * inside the directory is refused rather than admitted. That is a false refusal, not a hole: a
+ * short name cannot make an outside path resolve to an inside one, and nothing generates these
+ * on its own. Left alone rather than papered over with a `stat`-based identity comparison, which
+ * would only work for files that already exist and would say nothing about `Write`.
  */
 
 /** Case matters on Linux and does not on Windows; the comparison has to follow the platform. */
