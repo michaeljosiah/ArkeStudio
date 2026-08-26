@@ -12,11 +12,10 @@
  * constraints fails in ways that look like our bugs, and this is knowledge the output quality
  * depends on.
  *
- * **Shipped, never fetched** (R-15). Architecture settles this rather than principle: authoring
- * sessions have no network tools (SPEC-005 R-10), so a skill that had to be fetched could not be
- * fetched by the agent that needs it. These documents live in the repository and travel with the
- * application, which is also what keeps first run working on a machine that has never been
- * online.
+ * **Shipped, never fetched** (R-15). Public-web research is off by default and may be enabled in
+ * Settings (SPEC-005 R-10); it is not a reliable delivery path for the guidance authoring depends
+ * on. These documents live in the repository and travel with the application, which keeps first
+ * run working on a machine that has never been online and keeps a vendor CDN out of drafting.
  *
  * **Shapes authoring, never dispatch** (R-17). What a skill influences is a draft, and a draft
  * arrives as a proposal and waits for an accept. It does not reach prompt assembly: the assembled
