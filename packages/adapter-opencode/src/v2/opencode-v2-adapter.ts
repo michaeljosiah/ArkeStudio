@@ -15,6 +15,9 @@ import {
   type SessionRef,
   type SessionConfigInput,
   type SessionFile,
+  type VendorIntegration,
+  type VendorOAuthAttempt,
+  type VendorOAuthAttemptState,
 } from "@arke-studio/contracts";
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
@@ -22,6 +25,14 @@ import { parseSse } from "../sse.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
+import {
+  normalizeAttempt,
+  normalizeAttemptStatus,
+  normalizeIntegration,
+  type WireAttempt,
+  type WireAttemptStatus,
+  type WireIntegration,
+} from "./vendor-auth.js";
 
 /**
  * The live OpenCode v2 adapter (issue 327). Drives the authenticated /api surface of an
@@ -135,7 +146,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         );
         if (health?.healthy === true) {
           this.serverVersion = health.version ?? null;
-          this.caps = new Set<HarnessCapability>(["events", "models", "permissions"]);
+          this.caps = new Set<HarnessCapability>(["events", "models", "permissions", "auth"]);
           this.ready = { ready: true };
           this.trace("init.ready", { version: this.serverVersion, warmupMs: Date.now() - started });
           // Prime the window so the first turn budgets from the real model, not the fallback
@@ -486,6 +497,88 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       });
     }
     return out;
+  }
+
+  // ---- vendor sign-in (SPEC-030) -------------------------------------------
+
+  /**
+   * GET /api/integration, normalised at this boundary. The catalog populates asynchronously
+   * after spawn (~5s measured), so an empty list from a healthy server means "not yet", and
+   * the caller decides how patient to be.
+   */
+  async listIntegrations(): Promise<VendorIntegration[]> {
+    const rows = await this.http.reqData<WireIntegration[]>("GET", "/api/integration", undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    const out: VendorIntegration[] = [];
+    for (const row of rows ?? []) {
+      const normalized = normalizeIntegration(row);
+      if (normalized !== null) out.push(normalized);
+    }
+    return out;
+  }
+
+  /**
+   * POST connect/oauth. The harness owns the exchange from here: it binds the callback port
+   * itself for a browser method and polls the vendor for a device one (measured, D18). The
+   * one thing Arke does with the answer is open the URL and show the instructions verbatim.
+   */
+  async beginVendorOAuth(
+    integrationId: string,
+    methodId: string,
+    answers?: Record<string, string>,
+  ): Promise<VendorOAuthAttempt> {
+    const attempt = await this.http.reqData<WireAttempt>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth`,
+      { methodID: methodId, ...(answers && Object.keys(answers).length > 0 ? { answer: answers } : {}) },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+    return normalizeAttempt(attempt);
+  }
+
+  async pollVendorOAuth(integrationId: string, attemptId: string): Promise<VendorOAuthAttemptState> {
+    const status = await this.http.reqData<WireAttemptStatus>(
+      "GET",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}`,
+      undefined,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+    return normalizeAttemptStatus(status);
+  }
+
+  async cancelVendorOAuth(integrationId: string, attemptId: string): Promise<void> {
+    await this.http.req<void>(
+      "DELETE",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}`,
+      undefined,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+  }
+
+  async completeVendorOAuth(integrationId: string, attemptId: string, code: string): Promise<void> {
+    await this.http.req<void>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}/complete`,
+      { code },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+  }
+
+  /** POST connect/key — one call, 204, and the key is gone from this process (R-1, §2.2). */
+  async connectVendorKey(integrationId: string, key: string, answers?: Record<string, string>): Promise<void> {
+    await this.http.req<void>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/key`,
+      { key, ...(answers && Object.keys(answers).length > 0 ? { answer: answers } : {}) },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+  }
+
+  async removeVendorCredential(credentialId: string): Promise<void> {
+    await this.http.req<void>("DELETE", `/api/credential/${encodeURIComponent(credentialId)}`, undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
   }
 
   // ---- the event pump ------------------------------------------------------

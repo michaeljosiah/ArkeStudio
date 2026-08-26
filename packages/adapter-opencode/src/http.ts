@@ -18,13 +18,14 @@ export class OpenCodeError extends Error {
   }
 }
 
-/** Bounded, human-readable reason from an OpenCode error body. */
+/** Bounded, human-readable reason from an OpenCode error body — v1's `{name, data.message}`
+ * and v2's measured `{_tag, message}` envelope both. */
 export function errorDetailFrom(bodyText: string): string | undefined {
   const text = bodyText.trim();
   if (!text) return undefined;
   try {
-    const parsed = JSON.parse(text) as { name?: string; data?: { message?: string } };
-    const parts = [parsed.name, parsed.data?.message].filter(
+    const parsed = JSON.parse(text) as { name?: string; _tag?: string; message?: string; data?: { message?: string } };
+    const parts = [parsed.name ?? parsed._tag, parsed.data?.message ?? parsed.message].filter(
       (s): s is string => typeof s === "string" && s.length > 0,
     );
     if (parts.length > 0) return parts.join(": ").slice(0, 300);

@@ -13,6 +13,7 @@ import {
   SettingsNotificationsScreen,
   SettingsProvidersScreen,
   SettingsSampleWorldScreen,
+  SettingsSignInScreen,
   SettingsWhoDoesWhatScreen,
   ShellChrome,
   WorldPickerScreen,
@@ -162,6 +163,7 @@ export function App() {
           <Route path="/settings" element={<SettingsLayout />}>
             <Route index element={<Navigate to="providers" replace />} />
             <Route path="providers" element={<SettingsProvidersScreen />} />
+            <Route path="sign-in" element={<SettingsSignInScreen />} />
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />

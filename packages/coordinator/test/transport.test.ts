@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import WebSocket from "ws";
-import { FrameSchema, type ClientState, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, vendorAuthUnavailable, type ClientState, type Frame } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
 
 const STATE: ClientState = {
@@ -16,6 +16,7 @@ const STATE: ClientState = {
     ledger: [],
     providers: [],
     providerTools: [],
+    vendorAuth: vendorAuthUnavailable("not configured"),
     manifest: null,
     routing: { defaults: {}, faults: [] },
     models: { disabled: [] },

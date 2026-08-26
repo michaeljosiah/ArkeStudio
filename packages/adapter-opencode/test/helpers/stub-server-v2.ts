@@ -41,6 +41,19 @@ export class StubOpenCodeV2 {
   echoLocation: string | null = null;
   models: Array<{ id: string; providerID: string; name?: string; limit?: { context?: number; input?: number } }> = [];
   defaultModel: { id: string; providerID: string } | null = null;
+  /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
+  integrations: unknown[] = [];
+  /** Live OAuth attempts by id; each status is what the poll route answers next. */
+  readonly oauthAttempts = new Map<string, { integrationId: string; status: unknown }>();
+  /** What the next connect/oauth answers; tests script it before beginning. */
+  nextAttempt: { attemptID: string; url: string; instructions: string; mode: string; time: { created: number; expires: number } } | null = null;
+  /** A message makes the next connect/oauth answer 400 with it — the stated-refusal path. */
+  failNextOAuthBegin: string | null = null;
+  /** Keys stored via connect/key, by integration id. */
+  readonly storedKeys = new Map<string, unknown>();
+  /** Codes handed back through the complete route, by attempt id. */
+  readonly completedCodes = new Map<string, unknown>();
+  readonly removedCredentials: string[] = [];
 
   private authorized(header: string | undefined): boolean {
     const expected = "Basic " + Buffer.from(`opencode:${STUB_V2_PASSWORD}`).toString("base64");
@@ -220,6 +233,67 @@ export class StubOpenCodeV2 {
             return;
           }
           res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(this.defaultModel, locationDir));
+          return;
+        }
+
+        // ---- vendor sign-in (SPEC-030), shapes as measured on the pinned build ----
+        if (url.pathname === "/api/integration" && req.method === "GET") {
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(this.integrations, locationDir));
+          return;
+        }
+        m = /^\/api\/integration\/([^/]+)\/connect\/oauth$/.exec(url.pathname);
+        if (m && req.method === "POST") {
+          if (this.failNextOAuthBegin !== null) {
+            const message = this.failNextOAuthBegin;
+            this.failNextOAuthBegin = null;
+            res
+              .writeHead(400, { "Content-Type": "application/json" })
+              .end(JSON.stringify({ _tag: "InvalidRequestError", message }));
+            return;
+          }
+          const attempt = this.nextAttempt ?? {
+            attemptID: `con_stub_${++this.turnCounter}`,
+            url: "https://vendor.example/authorize",
+            instructions: "Complete authorization in your browser.",
+            mode: "auto",
+            time: { created: Date.now(), expires: Date.now() + 600_000 },
+          };
+          this.oauthAttempts.set(attempt.attemptID, { integrationId: m[1]!, status: { status: "pending", time: attempt.time } });
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(attempt, locationDir));
+          return;
+        }
+        m = /^\/api\/integration\/([^/]+)\/connect\/oauth\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "GET") {
+          const attempt = this.oauthAttempts.get(m[2]!);
+          // Measured: polling a cancelled attempt answers 500, not 404.
+          if (!attempt) {
+            res.writeHead(500).end();
+            return;
+          }
+          res.writeHead(200, { "Content-Type": "application/json" }).end(envelope(attempt.status, locationDir));
+          return;
+        }
+        if (m && req.method === "DELETE") {
+          this.oauthAttempts.delete(m[2]!);
+          res.writeHead(204).end();
+          return;
+        }
+        m = /^\/api\/integration\/([^/]+)\/connect\/oauth\/([^/]+)\/complete$/.exec(url.pathname);
+        if (m && req.method === "POST") {
+          this.completedCodes.set(m[2]!, (parsed as { code?: unknown } | undefined)?.code);
+          res.writeHead(204).end();
+          return;
+        }
+        m = /^\/api\/integration\/([^/]+)\/connect\/key$/.exec(url.pathname);
+        if (m && req.method === "POST") {
+          this.storedKeys.set(m[1]!, (parsed as { key?: unknown } | undefined)?.key);
+          res.writeHead(204).end();
+          return;
+        }
+        m = /^\/api\/credential\/([^/]+)$/.exec(url.pathname);
+        if (m && req.method === "DELETE") {
+          this.removedCredentials.push(m[1]!);
+          res.writeHead(204).end();
           return;
         }
 
