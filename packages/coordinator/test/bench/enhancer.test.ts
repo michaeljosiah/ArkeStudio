@@ -37,7 +37,9 @@ describe("the enhancer's brief", () => {
     assert.match(brief, /Seedance 2\.0 \(the seedance family\)/);
     assert.match(brief, /at most 3500 characters/);
     assert.match(brief, /the god surfacing at dusk, citing Image 1/);
-    assert.match(brief, /keep any the ask uses, verbatim/);
+    // The citations the ask makes are the one thing a rewrite may not lose (issue 476).
+    assert.match(brief, /keep every one the ask uses, verbatim, at-sign and all/);
+    assert.match(brief, /"@Image 1"/);
     assert.match(brief, /JSON only/);
   });
 

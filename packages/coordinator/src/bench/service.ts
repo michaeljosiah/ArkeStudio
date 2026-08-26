@@ -19,6 +19,7 @@ import {
   pricedDuration,
   routeFor,
   sizeParamsFor,
+  unresolvedBenchMentions,
   validateReferences,
   voiceFormatForModel,
   type ArtifactSidecar,
@@ -536,6 +537,25 @@ export function planBenchDispatch(
       route: routeFor(model, plan.mode),
       framesField: modeSpec(model, plan.mode)?.framesField,
       paths,
+    };
+  }
+
+  // Mentions (issue 476): a brief may cite an attached reference by name — "@Image 1". What it
+  // cites has to still be riding. A stale mention is refused with the name in it rather than
+  // sent on as prose, because the prompt would then tell the model to look at a picture that
+  // never arrived, and the take would be paid for before anyone could see that it had.
+  const lost = unresolvedBenchMentions(composer.brief, [
+    ...references.map((entry) => entry.token),
+    ...keyframes.map((entry) => entry.token),
+  ]);
+  if (lost.length > 0) {
+    const named = lost.map((token) => `@${token}`).join(", ");
+    return {
+      ok: false,
+      reason:
+        lost.length === 1
+          ? `The brief cites ${named}, which is not attached. Attach it again, or take the mention out.`
+          : `The brief cites ${named}, which are not attached. Attach them again, or take the mentions out.`,
     };
   }
 

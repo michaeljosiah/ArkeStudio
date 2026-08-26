@@ -243,6 +243,46 @@ export function benchSourceKey(source: BenchReferenceSource): string {
   }
 }
 
+/**
+ * A mention: the name a brief cites a reference by, written with an at-sign — "@Image 3"
+ * (issue 476).
+ *
+ * The token is the identity; the at-sign is only what tells a citation apart from the author's
+ * own prose, so the completion menu, the chip in the words, and the gate before dispatch all
+ * agree on which characters name a reference. A bare "Image 3" stays prose: briefs written
+ * before mentions existed are not retroactively bound to a reference that may since have gone.
+ */
+export const BENCH_MENTION = /@(?:Image|Video|Audio) [1-9][0-9]*/;
+
+/** The canonical spelling, in one place, so nothing writes a second dialect of it. */
+export function benchMentionFor(token: string): string {
+  return `@${token}`;
+}
+
+/** Every mention a brief makes, in order, each with the span it occupies. */
+export function benchMentionsIn(text: string): Array<{ token: string; start: number; end: number }> {
+  const found: Array<{ token: string; start: number; end: number }> = [];
+  for (const match of text.matchAll(new RegExp(BENCH_MENTION.source, "g"))) {
+    const start = match.index ?? 0;
+    found.push({ token: match[0].slice(1), start, end: start + match[0].length });
+  }
+  return found;
+}
+
+/**
+ * The tokens a brief cites that nothing attached answers for — de-duplicated, first mention
+ * first. The one function the composer warns from and the coordinator refuses from, so a
+ * sentence the screen calls fine is never one dispatch then rejects.
+ */
+export function unresolvedBenchMentions(text: string, attached: Iterable<string>): string[] {
+  const riding = new Set(attached);
+  const lost: string[] = [];
+  for (const { token } of benchMentionsIn(text)) {
+    if (!riding.has(token) && !lost.includes(token)) lost.push(token);
+  }
+  return lost;
+}
+
 // ---------------------------------------------------------------------------
 // The request snapshot — immutable once a take is reserved. Selection and
 // re-run read THIS, never the live composer, which is what makes an older

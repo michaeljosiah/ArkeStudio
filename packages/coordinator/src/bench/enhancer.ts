@@ -32,7 +32,7 @@ export function enhancerBrief(
   const rules = [
     "- Keep the author's subject; translate it into what an image or video model wants - subject, light, lens, material, motion.",
     "- Stay inside the world's look and its established canon; invent nothing the world has not said.",
-    '- Reference tokens like "Image 1" or "Audio 2" are citations the pipeline resolves - keep any the ask uses, verbatim.',
+    '- Mentions like "@Image 1" or "@Audio 2" are citations of pictures and sounds already attached - keep every one the ask uses, verbatim, at-sign and all. Dropping one, or rewriting it into plain words, loses the reference.',
     ...(cap !== undefined ? [`- ${model.displayName} takes at most ${cap} characters of prompt; stay well inside it.`] : []),
     '- Answer with JSON only: {"prompt": "..."} - no prose around it.',
   ];
