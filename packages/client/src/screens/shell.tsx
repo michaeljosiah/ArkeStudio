@@ -708,11 +708,22 @@ export function NewWorldScreen() {
   const shownLogline = logline.trim() || blueprint?.logline?.trim() || "";
   const shownTone = tone.trim() || blueprint?.tone?.trim() || "";
   const shownGenre = genre.trim() || blueprint?.genre?.trim() || "";
-  const oneLine = (e: { line?: string; description?: string }) => e.line ?? e.description ?? "";
+  // Never empty: a sentence of "" fails the frame's schema and the character named in
+  // conversation would silently not exist in the created world (SPEC-031 R-8).
+  const oneLine = (e: { name: string; line?: string; description?: string }) =>
+    e.line ?? e.description ?? e.name;
+  const hasBrief = (e: { brief?: object }) => e.brief !== undefined && Object.keys(e.brief).length > 0;
   const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
   const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
-  const railCharacters = [...(charSeed ? [charSeed] : []), ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c) }))];
-  const railLocations = [...(locSeed ? [locSeed] : []), ...draftLocations.map((l) => ({ name: l.name, sentence: oneLine(l) }))];
+  const railCharacters = [
+    ...(charSeed ? [{ ...charSeed, brief: false }] : []),
+    ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c), brief: hasBrief(c) })),
+  ];
+  const railLocations = [
+    ...(locSeed ? [{ ...locSeed, brief: false }] : []),
+    ...draftLocations.map((l) => ({ name: l.name, sentence: oneLine(l), brief: hasBrief(l) })),
+  ];
+  const railFactions = (blueprint?.factions ?? []).map((f) => ({ name: f.name, sentence: oneLine(f) }));
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || message.trim().length === 0) return;
@@ -737,16 +748,18 @@ export function NewWorldScreen() {
       // sketch that changes by typing in it.
       for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence, true);
       for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence, true);
+      for (const f of railFactions.slice(0, 4)) createSheetFromSentence(worldId, "faction", f.name, f.sentence, true);
       for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
       genesisDiscard(genesisId);
     }
     navigate(`/w/${worldId}`, { replace: true });
-  }, [submittedName, state?.world, navigate, railCharacters, railLocations, blueprint, genesisId]);
+  }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
-  const entries = 1 + railCharacters.length + railLocations.length + (blueprint?.threads.length ?? 0);
+  const entries =
+    1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
     setSubmittedName(shownName);
@@ -1064,6 +1077,8 @@ export function NewWorldScreen() {
                   { label: "premise", covered: coverage.premise },
                   { label: `cast ${coverage.cast}`, covered: coverage.cast > 0 },
                   { label: `places ${coverage.places}`, covered: coverage.places > 0 },
+                  // Not on R-7's list, so present only once one exists — never an open chip.
+                  ...(coverage.factions > 0 ? [{ label: `factions ${coverage.factions}`, covered: true }] : []),
                   { label: "through-line", covered: coverage.throughLine },
                   { label: "look", covered: coverage.look },
                   { label: "key image", covered: coverage.keyArt },
@@ -1142,7 +1157,7 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      sketch · no face yet
+                      {c.brief ? "sketch · brief kept" : "sketch · no face yet"}
                     </span>
                   </div>
                 </div>
@@ -1159,7 +1174,7 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      sketch
+                      {l.brief ? "sketch · brief kept" : "sketch"}
                     </span>
                   </div>
                 </div>
@@ -1202,9 +1217,9 @@ export function NewWorldScreen() {
               {submittedName ? "Creating…" : "Begin in this world"}
             </Button>
             {/* A bound is stated, never enforced in silence (SPEC-031 R-8). */}
-            {(railCharacters.length > 4 || railLocations.length > 4) && (
+            {(railCharacters.length > 4 || railLocations.length > 4 || railFactions.length > 4) && (
               <div className="fy-mono" style={{ textAlign: "center", color: "var(--warning)" }}>
-                Begin seeds the first 4 of each · the rest stay in the plan
+                Begin seeds the first 4 of each · the rest are let go
               </div>
             )}
             <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>

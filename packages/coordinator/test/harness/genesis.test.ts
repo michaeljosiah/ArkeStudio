@@ -386,6 +386,62 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.match(last.detail ?? "", /wall-clock/);
   });
 
+  it("a corrupt draft.json triggers the rescue instead of blanking the rail", async () => {
+    // The failure the rescue exists for, in its new shape: the agent tore draft.json (or
+    // wrote a field past its cap), and the fold would otherwise read it as an empty identity
+    // beside intact entity files — erasing the name the rail already held.
+    const dir = await tempDir("arke-genesis-torn-");
+    await writeFile(join(dir, "draft.json"), "{torn");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    await writeFile(
+      join(dir, "draft", "characters", "maren-kest.json"),
+      JSON.stringify({ name: "Maren Kest", line: "Tide-caller" }),
+    );
+    const events: DomainEvent[] = [];
+    const adapter = talkingAdapter();
+    const genesis = new GenesisService(adapter, (e) => events.push(e), {
+      sessionInput: (input) => input,
+    });
+
+    await genesis.run(dir, "gen-torn", "Keep going.");
+
+    assert.equal(adapter.prompts.length, 2, "the narrow ask ran");
+    const folded = events.find((e) => e.type === "genesis.blueprint");
+    assert.ok(folded && folded.type === "genesis.blueprint");
+    assert.equal(folded.blueprint.name, "The Pallid Beacon", "identity recovered, not blanked");
+    assert.ok(
+      folded.blueprint.characters.some((c) => c.slug === "maren-kest"),
+      "the entity files were never at risk",
+    );
+  });
+
+  it("a withdrawal that empties the plan still reaches the rail (R-2)", async () => {
+    // The one blueprint change that says nothing at all: the only settled entity retracted.
+    // The emit gate must still fire — the rail holding a character the author took out is
+    // exactly what "neither the resumed conversation nor Begin sees it again" forbids.
+    const dir = await tempDir("arke-genesis-withdraw-");
+    await mkdir(join(dir, "draft", "characters"), { recursive: true });
+    const file = join(dir, "draft", "characters", "old-tom.json");
+    await writeFile(file, JSON.stringify({ name: "Old Tom", line: "keeps the ledger" }));
+    const events: DomainEvent[] = [];
+    const base = talkingAdapter("{}");
+    const adapter: HarnessAdapter = {
+      ...base,
+      async dispatchAsync(input) {
+        // The whole turn: mark him withdrawn, write nothing else, reply in words.
+        await writeFile(file, JSON.stringify({ name: "Old Tom", withdrawn: true }));
+        return base.dispatchAsync(input);
+      },
+    };
+    const genesis = new GenesisService(adapter, (e) => events.push(e), {
+      sessionInput: (input) => input,
+    });
+    await genesis.run(dir, "gen-withdraw", "Take Old Tom out.");
+    const folded = events.findLast((e) => e.type === "genesis.blueprint");
+    assert.ok(folded && folded.type === "genesis.blueprint", "the retraction is a change the rail sees");
+    assert.equal(folded.blueprint.characters.length, 0, "and Begin never sees him again");
+  });
+
   it("a turn that settles nothing is not an error, and does not flicker the rail", async () => {
     const dir = await tempDir("arke-genesis-empty-");
     const events: DomainEvent[] = [];

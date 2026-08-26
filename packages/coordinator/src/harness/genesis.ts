@@ -3,7 +3,6 @@ import { basename, join } from "node:path";
 import {
   GenesisDraftSchema,
   type DomainEvent,
-  type GenesisBlueprint,
   type GenesisDraft,
   type HarnessAdapter,
 } from "@arke-studio/contracts";
@@ -58,10 +57,13 @@ const DRAFT_ASK_MS = 5 * 60_000;
 
 /** Asked only when the agent replied without touching the blueprint. */
 const DRAFT_REQUEST = `Now write ./draft.json for the world as it stands after that reply, and return its
-contents as your whole message — JSON only, no prose, no code fence. Same shape as before:
+contents as your whole message — JSON only, no prose, no code fence. Same shape as before,
+plus one-line entries for any cast or places you have not yet written files for:
 
 {"name": "...", "logline": "one sentence", "tone": "two or three words", "genre": "...",
  "look": "how this world should look, in your own words",
+ "characters": [{"name": "...", "line": "one line on who they are"}],
+ "locations": [{"name": "...", "line": "one line on the place"}],
  "threads": ["an open question worth pulling later"],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
  "keyArt": {"subject": "what the world's one image holds", "moment": "the moment it catches",
@@ -301,24 +303,28 @@ export class GenesisService {
       }
       // The blueprint the agent wrote, if it wrote to it. Asking a model to hold a
       // conversation AND keep files up to date gets the conversation and not the files most
-      // of the time — so when nothing moved, we ask for draft.json on its own and write it
+      // of the time — so when nothing moved, OR draft.json itself failed to parse (an
+      // over-cap look, a torn write), we ask for draft.json on its own and write it
       // ourselves. The rescue is deliberately narrow (§2.2): draft.json is small now, and
       // the entity files fail one at a time rather than taking the world with them.
       let blueprint = await foldBlueprint(dir);
-      if (sameBlueprint(blueprint, blueprintBefore)) {
+      if (sameBlueprint(blueprint, blueprintBefore) || blueprint.dropped.includes("draft.json")) {
         const recovered = await this.askForDraft(sessionId, dir);
         if (recovered !== null) blueprint = await foldBlueprint(dir);
       }
-      if (!sameBlueprint(blueprint, blueprintBefore) && blueprintSaysSomething(blueprint)) {
+      // Emitted when it changed and either side says something — a withdrawal that empties
+      // the plan is still a change the rail must see (R-2). A draft.json that is still
+      // unreadable is not emitted: blanking the identity the rail already holds would trade
+      // a stale name for no name.
+      if (
+        !sameBlueprint(blueprint, blueprintBefore) &&
+        !blueprint.dropped.includes("draft.json") &&
+        (blueprintSaysSomething(blueprint) || (blueprintBefore !== null && blueprintSaysSomething(blueprintBefore)))
+      ) {
         this.emit({ at: at(), type: "genesis.blueprint", genesisId, blueprint });
       }
     }
     status(final.state, final.detail);
-  }
-
-  /** The blueprint as it stands on disk — Begin folds through this, not through the events. */
-  async blueprint(dir: string): Promise<GenesisBlueprint> {
-    return foldBlueprint(dir);
   }
 
   /**
