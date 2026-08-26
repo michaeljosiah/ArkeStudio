@@ -7,6 +7,7 @@ import {
   DomainEventSchema,
   JobSchema,
   REFERENCE_FINALIZATION_TARGETS,
+  UlidSchema,
   imageConstraintSuffix,
   stagedReferenceKey,
   LedgerEntrySchema,
@@ -220,13 +221,18 @@ import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
 import { WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
 import {
+  LOOK_PREVIEW_DIR,
+  LOOK_PREVIEW_META,
+  LOOK_PREVIEW_NAME,
   MASTER_LOOK_DIR,
   MASTER_LOOK_DIR_ACCEPTED,
+  lookPreviewRequest,
   masterLookFile,
   masterLookRequest,
   stagedFor,
   stagedReferenceDir,
 } from "./references/master-look.js";
+import { foldBlueprint } from "./harness/blueprint.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -1118,6 +1124,14 @@ export class Coordinator {
             },
             landInWorld: async (worldId, fn) => {
               try {
+                // A conversation-scoped job (SPEC-031 R-55) lands in its sandbox: there is
+                // no world, no lock and no watcher — the directory is the whole destination.
+                if (!UlidSchema.safeParse(worldId).success) {
+                  const sandbox = await this.opts.provider.genesisDir?.(worldId);
+                  if (!sandbox) return false;
+                  await fn(sandbox);
+                  return true;
+                }
                 if (this.opts.provider.withWorldStore) {
                   await this.opts.provider.withWorldStore(worldId, (store) =>
                     store.ownedWrite(() => fn(store.dir)),
@@ -1265,6 +1279,13 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
+        // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
+        // sandboxes and worlds are different roots and must never shadow each other.
+        const genesis = /^\/genesis-media\/([^/]+)\/(.+)$/.exec(urlPath);
+        if (genesis && this.opts.provider.serveGenesisMedia) {
+          return this.opts.provider.serveGenesisMedia(genesis[1]!, genesis[2]!);
+        }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
         if (!match || !this.opts.provider.serveMedia) return null;
         return this.opts.provider.serveMedia(match[1]!, match[2]!);
@@ -1322,6 +1343,11 @@ export class Coordinator {
             openStore: () => this.opts.provider.openStore?.() ?? null,
             gate: () => this.opts.provider.gate?.() ?? null,
             carryAttachments: (genesisId, worldId) => this.carryGenesisAttachments(genesisId, worldId),
+            adoptScopedJobs: async (genesisId, worldId) => {
+              for (const job of this.jobQueue?.listJobs() ?? []) {
+                if (job.worldId === genesisId) await this.jobQueue?.adoptWorld(job.id, worldId);
+              }
+            },
             authorSheet: async (store, gate, input) => {
               if (!this.authoring || this.opts.adapter?.readiness().ready !== true) return;
               const worldQueryUrl = await this.worldQuery.start();
@@ -3319,6 +3345,44 @@ export class Coordinator {
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
         await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
+        return;
+      }
+      case "generate-look-preview": {
+        // One picture of the look, before any world exists (SPEC-031 R-50). A person pressed
+        // this — the agent can only propose (R-51) — and the spend is conversation-scoped (R-55).
+        const genesisDir = this.opts.provider.genesisDir;
+        if (!genesisDir || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Look previews are unavailable.");
+          return;
+        }
+        const sandbox = await genesisDir(msg.genesisId);
+        const blueprint = await foldBlueprint(sandbox);
+        if (blueprint.look === undefined) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The conversation has not settled a look yet.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "No image model is available. Check provider settings.");
+          return;
+        }
+        const request = lookPreviewRequest(msg.genesisId, blueprint.look, model);
+        // The exact look text is durable BEFORE the job exists (R-53): without it, Begin
+        // could not tell a preview of the founded look from a preview of rejected words —
+        // and it would have to either install rejected art or discard valid art (R-54).
+        // A stale image from an earlier preview goes with it, so metadata and picture can
+        // never disagree about which generation they describe.
+        await rm(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_NAME)), { force: true }).catch(
+          () => {},
+        );
+        await atomicWriteFile(
+          join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META),
+          JSON.stringify({ look: blueprint.look, requestId: msg.requestId, at: new Date().toISOString() }) + "\n",
+        );
+        await this.enqueueBatch(msg.requestId, msg.kind, [request]);
         return;
       }
       case "plan-founding-build": {

@@ -14,6 +14,7 @@ import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
 import { shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
+import { genesisMediaUrl } from "../lib/media.js";
 import {
   cancelExport as cancelExportMsg,
   cancelJob,
@@ -26,6 +27,7 @@ import {
   attachHostText,
   archiveWorld,
   beginFoundingBuild,
+  generateLookPreview,
   planFoundingBuild,
   runBuildItem,
   useBuildPlans,
@@ -127,7 +129,9 @@ import {
   DEFAULT_NARRATOR,
   blueprintCoverage,
   buildWorkingLine,
+  estimateImageMicroUsd,
   legacyVoiceModel,
+  modelForCapability,
   supportsVoiceUse,
   ulid,
 } from "@arke-studio/contracts";
@@ -861,6 +865,29 @@ export function NewWorldScreen() {
   const buildMode = blueprint?.name !== undefined;
   const buildPlan = useBuildPlans()[genesisId];
   const myBuild = state?.app.builds.find((build) => build.genesisId === genesisId) ?? null;
+  // The look preview (SPEC-031 §1.10): conversation-scoped jobs fold like any other, so the
+  // rail reads the queue rather than keeping a private channel.
+  const previewJob =
+    (state?.app.jobs ?? [])
+      .filter((job) => job.worldId === genesisId && job.target.kind === "look-preview")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  const previewFile = previewJob?.status === "succeeded" ? previewJob.landedFiles?.[0] : undefined;
+  const previewStale =
+    previewJob !== null &&
+    typeof previewJob.params["lookText"] === "string" &&
+    previewJob.params["lookText"] !== blueprint?.look;
+  const previewRunning =
+    previewJob !== null &&
+    (previewJob.status === "queued" || previewJob.status === "submitting" || previewJob.status === "running");
+  // The estimate is on the control (R-51): a conversation that could spend by talking would
+  // be a way to spend somebody's money by talking.
+  const previewEstimate = (() => {
+    const manifest = state?.app.manifest;
+    if (!manifest) return null;
+    const routed = modelForCapability(manifest, state?.app.routing.defaults, "image");
+    if (!routed || state?.app.models.disabled.includes(routed.id)) return null;
+    return estimateImageMicroUsd(routed, { landscape: true });
+  })();
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
@@ -1353,6 +1380,55 @@ export function NewWorldScreen() {
                   <div key={i}>{t}</div>
                 ))}
               </div>
+            </div>
+          )}
+          {/* The look, previewable while the conversation is still a conversation (SPEC-031
+              §1.10): the agent proposed the words; the press and the spend are the author's. */}
+          {blueprint?.look !== undefined && (
+            <div className="fy-draftcard" style={{ padding: "12px 14px" }}>
+              <div className="fy-mono" style={{ fontSize: 10 }}>
+                THE LOOK
+              </div>
+              <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
+                {blueprint.look}
+              </div>
+              {previewFile !== undefined && (
+                <>
+                  <img
+                    src={genesisMediaUrl(genesisId, previewFile)}
+                    alt="The look, previewed"
+                    style={{ width: "100%", borderRadius: 8, marginTop: 9, display: "block" }}
+                  />
+                  <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
+                    {previewStale
+                      ? "the look changed since this was made · it will not carry"
+                      : "carries in as the master look at Begin"}
+                  </div>
+                </>
+              )}
+              {previewRunning && <Loading inline label="making the look" />}
+              {previewJob?.status === "failed" && (
+                <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
+                  the preview failed{previewJob.error ? ` — ${previewJob.error}` : ""}
+                </div>
+              )}
+              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewStale) && (
+                <div style={{ marginTop: 9 }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={previewEstimate === null}
+                    onClick={() => generateLookPreview(genesisId)}
+                  >
+                    See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
+                  </Button>
+                  {previewEstimate === null && (
+                    <span className="fy-mono" style={{ fontSize: 9.5, marginLeft: 8 }}>
+                      needs an image provider
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
           <div style={{ flex: 1, minHeight: 16 }} />

@@ -47,6 +47,8 @@ export interface WorldProvider {
    * traversal-guarded, media extensions only. Null when the file is not servable.
    */
   serveMedia?(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null>;
+  /** The same, from a genesis sandbox — the look preview exists before any world (SPEC-031 R-50). */
+  serveGenesisMedia?(genesisId: string, relPath: string): Promise<{ path: string; contentType: string } | null>;
   /**
    * Where a world lives on disk, without opening it. The founding build's recovery reads
    * `build/build.json` from here at startup (SPEC-031 R-32) — a fold over files, never a

@@ -1,6 +1,7 @@
-import { mkdir, open, readFile } from "node:fs/promises";
+import { copyFile, mkdir, open, readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ART_DIRECTION_PATH,
   BuildJournalEntrySchema,
   BuildReviewSchema,
   buildItemDispatches,
@@ -34,7 +35,7 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
-import { toExtendedLength } from "./paths.js";
+import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { openThread } from "../canon/authoring.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
@@ -47,6 +48,7 @@ import {
 } from "../references/generate.js";
 import { acceptCharacterSheet, acceptLocationView, readKit } from "../references/kit.js";
 import { acceptMainPhoto } from "../references/main-photo.js";
+import { LOOK_PREVIEW_DIR, LOOK_PREVIEW_META, LOOK_PREVIEW_NAME, masterLookFile } from "../references/master-look.js";
 import { adoptKeyArtCandidate } from "../references/key-art.js";
 import { pendingReferenceTake, recordReferenceTake, referenceReviewDecision } from "../references/takes.js";
 import { keyArtPrompt, worldImageRequest } from "../references/world-image.js";
@@ -90,6 +92,8 @@ export interface FoundingBuildPorts {
   openStore(): WorldStore | null;
   gate(): ProposalManager | null;
   carryAttachments(genesisId: string, worldId: string): Promise<void>;
+  /** Re-associate the conversation's jobs with the world it became (SPEC-031 R-55). */
+  adoptScopedJobs(genesisId: string, worldId: string): Promise<void>;
   /** Author a staged sheet with the harness when it is ready; resolves when the draft landed. */
   authorSheet(
     store: WorldStore,
@@ -706,6 +710,47 @@ export class FoundingBuildService {
     // The world files were written by the press itself (they hold this record); what is left
     // is what the conversation was handed. Filing dedups by hash, so a crashed pass re-runs.
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
+    await this.carryLookPreview(active);
+    // The conversation's own spend follows it into the world (SPEC-031 R-55): the preview's
+    // job re-associates; its ledger entry keeps the scope the money was spent under, joinable
+    // through this record's genesisId.
+    await this.ports.adoptScopedJobs(active.record.genesisId, active.record.worldId).catch(() => {});
+  }
+
+  /**
+   * A kept preview is not made twice (SPEC-031 R-54, D9, D11): the carried image becomes art
+   * direction v1's master look — but ONLY when the look text it was generated from is the
+   * look the world was founded on. A preview of rejected words is not carried: a wrong master
+   * look is worse than none, because nothing downstream ever asks again.
+   */
+  private async carryLookPreview(active: ActiveBuild): Promise<void> {
+    const store = this.ports.openStore();
+    if (!store || store.worldId !== active.record.worldId) return;
+    const foundedLook = active.record.blueprint.look;
+    if (foundedLook === undefined) return;
+    const sandbox = await this.ports.genesisDir(active.record.genesisId).catch(() => null);
+    if (sandbox === null) return;
+    let generatedFrom: string | undefined;
+    try {
+      const raw = await readFile(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META)), "utf8");
+      generatedFrom = (JSON.parse(raw) as { look?: string }).look;
+    } catch {
+      return; // no preview was ever made — SPEC-017 R-2 treats a look with no image as ordinary
+    }
+    if (generatedFrom === undefined || generatedFrom !== foundedLook) return;
+    const image = join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_NAME);
+    if ((await stat(toExtendedLength(image)).catch(() => null))?.isFile() !== true) return;
+    const destination = masterLookFile(active.record.artDirectionVersion, ".png");
+    await store.gateOp(async () => {
+      await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
+      // Still v1, written before anything has read it: the record the world was founded
+      // with simply gains the picture the author already approved in conversation.
+      const recordPath = join(store.dir, fromPortable(ART_DIRECTION_PATH));
+      const parsed = JSON.parse(await readFile(toExtendedLength(recordPath), "utf8")) as Record<string, unknown>;
+      parsed["masterLook"] = destination;
+      await atomicWriteFile(recordPath, JSON.stringify(parsed, null, 2) + "\n");
+    });
+    await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
   }
 
   /** Returns a detail worth journalling — a sheet that stands on its seed because the agent failed. */

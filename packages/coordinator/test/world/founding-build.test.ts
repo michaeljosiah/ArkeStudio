@@ -178,6 +178,7 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
     openStore: () => provider.openStore(),
     gate: () => provider.gate(),
     carryAttachments: async () => {},
+    adoptScopedJobs: async () => {},
     authorSheet: async () => {},
     enqueue: (input) => queue.enqueue(input),
     jobById: (jobId) => queue.jobs.get(jobId),
@@ -436,6 +437,52 @@ describe("the founding build (SPEC-031)", () => {
     const maren = bundle.sheets.find((sheet) => sheet.name === "Maren Kest")!;
     const kit = (await readKit(h.provider.openStore()!, maren.id))?.kit;
     assert.ok(kit?.mainPhoto?.file, "the paid work is the anchor, not a stranded pending take");
+  });
+
+  it("a kept preview carries in as v1's master look; the build generates none itself (rows 14, 17)", async (t) => {
+    const h = await makeHarness(t);
+    const sandbox = await makeSandbox(h.root, "gen-preview");
+    await mkdir(join(sandbox, "previews"), { recursive: true });
+    await writeFile(join(sandbox, "previews", "look-preview.png"), PNG);
+    await writeFile(
+      join(sandbox, "previews", "look-preview.json"),
+      JSON.stringify({ look: "salt-bleached watercolour, cold light off the water" }) + "\n",
+    );
+    await h.service.begin("gen-preview", ulid());
+    await waitFor(() => h.lastState()?.status === "completed");
+
+    const store = h.provider.openStore()!;
+    const record = JSON.parse(await readFile(join(store.dir, "art-direction", "art-direction.json"), "utf8")) as {
+      version: number;
+      masterLook?: string;
+    };
+    assert.equal(record.version, 1, "still v1 — the record gains the picture, not a version");
+    assert.equal(record.masterLook, "art-direction/look-v1.png");
+    assert.ok(await readFile(join(store.dir, "art-direction", "look-v1.png")).catch(() => null));
+    assert.ok(
+      ![...h.queue.jobs.values()].some((job) => job.target.kind === "master-look"),
+      "an author who liked what they saw is not asked to pay for it twice (row 17)",
+    );
+  });
+
+  it("a preview that outlived its look is not carried — founded with none, never the wrong one (row 13)", async (t) => {
+    const h = await makeHarness(t);
+    const sandbox = await makeSandbox(h.root, "gen-stale-look");
+    await mkdir(join(sandbox, "previews"), { recursive: true });
+    await writeFile(join(sandbox, "previews", "look-preview.png"), PNG);
+    await writeFile(
+      join(sandbox, "previews", "look-preview.json"),
+      JSON.stringify({ look: "neon brutalism, hard flash, wet asphalt" }) + "\n",
+    );
+    await h.service.begin("gen-stale-look", ulid());
+    await waitFor(() => h.lastState()?.status === "completed");
+
+    const store = h.provider.openStore()!;
+    const record = JSON.parse(await readFile(join(store.dir, "art-direction", "art-direction.json"), "utf8")) as {
+      masterLook?: string;
+    };
+    assert.equal(record.masterLook, undefined, "a picture of rejected words is worse than none");
+    assert.equal(await readFile(join(store.dir, "art-direction", "look-v1.png")).catch(() => null), null);
   });
 
   it("stop keeps what landed, cancels what is in flight, and skips the rest (rows 7, 26)", async (t) => {

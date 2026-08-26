@@ -618,6 +618,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
   z.object({ kind: z.literal("stop-founding-build"), worldId: UlidSchema }).strict(),
   /**
+   * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
+   * The agent proposes; a person presses — the estimate is on the control, and the prompt is
+   * the look's own words unrewritten (R-52). Lands in the sandbox; carries in at Begin only
+   * if the look it was made from is the look the world is founded on (R-53, R-54).
+   */
+  z
+    .object({ kind: z.literal("generate-look-preview"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .strict(),
+  /**
    * Run one build item — or, with no key, everything runnable that has not landed, which is
    * how a text-only build's images run later "in one press" (SPEC-031 R-11, R-48, R-49). A
    * retry and a first run are the same operation with the same landing: settled, anchored,

@@ -52,6 +52,7 @@ const NOUN: Record<string, [one: string, many: string]> = {
   "bench-take": ["take", "takes"],
   "world-image": ["world image", "world images"],
   "master-look": ["master look", "master looks"],
+  "look-preview": ["look preview", "look previews"],
 };
 
 /** A commanded batch that never reaches a job — the enqueue was refused before one existed. */

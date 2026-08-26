@@ -322,6 +322,17 @@ export class JobQueue {
     return lane;
   }
 
+  /**
+   * Re-associate a conversation-scoped job with the world its conversation became
+   * (SPEC-031 R-55): one appended row folding latest-wins, like every other transition.
+   * The ledger entry is untouched — it keeps the scope the money was actually spent under.
+   */
+  async adoptWorld(jobId: string, worldId: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.worldId === worldId) return;
+    await this.transition({ ...job, worldId, updatedAt: this.clock() });
+  }
+
   /** Durable transition: journal first, then memory, then the event (D1). */
   private async transition(job: Job): Promise<boolean> {
     if (this.disposed) return false;

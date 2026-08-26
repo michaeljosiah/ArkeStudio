@@ -517,6 +517,28 @@ export class FsWorldProvider implements WorldProvider {
     return { path: toExtendedLength(abs), contentType };
   }
 
+  /**
+   * Read-only media from a genesis sandbox — the look preview, before any world exists
+   * (SPEC-031 R-50). Same guarding as `serveMedia`, different root: sandboxes live under
+   * `.genesis/`, deliberately outside the worlds directory.
+   */
+  async serveGenesisMedia(genesisId: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
+    if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return null;
+    const portable = relPath.replace(/\\/g, "/");
+    if (portable.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) return null;
+    const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
+    const contentType = FsWorldProvider.MEDIA_TYPES[ext];
+    if (contentType === undefined) return null;
+    const abs = join(this.appRoot, ".genesis", genesisId, fromPortable(portable));
+    try {
+      const info = await stat(toExtendedLength(abs));
+      if (!info.isFile()) return null;
+    } catch {
+      return null;
+    }
+    return { path: toExtendedLength(abs), contentType };
+  }
+
   async reconcileExternalEdit(worldId: string, path: string): Promise<WorldBundle> {
     if (!this.store || this.store.worldId !== worldId) await this.loadWorld(worldId);
     await this.store!.reconcileExternalEdit(path);

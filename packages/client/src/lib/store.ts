@@ -1597,6 +1597,11 @@ export function dismissBuildNotice(worldId: string): void {
   send({ kind: "dismiss-build-notice", worldId });
 }
 
+/** One picture of the look, from inside the conversation (SPEC-031 R-50) — a person pressed. */
+export function generateLookPreview(genesisId: string): void {
+  send({ kind: "generate-look-preview", genesisId, requestId: ulid() });
+}
+
 export function useBuildPlans(): StoreState["buildPlans"] {
   return useStore().buildPlans;
 }
