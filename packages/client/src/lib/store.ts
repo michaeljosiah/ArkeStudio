@@ -1613,8 +1613,10 @@ export function genesisDiscard(genesisId: string): void {
 
 // ---- The founding build (SPEC-031) ----------------------------------------
 
-export function planFoundingBuild(genesisId: string, requestId: string): void {
-  send({ kind: "plan-founding-build", genesisId, requestId });
+export function planFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+  // The same look the press will send: the review's master-look note is only true if it asks
+  // the carry question against the words the world would actually be founded on (SPEC-031 R-54).
+  send({ kind: "plan-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
 }
 
 export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {

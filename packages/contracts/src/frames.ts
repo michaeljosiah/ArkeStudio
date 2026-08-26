@@ -593,7 +593,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * precondition, compile the plan. Answered by a `build.plan` event; nothing is created.
    */
   z
-    .object({ kind: z.literal("plan-founding-build"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .object({
+      kind: z.literal("plan-founding-build"),
+      genesisId: GenesisIdSchema,
+      requestId: UlidSchema,
+      /**
+       * The look as the author left the words step, read the same way the press reads it.
+       * The review asks R-54's carry question against the words the world would actually be
+       * founded on, so a preview the author then rewrote is named as lost, not as carried.
+       */
+      look: z.string().trim().max(2000).optional(),
+    })
     .strict(),
   /**
    * The press (SPEC-031 R-13, R-16): one aggregate authorization covering every acceptance
