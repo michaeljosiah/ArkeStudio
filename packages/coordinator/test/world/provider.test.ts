@@ -181,6 +181,46 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     await provider.close();
   });
 
+  /*
+   * The one resolver behind both reading a picture and saving one (issue 478).
+   *
+   * The desktop host answers a save by asking this the same question the HTTP side asks, so a
+   * path the renderer could not fetch is a path it cannot write out either. What that turns on
+   * is that this refuses rather than clamps: a traversal, a slug that is not a slug, and a file
+   * type nobody displays all come back as nothing at all.
+   */
+  it("refuses anything that is not a media file inside the named world", async () => {
+    const { root } = await makeTempRoot();
+    await writeFile(join(root, "settings.json"), "{}");
+    const mediaDir = join(root, "worlds", "the-undersong", "artifacts");
+    await mkdir(mediaDir, { recursive: true });
+    await writeFile(join(mediaDir, "key-art.png"), "png");
+    await writeFile(join(mediaDir, "notes.txt"), "not media");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+
+    assert.ok(await provider.serveMedia("the-undersong", "artifacts/key-art.png"), "the picture itself resolves");
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "artifacts/key-art.png"))?.contentType,
+      "image/png",
+    );
+    for (const refused of [
+      "../settings.json",
+      "artifacts/../../settings.json",
+      "artifacts\\..\\..\\settings.json",
+      "./artifacts/key-art.png",
+      "artifacts//key-art.png",
+      "artifacts/notes.txt",
+      "artifacts",
+      "artifacts/missing.png",
+    ]) {
+      assert.equal(await provider.serveMedia("the-undersong", refused), null, `served ${refused}`);
+    }
+    for (const slug of ["../worlds/the-undersong", "The-Undersong", "", "the undersong"]) {
+      assert.equal(await provider.serveMedia(slug, "artifacts/key-art.png"), null, `served world ${slug}`);
+    }
+    await provider.close();
+  });
+
   it("reads and writes the deepest path the layout allows via extended-length prefixes (R-10)", async () => {
     // Build a path beyond the classic 260-char limit and prove our own I/O handles it.
     const base = await tempDir("arke-deep-");

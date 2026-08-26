@@ -76,6 +76,7 @@ import {
   X,
 } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
+import { ImageDownload } from "../components/image-actions.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { posterNameFor } from "../lib/poster.js";
@@ -1582,7 +1583,7 @@ function BenchWorkspace({
           )}
 
           {selected && selected.media ? (
-            <div className="fy-bench__media">
+            <div className="fy-bench__media fy-imghost">
               {selected.request.mode === "voice" || selected.request.mode === "music" ? (
                 // A take that is a sound has nothing to look at. Read as "video or else a
                 // picture", this rendered a broken image (design 70) — and a song reaching that
@@ -1639,14 +1640,24 @@ function BenchWorkspace({
                   />
                 ) : null
               ) : worldSlug ? (
-                <img
-                  src={mediaUrl(
-                    worldSlug,
-                    `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
-                  )}
-                  alt={`Take ${selected.n}`}
-                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
-                />
+                <>
+                  <img
+                    src={mediaUrl(
+                      worldSlug,
+                      `.sessions/${session.id}/media/${selected.id}/${selected.media.file}`,
+                    )}
+                    alt={`Take ${selected.n}`}
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                  {/* A take has no name but its number, and that is the name it saves under
+                      (issue 478). Keeping a copy is not keeping the take: nothing here files it,
+                      discards it, or touches its disposition. */}
+                  <ImageDownload
+                    worldSlug={worldSlug}
+                    path={`.sessions/${session.id}/media/${selected.id}/${selected.media.file}`}
+                    name={`Take ${selected.n}`}
+                  />
+                </>
               ) : null}
               <div className="fy-bench__overlaychips">
                 <span className="fy-bench__overlaychip fy-bench__overlaychip--name">{`TAKE ${selected.n}`}</span>

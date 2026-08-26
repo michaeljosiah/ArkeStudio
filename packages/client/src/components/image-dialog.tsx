@@ -1,5 +1,6 @@
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { Portrait } from "./portrait.js";
+import { ImageDownload } from "./image-actions.js";
 import { X } from "./icons.js";
 import { cx } from "./ui.js";
 
@@ -31,6 +32,8 @@ export function ImageDialog({
   triggerRadius = 9,
   dialogClassName,
   dialogRadius = 9,
+  download = false,
+  downloadName,
 }: {
   worldSlug: string | undefined;
   /** World-relative media path, shown both in the trigger and enlarged. */
@@ -58,6 +61,13 @@ export function ImageDialog({
   /** Extra class on the dialog, for screens that size it differently. */
   dialogClassName?: string;
   dialogRadius?: number;
+  /**
+   * Offer to save this picture (issue 478), both where it stands and once it is open. A person
+   * who enlarged an image to look at it should not have to close it again to keep a copy.
+   */
+  download?: boolean;
+  /** A human name for the saved file. The extension always comes from the file itself. */
+  downloadName?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -99,6 +109,13 @@ export function ImageDialog({
           onAvailabilityChange={onAvailabilityChange}
         />
       </button>
+      {/*
+       * A sibling of the trigger, never inside it: a button within a button is invalid markup,
+       * and browsers resolve it by dropping one of the two — usually the one you wanted.
+       */}
+      {download && (
+        <ImageDownload worldSlug={worldSlug} path={path} name={downloadName} ready={available} />
+      )}
       <dialog
         ref={dialog}
         className={cx("fy-portrait-dialog", dialogClassName)}
@@ -123,8 +140,15 @@ export function ImageDialog({
               <X size={18} />
             </button>
           </div>
-          <div className="fy-portrait-dialog__image">
-            <Portrait worldSlug={worldSlug} path={path} label={dialogLabel ?? label} radius={dialogRadius} />
+          <div className="fy-portrait-dialog__image fy-imghost">
+            <Portrait
+              worldSlug={worldSlug}
+              path={path}
+              label={dialogLabel ?? label}
+              radius={dialogRadius}
+              download={download}
+              downloadName={downloadName}
+            />
           </div>
         </div>
       </dialog>

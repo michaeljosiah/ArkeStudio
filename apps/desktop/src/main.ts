@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
@@ -57,6 +57,7 @@ import { BackgroundNotificationController } from "./background-notifications.js"
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
+import { saveMedia } from "./save-media.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -286,6 +287,44 @@ function registerHostIpc(): void {
     const name = typeof input?.name === "string" ? input.name : "pasted";
     return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
   });
+  /*
+   * Save a world image somewhere of the person's choosing (issue 478).
+   *
+   * The renderer asks by the identity it displayed the picture with — world slug and
+   * world-relative path — and this resolves that pair through the very same confined lookup the
+   * media server uses, which refuses traversal and anything that is not a media type. No path
+   * comes in and none goes back out: what the renderer gets is whether the save happened.
+   *
+   * The destination is the platform's to ask for, and so is what to do about a name already in
+   * use — the dialog confirms an overwrite rather than this deciding one silently.
+   */
+  ipcMain.handle(
+    "arke:save-media",
+    async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) => {
+      if (!window || event.sender !== window.webContents) return { ok: false, reason: "that window cannot save" };
+      const provider = startupProvider;
+      const parent = window;
+      if (!provider) return { ok: false, reason: "the library is not open yet" };
+      return await saveMedia(
+        {
+          // The world provider's own confined lookup — the one the media server serves through,
+          // so a path the renderer could not fetch is a path it cannot save either.
+          resolve: (worldSlug, path) => provider.serveMedia(worldSlug, path),
+          ask: async ({ defaultName, extension }) => {
+            const chosen = await dialog.showSaveDialog(parent, {
+              title: "Save image",
+              defaultPath: join(app.getPath("downloads"), defaultName),
+              filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : [],
+              properties: ["createDirectory", "showOverwriteConfirmation"],
+            });
+            return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
+          },
+          copy: (from, to) => copyFile(from, to),
+        },
+        input,
+      );
+    },
+  );
   ipcMain.on("arke:activity-activation-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;
     activityActivationReady = true;

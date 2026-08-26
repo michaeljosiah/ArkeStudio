@@ -141,7 +141,7 @@ export function LocationReferenceScreen() {
           {views.map((view, index) => (
             <article key={view.id} className="fy-locref__view">
               <span className="fy-locref__panel fy-mono">PANEL {String(index + 1).padStart(2, "0")}</span>
-              <div className="fy-locref__viewimage">
+              <div className="fy-locref__viewimage fy-imghost">
                 <ImageDialog
                   worldSlug={world.meta.slug}
                   path={`references/${sheetId}/${view.file}`}
@@ -152,6 +152,8 @@ export function LocationReferenceScreen() {
                   closeLabel="Close view"
                   triggerClassName="fy-locref__zoom"
                   triggerRadius={6}
+                  download
+                  downloadName={`${sheet.name} ${view.name}`}
                 />
               </div>
               <div className="fy-locref__viewfoot">
@@ -196,12 +198,16 @@ export function LocationReferenceScreen() {
                 return (
                   <div key={take.id} className="fy-locref__candidate">
                     <span className="fy-locref__status fy-mono">UNREVIEWED</span>
-                    <div className="fy-locref__candidateimage">
+                    {/* Unnamed until it is accepted, so a candidate saves under the take that
+                        made it — deterministic, and it says which one it was. */}
+                    <div className="fy-locref__candidateimage fy-imghost">
                       <Portrait
                         worldSlug={world.meta.slug}
                         path={`references/${sheetId}/takes/${take.id}/${take.media ?? ""}`}
                         label={name || "Candidate view"}
                         radius={6}
+                        download
+                        downloadName={name.trim() || `${sheet.name} candidate view ${take.id}`}
                       />
                     </div>
                     <p className="fy-mono">
@@ -404,17 +410,21 @@ export function LocationReferenceScreen() {
           </div>
           {sheetFile ? (
             <>
-              <ImageDialog
-                worldSlug={world.meta.slug}
-                path={`references/${sheetId}/${sheetFile}`}
-                label={`${sheet.name} location sheet`}
-                title={sheet.name}
-                subtitle="location sheet"
-                triggerLabel={`View larger location sheet for ${sheet.name}`}
-                closeLabel="Close location sheet"
-                triggerClassName="fy-locref__sheetimage"
-                triggerRadius={6}
-              />
+              <div className="fy-imghost">
+                <ImageDialog
+                  worldSlug={world.meta.slug}
+                  path={`references/${sheetId}/${sheetFile}`}
+                  label={`${sheet.name} location sheet`}
+                  title={sheet.name}
+                  subtitle="location sheet"
+                  triggerLabel={`View larger location sheet for ${sheet.name}`}
+                  closeLabel="Close location sheet"
+                  triggerClassName="fy-locref__sheetimage"
+                  triggerRadius={6}
+                  download
+                  downloadName={`${sheet.name} location sheet`}
+                />
+              </div>
               <p className="fy-mono">{sheetFile} · rebuilt on every acceptance</p>
               {/* The same function dispatch composes the preamble from, so what this promises and
                   what a request states cannot drift into disagreeing. */}

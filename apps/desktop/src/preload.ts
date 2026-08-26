@@ -222,6 +222,31 @@ const bridge = {
     bridge.send(JSON.stringify({ ...target, sourcePath: result.path }));
     return { ok: true };
   },
+
+  /**
+   * Save a world image somewhere of the person's choosing (issue 478).
+   *
+   * Only the identity the renderer already had crosses — world slug and world-relative path —
+   * and the host resolves that pair itself against the same confined lookup the media server
+   * uses. No filesystem path travels in either direction (SPEC-001 R-9); the answer is whether
+   * it saved, whether the dialog was closed, or why not.
+   */
+  async saveMedia(
+    worldSlug: string,
+    path: string,
+    name: string,
+  ): Promise<
+    { ok: true } | { ok: false; cancelled: true } | { ok: false; cancelled?: false; reason: string }
+  > {
+    const result = (await ipcRenderer
+      .invoke("arke:save-media", { worldSlug, path, name })
+      .catch(() => ({ ok: false, reason: "the app could not save that image" }))) as
+      | { ok: true }
+      | { ok: false; cancelled?: boolean; reason?: string };
+    if (result?.ok === true) return { ok: true };
+    if (result?.cancelled === true) return { ok: false, cancelled: true };
+    return { ok: false, reason: result?.reason ?? "the app could not save that image" };
+  },
 };
 
 export type ArkeBridge = typeof bridge;
