@@ -1114,7 +1114,8 @@ export class Coordinator {
                 }
                 // A founding build waiting on this job wakes without waiting out its tick —
                 // needs-reconciliation included, because that is build-terminal (SPEC-031 R-23).
-                this.foundingBuild?.noteJobSettled(event.job.id);
+                // A held item whose lane the author resumed also lands here (R-49).
+                this.foundingBuild?.noteJobSettled(event.job);
               }
             },
             ledger: {
@@ -3421,7 +3422,12 @@ export class Coordinator {
         return;
       }
       case "run-build-item": {
-        await this.foundingBuild?.runItems(msg.worldId, msg.itemKey).catch(() => {});
+        if (!this.foundingBuild) return;
+        // The landing paths need the build's world open; Activity may be scoped elsewhere.
+        if (this.opts.provider.openStore?.()?.worldId !== msg.worldId) {
+          await this.openWorld(msg.worldId).catch(() => {});
+        }
+        await this.foundingBuild.runItems(msg.worldId, msg.itemKey, msg.requestId).catch(() => {});
         return;
       }
       case "dismiss-build-notice": {

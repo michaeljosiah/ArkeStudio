@@ -760,7 +760,7 @@ function BuildReviewStep({
           Everything lands settled. Nothing waits for a decision.
         </span>
       </div>
-      {(plan.notes.length > 0 || plan.dropped.length > 0) && (
+      {plan.notes.length > 0 && (
         <div
           style={{
             borderLeft: "2px solid var(--border)",
@@ -925,6 +925,11 @@ export function NewWorldScreen() {
   useEffect(() => {
     if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
   }, [buildPressed, myBuild, navigate]);
+  // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
+  // refusal can be read and the author can go back — never a button stuck on "Building…".
+  useEffect(() => {
+    if (buildPressed && buildPlan !== undefined && buildPlan.plan === null) setBuildPressed(false);
+  }, [buildPressed, buildPlan]);
 
   const enterReview = (lookText: string) => {
     setLookForBuild(lookText);

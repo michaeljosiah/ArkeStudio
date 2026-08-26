@@ -173,6 +173,9 @@ export class FoundingBuildService {
   private readonly builds = new Map<string, ActiveBuild>();
   private readonly beginning = new Map<string, Promise<void>>();
   private readonly runningItems = new Map<string, Promise<void>>();
+  /** Held-item rescues in flight, so one job's settle event lands once. */
+  private readonly rescuing = new Set<string>();
+  private readonly seenRunRequests = new Set<string>();
   /** Wakes the driver when a watched job settles, without waiting out the tick. */
   private readonly jobWakers = new Map<string, Set<() => void>>();
 
@@ -335,8 +338,9 @@ export class FoundingBuildService {
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
     // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
-    // identity exists and BEFORE the record — so every crash window on this path re-enters
-    // through the marker and finishes the same founding, never founding a second world (R-16).
+    // identity exists and BEFORE the record — every window after that write re-enters the
+    // same founding. One residual sliver remains, between createWorld resolving and the
+    // marker landing; a crash exactly there can orphan one empty world (R-16, noted).
     let worldId = marker?.worldId;
     if (worldId === undefined) {
       const created = await this.ports.createWorld({
@@ -451,16 +455,32 @@ export class FoundingBuildService {
         lastByKey.set(entry.key, entry);
       }
     }
+    let settledAny = false;
     for (const [key, last] of lastByKey) {
-      if (last.kind === "terminal") continue;
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
+      if (last.kind === "terminal") {
+        // A held item is terminal for the build's purposes, not for the queue's (R-23): the
+        // lane may have been resumed while this world was closed, and the paid result must
+        // still land as the build would have landed it (R-49).
+        if (last.outcome !== "held") continue;
+        const enqueued = [...active.entries]
+          .reverse()
+          .find((entry): entry is Extract<BuildJournalEntry, { kind: "enqueued" }> => entry.kind === "enqueued" && entry.key === key);
+        const job = enqueued ? this.ports.jobById(enqueued.jobId) : undefined;
+        if (enqueued && (job?.status === "succeeded" || job?.status === "failed" || job?.status === "cancelled")) {
+          await this.settleDispatched(active, item, enqueued.jobId).catch(() => {});
+          settledAny = true;
+        }
+        continue;
+      }
       if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "finalize") {
         // Local work re-runs idempotently through the driver; an intent alone is enough.
         continue;
       }
       if (last.kind === "enqueued") {
         await this.settleDispatched(active, item, last.jobId).catch(() => {});
+        settledAny = true;
         continue;
       }
       // An intent with a journalled key and no job id: the crash window between the append
@@ -469,8 +489,12 @@ export class FoundingBuildService {
       const { route } = await this.resolveImageRoute();
       const jobId = await this.dispatchOne(active, item, route?.model ?? null).catch(() => null);
       await this.settleDispatched(active, item, jobId).catch(() => {});
+      settledAny = true;
     }
     this.publish(active);
+    // What recovery landed must reach the screen: the watcher suppresses app writes, so a
+    // snapshot refresh is the only way the anchor becomes visible (P3, #494 review).
+    if (settledAny) await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
   }
 
   // -------------------------------------------------------------------------
@@ -512,11 +536,27 @@ export class FoundingBuildService {
    * wave barrier and the authoring sessions), and serialized per world so a double press
    * joins rather than doubling.
    */
-  async runItems(worldId: string, itemKey?: string): Promise<void> {
-    const inFlight = this.runningItems.get(worldId);
-    if (inFlight) return inFlight;
-    const work = this.runItemsWork(worldId, itemKey).finally(() => this.runningItems.delete(worldId));
+  async runItems(worldId: string, itemKey?: string, requestId?: string): Promise<void> {
+    // A replayed frame is the same press, not a second spend (R-16's idempotency, applied here).
+    if (requestId !== undefined) {
+      if (this.seenRunRequests.has(requestId)) return;
+      this.seenRunRequests.add(requestId);
+      if (this.seenRunRequests.size > 200) {
+        for (const old of this.seenRunRequests) {
+          this.seenRunRequests.delete(old);
+          if (this.seenRunRequests.size <= 100) break;
+        }
+      }
+    }
+    // Chained, not joined: a press naming a different item queues behind the one running
+    // rather than being silently dropped.
+    const work = (this.runningItems.get(worldId) ?? Promise.resolve())
+      .catch(() => {})
+      .then(() => this.runItemsWork(worldId, itemKey));
     this.runningItems.set(worldId, work);
+    void work.finally(() => {
+      if (this.runningItems.get(worldId) === work) this.runningItems.delete(worldId);
+    });
     return work;
   }
 
@@ -530,7 +570,7 @@ export class FoundingBuildService {
     // Work a crash left mid-air settles first, with its journalled identity (R-34).
     await this.reconcileInDoubt(active).catch(() => {});
     state = this.fold(active);
-    const runnable = new Set(["failed", "skipped", "held", "unauthorized", "pending"]);
+    const runnable = new Set(["failed", "skipped", "unauthorized"]);
     const keys = state.items
       .filter((item) => (itemKey === undefined ? runnable.has(item.state) : item.key === itemKey))
       .map((item) => item.key);
@@ -553,12 +593,38 @@ export class FoundingBuildService {
   // The driver (R-17, R-18, R-23)
   // -------------------------------------------------------------------------
 
-  /** A job the coordinator saw settle — wakes any wait on it without the tick. */
-  noteJobSettled(jobId: string): void {
-    const wakers = this.jobWakers.get(jobId);
-    if (!wakers) return;
-    for (const wake of wakers) wake();
-    this.jobWakers.delete(jobId);
+  /**
+   * A job the coordinator saw settle — wakes any wait on it, and rescues a held item whose
+   * lane the author resumed: the queue row's own action ran the work, and it must land as
+   * the build would have landed it (R-23's promise, R-49's rule), not surface as a candidate
+   * awaiting review. Without this, terminal `held` was forever: the notice could never clear
+   * and paid work waited on a press that did not exist.
+   */
+  noteJobSettled(job: Job): void {
+    const wakers = this.jobWakers.get(job.id);
+    if (wakers) {
+      for (const wake of wakers) wake();
+      this.jobWakers.delete(job.id);
+    }
+    if (this.rescuing.has(job.id)) return;
+    for (const active of this.builds.values()) {
+      const enqueued = [...active.entries]
+        .reverse()
+        .find((entry): entry is Extract<BuildJournalEntry, { kind: "enqueued" }> => entry.kind === "enqueued" && entry.jobId === job.id);
+      if (!enqueued) continue;
+      const last = [...active.entries]
+        .reverse()
+        .find((entry) => (entry.kind === "intent" || entry.kind === "terminal") && entry.key === enqueued.key);
+      if (last?.kind !== "terminal" || last.outcome !== "held") continue;
+      const item = active.record.items.find((candidate) => candidate.key === enqueued.key);
+      if (!item) continue;
+      this.rescuing.add(job.id);
+      void this.settleDispatched(active, item, job.id)
+        .then(() => this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {}))
+        .catch(() => {})
+        .finally(() => this.rescuing.delete(job.id));
+      return;
+    }
   }
 
   private drive(active: ActiveBuild): void {
@@ -886,7 +952,10 @@ export class FoundingBuildService {
       const spent = state.items
         .filter(
           (candidate) =>
-            candidate.state !== "pending" && candidate.state !== "skipped" && candidate.state !== "unauthorized",
+            candidate.key !== item.key &&
+            candidate.state !== "pending" &&
+            candidate.state !== "skipped" &&
+            candidate.state !== "unauthorized",
         )
         .reduce((sum, candidate) => sum + candidate.estimatedMicroUsd, 0);
       if (spent + item.estimatedMicroUsd > active.record.capMicroUsd) {

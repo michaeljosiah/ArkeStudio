@@ -38,12 +38,14 @@ export function BuildingScreen() {
 
   // The run ends on the world screen with everything it made already in place (R-24).
   // Stopping leaves the world open and usable too (R-35) — same arrival, fewer things on it.
+  // Nothing navigates before the snapshot arrives: a deep link would otherwise bounce to the
+  // world and straight back once the running build landed in state.
   useEffect(() => {
-    if (!worldId) return;
+    if (!worldId || state === null) return;
     if (build === null || build.status === "completed" || build.status === "stopped") {
       navigate(`/w/${worldId}`, { replace: true });
     }
-  }, [build === null ? "gone" : build.status, worldId, navigate]);
+  }, [state === null, build === null ? "gone" : build.status, worldId, navigate]);
 
   if (!build) {
     return (
