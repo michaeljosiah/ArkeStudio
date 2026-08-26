@@ -1927,7 +1927,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-028 | Local inference completion — speech, generated media, and the Settings abstraction | 008, 009, 011, 016, 018, 021, 022 · amends 011, 016, 018, 021, 022 |
 | SPEC-029 | Graph-backed scenes — one canonical flow behind Storyboard, Flow, and storyboard rendering | 002, 004, 012, 013, 019, 023, 024 · amends 012, 013, 019, 023, 024 |
 | SPEC-030 | Vendor sign-in — the person's own model subscriptions, through the harness | 001, 005, 008 · amends 005 |
-| SPEC-031 | The founding build — a blueprint written in conversation, and one press that makes the whole world | 002, 004, 007, 009, 013, 017, 024 · amends 017 |
+| SPEC-031 | The founding build — a blueprint written in conversation, and one press that makes the whole world | 002, 004, 007, 009, 013, 014, 017, 024 · amends 009, 017 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.
