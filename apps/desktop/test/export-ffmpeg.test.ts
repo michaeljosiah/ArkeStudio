@@ -26,17 +26,20 @@ function fakeSpawn() {
 }
 
 const DRAW_ARGS = ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"];
+const VALID_HASH = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117";
+const validHash = async () => VALID_HASH;
 
 describe("the desktop export ffmpeg runner", () => {
   it("probes the exact escaped font before a slate encode, then reports encode progress", async () => {
     const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
     const { children, calls, spawn } = fakeSpawn();
     const progress: number[] = [];
-    const pending = createExportFfmpegRunner("C:\\ffmpeg.exe", font, spawn, () => true).run(
+    const pending = createExportFfmpegRunner("C:\\ffmpeg.exe", font, spawn, () => true, validHash).run(
       DRAW_ARGS,
       (value) => progress.push(value),
       new AbortController().signal,
     );
+    await waitForImmediate();
 
     const escaped = String.raw`C\\:/Users/D\\\'Angelo/Arke Studio\, Inc\; Stable \[x64\]/Geist-Regular.ttf`;
     assert.ok(
@@ -54,8 +57,9 @@ describe("the desktop export ffmpeg runner", () => {
 
   it("caches only a successful drawtext probe", async () => {
     const { children, calls, spawn } = fakeSpawn();
-    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
     const first = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    await waitForImmediate();
     children[0]!.emit("exit", 0);
     await waitForImmediate();
     children[1]!.emit("exit", 0);
@@ -70,11 +74,12 @@ describe("the desktop export ffmpeg runner", () => {
 
   it("names a failed drawtext capability probe without inspecting user-influenced encode stderr", async () => {
     const { children, calls, spawn } = fakeSpawn();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash).run(
       DRAW_ARGS,
       () => {},
       new AbortController().signal,
     );
+    await waitForImmediate();
     children[0]!.emit("exit", 3221225477);
     await assert.rejects(pending, /could not draw an export slate with the bundled font/);
     assert.equal(calls.length, 1, "the real encode never starts after a failed probe");
@@ -82,8 +87,9 @@ describe("the desktop export ffmpeg runner", () => {
 
   it("leaves every real encode failure in its original exit-code category", async () => {
     const { children, spawn } = fakeSpawn();
-    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
     const warm = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    await waitForImmediate();
     children[0]!.emit("exit", 0);
     await waitForImmediate();
     children[1]!.emit("exit", 0);
@@ -107,7 +113,7 @@ describe("the desktop export ffmpeg runner", () => {
   it("refuses a missing bundled font before ffmpeg can fall back to host discovery", async () => {
     const { calls, spawn } = fakeSpawn();
     await assert.rejects(
-      createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
+      createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false, validHash).run(
         DRAW_ARGS,
         () => {},
         new AbortController().signal,
@@ -117,9 +123,22 @@ describe("the desktop export ffmpeg runner", () => {
     assert.deepEqual(calls, []);
   });
 
+  it("refuses an existing but invalid bundled font before ffmpeg can fall back", async () => {
+    const { calls, spawn } = fakeSpawn();
+    await assert.rejects(
+      createExportFfmpegRunner("ffmpeg", "LICENSE.Geist.txt", spawn, () => true, async () => "bad").run(
+        DRAW_ARGS,
+        () => {},
+        new AbortController().signal,
+      ),
+      /bundled font is invalid — reinstall Arke Studio/,
+    );
+    assert.deepEqual(calls, [], "an invalid runtime file never reaches ffmpeg");
+  });
+
   it("skips the font probe for an export whose graph draws no text", async () => {
     const { children, calls, spawn } = fakeSpawn();
-    const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
+    const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false, validHash).run(
       ["-filter_complex", "null"],
       () => {},
       new AbortController().signal,
@@ -135,7 +154,7 @@ describe("the desktop export ffmpeg runner", () => {
       ["-metadata", "comment=drawtext=example", "-filter_complex", "null"],
     ]) {
       const { children, calls, spawn } = fakeSpawn();
-      const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
+      const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false, validHash).run(
         args,
         () => {},
         new AbortController().signal,
@@ -149,25 +168,28 @@ describe("the desktop export ffmpeg runner", () => {
   it("kills a drawtext probe when cancellation is requested", async () => {
     const { children, spawn } = fakeSpawn();
     const controller = new AbortController();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash).run(
       DRAW_ARGS,
       () => {},
       controller.signal,
     );
+    const rejected = assert.rejects(pending, /cancelled before start|could not draw an export slate/);
+    await waitForImmediate();
     controller.abort();
     assert.equal(children[0]!.killed, "SIGKILL");
     children[0]!.emit("exit", null);
-    await assert.rejects(pending, /cancelled before start|could not draw an export slate/);
+    await rejected;
   });
 
   it("does not start an encode when cancellation lands at probe completion", async () => {
     const { children, calls, spawn } = fakeSpawn();
     const controller = new AbortController();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash).run(
       DRAW_ARGS,
       () => {},
       controller.signal,
     );
+    await waitForImmediate();
     children[0]!.on("exit", () => controller.abort());
     children[0]!.emit("exit", 0);
     await assert.rejects(pending, /cancelled before start/);
@@ -176,11 +198,12 @@ describe("the desktop export ffmpeg runner", () => {
 
   it("coalesces concurrent probes while keeping caller cancellation independent", async () => {
     const { children, calls, spawn } = fakeSpawn();
-    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
     const firstController = new AbortController();
     const secondController = new AbortController();
     const first = runner.run(DRAW_ARGS, () => {}, firstController.signal);
     const second = runner.run(DRAW_ARGS, () => {}, secondController.signal);
+    await waitForImmediate();
     assert.equal(calls.length, 1, "both callers share one cold probe");
 
     firstController.abort();
@@ -192,5 +215,27 @@ describe("the desktop export ffmpeg runner", () => {
     assert.equal(calls.length, 2, "only the surviving caller starts an encode");
     children[1]!.emit("exit", 0);
     await second;
+  });
+
+  it("starts a fresh probe when all previous waiters cancelled and retry is immediate", async () => {
+    const { children, calls, spawn } = fakeSpawn();
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true, validHash);
+    const cancelledController = new AbortController();
+    const cancelled = runner.run(DRAW_ARGS, () => {}, cancelledController.signal);
+    const cancelledResult = assert.rejects(cancelled, /cancelled before start|could not draw an export slate/);
+    await waitForImmediate();
+    cancelledController.abort();
+    assert.equal(children[0]!.killed, "SIGKILL");
+
+    const retry = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    await waitForImmediate();
+    assert.equal(calls.length, 2, "retry starts a new probe before the killed child exits");
+    children[1]!.emit("exit", 0);
+    await waitForImmediate();
+    children[2]!.emit("exit", 0);
+    await retry;
+
+    children[0]!.emit("exit", null);
+    await cancelledResult;
   });
 });

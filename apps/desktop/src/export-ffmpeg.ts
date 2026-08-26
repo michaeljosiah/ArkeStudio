@@ -1,11 +1,14 @@
 import { spawn as nodeSpawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { ffmpegFilterPath } from "@arke-studio/contracts";
 import type { FfmpegRunner } from "@arke-studio/coordinator";
 
 type SpawnLike = typeof nodeSpawn;
+type HashFile = (path: string) => Promise<string>;
 
 const FILTER_OPTIONS = new Set(["-filter_complex", "-vf", "-filter:v"]);
+const GEIST_REGULAR_SHA256 = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117";
 
 /** Only filter option values can require drawtext; input paths and metadata are ordinary argv. */
 function usesDrawtext(args: readonly string[]): boolean {
@@ -18,12 +21,22 @@ function usesDrawtext(args: readonly string[]): boolean {
   });
 }
 
+const hashFile: HashFile = (path) =>
+  new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const source = createReadStream(path);
+    source.on("data", (chunk) => hash.update(chunk));
+    source.on("error", reject);
+    source.on("end", () => resolve(hash.digest("hex")));
+  });
+
 /** Run desktop exports after proving this binary can draw with the exact bundled font. */
 export function createExportFfmpegRunner(
   ffmpeg: string,
   slateFont: string,
   spawn: SpawnLike = nodeSpawn,
   exists: (path: string) => boolean = existsSync,
+  digest: HashFile = hashFile,
 ): FfmpegRunner {
   let slateVerified = false;
   let verification: {
@@ -31,6 +44,7 @@ export function createExportFfmpegRunner(
     controller: AbortController;
     waiters: number;
   } | null = null;
+  let fontIdentity: Promise<void> | null = null;
 
   const runProcess = (
     args: string[],
@@ -124,10 +138,27 @@ export function createExportFfmpegRunner(
     return state;
   };
 
+  const verifyFontIdentity = async (): Promise<void> => {
+    if (!exists(slateFont)) {
+      throw new Error("export cannot draw slates because the bundled font is missing — reinstall Arke Studio");
+    }
+    fontIdentity ??= digest(slateFont)
+      .then((actual) => {
+        if (actual !== GEIST_REGULAR_SHA256) {
+          throw new Error("export cannot draw slates because the bundled font is invalid — reinstall Arke Studio");
+        }
+      })
+      .catch((error: unknown) => {
+        fontIdentity = null;
+        throw error;
+      });
+    await fontIdentity;
+  };
+
   const verifySlate = (signal: AbortSignal): Promise<void> => {
     if (signal.aborted) return Promise.reject(new Error("cancelled before start"));
     if (slateVerified) return Promise.resolve();
-    const state = verification ?? startVerification();
+    const state = verification?.controller.signal.aborted ? startVerification() : (verification ?? startVerification());
     state.waiters += 1;
     return new Promise((resolve, reject) => {
       let released = false;
@@ -139,7 +170,10 @@ export function createExportFfmpegRunner(
       };
       const cancelled = (): void => {
         release();
-        if (state.waiters === 0) state.controller.abort();
+        if (state.waiters === 0) {
+          if (verification === state) verification = null;
+          state.controller.abort();
+        }
         reject(new Error("cancelled before start"));
       };
       signal.addEventListener("abort", cancelled, { once: true });
@@ -160,10 +194,10 @@ export function createExportFfmpegRunner(
     slateFont,
     run: async (args, onProgress, signal) => {
       const drawsText = usesDrawtext(args);
-      if (drawsText && !exists(slateFont)) {
-        throw new Error("export cannot draw slates because the bundled font is missing — reinstall Arke Studio");
+      if (drawsText) {
+        await verifyFontIdentity();
+        await verifySlate(signal);
       }
-      if (drawsText) await verifySlate(signal);
       await runProcess(args, onProgress, signal, false);
     },
   };
