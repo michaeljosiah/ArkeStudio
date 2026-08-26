@@ -76,7 +76,7 @@ function generatedJob(input: {
   };
 }
 
-async function openWorld(): Promise<{
+async function openWorld(opts: { withLedger?: boolean } = {}): Promise<{
   root: string;
   worldDir: string;
   provider: FsWorldProvider;
@@ -91,6 +91,8 @@ async function openWorld(): Promise<{
     adapter: null,
     changeLogPath: join(root, "logs", "changes.jsonl"),
     appVersion: "test",
+    // The coordinator only has a ledger when it has an app root to find one in.
+    ...(opts.withLedger === true ? { appRoot: root } : {}),
   });
   const sheetVersion = provider.openStore()?.getBundle().sheets.find((s) => s.id === SHEET)?.version ?? 1;
   return { root, worldDir, provider, coordinator, sheetVersion };
@@ -312,6 +314,73 @@ describe("generated character references become artifacts (issue 475)", () => {
     // A tile is not a take: it says so rather than naming one that does not exist.
     assert.equal(generation.takeId, undefined);
     assert.equal(generation.sourceFile, landed);
+    await provider.close();
+  });
+
+  /**
+   * A tile records no take, so before its dispatch froze one, finalization read the canon
+   * revision and sheet version as they stood when the picture came back. A sheet edited while a
+   * remote job was out would make the artifact claim revisions that had nothing to do with its
+   * bytes (Codex round 1).
+   */
+  it("records the tile's provenance as it was frozen at dispatch, not as the world stands now", async () => {
+    const { worldDir, provider, coordinator } = await openWorld();
+    const landed = `references/${SHEET}/incoming/head-profile.png`;
+    await land(worldDir, landed);
+    const bundle = provider.openStore()!.getBundle();
+    const job = generatedJob({
+      id: jobId("T10"),
+      kind: "reference-tile",
+      targetId: `${SHEET}/head-profile`,
+      landed,
+      sheetVersion: 4,
+      // Deliberately unlike anything the open world would answer with.
+      params: { provenance: { canonRevision: 7, sheets: { [SHEET]: 2 }, artDirectionVersion: 1 } },
+    });
+    assert.notEqual(bundle.meta.canonRevision, 7, "the fixture must disagree, or this proves nothing");
+    await finalize(coordinator, job);
+
+    const generation = generatedFor(await sidecars(worldDir), job.id)[0]!.generation!;
+    if (generation.source !== "character-reference") throw new Error("unreachable");
+    assert.equal(generation.provenance.canonRevision, 7);
+    assert.equal(generation.provenance.sheets[SHEET], 2);
+    assert.equal(generation.provenance.artDirectionVersion, 1);
+    await provider.close();
+  });
+
+  it("records the tile's actual cost from the ledger rather than reporting it unknown", async () => {
+    const { root, worldDir, provider, coordinator } = await openWorld({ withLedger: true });
+    const landed = `references/${SHEET}/incoming/head-profile.png`;
+    await land(worldDir, landed);
+    const job = generatedJob({
+      id: jobId("T11"),
+      kind: "reference-tile",
+      targetId: `${SHEET}/head-profile`,
+      landed,
+      sheetVersion: 4,
+    });
+    // The entry the dispatcher appends before finalization runs — it was already there, and the
+    // tile artifact reported an unknown cost anyway.
+    await writeFile(
+      join(root, "ledger.jsonl"),
+      JSON.stringify({
+        ts: CLOCK,
+        worldId: WORLD_ID,
+        jobId: job.id,
+        provider: "fal",
+        model: "flux-2-pro",
+        outcome: "succeeded",
+        estimatedMicroUsd: 47000,
+        actualMicroUsd: 45500,
+        actualSource: "provider-reported",
+      }) + "\n",
+    );
+    await finalize(coordinator, job);
+
+    const generation = generatedFor(await sidecars(worldDir), job.id)[0]!.generation!;
+    if (generation.source !== "character-reference") throw new Error("unreachable");
+    assert.equal(generation.costMicroUsd, 45500);
+    assert.equal(generation.costSource, "provider-reported");
     await provider.close();
   });
 

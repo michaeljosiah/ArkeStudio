@@ -122,4 +122,61 @@ describe("one identity for one generated picture", () => {
     const rows = characterPickerSources({ ...(world as object), artifacts: [] } as never, null);
     assert.equal(rows.some((r) => r.key === `file:${SOURCE_FILE}`), true);
   });
+
+  /**
+   * Two artifacts can name one source file, because the legacy tile path lands every
+   * regeneration of an angle on the SAME filename. Bundle order is the scan's alphabetical
+   * sort, and the collision name `…-front-2.png.json` sorts BEFORE `…-front.png.json`, so
+   * last-write-wins picked the OLDEST bytes while the row's thumbnail showed the newest.
+   */
+  it("hands back the newest artifact when a tile was regenerated over its own filename", () => {
+    const TILE = `references/${SHEET}/incoming/head-front.png`;
+    const tileArtifact = (id: string, file: string, created: string) =>
+      generatedReference({
+        id,
+        file,
+        created,
+        links: [SHEET],
+        generation: {
+          ...generatedReference().generation,
+          workflow: "reference-tile",
+          takeId: undefined,
+          sourceFile: TILE,
+        },
+      } as never);
+    // In the order scanWorld yields them: "…-2.png.json" sorts first, the original sorts last.
+    const older = tileArtifact("ar_01J8G0000000000000000000A1", "maren-kest-head-front.png", "2026-08-01T09:00:00.000Z");
+    const newer = tileArtifact("ar_01J8G0000000000000000000B2", "maren-kest-head-front-2.png", "2026-08-20T09:00:00.000Z");
+    const rows = characterPickerSources(
+      {
+        sheets: [{ id: SHEET, name: "Maren Kest" }],
+        referenceKits: [{ sheetId: SHEET, tiles: [{ angle: "head-front", file: "incoming/head-front.png" }], looks: [] }],
+        referenceTakes: [],
+        referenceCandidates: {},
+        artifacts: [newer, older],
+      } as never,
+      null,
+    );
+    const tile = rows.find((r) => r.imagePath === TILE)!;
+    assert.deepEqual(
+      tile.pick,
+      { source: "artifact", artifactId: newer.id },
+      "the picture on screen and the bytes a generation would carry are the same one",
+    );
+  });
+
+  it("keeps a world-file identity the session already carries, rather than minting a second token", () => {
+    // A session that picked the picture before an artifact existed for it. Aliasing the row to
+    // the artifact id would lose this registry entry, so the row would read as addable again and
+    // the coordinator would allocate a SECOND token for one picture.
+    const session = {
+      tokenRegistry: [{ token: "Image 1", kind: "image", source: { source: "world-file", path: SOURCE_FILE } }],
+      composer: { activeTokens: ["Image 1"], keyframeTokens: [] },
+    } as never;
+    const rows = characterPickerSources(world, session);
+    const row = rows.find((r) => r.imagePath === SOURCE_FILE)!;
+    assert.equal(row.key, `file:${SOURCE_FILE}`, "the identity the session knows is the one offered");
+    assert.equal(row.existingToken, "Image 1");
+    assert.equal(row.active, true, "so it reads as already riding rather than as addable");
+  });
 });

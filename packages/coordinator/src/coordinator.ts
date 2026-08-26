@@ -257,7 +257,7 @@ import {
   recordUploadedLocationViewTake,
   referenceReviewDecision,
 } from "./references/takes.js";
-import { fileGeneratedReferenceArtifact } from "./references/artifacts.js";
+import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
@@ -2030,18 +2030,23 @@ export class Coordinator {
         // REPLAYABLE_FINALIZATION_TARGETS because `supersedeTile` pushes a row every time it
         // runs. Throwing would strand the job in Needs You with no retry the user could press,
         // while its tile is already in the kit. Reported to the app log instead of swallowed.
+        const tileLedgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          : undefined;
         await fileGeneratedReferenceArtifact(store, {
           job,
           workflow: "reference-tile",
           sheetId,
           sourceFile: job.landedFiles[0],
-          // The tile path freezes no provenance at dispatch, so this is the pair the kit row is
-          // being stamped with in the same breath — as true as what the kit itself records.
-          provenance: {
-            canonRevision: store.getBundle().meta.canonRevision,
-            sheets: { [sheetId]: sheet.version },
+          provenance: frozenTileProvenance(job, sheetId, sheet.version, store.getBundle().meta.canonRevision),
+          // What the ledger actually recorded, like every take-backed reference (Codex round 1).
+          // The entry is already appended by the time finalization runs; a hard-coded null made
+          // every tile artifact report an unknown cost that was sitting right there.
+          cost: {
+            estimatedMicroUsd: job.estimatedMicroUsd,
+            actualMicroUsd: tileLedgerEntry?.actualMicroUsd ?? null,
+            ...(tileLedgerEntry?.actualSource ? { actualSource: tileLedgerEntry.actualSource } : {}),
           },
-          cost: { estimatedMicroUsd: job.estimatedMicroUsd, actualMicroUsd: null },
         }).catch((err: unknown) => {
           void this.appLog?.append({
             kind: "reference.artifact-filing-failed",

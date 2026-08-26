@@ -12,6 +12,37 @@ import { fileGeneratedArtifact } from "../artifacts/filing.js";
 import type { WorldStore } from "../world/store.js";
 
 /**
+ * What the world looked like when a tile was dispatched (issue 475, Codex round 1).
+ *
+ * Read from the job, which froze it at enqueue — the same rule `recordReferenceTake` follows for
+ * every other reference workflow. A tile records no take, so before the freeze existed this was
+ * read at arrival instead, and a sheet edited while a remote job was out made the artifact claim
+ * revisions that had nothing to do with its bytes.
+ *
+ * The fallback is for tiles dispatched before the freeze: those jobs carry nothing, and the pair
+ * the kit row is being stamped with in the same breath is the truest thing left to record.
+ */
+export function frozenTileProvenance(
+  job: Job,
+  sheetId: string,
+  sheetVersion: number,
+  canonRevision: number,
+): Provenance {
+  const frozen = job.params["provenance"] as
+    | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number }
+    | undefined;
+  const frozenSheetVersion = frozen?.sheets?.[sheetId];
+  if (frozen?.canonRevision === undefined || frozenSheetVersion === undefined) {
+    return { canonRevision, sheets: { [sheetId]: sheetVersion } };
+  }
+  return {
+    canonRevision: frozen.canonRevision,
+    sheets: { [sheetId]: frozenSheetVersion },
+    ...(frozen.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
+  };
+}
+
+/**
  * Every generated character reference is also a world artifact (issue 475).
  *
  * A paid picture used to be visible on the character's own surface and absent from the world's

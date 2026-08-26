@@ -87,6 +87,19 @@ export function worldPickerSources(
 }
 
 /**
+ * Which of two artifacts filed from one source file is the later one.
+ *
+ * By stamp, then by id: an artifact id is a ULID, so it breaks a tie in the order the two were
+ * actually minted rather than in whatever order they happened to be read.
+ */
+function newerArtifact(candidate: ArtifactSidecar, incumbent: ArtifactSidecar): boolean {
+  const a = Date.parse(candidate.created);
+  const b = Date.parse(incumbent.created);
+  if (Number.isFinite(a) && Number.isFinite(b) && a !== b) return a > b;
+  return candidate.id > incumbent.id;
+}
+
+/**
  * Every picture a character has, as picker rows (2026-08-18).
  *
  * The world holds far more pictures than the artifacts folder, and none of them could be picked:
@@ -124,7 +137,14 @@ export function characterPickerSources(
    */
   const artifactByFile = new Map<string, ArtifactSidecar>();
   for (const artifact of pickableArtifacts(world.artifacts ?? [])) {
-    if (artifact.generation?.source === "character-reference") {
+    if (artifact.generation?.source !== "character-reference") continue;
+    const existing = artifactByFile.get(artifact.generation.sourceFile);
+    // Newest wins, explicitly (Codex round 1). The legacy tile path lands every regeneration of
+    // an angle on ONE filename, so two artifacts can name one source file — and bundle order is
+    // the scan's alphabetical sort, where the collision name `…-front-2.png.json` sorts BEFORE
+    // `…-front.png.json`. Last-write-wins therefore handed back the OLDEST bytes while the row's
+    // thumbnail showed the current ones: a paid generation carrying a picture nobody could see.
+    if (existing === undefined || newerArtifact(artifact, existing)) {
       artifactByFile.set(artifact.generation.sourceFile, artifact);
     }
   }
@@ -133,8 +153,15 @@ export function characterPickerSources(
   const add = (sheetId: string, file: string, what: string): void => {
     if (!/\.(png|jpg|jpeg|webp)$/i.test(file)) return; // a path alone cannot price a clip
     const path = `references/${sheetId}/${file}`;
-    const artifact = artifactByFile.get(path);
-    const key = artifact ? `artifact:${artifact.id}` : `file:${path}`;
+    // The identity this session already knows wins (Codex round 1). A session that picked the
+    // picture before an artifact existed for it — a world opened after this shipped replays old
+    // finalizations, which file one — carries it as `file:<path>`. Switching the row to the
+    // artifact id would lose that registry entry, so the picture would read as addable again and
+    // the coordinator would mint a SECOND token for it: source identity, not content, is what
+    // deduplicates. Aliasing is for rows the session has no opinion about.
+    const fileKey = `file:${path}`;
+    const artifact = registry.has(fileKey) ? undefined : artifactByFile.get(path);
+    const key = artifact ? `artifact:${artifact.id}` : fileKey;
     if (rows.some((r) => r.key === key)) return; // a tile and a compilation can name one file
     const token = registry.get(key);
     rows.push({
