@@ -79,6 +79,20 @@ export interface ModelInfo {
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
 export type PermissionVerb = z.infer<typeof PermissionVerb>;
 
+/** A harness permission ask, retaining the session whose confinement governs it. */
+export interface PermissionRequest {
+  sessionId: string;
+  permissionId: string;
+  actionClass: string;
+  detail?: string;
+}
+
+/** Whether the active session policy permits a remembered grant to settle this ask. */
+export type PermissionAssessment =
+  | { status: "allowed" }
+  | { status: "ask" }
+  | { status: "denied"; reason: string };
+
 export interface PermissionDecision {
   permissionId: string;
   decision: PermissionVerb;
@@ -233,5 +247,7 @@ export interface HarnessAdapter {
   /** Async iterator of normalised, schema-validated harness events (capability: events). */
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent>;
   listModels?(): Promise<ModelInfo[]>;
+  /** Adapter-owned action vocabulary checked against the exact session's captured confinement. */
+  assessPermission?(request: PermissionRequest): PermissionAssessment;
   respondToPermission?(decision: PermissionDecision): Promise<PermissionAck>;
 }

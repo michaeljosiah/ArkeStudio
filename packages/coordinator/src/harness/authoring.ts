@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { writeSessionFiles, type SessionInput } from "./session-files.js";
-import type { DomainEvent, HarnessAdapter } from "@arke-studio/contracts";
+import type { DomainEvent, HarnessAdapter, PermissionRequest } from "@arke-studio/contracts";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
@@ -337,15 +337,48 @@ export class AuthoringService {
   }
 }
 
-/** Backstop permission flow (R-16, R-17, D9): remembered grants answer without prompting. */
+export interface PermissionConfinementDefect {
+  adapter: string;
+  sessionId: string;
+  reason: string;
+}
+
+/** Backstop permission flow (R-16, R-17, D9): confinement is checked before any remembered grant. */
 export async function settlePermission(
   adapter: HarnessAdapter,
   grants: GrantStore,
   emit: (event: DomainEvent) => void,
-  request: { permissionId: string; actionClass: string },
-): Promise<void> {
+  request: PermissionRequest,
+  recordDefect?: (defect: PermissionConfinementDefect) => void | Promise<void>,
+): Promise<"pending" | "settled"> {
   const at = new Date().toISOString();
-  if (await grants.covers(request.actionClass)) {
+  const assessment = adapter.assessPermission?.(request) ?? {
+    status: "denied" as const,
+    reason: "adapter cannot assess the active confinement",
+  };
+  if (assessment.status === "denied") {
+    await Promise.resolve(
+      recordDefect?.({
+        adapter: adapter.id,
+        sessionId: request.sessionId,
+        reason: assessment.reason,
+      }),
+    ).catch(() => {});
+    await adapter.respondToPermission?.({
+      permissionId: request.permissionId,
+      decision: "reject",
+      message: "Denied by Arke Studio's active confinement.",
+    });
+    emit({
+      at,
+      type: "permission.settled",
+      permissionId: request.permissionId,
+      decision: "reject",
+      remembered: false,
+    });
+    return "settled";
+  }
+  if (assessment.status === "allowed" && (await grants.covers(request.actionClass))) {
     await adapter.respondToPermission?.({ permissionId: request.permissionId, decision: "always" });
     emit({
       at,
@@ -354,7 +387,7 @@ export async function settlePermission(
       decision: "always",
       remembered: true,
     });
-    return;
+    return "settled";
   }
   emit({
     at,
@@ -363,6 +396,7 @@ export async function settlePermission(
     actionClass: request.actionClass,
     description: describeActionClass(request.actionClass),
   });
+  return "pending";
 }
 
 /** Harness-internal tool names become Studio language (R-16). */

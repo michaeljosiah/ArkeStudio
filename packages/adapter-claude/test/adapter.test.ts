@@ -329,7 +329,7 @@ describe("the session lifecycle", () => {
      */
     const fake = fakeQuery([result()]);
     const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ worldQueryUrl: "http://127.0.0.1:9/mcp" });
+    adapter.prepareSession?.({ sessionCwd: CWD, worldQueryUrl: "http://127.0.0.1:9/mcp" });
     const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
 
@@ -341,11 +341,26 @@ describe("the session lifecycle", () => {
   it("leaves the world tool off when no world is open", async () => {
     const fake = fakeQuery([result()]);
     const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({});
+    adapter.prepareSession?.({ sessionCwd: CWD });
     const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     assert.equal(fake.options()["mcpServers"], undefined, "no empty server registration");
     await adapter.dispose?.();
+  });
+
+  it("keeps concurrently prepared Claude settings with the cwd they were prepared for", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    const firstCwd = "/tmp/arke-first";
+    const secondCwd = "/tmp/arke-second";
+    adapter.prepareSession({ sessionCwd: firstCwd, worldQueryUrl: "http://127.0.0.1:9/first" });
+    adapter.prepareSession({ sessionCwd: secondCwd, worldQueryUrl: "http://127.0.0.1:9/second" });
+
+    const first = await adapter.createSession({ purpose: "authoring", cwd: firstCwd, agent: "sheet-editor" });
+    await adapter.sendMessage({ sessionId: first.sessionId, parts: [{ type: "text", text: "go" }] });
+    const servers = fake.options()["mcpServers"] as Record<string, { url?: string }>;
+    assert.equal(servers["arke-world"]?.url, "http://127.0.0.1:9/first");
+    await adapter.dispose();
   });
 });
 
@@ -362,7 +377,7 @@ describe("the skill a Claude session drafts under", () => {
     const fake = fakeQuery([result()]);
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ skillFamily: "seedance", skillModelId: "seedance-2.5" });
+    adapter.prepareSession?.({ sessionCwd: CWD, skillFamily: "seedance", skillModelId: "seedance-2.5" });
     const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);

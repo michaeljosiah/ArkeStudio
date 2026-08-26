@@ -6,7 +6,9 @@ import {
   type HarnessEvent,
   type ModelInfo,
   type PermissionAck,
+  type PermissionAssessment,
   type PermissionDecision,
+  type PermissionRequest,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
@@ -14,7 +16,8 @@ import {
   type SessionConfigInput,
   type SessionFile,
 } from "@arke-studio/contracts";
-import { buildSessionConfig } from "./config.js";
+import { assessV1Permission, buildSessionConfig } from "./config.js";
+import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 
 /**
  * Scripted mock behind the adapter interface (SPEC-001 T-6). The coordinator is written
@@ -27,6 +30,9 @@ export class MockHarnessAdapter implements HarnessAdapter {
   private sessions = 0;
   private correlations = 0;
   private readonly subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
+  private readonly sessionPolicies = new Map<string, SessionPermissionPolicy | null>();
+  private readonly preparedPolicies = new PreparedSessionPolicies();
+  readonly permissionDecisions: PermissionDecision[] = [];
   private disposed = false;
 
   capabilities(): ReadonlySet<HarnessCapability> {
@@ -41,6 +47,10 @@ export class MockHarnessAdapter implements HarnessAdapter {
   sessionFiles(input: SessionConfigInput): ReadonlyArray<SessionFile> {
     return [{ name: "opencode.json", contents: `${JSON.stringify(buildSessionConfig(input), null, 2)}
 ` }];
+  }
+
+  prepareSession(input: SessionConfigInput): void {
+    this.preparedPolicies.prepare(input);
   }
 
   readiness(): Readiness {
@@ -61,6 +71,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     const sessionId = `sess_mock_${++this.sessions}_${input.purpose}`;
+    this.sessionPolicies.set(sessionId, this.preparedPolicies.take(input.agent, input.cwd));
     this.push({ type: "session.created", sessionId });
     return { sessionId };
   }
@@ -94,6 +105,7 @@ export class MockHarnessAdapter implements HarnessAdapter {
   }
 
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
+    this.permissionDecisions.push(decision);
     this.push({
       type: "permission.replied",
       sessionId: "sess_mock_permissions",
@@ -101,6 +113,10 @@ export class MockHarnessAdapter implements HarnessAdapter {
       decision: decision.decision,
     });
     return { permissionId: decision.permissionId, status: "confirmed" };
+  }
+
+  assessPermission(request: PermissionRequest): PermissionAssessment {
+    return assessV1Permission(this.sessionPolicies.get(request.sessionId), request.actionClass);
   }
 
   /** Test hook: inject an event as if the harness produced it. */

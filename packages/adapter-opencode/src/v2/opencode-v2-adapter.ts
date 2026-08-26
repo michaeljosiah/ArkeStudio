@@ -6,7 +6,9 @@ import {
   type HarnessEvent,
   type ModelInfo,
   type PermissionAck,
+  type PermissionAssessment,
   type PermissionDecision,
+  type PermissionRequest,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
@@ -14,7 +16,8 @@ import {
   type SessionConfigInput,
   type SessionFile,
 } from "@arke-studio/contracts";
-import { buildSessionConfigV2 } from "./config.js";
+import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
+import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
@@ -46,6 +49,7 @@ interface TrackedSession {
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
   agent?: string;
+  permissionPolicy: SessionPermissionPolicy | null;
 }
 
 /**
@@ -84,6 +88,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * already-surfaced record the resync checks — one structure, one invariant.
    */
   private readonly permissionSessions = new Map<string, string>();
+  private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
@@ -188,6 +193,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 ` }];
   }
 
+  prepareSession(input: SessionConfigInput): void {
+    this.preparedPolicies.prepare(input);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     const location = input.cwd;
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
@@ -214,6 +223,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
+      permissionPolicy: this.preparedPolicies.take(input.agent, input.cwd),
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -413,6 +423,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       this.turnListeners.add(listener);
     });
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
+  }
+
+  assessPermission(request: PermissionRequest): PermissionAssessment {
+    return assessV2Permission(this.sessions.get(request.sessionId)?.permissionPolicy, request.actionClass);
   }
 
   // ---- models --------------------------------------------------------------

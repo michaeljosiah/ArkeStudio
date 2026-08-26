@@ -123,11 +123,8 @@ export class ClaudeAdapter implements HarnessAdapter {
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly subscribers = new Set<AsyncQueue<HarnessEvent>>();
   private ready: Readiness = { ready: false, reason: "not initialised" };
-  /**
-   * What the next session is configured with. Written by `prepareSession`, taken by the
-   * `createSession` that follows it — the same order the file-writing harnesses rely on.
-   */
-  private pending: SessionConfigInput = {};
+  /** Prepared settings keyed by cwd so concurrent session setup cannot cross-wire options. */
+  private readonly pending = new Map<string, SessionConfigInput>();
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
 
@@ -150,7 +147,7 @@ export class ClaudeAdapter implements HarnessAdapter {
    * misconfiguration, which is what let it go unnoticed.
    */
   prepareSession(input: SessionConfigInput): void {
-    this.pending = input;
+    if (input.sessionCwd !== undefined) this.pending.set(input.sessionCwd, input);
   }
 
   async init(): Promise<void> {
@@ -177,6 +174,9 @@ export class ClaudeAdapter implements HarnessAdapter {
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
+    if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
+    const prepared = this.pending.get(input.cwd) ?? {};
+    this.pending.delete(input.cwd);
     /*
      * From the session that was just prepared, not from how the adapter was built (codex,
      * 2026-08-23).
@@ -189,8 +189,8 @@ export class ClaudeAdapter implements HarnessAdapter {
      */
     const skill = skillForAgent(
       agentName,
-      this.pending.skillFamily ?? this.opts.skillFamily,
-      this.pending.skillModelId ?? this.opts.skillModelId,
+      prepared.skillFamily ?? this.opts.skillFamily,
+      prepared.skillModelId ?? this.opts.skillModelId,
     );
     /*
      * No default for `cwd`, though the contract makes it optional.
@@ -202,7 +202,6 @@ export class ClaudeAdapter implements HarnessAdapter {
      * the user happened to launch from, and quietly substituting it would widen the boundary to
      * a directory nobody chose. Every caller passes one; a caller that forgets should be told.
      */
-    if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     const session: ClaudeSession = {
       id: `claude_${randomUUID()}`,
       cwd: input.cwd,
@@ -210,11 +209,11 @@ export class ClaudeAdapter implements HarnessAdapter {
       // Settings' research toggle, from the same `prepareSession` input the skill comes from.
       // No `this.opts` fallback: there is no constructor option for it, and inventing an
       // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
-      confinement: confinementFor(member, { web: this.pending.researchWeb === true }),
-      worldQueryUrl: this.opts.worldQueryUrl ?? this.pending.worldQueryUrl,
+      confinement: confinementFor(member, { web: prepared.researchWeb === true }),
+      worldQueryUrl: this.opts.worldQueryUrl ?? prepared.worldQueryUrl,
       systemPrompt: agentPromptFor({
         ...member,
-        researchWeb: this.pending.researchWeb === true,
+        researchWeb: prepared.researchWeb === true,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),

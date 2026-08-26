@@ -6,7 +6,9 @@ import {
   type HarnessEvent,
   type ModelInfo,
   type PermissionAck,
+  type PermissionAssessment,
   type PermissionDecision,
+  type PermissionRequest,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
@@ -17,7 +19,8 @@ import {
 import { probeCapabilities } from "./capabilities.js";
 import { OpenCodeHttp } from "./http.js";
 import { createNormalizeState, normalizeOpenCode, type NormalizeState } from "./normalize.js";
-import { buildSessionConfig } from "./config.js";
+import { assessV1Permission, buildSessionConfig } from "./config.js";
+import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 import { parseSse } from "./sse.js";
 
 /**
@@ -50,6 +53,7 @@ interface TrackedSession {
    * repeat it. See `turnBody`.
    */
   agent?: string;
+  permissionPolicy: SessionPermissionPolicy | null;
 }
 
 /**
@@ -70,6 +74,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
   /** Bounded record of dropped frames — contained, never silently lost (R-14). */
   readonly deadLetters: Array<{ reason: string; at: number }> = [];
   private readonly permissionSessions = new Map<string, string>();
+  private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
@@ -177,6 +182,10 @@ export class OpenCodeAdapter implements HarnessAdapter {
 ` }];
   }
 
+  prepareSession(input: SessionConfigInput): void {
+    this.preparedPolicies.prepare(input);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
     const body: Record<string, unknown> = {
       ...(input.agent ? { agent: input.agent } : {}),
@@ -204,6 +213,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       purpose: input.purpose,
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
+      permissionPolicy: this.preparedPolicies.take(input.agent, input.cwd),
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -416,6 +426,10 @@ export class OpenCodeAdapter implements HarnessAdapter {
       this.turnListeners.add(listener);
     });
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
+  }
+
+  assessPermission(request: PermissionRequest): PermissionAssessment {
+    return assessV1Permission(this.sessions.get(request.sessionId)?.permissionPolicy, request.actionClass);
   }
 
   // ---- the event pump ------------------------------------------------------

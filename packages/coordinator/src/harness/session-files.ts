@@ -19,10 +19,11 @@ export async function writeSessionFiles(
   dir: string,
   input: SessionConfigInput = {},
 ): Promise<void> {
+  const prepared = { ...input, sessionCwd: dir };
   // Both seams, always. A harness takes its settings as files or as call options, and a
   // caller offering only one silently configures nothing for the harnesses using the other.
-  adapter.prepareSession?.(input);
-  for (const file of adapter.sessionFiles?.(input) ?? []) {
+  adapter.prepareSession?.(prepared);
+  for (const file of adapter.sessionFiles?.(prepared) ?? []) {
     await atomicWriteFile(join(dir, file.name), file.contents);
   }
 }

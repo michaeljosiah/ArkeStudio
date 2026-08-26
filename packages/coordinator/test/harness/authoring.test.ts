@@ -476,14 +476,17 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     assert.equal(await second.covers("bash"), false, "revocation holds");
   });
 
-  it("settles covered requests silently and surfaces the rest in Studio language", async () => {
+  it("settles an allowed covered request silently and surfaces an allowed uncovered one", async () => {
     const root = await tempDir("arke-grants-");
     const grants = new GrantStore(root);
     await grants.remember("webfetch", CLOCK());
     const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ sessionCwd: root, researchWeb: true });
+    const session = await adapter.createSession({ purpose: "authoring", cwd: root, agent: "sheet-editor" });
     const events: DomainEvent[] = [];
 
     await settlePermission(adapter, grants, (e) => events.push(e), {
+      sessionId: session.sessionId,
       permissionId: "p1",
       actionClass: "webfetch",
     });
@@ -492,10 +495,77 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     assert.equal(settled.type === "permission.settled" && settled.remembered, true);
 
     await settlePermission(adapter, grants, (e) => events.push(e), {
+      sessionId: session.sessionId,
       permissionId: "p2",
-      actionClass: "bash",
+      actionClass: "edit",
     });
     const pending = events.findLast((e) => e.type === "permission.pending");
-    assert.equal(pending?.type === "permission.pending" && pending.description, "The agent wants to run a shell command");
+    assert.equal(pending?.type === "permission.pending" && pending.description, "The agent wants to edit a file");
+  });
+
+  it("rejects a remembered grant denied by the session confinement and records the defect", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    await grants.remember("edit", CLOCK());
+    const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ sessionCwd: root });
+    const session = await adapter.createSession({ purpose: "world-chat", cwd: root, agent: "world-builder" });
+    const events: DomainEvent[] = [];
+    const defects: Array<{ adapter: string; sessionId: string; reason: string }> = [];
+
+    const result = await settlePermission(
+      adapter,
+      grants,
+      (event) => events.push(event),
+      {
+        sessionId: session.sessionId,
+        permissionId: "p-denied",
+        actionClass: "edit",
+        detail: "C:/world/private.md",
+      },
+      (defect) => {
+        defects.push(defect);
+      },
+    );
+
+    assert.equal(result, "settled");
+    assert.deepEqual(adapter.permissionDecisions.at(-1), {
+      permissionId: "p-denied",
+      decision: "reject",
+      message: "Denied by Arke Studio's active confinement.",
+    });
+    assert.ok(!events.some((event) => event.type === "permission.pending"), "denial never reaches the prompt UI");
+    assert.deepEqual(events.at(-1), {
+      at: events.at(-1)!.at,
+      type: "permission.settled",
+      permissionId: "p-denied",
+      decision: "reject",
+      remembered: false,
+    });
+    assert.equal(defects.length, 1);
+    assert.equal(defects[0]!["reason"], "edit is denied by the active confinement");
+    assert.ok(!("actionClass" in defects[0]!), "raw harness action classes are not logged");
+    assert.ok(!("detail" in defects[0]!), "paths and harness resources are not logged");
+    assert.equal(await grants.covers("edit"), true, "the durable grant remains stored but inert");
+  });
+
+  it("does not apply a remembered grant to an action the adapter has not mapped", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    await grants.remember("future-tool", CLOCK());
+    const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ sessionCwd: root });
+    const session = await adapter.createSession({ purpose: "authoring", cwd: root, agent: "sheet-editor" });
+    const events: DomainEvent[] = [];
+
+    const result = await settlePermission(adapter, grants, (event) => events.push(event), {
+      sessionId: session.sessionId,
+      permissionId: "p-unknown",
+      actionClass: "future-tool",
+    });
+
+    assert.equal(result, "pending");
+    assert.equal(adapter.permissionDecisions.length, 0, "an unmapped action cannot be silently granted");
+    assert.equal(events.at(-1)?.type, "permission.pending");
   });
 });

@@ -1637,11 +1637,28 @@ export class Coordinator {
         try {
           for await (const event of adapter.streamEvents()) {
             if (event.type === "permission.requested") {
-              this.pendingPermissions.set(event.permissionId, event.actionClass);
-              await settlePermission(adapter, grants, (e) => this.emit(e), {
-                permissionId: event.permissionId,
-                actionClass: event.actionClass,
-              });
+              const settlement = await settlePermission(
+                adapter,
+                grants,
+                (e) => this.emit(e),
+                {
+                  sessionId: event.sessionId,
+                  permissionId: event.permissionId,
+                  actionClass: event.actionClass,
+                  ...(event.detail !== undefined ? { detail: event.detail } : {}),
+                },
+                (defect) =>
+                  this.appLog?.append({
+                    level: "warn",
+                    event: "harness.permission-confinement-defect",
+                    ...defect,
+                  }),
+              );
+              if (settlement === "pending") {
+                this.pendingPermissions.set(event.permissionId, event.actionClass);
+              } else {
+                this.pendingPermissions.delete(event.permissionId);
+              }
             }
           }
         } catch {

@@ -8,6 +8,7 @@ import {
   type AgentConfinement,
   type SessionConfigInput,
 } from "@arke-studio/contracts";
+import { assessMappedPermission, type SessionPermissionPolicy } from "../permission-policy.js";
 
 /**
  * Session configuration in OpenCode v2's shapes (issue 327 §7). The POLICY is the v1
@@ -63,6 +64,14 @@ const V2_ACTIONS: Partial<Record<ToolIntent, readonly string[]>> = {
  * grant, not a hazard. `shell` is the one that stays, for the reason the list existed.
  */
 const V2_NEVER = ["shell"] as const;
+
+/** A runtime ask checked against the same vocabulary used to write v2's session config. */
+export function assessV2Permission(
+  policy: SessionPermissionPolicy | null | undefined,
+  actionClass: string,
+) {
+  return assessMappedPermission(policy, actionClass, V2_ACTIONS, [...V2_NEVER, "external_directory"]);
+}
 
 /**
  * One confinement, in v2's grammar — and the grammar IS the policy here, because rules are an
