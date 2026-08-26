@@ -26,7 +26,17 @@ const world = {
     { id: "tk_1", reference: { sheetId: "aurora-sabato" }, media: "character-sheet.png" },
     { id: "tk_2", reference: { sheetId: "aurora-sabato" }, media: "clip.mp4" },
   ],
-  referenceCandidates: { "aurora-sabato": ["candidates/candidate-1.png", "candidates/candidate-2.png"] },
+  /*
+   * World-relative, the shape the scan actually produces (`visibleCandidates` in
+   * world/scan.ts). This fixture used to hold sheet-relative paths, and every candidate row in
+   * the picker pointed at `references/<id>/references/<id>/candidates/…` with the test green.
+   */
+  referenceCandidates: {
+    "aurora-sabato": [
+      "references/aurora-sabato/candidates/candidate-1.png",
+      "references/aurora-sabato/candidates/candidate-2.png",
+    ],
+  },
 } as never;
 
 describe("a character's pictures in the picker", () => {
@@ -42,6 +52,12 @@ describe("a character's pictures in the picker", () => {
       "references/aurora-sabato/candidates/candidate-1.png",
     ]) {
       assert.ok(paths.includes(expected), expected);
+    }
+    // And every one of them is a path the media route can serve. The candidates arrive already
+    // world-relative, so a row that prefixes them again is offerable and unfetchable at once —
+    // exactly the state this test held green while the fixture disagreed with the scan.
+    for (const path of paths) {
+      assert.doesNotMatch(path, /references\/[^/]+\/references\//, `doubled sheet prefix: ${path}`);
     }
   });
 

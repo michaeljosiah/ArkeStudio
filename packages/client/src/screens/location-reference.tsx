@@ -7,8 +7,10 @@ import {
   stagedReferenceKey,
   orderedLocationViews,
   panelMapPhrase,
+  type Job,
   type LocationView,
   type ReferenceKit,
+  type ReviewDecision,
   type SizeTier,
   type Take,
 } from "@arke-studio/contracts";
@@ -26,9 +28,98 @@ import {
   pickStagedReference,
   rejectReferenceTake,
   useLocationViewUpload,
+  useStore,
 } from "../lib/store.js";
 
 const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
+
+/** One picture waiting on a name, whether or not a take was ever recorded for it. */
+export type PendingLocationView = {
+  /** Unique across both sources; the key the naming state is held under. */
+  key: string;
+  /** World-relative path to the bytes on screen. */
+  path: string;
+  /** What Accept sends. A candidate is accepted by filename and recovers its take first. */
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string };
+  /** Present only when a take exists: a rejection is a decision recorded against one. */
+  takeId: string | null;
+  /** What the generation asked this angle to be called; the name field opens on it. */
+  proposedName: string;
+  model: string;
+  anchored: boolean;
+  /** Newest first, and the download name's last resort. */
+  at: string;
+  sourceId: string;
+};
+
+/**
+ * Everything this location has waiting on a name.
+ *
+ * Two sources, deliberately one list. A generated view lands in `candidates/` and becomes a take
+ * when its job finalizes, so a finalization that never ran — v0.5.0 recorded no take for a
+ * location view and reported complete (issue 274) — leaves a picture somebody paid for that the
+ * screen could not see and no retry would ever reach. Reading the loose candidates back puts it
+ * where every other candidate is, and accepting one records the take its job always owed.
+ *
+ * Only candidates a succeeded job actually landed: a file with no generation behind it has no
+ * provenance to record, and offering it would be offering an Accept that could only refuse. A
+ * finalization still pending is skipped too — it is about to become a take of its own.
+ */
+export function pendingLocationViews(
+  world: {
+    referenceTakes: readonly Take[];
+    referenceReviews: readonly ReviewDecision[];
+    referenceCandidates: Readonly<Record<string, readonly string[]>>;
+  },
+  jobs: readonly Job[],
+  worldId: string,
+  sheetId: string,
+): PendingLocationView[] {
+  const rows: PendingLocationView[] = [];
+  for (const take of world.referenceTakes) {
+    if (take.kind !== "location-view" || take.reference?.sheetId !== sheetId) continue;
+    if (world.referenceReviews.some((review) => review.takeId === take.id)) continue;
+    const proposed = take.params["locationView"] as { name?: string } | undefined;
+    rows.push({
+      key: `take:${take.id}`,
+      path: `references/${sheetId}/takes/${take.id}/${take.media ?? ""}`,
+      selection: { source: "take", takeId: take.id },
+      takeId: take.id,
+      proposedName: proposed?.name ?? "",
+      model: take.model,
+      anchored: take.references.length > 0,
+      at: take.completedAt ?? take.dispatchedAt,
+      sourceId: take.id,
+    });
+  }
+  const recorded = new Set(world.referenceTakes.map((take) => take.jobId));
+  for (const path of world.referenceCandidates[sheetId] ?? []) {
+    const job = jobs.find(
+      (candidate) =>
+        candidate.worldId === worldId &&
+        candidate.status === "succeeded" &&
+        candidate.target.kind === "location-view-candidate" &&
+        candidate.finalization?.status !== "pending" &&
+        !recorded.has(candidate.id) &&
+        candidate.landedFiles?.includes(path) === true,
+    );
+    if (!job) continue;
+    const proposed = job.params["locationView"] as { name?: string } | undefined;
+    const file = path.slice(path.lastIndexOf("/") + 1);
+    rows.push({
+      key: `candidate:${path}`,
+      path,
+      selection: { source: "candidate", file },
+      takeId: null,
+      proposedName: proposed?.name ?? "",
+      model: job.model,
+      anchored: ((job.params["references"] as unknown[] | undefined) ?? []).length > 0,
+      at: job.updatedAt,
+      sourceId: file.replace(/\.[^.]+$/, ""),
+    });
+  }
+  return rows.sort((a, b) => b.at.localeCompare(a.at));
+}
 
 /** The picker belongs to the host, so in the browser there is nothing to open. */
 function canPickFiles(): boolean {
@@ -69,11 +160,12 @@ function LocationHeader({ worldId, sheetId, name, status }: {
  */
 export function LocationReferenceScreen() {
   const { worldId, sheetId } = useParams();
+  const { state } = useStore();
   const world = useOpenWorldGuard(worldId);
   const sheet = useSheet(worldId, sheetId);
   const upload = useLocationViewUpload()[sheetId ?? ""];
   const [naming, setNaming] = useState<{
-    takeId: string;
+    key: string;
     name: string;
     confirmReplace: boolean;
     /** Promote this candidate to panel 1. Only ever a choice once there is a panel 1 to displace. */
@@ -102,14 +194,7 @@ export function LocationReferenceScreen() {
   const uploading = upload?.status === null;
   const canUpload = canPickFiles();
 
-  const pending: Take[] = world.referenceTakes
-    .filter(
-      (take) =>
-        take.kind === "location-view" &&
-        take.reference?.sheetId === sheetId &&
-        !world.referenceReviews.some((review) => review.takeId === take.id),
-    )
-    .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt));
+  const pending = pendingLocationViews(world, state?.app.jobs ?? [], worldId, sheetId);
 
   // The name the user is typing against the names already taken. Folded the same way the
   // contract folds them, so the screen cannot say "free" about a name the write will refuse.
@@ -190,28 +275,28 @@ export function LocationReferenceScreen() {
           {pending.length > 0 && (
             <section className="fy-locref__pending">
               <h3>A view is waiting on you</h3>
-              {pending.map((take) => {
-                const proposed = take.params["locationView"] as { name?: string } | undefined;
-                const active = naming?.takeId === take.id ? naming : null;
-                const name = active?.name ?? proposed?.name ?? "";
+              {pending.map((candidate) => {
+                const active = naming?.key === candidate.key ? naming : null;
+                const rejectable = candidate.takeId;
+                const name = active?.name ?? candidate.proposedName;
                 const clash = name.trim() !== "" && collides(name);
                 return (
-                  <div key={take.id} className="fy-locref__candidate">
+                  <div key={candidate.key} className="fy-locref__candidate">
                     <span className="fy-locref__status fy-mono">UNREVIEWED</span>
                     {/* Unnamed until it is accepted, so a candidate saves under the take that
                         made it — deterministic, and it says which one it was. */}
                     <div className="fy-locref__candidateimage fy-imghost">
                       <Portrait
                         worldSlug={world.meta.slug}
-                        path={`references/${sheetId}/takes/${take.id}/${take.media ?? ""}`}
+                        path={candidate.path}
                         label={name || "Candidate view"}
                         radius={6}
                         download
-                        downloadName={name.trim() || `${sheet.name} candidate view ${take.id}`}
+                        downloadName={name.trim() || `${sheet.name} candidate view ${candidate.sourceId}`}
                       />
                     </div>
                     <p className="fy-mono">
-                      {take.model} · {take.references.length > 0 ? "anchored to the establishing view" : "unanchored"}
+                      {candidate.model} · {candidate.anchored ? "anchored to the establishing view" : "unanchored"}
                     </p>
                     <label className="fy-locref__namefield">
                       <span>Name this view</span>
@@ -222,7 +307,7 @@ export function LocationReferenceScreen() {
                         placeholder={establishing ? "Establishing view" : "Reverse angle"}
                         onChange={(event) =>
                           setNaming({
-                            takeId: take.id,
+                            key: candidate.key,
                             name: event.target.value,
                             confirmReplace: false,
                             asEstablishing: active?.asEstablishing ?? false,
@@ -240,7 +325,7 @@ export function LocationReferenceScreen() {
                           variant="secondary"
                           onClick={() =>
                             setNaming({
-                              takeId: take.id,
+                              key: candidate.key,
                               name,
                               confirmReplace: true,
                               asEstablishing: active?.asEstablishing ?? false,
@@ -261,7 +346,7 @@ export function LocationReferenceScreen() {
                           checked={active?.asEstablishing ?? false}
                           onChange={(event) =>
                             setNaming({
-                              takeId: take.id,
+                              key: candidate.key,
                               name,
                               confirmReplace: active?.confirmReplace ?? false,
                               asEstablishing: event.target.checked,
@@ -281,7 +366,7 @@ export function LocationReferenceScreen() {
                             : undefined
                         }
                         onClick={() => {
-                          acceptLocationView(worldId, sheetId, take.id, {
+                          acceptLocationView(worldId, sheetId, candidate.selection, {
                             name: name.trim(),
                             ...(establishing || active?.asEstablishing ? { establishing: true } : {}),
                             ...(clash ? { replaceExistingName: true } : {}),
@@ -291,13 +376,19 @@ export function LocationReferenceScreen() {
                       >
                         Accept
                       </Button>
-                      <Button variant="ghost" onClick={() => rejectReferenceTake(worldId, take.id, "environment")}>
-                        Reject
-                      </Button>
+                      {/* A rejection is a decision recorded against a take, so it is offered on
+                          the candidates that have one. A loose candidate is answered by accepting
+                          it — that is what records the take in the first place. */}
+                      {rejectable !== null && (
+                        <Button variant="ghost" onClick={() => rejectReferenceTake(worldId, rejectable, "environment")}>
+                          Reject
+                        </Button>
+                      )}
                     </div>
                     <p className="fy-locref__note">
-                      Accepting rebuilds the location sheet. Rejecting records the decision and changes nothing else —
-                      the take is kept either way.
+                      {rejectable !== null
+                        ? "Accepting rebuilds the location sheet. Rejecting records the decision and changes nothing else — the take is kept either way."
+                        : "Accepting rebuilds the location sheet."}
                     </p>
                   </div>
                 );

@@ -8180,16 +8180,50 @@ export class Coordinator {
       case "accept-location-view": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        // Before the recovery below, not after it: a take is the durable record of a generation
+        // and recording one is not the sort of thing to do on the way to refusing.
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        if (!sheet || sheet.type !== "location") return;
+        /*
+         * A candidate selection is a picture whose take was never recorded (issue 274): v0.5.0
+         * finalized `location-view-candidate` jobs without recording one and reported complete,
+         * and a finalization that can still fail leaves the same shape. The bytes are on disk
+         * and were paid for, so the accept records the take its job always owed before it does
+         * anything else — the same recovery `choose-anchor` performs for a main photo.
+         *
+         * The ledger is read for it, as the finalization would have: the entry is already
+         * appended by the time anything lands, and a recovered take that reported an unknown
+         * cost would be inventing a gap that is not there.
+         */
+        let takeId = msg.selection.source === "take" ? msg.selection.takeId : null;
+        if (msg.selection.source === "candidate") {
+          const landed = `references/${msg.sheetId}/candidates/${msg.selection.file}`;
+          const job = this.jobQueue
+            ?.listJobs()
+            .find(
+              (candidate) =>
+                candidate.status === "succeeded" &&
+                candidate.target.kind === "location-view-candidate" &&
+                candidate.target.id?.startsWith(`${msg.sheetId}/`) === true &&
+                candidate.landedFiles?.includes(landed) === true,
+            );
+          const ledgerEntry =
+            job && this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id) : undefined;
+          const recovered = job ? await recordReferenceTake(store, job, ledgerEntry).catch(() => null) : null;
+          takeId = recovered?.id ?? null;
+        }
+        // A refusal here is the same silence as every other one below: nothing was changed, and
+        // the candidate is still on the screen to try again.
+        if (!takeId) return;
         const bundle = store.getBundle();
-        const sheet = bundle.sheets.find((candidate) => candidate.id === msg.sheetId);
         const take = pendingReferenceTake(
           bundle.referenceTakes,
           bundle.referenceReviews,
-          msg.takeId,
+          takeId,
           msg.sheetId,
           "location-view",
         );
-        if (!sheet || sheet.type !== "location" || !take?.media) return;
+        if (!take?.media) return;
         const media = `references/${msg.sheetId}/takes/${take.id}/${take.media}`;
         if (
           basename(take.media) !== take.media ||
