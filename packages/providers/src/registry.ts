@@ -13,6 +13,7 @@ import { HiggsfieldClient } from "./clients/higgsfield.js";
 import { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 import { OllamaClient } from "./clients/ollama.js";
 import { OpenAiClient } from "./clients/openai.js";
+import { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 import { captureProviderClient } from "./capture.js";
 import { missingHiggsfieldRunner } from "./higgsfield-cli.js";
 import type { CommandRunner, FetchLike, ProviderCallCapture, ProviderClient } from "./types.js";
@@ -27,11 +28,14 @@ export interface ProviderClientDeps {
   higgsfield?: CommandRunner;
   /**
    * Where the Voxa sidecar is listening, resolved per call. Omitted where local voice cannot
-   * run at all — the Kokoro client is then absent rather than present and always failing.
+   * run at all — the Kokoro and whisper.cpp clients are then absent rather than present and
+   * always failing.
    */
   voxa?: SidecarBaseUrl;
   /** Host-owned synthesis path shared with direct Voxa callers, including its global scheduler. */
   voxaSynthesize?: KokoroSynthesize;
+  /** Host-owned transcription path shared with direct Voxa callers, including its cancellation. */
+  voxaTranscribe?: WhisperTranscribe;
   /**
    * The ComfyUI engine (SPEC-021): where it listens right now, and the pre-flight verification
    * every submit re-runs before touching the wire (§2.5). Omitted where no engine service is
@@ -52,11 +56,17 @@ export interface ProviderClientDeps {
 /**
  * The client registry (T-9): one instance per provider, declarations included.
  *
- * Kokoro is here (design 70) but is not a cloud client: it reaches the local Voxa sidecar over
- * loopback and has no credential, so its manifest row is gated by runtime detection rather
- * than by a secret. It exists so a local read is a job like any other — numbered, priced at
- * nothing, re-runnable and recoverable — instead of a second path around the queue. whisper.cpp
- * is still absent: transcription never travels this way.
+ * Kokoro and whisper.cpp are here (design 70, issue 462) but are not cloud clients: they reach
+ * the local Voxa sidecar over loopback and have no credential, so their manifest rows are gated
+ * by runtime detection rather than by a secret. They exist so a local read is a job like any
+ * other — numbered, priced at nothing, re-runnable and recoverable — instead of a second path
+ * around the queue. Both are absent when no sidecar is wired, rather than present and always
+ * failing; that absence is the whole point, because a keyless provider with no client reads as
+ * *available* to `deriveCapabilityAvailability` and there is nothing behind it.
+ *
+ * Push-to-talk dictation is deliberately NOT this path and keeps calling the sidecar directly:
+ * its recording is dropped the moment there is a transcript (SPEC-018 R-13), and a job would
+ * journal the one thing that must not persist.
  *
  * Higgsfield is the one client that is not an HTTP client (issue #137): it drives the vendor's
  * CLI as a subprocess and still takes `fetch`, because results are URLs and the bytes come
@@ -90,6 +100,12 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
             fetchImpl,
             capture,
           ),
+          whispercpp: captureProviderClient(
+            "whispercpp",
+            (fetch) => new WhisperCppClient(fetch, deps.voxa!, deps.voxaTranscribe),
+            fetchImpl,
+            capture,
+          ),
         }),
     ...(deps.comfyui === undefined
       ? {}
@@ -118,6 +134,10 @@ export const PROVIDER_DECLARATIONS: Partial<Record<ProviderId, ClientDeclaration
     createProviderClients({
       fetch: (() => Promise.reject(new Error("declarations-only"))) as FetchLike,
       higgsfield: () => Promise.reject(new Error("declarations-only")),
+      // Wired so the table covers the sidecar-backed providers too. A null base URL is the
+      // "not running" answer every one of their calls already handles, and reading declarations
+      // makes no call at all.
+      voxa: () => null,
       comfyui: {
         baseUrl: () => null,
         preflight: () => Promise.reject(new Error("declarations-only")),

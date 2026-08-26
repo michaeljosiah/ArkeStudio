@@ -41,6 +41,7 @@ import {
   estimateMicroUsd,
   modelForCapability,
   gateLocalRuntimes,
+  PROVIDERS,
   planScene,
   previewLineFor,
   SceneSchema,
@@ -673,6 +674,10 @@ export class Coordinator {
   private readonly setup: LocalSetupService | null;
   private readonly lifecycleDisposers = new Set<() => void>();
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
+  /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
+  private lastLocalRuntimeStatuses = "";
+  /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
+  private localRuntimeProbeInFlight = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
@@ -1811,6 +1816,17 @@ export class Coordinator {
       this.lifecycleTimers.add(timer);
     }
 
+    // What the keyless local runtimes can serve, kept current (issue 462). Not awaited at seed:
+    // the sidecar is still starting then, and a first paint that waits on four probes to say
+    // "not yet" is worse than one that corrects itself a moment later.
+    {
+      const probe = (): void => void this.revalidateLocalRuntimes().catch(() => {});
+      probe();
+      const timer = setInterval(probe, 30_000);
+      timer.unref?.();
+      this.lifecycleTimers.add(timer);
+    }
+
     // Stored keys reach the harness child as spawn environment before its first spawn
     // (SPEC-005 D5) — under v2's redirected profile there is no other credential path.
     await this.refreshHarnessEnv();
@@ -2024,6 +2040,46 @@ export class Coordinator {
       type: "provider.tool-status",
       tools: [...this.providerTools.values()].map((tool) => tool.current()),
     });
+  }
+
+  /**
+   * What the keyless local runtimes can actually serve, asked instead of assumed (issue 462).
+   *
+   * A provider whose credential is `none` is `configured` the moment it exists, and
+   * `deriveCapabilityAvailability` reads *configured + untested* as **available**. Nothing ever
+   * moved them off `untested`: `validate` was called only for tool-backed providers, and the
+   * Test button Settings offers belongs to the keyed providers alone. So Ollama with no models
+   * pulled, a sidecar that never started, and an engine nobody wired were all offering their
+   * capabilities to every picker and gate that asks — and whisper.cpp was offering `voice-stt`
+   * with no client behind it at all, which is what issue 462 was raised about.
+   *
+   * A poll rather than one pass at seed, because a local runtime is the one kind that arrives
+   * *after* the app does: Voxa is still starting during seed, ComfyUI is launched by hand, and
+   * Ollama is started from a terminal halfway through a session. A single probe at startup
+   * would replace an answer that is wrong-but-optimistic with one that is wrong and sticky.
+   * Every probe is a loopback call with its own short timeout and no side effect — a models
+   * list, a health read, a version read — and none of them is ever on the critical path.
+   *
+   * Only a *changed* answer is emitted. A status frame every tick would re-render Settings
+   * forever over four probes that almost always say the same thing.
+   */
+  private async revalidateLocalRuntimes(): Promise<void> {
+    // A port that is open but never answers would otherwise stack a new pass on the old one
+    // every tick, forever. Skipping is the right answer: the next tick asks again.
+    if (this.stopping || this.localRuntimeProbeInFlight) return;
+    this.localRuntimeProbeInFlight = true;
+    const local = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
+    try {
+      await Promise.all(local.map((id) => this.providerService.validate(id).catch(() => {})));
+    } finally {
+      this.localRuntimeProbeInFlight = false;
+    }
+    if (this.stopping) return;
+    const statuses = this.providerService.list();
+    const fingerprint = JSON.stringify(statuses.filter((s) => local.includes(s.id)));
+    if (fingerprint === this.lastLocalRuntimeStatuses) return;
+    this.lastLocalRuntimeStatuses = fingerprint;
+    this.emit({ at: new Date().toISOString(), type: "provider.status", providers: statuses });
   }
 
   /**

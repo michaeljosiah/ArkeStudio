@@ -286,7 +286,10 @@ export class ComfyUiClient implements ProviderClient {
     }
     let body: unknown;
     try {
-      const answer = await jsonRequest(this.fetchImpl, this.id, `${base}/system_stats`, {});
+      // Bounded for the same reason as Ollama's: validation is polled (issue 462).
+      const answer = await jsonRequest(this.fetchImpl, this.id, `${base}/system_stats`, {
+        signal: AbortSignal.timeout(3_000),
+      });
       if (answer.status >= 400) {
         return capabilities.map((capability) => ({
           capability,

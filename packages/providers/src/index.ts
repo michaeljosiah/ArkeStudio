@@ -39,6 +39,7 @@ export { HiggsfieldClient } from "./clients/higgsfield.js";
 export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
+export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 export { jsonRequest, tryProbe } from "./clients/http.js";
 export { requireModel, SHIPPED_MANIFEST } from "./manifest-data.js";
 export { createProviderClients, PROVIDER_DECLARATIONS, type ProviderClientDeps } from "./registry.js";
@@ -65,6 +66,7 @@ export {
   type FetchedArtifact,
   type FetchLike,
   type PollResult,
+  type PreparedAudioSource,
   type ProviderClient,
   type ProviderCallCapture,
   type ProviderCallContext,
