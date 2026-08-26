@@ -10,6 +10,7 @@ import {
   isMediaOnly,
   mediaCanvasSec,
   placedExtentSec,
+  placedFilmSec,
   episodeExportRefusals,
   spineExportRefusals,
   trimCeilingSec,
@@ -219,6 +220,20 @@ export function ProductionLayout() {
   const shape = production ? productionShape(production.meta) : null;
   const isStory = shape?.hasChapters === true;
   const cut = production ? deriveCut(production) : null;
+  /*
+   * The rail and the switcher state a length, and it has to be the length the Cut screen states.
+   *
+   * A production with no story keeps its clock in the clips (issue 453), and the derived cut
+   * reads zero there — so both of these advertised a `0s` cut for a film that plays and exports,
+   * one panel away from a header saying how long it actually runs (issue 508).
+   *
+   * Gated exactly as the Cut and Exports screens gate it: a production with a spine is never
+   * this, however unresolved that spine is, or the rail would call the clips the film while the
+   * screen beside it still treated the song as authoritative.
+   */
+  const mediaOnly =
+    cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
+  const filmSec = mediaOnly ? placedFilmSec(production?.cut.overlays ?? [], world?.artifacts ?? []) : 0;
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes
@@ -308,11 +323,22 @@ export function ProductionLayout() {
       </NavLink>
     );
   };
+  /*
+   * Two figures, because the rail states the cut and the switcher states how much of it is
+   * covered — and one figure for a production with no story, which has no shots to cover and only
+   * ever had one length. It is written as a measurement, the way the Cut header and the Exports
+   * button write it: a 0.4s film is real and exportable, and rounding it to `0s` would make it
+   * look exactly like the empty production the export refuses.
+   */
+  const railFigure = mediaOnly ? runtimeSeconds(filmSec) : seconds(cut?.totalSec ?? 0);
+  const cutFigure = mediaOnly
+    ? runtimeSeconds(filmSec)
+    : seconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${seconds(cut.totalSec - cut.uncoveredSec)} cut` : ""}`
+      : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${cutFigure} cut` : ""}`
     : "";
   return (
     <div className="fy-app">
@@ -392,7 +418,7 @@ export function ProductionLayout() {
               {item("scenes/new", "New scene", undefined, true, false, true)}
               {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
               {item("generate", "Generate", String(production?.takes.length ?? 0))}
-              {item("cut", "Cut", cut ? seconds(cut.totalSec) : "0:00")}
+              {item("cut", "Cut", cut ? railFigure : "0:00")}
               {item("audio", "Audio", String(audioCount))}
               {item("exports", "Exports", String(exportCount))}
             </>
@@ -4717,12 +4743,7 @@ export function ExportsScreen() {
   const overlays = production?.cut.overlays ?? [];
   const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
   const placedArtifacts = world?.artifacts ?? [];
-  const placedSec = mediaOnly
-    ? placedExtentSec([
-        ...exportOverlays(overlays, placedArtifacts),
-        ...exportAudioClips(overlays, placedArtifacts),
-      ])
-    : 0;
+  const placedSec = mediaOnly ? placedFilmSec(overlays, placedArtifacts) : 0;
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
   /*
