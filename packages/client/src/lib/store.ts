@@ -101,6 +101,8 @@ export interface CanonRefsState {
    * empty for an entry the moment a bulk write fills the window.
    */
   history: ChangeRecord[];
+  /** The canon revision this answer describes — how a late one is told from a current one. */
+  canonRevision: number;
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
@@ -1146,10 +1148,22 @@ function handleFrame(json: string): void {
       // Checked against the open world, as sheet.refs is: the answer is computed asynchronously
       // now that it reads the change log, so one for a world just switched away from can still
       // land here — and it would land on a live entry sharing its number (PR 540 review).
-      canonRefs = {
-        ...canonRefs,
-        [event.entryId]: { citedBy: event.citedBy, history: event.history, ripples: event.ripples },
-      };
+      //
+      // Two for the same entry can also be in flight — the entry re-asks when canon moves — and
+      // arrival order is not the order they were computed in. The one describing the later
+      // revision wins, so an answer overtaken in flight cannot put the history back as it was.
+      const held = canonRefs[event.entryId];
+      if (held === undefined || event.canonRevision >= held.canonRevision) {
+        canonRefs = {
+          ...canonRefs,
+          [event.entryId]: {
+            citedBy: event.citedBy,
+            history: event.history,
+            canonRevision: event.canonRevision,
+            ripples: event.ripples,
+          },
+        };
+      }
     } else if (event.type === "sheet.refs" && event.worldId === current.state.world?.meta.worldId) {
       sheetRefs = {
         ...sheetRefs,

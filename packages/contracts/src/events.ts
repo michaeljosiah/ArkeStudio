@@ -1110,6 +1110,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        * reports nothing while its records sit intact on disk.
        */
       history: z.array(ChangeRecordSchema),
+      /**
+       * The canon revision this answer describes. Answering reads the change log, so two asked
+       * of the same entry can be in flight at once and the older can come back last; the reader
+       * keeps the answer describing the later revision rather than the one that arrived later.
+       */
+      canonRevision: z.number().int(),
       ripples: z.array(
         z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict(),
       ),

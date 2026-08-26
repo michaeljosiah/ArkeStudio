@@ -88,20 +88,56 @@ const ENTITY_HISTORY_MAX = 200;
  * then reports "no recorded changes" for an entry whose records are sitting intact on disk.
  *
  * So a detail surface that wants one entity's history reads the log for that entity, per
- * SPEC-006 §2.5. The whole file is read: it is one small append-only file, and reading it in
- * full is what makes the answer independent of how much else has happened since.
+ * SPEC-006 §2.5.
+ *
+ * Not via `readChanges`, and not from the end of the file only (PR 540 review). Parsing every
+ * record to keep a handful cost 750ms on a 200k-line log, and this runs on every entry open and
+ * again whenever canon moves; but bounding the *read* to a tail of bytes would reintroduce this
+ * issue's own bug one level down, since an entry last touched long ago has its records at the
+ * front. So the whole file is scanned and almost none of it is parsed: lines are walked
+ * backwards, skipped unless they carry the entity's characters at all, and the walk stops once
+ * enough have been found. Same answer, a fiftieth of the work.
  */
 export async function changesForEntity(worldDir: string, entity: string): Promise<ChangeRecord[]> {
-  const lines = await readChanges(join(worldDir, "changes.jsonl"));
+  let raw: string;
+  try {
+    raw = await readFile(toExtendedLength(join(worldDir, "changes.jsonl")), "utf8");
+  } catch {
+    return [];
+  }
+  /*
+   * A record for this entity must contain the entity's own characters somewhere in its bytes,
+   * whatever spacing or key order the line was written with — so a line without them cannot be
+   * one, and need not be parsed to prove it. Only for an entity JSON leaves alone: one needing
+   * an escape would be spelled differently on disk than here, and then every line is parsed
+   * rather than a record being quietly missed.
+   */
+  const probe = JSON.stringify(entity) === `"${entity}"` ? entity : null;
+
   const out: ChangeRecord[] = [];
-  for (const line of lines) {
-    if (line.entity !== entity) continue;
-    const parsed = ChangeRecordSchema.safeParse(line);
+  let end = raw.length;
+  while (end > 0 && out.length < ENTITY_HISTORY_MAX) {
+    const newline = raw.lastIndexOf("\n", end - 1);
+    const line = raw.slice(newline + 1, end).trim();
+    end = newline; // -1 once the first line has been read, which ends the walk
+    if (!line) continue;
+    if (probe !== null && !line.includes(probe)) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      // A truncated final line is the crash signature (R-22) and a malformed one mid-file is
+      // corruption; neither is this entity's history, and neither may make reading throw.
+      continue;
+    }
+    if ((value as ChangeLine | null)?.entity !== entity) continue;
+    const parsed = ChangeRecordSchema.safeParse(value);
     if (parsed.success) out.push(parsed.data);
   }
-  // The newest are the ones kept: the panel reads newest first, and a truncated tail of an
-  // entry's own history is a different thing from a history evicted by unrelated writes.
-  return out.slice(-ENTITY_HISTORY_MAX);
+  // Walked newest first and handed back oldest first: the newest are the ones a bound keeps, and
+  // a truncated tail of an entry's own history is a different thing from one evicted by
+  // unrelated writes — which is the whole point of reading per entity.
+  return out.reverse();
 }
 
 /** Whether the log already carries a line for this commit — the roll-forward idempotency probe. */
