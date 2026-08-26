@@ -179,6 +179,41 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     assert.ok(html.includes("Duplicate") && html.includes("Delete"));
   });
 
+  it("assembles the editable prompt for the production's actual medium", () => {
+    const withTiming = withScene((s) => ({
+      shots: (s as { shots: Array<{ id: string }> }).shots.map((shot) =>
+        shot.id === "sh_12"
+          ? {
+              ...shot,
+              intent: "A held breath",
+              beats: [{ span: "0–4s", text: "She crosses the room" }],
+            }
+          : shot,
+      ),
+    }));
+    const world = withTiming.world!;
+    const video = render(withTiming, SHOT_PATH, <ShotSheetScreen />, ROUTE);
+    assert.ok(video.includes("infer unset camera choices from this"));
+    assert.ok(video.includes("Shot timing 0–4s"), "video preview includes its authored timing");
+    assert.ok(!video.includes("SPATIAL LAYOUT"), "editable video text excludes generated pass context");
+    assert.ok(!video.includes("CAMERA ANCHOR"), "editable video text cannot duplicate an anchor in an override");
+
+    const stills: ClientState = {
+      ...withTiming,
+      world: {
+        ...world,
+        productions: world.productions.map((production) =>
+          production.meta.id === "saltlight"
+            ? { ...production, meta: { ...production.meta, format: "stills" } }
+            : production,
+        ),
+      },
+    };
+    const image = render(stills, SHOT_PATH, <ShotSheetScreen />, ROUTE);
+    assert.ok(image.includes("infer unset camera choices from this"), "cinematic intent still guides one frame");
+    assert.ok(!image.includes("Shot timing 0–4s"), "a still preview cannot save temporal rows into an override");
+  });
+
   it("camera fields say where their value comes from: a scene default reads as from scene", () => {
     const html = render(
       withScene(() => ({ defaults: { size: "Medium" } })),

@@ -74,7 +74,7 @@ export const ShotSchema = z
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),
-    /** Turn 97 (14d): how it should feel. The camera is inferred from this; hand settings win. */
+    /** Turn 97 (14d): how it should feel. The prompt asks the model to infer only unset camera choices. */
     intent: z.string().optional(),
     /** Turn 97 (14d): timing beats — `span` is a label ("0–3s"), not a machine timeline. */
     beats: z

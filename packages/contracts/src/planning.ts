@@ -85,9 +85,9 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
  * make a fragment look like prose. Where the phrasing is ours, the capital is written in.
  */
 function sentence(text: string): string {
-  const trimmed = text.trim().replace(/[.\s]+$/, "");
+  const trimmed = text.trim();
   if (trimmed.length === 0) return "";
-  return `${trimmed}.`;
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /** The first clause of a named section, which is how a sheet's prose enters a prompt. */
@@ -129,7 +129,7 @@ export interface PromptBlocks {
   cameraAnchor: string;
   /** The shot's own action. */
   body: string;
-  /** This shot's camera and audio direction — part of the beat, in a pass. */
+  /** This shot's cinematic intent, camera, authored timing and audio — part of the beat, in a pass. */
   direction: string;
   /**
    * Art direction restated as what must not drift. Stated once per clip and never per beat
@@ -276,15 +276,31 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   const cameraLines = [authoredCamera, framingLine].filter((line) => line.length > 0).join("\n");
   const cameraAnchor = spatial.length > 0 && cameraLines.length > 0 ? `CAMERA ANCHOR\n${cameraLines}` : "";
 
-  // 5 — direction: this shot's camera and audio. Per-beat, so in a pass it travels with the beat.
+  // 5 — direction: this shot's intent, camera, local timing and audio. Per-beat, so in a pass it
+  // travels with the beat. Authored timing labels never become the pass's machine boundaries.
   // The camera is spoken once: if it has been raised into its own anchor block, it does not also
   // trail the description.
   const directionParts: string[] = [];
+  const cinematicIntent = shot.intent?.trim() ?? "";
+  if (cinematicIntent.length > 0) {
+    directionParts.push(
+      sentence(`Cinematic intent (infer unset camera choices from this; explicit camera settings win): ${cinematicIntent}`),
+    );
+  }
   // Two sentences, not one run-on: without the anchor block to separate them, "facing the doorway
   // medium close-up, low" reads as a single garbled instruction.
   if (cameraAnchor.length === 0) {
     if (authoredCamera.length > 0) directionParts.push(sentence(authoredCamera));
     if (framingLine.length > 0) directionParts.push(sentence(framingLine));
+  }
+  if (input.capability !== "image") {
+    for (const beat of shot.beats ?? []) {
+      const span = beat.span.trim();
+      const text = beat.text.trim();
+      if (span.length > 0 && text.length > 0) {
+        directionParts.push(sentence(`Shot timing ${span}: ${text}`));
+      }
+    }
   }
   if (shot.audio?.kind && shot.audio.kind !== "silence") {
     directionParts.push(
@@ -403,7 +419,7 @@ export function assemblePassBlocks(input: {
   }
 }
 
-/** The assembled form: cited sheets, the scene's location, the tone, the shot's direction. */
+/** The assembled form: cited sheets, scene and world context, and all authored shot direction. */
 export function assemblePrompt(
   world: WorldMeta,
   sheets: Sheet[],

@@ -215,6 +215,75 @@ describe("the pass compiler (issue 398)", () => {
     assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 10, "the plan describes the clip that was asked for");
   });
 
+  it("keeps authored timing inside each shot prompt and out of the machine shot plan", async () => {
+    const { bundle } = await open();
+    const production = bundle.productions[0]!;
+    const first: Shot = {
+      ...shot(1, 5, "a pier in fog"),
+      intent: "Uncertain but committed",
+      beats: [
+        { span: "0–2s", text: "The rope stays taut" },
+        { span: "2–5s", text: "A hand lets go" },
+      ],
+    };
+    const second: Shot = {
+      ...shot(2, 5, "a bell above the water"),
+      intent: "Release",
+      beats: [{ span: "throughout", text: "The bell recedes into haze" }],
+    };
+    const scene: Scene = { ...production.scenes[0]!, shots: [first, second] };
+    const planFor = (mode: "per-shot" | "whole-scene") =>
+      planScene(
+        {
+          world: bundle.meta,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits,
+          scene,
+          selections: {},
+          model: WAN_LIKE,
+        },
+        mode,
+      );
+
+    const perShot = compilePasses({
+      productionId: production.meta.id,
+      scene,
+      plan: planFor("per-shot"),
+      model: WAN_LIKE,
+      world: bundle,
+    });
+    assert.equal(perShot.length, 2);
+    const firstPrompt = String(perShot[0]!.params["prompt"]);
+    const secondPrompt = String(perShot[1]!.params["prompt"]);
+    assert.match(firstPrompt, /infer unset camera choices from this; explicit camera settings win/);
+    assert.match(firstPrompt, /Shot timing 0–2s: The rope stays taut\./);
+    assert.match(firstPrompt, /Shot timing 2–5s: A hand lets go\./);
+    assert.ok(!firstPrompt.includes("The bell recedes"), "one shot never receives another shot's timing");
+    assert.match(secondPrompt, /Shot timing throughout: The bell recedes into haze\./);
+    assert.ok(!secondPrompt.includes("The rope stays taut"), "the isolation works in both directions");
+
+    const [wholeScene] = compilePasses({
+      productionId: production.meta.id,
+      scene,
+      plan: planFor("whole-scene"),
+      model: WAN_LIKE,
+      world: bundle,
+    });
+    const wholePrompt = String(wholeScene!.params["prompt"]);
+    for (const authored of ["Uncertain but committed", "The rope stays taut", "A hand lets go", "Release", "The bell recedes into haze"]) {
+      assert.ok(wholePrompt.includes(authored), `the whole-scene prompt carries: ${authored}`);
+    }
+    const shotRows = wholePrompt.match(/^\[shot \d+ ·[^\n]*$/gm) ?? [];
+    assert.equal(shotRows.length, 2, "authored timing adds no shot wrapper");
+    assert.match(shotRows[0]!, /Uncertain but committed.*The rope stays taut.*A hand lets go/);
+    assert.ok(!shotRows[0]!.includes("The bell recedes"), "shot 1 contains only shot 1's timing");
+    assert.match(shotRows[1]!, /Release.*The bell recedes into haze/);
+    assert.ok(!shotRows[1]!.includes("The rope stays taut"), "shot 2 contains only shot 2's timing");
+    const shotPlan = wholeScene!.params["shotPlan"] as Array<{ shotId: string }>;
+    assert.deepEqual(shotPlan.map((entry) => entry.shotId), [first.id, second.id], "authored timing adds no boundary");
+  });
+
   it("a model change is a recompile, never a stale capability assumption", async () => {
     const { bundle } = await open();
     const production = bundle.productions[0]!;

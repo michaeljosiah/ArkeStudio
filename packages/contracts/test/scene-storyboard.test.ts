@@ -57,6 +57,8 @@ describe("the structured camera (turn 97, 14d)", () => {
       continuity: { openOnPrevious: true, keepOut: "text, lens flare" },
       audio: { kind: "sfx", ambience: "harbour swell", effects: "rope creak" },
     });
+    assert.equal(shot.intent, "Held breath.");
+    assert.deepEqual(shot.beats, [{ span: "0–2s", text: "Nothing moves" }]);
     assert.equal(shot.framing?.size, "Wide");
     assert.equal(shot.continuity?.openOnPrevious, true);
     assert.equal(shot.audio?.ambience, "harbour swell");
