@@ -335,7 +335,9 @@ export function ReferencePickerBody({
   /** The names the checked set will carry, said before they are added (issue 305 §4). */
   const previews = useMemo(() => {
     const used = new Map<ReferenceKind, number>();
-    for (const s of [...world, ...session]) {
+    // Every lane, not the two this started with: a character's picture holds a number too, and
+    // reading past it previewed a name already taken (issue 505).
+    for (const s of [...world, ...session, ...(characters ?? [])]) {
       if (s.existingToken === undefined) continue;
       const parsed = parseBenchToken(s.existingToken);
       if (parsed) used.set(parsed.kind, Math.max(used.get(parsed.kind) ?? 0, parsed.n));
@@ -352,7 +354,7 @@ export function ReferencePickerBody({
       byKey.set(p.source.key, benchTokenFor(p.source.kind, next));
     }
     return byKey;
-  }, [picks, world, session]);
+  }, [picks, world, session, characters]);
 
   function pickTile(source: PickerSource): void {
     if (source.active) return;
@@ -656,10 +658,15 @@ export function ReferencePickerDialog({
   );
 }
 
-/** The active set as budget items WITH their tokens, for the picker's capacity + replacement. */
-export function carriedForPicker(session: BenchSession, world: PickerSource[], sessionSources: PickerSource[]): Array<MultimediaReference & { token: string }> {
+/**
+ * The active set as budget items WITH their tokens, for the picker's capacity + replacement.
+ *
+ * `sources` is every row a token could have come from — one list, not a lane at a time, so a
+ * source the caller forgets cannot quietly resolve to no duration (issue 505).
+ */
+export function carriedForPicker(session: BenchSession, sources: readonly PickerSource[]): Array<MultimediaReference & { token: string }> {
   const byToken = new Map<string, PickerSource>();
-  for (const s of [...world, ...sessionSources]) if (s.existingToken !== undefined) byToken.set(s.existingToken, s);
+  for (const s of sources) if (s.existingToken !== undefined) byToken.set(s.existingToken, s);
   return session.composer.activeTokens.map((token) => {
     const source = byToken.get(token);
     const entry = session.tokenRegistry.find((e) => e.token === token);

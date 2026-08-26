@@ -223,10 +223,22 @@ function BenchWorkspace({
     () => (world ? characterPickerSources(world, session, "keyframe") : []),
     [world, session],
   );
-  const carried = useMemo(
-    () => carriedForPicker(session, worldSources, sessionSources),
-    [session, worldSources, sessionSources],
+  /**
+   * Every row a token could have come from, as ONE list (issue 505).
+   *
+   * A token is resolved back to its row in four places — the tiles of both lanes, the mention
+   * menu, and the carried set — and each used to concatenate its own lists. The tiles were
+   * written before the Characters tab existed, so anything picked from a character resolved to
+   * nothing: the tile said `missing` while the mention menu one line below named the same
+   * picture (issue 505). The lane split is about occupancy alone — a lookup by `existingToken`
+   * reads neither `active` nor the lane — so one list serves both lanes, and a fourth source
+   * can now only be added in one place.
+   */
+  const tokenSources = useMemo(
+    () => [...worldSources, ...sessionSources, ...characterSources],
+    [worldSources, sessionSources, characterSources],
   );
+  const carried = useMemo(() => carriedForPicker(session, tokenSources), [session, tokenSources]);
   const [pickerOpen, setPickerOpen] = useState(false);
   /** Which lane the open picker fills — the tabs choose what a picked picture is FOR. */
   const [pickerLane, setPickerLane] = useState<"reference" | "keyframe">("reference");
@@ -393,8 +405,8 @@ function BenchWorkspace({
   const attached = useMemo(() => new Set(attachedTokens), [attachedTokens]);
   /** The picker's own rows are where a mention gets its thumbnail, its name and its second line. */
   const mentions = useMemo(
-    () => mentionOptions(attachedTokens, [...worldSources, ...sessionSources, ...characterSources]),
-    [attachedTokens, worldSources, sessionSources, characterSources],
+    () => mentionOptions(attachedTokens, tokenSources),
+    [attachedTokens, tokenSources],
   );
   /** Said in the composer with the same function dispatch refuses with, so the two cannot differ. */
   const lostMentions = useMemo(
@@ -895,7 +907,7 @@ function BenchWorkspace({
           {lane === "reference" && !soundOnly && (
             <div className="fy-bench__refgrid">
               {session.composer.activeTokens.map((token) => {
-                const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
+                const source = tokenSources.find((s) => s.existingToken === token);
                 return (
                   <div key={token} className="fy-bench__reftile">
                     {source?.imagePath ? (
@@ -932,7 +944,7 @@ function BenchWorkspace({
             <>
               <div className="fy-bench__refgrid" data-testid="keyframe-lane">
                 {frames.map((token, index) => {
-                  const source = [...worldSources, ...sessionSources].find((s) => s.existingToken === token);
+                  const source = tokenSources.find((s) => s.existingToken === token);
                   return (
                     <div key={token} className="fy-bench__reftile">
                       {source?.imagePath ? (
