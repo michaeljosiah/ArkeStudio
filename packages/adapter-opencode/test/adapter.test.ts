@@ -412,7 +412,7 @@ describe("per-agent settings", () => {
 });
 
 describe("session configuration (R-5, R-6, R-10)", () => {
-  it("writes the roster with shell and network tools denied, and never a credential", () => {
+  it("writes the default roster with shell and public-web tools denied, and never a credential", () => {
     const config = buildSessionConfig({ worldQueryUrl: "http://127.0.0.1:9999/mcp" });
     const agents = config["agent"] as Record<
       string,

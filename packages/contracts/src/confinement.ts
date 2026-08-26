@@ -3,10 +3,10 @@ import { z } from "zod";
 /**
  * What an authoring agent is allowed to do, said once, in nobody's vocabulary (SPEC-005 R-10, R-17).
  *
- * The same policy — no shell, no network, read-only for the agents that answer rather than author
- * — was previously written twice, in two OpenCode grammars: v1's `tools`/`permission` maps and v2's
- * ordered last-match-wins rules. A third harness would have made three, and the intent would have
- * lived nowhere except in the agreement between them.
+ * The same policy — no shell, public-web research off by default, read-only for the agents that
+ * answer rather than author — was previously written twice, in two OpenCode grammars: v1's
+ * `tools`/`permission` maps and v2's ordered last-match-wins rules. A third harness would have made
+ * three, and the intent would have lived nowhere except in the agreement between them.
  *
  * This is the intent. Each adapter owns the table that turns it into tool names its harness
  * understands, and each renders it in its own shape — a config file for OpenCode, a runtime
