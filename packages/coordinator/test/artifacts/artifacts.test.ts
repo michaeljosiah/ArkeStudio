@@ -285,19 +285,25 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     const inFlight = new Promise<void>((resolve) => {
       probing = resolve;
     });
-    const pass = backfillMediaInfo(store, {
-      durationSec: async () => 5,
-      info: async (_path, opts) => {
-        probing();
-        // A real probe kills its child here; a fake one only has to notice it was asked to.
-        await new Promise<void>((resolve) => {
-          if (opts?.signal?.aborted === true) resolve();
-          else opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
-        });
-        withdrawn = true;
-        return null;
+    const pass = backfillMediaInfo(
+      store,
+      {
+        durationSec: async () => 5,
+        info: async (_path, opts) => {
+          probing();
+          // A real probe kills its child here; a fake one only has to notice it was asked to.
+          await new Promise<void>((resolve) => {
+            if (opts?.signal?.aborted === true) resolve();
+            else opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          withdrawn = true;
+          return null;
+        },
       },
-    });
+      // With a caller's own signal too, which is how the coordinator always runs it: the probe
+      // has to answer to both, and the close is the one that fires here.
+      { signal: new AbortController().signal },
+    );
     // Closed with a probe genuinely running, which is the only interesting moment: a close that
     // lands between files is the case the pass already handled before this issue.
     await inFlight;

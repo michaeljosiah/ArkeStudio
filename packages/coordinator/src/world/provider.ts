@@ -13,7 +13,7 @@ import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
-import { atomicWriteFile, renameWithRetry } from "./atomic.js";
+import { atomicWriteFile, renameWithRetry, type AtomicDeps } from "./atomic.js";
 import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
@@ -42,24 +42,12 @@ export interface CreateWorldInput {
 /** Codes a held handle produces. The rename has already retried through them (issue 288). */
 const HELD_OPEN = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
 
-/**
- * What the person who pressed Archive is told.
- *
- * A folder held open fails with a permissions code, and reporting that verbatim describes a
- * problem nobody has — the world is not read-only, something is reading it. Anything else is
- * reported as it came: a full disk or a missing folder is its own fault and its own message.
- */
-function archiveFailure(err: unknown): Error {
-  if (HELD_OPEN.has((err as NodeJS.ErrnoException).code ?? "")) {
-    return new Error("something is still using that world's files — nothing moved, so try again in a moment");
-  }
-  return err instanceof Error ? err : new Error(String(err));
-}
-
 export interface FsWorldProviderOptions {
   clock?: () => string;
   /** Injected SQLite constructor (Electron-ABI in the desktop shell; Node's by default). */
   sqlite?: DatabaseCtor;
+  /** Injectable for the archive-failure tests, exactly as `AtomicDeps` is for the retry ones. */
+  rename?: AtomicDeps["rename"];
 }
 
 export class FsWorldProvider implements WorldProvider {
@@ -72,6 +60,7 @@ export class FsWorldProvider implements WorldProvider {
   readonly pathBudget: PathBudget;
   private readonly clock: () => string;
   private readonly sqlite: DatabaseCtor | undefined;
+  private readonly renameDeps: AtomicDeps;
 
   constructor(
     readonly appRoot: string,
@@ -80,6 +69,7 @@ export class FsWorldProvider implements WorldProvider {
     this.pathBudget = checkPathBudget(appRoot);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.sqlite = opts.sqlite;
+    this.renameDeps = opts.rename ? { rename: opts.rename } : {};
   }
 
   private worldsDir(): string {
@@ -489,8 +479,14 @@ export class FsWorldProvider implements WorldProvider {
       // Never during shutdown: there is no screen left to strand, and reopening behind a close
       // that has already released the lock would leave the process holding a world it has no
       // remaining opportunity to put down.
-      if (wasOpen && !this.closing) await this.loadWorld(worldId).catch(() => {});
-      throw archiveFailure(err);
+      //
+      // And never over a world somebody has since opened. Message handlers overlap, so an
+      // open-world for a different world can land during the move's backoff — putting this one
+      // back on top of it would close the world the screen has just been told about and leave
+      // the provider serving one nobody selected, which is a worse version of the strand this
+      // reopen exists to prevent.
+      if (wasOpen && !this.closing && this.store === null) await this.loadWorld(worldId).catch(() => {});
+      throw err;
     }
   }
 
@@ -512,7 +508,21 @@ export class FsWorldProvider implements WorldProvider {
     // The same backoff as every other exclusive-access operation on a world (D7): Defender, the
     // search indexer and a media probe all take handles nobody asked them to hold, and each is
     // gone a moment later.
-    await renameWithRetry(dir, target);
+    try {
+      await renameWithRetry(dir, target, this.renameDeps);
+    } catch (err) {
+      /*
+       * Only the move is read as "in use", and only here.
+       *
+       * A folder held open fails with a permissions code, and reporting that verbatim describes a
+       * problem nobody has — the world is not read-only, something is reading it. But the same
+       * code from `mkdir archive/` above means the opposite: the destination is genuinely out of
+       * reach, retrying will not help, and the permissions diagnosis is the useful one. So the
+       * translation sits against the rename rather than over everything archiving does.
+       */
+      if (!HELD_OPEN.has((err as NodeJS.ErrnoException).code ?? "")) throw err;
+      throw new Error("something is still using that world's files — nothing moved, so try again in a moment");
+    }
     return target;
   }
 

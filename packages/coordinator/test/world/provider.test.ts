@@ -504,21 +504,73 @@ describe("archiving a world", () => {
     await provider.close();
   });
 
-  it("says a world is in use rather than reporting a permissions problem (issue 288)", async () => {
+  it("retries a held folder, then says it is in use rather than reporting permissions (issue 288)", async () => {
     // EPERM is what Windows answers for a directory somebody has a handle inside, and reporting
-    // that verbatim describes a problem the person does not have. The retry has already run by
-    // the time this is written, so it is the answer for a handle that stayed.
+    // that verbatim describes a problem the person does not have — the world is not read-only,
+    // something is reading it. The retry runs first, because the handle usually goes away.
+    const { root } = await makeTempRoot();
+    let attempts = 0;
+    const held = () => {
+      const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+      err.code = "EPERM";
+      return err;
+    };
+    const provider = new FsWorldProvider(root, {
+      clock: CLOCK,
+      rename: async () => {
+        attempts += 1;
+        throw held();
+      },
+    });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+    await provider.loadWorld(world.worldId);
+
+    await assert.rejects(provider.archiveWorld(world.worldId), /still using that world's files/);
+    assert.ok(attempts > 1, `the move was tried once and given up on (${attempts} attempts)`);
+    assert.equal(provider.openStore()?.worldId, world.worldId, "and the world it closed is open again");
+    await provider.close();
+  });
+
+  it("reports a destination it cannot make as what it is, not as a world in use (issue 288)", async () => {
+    // The same EPERM from `mkdir archive/` means the opposite of a held world: the destination is
+    // out of reach, retrying will not help, and the permissions diagnosis is the useful one.
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: CLOCK });
     const [world] = await provider.listWorlds();
     assert.ok(world);
-    const held = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
-    held.code = "EPERM";
-    const provider_ = provider as unknown as { moveToArchive: () => Promise<string> };
-    provider_.moveToArchive = async () => {
-      throw held;
-    };
-    await assert.rejects(provider.archiveWorld(world.worldId), /still using that world's files/);
+    await writeFile(join(root, "archive"), "not a folder");
+
+    await assert.rejects(provider.archiveWorld(world.worldId), (err: Error) => {
+      assert.doesNotMatch(err.message, /still using that world's files/);
+      return true;
+    });
+    await provider.close();
+  });
+
+  it("does not reopen over a world opened while the move was failing (issue 288)", async () => {
+    // Message handlers overlap, so an open-world for a different world can land during the
+    // move's backoff. Putting the archived one back on top of it would close the world the
+    // screen has just been told about and serve one nobody selected.
+    const { root } = await makeTempRoot();
+    let other: string | null = null;
+    const provider: FsWorldProvider = new FsWorldProvider(root, {
+      clock: CLOCK,
+      rename: async () => {
+        // Exactly the interleaving: somebody opens another world mid-move.
+        if (other !== null) await provider.loadWorld(other);
+        const err = new Error("EPERM") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      },
+    });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+    other = (await provider.createWorld({ name: "Somewhere Else" })).worldId;
+    await provider.loadWorld(world.worldId);
+
+    await assert.rejects(provider.archiveWorld(world.worldId));
+    assert.equal(provider.openStore()?.worldId, other, "the world opened during the move stayed open");
     await provider.close();
   });
 });
