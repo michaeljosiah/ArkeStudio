@@ -30,6 +30,7 @@ import {
   NarratorSettingsSchema,
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
+import { VendorAuthStatusSchema, vendorAuthUnavailable } from "./vendor-auth.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { RoutingSchema } from "./routing.js";
 import { SceneSchema, SelectionsSchema } from "./scene.js";
@@ -322,6 +323,14 @@ export const ClientStateSchema = z
          * carries nothing.
          */
         providerTools: z.array(ProviderToolStatusSchema).default([]),
+        /**
+         * Vendor sign-in through the harness (SPEC-030): the vendors with a connection, which
+         * one authoring uses, and any sign-in under way. Unavailable-with-reason on a lane
+         * that cannot sign anybody in — never simply missing (R-12, §2.6).
+         */
+        vendorAuth: VendorAuthStatusSchema.default(() =>
+          vendorAuthUnavailable("the harness has not started"),
+        ),
         /** The shipped model manifest, whole: pickers and estimates read it locally (R-15). */
         manifest: ModelManifestSchema.nullable().default(null),
         routing: z

@@ -283,6 +283,91 @@ describe("the live adapter over the stub server", () => {
     await adapter.interrupt(session.sessionId);
     assert.ok(stub.lastRequest(new RegExp(`/api/session/${session.sessionId}/interrupt$`)));
   });
+
+  it("assesses permission asks against the session's captured v1 confinement", async () => {
+    const readOnlyCwd = "C:\\worlds\\world-chat";
+    adapter.prepareSession({ preparationId: "prep_read", researchWeb: true });
+    const readOnly = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: readOnlyCwd,
+      agent: "world-builder",
+      preparationId: "prep_read",
+    });
+    const request = (actionClass: string) => ({
+      sessionId: readOnly.sessionId,
+      permissionId: `per_${actionClass}`,
+      actionClass,
+    });
+    assert.equal(adapter.assessPermission(request("webfetch")).status, "allowed");
+    assert.equal(adapter.assessPermission(request("edit")).status, "denied");
+    assert.equal(adapter.assessPermission(request("bash")).status, "denied");
+    assert.equal(adapter.assessPermission(request("future-tool")).status, "ask");
+
+    const authorCwd = "C:\\worlds\\authoring";
+    adapter.prepareSession({ preparationId: "prep_author", researchWeb: false });
+    const author = await adapter.createSession({
+      purpose: "authoring",
+      cwd: authorCwd,
+      agent: "sheet-editor",
+      preparationId: "prep_author",
+    });
+    assert.equal(
+      adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_web", actionClass: "webfetch" }).status,
+      "denied",
+    );
+    assert.equal(
+      adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_edit", actionClass: "edit" }).status,
+      "allowed",
+    );
+    assert.equal(
+      adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_future", actionClass: "future-tool" })
+        .status,
+      "ask",
+    );
+  });
+
+  it("keeps concurrent v1 preparations distinct even when they share a cwd", async () => {
+    const cwd = "C:\\worlds\\shared";
+    adapter.prepareSession({ preparationId: "prep_web", researchWeb: true });
+    adapter.prepareSession({ preparationId: "prep_offline", researchWeb: false });
+
+    const web = await adapter.createSession({
+      purpose: "authoring",
+      cwd,
+      agent: "sheet-editor",
+      preparationId: "prep_web",
+    });
+    const offline = await adapter.createSession({
+      purpose: "authoring",
+      cwd,
+      agent: "sheet-editor",
+      preparationId: "prep_offline",
+    });
+    assert.equal(
+      adapter.assessPermission({ sessionId: web.sessionId, permissionId: "per_web_on", actionClass: "webfetch" })
+        .status,
+      "allowed",
+    );
+    assert.equal(
+      adapter.assessPermission({ sessionId: offline.sessionId, permissionId: "per_web_off", actionClass: "webfetch" })
+        .status,
+      "denied",
+    );
+  });
+
+  it("cannot consume an abandoned v1 preparation", async () => {
+    adapter.prepareSession({ preparationId: "prep_abandoned" });
+    adapter.abandonSessionPreparation("prep_abandoned");
+    await assert.rejects(
+      adapter.createSession({
+        purpose: "authoring",
+        cwd: "C:\\worlds\\abandoned",
+        agent: "sheet-editor",
+        preparationId: "prep_abandoned",
+      }),
+      /preparation is missing/,
+    );
+  });
 });
 
 describe("listing what the harness can run", () => {

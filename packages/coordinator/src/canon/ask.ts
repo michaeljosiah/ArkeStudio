@@ -1,5 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
-import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -155,10 +155,16 @@ export class AskService {
     // The ask sandbox: an empty directory holding only the session config — never a world.
     const sandbox = join(this.opts.scratchRoot, `ask-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await writeSessionFiles(this.adapter, sandbox, this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}));
-
     try {
-      const session = await this.adapter.createSession({ purpose: "ask", cwd: sandbox, agent: "canon-qa" });
+      const session = await createPreparedSession(
+        this.adapter,
+        sandbox,
+        this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+        {
+          purpose: "ask",
+          agent: "canon-qa",
+        },
+      );
 
       const turn = async (prompt: string): Promise<string> => {
         let finalText = "";

@@ -357,6 +357,31 @@ describe("what the studio is told", () => {
 });
 
 describe("a turn that never answers", () => {
+  it("releases partial preparation and closes the run when setup fails", async () => {
+    const adapter = fakeAdapter(["unused"]);
+    const { store, conversationId, view } = await setup(adapter);
+    const bundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    let released = false;
+    const runner = new WorldChatRunner({
+      adapter,
+      prepare: async () => {
+        throw new Error("session config could not be written");
+      },
+      release: async () => {
+        released = true;
+      },
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: 0 }),
+      evidenceSources: (messages) => ({ messages, bundle, attachments: [], attachmentText: new Map() }),
+      now: NOW,
+    });
+
+    const outcome = await runner.send(store, conversationId, "start");
+    assert.equal(outcome.status, "failed");
+    assert.equal(released, true);
+    assert.equal((await view()).activeRun, null);
+  });
+
   it("times out rather than waiting forever, and says so", async () => {
     const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 60 });
     const outcome = await runner.send(store, conversationId, "hello");

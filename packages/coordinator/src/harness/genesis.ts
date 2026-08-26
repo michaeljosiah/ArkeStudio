@@ -1,4 +1,4 @@
-import { writeSessionFiles, type SessionInput } from "./session-files.js";
+import { createPreparedSession, type SessionInput } from "./session-files.js";
 import { basename, join } from "node:path";
 import {
   GenesisDraftSchema,
@@ -30,7 +30,7 @@ export interface GenesisOptions {
 }
 
 interface ActiveTurn {
-  sessionId: string;
+  sessionId: string | null;
   cancelled: boolean;
 }
 
@@ -185,6 +185,9 @@ export class GenesisService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    const run: ActiveTurn = { sessionId: null, cancelled: false };
+    this.turns.set(genesisId, run);
+    status("running");
 
     let sessionId = this.sessions.get(genesisId);
     const firstTurn = sessionId === undefined;
@@ -192,16 +195,20 @@ export class GenesisService {
       // Same confinement config as authoring sessions — no world, so no world-query MCP. Research
       // still works here: `web` is a harness tool the confinement grants, not an MCP one, so the
       // door can go and look something up before there is any world to scope a lookup to.
-      await writeSessionFiles(this.adapter, dir, this.opts.sessionInput({}));
       try {
-        const session = await this.adapter.createSession({ purpose: "drafting", cwd: dir, agent: "world-author" });
+        const session = await createPreparedSession(this.adapter, dir, this.opts.sessionInput({}), {
+          purpose: "drafting",
+          agent: "world-author",
+        });
         sessionId = session.sessionId;
         this.sessions.set(genesisId, sessionId);
       } catch (err) {
+        this.turns.delete(genesisId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
     }
+    run.sessionId = sessionId;
 
     // What the rail already holds, so we can tell a blueprint the agent updated from one it
     // ignored. The fold covers draft.json and every entity file — a turn that only touched
@@ -209,10 +216,6 @@ export class GenesisService {
     const blueprintBefore = await foldBlueprint(dir);
 
     this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
-
-    const run: ActiveTurn = { sessionId, cancelled: false };
-    this.turns.set(genesisId, run);
-    status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
     const tokenBudget =

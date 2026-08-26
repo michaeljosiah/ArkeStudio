@@ -21,6 +21,7 @@ import {
   voiceTargetKey,
   supportsVoiceUse,
   isClonedVoice,
+  isGeneratedArtifact,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -39,7 +40,7 @@ import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
-import { shortDateTime } from "../lib/format.js";
+import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -69,7 +70,6 @@ import {
   reconcileExternalEdit,
   promoteGuest,
   renameSheet,
-  replyToPermission,
   requestCanonRefs,
   requestSheetRefs,
   retireEntity,
@@ -95,7 +95,6 @@ import {
   dismissBuildNotice,
   useCanonRefs,
   useCanonSearches,
-  usePermissions,
   useSheetRefs,
   useStore,
   useTranscripts,
@@ -198,24 +197,18 @@ export function WorldLayout() {
   );
 }
 
-/** Staleness, closed-world edits, parse failures and permission backstops — stated, never silent. */
+/** Staleness, closed-world edits and parse failures — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
   const world = useWorld();
-  const permissions = usePermissions();
   const navigate = useNavigate();
   const clientState = useClientState();
   if (!world || world.meta.worldId !== worldId) return null;
-  const permissionEntries = Object.entries(permissions);
   // The completion notice (SPEC-031 R-44..R-47): persists until dismissed or the work it
   // names is no longer outstanding, and its one action opens the screen that can act.
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
   const notice = build ? foundingNote(build) : null;
-  const hasConditions =
-    world.externalEdits.length > 0 ||
-    world.problems.length > 0 ||
-    permissionEntries.length > 0 ||
-    notice !== null;
+  const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
@@ -233,21 +226,6 @@ function WorldConditionBanners() {
           </div>
         </Callout>
       )}
-      {permissionEntries.map(([id, p]) => (
-        <Callout key={id} tone="warning" title="The drafting agent is asking permission">
-          {p.description}. This is the backstop, not the gate — nothing lands in the world without your accept
-          either way.
-          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
-            <Button variant="primary" onClick={() => replyToPermission(id, "once")}>
-              Allow once
-            </Button>
-            <Button onClick={() => replyToPermission(id, "always")}>Always allow</Button>
-            <Button variant="ghost" onClick={() => replyToPermission(id, "reject")}>
-              Reject
-            </Button>
-          </div>
-        </Callout>
-      ))}
       {world.externalEdits.length > 0 && (
         <Callout
           tone="warning"
@@ -4095,8 +4073,9 @@ export function ArtifactsScreen() {
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
-  const madeHere = (a: (typeof artifacts)[number]) =>
-    a.origin.by === "system" && a.origin.producedBy === "bench";
+  // Whatever made it, not the bench alone (issue 475): a character's generated references are
+  // filed here too, and the chip that counts what this application made counts those as well.
+  const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
@@ -4314,7 +4293,7 @@ export function ArtifactsScreen() {
           // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
             name.includes(".") ? name.split(".").pop() : a.kind,
-            ...(madeHere(a) ? ["made here"] : []),
+            ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
             ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
           ].join(" · ");

@@ -1,5 +1,6 @@
 import {
   IDLE_UPDATE_STATE,
+  vendorAuthUnavailable,
   type AppHealth,
   type ClientState,
   type DomainEvent,
@@ -30,6 +31,7 @@ export class ReadModel {
         ledger: [],
         providers: [],
         providerTools: [],
+        vendorAuth: vendorAuthUnavailable("the harness has not started"),
         manifest: null,
         routing: { defaults: {}, faults: [] },
         models: { disabled: [] },
@@ -225,6 +227,10 @@ export class ReadModel {
       }
       case "provider.tool-status": {
         this.state = { ...this.state, app: { ...this.state.app, providerTools: event.tools } };
+        return;
+      }
+      case "vendor-auth.status": {
+        this.state = { ...this.state, app: { ...this.state.app, vendorAuth: event.auth } };
         return;
       }
       case "routing.changed": {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { SessionConfigInput } from "./agent-session.js";
+import type { VendorIntegration } from "./vendor-auth.js";
 
 /**
  * The harness adapter interface, adopted from Arke (master spec §1.4, §17).
@@ -15,6 +16,7 @@ export const HarnessCapability = z.enum([
   "events", // streamEvents()
   "models", // listModels() — the backend exposes a model catalog
   "permissions", // respondToPermission()
+  "auth", // vendor sign-in over the harness's API (SPEC-030)
 ]);
 export type HarnessCapability = z.infer<typeof HarnessCapability>;
 
@@ -28,6 +30,10 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
+  /** The one-use preparation returned by the coordinator's session-file step. */
+  preparationId?: string;
+  /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
+  signal?: AbortSignal;
   /**
    * The working directory the session runs in — for authoring, the proposal directory, never
    * the world root (SPEC-005). Absolute path; the adapter scopes every request to it.
@@ -79,6 +85,20 @@ export interface ModelInfo {
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
 export type PermissionVerb = z.infer<typeof PermissionVerb>;
 
+/** A harness permission ask, retaining the session whose confinement governs it. */
+export interface PermissionRequest {
+  sessionId: string;
+  permissionId: string;
+  actionClass: string;
+  detail?: string;
+}
+
+/** Whether the active session policy permits a remembered grant to settle this ask. */
+export type PermissionAssessment =
+  | { status: "allowed" }
+  | { status: "ask" }
+  | { status: "denied"; reason: string };
+
 export interface PermissionDecision {
   permissionId: string;
   decision: PermissionVerb;
@@ -89,7 +109,7 @@ export interface PermissionDecision {
  * The outcome of relaying a permission decision. Success is confirmed only by the matching
  * `permission.replied` event, never inferred from HTTP status.
  */
-export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "stale", "duplicate"]);
+export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "failed", "stale", "duplicate"]);
 export type PermissionAckStatus = z.infer<typeof PermissionAckStatus>;
 
 export interface PermissionAck {
@@ -171,6 +191,29 @@ export interface SessionFile {
   contents: string;
 }
 
+// ---------------------------------------------------------------------------
+// Vendor sign-in (SPEC-030) — gated by the "auth" capability.
+// ---------------------------------------------------------------------------
+
+/**
+ * A sign-in attempt the harness has opened with a vendor. Arke opens `url` and shows
+ * `instructions` verbatim; the harness completes the exchange itself when the mode is `auto`,
+ * and takes a person-typed code through `completeVendorOAuth` when it is `code` (§2.2).
+ */
+export interface VendorOAuthAttempt {
+  attemptId: string;
+  url: string;
+  instructions: string;
+  mode: "auto" | "code";
+  /** The harness's own deadline for this attempt, epoch milliseconds. Bounds the poll (R-9b). */
+  expiresAt: number;
+}
+
+/** Where an attempt stands. Polled, never evented — no event announces completion (R-9b). */
+export type VendorOAuthAttemptState =
+  | { status: "pending" | "complete" | "expired" }
+  | { status: "failed"; message: string };
+
 /**
  * One interface, mock or live. Methods beyond the core set are gated by the capabilities the
  * adapter reports.
@@ -213,6 +256,8 @@ export interface HarnessAdapter {
    * Called with the same input, immediately before that session's `createSession`.
    */
   prepareSession?(input: SessionConfigInput): void;
+  /** Forget a preparation whose file write or caller failed before session creation. */
+  abandonSessionPreparation?(preparationId: string): void;
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;
@@ -233,5 +278,22 @@ export interface HarnessAdapter {
   /** Async iterator of normalised, schema-validated harness events (capability: events). */
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent>;
   listModels?(): Promise<ModelInfo[]>;
+  /** Adapter-owned action vocabulary checked against the exact session's captured confinement. */
+  assessPermission?(request: PermissionRequest): PermissionAssessment;
   respondToPermission?(decision: PermissionDecision): Promise<PermissionAck>;
+
+  // ---- vendor sign-in (capability: auth, SPEC-030) ----
+  /** Vendors and their sign-in methods, normalised at this boundary, ids and labels verbatim (R-7). */
+  listIntegrations?(): Promise<VendorIntegration[]>;
+  /** Start an OAuth sign-in. The harness owns the exchange; Arke opens the page and polls (D18). */
+  beginVendorOAuth?(integrationId: string, methodId: string, answers?: Record<string, string>): Promise<VendorOAuthAttempt>;
+  pollVendorOAuth?(integrationId: string, attemptId: string): Promise<VendorOAuthAttemptState>;
+  /** Abandon an attempt, releasing whatever the harness holds for it. Leaves no partial state. */
+  cancelVendorOAuth?(integrationId: string, attemptId: string): Promise<void>;
+  /** Hand back the one-time code a `code`-mode attempt gave the person. Not retained (R-1). */
+  completeVendorOAuth?(integrationId: string, attemptId: string, code: string): Promise<void>;
+  /** The typed-secret method: one call, no address, no polling (§2.2). The key is not retained. */
+  connectVendorKey?(integrationId: string, key: string, answers?: Record<string, string>): Promise<void>;
+  /** Remove a stored connection — the harness's operation, never a file deletion (R-9a, D16). */
+  removeVendorCredential?(credentialId: string): Promise<void>;
 }

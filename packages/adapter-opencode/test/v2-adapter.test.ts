@@ -315,6 +315,92 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     }
   });
 
+  it("assesses permission asks against the session's captured v2 confinement", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      const readOnlyCwd = "C:\\worlds\\world-chat";
+      adapter.prepareSession({ preparationId: "prep_read", researchWeb: true });
+      const readOnly = await adapter.createSession({
+        purpose: "world-chat",
+        cwd: readOnlyCwd,
+        agent: "world-builder",
+        preparationId: "prep_read",
+      });
+      const assess = (actionClass: string) =>
+        adapter.assessPermission({
+          sessionId: readOnly.sessionId,
+          permissionId: `per_${actionClass}`,
+          actionClass,
+        }).status;
+      assert.equal(assess("websearch"), "allowed");
+      assert.equal(assess("edit"), "denied");
+      assert.equal(assess("shell"), "denied");
+      assert.equal(assess("external_directory"), "denied");
+      assert.equal(assess("future-tool"), "ask");
+
+      const authorCwd = "C:\\worlds\\authoring";
+      adapter.prepareSession({ preparationId: "prep_author", researchWeb: false });
+      const author = await adapter.createSession({
+        purpose: "authoring",
+        cwd: authorCwd,
+        agent: "scene-writer",
+        preparationId: "prep_author",
+      });
+      assert.equal(
+        adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_web", actionClass: "websearch" })
+          .status,
+        "denied",
+      );
+      assert.equal(
+        adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_edit", actionClass: "edit" }).status,
+        "allowed",
+      );
+      assert.equal(
+        adapter.assessPermission({ sessionId: author.sessionId, permissionId: "per_future", actionClass: "future-tool" })
+          .status,
+        "ask",
+      );
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
+  it("keeps concurrent v2 preparations distinct even when they share a cwd", async () => {
+    const adapter = makeAdapter();
+    try {
+      await adapter.init();
+      const cwd = "C:\\worlds\\shared";
+      adapter.prepareSession({ preparationId: "prep_web", researchWeb: true });
+      adapter.prepareSession({ preparationId: "prep_offline", researchWeb: false });
+
+      const web = await adapter.createSession({
+        purpose: "authoring",
+        cwd,
+        agent: "sheet-editor",
+        preparationId: "prep_web",
+      });
+      const offline = await adapter.createSession({
+        purpose: "authoring",
+        cwd,
+        agent: "sheet-editor",
+        preparationId: "prep_offline",
+      });
+      assert.equal(
+        adapter.assessPermission({ sessionId: web.sessionId, permissionId: "per_web_on", actionClass: "webfetch" })
+          .status,
+        "allowed",
+      );
+      assert.equal(
+        adapter.assessPermission({ sessionId: offline.sessionId, permissionId: "per_web_off", actionClass: "webfetch" })
+          .status,
+        "denied",
+      );
+    } finally {
+      await adapter.dispose();
+    }
+  });
+
   it("falls back to accumulated deltas when the completion fetch fails — a blip must not hang the turn", async () => {
     const adapter = makeAdapter();
     try {

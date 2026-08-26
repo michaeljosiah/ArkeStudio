@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { BenchParamsSchema, BenchReferenceTokenSchema } from "./bench.js";
 import { MediaInfoSchema } from "./media.js";
-import { ArtifactIdSchema, IsoDateTimeSchema, SessionIdSchema, Sha256Schema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ActualCostSourceSchema, ProvenanceSchema } from "./take.js";
+import {
+  ArtifactIdSchema,
+  IsoDateTimeSchema,
+  JobIdSchema,
+  SessionIdSchema,
+  Sha256Schema,
+  SlugSchema,
+  TakeIdSchema,
+} from "./ids.js";
 
 /**
  * Artifacts (master spec §13): recordings, documents, boards, stems and images filed against
@@ -50,9 +59,15 @@ export type ExtractionCandidate = z.infer<typeof ExtractionCandidateSchema>;
  * bytes were made" is part of the artifact's identity. Two generated occurrences with the same
  * bytes but different provenance stay two artifacts, and a generated take never collapses into
  * an earlier user upload — which is why generated filing bypasses content-hash dedup.
+ *
+ * The bench was the first surface to file what it made, so this shape was the bench's own for a
+ * while (issue 475). It stays exactly as it was, under a `source` that defaults to "bench" —
+ * every sidecar already on disk was written before the field existed, and an artifact whose
+ * sidecar fails to parse is an artifact the world scan drops.
  */
-export const ArtifactGenerationSchema = z
+export const ArtifactBenchGenerationSchema = z
   .object({
+    source: z.literal("bench").default("bench"),
     sessionId: SessionIdSchema,
     takeId: TakeIdSchema,
     takeNumber: z.number().int().min(1),
@@ -72,6 +87,79 @@ export const ArtifactGenerationSchema = z
     costMicroUsd: z.number().int().min(0).nullable(),
   })
   .strict();
+export type ArtifactBenchGeneration = z.infer<typeof ArtifactBenchGenerationSchema>;
+
+/**
+ * Which character surface asked for the picture (issue 475) — the job target, verbatim, so the
+ * workflow is a fact about the request rather than a guess made later from the file's name.
+ *
+ * `reference-tile` is the legacy kit path: it lands in the kit rather than in a take, and it is
+ * listed here for as long as existing kits still hold tiles that came from it.
+ */
+export const CharacterReferenceWorkflowSchema = z.enum([
+  "main-photo-candidate",
+  "establish-candidate",
+  "character-sheet",
+  "character-look",
+  "reference-tile",
+]);
+export type CharacterReferenceWorkflow = z.infer<typeof CharacterReferenceWorkflowSchema>;
+
+/** Job targets whose success files a character-reference artifact (issue 475). */
+export const CHARACTER_REFERENCE_ARTIFACT_TARGETS: ReadonlySet<string> = new Set(
+  CharacterReferenceWorkflowSchema.options,
+);
+
+/**
+ * How a character-reference picture came to exist (issue 475).
+ *
+ * The same claim the bench shape makes — the exact request is part of the artifact's identity —
+ * for the four character surfaces and the legacy kit tile. It is a separate shape rather than
+ * the bench's with holes in it because a character generation has no session and no take
+ * number, and inventing either would put a fiction in the one record that exists to be trusted.
+ *
+ * `jobId` is the identity filing deduplicates on: one succeeded job made these bytes once, and
+ * finalization is replayable, so a replay has to find what the first pass filed rather than file
+ * it again.
+ *
+ * The string fields are deliberately unconstrained beyond non-emptiness. This is a read path —
+ * a sidecar that fails to parse is an artifact `scanWorld` drops from the world — so a path
+ * shape tightened here would delete history from worlds already on disk.
+ */
+export const ArtifactReferenceGenerationSchema = z
+  .object({
+    source: z.literal("character-reference"),
+    /** The succeeded job whose result this is — the filing's idempotency key. */
+    jobId: JobIdSchema,
+    /** The reference take the bytes were filed from; the legacy tile path records none. */
+    takeId: TakeIdSchema.optional(),
+    /** The character (or location) sheet the picture is of. Also the artifact's link. */
+    sheetId: z.string().min(1),
+    workflow: CharacterReferenceWorkflowSchema,
+    /** World-relative path of the durable copy filed from — the take, or the kit's own tile. */
+    sourceFile: z.string().min(1),
+    prompt: z.string(),
+    /** World-relative reference images the request carried, in dispatch order. */
+    references: z.array(z.string()),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    /** The dispatch parameters as sent, so the request can be read back whole. */
+    params: z.record(z.string(), z.unknown()),
+    /** Canon revision, sheet versions and art-direction version, frozen at dispatch (§2.4). */
+    provenance: ProvenanceSchema,
+    requestedSeed: z.number().int().optional(),
+    estimatedMicroUsd: z.number().int().min(0),
+    /** From the matching ledger entry; null when the ledger had no actual figure. */
+    costMicroUsd: z.number().int().min(0).nullable(),
+    costSource: ActualCostSourceSchema.optional(),
+  })
+  .strict();
+export type ArtifactReferenceGeneration = z.infer<typeof ArtifactReferenceGenerationSchema>;
+
+export const ArtifactGenerationSchema = z.union([
+  ArtifactBenchGenerationSchema,
+  ArtifactReferenceGenerationSchema,
+]);
 export type ArtifactGeneration = z.infer<typeof ArtifactGenerationSchema>;
 
 /**
@@ -163,4 +251,15 @@ export type ArtifactSidecar = z.infer<typeof ArtifactSidecarSchema>;
 export function pickableArtifacts(artifacts: readonly ArtifactSidecar[]): ArtifactSidecar[] {
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   return artifacts.filter((a) => !superseded.has(a.id));
+}
+
+/**
+ * Made by this application rather than brought into it — whatever made it (issue 475).
+ *
+ * The bench was once the only such surface and the shelf asked for it by name; a character's
+ * generated pictures are as much "made here" as a bench take is, and a check spelled per
+ * producer would have to be found and widened again by the next surface that files.
+ */
+export function isGeneratedArtifact(artifact: ArtifactSidecar): boolean {
+  return artifact.origin.by === "system" && artifact.generation !== undefined;
 }

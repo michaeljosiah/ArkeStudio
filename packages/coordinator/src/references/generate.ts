@@ -123,6 +123,11 @@ export function tileRequest(
         prompt: `${styleLine(world, kit)}. ${sheet.name} — ${sheetDescription(sheet)}. ${ANGLE_PROMPT[angle]}, character reference sheet tile.${imageConstraintSuffix(direction)}`,
         references,
         output: characterImageOutput(model, "reference-tile"),
+        // Frozen here like every other workflow's (issue 475, Codex round 1). A tile records no
+        // take, so finalization used to read the canon revision and sheet version as they stood
+        // when the picture came back — and a sheet edited while a remote job was out would make
+        // the artifact claim revisions that had nothing to do with its bytes.
+        provenance: generationProvenance(world, direction, sheet),
       },
       estimatedMicroUsd: estimated,
       // Named by angle. Without a name every job lands the provider's own "image-1.png" into
@@ -195,16 +200,22 @@ function pricedCharacterImage(
   return estimate;
 }
 
+/**
+ * What the world looked like at dispatch (§2.4) — frozen here, never read again on arrival.
+ *
+ * `direction` is optional because the tile path may have none resolved; every other caller has
+ * one and passes it. An absent art direction states nothing rather than guessing a version.
+ */
 function generationProvenance(
   world: WorldMeta,
-  direction: ResolvedArtDirection,
+  direction: ResolvedArtDirection | undefined,
   sheet: Sheet,
   anchorFile?: string,
 ) {
   return {
     canonRevision: world.canonRevision,
     sheets: { [sheet.id]: sheet.version },
-    artDirectionVersion: direction.version,
+    ...(direction ? { artDirectionVersion: direction.version } : {}),
     ...(anchorFile ? { anchorFile } : {}),
   };
 }

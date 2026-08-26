@@ -1685,6 +1685,14 @@ by provider, and the alert threshold is checked against it.
   end and on next start-up.
   - **WHEN** the application is killed with a session open **THEN** no plaintext credential
     file survives the next start-up.
+  - Narrowed 2026-08-26 to credentials Arke holds — that is, API keys — for the same reason
+    SPEC-005 R-6 was, and at the same time. A vendor OAuth connection is not a secret in Studio's
+    possession but a session the person established with their vendor, living in a file the
+    harness refreshes on its own schedule. No environment variable carries it, and no per-session
+    file could hold it without Arke first taking a copy — which SPEC-030 prohibits outright.
+    SPEC-030 owns that case, and its carrying path is deliberately persistent: a shared credential
+    deleted on session end would ask an existing harness user to sign in again every time, which
+    is the exact outcome that spec exists to prevent.
 - **R-PROV-9** Log redaction SHALL be applied at the logging boundary rather than at call sites.
   - **WHEN** a new code path logs an object containing a key **THEN** it is redacted without that
     path having been changed.
@@ -1926,7 +1934,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-027 | The child's drawing — keeping it, tidying it, painting it, and proving it is still theirs | 004, 013, 015, 017, 026 |
 | SPEC-028 | Local inference completion — speech, generated media, and the Settings abstraction | 008, 009, 011, 016, 018, 021, 022 · amends 011, 016, 018, 021, 022 |
 | SPEC-029 | Graph-backed scenes — one canonical flow behind Storyboard, Flow, and storyboard rendering | 002, 004, 012, 013, 019, 023, 024 · amends 012, 013, 019, 023, 024 |
-| SPEC-030 | Vendor sign-in — the person's own model subscriptions, through the harness | 001, 005, 008 · amends 005 |
+| SPEC-030 | Vendor sign-in — the person's own model subscriptions, through the harness | 001, 005, 008 · amends master, 005 |
 | SPEC-031 | The founding build — a blueprint written in conversation, and one press that makes the whole world | 002, 004, 007, 009, 013, 014, 017, 024 · amends 009, 017 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a

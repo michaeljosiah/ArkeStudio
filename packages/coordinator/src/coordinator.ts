@@ -1,11 +1,12 @@
 import { tmpdir } from "node:os";
-import { writeSessionFiles, type SessionInput } from "./harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
+  CHARACTER_REFERENCE_ARTIFACT_TARGETS,
   REFERENCE_FINALIZATION_TARGETS,
   UlidSchema,
   keyArtBriefProse,
@@ -19,6 +20,7 @@ import {
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
+  type PermissionRequest,
   type HealthComponent,
   buildExportPlan,
   exportAudioClips,
@@ -58,6 +60,7 @@ import {
   type RuntimeProbes,
   type VoiceCandidate,
   type ArtifactGeneration,
+  type CharacterReferenceWorkflow,
   type BenchSession,
   type SessionId,
   deliveryParams as mapDelivery,
@@ -257,6 +260,7 @@ import {
   recordUploadedLocationViewTake,
   referenceReviewDecision,
 } from "./references/takes.js";
+import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
@@ -274,9 +278,15 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
-import { AuthoringService, settlePermission } from "./harness/authoring.js";
+import {
+  AuthoringService,
+  describeActionClass,
+  settlePendingPermission,
+  settlePermission,
+} from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { FoundingBuildService } from "./world/founding-build.js";
+import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
   SETUP_CATALOGUE,
@@ -560,6 +570,12 @@ export interface CoordinatorOptions {
   };
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
   openPath?: (path: string) => void;
+  /**
+   * SPEC-030 R-6: open a vendor's sign-in page in the person's own browser. Host-owned like
+   * openPath, and for the same reason — the URL comes from the harness and never enters
+   * renderer state.
+   */
+  openExternal?: (url: string) => void;
   /** SPEC-016 R-2: whether the native index binding loaded, known only to the desktop shell. */
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
@@ -660,7 +676,10 @@ export class Coordinator {
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
-  private readonly pendingPermissions = new Map<string, string>();
+  private readonly pendingPermissions = new Map<string, { actionClass: string; rememberable: boolean }>();
+  private readonly settlingPermissions = new Set<string>();
+  /** Unconfirmed automatic decisions retry without turning a denied action into a user prompt. */
+  private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
@@ -1050,6 +1069,8 @@ export class Coordinator {
   private readonly providerService: ProviderService;
   /** One per provider whose credential is external (issue #137); empty when none are wired. */
   private readonly providerTools = new Map<ProviderId, ProviderToolService>();
+  /** SPEC-030: vendor sign-in through the harness. Always constructed; states its own absence. */
+  private readonly vendorAuth: VendorAuthService;
   private readonly ledger: LedgerFile | null;
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
@@ -1091,6 +1112,21 @@ export class Coordinator {
         ),
       );
     }
+    this.vendorAuth = new VendorAuthService({
+      adapter: () => this.opts.adapter,
+      openExternal: (url) => {
+        try {
+          this.opts.openExternal?.(url);
+        } catch {
+          /* a browser that cannot open is the person's to notice; the poll still runs */
+        }
+      },
+      onChange: (auth) => this.emit({ at: new Date().toISOString(), type: "vendor-auth.status", auth }),
+      // Pass-through secrets (typed keys, one-time codes) are registered so no log line can
+      // carry one — registration is redaction, not retention (SPEC-030 R-1).
+      registerSecret: (value) => this.secrets.register(value),
+      log: this.appLog,
+    });
     this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
     this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
     this.jobQueue =
@@ -1261,6 +1297,15 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
+      getInitialEvents: () =>
+        [...this.pendingPermissions].map(([permissionId, permission]) => ({
+          at: new Date().toISOString(),
+          type: "permission.pending" as const,
+          permissionId,
+          actionClass: permission.actionClass,
+          description: describeActionClass(permission.actionClass),
+          rememberable: permission.rememberable,
+        })),
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1315,6 +1360,16 @@ export class Coordinator {
         ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
             sessionInput: this.sessionInput,
             agentForPurpose: opts.authoring.agentForPurpose,
+            // R-13: the failed refresh marks the connection, so the sign-in surface says
+            // "sign-in needed" by the time the person goes looking for why the turn ended.
+            // The agent that ran may carry a model override, whose provider outranks the
+            // harness default as the vendor to mark.
+            onAuthFailure: (purpose) => {
+              const agent = opts.authoring?.agentForPurpose(purpose);
+              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const hint = override?.split("/")[0] ?? null;
+              void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
+            },
           })
         : null;
     this.genesis =
@@ -1507,7 +1562,10 @@ export class Coordinator {
       parsed.type !== "health.changed" &&
       parsed.type !== "appearance.changed" &&
       parsed.type !== "update.status" &&
-      parsed.type !== "voice.runtime-test"
+      parsed.type !== "voice.runtime-test" &&
+      // Transient too — and a device flow's instructions carry the one-time code, which an
+      // append-only audit file must never hold (SPEC-030 R-1).
+      parsed.type !== "vendor-auth.status"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
@@ -1578,6 +1636,9 @@ export class Coordinator {
                 ? {}
                 : { reason: readiness.reason ?? "the harness is missing a required capability" }),
             });
+            // Seed the sign-in surface once the harness answers (SPEC-030 §3.1 step 10) —
+            // patient, because the integration catalog populates a few seconds after spawn.
+            if (readiness.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
           })
           .catch((err: unknown) => {
             this.emit({
@@ -1749,15 +1810,59 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (adapter && this.grants) {
       const grants = this.grants;
+      const handlePermission = async (request: PermissionRequest, recordDefect: boolean): Promise<void> => {
+        if (this.settlingPermissions.has(request.permissionId)) return;
+        this.settlingPermissions.add(request.permissionId);
+        try {
+          const settlement = await settlePermission(
+            adapter,
+            grants,
+            (e) => this.emit(e),
+            request,
+            recordDefect
+              ? (defect) =>
+                  this.appLog?.append({
+                    level: "warn",
+                    event: "harness.permission-confinement-defect",
+                    ...defect,
+                  })
+              : undefined,
+          );
+          if (settlement === "retry") {
+            if (this.stopping) return;
+            if (this.permissionRetryTimers.has(request.permissionId)) return;
+            const timer = setTimeout(() => {
+              this.permissionRetryTimers.delete(request.permissionId);
+              if (!this.stopping) void handlePermission(request, false);
+            }, 1_000);
+            timer.unref?.();
+            this.permissionRetryTimers.set(request.permissionId, timer);
+            return;
+          }
+          const retry = this.permissionRetryTimers.get(request.permissionId);
+          if (retry) clearTimeout(retry);
+          this.permissionRetryTimers.delete(request.permissionId);
+          if (settlement === "pending") {
+            const rememberable = adapter.assessPermission?.(request)?.status === "allowed";
+            this.pendingPermissions.set(request.permissionId, { actionClass: request.actionClass, rememberable });
+          } else this.pendingPermissions.delete(request.permissionId);
+        } finally {
+          this.settlingPermissions.delete(request.permissionId);
+        }
+      };
       void (async () => {
         try {
           for await (const event of adapter.streamEvents()) {
             if (event.type === "permission.requested") {
-              this.pendingPermissions.set(event.permissionId, event.actionClass);
-              await settlePermission(adapter, grants, (e) => this.emit(e), {
-                permissionId: event.permissionId,
-                actionClass: event.actionClass,
-              });
+              await handlePermission(
+                {
+                  sessionId: event.sessionId,
+                  permissionId: event.permissionId,
+                  actionClass: event.actionClass,
+                  ...(event.detail !== undefined ? { detail: event.detail } : {}),
+                },
+                true,
+              );
             }
           }
         } catch {
@@ -2081,6 +2186,39 @@ export class Coordinator {
         if (!sheet || !angle) throw new Error("reference tile finalization target is unavailable");
         const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
         await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version });
+        // The tile is also a world artifact (issue 475), filed from the kit's own copy — a tile
+        // has no take, and `incoming/` is where its kit row points, so that IS the durable path.
+        //
+        // Best-effort here and nowhere else in this method: `reference-tile` is absent from
+        // REPLAYABLE_FINALIZATION_TARGETS because `supersedeTile` pushes a row every time it
+        // runs. Throwing would strand the job in Needs You with no retry the user could press,
+        // while its tile is already in the kit. Reported to the app log instead of swallowed.
+        const tileLedgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          : undefined;
+        await fileGeneratedReferenceArtifact(store, {
+          job,
+          workflow: "reference-tile",
+          sheetId,
+          sourceFile: job.landedFiles[0],
+          provenance: frozenTileProvenance(job, sheetId, sheet.version, store.getBundle().meta.canonRevision),
+          // What the ledger actually recorded, like every take-backed reference (Codex round 1).
+          // The entry is already appended by the time finalization runs; a hard-coded null made
+          // every tile artifact report an unknown cost that was sitting right there.
+          cost: {
+            estimatedMicroUsd: job.estimatedMicroUsd,
+            actualMicroUsd: tileLedgerEntry?.actualMicroUsd ?? null,
+            ...(tileLedgerEntry?.actualSource ? { actualSource: tileLedgerEntry.actualSource } : {}),
+          },
+        }).catch((err: unknown) => {
+          void this.appLog?.append({
+            kind: "reference.artifact-filing-failed",
+            worldId: job.worldId,
+            jobId: job.id,
+            targetKind: job.target.kind,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
       // The shared set, not a copy of it. This branch used to carry its own inline list of the
       // four kinds that existed when it was written, while contracts already published the same
@@ -2137,6 +2275,28 @@ export class Coordinator {
               review,
             }).catch(() => {});
           }
+        }
+        // And the world's shelf keeps it, whatever the kit later decides (issue 475).
+        //
+        // Last, so a filing fault cannot cost the sheet its acceptance, and unconditional, so a
+        // candidate still awaiting review — or one the kit rejects tomorrow — is retained all the
+        // same: the shelf is the durable history of what this application made. Filed from the
+        // take's own directory, which is the copy that outlives staging (issue 231).
+        //
+        // This one throws. Every take-backed target is replayable, `recordReferenceTake` and
+        // `fileGeneratedArtifact` are both idempotent, and a retry contacts no provider — so a
+        // failure that says so and offers the retry beats a paid picture the shelf silently lost.
+        const referenceSheetId = take.reference?.sheetId;
+        if (CHARACTER_REFERENCE_ARTIFACT_TARGETS.has(job.target.kind) && take.media && referenceSheetId) {
+          await fileGeneratedReferenceArtifact(store, {
+            job,
+            workflow: job.target.kind as CharacterReferenceWorkflow,
+            sheetId: referenceSheetId,
+            sourceFile: `references/${referenceSheetId}/takes/${take.id}/${take.media}`,
+            take,
+            provenance: take.provenance,
+            cost: take.cost,
+          });
         }
       }
       if (
@@ -3942,6 +4102,33 @@ export class Coordinator {
         this.providerTools.get(msg.provider)?.cancelSignIn();
         return;
       }
+      // ---- vendor sign-in through the harness (SPEC-030 §3.1) ----
+      case "refresh-vendor-auth": {
+        await this.vendorAuth.refresh();
+        return;
+      }
+      case "begin-vendor-sign-in": {
+        // The service publishes every state change through its own callback; nothing here
+        // waits on the browser the person is standing in front of.
+        await this.vendorAuth.beginOAuth(msg.vendor, msg.method, msg.answers);
+        return;
+      }
+      case "submit-vendor-sign-in-code": {
+        await this.vendorAuth.submitCode(msg.code);
+        return;
+      }
+      case "submit-vendor-key": {
+        await this.vendorAuth.submitKey(msg.vendor, msg.key, msg.answers);
+        return;
+      }
+      case "cancel-vendor-sign-in": {
+        await this.vendorAuth.cancel();
+        return;
+      }
+      case "remove-vendor-connection": {
+        await this.vendorAuth.remove(msg.vendor, msg.credential);
+        return;
+      }
       case "set-routing-default": {
         if (!this.appSettings || !this.opts.manifest) return;
         const result = await this.appSettings.setRoutingDefault(
@@ -5742,6 +5929,7 @@ export class Coordinator {
           return;
         }
         const generation: ArtifactGeneration = {
+          source: "bench",
           sessionId: bench.session.id,
           takeId: take.id,
           takeNumber: take.n,
@@ -8321,21 +8509,28 @@ export class Coordinator {
       case "permission-reply": {
         const adapter = this.opts.adapter;
         if (!adapter) return;
-        const actionClass = this.pendingPermissions.get(msg.permissionId);
-        if (msg.decision === "always" && actionClass && this.grants) {
-          await this.grants.remember(actionClass, new Date().toISOString());
+        const permission = this.pendingPermissions.get(msg.permissionId);
+        if (!permission || this.settlingPermissions.has(msg.permissionId)) return;
+        if (msg.decision === "always" && !permission.rememberable) return;
+        this.settlingPermissions.add(msg.permissionId);
+        try {
+          const settlement = await settlePendingPermission(adapter, this.grants, {
+            permissionId: msg.permissionId,
+            actionClass: permission.actionClass,
+            decision: msg.decision,
+          });
+          if (settlement === "retry") return;
+          this.pendingPermissions.delete(msg.permissionId);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "permission.settled",
+            permissionId: msg.permissionId,
+            decision: msg.decision,
+            remembered: false,
+          });
+        } finally {
+          this.settlingPermissions.delete(msg.permissionId);
         }
-        this.pendingPermissions.delete(msg.permissionId);
-        await adapter
-          .respondToPermission?.({ permissionId: msg.permissionId, decision: msg.decision })
-          .catch(() => {});
-        this.emit({
-          at: new Date().toISOString(),
-          type: "permission.settled",
-          permissionId: msg.permissionId,
-          decision: msg.decision,
-          remembered: false,
-        });
         return;
       }
     }
@@ -8847,17 +9042,9 @@ export class Coordinator {
           },
         });
         tokenByRun.set(runId, lease.token);
-        const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
         const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
-        if (this.opts.adapter) {
-          await writeSessionFiles(
-            this.opts.adapter,
-            cwd,
-            this.sessionInput(url ? { worldQueryUrl: url } : {}),
-          );
-        }
         return { cwd, leaseToken: lease.token };
       },
       release: async ({ conversationId, runId }) => {
@@ -8872,6 +9059,16 @@ export class Coordinator {
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
       receiptsFor: (runId) => receipts.get(runId) ?? [],
+      createSession: ({ cwd, runId }) => {
+        const token = tokenByRun.get(runId);
+        const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
+        return createPreparedSession(
+          this.opts.adapter!,
+          cwd,
+          this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          { purpose: "world-chat", agent: "world-builder" },
+        );
+      },
       runCheckPlan: async ({ draft, leaseToken }) => {
         const plan = planFor(draft);
         const produced: WorldChatCheckReceipt[] = [];
@@ -8925,6 +9122,9 @@ export class Coordinator {
           runId,
           cause,
         });
+        // The same marking the authoring wiring does (SPEC-030 R-13): the recovery screen the
+        // failure message points at must already say which connection needs sign-in.
+        if (isAuthShapedFailure(cause)) void this.vendorAuth.noteAuthFailure().catch(() => {});
       },
       onProgress: (conversationId, label) => {
         this.emit({
@@ -9170,6 +9370,10 @@ export class Coordinator {
       this.lifecycleDisposers.clear();
       for (const timer of this.lifecycleTimers) clearInterval(timer);
       this.lifecycleTimers.clear();
+      for (const timer of this.permissionRetryTimers.values()) clearTimeout(timer);
+      this.permissionRetryTimers.clear();
+      // A sign-in poll racing shutdown would dial a harness the supervisor is stopping.
+      this.vendorAuth.stop();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

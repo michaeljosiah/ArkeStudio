@@ -6,7 +6,9 @@ import {
   type HarnessEvent,
   type ModelInfo,
   type PermissionAck,
+  type PermissionAssessment,
   type PermissionDecision,
+  type PermissionRequest,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
@@ -15,9 +17,10 @@ import {
   type SessionFile,
 } from "@arke-studio/contracts";
 import { probeCapabilities } from "./capabilities.js";
-import { OpenCodeHttp } from "./http.js";
+import { OpenCodeError, OpenCodeHttp } from "./http.js";
 import { createNormalizeState, normalizeOpenCode, type NormalizeState } from "./normalize.js";
-import { buildSessionConfig } from "./config.js";
+import { assessV1Permission, buildSessionConfig } from "./config.js";
+import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 import { parseSse } from "./sse.js";
 
 /**
@@ -50,6 +53,7 @@ interface TrackedSession {
    * repeat it. See `turnBody`.
    */
   agent?: string;
+  permissionPolicy: SessionPermissionPolicy | null;
 }
 
 /**
@@ -70,6 +74,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
   /** Bounded record of dropped frames — contained, never silently lost (R-14). */
   readonly deadLetters: Array<{ reason: string; at: number }> = [];
   private readonly permissionSessions = new Map<string, string>();
+  private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
@@ -177,14 +182,28 @@ export class OpenCodeAdapter implements HarnessAdapter {
 ` }];
   }
 
+  prepareSession(input: SessionConfigInput): void {
+    this.preparedPolicies.prepare(input);
+  }
+
+  abandonSessionPreparation(preparationId: string): void {
+    this.preparedPolicies.abandon(preparationId);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
+    if (input.preparationId !== undefined && permissionPolicy === null) {
+      throw new Error("session preparation is missing or was already consumed");
+    }
     const body: Record<string, unknown> = {
       ...(input.agent ? { agent: input.agent } : {}),
       ...(input.cwd ? { location: { directory: input.cwd.replaceAll("\\", "/") } } : {}),
     };
     let sessionId: string;
     try {
-      const res = await this.http.req<{ data?: { id?: string }; id?: string }>("POST", "/api/session", body);
+      const res = await this.http.req<{ data?: { id?: string }; id?: string }>("POST", "/api/session", body, {
+        signal: input.signal,
+      });
       sessionId = res.data?.id ?? res.id ?? "";
     } catch {
       // Legacy generation: directory travels as a query parameter.
@@ -192,7 +211,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
         "POST",
         "/session",
         {},
-        input.cwd ? { directory: input.cwd } : {},
+        { ...(input.cwd ? { directory: input.cwd } : {}), signal: input.signal },
       );
       sessionId = res.id ?? "";
     }
@@ -204,6 +223,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       purpose: input.purpose,
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
+      permissionPolicy,
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -387,6 +407,25 @@ export class OpenCodeAdapter implements HarnessAdapter {
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
     const sessionId = this.permissionSessions.get(decision.permissionId);
     const body = { response: decision.decision, reply: decision.decision };
+    const confirmation = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.turnListeners.delete(listener);
+        resolve(false);
+      }, 3_000);
+      const listener = (event: HarnessEvent) => {
+        if (
+          event.type === "permission.replied" &&
+          event.permissionId === decision.permissionId &&
+          event.decision === decision.decision &&
+          (sessionId === undefined || event.sessionId === sessionId)
+        ) {
+          clearTimeout(timer);
+          this.turnListeners.delete(listener);
+          resolve(true);
+        }
+      };
+      this.turnListeners.add(listener);
+    });
     try {
       if (sessionId) {
         await this.http.req(
@@ -397,25 +436,19 @@ export class OpenCodeAdapter implements HarnessAdapter {
       } else {
         await this.http.req("POST", `/permission/${decision.permissionId}/reply`, body);
       }
-    } catch {
-      return { permissionId: decision.permissionId, status: "stale" };
+    } catch (error) {
+      const stale = error instanceof OpenCodeError && (error.status === 404 || error.status === 409);
+      if (stale) this.permissionSessions.delete(decision.permissionId);
+      return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
     }
     // Confirmation comes only from the replied event, never HTTP status; wait briefly.
-    const confirmed = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.turnListeners.delete(listener);
-        resolve(false);
-      }, 3_000);
-      const listener = (event: HarnessEvent) => {
-        if (event.type === "permission.replied" && event.permissionId === decision.permissionId) {
-          clearTimeout(timer);
-          this.turnListeners.delete(listener);
-          resolve(true);
-        }
-      };
-      this.turnListeners.add(listener);
-    });
+    const confirmed = await confirmation;
+    if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
+  }
+
+  assessPermission(request: PermissionRequest): PermissionAssessment {
+    return assessV1Permission(this.sessions.get(request.sessionId)?.permissionPolicy, request.actionClass);
   }
 
   // ---- the event pump ------------------------------------------------------

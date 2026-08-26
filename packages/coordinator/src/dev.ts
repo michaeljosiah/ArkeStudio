@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -152,6 +153,22 @@ const coordinator = new Coordinator({
   authoring: { agentForPurpose, roster: ROSTER, skillFor },
   ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
   relaunchHarness: wiring.relaunchHarness,
+  // SPEC-030 R-6: no Electron shell here, so the platform opener carries the vendor's page.
+  openExternal: (url) => {
+    if (!url.startsWith("https://")) return;
+    const opener =
+      process.platform === "win32"
+        ? { command: "cmd", args: ["/c", "start", "", url] }
+        : process.platform === "darwin"
+          ? { command: "open", args: [url] }
+          : { command: "xdg-open", args: [url] };
+    const child = spawn(opener.command, opener.args, { detached: true, stdio: "ignore", windowsHide: true });
+    // A machine without the platform opener emits an async error on a detached child — with no
+    // listener that is an unhandled event, which would take the whole dev coordinator down for
+    // a browser that simply could not open.
+    child.on("error", () => {});
+    child.unref();
+  },
   // The dev coordinator carries the app's own preset speakers so the voice picker has a
   // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed
   // providers contribute nothing anyway, and dev should never reach for one.

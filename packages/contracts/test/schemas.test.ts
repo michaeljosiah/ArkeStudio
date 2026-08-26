@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ArtifactSidecarSchema,
+  isGeneratedArtifact,
   ArtDirectionRecordSchema,
   AppSettingsSchema,
   canDeleteJob,
@@ -475,6 +476,71 @@ describe("artifacts", () => {
     assert.throws(() => ArtifactSidecarSchema.parse({ ...sidecar, origin: { by: "system" } }));
     const system = { ...sidecar, origin: { by: "system", producedBy: "board-compile:sc_04" } };
     assert.deepEqual(ArtifactSidecarSchema.parse(system), system);
+  });
+
+  /**
+   * A sidecar that fails to parse is an artifact the world scan drops (scan.ts), so widening
+   * `generation` to a second producer had to leave every sidecar already on disk readable.
+   * Those were written before `source` existed and name no producer at all.
+   */
+  it("reads a bench sidecar written before generation had a source (issue 475)", () => {
+    const legacy = {
+      ...sidecar,
+      kind: "image",
+      file: "tide-clock-take-1.png",
+      origin: { by: "system", producedBy: "bench" },
+      generation: {
+        sessionId: newId("sess"),
+        takeId: newId("tk"),
+        takeNumber: 1,
+        brief: "a rusted tide-clock face",
+        references: [],
+        provider: "fal",
+        model: "test-image",
+        params: { kind: "image", count: 1 },
+        costMicroUsd: 60000,
+      },
+    };
+    const parsed = ArtifactSidecarSchema.parse(legacy);
+    assert.equal(parsed.generation?.source, "bench", "an unnamed producer is the bench, as it was");
+    assert.deepEqual(parsed.generation?.source === "bench" ? parsed.generation.keyframes : null, []);
+  });
+
+  it("files a character reference against its sheet, with no session or take number (issue 475)", () => {
+    const jobId = newId("jb");
+    const generated = {
+      ...sidecar,
+      kind: "image",
+      file: "maren-kest-character-look.png",
+      origin: { by: "system", producedBy: "character-reference" },
+      links: ["maren-kest"],
+      generation: {
+        source: "character-reference",
+        jobId,
+        takeId: newId("tk"),
+        sheetId: "maren-kest",
+        workflow: "character-look",
+        sourceFile: "references/maren-kest/takes/tk_x/look.png",
+        prompt: "harbour oilskins",
+        references: ["references/maren-kest/head-front.png"],
+        provider: "comfyui",
+        model: "draft-image",
+        params: { lookKind: "costume" },
+        provenance: { canonRevision: 42, sheets: { "maren-kest": 4 }, artDirectionVersion: 3 },
+        estimatedMicroUsd: 47000,
+        costMicroUsd: null,
+      },
+    };
+    const parsed = ArtifactSidecarSchema.parse(generated);
+    assert.equal(parsed.generation?.source, "character-reference");
+    assert.equal(isGeneratedArtifact(parsed), true);
+    // The bench's own required fields have no place here: a character generation has neither.
+    assert.throws(() =>
+      ArtifactSidecarSchema.parse({
+        ...generated,
+        generation: { ...generated.generation, takeNumber: 1 },
+      }),
+    );
   });
 });
 

@@ -1,6 +1,28 @@
-import { join } from "node:path";
-import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
+import { randomUUID } from "node:crypto";
+import { join, resolve } from "node:path";
+import type { CreateSessionInput, HarnessAdapter, SessionConfigInput, SessionRef } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+
+const setupByDir = new Map<string, Promise<void>>();
+
+async function serialized<T>(dir: string, work: () => Promise<T>): Promise<T> {
+  const absolute = resolve(dir).replaceAll("\\", "/");
+  const key = process.platform === "win32" || process.platform === "darwin" ? absolute.toLowerCase() : absolute;
+  const previous = setupByDir.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  setupByDir.set(key, tail);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (setupByDir.get(key) === tail) setupByDir.delete(key);
+  }
+}
 
 /**
  * Lay down whatever the wired harness needs beside a session's work, before the session opens.
@@ -15,16 +37,48 @@ import { atomicWriteFile } from "../world/atomic.js";
  * solve them differently.
  */
 export async function writeSessionFiles(
-  adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession">,
+  adapter: Pick<HarnessAdapter, "sessionFiles" | "prepareSession" | "abandonSessionPreparation">,
   dir: string,
   input: SessionConfigInput = {},
-): Promise<void> {
+): Promise<string> {
+  const preparationId = randomUUID();
+  const prepared = { ...input, preparationId };
   // Both seams, always. A harness takes its settings as files or as call options, and a
   // caller offering only one silently configures nothing for the harnesses using the other.
-  adapter.prepareSession?.(input);
-  for (const file of adapter.sessionFiles?.(input) ?? []) {
-    await atomicWriteFile(join(dir, file.name), file.contents);
+  try {
+    adapter.prepareSession?.(prepared);
+    for (const file of adapter.sessionFiles?.(prepared) ?? []) {
+      await atomicWriteFile(join(dir, file.name), file.contents);
+    }
+    return preparationId;
+  } catch (error) {
+    adapter.abandonSessionPreparation?.(preparationId);
+    throw error;
   }
+}
+
+/** Write configuration and create its session as one per-directory critical section. */
+export async function createPreparedSession(
+  adapter: HarnessAdapter,
+  dir: string,
+  input: SessionConfigInput,
+  session: CreateSessionInput,
+  timeoutMs = 30_000,
+): Promise<SessionRef> {
+  return serialized(dir, async () => {
+    const preparationId = await writeSessionFiles(adapter, dir, input);
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
+    try {
+      return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
+    } catch (error) {
+      if (abort.signal.aborted) throw new Error("session creation timed out", { cause: error });
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      adapter.abandonSessionPreparation?.(preparationId);
+    }
+  });
 }
 
 /**

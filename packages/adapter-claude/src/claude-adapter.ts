@@ -16,7 +16,8 @@ import {
   type SessionRef,
 } from "@arke-studio/contracts";
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
-import { decideTool } from "./tool-intents.js";
+import { resolveRoot } from "./path-confinement.js";
+import { decideTool, type ToolDecision } from "./tool-intents.js";
 
 /**
  * The Claude Code harness adapter (SPEC-005 §1.4, §17).
@@ -33,6 +34,11 @@ import { decideTool } from "./tool-intents.js";
  * assumed (see `confinement-probe.ts`). It is not total: side-effect-free work inside the
  * working directory is auto-approved without reaching the callback, which `tool-intents.ts`
  * records in full along with the audit that bounded it.
+ *
+ * The gate asks two questions, not one. What a tool DOES is its intent; where it was pointed is
+ * `session.root`, and both have to pass. The second question went unasked until a read-only
+ * agent was measured reading a file out of `%LOCALAPPDATA%\Temp` — `cwd` is where a process
+ * starts, and an absolute path in a tool argument does not care.
  */
 
 export interface ClaudeAdapterOptions {
@@ -66,6 +72,8 @@ interface Turn {
 interface ClaudeSession {
   id: string;
   cwd: string;
+  /** `cwd` with symlinks resolved: the boundary every path argument is judged against. */
+  root: string;
   agentName: string;
   confinement: AgentConfinement;
   systemPrompt: string;
@@ -117,17 +125,43 @@ class AsyncQueue<T> {
   }
 }
 
+/** The four ways {@link decideTool} says no. */
+type RefusalReason = Exclude<ToolDecision, { allow: true }>["reason"];
+
+/**
+ * What a refusal is called on screen — a state, not an explanation. Never the path: a summary
+ * that named the file it refused would publish the one thing the refusal exists to withhold.
+ */
+const REFUSAL_SUMMARY: Record<RefusalReason, (tool: string) => string> = {
+  unknown: (tool) => `refused ${tool} — not a tool this agent has`,
+  refused: (tool) => `refused ${tool} — outside what this agent may do`,
+  outside: (tool) => `refused ${tool} — outside the working directory`,
+  "undeclared-path": (tool) => `refused ${tool} — unrecognised path argument`,
+};
+
+/**
+ * What the agent is told, which is a different question from what the screen shows.
+ *
+ * The out-of-directory case says WHY, and that is deliberate rather than chatty: a bare refusal
+ * was measured sending a turn looking for another route to the same file — denied `Read`, it
+ * reached for `cat` through the shell. Naming the boundary is what makes it stop, and it gives
+ * away nothing the agent did not already put in the argument.
+ */
+const DENIAL_MESSAGE: Record<RefusalReason, string> = {
+  unknown: "denied by Arke Studio confinement",
+  refused: "denied by Arke Studio confinement",
+  outside: "denied by Arke Studio confinement — that path is outside this session's working directory",
+  "undeclared-path": "denied by Arke Studio confinement — that argument is not one this session can check",
+};
+
 export class ClaudeAdapter implements HarnessAdapter {
   readonly id = "claude";
 
   private readonly sessions = new Map<string, ClaudeSession>();
   private readonly subscribers = new Set<AsyncQueue<HarnessEvent>>();
   private ready: Readiness = { ready: false, reason: "not initialised" };
-  /**
-   * What the next session is configured with. Written by `prepareSession`, taken by the
-   * `createSession` that follows it — the same order the file-writing harnesses rely on.
-   */
-  private pending: SessionConfigInput = {};
+  /** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
+  private readonly pending = new Map<string, SessionConfigInput>();
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
 
@@ -150,7 +184,11 @@ export class ClaudeAdapter implements HarnessAdapter {
    * misconfiguration, which is what let it go unnoticed.
    */
   prepareSession(input: SessionConfigInput): void {
-    this.pending = input;
+    if (input.preparationId !== undefined) this.pending.set(input.preparationId, input);
+  }
+
+  abandonSessionPreparation(preparationId: string): void {
+    this.pending.delete(preparationId);
   }
 
   async init(): Promise<void> {
@@ -173,10 +211,14 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const prepared = input.preparationId === undefined ? {} : this.pending.get(input.preparationId);
+    if (input.preparationId !== undefined) this.pending.delete(input.preparationId);
+    if (prepared === undefined) throw new Error("session preparation is missing or was already consumed");
     const agentName = input.agent ?? "sheet-editor";
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
+    if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     /*
      * From the session that was just prepared, not from how the adapter was built (codex,
      * 2026-08-23).
@@ -189,8 +231,8 @@ export class ClaudeAdapter implements HarnessAdapter {
      */
     const skill = skillForAgent(
       agentName,
-      this.pending.skillFamily ?? this.opts.skillFamily,
-      this.pending.skillModelId ?? this.opts.skillModelId,
+      prepared.skillFamily ?? this.opts.skillFamily,
+      prepared.skillModelId ?? this.opts.skillModelId,
     );
     /*
      * No default for `cwd`, though the contract makes it optional.
@@ -202,19 +244,27 @@ export class ClaudeAdapter implements HarnessAdapter {
      * the user happened to launch from, and quietly substituting it would widen the boundary to
      * a directory nobody chose. Every caller passes one; a caller that forgets should be told.
      */
-    if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     const session: ClaudeSession = {
       id: `claude_${randomUUID()}`,
       cwd: input.cwd,
+      /*
+       * Resolved once, here, rather than per call.
+       *
+       * Every path argument is judged against this, and judging it against the UNRESOLVED cwd
+       * would be a string test wearing a boundary's clothes: a working directory reached through
+       * a symlink would fail to contain its own files, and every honest call inside it would be
+       * refused.
+       */
+      root: await resolveRoot(input.cwd),
       agentName,
       // Settings' research toggle, from the same `prepareSession` input the skill comes from.
       // No `this.opts` fallback: there is no constructor option for it, and inventing an
       // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
-      confinement: confinementFor(member, { web: this.pending.researchWeb === true }),
-      worldQueryUrl: this.opts.worldQueryUrl ?? this.pending.worldQueryUrl,
+      confinement: confinementFor(member, { web: prepared.researchWeb === true }),
+      worldQueryUrl: this.opts.worldQueryUrl ?? prepared.worldQueryUrl,
       systemPrompt: agentPromptFor({
         ...member,
-        researchWeb: this.pending.researchWeb === true,
+        researchWeb: prepared.researchWeb === true,
         ...(override?.brief !== undefined ? { brief: override.brief } : {}),
         ...(skill !== null ? { skill } : {}),
       }),
@@ -338,21 +388,33 @@ export class ClaudeAdapter implements HarnessAdapter {
     }
   }
 
-  /** The confinement, enforced per call. Default-deny, including tools we have never heard of. */
+  /**
+   * The confinement, enforced per call: what the tool does AND where it was pointed.
+   *
+   * `input` used to be passed straight back out as `updatedInput` without being looked at, which
+   * is how a path argument reached anywhere on the disk under a tool name both roles permit.
+   */
   private gateFor(session: ClaudeSession) {
     return async (toolName: string, input: Record<string, unknown>) => {
-      const decision = decideTool(session.confinement, toolName);
+      const decision = await decideTool(session.confinement, toolName, { input, root: session.root });
       if (decision.allow) return { behavior: "allow" as const, updatedInput: input };
       this.emit({
         type: "tool.activity",
         sessionId: session.id,
         tool: toolName,
-        summary:
-          decision.reason === "unknown"
-            ? `refused ${toolName} — not a tool this agent has`
-            : `refused ${toolName} — outside what this agent may do`,
+        summary: REFUSAL_SUMMARY[decision.reason](toolName),
       });
-      return { behavior: "deny" as const, message: "denied by Arke Studio confinement" };
+      // The path itself goes to the trace, not to the summary or the model: a refusal that
+      // quotes the file it refused hands back the one thing the boundary exists to withhold.
+      this.opts.onTrace?.({
+        at: "claude.tool-refused",
+        sessionId: session.id,
+        tool: toolName,
+        reason: decision.reason,
+        ...(decision.reason === "outside" ? { path: decision.path, root: session.root } : {}),
+        ...(decision.reason === "undeclared-path" ? { argument: decision.argument } : {}),
+      });
+      return { behavior: "deny" as const, message: DENIAL_MESSAGE[decision.reason] };
     };
   }
 

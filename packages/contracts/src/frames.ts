@@ -833,6 +833,55 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       workspaceId: z.string().min(1).nullable(),
     })
     .strict(),
+  /**
+   * Vendor sign-in through the harness (SPEC-030). Same split as the provider tools above and
+   * for the same reason: a sign-in opens a browser and can take minutes, so starting, giving
+   * up, and re-asking are separate messages. Vendor and method ids are the harness's own
+   * strings (R-7), so no closed enum can carry them.
+   */
+  z.object({ kind: z.literal("refresh-vendor-auth") }).strict(),
+  z
+    .object({
+      kind: z.literal("begin-vendor-sign-in"),
+      vendor: z.string().min(1).max(128),
+      /** The oauth method's id. Key methods go through submit-vendor-key instead. */
+      method: z.string().min(1).max(128),
+      /** Answers to the method's form fields, when it has any — keyed by field key. */
+      answers: z.record(z.string().max(2048)).optional(),
+    })
+    .strict(),
+  /**
+   * The one-time code a `code`-mode attempt handed the person to bring back. Write-only and
+   * passed straight through to the harness; nothing retains or echoes it (R-1).
+   */
+  z
+    .object({
+      kind: z.literal("submit-vendor-sign-in-code"),
+      vendor: z.string().min(1).max(128),
+      code: z.string().min(1).max(512),
+    })
+    .strict(),
+  /**
+   * The typed-secret method (§2.2): the key goes to the harness in one call and is not
+   * retained. Write-only — no message or event ever carries it back.
+   */
+  z
+    .object({
+      kind: z.literal("submit-vendor-key"),
+      vendor: z.string().min(1).max(128),
+      key: z.string().min(1).max(4096),
+      answers: z.record(z.string().max(2048)).optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("cancel-vendor-sign-in") }).strict(),
+  /** Remove a stored connection — performed by the harness, never a file deletion (R-9a). */
+  z
+    .object({
+      kind: z.literal("remove-vendor-connection"),
+      vendor: z.string().min(1).max(128),
+      credential: z.string().min(1).max(256),
+    })
+    .strict(),
   /** SPEC-008 R-20: a routing default is a concrete model, displayed as its provider (D1). */
   z
     .object({

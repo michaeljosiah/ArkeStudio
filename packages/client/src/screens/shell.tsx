@@ -66,6 +66,13 @@ import {
   retryJobFinalization,
   resumeQueue,
   refreshProviderTool,
+  refreshVendorAuth,
+  beginVendorSignIn,
+  submitVendorSignInCode,
+  submitVendorKey,
+  cancelVendorSignIn,
+  removeVendorConnection,
+  listHarnessModels,
   selectProviderWorkspace,
   setCredential,
   signInProviderTool,
@@ -125,6 +132,9 @@ import {
   type ProviderStatus,
   type ProviderWorkspace,
   type SetupComponent,
+  type VendorAuthMethod,
+  type VendorIntegration,
+  type VendorSignIn,
   type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
   blueprintCoverage,
@@ -1521,6 +1531,7 @@ export function SettingsLayout() {
                 {(
                   [
                     ["providers", "Providers"],
+                    ["sign-in", "Sign-in"],
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
                     ["local-runtime", "Local runtime"],
@@ -2059,6 +2070,291 @@ export function SettingsProvidersScreen() {
        * keys, and 40a's rail already says what this is.
        */}
     </div>
+  );
+}
+
+/**
+ * Vendor sign-in through the harness (SPEC-030 §2.4): the vendors with a connection, which one
+ * authoring uses, and the hand-off to the vendor's own page. The list, its labels and its
+ * method names are the harness's verbatim (R-7) — nothing here carries a vendor's name of its
+ * own. Why a connection outranks a key, and why one can look healthy and then fail, live in
+ * the spec, not on this screen.
+ */
+export function SettingsSignInScreen() {
+  const { state } = useStore();
+  const auth = state?.app.vendorAuth ?? null;
+  const harnessReady = state?.app.health.harness.status === "healthy";
+  useEffect(() => {
+    if (harnessReady) refreshVendorAuth();
+  }, [harnessReady]);
+  // The default model's provider is which vendor authoring uses (R-10) — and it can change
+  // while health stays healthy, because signing in or out changes the catalog. Keyed on the
+  // stored connections, so the label follows the sign-in that just landed.
+  const storedConnections = (auth?.vendors ?? [])
+    .map((v) => `${v.id}:${v.connections.flatMap((c) => (c.kind === "stored" ? [c.id] : [])).join(",")}`)
+    .join("|");
+  useEffect(() => {
+    if (harnessReady) listHarnessModels();
+  }, [harnessReady, storedConnections]);
+  // Authoring runs on the default model — and on any agent's model override, which routes past
+  // it. The label follows every provider an agent can actually bill, not only the default's.
+  const authoringProviders = new Set<string>();
+  const defaultProvider = state?.app.harnessModels.find((m) => m.isDefault === true)?.provider;
+  if (defaultProvider !== undefined) authoringProviders.add(defaultProvider);
+  for (const agent of state?.app.agents ?? []) {
+    const overrideProvider = agent.model?.split("/")[0];
+    if (overrideProvider) authoringProviders.add(overrideProvider);
+  }
+  if (!auth || !auth.available) {
+    return (
+      <div data-screen="settings-signin" className="fy-set">
+        <div className="fy-set__eyebrow">VENDOR SIGN-IN</div>
+        <div className="fy-set__row">
+          <div className="fy-set__name fy-set__name--wide">
+            <div className="fy-set__title">Use a subscription you already pay for</div>
+          </div>
+          <div className="fy-set__field fy-set__field--empty">unavailable</div>
+        </div>
+        <div className="fy-set__note">{auth?.reason ?? "the harness has not started"}</div>
+      </div>
+    );
+  }
+  return (
+    <div data-screen="settings-signin" className="fy-set">
+      <div className="fy-set__eyebrow">VENDOR SIGN-IN</div>
+      {auth.reason !== null && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>{auth.reason}</span>
+        </div>
+      )}
+      {auth.vendors.length === 0 && <div className="fy-set__note">Nothing to sign in to yet — the harness is still listing vendors.</div>}
+      {auth.vendors.map((vendor) => (
+        <VendorSignInRow
+          key={vendor.id}
+          vendor={vendor}
+          signIn={auth.signIn}
+          linked={auth.carry === "linked"}
+          usedForAuthoring={authoringProviders.has(vendor.id)}
+        />
+      ))}
+      {auth.carryDetail !== null && <div className="fy-set__note">{auth.carryDetail}</div>}
+    </div>
+  );
+}
+
+/**
+ * One vendor: its state, its connections, and every method the harness reports, offered at
+ * once (R-9). A method with form fields opens them inline; equality-gated fields follow the
+ * answers, which is all the measured builds express.
+ */
+function VendorSignInRow({
+  vendor,
+  signIn,
+  linked,
+  usedForAuthoring,
+}: {
+  vendor: VendorIntegration;
+  signIn: VendorSignIn | null;
+  linked: boolean;
+  usedForAuthoring: boolean;
+}) {
+  const [openMethod, setOpenMethod] = useState<VendorAuthMethod | null>(null);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [keyDraft, setKeyDraft] = useState("");
+  const [codeDraft, setCodeDraft] = useState("");
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const stored = vendor.connections.filter((c) => c.kind === "stored");
+  const hasEnvKey = vendor.connections.some((c) => c.kind === "env");
+  const active = signIn !== null && signIn.vendor === vendor.id ? signIn : null;
+  const stateWord = vendor.needsSignIn ? "sign-in needed" : stored.length > 0 ? "connected" : "not signed in";
+  const visibleFields = (method: VendorAuthMethod) =>
+    method.fields.filter((f) => f.whenEquals.every((w) => (answers[w.key] ?? "") === w.value));
+  const fieldsAnswered = (method: VendorAuthMethod) =>
+    visibleFields(method).every((f) => !f.required || (answers[f.key] ?? "").trim().length > 0);
+  const begin = (method: VendorAuthMethod) => {
+    const fields = visibleFields(method);
+    const filled: Record<string, string> = {};
+    for (const field of fields) {
+      const value = (answers[field.key] ?? "").trim();
+      if (value.length > 0) filled[field.key] = value;
+    }
+    if (method.kind === "key") {
+      if (keyDraft.trim().length === 0) return;
+      submitVendorKey(vendor.id, keyDraft.trim(), Object.keys(filled).length > 0 ? filled : undefined);
+      setKeyDraft("");
+    } else if (method.id !== null) {
+      beginVendorSignIn(vendor.id, method.id, Object.keys(filled).length > 0 ? filled : undefined);
+    }
+    setOpenMethod(null);
+    setAnswers({});
+  };
+  return (
+    <>
+      <div className="fy-set__row">
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">{vendor.name}</div>
+        </div>
+        <span className={cx("fy-set__dot", stored.length > 0 && !vendor.needsSignIn && "fy-set__dot--ok", vendor.needsSignIn && "fy-set__dot--warn")} />
+        <span className="fy-set__state">{stateWord}</span>
+      </div>
+      {/* R-11: with both a connection and a Studio key, name the one in effect. */}
+      {stored.length > 0 && hasEnvKey && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--ok" />
+          <span>uses this sign-in, not your key</span>
+        </div>
+      )}
+      {usedForAuthoring && stored.length > 0 && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--ok" />
+          <span>used for authoring</span>
+        </div>
+      )}
+      {active !== null ? (
+        <div className="fy-prov__keyline">
+          <div className="fy-prov__eyebrow">{active.method.toUpperCase()}</div>
+          {active.phase === "waiting" ? (
+            <div className="fy-set__field">
+              {/* The harness's instructions verbatim — for a device flow they carry the code. */}
+              <span style={{ flex: 1 }}>{active.instructions ?? "waiting for the vendor…"}</span>
+              {active.codeEntry && (
+                <>
+                  <Input
+                    value={codeDraft}
+                    onChange={(e) => setCodeDraft(e.target.value)}
+                    placeholder="code from the vendor"
+                    aria-label={`code for ${vendor.name}`}
+                  />
+                  <button
+                    type="button"
+                    className="fy-set__link"
+                    disabled={codeDraft.trim().length === 0}
+                    onClick={() => {
+                      submitVendorSignInCode(vendor.id, codeDraft.trim());
+                      setCodeDraft("");
+                    }}
+                  >
+                    Submit
+                  </button>
+                </>
+              )}
+              <button type="button" className="fy-set__link" onClick={() => cancelVendorSignIn()}>
+                Stop waiting
+              </button>
+            </div>
+          ) : (
+            <div className="fy-set__field">
+              <span className="fy-set__dot fy-set__dot--warn" />
+              <span style={{ flex: 1 }}>{active.detail ?? "the sign-in did not complete"}</span>
+              <button type="button" className="fy-set__link" onClick={() => cancelVendorSignIn()}>
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="fy-set__field">
+          {/* Every method the harness reports, offered at once — no fallback detection (R-9). */}
+          {vendor.methods.map((method) => (
+            <button
+              type="button"
+              key={method.id ?? method.kind}
+              className="fy-set__link"
+              onClick={() => {
+                if (method.fields.length > 0 || method.kind === "key") {
+                  setOpenMethod(openMethod === method ? null : method);
+                  setAnswers({});
+                } else if (method.id !== null) {
+                  beginVendorSignIn(vendor.id, method.id);
+                }
+              }}
+            >
+              {method.label}
+            </button>
+          ))}
+          {stored.map((connection) =>
+            confirmRemove === connection.id ? (
+              <button
+                type="button"
+                key={connection.id}
+                className="fy-set__link"
+                onClick={() => {
+                  setConfirmRemove(null);
+                  removeVendorConnection(vendor.id, connection.id);
+                }}
+              >
+                {/* Two clicks and no dialog: this second click is the consent, and the words say
+                    where the sign-out reaches (R-9a). */}
+                {linked ? "signs your own installation out too — Remove" : "signs this studio out — Remove"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                key={connection.id}
+                className="fy-set__link"
+                onClick={() => setConfirmRemove(connection.id)}
+              >
+                Remove{stored.length > 1 ? ` · ${connection.label}` : ""}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+      {openMethod !== null && active === null && (
+        <div className="fy-prov__keyline">
+          <div className="fy-prov__eyebrow">{openMethod.label.toUpperCase()}</div>
+          <div className="fy-set__field">
+            {visibleFields(openMethod).map((field) =>
+              field.options !== null ? (
+                <select
+                  key={field.key}
+                  className="fy-set__select"
+                  aria-label={field.title}
+                  value={answers[field.key] ?? ""}
+                  onChange={(e) => setAnswers({ ...answers, [field.key]: e.target.value })}
+                >
+                  <option value="">{field.title}</option>
+                  {field.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  key={field.key}
+                  value={answers[field.key] ?? ""}
+                  onChange={(e) => setAnswers({ ...answers, [field.key]: e.target.value })}
+                  placeholder={field.placeholder ?? field.title}
+                  aria-label={field.title}
+                />
+              ),
+            )}
+            {openMethod.kind === "key" && (
+              <Input
+                type="password"
+                value={keyDraft}
+                onChange={(e) => setKeyDraft(e.target.value)}
+                placeholder="API key"
+                aria-label={`API key for ${vendor.name}`}
+              />
+            )}
+            <button
+              type="button"
+              className="fy-set__link"
+              disabled={!fieldsAnswered(openMethod) || (openMethod.kind === "key" && keyDraft.trim().length === 0)}
+              onClick={() => begin(openMethod)}
+            >
+              {openMethod.kind === "key" ? "Save" : "Continue"}
+            </button>
+            <button type="button" className="fy-set__link" onClick={() => setOpenMethod(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

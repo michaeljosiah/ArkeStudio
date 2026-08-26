@@ -74,6 +74,28 @@ const state: ClientState = {
       },
     ],
     providerTools: [],
+    // SPEC-030: the sign-in surface as the harness reports it — openai's methods verbatim from
+    // the measured build, no connection yet.
+    vendorAuth: {
+      available: true,
+      reason: null,
+      carry: "none" as const,
+      carryDetail: null,
+      vendors: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          methods: [
+            { id: null, kind: "key" as const, label: "API key", fields: [] },
+            { id: "chatgpt-browser", kind: "oauth" as const, label: "ChatGPT Pro/Plus (browser)", fields: [] },
+            { id: "chatgpt-headless", kind: "oauth" as const, label: "ChatGPT Pro/Plus (headless)", fields: [] },
+          ],
+          connections: [],
+          needsSignIn: false,
+        },
+      ],
+      signIn: null,
+    },
     manifest: {
       manifestVersion: 9,
       generated: "2026-07-28",

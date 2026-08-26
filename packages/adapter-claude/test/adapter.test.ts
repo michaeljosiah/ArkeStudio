@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { confinementFor, type HarnessAdapter, type HarnessEvent } from "@arke-studio/contracts";
+import {
+  confinementFor,
+  type AgentConfinement,
+  type HarnessAdapter,
+  type HarnessEvent,
+} from "@arke-studio/contracts";
 import {
   ClaudeAdapter,
   createNormalizeState,
@@ -10,6 +15,7 @@ import {
   toolSummary,
   type RunQuery,
 } from "../src/index.js";
+import { tempDir } from "./tmp.js";
 
 /** Scripted SDK messages, plus a hook onto the options the adapter actually passed. */
 function fakeQuery(script: unknown[]): { run: RunQuery; options: () => Record<string, unknown> } {
@@ -40,8 +46,18 @@ async function collect(adapter: ClaudeAdapter, run: () => Promise<unknown>): Pro
   return events;
 }
 
-/** Any path will do — runQuery is faked throughout; what matters is that one is chosen. */
-const CWD = "/tmp/arke-claude-test";
+/**
+ * A REAL directory, not a made-up string.
+ *
+ * `runQuery` is faked throughout, so the harness never looks at this — but the gate does now.
+ * Every path argument is resolved against it and symlinks are followed, so a cwd that does not
+ * exist would make every in-directory call fail its containment test for the wrong reason.
+ */
+const CWD = await tempDir("arke-claude-test-");
+
+/** The gate's question, minus the ceremony: one confinement, one tool, one set of arguments. */
+const decide = (confinement: AgentConfinement, tool: string, input: Record<string, unknown>) =>
+  decideTool(confinement, tool, { input, root: CWD });
 
 describe("the confinement, enforced per tool call", () => {
   const authoring = confinementFor({ readOnly: false });
@@ -54,22 +70,26 @@ describe("the confinement, enforced per tool call", () => {
     assert.equal(intentOf("mcp__arke-world__search_canon"), "world-query");
   });
 
-  it("allows an authoring agent to edit, and refuses the same tool to one that answers", () => {
-    assert.deepEqual(decideTool(authoring, "Edit"), { allow: true });
-    assert.deepEqual(decideTool(readOnly, "Edit"), { allow: false, reason: "refused", intent: "edit" });
+  it("allows an authoring agent to edit, and refuses the same tool to one that answers", async () => {
+    assert.deepEqual(await decide(authoring, "Edit", { file_path: `${CWD}/sheet.md` }), { allow: true });
+    assert.deepEqual(await decide(readOnly, "Edit", { file_path: `${CWD}/sheet.md` }), {
+      allow: false,
+      reason: "refused",
+      intent: "edit",
+    });
   });
 
-  it("refuses a tool it has never heard of, rather than assuming it is harmless", () => {
+  it("refuses a tool it has never heard of, rather than assuming it is harmless", async () => {
     // Measured: a real installation advertises thirty-odd tools, and gained five between two runs
     // of the same spike. Anything not in the table is refused by construction.
     for (const unknown of ["Monitor", "Workflow", "CronCreate", "SomeToolShippedNextTuesday"]) {
-      assert.deepEqual(decideTool(authoring, unknown), { allow: false, reason: "unknown" });
+      assert.deepEqual(await decide(authoring, unknown, {}), { allow: false, reason: "unknown" });
     }
   });
 
-  it("refuses the shell under every spelling, because denying one was measured to be routed around", () => {
+  it("refuses the shell under every spelling, because denying one was measured to be routed around", async () => {
     for (const shell of ["Bash", "PowerShell"]) {
-      assert.equal(decideTool(authoring, shell).allow, false, `${shell} is not an intent this agent has`);
+      assert.equal((await decide(authoring, shell, {})).allow, false, `${shell} is not an intent this agent has`);
     }
   });
 
@@ -329,8 +349,13 @@ describe("the session lifecycle", () => {
      */
     const fake = fakeQuery([result()]);
     const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ worldQueryUrl: "http://127.0.0.1:9/mcp" });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
+    adapter.prepareSession?.({ preparationId: "prep_world", worldQueryUrl: "http://127.0.0.1:9/mcp" });
+    const { sessionId } = await adapter.createSession({
+      purpose: "authoring",
+      cwd: CWD,
+      agent: "sheet-editor",
+      preparationId: "prep_world",
+    });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
 
     const servers = fake.options()["mcpServers"] as Record<string, { url?: string }> | undefined;
@@ -341,11 +366,50 @@ describe("the session lifecycle", () => {
   it("leaves the world tool off when no world is open", async () => {
     const fake = fakeQuery([result()]);
     const adapter: HarnessAdapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({});
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
+    adapter.prepareSession?.({ preparationId: "prep_empty" });
+    const { sessionId } = await adapter.createSession({
+      purpose: "authoring",
+      cwd: CWD,
+      agent: "sheet-editor",
+      preparationId: "prep_empty",
+    });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     assert.equal(fake.options()["mcpServers"], undefined, "no empty server registration");
     await adapter.dispose?.();
+  });
+
+  it("keeps concurrent Claude preparations distinct even when they share a cwd", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession({ preparationId: "prep_first", worldQueryUrl: "http://127.0.0.1:9/first" });
+    adapter.prepareSession({ preparationId: "prep_second", worldQueryUrl: "http://127.0.0.1:9/second" });
+
+    const first = await adapter.createSession({
+      purpose: "authoring",
+      cwd: CWD,
+      agent: "sheet-editor",
+      preparationId: "prep_first",
+    });
+    await adapter.sendMessage({ sessionId: first.sessionId, parts: [{ type: "text", text: "go" }] });
+    const servers = fake.options()["mcpServers"] as Record<string, { url?: string }>;
+    assert.equal(servers["arke-world"]?.url, "http://127.0.0.1:9/first");
+    await adapter.dispose();
+  });
+
+  it("cannot consume an abandoned Claude preparation", async () => {
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fakeQuery([result()]).run });
+    adapter.prepareSession({ preparationId: "prep_abandoned" });
+    adapter.abandonSessionPreparation("prep_abandoned");
+    await assert.rejects(
+      adapter.createSession({
+        purpose: "authoring",
+        cwd: CWD,
+        agent: "sheet-editor",
+        preparationId: "prep_abandoned",
+      }),
+      /preparation is missing/,
+    );
+    await adapter.dispose();
   });
 });
 
@@ -362,8 +426,13 @@ describe("the skill a Claude session drafts under", () => {
     const fake = fakeQuery([result()]);
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ skillFamily: "seedance", skillModelId: "seedance-2.5" });
-    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
+    adapter.prepareSession?.({ preparationId: "prep_skill", skillFamily: "seedance", skillModelId: "seedance-2.5" });
+    const { sessionId } = await adapter.createSession({
+      purpose: "authoring",
+      cwd: CWD,
+      agent: "scene-writer",
+      preparationId: "prep_skill",
+    });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);
     assert.ok(prompt.includes("thirty seconds"), "2.5's own document arrives, not the family's");

@@ -6,18 +6,33 @@ import {
   type HarnessEvent,
   type ModelInfo,
   type PermissionAck,
+  type PermissionAssessment,
   type PermissionDecision,
+  type PermissionRequest,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
   type SessionRef,
   type SessionConfigInput,
   type SessionFile,
+  type VendorIntegration,
+  type VendorOAuthAttempt,
+  type VendorOAuthAttemptState,
 } from "@arke-studio/contracts";
-import { buildSessionConfigV2 } from "./config.js";
+import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
+import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
+import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
+import {
+  normalizeAttempt,
+  normalizeAttemptStatus,
+  normalizeIntegration,
+  type WireAttempt,
+  type WireAttemptStatus,
+  type WireIntegration,
+} from "./vendor-auth.js";
 
 /**
  * The live OpenCode v2 adapter (issue 327). Drives the authenticated /api surface of an
@@ -46,6 +61,7 @@ interface TrackedSession {
   purpose: CreateSessionInput["purpose"];
   cwd?: string;
   agent?: string;
+  permissionPolicy: SessionPermissionPolicy | null;
 }
 
 /**
@@ -84,6 +100,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * already-surfaced record the resync checks — one structure, one invariant.
    */
   private readonly permissionSessions = new Map<string, string>();
+  private readonly preparedPolicies = new PreparedSessionPolicies();
   private disposed = false;
 
   // Fan-out: each streamEvents() consumer gets its own queue — the authoring service and the
@@ -129,7 +146,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         );
         if (health?.healthy === true) {
           this.serverVersion = health.version ?? null;
-          this.caps = new Set<HarnessCapability>(["events", "models", "permissions"]);
+          this.caps = new Set<HarnessCapability>(["events", "models", "permissions", "auth"]);
           this.ready = { ready: true };
           this.trace("init.ready", { version: this.serverVersion, warmupMs: Date.now() - started });
           // Prime the window so the first turn budgets from the real model, not the fallback
@@ -188,12 +205,25 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
 ` }];
   }
 
+  prepareSession(input: SessionConfigInput): void {
+    this.preparedPolicies.prepare(input);
+  }
+
+  abandonSessionPreparation(preparationId: string): void {
+    this.preparedPolicies.abandon(preparationId);
+  }
+
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    const permissionPolicy = this.preparedPolicies.take(input.agent, input.preparationId);
+    if (input.preparationId !== undefined && permissionPolicy === null) {
+      throw new Error("session preparation is missing or was already consumed");
+    }
     const location = input.cwd;
     const session = await this.http.reqData<{ id?: string; location?: { directory?: string } }>(
       "POST",
       "/api/session",
       location ? { location: { directory: wireDirectory(location) } } : {},
+      { signal: input.signal },
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
@@ -208,12 +238,13 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // backing carried (the `build` fallback that silently ate turns). 204 on success;
     // confirmation arrives as session.agent.selected on the stream.
     if (input.agent) {
-      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent });
+      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
     }
     this.sessions.set(sessionId, {
       purpose: input.purpose,
       ...(location ? { cwd: location } : {}),
       ...(input.agent ? { agent: input.agent } : {}),
+      permissionPolicy,
     });
     this.trace("session.created", { sessionId, agent: input.agent ?? null, baseUrl: this.opts.baseUrl() });
     this.push({ type: "session.created", sessionId });
@@ -386,25 +417,19 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
     const sessionId = this.permissionSessions.get(decision.permissionId);
     if (!sessionId) return { permissionId: decision.permissionId, status: "stale" };
-    try {
-      // The contracts' verbs are v2's verbs — once | always | reject — and the optional
-      // message carries the refusal reason to the agent (issue 327 §6).
-      await this.http.req("POST", `/api/session/${sessionId}/permission/${decision.permissionId}/reply`, {
-        reply: decision.decision,
-        ...(decision.message !== undefined ? { message: decision.message } : {}),
-      });
-    } catch {
-      return { permissionId: decision.permissionId, status: "stale" };
-    }
-    // Confirmation comes only from the replied event, never HTTP status; wait briefly.
-    const confirmed = await new Promise<boolean>((resolve) => {
+    const confirmation = new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         this.turnListeners.delete(listener);
         resolve(false);
       }, 3_000);
       (timer as { unref?: () => void }).unref?.();
       const listener = (event: HarnessEvent) => {
-        if (event.type === "permission.replied" && event.permissionId === decision.permissionId) {
+        if (
+          event.type === "permission.replied" &&
+          event.sessionId === sessionId &&
+          event.permissionId === decision.permissionId &&
+          event.decision === decision.decision
+        ) {
           clearTimeout(timer);
           this.turnListeners.delete(listener);
           resolve(true);
@@ -412,7 +437,26 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       };
       this.turnListeners.add(listener);
     });
+    try {
+      // The contracts' verbs are v2's verbs — once | always | reject — and the optional
+      // message carries the refusal reason to the agent (issue 327 §6).
+      await this.http.req("POST", `/api/session/${sessionId}/permission/${decision.permissionId}/reply`, {
+        reply: decision.decision,
+        ...(decision.message !== undefined ? { message: decision.message } : {}),
+      });
+    } catch (error) {
+      const stale = error instanceof OpenCodeError && (error.status === 404 || error.status === 409);
+      if (stale) this.permissionSessions.delete(decision.permissionId);
+      return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
+    }
+    // Confirmation comes only from the replied event, never HTTP status; wait briefly.
+    const confirmed = await confirmation;
+    if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
+  }
+
+  assessPermission(request: PermissionRequest): PermissionAssessment {
+    return assessV2Permission(this.sessions.get(request.sessionId)?.permissionPolicy, request.actionClass);
   }
 
   // ---- models --------------------------------------------------------------
@@ -453,6 +497,88 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       });
     }
     return out;
+  }
+
+  // ---- vendor sign-in (SPEC-030) -------------------------------------------
+
+  /**
+   * GET /api/integration, normalised at this boundary. The catalog populates asynchronously
+   * after spawn (~5s measured), so an empty list from a healthy server means "not yet", and
+   * the caller decides how patient to be.
+   */
+  async listIntegrations(): Promise<VendorIntegration[]> {
+    const rows = await this.http.reqData<WireIntegration[]>("GET", "/api/integration", undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    const out: VendorIntegration[] = [];
+    for (const row of rows ?? []) {
+      const normalized = normalizeIntegration(row);
+      if (normalized !== null) out.push(normalized);
+    }
+    return out;
+  }
+
+  /**
+   * POST connect/oauth. The harness owns the exchange from here: it binds the callback port
+   * itself for a browser method and polls the vendor for a device one (measured, D18). The
+   * one thing Arke does with the answer is open the URL and show the instructions verbatim.
+   */
+  async beginVendorOAuth(
+    integrationId: string,
+    methodId: string,
+    answers?: Record<string, string>,
+  ): Promise<VendorOAuthAttempt> {
+    const attempt = await this.http.reqData<WireAttempt>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth`,
+      { methodID: methodId, ...(answers && Object.keys(answers).length > 0 ? { answer: answers } : {}) },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+    return normalizeAttempt(attempt);
+  }
+
+  async pollVendorOAuth(integrationId: string, attemptId: string): Promise<VendorOAuthAttemptState> {
+    const status = await this.http.reqData<WireAttemptStatus>(
+      "GET",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}`,
+      undefined,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+    return normalizeAttemptStatus(status);
+  }
+
+  async cancelVendorOAuth(integrationId: string, attemptId: string): Promise<void> {
+    await this.http.req<void>(
+      "DELETE",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}`,
+      undefined,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+  }
+
+  async completeVendorOAuth(integrationId: string, attemptId: string, code: string): Promise<void> {
+    await this.http.req<void>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/oauth/${encodeURIComponent(attemptId)}/complete`,
+      { code },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+  }
+
+  /** POST connect/key — one call, 204, and the key is gone from this process (R-1, §2.2). */
+  async connectVendorKey(integrationId: string, key: string, answers?: Record<string, string>): Promise<void> {
+    await this.http.req<void>(
+      "POST",
+      `/api/integration/${encodeURIComponent(integrationId)}/connect/key`,
+      { key, ...(answers && Object.keys(answers).length > 0 ? { answer: answers } : {}) },
+      { signal: AbortSignal.timeout(30_000) },
+    );
+  }
+
+  async removeVendorCredential(credentialId: string): Promise<void> {
+    await this.http.req<void>("DELETE", `/api/credential/${encodeURIComponent(credentialId)}`, undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
   }
 
   // ---- the event pump ------------------------------------------------------

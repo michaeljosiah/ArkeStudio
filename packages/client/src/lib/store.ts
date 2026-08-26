@@ -79,6 +79,7 @@ export interface AuthoringActivity {
 export interface PendingPermission {
   description: string;
   actionClass: string;
+  rememberable: boolean;
 }
 
 export interface CanonSearchState {
@@ -481,6 +482,12 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
     case "provider.status":
       return { ...state, app: { ...state.app, providers: event.providers } };
+    case "provider.tool-status":
+      // Folded late (2026-08-26): without this arm the absent → signing-in → ready progression
+      // only ever arrived by reconnect snapshot, so the row could not move while you watched.
+      return { ...state, app: { ...state.app, providerTools: event.tools } };
+    case "vendor-auth.status":
+      return { ...state, app: { ...state.app, vendorAuth: event.auth } };
     case "routing.changed":
       return { ...state, app: { ...state.app, routing: { defaults: event.routing, faults: event.faults } } };
     case "presets.changed":
@@ -668,6 +675,9 @@ function handleFrame(json: string): void {
       state: frame.state,
       gateNotices,
       authoring,
+      // Snapshot replay is followed by current permission.pending events. Clear stale prompts
+      // first so a request that disappeared while the renderer was away does not survive reload.
+      permissions: {},
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceClips: changedWorld ? {} : current.voiceClips,
@@ -886,7 +896,11 @@ function handleFrame(json: string): void {
     } else if (event.type === "permission.pending") {
       permissions = {
         ...permissions,
-        [event.permissionId]: { description: event.description, actionClass: event.actionClass },
+        [event.permissionId]: {
+          description: event.description,
+          actionClass: event.actionClass,
+          rememberable: event.rememberable,
+        },
       };
     } else if (event.type === "permission.settled") {
       permissions = { ...permissions };
@@ -1805,6 +1819,35 @@ export function refreshProviderTool(provider: ProviderId): void {
 /** Which account the provider bills. null hands billing back to the personal context. */
 export function selectProviderWorkspace(provider: ProviderId, workspaceId: string | null): void {
   send({ kind: "select-provider-workspace", provider, workspaceId });
+}
+
+// ---- SPEC-030: vendor sign-in through the harness --------------------------
+
+export function refreshVendorAuth(): void {
+  send({ kind: "refresh-vendor-auth" });
+}
+
+/** Vendor and method ids are the harness's own strings (R-7); nothing here waits on the browser. */
+export function beginVendorSignIn(vendor: string, method: string, answers?: Record<string, string>): void {
+  send({ kind: "begin-vendor-sign-in", vendor, method, ...(answers ? { answers } : {}) });
+}
+
+/** Write-only, like set-credential: the code goes up once and nothing carries it back (R-1). */
+export function submitVendorSignInCode(vendor: string, code: string): void {
+  send({ kind: "submit-vendor-sign-in-code", vendor, code });
+}
+
+/** Write-only, like set-credential: the key goes up once and nothing carries it back (R-1). */
+export function submitVendorKey(vendor: string, key: string, answers?: Record<string, string>): void {
+  send({ kind: "submit-vendor-key", vendor, key, ...(answers ? { answers } : {}) });
+}
+
+export function cancelVendorSignIn(): void {
+  send({ kind: "cancel-vendor-sign-in" });
+}
+
+export function removeVendorConnection(vendor: string, credential: string): void {
+  send({ kind: "remove-vendor-connection", vendor, credential });
 }
 
 /** Configure one agent. null clears that half back to what shipped. */
