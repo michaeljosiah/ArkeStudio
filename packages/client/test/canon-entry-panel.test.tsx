@@ -3,13 +3,13 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __setStateForTest, type CanonRefsState } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 const ENTRY = "CANON-002";
 
-function render(canonRefs: Record<string, unknown>): string {
+function render(canonRefs: Record<string, CanonRefsState>): string {
   __setStateForTest(FIXTURE_STATE, { canonRefs });
   return renderToString(
     <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/canon/${ENTRY}`]}>
@@ -18,7 +18,7 @@ function render(canonRefs: Record<string, unknown>): string {
   );
 }
 
-function detail(history: unknown[], historyTruncated: boolean): Record<string, unknown> {
+function detail(history: CanonRefsState["history"], historyTruncated: boolean): Record<string, CanonRefsState> {
   return {
     [ENTRY]: {
       citedBy: { sheets: [], entries: [], productions: [] },
