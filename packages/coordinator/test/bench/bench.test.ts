@@ -668,6 +668,7 @@ describe("keeping (issue 305 §7)", () => {
     await mkdir(join(dir, "artifacts"), { recursive: true });
     await writeFile(join(dir, "artifacts", "upload.png"), "the same bytes");
     const generation = {
+      source: "bench" as const,
       sessionId: opened.session.id,
       takeId: takeId as never,
       takeNumber: 1,
@@ -682,7 +683,7 @@ describe("keeping (issue 305 §7)", () => {
     const first = await fileGeneratedArtifact(store, { sourcePath: join(mediaDir, "take.png"), generation });
     assert.deepEqual(first.origin, { by: "system", producedBy: "bench" });
     assert.equal(first.production, undefined); // the world owns it
-    assert.equal(first.generation?.takeId, takeId);
+    assert.equal(first.generation?.source === "bench" ? first.generation.takeId : null, takeId);
     assert.match(first.file, /take-1\.png$/);
 
     // Retry of Keep: the same artifact comes back; no sibling is minted.
