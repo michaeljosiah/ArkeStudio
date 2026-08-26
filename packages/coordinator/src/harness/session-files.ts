@@ -69,7 +69,6 @@ export async function createPreparedSession(
     const preparationId = await writeSessionFiles(adapter, dir, input);
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(new Error("session creation timed out")), timeoutMs);
-    timer.unref?.();
     try {
       return await adapter.createSession({ ...session, cwd: dir, preparationId, signal: abort.signal });
     } catch (error) {

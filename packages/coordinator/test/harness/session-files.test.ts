@@ -37,6 +37,10 @@ describe("session preparation lifetime", () => {
     const firstCreated = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => {
+      enteredFirst = resolve;
+    });
     const adapter = {
       id: "serialized",
       capabilities: () => new Set(),
@@ -49,7 +53,10 @@ describe("session preparation lifetime", () => {
       },
       async createSession(input: CreateSessionInput) {
         order.push(`create:${input.title}`);
-        if (input.title === "first") await firstCreated;
+        if (input.title === "first") {
+          enteredFirst();
+          await firstCreated;
+        }
         return { sessionId: `session-${input.title}` };
       },
       async sendMessage() {
@@ -65,9 +72,9 @@ describe("session preparation lifetime", () => {
     const dir = await tempDir("arke-session-files-");
 
     const first = createPreparedSession(adapter, dir, { model: "first" }, { purpose: "authoring", title: "first" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await firstEntered;
     const second = createPreparedSession(adapter, dir, { model: "second" }, { purpose: "authoring", title: "second" });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(order, ["prepare:first", "create:first"]);
     releaseFirst();
     await Promise.all([first, second]);
