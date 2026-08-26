@@ -3734,6 +3734,20 @@ function useCutTransport(totalSec: number): Transport {
   const timeRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+  /*
+   * A film can get shorter underneath the playhead (issue 453).
+   *
+   * On the story and song clocks the duration is authored and changes only when somebody edits
+   * the story, but a media-only film is measured from its clips — trim the one that reaches
+   * furthest, drag it earlier or delete it and the end moves back. `seek` clamps, and nothing was
+   * calling `seek`: the viewer sat at `0:14 / 0:05` over no span at all, blank and stuck, until
+   * the person happened to scrub or press play.
+   */
+  useEffect(() => {
+    if (timeRef.current <= totalSec) return;
+    timeRef.current = totalSec;
+    setTime(totalSec);
+  }, [totalSec]);
   useTransport({
     playing,
     durationSec: totalSec,
@@ -3756,12 +3770,15 @@ function CutPreview({
   slug,
   spans,
   totalSec,
+  soundSec = 0,
   restartToken,
   transport,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
+  /** How far placed sound reaches, so a film with no picture is not reported as nothing. */
+  soundSec?: number;
   restartToken: number;
   transport: Transport;
 }) {
@@ -3789,6 +3806,28 @@ function CutPreview({
   const stillSrcFor = (span: PlaybackSpan | null) => (span?.still ? srcFor(span) : null);
 
   /*
+   * The still is painted off the frame clock too, for the reason the video already is.
+   *
+   * `time` reaches React four times a second; the video source is switched every frame from
+   * `timeRef`. Selecting the still from the throttled value would leave the old plate covering a
+   * video that had already started, or the old video showing under a plate that had already
+   * begun — a quarter second of the wrong picture at every boundary between the two, which is
+   * exactly the mistake the video loop exists to avoid.
+   */
+  const stillEl = useRef<HTMLImageElement>(null);
+  const paintStill = useCallback((span: PlaybackSpan | null) => {
+    const img = stillEl.current;
+    const el = video.current;
+    const src = span?.still && slug && span.path ? mediaUrl(slug, span.path) : null;
+    if (img !== null) {
+      // Assigning an identical src would restart the decode every frame.
+      if (src !== null && img.getAttribute("src") !== src) img.setAttribute("src", src);
+      img.style.opacity = src === null ? "0" : "1";
+    }
+    if (el !== null) el.style.opacity = videoSrcFor(span) === null ? "0" : "1";
+  }, [slug]);
+
+  /*
    * The sync runs on its own frame loop off `timeRef`, not off `time`.
    *
    * The transport reports to React four times a second, which is right for the clock and wrong
@@ -3809,11 +3848,12 @@ function CutPreview({
         playing: true,
         nowMs: ts,
       });
+      paintStill(span);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, spans, slug]);
+  }, [playing, spans, slug, paintStill]);
 
   // Paused: one sync, so a seek lands on the right frame without a loop running. A source that
   // was not ready when it was asked calls back through onMediaReady, since nothing else will.
@@ -3829,12 +3869,19 @@ function CutPreview({
         playing: false,
         nowMs: 0,
       });
+      paintStill(span);
     };
     onMediaReady(el, push);
     push();
-  }, [playing, time, spans, slug, timeRef]);
+  }, [playing, time, spans, slug, timeRef, paintStill]);
 
   const current = spanAt(spans, time);
+  /*
+   * A film can run on sound alone (issue 453). Its length counts placed sound, so an audio-only
+   * production has a real runtime and no picture at any second of it — and "nothing here yet" is
+   * then simply false, said to somebody who has placed something and can see it on a lane.
+   */
+  const soundOnly = soundSec > 0 && spans.length === 0;
   const showingVideo = videoSrcFor(current);
   const showingStill = stillSrcFor(current);
   const showing = showingVideo ?? showingStill;
@@ -3848,11 +3895,22 @@ function CutPreview({
         muted
         style={{ opacity: showingVideo === null ? 0 : 1 }}
       />
-      {showingStill !== null && (
-        <img className="fy-cutviewer__video" src={showingStill} alt="" />
-      )}
+      {/*
+        * Always mounted, never conditional: `paintStill` reaches it through the ref on the frame
+        * clock, and an element that came and went with a throttled render could not be painted at
+        * the moment the picture actually changes.
+        */}
+      <img
+        ref={stillEl}
+        className="fy-cutviewer__video"
+        alt=""
+        style={{ opacity: showingStill === null ? 0 : 1 }}
+        {...(showingStill !== null ? { src: showingStill } : {})}
+      />
       {showing === null && (
-        <span className="fy-cutviewer__empty">{current ? current.label : "nothing here yet"}</span>
+        <span className="fy-cutviewer__empty">
+          {current ? current.label : soundOnly ? "sound only" : "nothing here yet"}
+        </span>
       )}
       <button
         type="button"
@@ -4242,10 +4300,20 @@ export function CutScreen() {
    * header states — presenting the canvas as the runtime would let "Watch from top" run on into
    * blank editor space the export never emits.
    */
+  /*
+   * The canvas is measured from the RAW placements, not the resolved ones.
+   *
+   * What the export can use decides how long the film is; what somebody dropped decides how much
+   * timeline they need to reach it. A clip the export drops — a document, or a video not known to
+   * carry sound — is still drawn on a lane, and sizing the canvas without it puts that clip past
+   * 100% where it cannot be selected, moved or deleted. The case is not hypothetical: a cut
+   * becomes media-only the moment its last shot is removed, and any placement inherited from the
+   * old story timeline can sit well beyond the minimum canvas.
+   */
   const canvasSec = spineCut
     ? spineCut.trackDurationSec
     : mediaOnly
-      ? mediaCanvasSec([...placedPicture, ...placedSound])
+      ? mediaCanvasSec(overlays)
       : (cut?.totalSec ?? 0);
   const filmSec = mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : canvasSec;
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
@@ -4305,6 +4373,7 @@ export function CutScreen() {
           slug={slug}
           spans={spans}
           totalSec={filmSec}
+          soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
           restartToken={watchToken}
           transport={transport}
         />
