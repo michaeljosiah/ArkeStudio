@@ -29,6 +29,24 @@ export function seconds(n: number | undefined): string {
   return n === undefined ? "—" : `${n}s`;
 }
 
+/**
+ * A runtime measured off a timeline rather than authored (issue 453).
+ *
+ * Every other length on the Cut is a duration somebody wrote down, so it arrives whole and
+ * `seconds` never had to round. A placed film's length is wherever a person let go of the
+ * pointer: "14.776s" reads as a measurement rather than a label, so whole seconds it is.
+ *
+ * Except near zero, which is the case worth the extra branch. A clip may be as short as
+ * `MIN_CLIP_SEC`, and rounding a 0.1s film to "0s" would make something real and exportable look
+ * exactly like the empty production the export refuses. Below a second it keeps a decimal, and it
+ * never returns zero for a film that has anything on it at all.
+ */
+export function runtimeSeconds(n: number): string {
+  if (n <= 0) return "0s";
+  if (n >= 1) return `${Math.round(n)}s`;
+  return `${Math.max(0.1, Math.round(n * 10) / 10)}s`;
+}
+
 /** "sh_12" → "Shot 12", "sc_04" → "Scene 4" — ids stay mono in detail views. */
 export function humanNumber(id: string, label: string): string {
   const m = /_0*(\d+)$/.exec(id);

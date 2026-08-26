@@ -5151,6 +5151,25 @@ export class Coordinator {
             const overlays = exportOverlays(production.cut.overlays, artifacts);
             const audio = exportAudioClips(production.cut.overlays, artifacts);
             const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
+            /*
+             * Nothing to render, said before the encode (issue 453).
+             *
+             * A production with no story and nothing usable placed has no picture at all, and an
+             * empty plan becomes `concat=n=0`, which is not a filter graph — so this would fail as
+             * an opaque ffmpeg error after the export had been started and reported as running.
+             * The screen blocks the button for the same reason, but the refusal belongs here too:
+             * the screen is not the only way a message arrives.
+             */
+            if (plan.items.length === 0) {
+              emitProgress(
+                attemptId,
+                "failed",
+                0,
+                null,
+                "nothing to export: this production has no story and nothing usable placed on its lanes",
+              );
+              return;
+            }
             buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont);
           }
           const stamp = new Date()

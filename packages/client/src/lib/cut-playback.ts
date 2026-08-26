@@ -17,6 +17,15 @@ export interface PlaybackSpan {
   /** Where in the source file this span starts — trim already applied by the derivation. */
   mediaInSec: number;
   label: string;
+  /**
+   * A single frame rather than a timeline, so it needs an element that decodes images.
+   *
+   * Only a placed clip can be one: a shot's take and a spine segment are always footage. A
+   * browser does not decode a PNG as video, so feeding a still to the `<video>` shows nothing at
+   * all — the preview would be blank for an image-only production while the export holds that
+   * still for its whole placement.
+   */
+  still?: boolean;
 }
 
 export function spineSpans(cut: DerivedSpineCut): PlaybackSpan[] {
@@ -64,4 +73,50 @@ export function spanAt(spans: readonly PlaybackSpan[], seconds: number): Playbac
 /** Where in the source file the transport is, for a span it is inside. */
 export function mediaTimeFor(span: PlaybackSpan, seconds: number): number {
   return span.mediaInSec + Math.max(0, seconds - span.startSec);
+}
+
+/**
+ * What plays at a given second of a production that has no story (issue 453).
+ *
+ * The third derivation, and the one with no clock of its own to walk: there are no shots and no
+ * track, only the clips somebody placed, so the spans come from where they were placed and the
+ * holes between them are genuinely empty rather than missing.
+ *
+ * Takes the RESOLVED overlays — what `exportOverlays` returns — rather than raw lane records, so
+ * the preview shows exactly what the export will render. That resolution is what drops a document
+ * or an audio-only clip, and it also decides compositing: overlays come back ordered lane, then
+ * start, and the exporter chains them in that order, so the LAST one covering a moment is the one
+ * on top. Reading the first would show the picture underneath and disagree with the file.
+ */
+export function mediaSpans(
+  overlays: readonly { path: string; startSec: number; endSec: number; still: boolean }[],
+): PlaybackSpan[] {
+  if (overlays.length === 0) return [];
+  // Every edge any clip begins or ends on. Between two adjacent edges the answer cannot change,
+  // which is what makes the result contiguous and orderable without walking frame by frame.
+  const edges = [...new Set(overlays.flatMap((o) => [o.startSec, o.endSec]))].sort((a, b) => a - b);
+  const spans: PlaybackSpan[] = [];
+  let at = edges[0]!;
+  // The film starts at zero even when the first clip does not: leading emptiness is part of it.
+  if (at > 0) {
+    spans.push({ startSec: 0, endSec: at, path: null, mediaInSec: 0, label: "" });
+  }
+  for (let i = 0; i < edges.length - 1; i += 1) {
+    const start = edges[i]!;
+    const end = edges[i + 1]!;
+    const covering = overlays.filter((o) => o.startSec <= start && o.endSec > start);
+    const top = covering[covering.length - 1] ?? null;
+    spans.push({
+      startSec: start,
+      endSec: end,
+      path: top?.path ?? null,
+      // A clip plays from its own start, so entering it late means entering the file late. A
+      // still has one frame and no timeline to be at an offset into.
+      mediaInSec: top === null || top.still ? 0 : start - top.startSec,
+      label: top === null ? "" : (top.path.split("/").pop() ?? ""),
+      still: top?.still ?? false,
+    });
+    at = end;
+  }
+  return spans;
 }

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildExportPlan, buildFfmpegArgs, exportOverlays } from "../src/cut.js";
+import {
+  MEDIA_CANVAS_MIN_SEC,
+  buildExportPlan,
+  buildFfmpegArgs,
+  exportOverlays,
+  isMediaOnly,
+  mediaCanvasSec,
+  placedExtentSec,
+} from "../src/cut.js";
 import type { CutOverlay, DerivedCut } from "../src/cut.js";
 
 /**
@@ -177,5 +185,74 @@ describe("a shot's slot is what a clip is conformed to", () => {
     const graph = graphFor([{ durationSec: 4, media: null }]);
     assert.ok(!graph.includes("tpad="), "a slate is generated at its length, never conformed to it");
     assert.match(graph, /drawtext=/);
+  });
+});
+
+/**
+ * A production that is only media (issue 453).
+ *
+ * The picture stays derived wherever a story exists — none of this touches that. What it covers
+ * is the case derivation has nothing to work from, where the clips somebody placed ARE the film.
+ *
+ * Verified against ffmpeg 8.1.2 before being pinned: a story-less cut carrying a 4s picture at 0s
+ * and a 4s sound at 2s encodes to exactly 6.000s — the furthest thing placed, not the longer
+ * canvas the screen draws — reading the clip at 1s and 3.5s, bare black at 5s with YMAX 16 (a
+ * slate measures 246+, because a slate has text on it), and −91dB before the sound against
+ * −21.1dB across it.
+ */
+describe("a production with no story", () => {
+  const empty = { entries: [], covered: 0, gaps: 0, totalSec: 0, uncoveredSec: 0 } as unknown as DerivedCut;
+  const graphOf = (a: string[]) => a[a.indexOf("-filter_complex") + 1] ?? "";
+
+  it("is recognised by having nothing derived, not by having no scenes", () => {
+    assert.equal(isMediaOnly(empty), true);
+    assert.equal(isMediaOnly(cut), false, "a cut with entries orders a picture and is not this");
+  });
+
+  it("measures the film by what reaches furthest, counting sound as well as picture", () => {
+    // The sound outlasts the picture here. Taking the picture's extent would silently cut the
+    // film short of something a person placed.
+    assert.equal(placedExtentSec([{ endSec: 4 }, { endSec: 6 }]), 6);
+    assert.equal(placedExtentSec([]), 0, "nothing placed is not a film of some default length");
+  });
+
+  it("draws a canvas longer than the film, so there is somewhere to drop the next clip", () => {
+    // The empty state has to be droppable or it is a dead end: every gesture on the Cut refuses
+    // at zero, so a canvas measured only by its contents could never accept the first clip.
+    assert.equal(mediaCanvasSec([]), MEDIA_CANVAS_MIN_SEC);
+    assert.ok(mediaCanvasSec([{ endSec: 300 }]) > 300, "and it grows past the last clip, never stops at it");
+  });
+
+  it("exports the placed work over bare ground, at the work's length and not the canvas's", () => {
+    const plan = buildExportPlan(empty, "review-cut", [{ path: "artifacts/a.mp4", startSec: 0, endSec: 4, still: false }], [
+      { path: "artifacts/b.wav", startSec: 2, endSec: 6, gainDb: 0 },
+    ]);
+    assert.deepEqual(plan.items, [{ type: "black", durationSec: 6 }], "one bed, as long as the furthest thing placed");
+    assert.equal(plan.totalSec, 6);
+    assert.ok(plan.totalSec < mediaCanvasSec([{ endSec: 6 }]), "the empty canvas past the work is not part of the film");
+  });
+
+  it("writes nothing on that ground, because there is no missing work to name", () => {
+    const graph = graphOf(
+      buildFfmpegArgs(
+        buildExportPlan(empty, "review-cut", [{ path: "artifacts/a.mp4", startSec: 0, endSec: 4, still: false }], []),
+        "/w",
+        "/out.mp4",
+        // A font is still handed over: the point is that nothing asks it to draw anything.
+        "/fonts/Geist-Regular.ttf",
+      ),
+    );
+    // The distinction this pins: a slate names work the story asked for and nobody delivered. A
+    // production with no story asked for nothing, so a label here would be reporting a fiction.
+    assert.ok(!graph.includes("drawtext"), "no slate label over a film nobody left a gap in");
+    assert.match(graph, /concat=n=1/, "the bed is still concatenated, so the overlay chain has a film to lay on");
+  });
+
+  it("refuses to describe an empty one as a film", () => {
+    const plan = buildExportPlan(empty, "review-cut", [], []);
+    // Nothing placed and no story is not a zero-length film; it is nothing yet. The screen blocks
+    // on this rather than handing ffmpeg `concat=n=0`, which is not a filter graph.
+    assert.deepEqual(plan.items, []);
+    assert.equal(plan.totalSec, 0);
   });
 });

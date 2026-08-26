@@ -5,6 +5,11 @@ import {
   deriveCut,
   deriveEpisodeCut,
   deriveSpineCut,
+  exportAudioClips,
+  exportOverlays,
+  isMediaOnly,
+  mediaCanvasSec,
+  placedExtentSec,
   episodeExportRefusals,
   spineExportRefusals,
   trimCeilingSec,
@@ -72,14 +77,14 @@ import { ClipPlayButton, clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { planForScene } from "../lib/scene-plan.js";
 import { mediaUrl } from "../lib/media.js";
-import { seconds, usd } from "../lib/format.js";
+import { runtimeSeconds, seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { SceneReview, SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
-import { mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { mediaSpans, mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
 import {
   MIN_CLIP_SEC,
   applyClipDrag,
@@ -3771,6 +3776,17 @@ function CutPreview({
   }, [restartToken]);
 
   const srcFor = (span: PlaybackSpan | null) => (span?.path && slug ? mediaUrl(slug, span.path) : null);
+  /*
+   * A still needs an element that decodes images (issue 453).
+   *
+   * Everything the story and the song clocks produce is footage, so one `<video>` was always
+   * enough. A placed clip can be a plate or a board, and a browser does not decode a PNG as
+   * video — handing one to the video element shows nothing while the export holds that frame for
+   * the whole placement. So the two are separated at the source: the video never receives a
+   * still, and the still is drawn over it by an `<img>` wearing the same class.
+   */
+  const videoSrcFor = (span: PlaybackSpan | null) => (span?.still ? null : srcFor(span));
+  const stillSrcFor = (span: PlaybackSpan | null) => (span?.still ? srcFor(span) : null);
 
   /*
    * The sync runs on its own frame loop off `timeRef`, not off `time`.
@@ -3788,7 +3804,7 @@ function CutPreview({
       const at = timeRef.current;
       const span = spanAt(spans, at);
       syncMediaElement(el, {
-        src: srcFor(span),
+        src: videoSrcFor(span),
         targetSec: span ? mediaTimeFor(span, at) : 0,
         playing: true,
         nowMs: ts,
@@ -3808,7 +3824,7 @@ function CutPreview({
       const at = timeRef.current;
       const span = spanAt(spans, at);
       syncMediaElement(el, {
-        src: srcFor(span),
+        src: videoSrcFor(span),
         targetSec: span ? mediaTimeFor(span, at) : 0,
         playing: false,
         nowMs: 0,
@@ -3819,7 +3835,9 @@ function CutPreview({
   }, [playing, time, spans, slug, timeRef]);
 
   const current = spanAt(spans, time);
-  const showing = srcFor(current);
+  const showingVideo = videoSrcFor(current);
+  const showingStill = stillSrcFor(current);
+  const showing = showingVideo ?? showingStill;
 
   return (
     <div className="fy-cutviewer">
@@ -3828,8 +3846,11 @@ function CutPreview({
         className="fy-cutviewer__video"
         playsInline
         muted
-        style={{ opacity: showing === null ? 0 : 1 }}
+        style={{ opacity: showingVideo === null ? 0 : 1 }}
       />
+      {showingStill !== null && (
+        <img className="fy-cutviewer__video" src={showingStill} alt="" />
+      )}
       {showing === null && (
         <span className="fy-cutviewer__empty">{current ? current.label : "nothing here yet"}</span>
       )}
@@ -4194,11 +4215,56 @@ export function CutScreen() {
   const spineCut = view.kind === "spine" ? view.cut : null;
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
-  const totalSec = spineCut ? spineCut.trackDurationSec : (cut?.totalSec ?? 0);
-  const transport = useCutTransport(totalSec);
+  const overlays = production?.cut.overlays ?? [];
+  /*
+   * A production with no story is the clips (issue 453), so they are the clock.
+   *
+   * Gated on the same `scene-order` the Exports screen uses, not merely on `spineCut` being null.
+   * A spine whose track is missing, unmeasured or silent yields no spine cut either, and calling
+   * that media-only would tell one screen the clips are the film while Exports still treats the
+   * song as authoritative — and a track that later measured would yank the canvas out from under
+   * somebody mid-edit. A production with a spine is never this, however unresolved that spine is.
+   */
+  const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
+  /*
+   * Resolved exactly as the coordinator resolves them, because the screen must not advertise a
+   * film the export will not produce: `exportOverlays` drops a document or a missing artifact and
+   * `exportAudioClips` drops a video not known to carry sound, so measuring raw lane records
+   * would let a document stretched to 60s claim a film that encodes as five seconds.
+   */
+  const artifacts = world?.artifacts ?? [];
+  const placedPicture = mediaOnly ? exportOverlays(overlays, artifacts) : [];
+  const placedSound = mediaOnly ? exportAudioClips(overlays, artifacts) : [];
+  /*
+   * Two lengths. The CANVAS is how much timeline to draw and must extend past the last clip or
+   * there is nowhere to drop the next one; the FILM is how long the thing actually is. Trailing
+   * editing headroom is not part of the film, so it is the film that plays and the film the
+   * header states — presenting the canvas as the runtime would let "Watch from top" run on into
+   * blank editor space the export never emits.
+   */
+  const canvasSec = spineCut
+    ? spineCut.trackDurationSec
+    : mediaOnly
+      ? mediaCanvasSec([...placedPicture, ...placedSound])
+      : (cut?.totalSec ?? 0);
+  const filmSec = mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : canvasSec;
+  /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
+  const totalSec = canvasSec;
+  const transport = useCutTransport(filmSec);
   // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
   // LTX port has always offered and nothing had yet asked for.
-  const spans = spineCut ? spineSpans(spineCut) : cut ? storySpans(cut) : [];
+  /*
+   * What the preview shows. A media-only production has no shots to walk, so its spans come from
+   * the placed picture — without this the transport advanced over a film the viewer reported as
+   * empty, because `storySpans` has no entries to build from.
+   */
+  const spans = spineCut
+    ? spineSpans(spineCut)
+    : mediaOnly
+      ? mediaSpans(placedPicture)
+      : cut
+        ? storySpans(cut)
+        : [];
   /*
    * What a person placed, which a split does not add to: splitting files a second record over the
    * same file, and counting both would report two clips for one piece of media still drawn as one
@@ -4220,9 +4286,13 @@ export function CutScreen() {
           <span className="fy-h1row__meta">
             {spineCut
               ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
-              : cut
-                ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
-                : ""}
+              : mediaOnly
+                ? // No shots to be covered or uncovered, so coverage is not a fact about this cut.
+                  // What is true of it is how long it runs and what is on it, and nothing else.
+                  `${runtimeSeconds(filmSec)} · no story · what you place is the film`
+                : cut
+                  ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
+                  : ""}
             {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
           </span>
           <span className="fy-h1row__push" />
@@ -4234,7 +4304,7 @@ export function CutScreen() {
         <CutPreview
           slug={slug}
           spans={spans}
-          totalSec={totalSec}
+          totalSec={filmSec}
           restartToken={watchToken}
           transport={transport}
         />
@@ -4554,6 +4624,21 @@ export function ExportsScreen() {
   const isStory = production ? productionShape(production.meta).hasChapters : false;
   const cut = production ? deriveCut(production) : null;
   const view = exportViewFor(world, production);
+  /*
+   * No story to derive a picture from, so what was placed is the film (issue 453). Resolved
+   * exactly as the coordinator resolves it, or this screen advertises a runtime the encode does
+   * not produce — a document stretched to 60s beside a 5s image is a 5s film, and a lane holding
+   * nothing but a document is not a film at all.
+   */
+  const overlays = production?.cut.overlays ?? [];
+  const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
+  const placedArtifacts = world?.artifacts ?? [];
+  const placedSec = mediaOnly
+    ? placedExtentSec([
+        ...exportOverlays(overlays, placedArtifacts),
+        ...exportAudioClips(overlays, placedArtifacts),
+      ])
+    : 0;
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
   /*
@@ -4567,14 +4652,27 @@ export function ExportsScreen() {
       : view.kind === "silent"
         ? view.durationSec
         : view.kind === "scene-order"
-          ? cut?.totalSec
+          ? // A production with no story runs as long as what was placed on it (issue 453), which
+            // is the only length it has — `cut.totalSec` is zero there and would report 0s for a
+            // film that plainly is not.
+            mediaOnly
+            ? placedSec
+            : cut?.totalSec
           : undefined;
   /*
    * An unmeasured track does not block: exporting is what measures it, and the coordinator probes
    * an artifact with no stored measurement, then renders or refuses in words. A missing artifact
    * and a silent one do block, because no probe rescues either.
    */
-  const blocked = refusal !== null || view.kind === "no-track" || view.kind === "silent";
+  /*
+   * Nothing the export can USE, which is not the same as nothing on the lanes: a production
+   * holding only a document has a clip on screen and still has no film. Blocked either way,
+   * because an empty plan becomes `concat=n=0`, which is not a filter graph — but the two are
+   * told apart below, so somebody looking at a clip is not told there is nothing there.
+   */
+  const nothingPlaced = mediaOnly && placedSec === 0;
+  const unusablePlacements = nothingPlaced && overlays.length > 0;
+  const blocked = refusal !== null || view.kind === "no-track" || view.kind === "silent" || nothingPlaced;
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": {
       label: "Review cut",
@@ -4726,6 +4824,16 @@ export function ExportsScreen() {
                 carries audio — nothing else about the production changes.
               </div>
             )}
+            {nothingPlaced && (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                {unusablePlacements
+                  ? // Saying "nothing on its lanes" to somebody looking at a clip is simply untrue,
+                    // and leaves them with no idea why the button will not move.
+                    "The lanes hold nothing this export can use — a document has no picture, and a video is only mixed in when it is known to carry sound. Place a video, an image or an audio file and it becomes the film."
+                  : "This production has no story and nothing on its lanes, so there is no film to render yet. Drop something on the Cut and it becomes the film."}
+              </div>
+            )}
             {view.kind === "unmeasured" && (
               <div className="fy-notecard">
                 <span className="fy-dot fy-dot--warn" />
@@ -4777,7 +4885,7 @@ export function ExportsScreen() {
                 disabled={blocked}
                 onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
               >
-                {runtimeSec === undefined ? "Export" : <>Export · {seconds(runtimeSec)}</>}
+                {runtimeSec === undefined ? "Export" : <>Export · {mediaOnly ? runtimeSeconds(runtimeSec) : seconds(runtimeSec)}</>}
               </Button>
             </div>
           </div>
