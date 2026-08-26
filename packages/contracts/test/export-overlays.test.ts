@@ -8,6 +8,7 @@ import {
   isMediaOnly,
   mediaCanvasSec,
   placedExtentSec,
+  placedFilmSec,
 } from "../src/cut.js";
 import type { CutOverlay, DerivedCut } from "../src/cut.js";
 
@@ -214,6 +215,20 @@ describe("a production with no story", () => {
     // film short of something a person placed.
     assert.equal(placedExtentSec([{ endSec: 4 }, { endSec: 6 }]), 6);
     assert.equal(placedExtentSec([]), 0, "nothing placed is not a film of some default length");
+  });
+
+  it("hands every surface that states a length the same one, resolved (508)", () => {
+    // The rail, the switcher, the Cut header and the Exports button all read this. It resolves
+    // against the world's artifacts rather than counting lane records, so a document stretched
+    // past the picture cannot claim a runtime the encode will not produce.
+    const placed = [
+      overlay("ar_01J8G0000000000000000000A2", 0, 4),
+      overlay("ar_01J8G0000000000000000000A3", 2, 6),
+      overlay("ar_01J8G0000000000000000000A4", 0, 60),
+    ];
+    assert.equal(placedFilmSec(placed, artifacts), 6, "the sound outlasting the picture is the film's end");
+    assert.equal(placedFilmSec([overlay("ar_01J8G0000000000000000000A4", 0, 60)], artifacts), 0, "a lane holding only a document is not a film");
+    assert.equal(placedFilmSec([], artifacts), 0);
   });
 
   it("draws a canvas longer than the film, so there is somewhere to drop the next clip", () => {
