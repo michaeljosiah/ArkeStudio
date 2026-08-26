@@ -944,7 +944,7 @@ export function NewWorldScreen() {
   const enterReview = (lookText: string) => {
     setLookForBuild(lookText);
     planRequestRef.current = ulid();
-    planFoundingBuild(genesisId, planRequestRef.current);
+    planFoundingBuild(genesisId, planRequestRef.current, lookText);
     setStep("review");
   };
 
@@ -1437,6 +1437,12 @@ export function NewWorldScreen() {
               )}
               {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
                 <div style={{ marginTop: 9 }}>
+                  {/* The build never makes a master look (SPEC-031 R-18): the world gets this
+                      preview or none. Said beside the control that answers it, not left for an
+                      empty plate on Art direction months later (issue 521). */}
+                  <div className="fy-mono" style={{ fontSize: 9.5, marginBottom: 7 }}>
+                    without one, this world has no master look
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"

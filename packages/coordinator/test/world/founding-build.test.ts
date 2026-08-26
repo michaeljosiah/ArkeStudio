@@ -6,6 +6,7 @@ import {
   JobSchema,
   newId,
   ulid,
+  type BuildReview,
   type DomainEvent,
   type FoundingBuildState,
   type Job,
@@ -208,6 +209,44 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
     },
     worldId: () => provider.openStore()?.worldId ?? "",
   };
+}
+
+/** The preview as it waits in the sandbox: the image and the words it was made from (R-53). */
+async function writePreview(sandbox: string, look: string): Promise<void> {
+  await mkdir(join(sandbox, "previews"), { recursive: true });
+  await writeFile(join(sandbox, "previews", "look-preview.png"), PNG);
+  await writeFile(join(sandbox, "previews", "look-preview.json"), JSON.stringify({ look }) + "\n");
+}
+
+/** The receipt beside it: only a succeeded job proves a person pressed and paid (R-51, R-54). */
+function addPreviewReceipt(h: Harness, genesisId: string, lookText: string): void {
+  const now = new Date().toISOString();
+  const receipt = JobSchema.parse({
+    id: newId("jb"),
+    idempotencyKey: ulid(),
+    worldId: genesisId,
+    target: { kind: "look-preview", id: genesisId },
+    capability: "image",
+    provider: "fal",
+    model: "test-image",
+    params: { lookText },
+    estimatedMicroUsd: 40000,
+    status: "succeeded",
+    providerJobId: null,
+    attempt: 1,
+    error: null,
+    landedFiles: ["previews/look-preview.png"],
+    createdAt: now,
+    updatedAt: now,
+  });
+  h.queue.jobs.set(receipt.id, receipt);
+}
+
+/** The review the coordinator answered with, which the screen renders verbatim. */
+function lastPlan(h: Harness): BuildReview {
+  const found = h.events.findLast((event) => event.type === "build.plan");
+  assert.ok(found?.type === "build.plan" && found.plan !== null, "the build was sized");
+  return found.plan;
 }
 
 async function waitFor(check: () => boolean, ms = 45000): Promise<void> {
@@ -516,34 +555,8 @@ describe("the founding build (SPEC-031)", () => {
   it("a kept preview carries in as v1's master look; the build generates none itself (rows 14, 17)", async (t) => {
     const h = await makeHarness(t);
     const sandbox = await makeSandbox(h.root, "gen-preview");
-    await mkdir(join(sandbox, "previews"), { recursive: true });
-    await writeFile(join(sandbox, "previews", "look-preview.png"), PNG);
-    await writeFile(
-      join(sandbox, "previews", "look-preview.json"),
-      JSON.stringify({ look: "salt-bleached watercolour, cold light off the water" }) + "\n",
-    );
-    // The receipt: only a succeeded preview JOB proves a person pressed and paid — files in
-    // the agent's own sandbox prove nothing (R-51, R-54).
-    const now = new Date().toISOString();
-    const receipt = JobSchema.parse({
-      id: newId("jb"),
-      idempotencyKey: ulid(),
-      worldId: "gen-preview",
-      target: { kind: "look-preview", id: "gen-preview" },
-      capability: "image",
-      provider: "fal",
-      model: "test-image",
-      params: { lookText: "salt-bleached watercolour, cold light off the water" },
-      estimatedMicroUsd: 40000,
-      status: "succeeded",
-      providerJobId: null,
-      attempt: 1,
-      error: null,
-      landedFiles: ["previews/look-preview.png"],
-      createdAt: now,
-      updatedAt: now,
-    });
-    h.queue.jobs.set(receipt.id, receipt);
+    await writePreview(sandbox, "salt-bleached watercolour, cold light off the water");
+    addPreviewReceipt(h, "gen-preview", "salt-bleached watercolour, cold light off the water");
     // The author's words at Begin arrive as the look override, whitespace and all — the
     // carry test normalizes rather than failing on a trailing space (review round 3).
     await h.service.begin("gen-preview", ulid(), "salt-bleached watercolour, cold light off the water ");
@@ -566,32 +579,8 @@ describe("the founding build (SPEC-031)", () => {
   it("a preview that outlived its look is not carried — founded with none, never the wrong one (row 13)", async (t) => {
     const h = await makeHarness(t);
     const sandbox = await makeSandbox(h.root, "gen-stale-look");
-    await mkdir(join(sandbox, "previews"), { recursive: true });
-    await writeFile(join(sandbox, "previews", "look-preview.png"), PNG);
-    await writeFile(
-      join(sandbox, "previews", "look-preview.json"),
-      JSON.stringify({ look: "neon brutalism, hard flash, wet asphalt" }) + "\n",
-    );
-    const now = new Date().toISOString();
-    const receipt = JobSchema.parse({
-      id: newId("jb"),
-      idempotencyKey: ulid(),
-      worldId: "gen-stale-look",
-      target: { kind: "look-preview", id: "gen-stale-look" },
-      capability: "image",
-      provider: "fal",
-      model: "test-image",
-      params: { lookText: "neon brutalism, hard flash, wet asphalt" },
-      estimatedMicroUsd: 40000,
-      status: "succeeded",
-      providerJobId: null,
-      attempt: 1,
-      error: null,
-      landedFiles: ["previews/look-preview.png"],
-      createdAt: now,
-      updatedAt: now,
-    });
-    h.queue.jobs.set(receipt.id, receipt);
+    await writePreview(sandbox, "neon brutalism, hard flash, wet asphalt");
+    addPreviewReceipt(h, "gen-stale-look", "neon brutalism, hard flash, wet asphalt");
     await h.service.begin("gen-stale-look", ulid());
     await waitFor(() => h.lastState()?.status === "completed");
 
@@ -601,6 +590,60 @@ describe("the founding build (SPEC-031)", () => {
     };
     assert.equal(record.masterLook, undefined, "a picture of rejected words is worse than none");
     assert.equal(await readFile(join(store.dir, "art-direction", "look-v1.png")).catch(() => null), null);
+  });
+
+  // The review names both missing images or neither (issue 521). The build refuses to make a
+  // master look by rule (R-18, D11), so a world founded without a carried preview simply has
+  // none — and the only moment that is cheap to fix is before the press.
+  it("the review names the missing master look beside the key-art refusal (issue 521)", async (t) => {
+    const h = await makeHarness(t);
+    const sandbox = await makeSandbox(h.root, "gen-no-preview");
+    // No preview pressed, and the world's one image never settled: two losses, two notes.
+    await writeFile(
+      join(sandbox, "draft.json"),
+      JSON.stringify({
+        name: "The Undersong",
+        look: "salt-bleached watercolour, cold light off the water",
+      }),
+    );
+    await h.service.plan("gen-no-preview", ulid());
+
+    const notes = lastPlan(h).notes;
+    assert.ok(
+      notes.includes("No look preview was made — this world will be founded without a master look."),
+      "the loss is stated where See the look is one screen back",
+    );
+    assert.ok(notes.includes("The world's one image was never settled — key art will not be made."));
+  });
+
+  it("a preview that will carry is not reported as a loss (issue 521)", async (t) => {
+    const h = await makeHarness(t);
+    const look = "salt-bleached watercolour, cold light off the water";
+    const sandbox = await makeSandbox(h.root, "gen-plan-carries");
+    await writePreview(sandbox, look);
+    addPreviewReceipt(h, "gen-plan-carries", look);
+    await h.service.plan("gen-plan-carries", ulid());
+
+    assert.ok(
+      !lastPlan(h).notes.some((note) => /master look/.test(note)),
+      "the world gets the picture the author already approved — nothing is lost to name",
+    );
+  });
+
+  it("a preview the author then rewrote past is named as lost, not as carried (row 13, issue 521)", async (t) => {
+    const h = await makeHarness(t);
+    const sandbox = await makeSandbox(h.root, "gen-plan-stale");
+    await writePreview(sandbox, "neon brutalism, hard flash, wet asphalt");
+    addPreviewReceipt(h, "gen-plan-stale", "neon brutalism, hard flash, wet asphalt");
+    // The review reads the look the author left the words step, exactly as the press will.
+    await h.service.plan("gen-plan-stale", ulid(), "salt-bleached watercolour, cold light off the water");
+
+    assert.ok(
+      lastPlan(h).notes.includes(
+        "The look changed after the preview was made — it will not carry, and this world will be founded without a master look.",
+      ),
+      "R-54's refusal is stated as the reason it is",
+    );
   });
 
   it("stop keeps what landed, cancels what is in flight, and skips the rest (rows 7, 26)", async (t) => {

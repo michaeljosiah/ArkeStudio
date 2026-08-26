@@ -3672,7 +3672,7 @@ export class Coordinator {
           });
           return;
         }
-        await this.foundingBuild.plan(msg.genesisId, msg.requestId);
+        await this.foundingBuild.plan(msg.genesisId, msg.requestId, msg.look);
         return;
       }
       case "begin-founding-build": {
