@@ -1,11 +1,11 @@
-import { readFile, rm } from "node:fs/promises";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { ExternalEdit, WorldBundle } from "@arke-studio/contracts";
+import { BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { atomicWriteFile } from "./atomic.js";
 import { readBible } from "./bible.js";
-import { appendChanges } from "./change-writer.js";
+import { readChanges } from "./change-writer.js";
 import {
   CommitPlanError,
   Committer,
@@ -18,7 +18,7 @@ import {
 import { WorldLock } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { scanWorld, type ScanResult } from "./scan.js";
-import { MarkdownFile, sha256 } from "./text-files.js";
+import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 import { WorldWatcher } from "./watcher.js";
 
 /**
@@ -32,6 +32,8 @@ const SCAN_STATE_PATH = ".index/scan-state.json";
 interface ScanState {
   /** portable path → content hash at last app-owned write/close. */
   manifest: Record<string, string>;
+  /** Number of durable change lines reflected by the manifest. */
+  changeCount?: number;
 }
 
 export interface WorldStoreEvents {
@@ -56,6 +58,7 @@ export class WorldStore {
     private readonly committer: Committer,
     private scan: ScanResult,
     private externalEdits: ExternalEdit[],
+    private scanState: ScanState,
     private readonly events: WorldStoreEvents,
     private readonly clockFn: () => string,
   ) {
@@ -86,7 +89,7 @@ export class WorldStore {
      * Ownership first, then recovery.
      *
      * An interrupted commit must resolve before anything reads (R-15), but recovery is not a
-     * read: it rolls a `prepared` journal back or a `committing` journal forward, renaming live
+     * read: it rolls a `planning` journal back or a `committing` journal forward, renaming live
      * files. Running it before the lock meant a second instance resolved a journal that the
      * world's actual owner was in the middle of writing — the one thing the lock exists to
      * prevent, done by the code that runs before the lock is taken.
@@ -101,55 +104,60 @@ export class WorldStore {
       await lock.acquire();
     }
 
-    let scan: ScanResult;
+    let store: WorldStore | null = null;
     let pending: PendingCommit[] = [];
     try {
       if (opts.readOnly) pending = await committer.pendingRecovery();
       else await committer.recover();
-      scan = await scanWorld(dir);
+      const scan = await scanWorld(dir);
+      if (pending.length > 0) {
+        scan.bundle.problems = [
+          ...scan.bundle.problems,
+          ...pending.map((p) => ({
+            path: `.commit/${p.commitId}.json`,
+            message:
+              p.phase === "prepared"
+                ? "an interrupted commit is unresolved; nothing of it reached the world, and it will be rolled back when this world is opened for writing"
+                : "an interrupted commit is unresolved; this world is part-way through it and is not a consistent snapshot until it is opened for writing and the commit completed",
+          })),
+        ];
+      }
+      let scanState = opts.readOnly ? null : await readScanState(dir);
+      if (!opts.readOnly && scanState === null) scanState = await reconstructScanState(dir, scan);
+      else if (scanState !== null) scanState = await advanceCommittedScanState(dir, scanState);
+      const externalEdits = scanState === null ? [] : detectExternalEdits(scan, scanState);
+      store = new WorldStore(
+        dir,
+        lock,
+        committer,
+        scan,
+        externalEdits,
+        scanState ?? { manifest: {} },
+        opts.events ?? {},
+        opts.clock ?? (() => new Date().toISOString()),
+      );
+      if (!opts.readOnly) {
+        await store.adoptBibleIfMoved();
+        await store.ensureCurrentHistorySnapshots();
+        await store.saveScanState();
+        store.startWatcher();
+        try {
+          store.index = WorldIndex.open(dir, scan.bundle, opts.sqlite);
+        } catch {
+          store.index = null;
+        }
+      }
+      return store;
     } catch (err) {
-      // Whatever stopped the open is the more useful thing to report; a lock acquired a
-      // moment ago is not plausibly deposed, and masking the real failure would help nobody.
+      store?.watcher?.stop();
+      try {
+        store?.index?.close();
+      } catch {
+        /* a failed cache open has no cleanup guarantee */
+      }
       await lock?.release().catch(() => {});
       throw err;
     }
-    if (pending.length > 0) {
-      scan.bundle.problems = [
-        ...scan.bundle.problems,
-        ...pending.map((p) => ({
-          path: `.commit/${p.commitId}.json`,
-          message:
-            p.phase === "prepared"
-              ? // Nothing live moved before `prepared`, so what was scanned is the world as it stood
-                // before the commit — whole, and about to lose only the commit that never landed.
-                "an interrupted commit is unresolved; nothing of it reached the world, and it will be rolled back when this world is opened for writing"
-              : // Past the point of no return: some files are renamed and some are not, so what was
-                // scanned is a world part-way through one commit, not a snapshot of either side.
-                "an interrupted commit is unresolved; this world is part-way through it and is not a consistent snapshot until it is opened for writing and the commit completed",
-        })),
-      ];
-    }
-    const externalEdits = opts.readOnly ? [] : await detectExternalEdits(dir, scan);
-    const store = new WorldStore(
-      dir,
-      lock,
-      committer,
-      scan,
-      externalEdits,
-      opts.events ?? {},
-      opts.clock ?? (() => new Date().toISOString()),
-    );
-    if (!opts.readOnly) {
-      await store.saveScanState();
-      store.startWatcher();
-      // The index is a cache: a failure to open it degrades queries, never the world (SPEC-003 R-4).
-      try {
-        store.index = WorldIndex.open(dir, scan.bundle, opts.sqlite);
-      } catch {
-        store.index = null;
-      }
-    }
-    return store;
   }
 
   /** The derived index, when it opened. Null in read-only mode or after an index failure. */
@@ -249,7 +257,7 @@ export class WorldStore {
    * outside that envelope.
    */
   async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
-    this.assertLockHeld();
+    this.assertWritable();
     const result = await this.committer.commit(input, hooks);
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     return result;
@@ -339,51 +347,60 @@ export class WorldStore {
    * so adoption bumps the entity version, stamps, and logs `source: "external-edit"`.
    */
   async reconcileExternalEdit(portablePath: string): Promise<void> {
-    this.assertWritable();
-    const edit = this.externalEdits.find((e) => e.path === portablePath);
-    if (!edit) return;
+    if (this.closed) throw new Error("world is closed");
+    this.assertLockHeld();
     await this.serialise(async () => {
       this.assertLockHeld();
+      const edit = this.externalEdits.find((e) => e.path === portablePath);
+      if (!edit) return;
       this.watcher?.suppress();
       try {
-        if (edit.kind === "deleted") {
-          // The file is gone; record the disappearance so the log explains it.
-          await appendChanges(join(this.dir, "changes.jsonl"), [
-            {
-              ts: new Date().toISOString(),
-              entity: portablePath.replace(/\.(md|json)$/, ""),
-              deleted: true,
-              source: "external-edit",
-            },
-          ]);
-        } else {
-          const live = await this.readEntity(portablePath);
-          if (live !== null) {
-            const kind = classify(portablePath);
-            if (kind.track === "sheet" || kind.track === "canon" || kind.track === "chapter") {
-              const doc = MarkdownFile.parse(live);
-              const fromVersion = (doc.data["version"] as number | undefined) ?? null;
-              // Adopt via the committer so snapshot/version/log happen together (D16). The
-              // edit itself is the base — we accept the bytes on disk as the proposed content.
-              await this.committer.commit({
-                kind: "external-edit",
-                source: "external-edit",
-                files: [{ path: portablePath, action: "replace", content: live, baseHash: sha256(live) }],
-              });
-              void fromVersion;
-            } else {
-              await appendChanges(join(this.dir, "changes.jsonl"), [
-                {
-                  ts: new Date().toISOString(),
-                  entity: portablePath.replace(/\.(md|json)$/, ""),
-                  source: "external-edit",
-                },
-              ]);
-            }
-          }
+        const live = await this.readEntity(portablePath);
+        const committedHash = this.scanState.manifest[portablePath];
+
+        // Reclassify under the serialization lock. An editor may have recreated a deletion,
+        // deleted a modification, or restored the committed bytes while the prompt was waiting.
+        if (live !== null && committedHash === sha256(live)) {
+          this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
+          await this.rescan();
+          return;
         }
+        if (live === null && committedHash === undefined) {
+          this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
+          await this.rescan();
+          return;
+        }
+
+        const versioned = historyDirectory(portablePath) !== null;
+        const committedBase = versioned
+          ? committedHash === undefined
+            ? null
+            : await this.readLastCommittedEntity(portablePath)
+          : undefined;
+        await this.committer.commit({
+          kind: "external-edit",
+          source: "external-edit",
+          files: [
+            {
+              path: portablePath,
+              action: live === null ? "delete" : "replace",
+              ...(live !== null ? { content: live } : {}),
+              baseHash: live === null ? null : sha256(live),
+              ...(committedBase !== undefined ? { committedBase } : {}),
+              committedBaseHash: committedHash ?? null,
+            },
+          ],
+        });
         this.externalEdits = this.externalEdits.filter((e) => e.path !== portablePath);
         await this.rescan();
+        if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+      } catch (err) {
+        const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+        this.externalEdits = this.externalEdits.map((candidate) =>
+          candidate.path === portablePath
+            ? { path: candidate.path, kind: candidate.kind, refusal }
+            : candidate,
+        );
       } finally {
         this.watcher?.unsuppress();
       }
@@ -395,8 +412,10 @@ export class WorldStore {
     this.assertWritable();
     await this.serialise(async () => {
       this.assertLockHeld();
-      await this.rescan();
+      this.scan = await scanWorld(this.dir);
+      this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.saveScanState();
+      if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
     });
     return this.getBundle();
   }
@@ -456,6 +475,9 @@ export class WorldStore {
   private assertWritable(): void {
     if (this.closed) throw new Error("world is closed");
     this.assertLockHeld();
+    if (this.externalEdits.length > 0) {
+      throw new CommitPlanError("world has external edits awaiting reconciliation");
+    }
   }
 
   private assertLockHeld(): void {
@@ -487,14 +509,73 @@ export class WorldStore {
   private async readEntity(portablePath: string): Promise<string | null> {
     try {
       return await readFile(toExtendedLength(join(this.dir, fromPortable(portablePath))), "utf8");
-    } catch {
-      return null;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
     }
   }
 
   private async saveScanState(): Promise<void> {
-    const state: ScanState = { manifest: this.scan.manifest };
-    await atomicWriteFile(join(this.dir, fromPortable(SCAN_STATE_PATH)), JSON.stringify(state, null, 2));
+    const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
+    const manifest = { ...this.scanState.manifest };
+
+    for (const [path, hash] of Object.entries(this.scan.manifest)) {
+      if (unresolved.has(path)) continue;
+      manifest[path] = hash;
+    }
+    for (const path of Object.keys(manifest)) {
+      if (!(path in this.scan.manifest) && !unresolved.has(path)) {
+        delete manifest[path];
+      }
+    }
+
+    this.scanState = { manifest, changeCount: this.scan.changeCount };
+    await atomicWriteFile(
+      join(this.dir, fromPortable(SCAN_STATE_PATH)),
+      JSON.stringify(this.scanState, null, 2),
+    );
+  }
+
+  /** Seed the current committed snapshot when adopting a world that predates history tracking. */
+  private async ensureCurrentHistorySnapshots(): Promise<void> {
+    const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
+    const seeds = Object.entries(this.scan.manifest)
+      .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
+      .map(async ([portablePath, hash]) => {
+        const content = await this.readEntity(portablePath);
+        if (content === null || sha256(content) !== hash) return;
+        const snapshot = historySnapshot(portablePath, content);
+        if (snapshot === null) return;
+        const existing = await this.readEntity(snapshot.path);
+        if (existing === null) await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+        else if (existing !== content) {
+          throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
+        }
+      });
+    // A failed open must not release the world lock while another seed is still writing.
+    const results = await Promise.allSettled(seeds);
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) {
+      throw failure.reason;
+    }
+  }
+
+  private async readLastCommittedEntity(portablePath: string): Promise<string> {
+    const expected = this.scanState.manifest[portablePath];
+    if (expected === undefined) {
+      throw new CommitPlanError(`${portablePath}: last committed version is unavailable`);
+    }
+    // The manifest supplies the identity; history supplies the canonical bytes.
+    const historyDir = historyDirectory(portablePath);
+    if (historyDir !== null) {
+      const entries = await readdir(join(this.dir, fromPortable(historyDir))).catch(() => []);
+      for (const entry of entries) {
+        if (!/^v\d+\.(md|json)$/.test(entry)) continue;
+        const content = await this.readEntity(`${historyDir}/${entry}`);
+        if (content !== null && sha256(content) === expected) return content;
+      }
+    }
+    throw new CommitPlanError(`${portablePath}: last committed version is unavailable`);
   }
 
   /**
@@ -524,35 +605,168 @@ export class WorldStore {
    * and applying either here would answer an edit the app asked for with "this world changed
    * outside Arke Studio", or with a reconciliation prompt for prose nobody needs to approve.
    *
-   * Adopting it is a plain rescan, which is also what makes the next turn read what they typed.
+   * A hand edit is committed as the next Bible version before the refreshed scan is published.
    */
   private async adoptBibleIfMoved(): Promise<void> {
-    if (this.closed) return;
-    const current = await readBible(this.dir).catch(() => null);
-    if (current === null) return;
-    const held = this.scan.bundle.bible;
-    if (current.text === held.text && current.present === held.present) return;
-    await this.rescan().catch(() => {});
-    this.events.onAdopted?.();
+    if (this.closed || this.externalEdits.length > 0) return;
+    const live = await this.readEntity(BIBLE_PATH);
+    if (live === null) return;
+    const committed = await latestHistoryContent(this.dir, BIBLE_PATH);
+    if (committed === null) {
+      const snapshot = historySnapshot(BIBLE_PATH, live);
+      if (snapshot !== null) await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), live);
+      return;
+    }
+    if (committed === live) {
+      const current = await readBible(this.dir);
+      const held = this.scan.bundle.bible;
+      if (current.text === held.text && current.present === held.present) return;
+      await this.rescan();
+      this.events.onAdopted?.();
+      return;
+    }
+
+    let content = live;
+    try {
+      MarkdownFile.parse(content);
+    } catch {
+      content = MarkdownFile.create({ version: 1 }, live.replace(/^﻿/, "").replace(/\r\n/g, "\n")).serialize();
+    }
+    this.watcher?.suppress();
+    try {
+      await this.committer.commit({
+        kind: "external-bible-edit",
+        source: "external-edit",
+        files: [
+          {
+            path: BIBLE_PATH,
+            action: "replace",
+            content,
+            baseHash: sha256(live),
+            committedBase: committed,
+            committedBaseHash: sha256(committed),
+          },
+        ],
+      });
+      await this.rescan();
+      this.events.onAdopted?.();
+    } finally {
+      this.watcher?.unsuppress();
+    }
   }
 }
 
 /**
  * Closed-world edit detection (R-28): compare the on-disk manifest against `.index/`'s
- * scan-state. A world with no scan-state (foreign, fresh, or index deleted) is adopted as-is
- * rather than reported as edited — `.index/` is deletable and its absence must cost nothing.
+ * scan-state. If that derived file is absent, canonical history reconstructs versioned baselines;
+ * entities with no history are adopted as-is, so deleting `.index/` never deletes authored state.
  */
-async function detectExternalEdits(dir: string, scan: ScanResult): Promise<ExternalEdit[]> {
-  let previous: ScanState | null = null;
+async function readScanState(dir: string): Promise<ScanState | null> {
   try {
-    previous = JSON.parse(
+    const previous = JSON.parse(
       await readFile(toExtendedLength(join(dir, fromPortable(SCAN_STATE_PATH))), "utf8"),
     ) as ScanState;
+    return previous && typeof previous.manifest === "object" ? previous : null;
   } catch {
-    return [];
+    return null;
   }
-  if (!previous || typeof previous.manifest !== "object") return [];
+}
 
+function historySnapshot(portablePath: string, content: string): { path: string; version: number } | null {
+  try {
+    const kind = classify(portablePath);
+    let version: number | undefined;
+    if (kind.track === "sheet" || kind.track === "chapter" || kind.track === "canon" || kind.track === "bible") {
+      const doc = MarkdownFile.parse(content);
+      if (kind.track !== "canon") version = doc.data["version"] as number | undefined;
+      else {
+        const stamps = [doc.data["introducedAt"], doc.data["settledAt"], doc.data["amendedAt"]].filter(
+          (value): value is number => typeof value === "number",
+        );
+        version = stamps.length > 0 ? Math.max(...stamps) : 0;
+      }
+    } else if (historyDirectory(portablePath) !== null) {
+      version = JsonFile.parse(content).value["version"] as number | undefined;
+    }
+    if (typeof version !== "number") return null;
+    const path = historyPathForVersion(portablePath, version);
+    return path === null ? null : { path, version };
+  } catch {
+    // Malformed entities remain visible as scan problems; history seeding must not block open.
+  }
+  return null;
+}
+
+async function reconstructScanState(dir: string, scan: ScanResult): Promise<ScanState> {
+  const manifest = { ...scan.manifest };
+  for (const portablePath of Object.keys(manifest)) {
+    if (historyDirectory(portablePath) === null) continue;
+    const committed = await latestHistoryContent(dir, portablePath);
+    if (committed !== null) manifest[portablePath] = sha256(committed);
+  }
+  return { manifest, changeCount: scan.changeCount };
+}
+
+async function latestHistoryContent(dir: string, portablePath: string): Promise<string | null> {
+  const historyDir = historyDirectory(portablePath);
+  if (historyDir === null) return null;
+  const entries = await readdir(join(dir, fromPortable(historyDir))).catch(() => []);
+  const latest = entries
+    .map((entry) => ({ entry, match: /^v(\d+)\.(md|json)$/.exec(entry) }))
+    .filter((candidate): candidate is { entry: string; match: RegExpExecArray } => candidate.match !== null)
+    .sort((a, b) => Number(b.match[1]) - Number(a.match[1]))[0];
+  if (!latest) return null;
+  return readFile(toExtendedLength(join(dir, fromPortable(`${historyDir}/${latest.entry}`))), "utf8").catch(
+    () => null,
+  );
+}
+
+/**
+ * Repair derived state after a commit landed but the process died before its post-commit rescan.
+ * Only change lines written after the state's durable watermark may advance its hashes.
+ */
+async function advanceCommittedScanState(dir: string, previous: ScanState): Promise<ScanState> {
+  if (previous.changeCount === undefined) return previous;
+  const changes = await readChanges(join(dir, "changes.jsonl"));
+  if (previous.changeCount > changes.length) return previous;
+  const manifest = { ...previous.manifest };
+  for (const change of changes.slice(previous.changeCount)) {
+    const path = change["path"];
+    const before = change["contentHashBefore"];
+    const after = change["contentHashAfter"];
+    if (typeof path !== "string" || (before !== null && typeof before !== "string")) continue;
+    if (after !== null && typeof after !== "string") continue;
+    const held = manifest[path];
+    if ((before === null && held !== undefined) || (typeof before === "string" && held !== before)) continue;
+    if (after === null) delete manifest[path];
+    else manifest[path] = after;
+  }
+  return { manifest, changeCount: changes.length };
+}
+
+function historyPathForVersion(portablePath: string, version: number): string | null {
+  const directory = historyDirectory(portablePath);
+  if (directory === null) return null;
+  return `${directory}/v${version}.${portablePath.endsWith(".md") ? "md" : "json"}`;
+}
+
+function historyDirectory(portablePath: string): string | null {
+  const kind = classify(portablePath);
+  if (kind.track === "sheet") return `.history/${kind.collection}/${kind.id}`;
+  if (kind.track === "canon") return `.history/canon/${kind.id}`;
+  if (kind.track === "chapter") return `.history/productions/${kind.production}/chapters/${kind.file}`;
+  if (kind.track === "scene") return `.history/productions/${kind.production}/scenes/${kind.file}`;
+  if (kind.track === "story" || kind.track === "routing" || kind.track === "season") {
+    return `.history/productions/${kind.production}/${kind.track}`;
+  }
+  if (kind.track === "episode") return `.history/productions/${kind.production}/episodes/${kind.file}`;
+  if (kind.track === "series") return `.history/series/${kind.id}`;
+  if (kind.track === "art-direction") return ".history/art-direction";
+  if (kind.track === "bible") return ".history/bible";
+  return null;
+}
+
+function detectExternalEdits(scan: ScanResult, previous: ScanState): ExternalEdit[] {
   const edits: ExternalEdit[] = [];
   for (const [path, hash] of Object.entries(scan.manifest)) {
     const prior = previous.manifest[path];

@@ -35,7 +35,7 @@ it was supporting, so it goes first.
 | Compare-and-swap on every write | **A check, not a swap.** `commit()` verifies base hashes, then stages asynchronously, and `rollForward()` renames the live files later. The window between check and rename is wide, and the code names its own precondition: *"verify bases under the lock (R-27)"*. |
 | Client-chosen `commitId`, so retries are idempotent | **Server-generated.** `commit.ts` does `newId("cm")` per invocation. `hasCommitLine()` deduplicates roll-forward of *that same journal* — crash recovery, not a client replaying a lost response. |
 | Takes are content-addressed | **ULID-addressed.** `TakeIdSchema` is `tk_<ULID>`; a take stores a media *filename*, not a digest. Identical bytes get different addresses. |
-| One journalled commit primitive, crash-safe | **True.** `prepared → committing → done`, rolling back or forward on recovery (R-15). |
+| One journalled commit primitive, crash-safe | **True.** `planning → committing → done`, rolling back or forward on recovery (R-15). |
 | Every mutation goes through it | **No, and the exceptions have been miscounted three times.** `ownedWrite()`, `gateOp()`, and `WorldChatStore` writing `.conversations/` through neither — with upwards of forty modules in the coordinator issuing direct filesystem writes. SPEC-002 §2.1 now states the criterion (anything writing inside a world) instead of a list, because the list has been wrong at one, two and three. |
 
 **Three defects surfaced while checking the above**, and both are in the code rather than in any
@@ -49,11 +49,10 @@ lands.
   stops the deposed *process*, and the *transaction* is completed by the new owner on open. That
   only works if recovery happens under ownership, which is the first defect below — so the two
   findings are one fix, not two.
-- **Reconciling a closed-world edit snapshots the wrong bytes.** `reconcileExternalEdit()` commits
-  the hand-edited content with `baseHash: sha256(live)`, so the base check compares the edit against
-  itself and the history snapshot captures the edit rather than the version it replaced. R-28
-  promises the prior version is kept; the path relies on an earlier commit having left it there.
-  The function reads `fromVersion` and discards it with `void fromVersion;`.
+- **Closed-world reconciliation has two bases.** The outside bytes remain the physical base for
+  stale-write detection, while the last app-owned bytes supply the outgoing version and history
+  snapshot. Canonical history retains those bytes; the derived scan state retains their hash and
+  keeps that baseline across close and reopen while an edit is unresolved.
 - **An adopted Bible edit is invisible to the guard written for it.** `applyTurnBibleEdits()`
   refuses a World Chat turn whose base moved, citing R-27, for precisely the case of an author
   editing in a text editor while the model thinks. It compares frontmatter *versions*;

@@ -212,6 +212,7 @@ export const ExternalEditSchema = z
   .object({
     path: z.string().min(1),
     kind: z.enum(["modified", "created", "deleted"]),
+    refusal: z.string().min(1).max(300).optional(),
   })
   .strict();
 export type ExternalEdit = z.infer<typeof ExternalEditSchema>;

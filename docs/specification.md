@@ -773,7 +773,8 @@ is touched. It records the complete plan:
 {
   "commitId": "cm_01J8H...",
   "proposalId": "pr_01J8H...",
-  "phase": "prepared",
+  "protocolVersion": 2,
+  "phase": "planning",
   "canonRevisionFrom": 42, "canonRevisionTo": 43,
   "files": [
     { "path": "canon/CANON-044.md",
@@ -791,11 +792,11 @@ is touched. It records the complete plan:
 **Commit sequence.** Each step is durable before the next begins:
 
 1. Acquire the world lock. Verify every `baseHash`. Recompute ripples. Reserve any canon ids.
-2. Write the journal with `phase: "prepared"`. Flush.
-3. Write every `.history/` snapshot. Flush.
-4. Write staged copies of every new file alongside their targets. Flush.
+2. Write the journal with `phase: "planning"`, including the snapshot bytes. Flush.
+3. Validate every history destination, then write staged copies of every new file. Flush.
+4. Reverify live bases and history destinations.
 5. Set `phase: "committing"`. Flush. **This is the point of no return.**
-6. Rename every staged file into place, and write `world.json` last of all — its
+6. Install history snapshots, rename every staged file into place, and write `world.json` last — its
    `canonRevision` is the world's single observable statement about which revision it is at.
 7. Append to `changes.jsonl`. Flush.
 8. Set `phase: "done"`, then delete the journal and the proposal directory.
@@ -804,13 +805,15 @@ is touched. It records the complete plan:
 
 | Phase found | Meaning | Action |
 |---|---|---|
-| `prepared` | Crashed before the point of no return | **Roll back.** Delete staged files and snapshots written by this commit. The world is untouched. |
+| `planning` | Crashed before the point of no return | **Roll back.** Delete the journal and staging; canonical files were untouched. |
+| legacy `prepared` | A protocol-v1 commit crashed after it may have written history | Restore its outgoing snapshots, remove uncommitted incoming snapshots, and clean up. |
 | `committing` | Crashed mid-apply | **Roll forward.** Re-run steps 6–8 idempotently; hashes identify which renames already happened. |
 | `done` | Crashed during cleanup | Delete the journal and proposal directory. |
 
 Roll-forward is safe because every step from 6 on is idempotent against the recorded hashes: a
-file already matching `newHash` is skipped, and `changes.jsonl` is appended only if its line for
-this `commitId` is absent. Roll-back is safe because before step 5 nothing live has changed.
+file already matching `newHash` is skipped, and indexed `changes.jsonl` records are appended only
+when that `(commitId, commitIndex)` is absent. Roll-back is safe because before step 5 nothing
+canonical has changed.
 
 Two commits are never in flight at once — the world lock guarantees it — so a journal found on
 open is unambiguous.

@@ -671,38 +671,30 @@
       </section>
 
       <section id="outside">
-        <h2>Editing a world in a text editor while Arke is open</h2>
+        <h2>Editing a world in a text editor while Arke is closed</h2>
         <p>
           You can. The files are yours, they are plain text, and nothing stops you. Honestly, here
           is what happens.
         </p>
         <p>
-          While a world is open, Arke watches the folder, ignoring its own working areas — the
-          index, the staging folders, the conversations, the lock — and settling for a moment before
-          reacting, so a text editor's messy save sequence reads as one event rather than five. When
-          it notices a change it did not make, it <strong>reports</strong> it. It does not merge it
-          and does not adopt it silently: the change appears in your waiting queue as "files changed
-          outside the app", and sits there until you deal with it.
+          On the next open, Arke compares inventoried entity files with the last state it wrote. A
+          changed file is <strong>reported</strong>, not merged or silently adopted: it appears in
+          the waiting queue as "files changed outside the app" and stays there until you deal with
+          it. While a world is open, the watcher only hot-reloads the author-owned bible; other
+          entity changes are found on the next open.
         </p>
         <p>
-          Accepting the reconciliation takes what is on disk as the truth: the version goes up, a
-          copy is filed, and a change-log line is added with a source of <code>external-edit</code>,
-          so the trail is honest that this change did not come through the gate. A file you deleted
-          outside the app stays deleted and gains a line saying so. A file with no version to move
-          gets a log line and nothing else.
-        </p>
-        <p class="note">
-          <strong>One known gap, stated plainly.</strong> The specification says the snapshot taken
-          when adopting an outside edit should be of the version being replaced. In the code it is a
-          snapshot of the edit itself, so your pre-edit contents survive only if some earlier accept
-          happened to leave them in <code>.history/</code>. The repository documents this against its
-          own requirement rather than hiding it. <span class="pill pill--part">specified, not built</span>
+          Accepting the reconciliation takes what is on disk as the truth: the version goes up, the
+          last committed version is filed before it is replaced, and a change-log line is added with
+          a source of <code>external-edit</code>, so the trail is honest that this change did not come
+          through the gate. A file you deleted outside the app stays deleted and gains a line saying
+          so. A file with no version to move gets a log line and nothing else.
         </p>
         <p>
-          Detection can also degrade: some systems cannot watch a folder tree at all, and a watch can
-          be lost while a world is open. Arke then lets the watch go rather than trust it. The check
-          made when the world is next opened still catches the edits, so the worst case is finding
-          out later rather than immediately.
+          A world first opened by this build files its current version so a later outside edit always
+          has an outgoing snapshot. If an older build recorded only a hash and no matching history
+          snapshot survives, Arke refuses adoption rather than pretending it can preserve bytes it
+          no longer has.
         </p>
       </section>
 

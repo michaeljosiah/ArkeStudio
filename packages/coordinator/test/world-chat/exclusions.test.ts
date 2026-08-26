@@ -76,4 +76,12 @@ describe("conversations are operational state, not world content", () => {
       "conversation records must not be reported as unreadable world content",
     );
   });
+
+  it("keeps proposal staging out of the external-edit manifest", async () => {
+    const world = await scanWorld(await makeTempWorld());
+    assert.equal(
+      Object.keys(world.manifest).some((path) => path.startsWith(".proposals/")),
+      false,
+    );
+  });
 });
