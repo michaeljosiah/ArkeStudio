@@ -1135,6 +1135,11 @@ async function initialize(): Promise<{ port: number }> {
     },
     setupExtraEntries: comfyUiWeightEntries,
     openPath: (p) => void shell.openPath(p),
+    // SPEC-030 R-6: the vendor's sign-in page, in the person's own browser. https only — the
+    // URL comes from the harness, and anything else has no business leaving the app.
+    openExternal: (url) => {
+      if (/^https:\/\//.test(url)) void shell.openExternal(url);
+    },
     nativeIndex: sqlite
       ? { ok: true }
       : {

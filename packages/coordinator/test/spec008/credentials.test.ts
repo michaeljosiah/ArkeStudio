@@ -7,7 +7,7 @@ import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { AppLog } from "../../src/app-log.js";
 import { REDACTED, redactDeep, SecretRegistry } from "../../src/redact.js";
 import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
-import type { ClientState } from "@arke-studio/contracts";
+import { vendorAuthUnavailable, type ClientState } from "@arke-studio/contracts";
 
 /** A reversible fake cipher that is very visibly not the plaintext. */
 const fakeCipher: Cipher = {
@@ -233,6 +233,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
           },
         ],
         providerTools: [],
+        vendorAuth: vendorAuthUnavailable("not configured"),
         manifest: null,
         routing: { defaults: {}, faults: [] },
         models: { disabled: [] },

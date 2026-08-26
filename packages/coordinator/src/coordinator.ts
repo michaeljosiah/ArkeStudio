@@ -279,6 +279,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
+import { VendorAuthService } from "./harness/vendor-auth.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
   SETUP_CATALOGUE,
@@ -562,6 +563,12 @@ export interface CoordinatorOptions {
   };
   /** SPEC-016 R-17: open a path in the platform file manager, injected from the desktop. */
   openPath?: (path: string) => void;
+  /**
+   * SPEC-030 R-6: open a vendor's sign-in page in the person's own browser. Host-owned like
+   * openPath, and for the same reason — the URL comes from the harness and never enters
+   * renderer state.
+   */
+  openExternal?: (url: string) => void;
   /** SPEC-016 R-2: whether the native index binding loaded, known only to the desktop shell. */
   nativeIndex?: { ok: boolean; reason?: string };
   /** SPEC-011: the Voxa sidecar and voice catalogue sources, injected from the desktop. */
@@ -1053,6 +1060,8 @@ export class Coordinator {
   private readonly providerService: ProviderService;
   /** One per provider whose credential is external (issue #137); empty when none are wired. */
   private readonly providerTools = new Map<ProviderId, ProviderToolService>();
+  /** SPEC-030: vendor sign-in through the harness. Always constructed; states its own absence. */
+  private readonly vendorAuth: VendorAuthService;
   private readonly ledger: LedgerFile | null;
   private readonly appSettings: AppSettingsFile | null;
   /** SPEC-009: the dispatch engine. Null without an app root, clients and a ledger. */
@@ -1094,6 +1103,21 @@ export class Coordinator {
         ),
       );
     }
+    this.vendorAuth = new VendorAuthService({
+      adapter: () => this.opts.adapter,
+      openExternal: (url) => {
+        try {
+          this.opts.openExternal?.(url);
+        } catch {
+          /* a browser that cannot open is the person's to notice; the poll still runs */
+        }
+      },
+      onChange: (auth) => this.emit({ at: new Date().toISOString(), type: "vendor-auth.status", auth }),
+      // Pass-through secrets (typed keys, one-time codes) are registered so no log line can
+      // carry one — registration is redaction, not retention (SPEC-030 R-1).
+      registerSecret: (value) => this.secrets.register(value),
+      log: this.appLog,
+    });
     this.ledger = opts.appRoot ? new LedgerFile(join(opts.appRoot, "ledger.jsonl")) : null;
     this.appSettings = opts.appRoot ? new AppSettingsFile(join(opts.appRoot, "settings.json")) : null;
     this.jobQueue =
@@ -1305,6 +1329,9 @@ export class Coordinator {
         ? new AuthoringService(opts.adapter, (event) => this.emit(event), {
             sessionInput: this.sessionInput,
             agentForPurpose: opts.authoring.agentForPurpose,
+            // R-13: the failed refresh marks the connection, so the sign-in surface says
+            // "sign-in needed" by the time the person goes looking for why the turn ended.
+            onAuthFailure: () => void this.vendorAuth.noteAuthFailure().catch(() => {}),
           })
         : null;
     this.genesis =
@@ -1499,6 +1526,9 @@ export class Coordinator {
                 ? {}
                 : { reason: readiness.reason ?? "the harness is missing a required capability" }),
             });
+            // Seed the sign-in surface once the harness answers (SPEC-030 §3.1 step 10) —
+            // patient, because the integration catalog populates a few seconds after spawn.
+            if (readiness.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
           })
           .catch((err: unknown) => {
             this.emit({
@@ -3763,6 +3793,33 @@ export class Coordinator {
       }
       case "cancel-provider-tool-sign-in": {
         this.providerTools.get(msg.provider)?.cancelSignIn();
+        return;
+      }
+      // ---- vendor sign-in through the harness (SPEC-030 §3.1) ----
+      case "refresh-vendor-auth": {
+        await this.vendorAuth.refresh();
+        return;
+      }
+      case "begin-vendor-sign-in": {
+        // The service publishes every state change through its own callback; nothing here
+        // waits on the browser the person is standing in front of.
+        await this.vendorAuth.beginOAuth(msg.vendor, msg.method, msg.answers);
+        return;
+      }
+      case "submit-vendor-sign-in-code": {
+        await this.vendorAuth.submitCode(msg.code);
+        return;
+      }
+      case "submit-vendor-key": {
+        await this.vendorAuth.submitKey(msg.vendor, msg.key, msg.answers);
+        return;
+      }
+      case "cancel-vendor-sign-in": {
+        await this.vendorAuth.cancel();
+        return;
+      }
+      case "remove-vendor-connection": {
+        await this.vendorAuth.remove(msg.vendor, msg.credential);
         return;
       }
       case "set-routing-default": {
@@ -8983,6 +9040,8 @@ export class Coordinator {
       this.lifecycleTimers.clear();
       for (const timer of this.permissionRetryTimers.values()) clearTimeout(timer);
       this.permissionRetryTimers.clear();
+      // A sign-in poll racing shutdown would dial a harness the supervisor is stopping.
+      this.vendorAuth.stop();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

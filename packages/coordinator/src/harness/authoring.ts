@@ -6,6 +6,7 @@ import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
 import type { GrantStore } from "./grants.js";
 import { sessionTokenBudget } from "./token-budget.js";
+import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "./vendor-auth.js";
 
 /**
  * Authoring sessions over proposals (SPEC-005 §2.4): one session, one proposal; cancellable,
@@ -19,6 +20,12 @@ export interface AuthoringOptions {
   agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask") => string;
   wallClockMs?: number;
   tokenBudget?: number;
+  /**
+   * A turn died because a vendor token could not be refreshed (SPEC-030 R-13). The caller
+   * marks the connection; this service's part is only to say it happened — and to state the
+   * ending as a sign-in request rather than a provider error.
+   */
+  onAuthFailure?: () => void;
 }
 
 export interface RunInput {
@@ -291,7 +298,22 @@ export class AuthoringService {
     // Whatever happened, the proposal keeps the agent's work (R-12, D7, D8): refresh its
     // preview from the files as they now stand.
     await gate.refreshPreviewFor(input.proposalId).catch(() => {});
-    const final = ending ?? { state: "failed", detail: "the event stream ended unexpectedly" };
+    let final = ending ?? { state: "failed", detail: "the event stream ended unexpectedly" };
+
+    /*
+     * A refresh the vendor declined surfaces as a request to sign in again, never as a failed
+     * turn with a provider error (SPEC-030 R-13). The raw cause — `provider.auth`, often with
+     * nothing after it — is exactly the string §2.5 warns will be mistaken for an Arke defect.
+     * The proposal was already preserved above, unconditionally, so the stated reason is true.
+     */
+    if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
+      final = { state: "failed", detail: AUTH_FAILURE_REASON };
+      try {
+        this.opts.onAuthFailure?.();
+      } catch {
+        /* marking the connection must not change the turn's ending */
+      }
+    }
 
     // A turn that ended cleanly keeps its session for the next instruction; any other ending
     // drops it, so the following send starts a fresh conversation rather than a haunted one.
