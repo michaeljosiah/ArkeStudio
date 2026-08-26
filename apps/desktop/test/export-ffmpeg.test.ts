@@ -76,6 +76,20 @@ describe("the desktop export ffmpeg runner", () => {
     await assert.rejects(pending, /ffmpeg exited 2/);
   });
 
+  it("does not mistake an unrelated media path containing font for a slate failure", async () => {
+    for (const path of ["C:/world/font-reference-missing.mp4", "C:/Users/Fontaine/missing.mp4"]) {
+      const { child, spawn } = fakeSpawn();
+      const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+        ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate", "-i", path],
+        () => {},
+        new AbortController().signal,
+      );
+      child.stderr.emit("data", Buffer.from(`${path}: No such file or directory`));
+      child.emit("exit", 2);
+      await assert.rejects(pending, /ffmpeg exited 2/);
+    }
+  });
+
   it("names the observed Windows drawtext crash even when it exits before diagnostics", async () => {
     const { child, spawn } = fakeSpawn();
     const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(

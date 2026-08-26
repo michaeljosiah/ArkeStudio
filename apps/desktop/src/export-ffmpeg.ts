@@ -5,7 +5,7 @@ import type { FfmpegRunner } from "@arke-studio/coordinator";
 type SpawnLike = typeof nodeSpawn;
 
 const DRAWTEXT_FAILURE =
-  /(?:error|failed|unable|cannot|could not|no such file|invalid).*(?:drawtext|fontconfig|fontfile|freetype|font)|(?:drawtext|fontconfig|fontfile|freetype|font).*(?:error|failed|unable|cannot|could not|no such file|invalid)/i;
+  /fontconfig error|(?:error|failed|unable|cannot|could not|no such file|invalid).*(?:drawtext|fontfile|freetype)|(?:drawtext|fontfile|freetype).*(?:error|failed|unable|cannot|could not|no such file|invalid)|(?:cannot|could not|failed to) load font/i;
 
 /** Run desktop exports and retain enough diagnostics to name a slate-font failure. */
 export function createExportFfmpegRunner(
