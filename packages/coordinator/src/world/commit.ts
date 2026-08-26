@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -9,7 +10,7 @@ import {
   WorldMetaSchema,
 } from "@arke-studio/contracts";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
-import { appendChanges, hasCommitLine } from "./change-writer.js";
+import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
 
@@ -18,11 +19,11 @@ import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
  * atomicity, base-hash verification, history, versioning and the change log live here — once.
  *
  * A commit is a journalled transaction (R-15, master spec §3.5):
- *   prepared   — journal on disk with the full plan and hashes; nothing live touched
- *   committing — snapshots and staged files written; renames may have begun
+ *   planning   — journal and staging on disk; nothing canonical touched
+ *   committing — snapshots and staged files may have begun landing
  *   done       — everything renamed and logged; cleanup only
  *
- * Recovery on open rolls back from `prepared` (world byte-identical to before) and rolls
+ * Recovery on open rolls back from `planning` (world byte-identical to before) and rolls
  * forward from `committing` (idempotent — every step checks recorded hashes).
  */
 
@@ -47,6 +48,14 @@ export interface CommitFileInput {
   content?: string;
   /** sha256 of the base content this change was drafted against; null for create (R-27). */
   baseHash: string | null;
+  /**
+   * The last committed content when the physical live file is an outside edit. The live bytes
+   * still satisfy `baseHash`; this value supplies the version, diff and outgoing history snapshot.
+   * Explicit null means the outside edit created the file.
+   */
+  committedBase?: string | null;
+  /** Last committed hash when those bytes are unavailable for an unversioned outside edit. */
+  committedBaseHash?: string | null;
   /**
    * Save without cutting a version (SPEC-012 R-5): direct chapter authoring and shot prompt
    * overrides are production output, not gated change. The history snapshot for the current
@@ -106,8 +115,9 @@ interface JournalFile {
 }
 
 interface Journal {
+  protocolVersion?: 2;
   commitId: string;
-  phase: "prepared" | "committing" | "done";
+  phase: "planning" | "prepared" | "committing" | "done";
   kind: string;
   source: string;
   proposalId?: string;
@@ -292,6 +302,9 @@ export class Committer {
       if (f.action !== "delete" && typeof f.content !== "string") {
         throw new CommitPlanError(`${f.path}: ${f.action} requires content`);
       }
+      if (f.committedBase !== undefined && f.action === "create") {
+        throw new CommitPlanError(`${f.path}: a committed base is only valid for an outside edit`);
+      }
     }
 
     // ---- verify bases under the lock (R-27) --------------------------------
@@ -324,6 +337,8 @@ export class Committer {
     for (const f of input.files) {
       const kind = classify(f.path);
       const live = liveByPath.get(f.path) ?? null;
+      const base = f.committedBase === undefined ? live : f.committedBase;
+      const logicalCreate = f.action === "create" || (f.action === "replace" && f.committedBase === null);
       let newContent: string | null = f.action === "delete" ? null : f.content!;
       let historyPrev: string | null = null;
       let historyNew: string | null = null;
@@ -342,12 +357,12 @@ export class Committer {
             : kind.track === "bible"
               ? ".history/bible"
               : `.history/productions/${kind.production}/chapters/${kind.file}`;
-        const baseDoc = live !== null ? MarkdownFile.parse(live) : null;
+        const baseDoc = base !== null ? MarkdownFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.data["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {
           const doc = MarkdownFile.parse(newContent!);
           toVersion =
-            f.action === "create" ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1; // R-17; SPEC-012 R-5
+            logicalCreate ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1; // R-17; SPEC-012 R-5
           doc.setData({ version: toVersion, updated: at.slice(0, 10) });
           newContent = doc.serialize();
           historyNew = `${dirPath}/v${toVersion}.md`;
@@ -357,12 +372,12 @@ export class Committer {
         if (baseDoc) historyPrev = `${dirPath}/v${fromVersion}.md`;
       } else if (kind.track === "canon") {
         const dirPath = `.history/canon/${kind.id}`;
-        const baseDoc = live !== null ? MarkdownFile.parse(live) : null;
+        const baseDoc = base !== null ? MarkdownFile.parse(base) : null;
         fromVersion = baseDoc ? canonStamp(baseDoc.data) : null;
         if (f.action !== "delete") {
           const doc = MarkdownFile.parse(newContent!);
           // Stamp the lifecycle field the transition implies (R-16).
-          if (f.action === "create") {
+          if (logicalCreate) {
             doc.setData({ introducedAt: revisionTo });
           } else if (doc.data["status"] === "settled" && baseDoc?.data["status"] !== "settled") {
             doc.setData({ settledAt: revisionTo });
@@ -395,12 +410,12 @@ export class Committer {
                     ? `episodes/${kind.file}`
                     : kind.track
               }`;
-        const baseDoc = live !== null ? JsonFile.parse(live) : null;
+        const baseDoc = base !== null ? JsonFile.parse(base) : null;
         fromVersion = baseDoc ? ((baseDoc.value["version"] as number) ?? 1) : null;
         if (f.action !== "delete") {
           const doc = JsonFile.parse(newContent!);
           toVersion =
-            f.action === "create" ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1;
+            logicalCreate ? 1 : f.preserveVersion === true ? (fromVersion ?? 1) : (fromVersion ?? 0) + 1;
           doc.set({ version: toVersion });
           newContent = doc.serialize();
           historyNew = `${dirPath}/v${toVersion}.json`;
@@ -408,65 +423,63 @@ export class Committer {
         }
         if (baseDoc) historyPrev = `${dirPath}/v${fromVersion}.json`;
       } else if (kind.track === "art-direction") {
-        const proposed = ArtDirectionRecordSchema.parse(JSON.parse(newContent!));
-        const base = live !== null ? ArtDirectionRecordSchema.parse(JSON.parse(live)) : null;
-        const worldMeta = WorldMetaSchema.parse(worldDoc.value);
-        fromVersion = base?.version ?? 1;
-        toVersion = fromVersion + 1;
-        // Rebuilt field by field, which is why the standing constraints have to be named here
-        // too (#244). This is the authoritative author of the record — the version and the
-        // history are decided here, not by whatever the proposal staged — so a field the rebuild
-        // does not mention is a field that does not survive being accepted, however carefully
-        // the gate composed it. The schema's defaults would then quietly restore a permissive
-        // world to the strict default, and the first sign would be a clip with music under it.
-        const previous = base
-          ? {
-              version: base.version,
-              description: base.description,
-              ...(base.masterLook ? { masterLook: base.masterLook } : {}),
-              acceptedAt: base.acceptedAt,
-              audio: base.audio,
-              failureModes: base.failureModes,
-            }
-          : {
-              version: 1,
-              description: deriveArtDirectionDescription(worldMeta),
-              acceptedAt: worldMeta.created,
-            };
-        const next = ArtDirectionRecordSchema.parse({
-          version: toVersion,
-          description: proposed.description,
-          ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
-          acceptedAt: at,
-          audio: proposed.audio,
-          failureModes: proposed.failureModes,
-          history: [...(base?.history ?? []), previous],
-        });
-        newContent = `${JSON.stringify(next, null, 2)}\n`;
-        historyPrev = base ? `.history/art-direction/v${fromVersion}.json` : null;
-        historyNew = `.history/art-direction/v${toVersion}.json`;
-        fieldsChanged = [
-          ...(base?.description !== next.description ? ["description"] : []),
-          ...(base?.masterLook !== next.masterLook ? ["master-look"] : []),
-          // A policy-only commit changed neither of the above, so it logged no fieldsChanged at
-          // all — the audit record could not say the generation policy had moved (#244, round 3).
-          // Compared by value: failureModes is an array, and identity would call every commit a
-          // change.
-          ...(JSON.stringify(base?.audio) !== JSON.stringify(next.audio) ? ["audio-policy"] : []),
-          ...(JSON.stringify(base?.failureModes ?? []) !== JSON.stringify(next.failureModes)
-            ? ["failure-modes"]
-            : []),
-        ];
-        versions[f.path] = toVersion;
+        const baseRecord = base !== null ? ArtDirectionRecordSchema.parse(JSON.parse(base)) : null;
+        // Even without a physical record the world has a derived v1 look. The first authored
+        // record therefore replaces that logical baseline as v2 rather than being born at v1.
+        fromVersion = baseRecord?.version ?? 1;
+        historyPrev = baseRecord ? `.history/art-direction/v${fromVersion}.json` : null;
+        if (f.action !== "delete") {
+          const proposed = ArtDirectionRecordSchema.parse(JSON.parse(newContent!));
+          const worldMeta = WorldMetaSchema.parse(worldDoc.value);
+          const effectiveFrom = baseRecord?.version ?? 1;
+          toVersion = effectiveFrom + 1;
+          // Rebuilt field by field, which is why the standing constraints have to be named here
+          // too (#244). This is the authoritative author of the record — the version and the
+          // history are decided here, not by whatever the proposal staged.
+          const previous = baseRecord
+            ? {
+                version: baseRecord.version,
+                description: baseRecord.description,
+                ...(baseRecord.masterLook ? { masterLook: baseRecord.masterLook } : {}),
+                acceptedAt: baseRecord.acceptedAt,
+                audio: baseRecord.audio,
+                failureModes: baseRecord.failureModes,
+              }
+            : {
+                version: 1,
+                description: deriveArtDirectionDescription(worldMeta),
+                acceptedAt: worldMeta.created,
+              };
+          const next = ArtDirectionRecordSchema.parse({
+            version: toVersion,
+            description: proposed.description,
+            ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+            acceptedAt: at,
+            audio: proposed.audio,
+            failureModes: proposed.failureModes,
+            history: [...(baseRecord?.history ?? []), previous],
+          });
+          newContent = `${JSON.stringify(next, null, 2)}\n`;
+          historyNew = `.history/art-direction/v${toVersion}.json`;
+          fieldsChanged = [
+            ...(baseRecord?.description !== next.description ? ["description"] : []),
+            ...(baseRecord?.masterLook !== next.masterLook ? ["master-look"] : []),
+            ...(JSON.stringify(baseRecord?.audio) !== JSON.stringify(next.audio) ? ["audio-policy"] : []),
+            ...(JSON.stringify(baseRecord?.failureModes ?? []) !== JSON.stringify(next.failureModes)
+              ? ["failure-modes"]
+              : []),
+          ];
+          versions[f.path] = toVersion;
+        }
       }
       // production-meta and unversioned: change-logged only, no history, no stamps (§2.4.1).
       // production.json is unversioned, so the change line IS its entire history — it has to
       // say which fields moved (issue 389), or an edited aspect leaves an audit line that
       // records only that something happened. `updated` is excluded: every edit moves it, and
       // a field that always changes says nothing.
-      if (kind.track === "production-meta" && f.action === "replace" && live !== null && newContent !== null) {
+      if (kind.track === "production-meta" && f.action === "replace" && base !== null && newContent !== null) {
         try {
-          const before = JSON.parse(live) as Record<string, unknown>;
+          const before = JSON.parse(base) as Record<string, unknown>;
           const after = JSON.parse(newContent) as Record<string, unknown>;
           const moved = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
             (key) => key !== "updated" && JSON.stringify(before[key]) !== JSON.stringify(after[key]),
@@ -481,6 +494,10 @@ export class Committer {
         ts: at,
         commitId,
         entity: f.path.replace(/\.(md|json)$/, ""),
+        path: f.path,
+        contentHashBefore:
+          f.committedBaseHash !== undefined ? f.committedBaseHash : base === null ? null : sha256(base),
+        contentHashAfter: newContent === null ? null : sha256(newContent),
         ...(f.action === "delete" ? { deleted: true } : {}),
         fromVersion,
         ...(toVersion !== undefined ? { toVersion } : {}),
@@ -498,7 +515,7 @@ export class Committer {
         newHash: newContent !== null ? sha256(newContent) : null,
         historyPrev,
         historyNew,
-        ...(live !== null ? { prevContent: live } : {}),
+        ...(base !== null ? { prevContent: base } : {}),
         ...(newContent !== null ? { newContent } : {}),
       });
     }
@@ -548,8 +565,9 @@ export class Committer {
     const worldNew = worldDoc.serialize();
 
     const journal: Journal = {
+      protocolVersion: 2,
       commitId,
-      phase: "prepared",
+      phase: "planning",
       kind: input.kind,
       source: input.source,
       ...(input.proposalId ? { proposalId: input.proposalId } : {}),
@@ -559,23 +577,23 @@ export class Committer {
       worldJsonBaseHash: sha256(worldRaw),
       worldJsonNewContent: worldNew,
       files,
-      changes,
+      changes: changes.map((change, commitIndex) => ({ ...change, commitIndex })),
       allocatedCanonIds,
     };
 
-    // ---- prepared ----------------------------------------------------------
+    // ---- planning ----------------------------------------------------------
     const journalPath = this.abs(`${COMMIT_DIR}/${commitId}.json`);
     await atomicWriteFile(journalPath, JSON.stringify(journal, null, 2));
     hooks.at?.("prepared-written");
 
     try {
-      // snapshots (R-18: outgoing written before the live file is replaced)
-      for (const f of files) {
-        if (f.historyPrev && f.prevContent !== undefined) {
-          await atomicWriteFile(this.abs(f.historyPrev), f.prevContent);
-        }
-        if (f.historyNew && f.newContent !== undefined) {
-          await atomicWriteFile(this.abs(f.historyNew), f.newContent);
+      // The planning journal already carries snapshot bytes. Validate every canonical destination
+      // now; roll-forward installs the final bytes idempotently after the point of no return.
+      const snapshots = this.snapshotPlan(files);
+      for (const [path, snapshot] of snapshots) {
+        const existing = await this.readLive(path);
+        if (existing !== null && !snapshot.allowedExisting.has(sha256(existing))) {
+          throw new CommitPlanError(`${path}: history snapshot conflicts with this commit`);
         }
       }
       hooks.at?.("snapshots-written");
@@ -588,9 +606,32 @@ export class Committer {
       }
       await atomicWriteFile(this.abs(`${COMMIT_DIR}/staging/${commitId}/world.json`), worldNew);
       hooks.at?.("staged-written");
+
+      // The first check protects proposal staleness; this one closes the asynchronous staging
+      // window before the transaction crosses its point of no return.
+      for (const [path, snapshot] of snapshots) {
+        const existing = await this.readLive(path);
+        if (existing !== null && !snapshot.allowedExisting.has(sha256(existing))) {
+          throw new CommitPlanError(`${path}: history snapshot moved while this commit was staged`);
+        }
+      }
+      const moved: CommitStaleError["stale"] = [];
+      for (const f of input.files) {
+        const live = await this.readLive(f.path);
+        const found = live === null ? null : sha256(live);
+        if ((f.action === "create" && live !== null) || (f.action !== "create" && found !== f.baseHash)) {
+          moved.push({ path: f.path, expected: f.action === "create" ? null : f.baseHash, found });
+        }
+      }
+      const worldNow = await this.readLive("world.json");
+      const worldFound = worldNow === null ? null : sha256(worldNow);
+      if (worldFound !== journal.worldJsonBaseHash) {
+        moved.push({ path: "world.json", expected: journal.worldJsonBaseHash, found: worldFound });
+      }
+      if (moved.length > 0) throw new CommitStaleError(moved);
     } catch (err) {
       if (err instanceof CrashSignal) throw err; // a real kill leaves debris for recover()
-      // Still fully in `prepared` — roll back so the world is byte-identical (R-15).
+      // Still fully in `planning` — roll back so the world is byte-identical (R-15).
       await this.rollback(journal).catch(() => {});
       throw err;
     }
@@ -606,6 +647,13 @@ export class Committer {
   /** Idempotent completion from `committing` — every step checks recorded hashes. */
   private async rollForward(journal: Journal, hooks: CommitHooks = {}): Promise<void> {
     const staging = (p: string) => this.abs(`${COMMIT_DIR}/staging/${journal.commitId}/${p}`);
+
+    for (const [path, snapshot] of this.snapshotPlan(journal.files)) {
+      const existing = await this.readLive(path);
+      if (existing !== null && sha256(existing) === sha256(snapshot.content)) continue;
+      await atomicWriteFile(this.abs(path), snapshot.content);
+    }
+    hooks.at?.("snapshots-installed");
 
     let i = 0;
     for (const f of journal.files) {
@@ -627,9 +675,14 @@ export class Committer {
     hooks.at?.("world-renamed");
 
     const changesPath = this.abs("changes.jsonl");
-    if (!(await hasCommitLine(changesPath, journal.commitId))) {
-      await appendChanges(changesPath, journal.changes);
-    }
+    const logged = (await readChanges(changesPath)).filter((line) => line.commitId === journal.commitId);
+    const missing = journal.changes.filter((change, index) => {
+      const commitIndex = (change as { commitIndex?: number }).commitIndex ?? index;
+      return !logged.some(
+        (line) => line["commitIndex"] === commitIndex || isDeepStrictEqual(line, change),
+      );
+    });
+    await appendChanges(changesPath, missing);
     hooks.at?.("changes-appended");
 
     const journalPath = this.abs(`${COMMIT_DIR}/${journal.commitId}.json`);
@@ -637,14 +690,43 @@ export class Committer {
     await this.cleanup(journal.commitId);
   }
 
-  /** Roll back a `prepared` commit: remove snapshots and staging; live files were never touched. */
+  /** Roll back a `planning` commit: snapshots and live files were never installed. */
   private async rollback(journal: Journal): Promise<void> {
-    for (const f of journal.files) {
-      for (const h of [f.historyPrev, f.historyNew]) {
-        if (h) await rm(toExtendedLength(this.abs(h)), { force: true }).catch(() => {});
+    await this.cleanup(journal.commitId);
+  }
+
+  /** Restore canonical history touched by protocol-v1 `prepared` journals before cleanup. */
+  private async rollbackLegacyPrepared(journal: Journal): Promise<void> {
+    for (const file of journal.files) {
+      if (file.historyPrev && file.prevContent !== undefined) {
+        await atomicWriteFile(this.abs(file.historyPrev), file.prevContent);
+      }
+      if (file.historyNew && file.historyNew !== file.historyPrev) {
+        await rm(toExtendedLength(this.abs(file.historyNew)), { force: true }).catch(() => {});
       }
     }
     await this.cleanup(journal.commitId);
+  }
+
+  private snapshotPlan(files: JournalFile[]): Map<string, { content: string; allowedExisting: Set<string> }> {
+    const snapshots = new Map<string, { content: string; allowedExisting: Set<string> }>();
+    for (const file of files) {
+      for (const [path, content] of [
+        [file.historyPrev, file.prevContent],
+        [file.historyNew, file.newContent],
+      ] as const) {
+        if (path === null || content === undefined) continue;
+        const hash = sha256(content);
+        const existing = snapshots.get(path);
+        if (existing) {
+          existing.content = content;
+          existing.allowedExisting.add(hash);
+        } else {
+          snapshots.set(path, { content, allowedExisting: new Set([hash]) });
+        }
+      }
+    }
+    return snapshots;
   }
 
   private async cleanup(commitId: string): Promise<void> {
@@ -682,7 +764,10 @@ export class Committer {
       }
       // `done` is debris awaiting a sweep, not an unresolved commit — the world is already whole.
       if (journal.phase === "done") continue;
-      out.push({ commitId: journal.commitId, phase: journal.phase });
+      out.push({
+        commitId: journal.commitId,
+        phase: journal.phase === "planning" ? "prepared" : journal.phase,
+      });
     }
     return out;
   }
@@ -711,8 +796,11 @@ export class Committer {
         await rm(toExtendedLength(this.abs(`${COMMIT_DIR}/${entry}`)), { force: true }).catch(() => {});
         continue;
       }
-      if (journal.phase === "prepared") {
+      if (journal.phase === "planning") {
         await this.rollback(journal);
+        out.push({ commitId: journal.commitId, action: "rolled-back" });
+      } else if (journal.phase === "prepared") {
+        await this.rollbackLegacyPrepared(journal);
         out.push({ commitId: journal.commitId, action: "rolled-back" });
       } else if (journal.phase === "committing") {
         await this.rollForward(journal);

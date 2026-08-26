@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { CommitStaleError, Committer } from "../../src/world/commit.js";
+import { CommitPlanError, CommitStaleError, Committer } from "../../src/world/commit.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "./helpers.js";
@@ -134,6 +135,66 @@ describe("the commit primitive (R-13, R-15..R-21, R-27)", () => {
     );
     const after = await readFile(join(dir, path), "utf8");
     assert.ok(after.includes("First edit."), "the newer content survived");
+  });
+
+  it("rechecks the physical base after staging and preserves a concurrent outside save", async () => {
+    const dir = await makeTempWorld();
+    const path = "characters/maren-kest.md";
+    const live = await readFile(join(dir, path), "utf8");
+    const proposed = MarkdownFile.parse(live);
+    proposed.setBody(proposed.body.replace("Salt-crusted braids", "Salt-white braids"));
+    const outside = live.replace("Salt-crusted braids", "Iron-grey braids");
+
+    await assert.rejects(
+      () =>
+        new Committer(dir, CLOCK).commit(
+          {
+            kind: "sheet-edit",
+            source: "test",
+            files: [{ path, action: "replace", content: proposed.serialize(), baseHash: sha256(live) }],
+          },
+          {
+            at: (point) => {
+              if (point === "staged-written") writeFileSync(join(dir, path), outside, "utf8");
+            },
+          },
+        ),
+      CommitStaleError,
+    );
+
+    assert.equal(await readFile(join(dir, path), "utf8"), outside);
+  });
+
+  it("rechecks history destinations after staging and preserves a conflicting snapshot", async () => {
+    const dir = await makeTempWorld();
+    const path = "characters/maren-kest.md";
+    const live = await readFile(join(dir, path), "utf8");
+    const proposed = MarkdownFile.parse(live);
+    proposed.setBody(proposed.body.replace("Salt-crusted braids", "Salt-white braids"));
+    const conflictPath = join(dir, ".history/characters/maren-kest/v6.md");
+
+    await assert.rejects(
+      () =>
+        new Committer(dir, CLOCK).commit(
+          {
+            kind: "sheet-edit",
+            source: "test",
+            files: [{ path, action: "replace", content: proposed.serialize(), baseHash: sha256(live) }],
+          },
+          {
+            at: (point) => {
+              if (point === "staged-written") {
+                mkdirSync(join(conflictPath, ".."), { recursive: true });
+                writeFileSync(conflictPath, "conflicting snapshot", "utf8");
+              }
+            },
+          },
+        ),
+      CommitPlanError,
+    );
+
+    assert.equal(await readFile(conflictPath, "utf8"), "conflicting snapshot");
+    assert.equal(await readFile(join(dir, path), "utf8"), live);
   });
 
   it("allocates canon ids monotonically inside the transaction (R-11)", async () => {

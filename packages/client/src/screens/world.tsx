@@ -231,8 +231,8 @@ function WorldConditionBanners() {
           tone="warning"
           title={`${world.externalEdits.length} file(s) changed while the world was closed`}
         >
-          Adopting an edit snapshots the prior version, bumps the entity version and records the change as
-          external — so the history still explains itself.
+          Adopting records the change as external. Versioned files also snapshot the prior version and advance
+          their version, so the history still explains itself.
           <div style={{ display: "grid", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
             {world.externalEdits.map((e) => (
               <div key={e.path} style={{ display: "flex", gap: "var(--space-3)", alignItems: "center" }}>
@@ -240,6 +240,7 @@ function WorldConditionBanners() {
                   {e.path} · {e.kind}
                 </span>
                 <Button onClick={() => reconcileExternalEdit(world.meta.worldId, e.path)}>Adopt</Button>
+                {e.refusal && <span style={{ color: "var(--danger)", fontSize: "var(--text-xs)" }}>{e.refusal}</span>}
               </div>
             ))}
           </div>

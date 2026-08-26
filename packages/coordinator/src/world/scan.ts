@@ -90,6 +90,8 @@ export interface ScanResult {
   manifest: Record<string, string>;
   /** Hashes of measured take media — for staleness only; never an adoptable text path. */
   mediaManifest: Record<string, string>;
+  /** Complete durable change-line count; the bundle carries only the latest 50 records. */
+  changeCount: number;
 }
 
 /** What counts as an image when reading a candidate off the disk rather than out of a record. */
@@ -687,8 +689,14 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
       ...(review.targets.length > 0 ? { review } : {}),
     });
   }
+  // Proposals are operational staging, not committed entities. Keep parsing and reporting them,
+  // but never offer their dot-prefixed files to the generic external-edit committer.
+  for (const path of Object.keys(manifest)) {
+    if (path.startsWith(".proposals/")) delete manifest[path];
+  }
 
-  const changes = (await readChanges(join(dir, "changes.jsonl")))
+  const allChanges = await readChanges(join(dir, "changes.jsonl"));
+  const changes = allChanges
     .map((line) => {
       const r = ChangeRecordSchema.safeParse(line);
       return r.success ? r.data : null;
@@ -831,5 +839,5 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     problems,
     externalEdits: [],
   };
-  return { meta, bundle, problems, manifest, mediaManifest };
+  return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length };
 }

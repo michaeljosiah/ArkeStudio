@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
 import { WorldLockedError } from "../../src/world/lock.js";
+import { CrashSignal, Committer } from "../../src/world/commit.js";
+import { initialBible } from "../../src/world/bible.js";
 import { WorldOpenError, readWorldMeta } from "../../src/world/scan.js";
-import { WorldStore } from "../../src/world/store.js";
+import { deleteScanState, WorldStore } from "../../src/world/store.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { FIXTURE_WORLD, makeTempWorld } from "./helpers.js";
 
@@ -222,15 +224,271 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
       edits.map((e) => e.path),
       ["characters/bray-half-hitch.md"],
     );
+    await assert.rejects(
+      () => second.commit({ kind: "blocked", source: "test", files: [] }),
+      /external edits awaiting reconciliation/,
+      "ordinary writes cannot bypass a pending reconciliation",
+    );
+    await second.close();
 
-    await second.reconcileExternalEdit("characters/bray-half-hitch.md");
-    const bundle = second.getBundle();
+    const third = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(
+      third.getBundle().externalEdits.map((e) => e.path),
+      ["characters/bray-half-hitch.md"],
+      "an unaccepted edit remains pending across close and reopen",
+    );
+
+    await third.reconcileExternalEdit("characters/bray-half-hitch.md");
+    const bundle = third.getBundle();
     assert.equal(bundle.externalEdits.length, 0);
     const sheet = bundle.sheets.find((s) => s.id === "bray-half-hitch");
     assert.equal(sheet?.version, 7, "adoption bumped the version");
+    assert.equal(
+      await readFile(join(dir, ".history", "characters", "bray-half-hitch", "v6.md"), "utf8"),
+      raw,
+      "the outgoing snapshot is the last committed version, not the outside edit",
+    );
+    assert.match(
+      await readFile(join(dir, ".history", "characters", "bray-half-hitch", "v7.md"), "utf8"),
+      /four belts/,
+      "the adopted edit is filed as the incoming version",
+    );
     const changeLine = bundle.changes.findLast((c) => c.entity === "characters/bray-half-hitch");
     assert.equal(changeLine?.source, "external-edit");
+    await third.close();
+  });
+
+  it("snapshots and journals a sheet deleted outside the app (R-28)", async () => {
+    const dir = await makeTempWorld();
+    const path = "characters/bray-half-hitch.md";
+    const raw = await readFile(join(dir, path), "utf8");
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    await rm(join(dir, path));
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    await second.reconcileExternalEdit(path);
+
+    assert.equal(await readFile(join(dir, path), "utf8").catch(() => null), null);
+    assert.equal(await readFile(join(dir, ".history/characters/bray-half-hitch/v6.md"), "utf8"), raw);
+    const change = second.getBundle().changes.findLast((candidate) => candidate.entity === path.slice(0, -3));
+    assert.equal(change?.fromVersion, 6);
+    assert.equal(change?.["deleted"], true);
+    assert.equal(typeof change?.["commitId"], "string", "deletion used the journalled committer");
     await second.close();
+  });
+
+  it("snapshots the committed JSON base when adopting a scene edit", async () => {
+    const dir = await makeTempWorld();
+    const path = "productions/saltlight/scenes/02-the-tables-say-neap.json";
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const committed = await readFile(join(dir, path), "utf8");
+    const outside = JSON.parse(committed) as Record<string, unknown>;
+    outside["title"] = "The tables still say neap";
+    await writeFile(join(dir, path), `${JSON.stringify(outside, null, 2)}\n`, "utf8");
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    await second.reconcileExternalEdit(path);
+
+    assert.equal(
+      await readFile(join(dir, ".history/productions/saltlight/scenes/02-the-tables-say-neap/v3.json"), "utf8"),
+      committed,
+    );
+    const adopted = JSON.parse(await readFile(join(dir, path), "utf8")) as Record<string, unknown>;
+    assert.equal(adopted["version"], 4);
+    assert.equal(adopted["title"], "The tables still say neap");
+    await second.close();
+  });
+
+  it("reconstructs a deleted scan state from canonical history", async () => {
+    const dir = await makeTempWorld();
+    const path = join(dir, "characters", "bray-half-hitch.md");
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    await deleteScanState(dir);
+    const committed = await readFile(path, "utf8");
+    await writeFile(path, committed.replace("three belts", "four belts"), "utf8");
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(second.getBundle().externalEdits.map((edit) => edit.path), [
+      "characters/bray-half-hitch.md",
+    ]);
+    await second.close();
+  });
+
+  it("advances an unversioned adoption after point-of-no-return recovery", async () => {
+    const dir = await makeTempWorld();
+    const path = "productions/saltlight/production.json";
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const committed = await readFile(join(dir, path), "utf8");
+    const outside = committed.replace('"title": "Saltlight"', '"title": "Saltlight revised"');
+    await writeFile(join(dir, path), outside, "utf8");
+
+    await assert.rejects(
+      () =>
+        new Committer(dir, CLOCK).commit(
+          {
+            kind: "external-edit",
+            source: "external-edit",
+            files: [
+              {
+                path,
+                action: "replace",
+                content: outside,
+                baseHash: sha256(outside),
+                committedBaseHash: sha256(committed),
+              },
+            ],
+          },
+          {
+            at: (point) => {
+              if (point === "committing-marked") throw new CrashSignal("kill");
+            },
+          },
+        ),
+      CrashSignal,
+    );
+
+    const recovered = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(recovered.getBundle().externalEdits, []);
+    assert.equal(recovered.getBundle().productions.find((production) => production.meta.id === "saltlight")?.meta.title, "Saltlight revised");
+    await recovered.close();
+  });
+
+  it("journals a hand-edited bible as the next version on open", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    const original = initialBible("Original author notes.", CLOCK());
+    await first.commit({
+      kind: "bible-create",
+      source: "test",
+      files: [{ path: "bible.md", action: "create", content: original, baseHash: null }],
+    });
+    await first.close();
+    await writeFile(join(dir, "bible.md"), original.replace("Original", "Revised"), "utf8");
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    assert.equal(second.getBundle().bible.version, 2);
+    assert.match(second.getBundle().bible.text, /Revised author notes/);
+    assert.equal(await readFile(join(dir, ".history/bible/v1.md"), "utf8"), original);
+    await second.close();
+  });
+
+  it("does not re-offer an adopted edit recovered after the point of no return", async () => {
+    const dir = await makeTempWorld();
+    const path = "characters/bray-half-hitch.md";
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const committed = await readFile(join(dir, path), "utf8");
+    const outside = committed.replace("three belts", "four belts");
+    await writeFile(join(dir, path), outside, "utf8");
+
+    await assert.rejects(
+      () =>
+        new Committer(dir, CLOCK).commit(
+          {
+            kind: "external-edit",
+            source: "external-edit",
+            files: [
+              {
+                path,
+                action: "replace",
+                content: outside,
+                baseHash: sha256(outside),
+                committedBase: committed,
+              },
+            ],
+          },
+          {
+            at: (point) => {
+              if (point === "committing-marked") throw new CrashSignal("kill");
+            },
+          },
+        ),
+      CrashSignal,
+    );
+
+    const recovered = await WorldStore.open(dir, { clock: CLOCK });
+    assert.deepEqual(recovered.getBundle().externalEdits, []);
+    assert.equal(recovered.getBundle().sheets.find((sheet) => sheet.id === "bray-half-hitch")?.version, 7);
+    assert.equal(
+      recovered.getBundle().changes.filter((change) => change.entity === "characters/bray-half-hitch").at(-1)
+        ?.source,
+      "external-edit",
+    );
+    await recovered.close();
+  });
+
+  it("clears a waiting edit restored to the committed bytes without cutting a version", async () => {
+    const dir = await makeTempWorld();
+    const path = join(dir, "characters", "bray-half-hitch.md");
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const committed = await readFile(path, "utf8");
+    await writeFile(path, committed.replace("three belts", "four belts"), "utf8");
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    await writeFile(path, committed, "utf8");
+    await second.reconcileExternalEdit("characters/bray-half-hitch.md");
+
+    assert.deepEqual(second.getBundle().externalEdits, []);
+    assert.equal(second.getBundle().sheets.find((sheet) => sheet.id === "bray-half-hitch")?.version, 6);
+    await second.close();
+  });
+
+  it("introduces a canon file created outside the app at the next revision", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const path = "canon/CANON-999.md";
+    await writeFile(
+      join(dir, path),
+      "---\nid: CANON-999\ntype: rule\ntitle: Outside rule\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nCreated outside Arke.\n",
+      "utf8",
+    );
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    await second.reconcileExternalEdit(path);
+
+    const adopted = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
+    assert.equal(adopted.data["introducedAt"], 105);
+    assert.equal(adopted.data["amendedAt"], undefined);
+    assert.equal(await readFile(join(dir, ".history/canon/CANON-999/v105.md"), "utf8").then(Boolean), true);
+    await second.close();
+  });
+
+  it("refuses adoption when a legacy baseline has no recoverable committed bytes", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    await rm(join(dir, ".history/characters/bray-half-hitch/v6.md"));
+    const path = join(dir, "characters", "bray-half-hitch.md");
+    const committed = await readFile(path, "utf8");
+    await writeFile(path, committed.replace("three belts", "four belts"), "utf8");
+
+    const second = await WorldStore.open(dir, { clock: CLOCK });
+    await second.reconcileExternalEdit("characters/bray-half-hitch.md");
+    assert.equal(second.getBundle().externalEdits.length, 1, "refusal preserves the pending edit");
+    assert.match(second.getBundle().externalEdits[0]?.refusal ?? "", /last committed version is unavailable/);
+    await second.close();
+  });
+
+  it("releases ownership when history seeding fails during open", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const live = await readFile(join(dir, "characters/bray-half-hitch.md"), "utf8");
+    const snapshot = join(dir, ".history/characters/bray-half-hitch/v6.md");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(snapshot, ".."), { recursive: true });
+    await writeFile(snapshot, "conflicting history", "utf8");
+
+    await assert.rejects(() => WorldStore.open(dir, { clock: CLOCK }), /history snapshot conflicts/);
+    await writeFile(snapshot, live, "utf8");
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    await reopened.close();
   });
 
   it("adopts a world with no history or scan-state as-is (R-28)", async () => {

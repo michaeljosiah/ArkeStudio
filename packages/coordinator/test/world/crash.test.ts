@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CrashSignal, Committer, type CommitInput } from "../../src/world/commit.js";
-import { readChanges } from "../../src/world/change-writer.js";
+import { appendChanges, readChanges } from "../../src/world/change-writer.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "./helpers.js";
@@ -21,6 +21,7 @@ const KILL_POINTS = [
   "snapshots-written",
   "staged-written",
   "committing-marked",
+  "snapshots-installed",
   "renamed:0",
   "renamed:1",
   "renamed:2",
@@ -141,6 +142,9 @@ describe("kill-at-every-step recovery (R-15)", () => {
 
   it("rolled-back worlds are byte-identical including history — no stray snapshots", async () => {
     const p = await prepare();
+    const currentSnapshot = join(p.dir, `.history/characters/maren-kest/v${p.baseSheetVersion}.md`);
+    await mkdir(join(p.dir, ".history/characters/maren-kest"), { recursive: true });
+    await writeFile(currentSnapshot, p.oldSheet, "utf8");
     const committer = new Committer(p.dir, CLOCK);
     await assert.rejects(
       () =>
@@ -152,7 +156,121 @@ describe("kill-at-every-step recovery (R-15)", () => {
       CrashSignal,
     );
     await new Committer(p.dir, CLOCK).recover();
-    const v5 = await readFile(join(p.dir, ".history/characters/maren-kest/v5.md"), "utf8").catch(() => null);
-    assert.equal(v5, null, "the incoming snapshot was rolled back with everything else");
+    assert.equal(
+      await readFile(currentSnapshot, "utf8"),
+      p.oldSheet,
+      "prepared rollback leaves a history snapshot that predated the transaction intact",
+    );
+  });
+
+  it("recovers a same-version history refresh after snapshots are installed", async () => {
+    const dir = await makeTempWorld();
+    const path = "productions/the-ledger-of-nights/chapters/01-neap.md";
+    const live = await readFile(join(dir, path), "utf8");
+    const next = MarkdownFile.parse(live);
+    next.setBody(`${next.body}\n\nA same-version continuation.`);
+    const committer = new Committer(dir, CLOCK);
+
+    await assert.rejects(
+      () =>
+        committer.commit(
+          {
+            kind: "chapter-save",
+            source: "crash-test",
+            files: [
+              {
+                path,
+                action: "replace",
+                content: next.serialize(),
+                baseHash: sha256(live),
+                preserveVersion: true,
+              },
+            ],
+          },
+          {
+            at: (point) => {
+              if (point === "snapshots-installed") throw new CrashSignal("kill");
+            },
+          },
+        ),
+      CrashSignal,
+    );
+
+    await new Committer(dir, CLOCK).recover();
+    assert.match(await readFile(join(dir, path), "utf8"), /same-version continuation/);
+    assert.match(
+      await readFile(join(dir, ".history/productions/the-ledger-of-nights/chapters/01-neap/v4.md"), "utf8"),
+      /same-version continuation/,
+    );
+  });
+
+  it("repairs a partial multi-line audit append without duplicating completed records", async () => {
+    const p = await prepare();
+    await assert.rejects(
+      () =>
+        new Committer(p.dir, CLOCK).commit(p.input, {
+          at: (point) => {
+            if (point === "world-renamed") throw new CrashSignal("kill");
+          },
+        }),
+      CrashSignal,
+    );
+    const journalName = (await readdir(join(p.dir, ".commit"))).find((entry) => entry.endsWith(".json"))!;
+    const journal = JSON.parse(await readFile(join(p.dir, ".commit", journalName), "utf8")) as {
+      changes: object[];
+    };
+    const changesPath = join(p.dir, "changes.jsonl");
+    await appendChanges(changesPath, [journal.changes[0]!]);
+    const partial = JSON.stringify(journal.changes[1]!);
+    await appendFile(changesPath, partial.slice(0, Math.floor(partial.length / 2)), "utf8");
+
+    await new Committer(p.dir, CLOCK).recover();
+
+    const lines = (await readChanges(changesPath)).filter((line) => line["source"] === "crash-test");
+    assert.equal(lines.length, 3);
+    assert.deepEqual(lines.map((line) => line["commitIndex"]), [0, 1, 2]);
+  });
+
+  it("migrates a protocol-v1 prepared journal without deleting its outgoing snapshot", async () => {
+    const p = await prepare();
+    await assert.rejects(
+      () =>
+        new Committer(p.dir, CLOCK).commit(p.input, {
+          at: (point) => {
+            if (point === "snapshots-written") throw new CrashSignal("kill");
+          },
+        }),
+      CrashSignal,
+    );
+    const journalName = (await readdir(join(p.dir, ".commit"))).find((entry) => entry.endsWith(".json"))!;
+    const journalPath = join(p.dir, ".commit", journalName);
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      protocolVersion?: number;
+      phase: string;
+      files: Array<{ historyPrev: string | null; historyNew: string | null; prevContent?: string; newContent?: string }>;
+    };
+    assert.equal(journal.phase, "planning", "new journals are safe for an older reader to discard");
+    delete journal.protocolVersion;
+    journal.phase = "prepared";
+    for (const file of journal.files) {
+      if (file.historyPrev && file.prevContent) {
+        await mkdir(join(p.dir, file.historyPrev, ".."), { recursive: true });
+        await writeFile(join(p.dir, file.historyPrev), file.prevContent, "utf8");
+      }
+      if (file.historyNew && file.newContent) {
+        await mkdir(join(p.dir, file.historyNew, ".."), { recursive: true });
+        await writeFile(join(p.dir, file.historyNew), file.newContent, "utf8");
+      }
+    }
+    await writeFile(journalPath, JSON.stringify(journal), "utf8");
+
+    await new Committer(p.dir, CLOCK).recover();
+
+    assert.equal(
+      await readFile(join(p.dir, `.history/characters/maren-kest/v${p.baseSheetVersion}.md`), "utf8"),
+      p.oldSheet,
+    );
+    await assert.rejects(() => readFile(join(p.dir, `.history/characters/maren-kest/v${p.baseSheetVersion + 1}.md`)));
+    await rm(join(p.dir, ".commit"), { recursive: true, force: true });
   });
 });

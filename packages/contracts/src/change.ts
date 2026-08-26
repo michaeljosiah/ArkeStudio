@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTimeSchema } from "./ids.js";
+import { IsoDateTimeSchema, Sha256Schema } from "./ids.js";
 
 /**
  * changes.jsonl — the world's append-only audit trail (master spec §2.5): backing store for
@@ -12,6 +12,11 @@ export const ChangeRecordSchema = z
     ts: IsoDateTimeSchema,
     /** World-relative entity path, e.g. "characters/maren-kest". */
     entity: z.string().min(1),
+    /** Exact file path and hashes used to advance derived scan state after crash recovery. */
+    path: z.string().min(1).optional(),
+    commitIndex: z.number().int().min(0).optional(),
+    contentHashBefore: Sha256Schema.nullable().optional(),
+    contentHashAfter: Sha256Schema.nullable().optional(),
     fromVersion: z.number().int().nullable().optional(),
     toVersion: z.number().int().optional(),
     fieldsChanged: z.array(z.string()).optional(),

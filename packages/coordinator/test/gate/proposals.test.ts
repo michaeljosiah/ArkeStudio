@@ -797,6 +797,7 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
     kit.tiles = kit.tiles.filter((t) => t.angle !== "body-full");
     await writeFile(kitPath, JSON.stringify(kit, null, 2), "utf8");
     await store.reload(); // structural change → index resyncs
+    await store.reconcileExternalEdit("references/maren-kest/kit.json");
 
     const blocked = await gate.accept(a.id);
     assert.equal(blocked.status, "needs-reconfirm", "tile count changed: 3 → 2 (category count)");
@@ -834,7 +835,7 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
     kit.tiles = kit.tiles.filter((t) => t.angle !== "body-full");
     await writeFile(kitPath, JSON.stringify(kit, null, 2), "utf8");
     await store.reload();
-
+    await store.reconcileExternalEdit("references/maren-kest/kit.json");
 
     const outcome = await acceptDecided(gate, a.id);
     assert.equal(outcome.status, "accepted", "the press writes rather than asking a question nobody posed");
@@ -854,6 +855,7 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
     // Somebody else writes the same file. Confirming ripples must not confirm past this.
     await writeFile(join(dir, MAREN), await editedMaren(dir, ["Maren", "Maren (edited elsewhere)"]), "utf8");
     await store.reload();
+    await store.reconcileExternalEdit(MAREN);
 
     const outcome = await acceptDecided(gate, a.id);
     assert.equal(outcome.status, "stale", "the staleness guard is not what this press waives");
@@ -963,6 +965,7 @@ describe("the gate bounds authored roles (SPEC-007 R-18)", () => {
       "utf8",
     );
     await store.reload();
+    await store.reconcileExternalEdit(MAREN);
 
     const proposal = await stageRaw(dir, gate, (doc) => doc.setBody(doc.body.replace("Salt-crusted", "Salt-white")));
     const outcome = await gate.accept(proposal.id);
@@ -979,6 +982,7 @@ describe("the gate bounds authored roles (SPEC-007 R-18)", () => {
       "utf8",
     );
     await store.reload();
+    await store.reconcileExternalEdit(MAREN);
 
     const proposal = await stageRaw(dir, gate, (doc) => doc.setData({ role: "z".repeat(40) }));
     assert.equal((await gate.accept(proposal.id)).status, "invalid", "rewriting it is an authoring act, and is judged");
