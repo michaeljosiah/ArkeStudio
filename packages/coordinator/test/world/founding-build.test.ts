@@ -10,6 +10,7 @@ import {
   type DomainEvent,
   type FoundingBuildState,
   type Job,
+  type JobStatus,
   type ManifestModel,
   type ModelManifest,
   type QueueStatus,
@@ -219,7 +220,7 @@ async function writePreview(sandbox: string, look: string): Promise<void> {
 }
 
 /** The receipt beside it: only a succeeded job proves a person pressed and paid (R-51, R-54). */
-function addPreviewReceipt(h: Harness, genesisId: string, lookText: string): void {
+function addPreviewReceipt(h: Harness, genesisId: string, lookText: string, status: JobStatus = "succeeded"): string {
   const now = new Date().toISOString();
   const receipt = JobSchema.parse({
     id: newId("jb"),
@@ -231,7 +232,7 @@ function addPreviewReceipt(h: Harness, genesisId: string, lookText: string): voi
     model: "test-image",
     params: { lookText },
     estimatedMicroUsd: 40000,
-    status: "succeeded",
+    status,
     providerJobId: null,
     attempt: 1,
     error: null,
@@ -240,6 +241,7 @@ function addPreviewReceipt(h: Harness, genesisId: string, lookText: string): voi
     updatedAt: now,
   });
   h.queue.jobs.set(receipt.id, receipt);
+  return receipt.id;
 }
 
 /** The review the coordinator answered with, which the screen renders verbatim. */
@@ -643,6 +645,31 @@ describe("the founding build (SPEC-031)", () => {
         "The look changed after the preview was made — it will not carry, and this world will be founded without a master look.",
       ),
       "R-54's refusal is stated as the reason it is",
+    );
+  });
+
+  it("a preview still generating is a condition, not a loss — the review does not report what the build would contradict", async (t) => {
+    const h = await makeHarness(t);
+    const look = "salt-bleached watercolour, cold light off the water";
+    const sandbox = await makeSandbox(h.root, "gen-plan-inflight");
+    // The author walked to the review while the preview was still running. Nothing has landed,
+    // so carriablePreview refuses it — but it can succeed before the press and then carry.
+    const jobId = addPreviewReceipt(h, "gen-plan-inflight", look, "running");
+    await h.service.plan("gen-plan-inflight", ulid(), look);
+
+    assert.ok(
+      lastPlan(h).notes.includes("The look preview has not settled yet — it carries only if it lands before you press."),
+      "the review states the condition rather than a loss the build is about to contradict",
+    );
+
+    // It lands. The same question, asked again, now answers the other way — which is what the
+    // review screen re-asks for when the preview settles under it.
+    await writePreview(sandbox, look);
+    h.queue.jobs.set(jobId, { ...h.queue.jobs.get(jobId)!, status: "succeeded" });
+    await h.service.plan("gen-plan-inflight", ulid(), look);
+    assert.ok(
+      !lastPlan(h).notes.some((note) => /master look/.test(note)),
+      "a preview that landed in time is not reported as a loss",
     );
   });
 

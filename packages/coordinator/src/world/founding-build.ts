@@ -246,13 +246,24 @@ export class FoundingBuildService {
       .scopedJobs(genesisId)
       .filter((job) => job.target.kind === "look-preview")
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    const stale =
-      latest?.status === "succeeded" &&
-      typeof latest.params["lookText"] === "string" &&
-      latest.params["lookText"].trim() !== (foundedLook?.trim() ?? "");
+    const words = typeof latest?.params["lookText"] === "string" ? latest.params["lookText"].trim() : undefined;
+    const founded = foundedLook?.trim() ?? "";
+    // An unsettled preview is not a preview the author has, and it is not one they have lost
+    // either: it carries if it lands first, and Begin cancels it if it does not (runWorld).
+    // Reporting it as never made would be contradicted by the world it founds, so the review
+    // states the condition and the screen asks again the moment it settles.
+    if (
+      words === founded &&
+      (latest?.status === "queued" ||
+        latest?.status === "submitting" ||
+        latest?.status === "running" ||
+        latest?.status === "needs-reconciliation")
+    ) {
+      return "The look preview has not settled yet — it carries only if it lands before you press.";
+    }
     // R-54 refuses a preview of words that were rewritten, and a world founded on the rewrite
     // has no master look either. Said as the reason it is, not as a preview never made.
-    return stale
+    return latest?.status === "succeeded" && words !== undefined && words !== founded
       ? "The look changed after the preview was made — it will not carry, and this world will be founded without a master look."
       : "No look preview was made — this world will be founded without a master look.";
   }
