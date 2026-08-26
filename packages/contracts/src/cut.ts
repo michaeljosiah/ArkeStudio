@@ -475,7 +475,7 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
       args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
       assertSlateLabelSupported(item.label);
       const text = item.label.replace(/[':\\]/g, " ");
-      filters.push(`[${inputIndex}:v]drawtext=fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);
+      filters.push(`[${inputIndex}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);
     }
     inputIndex += 1;
   }
