@@ -31,3 +31,6 @@ apps/desktop/build-resources/
 
 # Local system documentation — generated for this machine, not shipped.
 docs/system/
+
+# Story bibles written by hand for reference — working documents, not shipped.
+docs/example/
