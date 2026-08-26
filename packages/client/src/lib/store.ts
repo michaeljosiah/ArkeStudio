@@ -696,6 +696,10 @@ function handleFrame(json: string): void {
       // Snapshot replay is followed by current permission.pending events. Clear stale prompts
       // first so a request that disappeared while the renderer was away does not survive reload.
       permissions: {},
+      // Keyed by entry id alone, and canon ids restart at CANON-001 in every world: the previous
+      // world's entry would otherwise supply the history, citations and ripples for the
+      // same-numbered entry in the next one, until its own answer arrived to replace them.
+      canonRefs: changedWorld ? {} : current.canonRefs,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceClips: changedWorld ? {} : current.voiceClips,
@@ -1138,7 +1142,10 @@ function handleFrame(json: string): void {
           candidates: event.candidates,
         },
       };
-    } else if (event.type === "canon.refs") {
+    } else if (event.type === "canon.refs" && event.worldId === current.state.world?.meta.worldId) {
+      // Checked against the open world, as sheet.refs is: the answer is computed asynchronously
+      // now that it reads the change log, so one for a world just switched away from can still
+      // land here — and it would land on a live entry sharing its number (PR 540 review).
       canonRefs = {
         ...canonRefs,
         [event.entryId]: { citedBy: event.citedBy, history: event.history, ripples: event.ripples },
