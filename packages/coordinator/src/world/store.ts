@@ -73,6 +73,7 @@ export class WorldStore {
   private closed = false;
   private lockHeld: boolean;
   private closePromise: Promise<void> | null = null;
+  private readonly closingController = new AbortController();
 
   static async open(
     dir: string,
@@ -224,6 +225,21 @@ export class WorldStore {
   /** True as soon as close starts, before the serialization queue releases the world lock. */
   isClosed(): boolean {
     return this.closed;
+  }
+
+  /**
+   * Aborts the instant close starts — before the lock is released, and before anything that
+   * moves the folder can run (issue 288).
+   *
+   * Refusing writes is not enough for background work that holds an *operating system handle* on
+   * the world: a media probe is a child process reading a file, and on Windows a directory with
+   * an open handle inside it cannot be renamed. Archiving closes the store and then renames, so
+   * the close is the only moment that is both after "this world is going away" and before the
+   * move — which makes it the honest place to hang cancellation, rather than asking every caller
+   * to remember which pass belongs to which world.
+   */
+  get closingSignal(): AbortSignal {
+    return this.closingController.signal;
   }
 
   /**
@@ -423,6 +439,9 @@ export class WorldStore {
   close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
+    // Synchronous, alongside the flag and the watcher: everything holding a handle on this world
+    // has to let go before the queue drains, because whoever closed it may be about to move it.
+    this.closingController.abort();
     this.watcher?.stop();
     this.watcher = null;
     this.closePromise = this.serialise(async () => {

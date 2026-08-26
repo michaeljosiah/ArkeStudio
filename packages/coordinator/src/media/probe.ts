@@ -17,9 +17,25 @@ import type { WorldStore } from "../world/store.js";
  * nothing more.
  */
 export interface MediaProbe {
-  durationSec(absolutePath: string): Promise<number | null>;
+  durationSec(absolutePath: string, opts?: ProbeOptions): Promise<number | null>;
   /** Full measurement, or null when nothing can read the file. */
-  info?(absolutePath: string): Promise<MediaInfo | null>;
+  info?(absolutePath: string, opts?: ProbeOptions): Promise<MediaInfo | null>;
+}
+
+/**
+ * How a caller withdraws a measurement it no longer wants (issue 288).
+ *
+ * A signal here is not the usual "stop waiting": a probe is a *subprocess holding the file open*,
+ * and until it exits the world it is reading cannot be moved or, on Windows, renamed around. So
+ * an implementation that takes this must kill the child, not merely stop listening to it —
+ * otherwise cancelling changes nothing that the caller cared about.
+ *
+ * Optional, and optional on the interface too, so a host that only knows how to run a probe to
+ * completion still satisfies `MediaProbe`. It measures for the full timeout as it always did;
+ * the callers that pass a signal are the ones that also survive not having it honoured.
+ */
+export interface ProbeOptions {
+  signal?: AbortSignal;
 }
 
 /** Measure an input's length, or null when nothing can read it (SPEC-019 R-39). */
@@ -27,10 +43,14 @@ export async function measureDurationSec(
   store: WorldStore,
   worldRelativePath: string,
   probe: MediaProbe | null,
+  opts: ProbeOptions = {},
 ): Promise<number | null> {
   if (!probe) return null;
   try {
-    const seconds = await probe.durationSec(toExtendedLength(join(store.dir, fromPortable(worldRelativePath))));
+    const seconds = await probe.durationSec(
+      toExtendedLength(join(store.dir, fromPortable(worldRelativePath))),
+      opts,
+    );
     return seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null;
   } catch {
     // An unreadable input is a refusal, never a default: the mode is withdrawn with a reason.
@@ -50,17 +70,18 @@ export async function measureMediaInfo(
   store: WorldStore,
   worldRelativePath: string,
   probe: MediaProbe | null,
+  opts: ProbeOptions = {},
 ): Promise<MediaInfo | null> {
   if (!probe) return null;
   const absolute = toExtendedLength(join(store.dir, fromPortable(worldRelativePath)));
   try {
     if (probe.info) {
-      const raw = await probe.info(absolute);
+      const raw = await probe.info(absolute, opts);
       if (raw === null) return null;
       const parsed = MediaInfoSchema.safeParse(raw);
       return parsed.success ? parsed.data : null;
     }
-    const seconds = await probe.durationSec(absolute);
+    const seconds = await probe.durationSec(absolute, opts);
     if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return null;
     // A narrow probe cannot say whether there is audio. Claiming there is would let a silent
     // file become a master track; claiming there is not would refuse a real one. `false` is the
