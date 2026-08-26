@@ -62,6 +62,7 @@ describe("the desktop export ffmpeg runner", () => {
     await first;
 
     const second = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    await waitForImmediate();
     assert.equal(calls.length, 3, "the second encode starts without another probe");
     children[2]!.emit("exit", 0);
     await second;
@@ -95,6 +96,7 @@ describe("the desktop export ffmpeg runner", () => {
     ];
     for (const path of paths) {
       const pending = runner.run([...DRAW_ARGS, "-i", path], () => {}, new AbortController().signal);
+      await waitForImmediate();
       const encode = children.at(-1)!;
       encode.stderr.emit("data", Buffer.from(`Error opening input file ${path}`));
       encode.emit("exit", 2);
@@ -127,11 +129,68 @@ describe("the desktop export ffmpeg runner", () => {
     await pending;
   });
 
+  it("does not infer drawtext use from input paths or metadata", async () => {
+    for (const args of [
+      ["-i", "C:/world/drawtext=notes.mp4", "-filter_complex", "null"],
+      ["-metadata", "comment=drawtext=example", "-filter_complex", "null"],
+    ]) {
+      const { children, calls, spawn } = fakeSpawn();
+      const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
+        args,
+        () => {},
+        new AbortController().signal,
+      );
+      assert.equal(calls.length, 1, "a no-slate export starts without a font probe");
+      children[0]!.emit("exit", 0);
+      await pending;
+    }
+  });
+
   it("kills a drawtext probe when cancellation is requested", async () => {
     const { children, spawn } = fakeSpawn();
     const controller = new AbortController();
-    void createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(DRAW_ARGS, () => {}, controller.signal);
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+      DRAW_ARGS,
+      () => {},
+      controller.signal,
+    );
     controller.abort();
     assert.equal(children[0]!.killed, "SIGKILL");
+    children[0]!.emit("exit", null);
+    await assert.rejects(pending, /cancelled before start|could not draw an export slate/);
+  });
+
+  it("does not start an encode when cancellation lands at probe completion", async () => {
+    const { children, calls, spawn } = fakeSpawn();
+    const controller = new AbortController();
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+      DRAW_ARGS,
+      () => {},
+      controller.signal,
+    );
+    children[0]!.on("exit", () => controller.abort());
+    children[0]!.emit("exit", 0);
+    await assert.rejects(pending, /cancelled before start/);
+    assert.equal(calls.length, 1, "the encode never starts from an already-cancelled signal");
+  });
+
+  it("coalesces concurrent probes while keeping caller cancellation independent", async () => {
+    const { children, calls, spawn } = fakeSpawn();
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = runner.run(DRAW_ARGS, () => {}, firstController.signal);
+    const second = runner.run(DRAW_ARGS, () => {}, secondController.signal);
+    assert.equal(calls.length, 1, "both callers share one cold probe");
+
+    firstController.abort();
+    await assert.rejects(first, /cancelled before start/);
+    assert.equal(children[0]!.killed, null, "one cancelled waiter does not kill another's probe");
+
+    children[0]!.emit("exit", 0);
+    await waitForImmediate();
+    assert.equal(calls.length, 2, "only the surviving caller starts an encode");
+    children[1]!.emit("exit", 0);
+    await second;
   });
 });
