@@ -241,3 +241,66 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.doesNotMatch(html, /14 of 15/, "placing something over the picture covers no shot");
   });
 });
+
+/**
+ * The footer of a production with no story (issue 504).
+ *
+ * Issue 453 asked that the Cut present no coverage or gap language for a production that never had a
+ * story. The header honoured it and the footer did not, so the two disagreed: "no story · what
+ * you place is the film" above a line reading "0 of 0 shots placed · 0 gaps".
+ */
+const IMPORT = "ar_01J8G0000000000000000000V1";
+
+/** No scenes, and two imported clips with eight seconds of black between them. */
+function mediaOnlyState(): ClientState {
+  const base = structuredClone(FIXTURE_STATE) as ClientState;
+  const world = base.world!;
+  world.artifacts = [
+    ...world.artifacts,
+    {
+      id: IMPORT,
+      kind: "video",
+      file: "plate.mp4",
+      hash: "sha256:6a1e02b9c44d7f33",
+      origin: { by: "user" },
+      links: [],
+      created: "2026-06-11T10:00:00Z",
+      mediaInfo: { durationSec: 4, hasAudio: false },
+    } as (typeof world.artifacts)[number],
+  ];
+  const production = world.productions[0]!;
+  production.scenes = [];
+  production.takes = [];
+  production.chapters = [];
+  production.selections = {} as typeof production.selections;
+  production.cut = {
+    audio: [],
+    overlays: [
+      { id: "ov_01J8G0000000000000000000A1", artifactId: IMPORT, startSec: 0, endSec: 4, lane: 1, audio: "keep" },
+      { id: "ov_01J8G0000000000000000000A2", artifactId: IMPORT, startSec: 12, endSec: 16, lane: 1, audio: "keep" },
+    ],
+  } as typeof production.cut;
+  return ClientStateSchema.parse(base);
+}
+
+describe("the cut footer of a production with no story (504)", () => {
+  it("says nothing about shots or gaps, over uncovered time it has no claim on", () => {
+    const html = renderCut(mediaOnlyState());
+    assert.match(html, /no story · what you place is the film/, "the header states the mode");
+    // The reported bug exactly: the same sentence as a story production, with zeros in it, and a
+    // gap count of nought over eight seconds nobody covered.
+    assert.doesNotMatch(html, /shots placed/, "there are no shots to place");
+    assert.doesNotMatch(html, /\d gaps?\b/, "and no gap, because nothing is missing");
+    assert.doesNotMatch(html, /covered/, "coverage describes a story that does not exist");
+  });
+
+  it("still counts what is on the timeline, in the header", () => {
+    const html = renderCut(mediaOnlyState());
+    assert.match(html, /2 clips/, "the clips are the film, so they are stated");
+  });
+
+  it("leaves the story footer alone", () => {
+    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
+    assert.match(html, /shots placed/, "a production with a story still reports its coverage");
+  });
+});

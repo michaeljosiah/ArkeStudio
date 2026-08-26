@@ -4427,9 +4427,16 @@ export function CutScreen() {
             <span className="fy-mono">
               {spineCut
                 ? `${spineCut.segments.filter((seg) => seg.kind === "clip").length} of ${spineCut.segments.filter((seg) => seg.kind !== "black").length} anchors covered`
-                : cut
-                  ? `${cut.covered} of ${cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
-                  : ""}
+                : mediaOnly
+                  ? // Nothing to say (issue 504). This line answers how much of the work is
+                    // placed, and a production with no story has no work outstanding — "0 of 0
+                    // shots placed · 0 gaps" reads as a film in trouble, counts nothing that
+                    // exists, and calls eight uncovered seconds no gap in its own vocabulary.
+                    // What is on the timeline the header already states: runtime and clips both.
+                    ""
+                  : cut
+                    ? `${cut.covered} of ${cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
+                    : ""}
             </span>
             <span className="fy-h1row__push" />
             {spineCut
