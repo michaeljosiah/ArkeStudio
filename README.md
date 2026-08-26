@@ -1,9 +1,9 @@
 <div align="center">
 
-<img src=".github/assets/readme-banner.png" alt="Arke Studio. The world is the asset. Author once. Produce everywhere." width="100%">
+<img src=".github/assets/readme-banner.png" alt="Arke Studio. The world is the asset. Build the world once. Develop every production from it." width="100%">
 
-Invent a character, a place, a rule about how your world works, once. Every book,
-film, song and game you make from it draws on the same source, and stays consistent
+Build your world once as a durable creative foundation. Every story, film, episode and
+interactive experience you make from it draws on the same source and stays consistent
 because they share it.
 
 [![CI](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml/badge.svg)](https://github.com/michaeljosiah/ArkeStudio/actions/workflows/ci.yml)
@@ -20,13 +20,14 @@ Most creative tools are organised around *projects*. You make a short film, and 
 finished the film is the artefact. The world it was set in exists only in your head and
 across a folder of notes.
 
-Arke Studio inverts that. **The world is the thing you own.** Productions are what you
-draw out of it.
+Arke Studio inverts that. **Your world is the foundation.** Productions — novels, films,
+episodes, interactive experiences — are what you develop from it.
 
 That inversion is the whole product. Because the world is a real, versioned record rather
 than a folder of documents, it can be *consulted*: asked whether something contradicts
 what's already true, told what changes when a character does, and cited automatically by
-everything it feeds.
+everything it produces. Canon, characters, locations and visual identity are shared across
+every work you make from that world, without being copied or forked.
 
 ## Three mechanics
 
@@ -77,14 +78,15 @@ exist as operational records; the gate controls authored facts and what the work
 
 ## What you can make
 
-One world, many formats, all of them starring the same characters, in the same places,
+One world, three production families, all starring the same characters in the same places
 under the same rules:
 
-- **Story** · novels, scripts, serials, drafted with the canon as editor
-- **Video** · boards and shots dispatched to video models with references attached
-- **Stills** · visual albums, key art, character sheets
-- **Game** · branching narrative with a chapter graph, playthrough state and an
-  engine-neutral export *(designed, not yet built)*
+- **Story** · novels, novellas, short fiction, screenplays and audio-first scripts, drafted with the canon as editor
+- **Video** · *Microdrama* (short-form episodic drama), films and series with boards and shots dispatched to video models with references attached
+- **Interactive video** · branching narratives where the audience chooses which scene follows, with validated structure and continuity
+
+Visual assets — concept art, character references, storyboards and promotional material — travel
+with every production as they develop.
 
 A change to a character lands in all of them.
 
@@ -98,20 +100,21 @@ Whisper for dictation). Cloud providers are optional and you supply your own key
 
 ## Principles
 
-**Your worlds stay yours.** Arke Studio runs on your machine. Worlds live on your disk in
-a readable format, and nothing leaves except the generations you explicitly approve.
+**Your world remains yours.** Arke Studio runs on your machine. Worlds live on your disk in
+a readable, portable format. Nothing leaves except the generations you explicitly approve.
+An account is never required to open, create or continue a world.
 
-**Your keys, your providers.** Bring your own API keys, or run models locally. What your
-machine can't run stays visible and disabled, with the reason.
+**You decide what becomes true.** Arke can propose boldly, but it cannot quietly rewrite
+accepted work. Material changes remain visible proposals, shown with what they would disturb,
+until you approve them.
 
-**The canon never guesses.** Asked something it can't answer, it says so and cites the
-closest thing it has. Inventing quietly is worse than admitting a gap.
+**Canon that distinguishes fact from invention.** The world answers from what is written, with
+a citation per claim. Asked something it cannot support, it says so, cites the closest entries
+it has, and offers to open a thread. It never invents behind your back.
 
-**Nothing is filed by hand.** Provenance is recorded at dispatch, so artifacts, citations
-and usage assemble themselves.
-
-**No lock-in.** Open format, open licence. Leave whenever you like and take the world with
-you.
+**Choose how and where intelligence runs.** Use local models, bring your own provider accounts,
+or choose managed access. Costs remain visible in real currency before anything is spent. The
+managed route is a convenience, never the only easy path.
 
 ## How this is built
 
@@ -143,13 +146,21 @@ operation creates, replaces, appends, moves or removes.
 
 ## Status
 
-**Early, and running.** World genesis, canon, cast, identity kits, world art direction and
-productions are built, and currently unsigned Windows installers ship from the releases page.
+**Core trust foundations are built.** Worlds as folders you own, canon with verified quotations
+and typed refusals, proposals staged with ripple computation, reference sets that travel into
+every dispatch, real currency shown before spend, and durable execution tracking.
 
-In build: voice mode, so a world can be spoken into existence rather than typed. Designed
-and not yet written: the narrative-game graph, and recovery from the archive.
+**Cloud experience is named but not yet connected.** The launch screen already offers "Arke Studio
+Cloud — access your worlds anywhere. Sync, collaborate, create" but integration with Aonik
+(the platform foundation) is not yet complete.
 
-This repository holds the code, the specifications and the design system.
+**The audience journey is not yet started.** Series vocabulary, episodes, publishing and personal
+sync are designed but not built. Arke can build a world and generate governed media from it, but
+cannot yet produce a complete season or get work to an audience.
+
+This repository holds the code, the specifications and the design system. For more on the vision,
+roadmap and principles, see [`docs/vision.html`](https://github.com/michaeljosiah/ArkeStudio/blob/main/docs/vision.html)
+and the specification in [`docs/specification.md`](docs/specification.md).
 
 ## Contributing
 
