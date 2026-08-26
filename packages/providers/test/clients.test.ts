@@ -158,7 +158,7 @@ describe("synchronous speech returns artifacts to the durable queue path", () =>
   });
 });
 
-describe("queue cancellation reaches every paid remote submit (issue 95)", () => {
+describe("queue cancellation reaches the synchronous paid submits (issue 95)", () => {
   /**
    * `SubmitRequest.signal` was declared and threaded all the way from the dispatcher, and only
    * ElevenLabs ever handed it to `fetch` — so cancelling an in-flight OpenAI image submit left the
@@ -166,8 +166,10 @@ describe("queue cancellation reaches every paid remote submit (issue 95)", () =>
    * test cannot see which client drops it: the abort is fired against a client that never asked to
    * hear about it, and the queue looks correct while nothing happens. Assert it per path instead.
    *
-   * These are the paid paths, where the wait costs the user real time on a request that may already
-   * have been charged. The local runtimes carry their own deadlines (§ their AbortSignal.timeout).
+   * These are the *synchronous* paid paths, where submit itself is the long wait and the provider
+   * has no remote job to call off afterwards — their `cancel()` is a documented no-op, so there is
+   * nothing an abort can lose. The queue-backed providers are a different case entirely; see the
+   * fal test below. The local runtimes carry their own deadlines (their `AbortSignal.timeout`).
    */
   const paths: Array<{ name: string; submit: (fetchImpl: FetchLike, signal: AbortSignal) => Promise<unknown> }> = [
     {
@@ -204,16 +206,6 @@ describe("queue cancellation reaches every paid remote submit (issue 95)", () =>
         }),
     },
     {
-      name: "fal",
-      submit: (fetchImpl, signal) =>
-        new FalClient(fetchImpl).submit("k", {
-          model: "nano-banana-2",
-          capability: "image",
-          signal,
-          params: { prompt: "x", output: { width: 1024, height: 1024 } },
-        }),
-    },
-    {
       name: "anthropic",
       submit: (fetchImpl, signal) =>
         new AnthropicClient(fetchImpl).submit("k", {
@@ -244,6 +236,32 @@ describe("queue cancellation reaches every paid remote submit (issue 95)", () =>
       await assert.rejects(submitting, /aborted/);
     });
   }
+
+  it("fal's queue submission is deliberately left un-abortable", async () => {
+    // The opposite of the rule above, and the reason it is not "forward it everywhere". fal's
+    // submit is an *enqueue*: the POST returns the `request_id` that cancel() needs to call the
+    // work off. Aborting it discards that id while the remote job carries on — the request was
+    // accepted, we simply threw away the handle, and a cancelled paid generation would run to
+    // completion and charge. There is no long local wait here to save; the wait worth aborting is
+    // a synchronous generation, not a sub-second enqueue. The queue cancels this one properly by
+    // letting the id come back (dispatcher.ts:701).
+    let init: RequestInit | undefined;
+    const fetchImpl: FetchLike = async (_url, seen) => {
+      init = seen;
+      return new Response(JSON.stringify({ request_id: "req-2" }), { status: 200 });
+    };
+    const controller = new AbortController();
+    const submitted = await new FalClient(fetchImpl).submit("k", {
+      model: "nano-banana-2",
+      capability: "image",
+      signal: controller.signal,
+      params: { prompt: "x", output: { width: 1024, height: 1024 } },
+    });
+    assert.ok(init !== undefined);
+    assert.ok(!("signal" in init), "aborting the enqueue would discard the id needed to cancel it");
+    // The id the remote cancel is reached through still comes back.
+    assert.equal(submitted.remoteId, "fal-ai/nano-banana-2::req-2");
+  });
 
   it("omits the field entirely when the caller passed no signal", async () => {
     // `exactOptionalPropertyTypes` is on and the clients spread-guard the field. An explicit

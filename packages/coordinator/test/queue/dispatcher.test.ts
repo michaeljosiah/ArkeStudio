@@ -1651,6 +1651,37 @@ describe("cancellation (R-14, R-15, D10)", () => {
     assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
+
+  it("a queue-backed submit landing after cancellation is still cancelled remotely (issue 95)", async () => {
+    // The counterpart to the test above, and why the signal is NOT forwarded everywhere. fal's
+    // submit is an enqueue that ignores the abort deliberately: it has to return the request id,
+    // because that id is the only handle for calling accepted remote work off. So the cancel is
+    // delivered on the far side of a submit that completes *after* the user cancelled — the branch
+    // at dispatcher.ts:701. Abort that POST instead and the id is lost with the remote job still
+    // running: a cancelled paid generation that finishes, and charges, unseen.
+    let release: (() => void) | undefined;
+    const fake = new FakeProvider({});
+    const accept = fake.submit.bind(fake);
+    fake.submit = async (key, request) => {
+      // No signal handling, exactly like the fal enqueue.
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return accept(key, request);
+    };
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await until(() => release !== undefined);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(fake.cancelCount, 0, "there is nothing to cancel remotely until the id comes back");
+    release!();
+    await until(() => fake.cancelCount === 1);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    h.queue.dispose();
+  });
 });
 
 describe("cost capture (R-15, SPEC-008 R-17)", () => {
