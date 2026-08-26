@@ -197,10 +197,17 @@ describe("the arguments sound produces", () => {
     const graph = graphOf(buildFfmpegArgs(buildExportPlan(slateCut, "review-cut"), "/w", "/out.mp4", font));
     const escaped = String.raw`C\\:/Users/D\\\'Angelo/Arke Studio\, Inc\; Stable \[x64\]/Geist-Regular.ttf`;
     assert.ok(
-      graph.includes(`drawtext=fontfile=${escaped}:text=`),
+      graph.includes(`drawtext=expansion=none:fontfile=${escaped}:text=`),
       `expected escaped font path in ${graph}`,
     );
     assert.doesNotMatch(graph, /drawtext=text=/, "host font discovery is never the fallback");
+  });
+
+  it("draws an authored ffmpeg expression literally", () => {
+    const slateCut = { entries: [{ durationSec: 6, label: "SHOT 1 · %{pts}", media: null }], totalSec: 6 } as unknown as DerivedCut;
+    const graph = graphOf(buildFfmpegArgs(buildExportPlan(slateCut, "review-cut"), "/w", "/out.mp4", font));
+    assert.match(graph, /drawtext=expansion=none:/);
+    assert.match(graph, /text='SHOT 1 · %\{pts\} · 6\.0s'/);
   });
 
   it("refuses a slate label the redistributed face would render as missing-glyph boxes", () => {
