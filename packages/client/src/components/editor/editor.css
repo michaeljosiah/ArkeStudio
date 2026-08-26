@@ -14,6 +14,10 @@
   background: var(--background);
 }
 
+/* Read-only (issue 477): the artifact viewer opens a filed .md through this editor, and the
+   document is immutable. No caret, and the bible's tall minimum does not apply inside a frame. */
+.fy-rme--read .fy-rme__doc { min-height: 0; cursor: default; }
+
 .fy-rme__doc {
   min-height: 62vh;
   padding: 20px 22px;

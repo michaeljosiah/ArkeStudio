@@ -72,13 +72,16 @@ export class ProviderService {
   async validate(id: ProviderId): Promise<ProviderStatus> {
     const validator = this.validators[id];
     if (!validator) {
+      // A local provider whose runtime was never wired has no client to ask, so there is nothing
+      // to probe (issue 462). Named as the runtime being absent rather than as a key problem —
+      // these providers have no key, and "invalid" against a credential that does not exist sends
+      // whoever reads it looking for a box to paste something into.
+      const reason = PROVIDERS[id].local
+        ? `${PROVIDERS[id].displayName} is not running on this machine`
+        : `${PROVIDERS[id].displayName} has no client in this build`;
       return this.patch(id, {
         validation: "invalid",
-        probes: PROVIDERS[id].capabilities.map((capability) => ({
-          capability,
-          available: false,
-          reason: `${PROVIDERS[id].displayName} runs inside the Voxa sidecar — validated by runtime detection, not a key`,
-        })),
+        probes: PROVIDERS[id].capabilities.map((capability) => ({ capability, available: false, reason })),
       });
     }
     // Only an in-app credential is ours to fetch. The other two kinds pass an empty key: the

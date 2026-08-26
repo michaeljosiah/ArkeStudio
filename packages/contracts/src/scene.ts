@@ -167,8 +167,14 @@ export const SceneStoryboardSchema = z
   .strict();
 export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
 
-export const SceneSchema = z
-  .object({
+/**
+ * Every scene field except its structural authority — the shared half of SPEC-029 R-1's
+ * two-arm read union. `SceneSchema` below closes it with legacy `shots[]`; `GraphSceneSchema`
+ * (scene-flow.ts) closes it with `flow`. One shape object, two schemas: the arms cannot drift,
+ * because apart from the structural field there is nothing to drift — every other field keeps
+ * its identity, owner, optionality, and meaning in both.
+ */
+export const SceneBaseShape = {
     id: SceneIdSchema,
     /**
      * The scene's stable birth number — identity, not position (issue #387). It names the scene
@@ -242,9 +248,15 @@ export const SceneSchema = z
       })
       .strict()
       .optional(),
-    shots: z.array(ShotSchema),
-  })
-  .strict();
+} as const;
+
+/**
+ * The legacy arm of SPEC-029 R-1's read union: `shots[]` owns both payload and order. Still
+ * the only shape any writer produces and the shape every consumer reads — rollout step 3
+ * (SPEC-029 §3.3) swaps the read path to `SceneRecordSchema` (scene-flow.ts) and moves ordered
+ * consumers onto `linearizeSceneFlow`; until then this name keeps its historical meaning.
+ */
+export const SceneSchema = z.object({ ...SceneBaseShape, shots: z.array(ShotSchema) }).strict();
 export type Scene = z.infer<typeof SceneSchema>;
 
 /**

@@ -484,6 +484,36 @@ export class FsWorldProvider implements WorldProvider {
   };
 
   /**
+   * Text the renderer may read, and only out of the artifact shelf (issue 477).
+   *
+   * A markdown or text artifact has no `<img>` to point at it: the viewer has to fetch the bytes
+   * and render them itself. That is the whole reason these are here — and the reason they are
+   * kept apart from the media map rather than added to it. A world folder is full of markdown
+   * that is not an artifact (the bible, every sheet, every canon entry), and this route is
+   * loopback HTTP with an open CORS header on it, so "any .md under the world" would be a wider
+   * door than the feature asked for. Confined to `artifacts/`, the door is exactly the shelf.
+   */
+  private static readonly TEXT_TYPES: Record<string, string> = {
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+  };
+
+  /**
+   * The content type a world-relative path may be served as, or undefined for "not servable".
+   *
+   * Sidecars are `<file>.json` and `.json` is in neither map, so an artifact's record stays
+   * unreadable over HTTP while its bytes are readable — which is the split the shelf wants.
+   */
+  private static contentTypeFor(portable: string): string | undefined {
+    const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
+    const media = FsWorldProvider.MEDIA_TYPES[ext];
+    if (media !== undefined) return media;
+    const text = FsWorldProvider.TEXT_TYPES[ext];
+    if (text === undefined) return undefined;
+    return portable.startsWith("artifacts/") ? text : undefined;
+  }
+
+  /**
    * Read-only media for the renderer (design-fidelity pass): any registered world's media
    * files, resolved under the worlds directory with the traversal cases refused outright.
    */
@@ -504,8 +534,7 @@ export class FsWorldProvider implements WorldProvider {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
     const portable = relPath.replace(/\\/g, "/");
     if (portable.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) return null;
-    const ext = portable.slice(portable.lastIndexOf(".")).toLowerCase();
-    const contentType = FsWorldProvider.MEDIA_TYPES[ext];
+    const contentType = FsWorldProvider.contentTypeFor(portable);
     if (contentType === undefined) return null;
     const abs = join(this.worldsDir(), slug, fromPortable(portable));
     try {
@@ -521,6 +550,9 @@ export class FsWorldProvider implements WorldProvider {
    * Read-only media from a genesis sandbox — the look preview, before any world exists
    * (SPEC-031 R-50). Same guarding as `serveMedia`, different root: sandboxes live under
    * `.genesis/`, deliberately outside the worlds directory.
+   *
+   * Media only — a sandbox holds a look preview and nothing a text viewer would open, so the
+   * artifact-shelf text types (issue 477) deliberately do not reach here.
    */
   async serveGenesisMedia(genesisId: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
     if (!/^[a-z0-9][a-z0-9-]{2,40}$/.test(genesisId)) return null;

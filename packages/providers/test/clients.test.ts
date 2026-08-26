@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
-import { frameDispatchFor, PROVIDERS } from "@arke-studio/contracts";
+import { frameDispatchFor, PROVIDERS, type ProviderId } from "@arke-studio/contracts";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { FalClient } from "../src/clients/fal.js";
@@ -11,6 +11,8 @@ import { OpenAiClient } from "../src/clients/openai.js";
 import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
 import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
 import { KokoroClient } from "../src/clients/kokoro.js";
+import { WhisperCppClient } from "../src/clients/whispercpp.js";
+import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
 function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown }>): FetchLike {
@@ -1145,5 +1147,239 @@ describe("a song reaches the route, and comes back (design turn 73)", () => {
     });
     const artifacts = await client.fetchArtifacts("k", "minimax/music-3::req");
     assert.equal(artifacts[0]!.name, "output-1.wav");
+  });
+});
+
+describe("local transcription rides the same queue as the cloud (issue 462)", () => {
+  const RECORDING = { contentType: "audio/webm", data: new Uint8Array([1, 2, 3, 4]) };
+  const sttFetch = (seen: { url?: string; contentType?: string; body?: unknown }, text = "the tide-clock") =>
+    (async (url: string, init?: { headers?: Record<string, string>; body?: unknown }) => {
+      seen.url = String(url);
+      seen.contentType = init?.headers?.["Content-Type"];
+      seen.body = init?.body;
+      return new Response(JSON.stringify({ text }), { status: 200 });
+    }) as unknown as FetchLike;
+
+  it("transcribes through the sidecar and hands back a transcript artifact", async () => {
+    const seen: { url?: string; contentType?: string; body?: unknown } = {};
+    const client = new WhisperCppClient(sttFetch(seen), () => "http://127.0.0.1:7777");
+    const submitted = await client.submit("", {
+      model: "whisper-large-v3",
+      capability: "voice-stt",
+      params: {},
+      audioSource: RECORDING,
+    });
+    assert.equal(seen.url, "http://127.0.0.1:7777/stt");
+    // The recording's own type is what the engine is told; the bytes go up raw, not JSON-wrapped.
+    assert.equal(seen.contentType, "audio/webm");
+    assert.deepEqual([...(seen.body as Uint8Array)], [...RECORDING.data]);
+    // Synchronous text goes inline to the queue's durable landing path; no process-memory id is
+    // presented as recoverable work.
+    const artifacts = submitted.artifacts!;
+    assert.equal(artifacts[0]?.name, "transcript.txt");
+    assert.match(artifacts[0]?.contentType ?? "", /^text\/plain/);
+    assert.equal(new TextDecoder().decode(artifacts[0]!.data), "the tide-clock");
+    assert.match((await client.poll("", submitted.remoteId)).error ?? "", /returned by submit/);
+  });
+
+  it("refuses with the remedy when local transcription is not running", async () => {
+    const client = new WhisperCppClient(sttFetch({}), () => null);
+    await assert.rejects(
+      () =>
+        client.submit("", {
+          model: "whisper-large-v3",
+          capability: "voice-stt",
+          params: {},
+          audioSource: RECORDING,
+        }),
+      /local transcription is not running/,
+    );
+    // And says so as availability rather than as a failed transcription.
+    assert.deepEqual(await client.validateKey(), [
+      { capability: "voice-stt", available: false, reason: "the Voxa sidecar is not running" },
+    ]);
+  });
+
+  /**
+   * The whole of issue 462. `whispercpp` takes no credential, so its status is `configured` at
+   * birth and stays `untested` — which deriveCapabilityAvailability reads as *available*. Before
+   * this client, nothing could ever move it off that, and voice-stt was offered by a table row
+   * with no runtime behind it.
+   */
+  it("probes Whisper engine readiness rather than treating HTTP 200 as availability", async () => {
+    const client = new WhisperCppClient(
+      async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            engineStatus: {
+              kokoro: { ready: true },
+              whisper: { ready: false, reason: "the dictation model has not been downloaded yet" },
+            },
+          }),
+          { status: 200 },
+        ),
+      () => "http://127.0.0.1:7777",
+    );
+    assert.deepEqual(await client.validateKey(), [
+      { capability: "voice-stt", available: false, reason: "the dictation model has not been downloaded yet" },
+    ]);
+  });
+
+  it("accepts Whisper readiness even when another engine makes aggregate health false", async () => {
+    const client = new WhisperCppClient(
+      async () =>
+        new Response(
+          JSON.stringify({ ok: false, engineStatus: { kokoro: { ready: false }, whisper: { ready: true } } }),
+          { status: 200 },
+        ),
+      () => "http://127.0.0.1:7777",
+    );
+    assert.deepEqual(await client.validateKey(), [{ capability: "voice-stt", available: true }]);
+
+    // The probe set has to be the provider table's own list: a capability the table declares but
+    // the client never probes reads as locked, because an absent probe is read as unavailable.
+    assert.deepEqual(
+      (await client.validateKey()).map((p) => p.capability),
+      [...PROVIDERS.whispercpp.capabilities],
+    );
+  });
+
+  it("keeps the recording off `params`, so nothing journals what must not persist", async () => {
+    // SPEC-018 R-13: the transcript is the artefact, the audio is a buffer. `params` is written
+    // verbatim into the durable job row, so audio there would outlive the transcript.
+    const client = new WhisperCppClient(sttFetch({}), () => "http://127.0.0.1:7777");
+    await assert.rejects(
+      () =>
+        client.submit("", {
+          model: "whisper-large-v3",
+          capability: "voice-stt",
+          params: { audioBase64: Buffer.from(RECORDING.data).toString("base64") },
+        }),
+      /audioSource is required/,
+    );
+  });
+
+  it("can route queue-backed transcription through the host's shared Voxa client", async () => {
+    let rawFetches = 0;
+    const heard: Array<{ audio: Uint8Array; contentType: string }> = [];
+    const client = new WhisperCppClient(
+      async () => {
+        rawFetches += 1;
+        throw new Error("the provider fetch should not own transcription when the host adapter is present");
+      },
+      () => "http://127.0.0.1:7777",
+      async (input) => {
+        heard.push(input);
+        return "under the harbour";
+      },
+    );
+    await client.submit("", {
+      model: "whisper-large-v3",
+      capability: "voice-stt",
+      params: {},
+      audioSource: RECORDING,
+    });
+    assert.equal(rawFetches, 0);
+    assert.deepEqual(heard, [{ audio: RECORDING.data, contentType: "audio/webm" }]);
+  });
+
+  it("passes queue cancellation to the host's shared Voxa client", async () => {
+    let signal: AbortSignal | undefined;
+    const client = new WhisperCppClient(
+      async () => {
+        throw new Error("raw fetch must not run");
+      },
+      () => "http://127.0.0.1:7777",
+      async (_input, options) => {
+        signal = options?.signal;
+        return new Promise<string>((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
+        });
+      },
+    );
+    const controller = new AbortController();
+    const pending = client.submit("", {
+      model: "whisper-large-v3",
+      capability: "voice-stt",
+      signal: controller.signal,
+      params: {},
+      audioSource: RECORDING,
+    });
+    controller.abort();
+    await assert.rejects(pending, /cancelled/);
+    assert.equal(signal, controller.signal);
+  });
+
+  it("will not file a transcript that is not one", async () => {
+    // A port that belongs to something other than Voxa answers 200 with anything at all; the
+    // body would otherwise be filed as the transcript of a recording it never heard.
+    const client = new WhisperCppClient(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      () => "http://127.0.0.1:7777",
+    );
+    await assert.rejects(
+      () =>
+        client.submit("", {
+          model: "whisper-large-v3",
+          capability: "voice-stt",
+          params: {},
+          audioSource: RECORDING,
+        }),
+      /did not answer with a transcript/,
+    );
+  });
+
+  it("names silence rather than landing an artifact the verifier calls an empty download", async () => {
+    const client = new WhisperCppClient(sttFetch({}, "   "), () => "http://127.0.0.1:7777");
+    await assert.rejects(
+      () =>
+        client.submit("", {
+          model: "whisper-large-v3",
+          capability: "voice-stt",
+          params: {},
+          audioSource: RECORDING,
+        }),
+      /no speech was detected/,
+    );
+  });
+});
+
+/**
+ * The invariant issue 462 asks for: the provider table and the client registry cannot disagree
+ * silently. A row carrying a capability with no client behind it is a capability the app can
+ * offer and then fail — and for a keyless provider it is worse than that, because
+ * `deriveCapabilityAvailability` reads `configured` + `untested` as *available*, so nothing ever
+ * finds out. Asserted over the fullest wiring, since sidecar- and engine-backed clients are
+ * legitimately absent when their runtime is not wired.
+ */
+describe("the provider table and the registry cannot drift apart (issue 462)", () => {
+  const unreachable = () => Promise.reject(new Error("no call is made while building the registry"));
+  const fullyWired = () =>
+    createProviderClients({
+      fetch: unreachable as unknown as FetchLike,
+      higgsfield: unreachable as unknown as CommandRunner,
+      voxa: () => null,
+      comfyui: { baseUrl: () => null, preflight: unreachable as unknown as () => Promise<never> },
+    });
+
+  it("builds a client for every capability-carrying entry in PROVIDERS", () => {
+    const clients = fullyWired();
+    const missing = (Object.keys(PROVIDERS) as ProviderId[]).filter(
+      (id) => PROVIDERS[id].capabilities.length > 0 && clients[id] === undefined,
+    );
+    assert.deepEqual(missing, [], "every capability the table offers must resolve to a client under some wiring");
+  });
+
+  it("builds no client the table does not list, and each answers to its own id", () => {
+    for (const [id, client] of Object.entries(fullyWired())) {
+      assert.ok(id in PROVIDERS, `${id} is built but is not in the provider table`);
+      assert.equal(client!.id, id, `${id} was registered under another provider's id`);
+    }
+  });
+
+  it("declares every provider in the declarations table too", () => {
+    const missing = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDER_DECLARATIONS[id] === undefined);
+    assert.deepEqual(missing, [], "reconciliation strategy is chosen from declarations; an absent row has none");
   });
 });

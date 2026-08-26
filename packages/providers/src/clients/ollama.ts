@@ -25,7 +25,11 @@ export class OllamaClient implements ProviderClient {
   ) {}
 
   async validateKey(): Promise<CapabilityProbe[]> {
-    const probe = await tryProbe(() => jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, {}));
+    // Bounded: this probe is re-run on a timer (issue 462), and a loopback port that accepts a
+    // connection and then never answers would hold the pass open indefinitely.
+    const probe = await tryProbe(() =>
+      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/tags`, { signal: AbortSignal.timeout(3_000) }),
+    );
     if (!probe.ok) {
       return [{ capability: "llm", available: false, reason: "Ollama is not running on this machine" }];
     }

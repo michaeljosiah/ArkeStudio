@@ -5016,6 +5016,138 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-liftfacts:hover { color: var(--foreground); }
 
+/*
+ * Opening an artifact (issue 477).
+ *
+ * The card is not a <button>: it already holds a save control, a play control and "Lift facts",
+ * and a button inside a button is markup the browser resolves by dropping one of the two. The
+ * open target is a transparent sibling laid over the card instead — one real <button>, so Enter
+ * and Space come for free — and the controls that were already there are lifted above it.
+ */
+.fy-gridcard--openable { position: relative; }
+.fy-gridcard__open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.fy-gridcard__open:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-gridcard--openable .fy-clipbtn,
+.fy-gridcard--openable .fy-liftfacts { position: relative; z-index: 2; }
+/* The save control reveals on hovering its own image host, and the host is no longer what the
+   pointer is over once the open target covers it. The card's own hover stands in. */
+.fy-gridcard--openable:hover .fy-imgdl,
+.fy-gridcard--openable:focus-within .fy-imgdl { opacity: 1; pointer-events: auto; }
+
+/*
+ * The artifact viewer (issue 477): one frame, a stage chosen by the file's type, and a metadata
+ * column that does not change with it. Fixed width rather than shrink-wrapped like the portrait
+ * dialog — this one holds text as often as it holds a picture, and a frame whose width follows
+ * its longest line is a frame that moves while you read it.
+ */
+.fy-artview {
+  width: min(1120px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+}
+.fy-artview::backdrop { background: color-mix(in srgb, var(--background) 72%, transparent); }
+.fy-artview__panel { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+.fy-artview__head {
+  display: flex; align-items: center; gap: 11px; flex: none;
+  padding: 13px 18px; border-bottom: 1px solid var(--border);
+}
+.fy-artview__titles { flex: 1; min-width: 0; }
+.fy-artview__head h2 { margin: 0; font: 600 13.5px var(--font-sans); overflow-wrap: anywhere; }
+.fy-artview__sub { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
+.fy-artview__close,
+.fy-artview__save {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px;
+  background: transparent; color: var(--neutral-400); cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-artview__close:hover,
+.fy-artview__save:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-artview__close:focus-visible,
+.fy-artview__save:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-artview__save:disabled { cursor: default; }
+.fy-artview__body {
+  display: grid; grid-template-columns: minmax(0, 1fr) 250px;
+  flex: 1; min-height: 0;
+}
+.fy-artview__stage {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 0; min-height: 0; padding: 14px; overflow: auto;
+}
+/* Text and documents fill the stage and scroll inside it; a tall block centred in a scroll pane
+   loses its own top edge above the scroll origin. */
+.fy-artview__stage[data-viewer="markdown"],
+.fy-artview__stage[data-viewer="text"],
+.fy-artview__stage[data-viewer="pdf"] { align-items: stretch; }
+.fy-artview__meta {
+  display: grid; gap: 9px; align-content: start;
+  margin: 0; padding: 14px 18px; overflow-y: auto;
+  border-left: 1px solid var(--border);
+}
+.fy-artview__row { display: grid; gap: 2px; min-width: 0; }
+.fy-artview__key {
+  font: 400 10px var(--font-mono); color: var(--neutral-400);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.fy-artview__val { margin: 0; font: 400 11.5px var(--font-mono); overflow-wrap: anywhere; }
+/* 48px of viewport margin, the head, and the stage's own padding come off the picture's budget. */
+.fy-artview__image {
+  display: block; max-width: 100%; max-height: calc(100vh - 150px);
+  object-fit: contain; border-radius: 8px;
+}
+.fy-artview__media { width: 100%; max-height: calc(100vh - 150px); }
+.fy-artview__pdf { width: 100%; height: calc(100vh - 150px); border: 0; background: var(--muted); }
+.fy-artview__doc { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
+.fy-artview__note {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: none;
+  font: 400 10.5px var(--font-mono); color: var(--neutral-400);
+}
+.fy-artview__copy {
+  display: inline-flex; align-items: center; gap: 5px;
+  appearance: none; border: 0; padding: 0; background: transparent; cursor: pointer;
+  font: 500 10.5px var(--font-mono); color: var(--muted-foreground);
+  transition: var(--transition-control);
+}
+.fy-artview__copy:hover { color: var(--foreground); }
+.fy-artview__copy:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The document is the whitespace: an indented block that reflows is a different file. */
+.fy-artview__text {
+  margin: 0; font: 400 12.5px/1.65 var(--font-mono);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.fy-artview__fail {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 48px 0; font: 400 13px var(--font-sans); color: var(--muted-foreground);
+}
+
+/* Narrow windows: the frame takes the screen and the metadata drops under the stage. */
+@media (max-width: 860px) {
+  .fy-artview { width: 100vw; max-width: 100vw; max-height: 100vh; border: 0; border-radius: 0; }
+  .fy-artview__panel { max-height: 100vh; }
+  .fy-artview__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .fy-artview__meta { border-left: 0; border-top: 1px solid var(--border); max-height: 34vh; }
+  .fy-artview__image,
+  .fy-artview__media { max-height: 52vh; }
+  .fy-artview__pdf { height: 52vh; }
+}
+
 /* Presets (issue 305 §3): the ghost trigger left of the model select, menu opening upward. */
 .fy-bench__presets {
   appearance: none; border: 0; background: transparent; cursor: pointer;
