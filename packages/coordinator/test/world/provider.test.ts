@@ -195,7 +195,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     const mediaDir = join(root, "worlds", "the-undersong", "artifacts");
     await mkdir(mediaDir, { recursive: true });
     await writeFile(join(mediaDir, "key-art.png"), "png");
-    await writeFile(join(mediaDir, "notes.txt"), "not media");
+    await writeFile(join(mediaDir, "notes.rtf"), "not media");
     const provider = new FsWorldProvider(root, { clock: CLOCK });
 
     assert.ok(await provider.serveMedia("the-undersong", "artifacts/key-art.png"), "the picture itself resolves");
@@ -209,7 +209,7 @@ describe("FsWorldProvider (R-1, T-14)", () => {
       "artifacts\\..\\..\\settings.json",
       "./artifacts/key-art.png",
       "artifacts//key-art.png",
-      "artifacts/notes.txt",
+      "artifacts/notes.rtf",
       "artifacts",
       "artifacts/missing.png",
     ]) {
@@ -218,6 +218,51 @@ describe("FsWorldProvider (R-1, T-14)", () => {
     for (const slug of ["../worlds/the-undersong", "The-Undersong", "", "the undersong"]) {
       assert.equal(await provider.serveMedia(slug, "artifacts/key-art.png"), null, `served world ${slug}`);
     }
+    await provider.close();
+  });
+
+  /*
+   * Text out of the artifact shelf, and out of nowhere else (issue 477).
+   *
+   * A markdown artifact has no `<img>` to point at it, so the viewer fetches the bytes over the
+   * same confined `/media/<slug>/<file>` identity every picture uses. The narrowing that matters
+   * is the folder: a world is full of markdown that is not an artifact — the bible, every sheet,
+   * every canon entry — and this route carries an open CORS header, so "any .md" would be a much
+   * wider door than a viewer needs. The sidecar stays shut either way: `.json` is servable
+   * nowhere, so an artifact's bytes can be read while its record cannot.
+   */
+  it("serves artifact text, and only from the artifact shelf", async () => {
+    const { root } = await makeTempRoot();
+    const worldDir = join(root, "worlds", "the-undersong");
+    await mkdir(join(worldDir, "artifacts"), { recursive: true });
+    await mkdir(join(worldDir, "canon"), { recursive: true });
+    await writeFile(join(worldDir, "artifacts", "treatment.md"), "# Saltlight");
+    await writeFile(join(worldDir, "artifacts", "treatment.md.json"), "{}");
+    await writeFile(join(worldDir, "artifacts", "notes.txt"), "one night on the Vigil");
+    await writeFile(join(worldDir, "canon", "the-vigil.md"), "not an artifact");
+    await writeFile(join(worldDir, "bible.md"), "not an artifact");
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "artifacts/treatment.md"))?.contentType,
+      "text/markdown; charset=utf-8",
+    );
+    assert.equal(
+      (await provider.serveMedia("the-undersong", "artifacts/notes.txt"))?.contentType,
+      "text/plain; charset=utf-8",
+    );
+    for (const refused of [
+      "artifacts/treatment.md.json",
+      "canon/the-vigil.md",
+      "bible.md",
+      "artifacts/../bible.md",
+    ]) {
+      assert.equal(await provider.serveMedia("the-undersong", refused), null, `served ${refused}`);
+    }
+    // A sandbox holds a look preview and nothing a text viewer would open.
+    await mkdir(join(root, ".genesis", "gn-first"), { recursive: true });
+    await writeFile(join(root, ".genesis", "gn-first", "notes.md"), "# nope");
+    assert.equal(await provider.serveGenesisMedia("gn-first", "notes.md"), null);
     await provider.close();
   });
 

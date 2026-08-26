@@ -29,6 +29,7 @@ import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
+import { ArtifactViewer } from "../components/artifact-viewer.js";
 import {
   characterPortraitPath,
   locationPortraitPath,
@@ -41,6 +42,7 @@ import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
+import { artifactOpenLabel } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -4074,6 +4076,17 @@ export function ArtifactsScreen() {
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
+  /*
+   * Which artifact is open, by id (issue 477).
+   *
+   * The id rather than the row: the sidecar is looked up in the live snapshot every render, so a
+   * filing, a supersede or any other world update moves the frame's contents or closes it, where
+   * an index would have quietly re-pointed it at whichever file slid into that position. Local
+   * state rather than a route, so opening one does not remount the shelf and drop its filters,
+   * its import report and its scroll position.
+   */
+  const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  const openTrigger = useRef<HTMLButtonElement | null>(null);
   // Whatever made it, not the bench alone (issue 475): a character's generated references are
   // filed here too, and the chip that counts what this application made counts those as well.
   const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
@@ -4301,9 +4314,26 @@ export function ArtifactsScreen() {
           return (
             <div
               key={a.id}
-              className="fy-gridcard"
+              className="fy-gridcard fy-gridcard--openable"
               style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}
             >
+              {/*
+                * The open target: one real <button> laid over the card, so a pointer and a
+                * keyboard reach the same viewer and Enter and Space come from the element rather
+                * than from a handler. Never a <button> around the card — the save control, the
+                * play control and "Lift facts" live inside it, and a button within a button is
+                * markup the browser resolves by dropping one of the two.
+                */}
+              <button
+                type="button"
+                className="fy-gridcard__open"
+                aria-label={artifactOpenLabel(a)}
+                title={artifactOpenLabel(a)}
+                onClick={(event) => {
+                  openTrigger.current = event.currentTarget;
+                  setOpenArtifactId(a.id);
+                }}
+              />
               {isImage ? (
                 <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
                   <Portrait
@@ -4395,6 +4425,17 @@ export function ArtifactsScreen() {
           />
         )}
       </div>
+      <ArtifactViewer
+        artifact={artifacts.find((a) => a.id === openArtifactId) ?? null}
+        artifacts={artifacts}
+        worldSlug={world?.meta.slug}
+        linkName={linkName}
+        onClose={() => {
+          setOpenArtifactId(null);
+          // A dialog that dropped focus leaves the keyboard at the top of the document.
+          openTrigger.current?.focus();
+        }}
+      />
     </div>
   );
 }
