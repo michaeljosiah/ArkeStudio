@@ -206,6 +206,7 @@ import {
 } from "./voice/library.js";
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
+import { changesForEntity } from "./world/change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
@@ -3770,6 +3771,7 @@ export class Coordinator {
           worldId: msg.worldId,
           entryId: msg.entryId,
           citedBy: { sheets: refs.sheets, entries: refs.entries, productions: refs.productions },
+          history: await changesForEntity(store.dir, `canon/${msg.entryId}`),
           ripples: ripples.map((r) => ({ kind: r.kind, summary: r.summary, targets: r.targets })),
         });
         return;

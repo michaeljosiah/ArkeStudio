@@ -211,7 +211,7 @@ export { leashChildToParent, type LeashResult } from "./job-leash.js";
 export { Transport, type TransportOptions } from "./transport.js";
 export { type WorldProvider } from "./world-provider.js";
 export { atomicWriteFile, renameWithRetry } from "./world/atomic.js";
-export { appendChanges, readChanges } from "./world/change-writer.js";
+export { appendChanges, changesForEntity, readChanges } from "./world/change-writer.js";
 export {
   classify,
   CommitPlanError,

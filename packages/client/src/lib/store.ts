@@ -6,6 +6,7 @@ import {
   type BenchParams,
   type BibleHelperKind,
   type Capability,
+  type ChangeRecord,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
@@ -94,6 +95,12 @@ export interface CanonRefsState {
     entries: string[];
     productions: string[];
   };
+  /**
+   * The entry's own change lines, oldest first (issue 289). Read per entity by the coordinator
+   * rather than filtered out of `world.changes`, which is a tail of the whole log and so goes
+   * empty for an entry the moment a bulk write fills the window.
+   */
+  history: ChangeRecord[];
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
@@ -1132,7 +1139,10 @@ function handleFrame(json: string): void {
         },
       };
     } else if (event.type === "canon.refs") {
-      canonRefs = { ...canonRefs, [event.entryId]: { citedBy: event.citedBy, ripples: event.ripples } };
+      canonRefs = {
+        ...canonRefs,
+        [event.entryId]: { citedBy: event.citedBy, history: event.history, ripples: event.ripples },
+      };
     } else if (event.type === "sheet.refs" && event.worldId === current.state.world?.meta.worldId) {
       sheetRefs = {
         ...sheetRefs,

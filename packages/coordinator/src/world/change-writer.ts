@@ -1,4 +1,6 @@
 import { open, readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { ChangeRecordSchema, type ChangeRecord } from "@arke-studio/contracts";
 import { toExtendedLength } from "./paths.js";
 
 /**
@@ -72,6 +74,34 @@ export async function appendChanges(path: string, records: object[]): Promise<vo
   } finally {
     await handle.close();
   }
+}
+
+/** Bounded so one pathological entity cannot make a detail response unbounded. */
+const ENTITY_HISTORY_MAX = 200;
+
+/**
+ * A single entity's change lines, newest last (issue 289).
+ *
+ * The client snapshot carries a tail of the whole log, which is a recent-activity window and
+ * nothing more: a bulk write — a migration measuring a hundred legacy tracks, an import filing a
+ * folder — pushes every earlier record out of it in one pass. Filtering that window per entity
+ * then reports "no recorded changes" for an entry whose records are sitting intact on disk.
+ *
+ * So a detail surface that wants one entity's history reads the log for that entity, per
+ * SPEC-006 §2.5. The whole file is read: it is one small append-only file, and reading it in
+ * full is what makes the answer independent of how much else has happened since.
+ */
+export async function changesForEntity(worldDir: string, entity: string): Promise<ChangeRecord[]> {
+  const lines = await readChanges(join(worldDir, "changes.jsonl"));
+  const out: ChangeRecord[] = [];
+  for (const line of lines) {
+    if (line.entity !== entity) continue;
+    const parsed = ChangeRecordSchema.safeParse(line);
+    if (parsed.success) out.push(parsed.data);
+  }
+  // The newest are the ones kept: the panel reads newest first, and a truncated tail of an
+  // entry's own history is a different thing from a history evicted by unrelated writes.
+  return out.slice(-ENTITY_HISTORY_MAX);
 }
 
 /** Whether the log already carries a line for this commit — the roll-forward idempotency probe. */

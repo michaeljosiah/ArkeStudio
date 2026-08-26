@@ -1089,7 +1089,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       candidates: z.array(AskCandidateSchema),
     })
     .strict(),
-  /** An entry's computed detail: cited-by and speculative ripples (SPEC-006 §2.5). */
+  /** An entry's computed detail: cited-by, history and speculative ripples (SPEC-006 §2.5). */
   z
     .object({
       ...base,
@@ -1103,6 +1103,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
           productions: z.array(z.string()),
         })
         .strict(),
+      /**
+       * Every change line for this entry, oldest first — read per entity, not sliced off a
+       * global tail (issue 289). `ClientState.changes` is a recent-activity window, so a bulk
+       * write like a migration pushes older records out of it and an entry's History panel
+       * reports nothing while its records sit intact on disk.
+       */
+      history: z.array(ChangeRecordSchema),
       ripples: z.array(
         z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict(),
       ),
