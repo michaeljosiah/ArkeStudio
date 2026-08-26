@@ -61,10 +61,14 @@ function deps(opts: {
   externallyPresent?: boolean;
   onTar?: (staged: string) => Promise<void>;
   lead?: readonly number[];
-} = {}): SetupDeps & { calls: string[] } {
+  /** Free space per destination, so a test can put the mapped folder on a fuller disk. */
+  freeMbFor?: (dir: string) => number | null;
+} = {}): SetupDeps & { calls: string[]; measured: string[] } {
   const calls: string[] = [];
+  const measured: string[] = [];
   return {
     calls,
+    measured,
     async fetchStream(url) {
       calls.push(`fetch ${url}`);
       const payload = bytes(2048, opts.lead ?? SEVENZ);
@@ -91,8 +95,9 @@ function deps(opts: {
     async probeUrl() {
       return false;
     },
-    async diskFreeMb() {
-      return 500_000;
+    async diskFreeMb(dir) {
+      measured.push(dir);
+      return opts.freeMbFor?.(dir) ?? 500_000;
     },
     ...(opts.externallyPresent !== undefined
       ? { externallyPresent: async () => opts.externallyPresent! }
@@ -300,6 +305,58 @@ describe("an external models folder is the user's (§2.4)", () => {
       "the user's own file is untouched",
     );
     assert.equal((await stat(modelsDir)).isDirectory(), true, "the folder itself survives");
+  });
+
+  it("guards the weights against the mapped folder's disk, not the app's", async () => {
+    const appRoot = await tempDir("arke-guard-");
+    const modelsDir = await tempDir("arke-guard-models-");
+    const events: DomainEvent[] = [];
+    // The real figure: Wan 2.2's closure. The app's own drive has room to spare; the drive the
+    // user mapped their library onto does not, which is the case the old single measurement
+    // could not see at all — it read the app root and waved a 17 GB fetch onto a full disk.
+    const weights = { ...weightsEntry(), sizeMb: 17_300 };
+    const d = deps({ freeMbFor: (dir) => (dir.startsWith(modelsDir) ? 4_000 : 500_000) });
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: [weights],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+    svc.retry("comfyui-weights-draft-image");
+    await svc.run();
+
+    const component = last(events).components[0]!;
+    assert.equal(component.state, "blocked");
+    assert.match(component.detail!, /16\.9 GB plus room to work/, "what it costs");
+    assert.match(component.detail!, /3\.9 GB free/, "what the mapped folder's disk has");
+    assert.ok(d.measured.some((dir) => dir.startsWith(modelsDir)), "the destination was measured");
+    assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was started");
+  });
+
+  it("sweeps its own debris from the mapped folder and walks nothing else", async () => {
+    const appRoot = await tempDir("arke-sweep-");
+    const modelsDir = await tempDir("arke-sweep-models-");
+    await mkdir(join(modelsDir, "checkpoints"), { recursive: true });
+    await mkdir(join(modelsDir, "loras"), { recursive: true });
+    const ours = join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors.partial");
+    const theirs = join(modelsDir, "checkpoints", "a-download-of-their-own.partial");
+    await writeFile(ours, bytes(64, [1, 2, 3]));
+    await writeFile(theirs, bytes(64, [4, 5, 6]));
+
+    const svc = new LocalSetupService(deps(), () => {}, {
+      appRoot,
+      catalogue: [weightsEntry()],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+    await svc.run();
+
+    await assert.rejects(stat(ours), "the fragment of our own cancelled fetch is gone");
+    // Both of these prove the same rule from the other side: the sweep visits the paths the
+    // catalogue named and never walks the folder, so a fragment that is not ours survives and
+    // an empty folder of the user's is not pruned out from under them (§2.4).
+    assert.equal((await stat(theirs)).isFile(), true, "a .partial that is not ours is not ours to delete");
+    assert.equal((await stat(join(modelsDir, "loras"))).isDirectory(), true, "an empty folder survives");
   });
 });
 
