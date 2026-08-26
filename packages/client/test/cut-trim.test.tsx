@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { ClientStateSchema, type ClientState } from "@arke-studio/contracts";
+import { ClientStateSchema, deriveCut, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -318,5 +318,36 @@ describe("the cut footer of a production with no story (504)", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.match(html, /the cut is a projection — it recomputes from shot selections/, "24a's note, unchanged");
     assert.doesNotMatch(html, /the clips themselves are the record/);
+  });
+});
+
+/**
+ * The rail and the switcher, on the same clock as the screen beside them (issue 508).
+ *
+ * A production with no story keeps its length in its clips, and these two read the derived cut,
+ * which has nothing in it. So the same film was `28s` in the Cut header, `28s` on the Exports
+ * button, 28.000s in the rendered file — and a `0s` cut in the rail one panel to the left.
+ */
+describe("the rail and the switcher on a production with no story (508)", () => {
+  it("states the length of what was placed, the way the header does", () => {
+    const html = renderCut(mediaOnlyState());
+    // Clips at 0→4 and 12→16: the film ends where the furthest one ends, not where the canvas does.
+    assert.match(html, /fy-prodrail__count">16s/, "the rail counts the film");
+    assert.match(html, /fy-prodrail__switchsub">video · 16s cut/, "and so does the switcher");
+    assert.doesNotMatch(html, /0s cut/, "an empty cut is not what this production is");
+  });
+
+  it("leaves a production with a story on the derived clock", () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const derived = deriveCut(state.world!.productions[0]!);
+    const html = renderCut(state);
+    // The rail states the cut and the switcher states how much of it is covered: two figures,
+    // both derived, and neither of them measured off the timeline.
+    assert.match(html, new RegExp(`fy-prodrail__count">${derived.totalSec}s`), "the rail states the cut");
+    assert.match(
+      html,
+      new RegExp(`fy-prodrail__switchsub">video · ${derived.totalSec - derived.uncoveredSec}s cut`),
+      "the switcher states what is covered",
+    );
   });
 });

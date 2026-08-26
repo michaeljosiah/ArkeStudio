@@ -213,6 +213,12 @@ function refusalAction(reason: string | undefined): QueueNote["action"] {
 }
 
 /**
+ * One enqueue answer, one notification — and its id is the request's own, so a screen that made
+ * the request can find the row raised for it without being told (issue 507).
+ */
+export const queueNoteId = (requestId: string): string => `queue:${requestId}`;
+
+/**
  * The notification for one enqueue answer. `jobs` is the client's own job list — every id in
  * `acceptedJobIds` resolves against it, which is where the model, the estimate and the queue
  * depth come from. No new event is needed.
@@ -243,7 +249,7 @@ export function enqueueNote(
           .join(" · ")
       : "nothing to price yet";
     return {
-      id: `queue:${result.requestId}`,
+      id: queueNoteId(result.requestId),
       tone: partial ? "warning" : "queued",
       ...(first && (first.status === "running" || first.status === "submitting") ? { live: true } : {}),
       title: title(sharedSubject(accepted), what, verbOf(first)),
@@ -256,7 +262,7 @@ export function enqueueNote(
   const reason = reasonOf(result);
   if (NEVER_QUEUES.has(result.command)) {
     return {
-      id: `queue:${result.requestId}`,
+      id: queueNoteId(result.requestId),
       tone: "refused",
       title: "That image can’t be used",
       meta: "nothing spent",
@@ -264,7 +270,7 @@ export function enqueueNote(
     };
   }
   return {
-    id: `queue:${result.requestId}`,
+    id: queueNoteId(result.requestId),
     tone: "refused",
     title: "Nothing was queued",
     meta: "nothing spent",

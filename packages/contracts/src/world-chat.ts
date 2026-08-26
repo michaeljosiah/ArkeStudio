@@ -183,6 +183,22 @@ export type WorldChatLinkRef = z.infer<typeof WorldChatLinkRefSchema>;
 // Messages and runs
 // ---------------------------------------------------------------------------
 
+/**
+ * The harness tools a turn asked for and was refused, by name, deduplicated (SPEC-005 R-10b).
+ *
+ * Names, not sentences, and not the adapter's own summary. The name is what survives a change of
+ * wording, and the wording is the coordinator's to choose — R-16 forbids showing a harness tool
+ * name to a person and #70 R-18 forbids rendering an adapter summary at all, so a refusal reaches
+ * the screen only through `refusalLabel`.
+ *
+ * Recorded at all because a refusal is the one piece of a turn that contradicts the answer. An
+ * agent that reported running a shell command it never ran (#506) was believed because nothing
+ * else on the screen had anything to say about it.
+ */
+/** Enough to show a turn reached for several different things; a bound, not an expectation. */
+export const REFUSED_TOOLS_MAX = 20;
+export const RefusedToolsSchema = z.array(z.string().min(1).max(120)).max(REFUSED_TOOLS_MAX);
+
 export const WorldChatMessageSchema = z
   .object({
     id: MessageIdSchema,
@@ -986,6 +1002,14 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       message: WorldChatMessageSchema,
       run: WorldChatRunSchema,
       receipts: z.array(WorldChatCheckReceiptSchema),
+      /**
+       * Tools this turn was refused, absent when there were none — which is almost every turn.
+       *
+       * Optional rather than defaulted, for the same reason `bibleEdit` is: every turn already on
+       * disk was written without it, and a field that appears only when it has something to say
+       * keeps the log readable.
+       */
+      refusedTools: RefusedToolsSchema.optional(),
       candidates: z.array(WorldChangeCandidateSchema),
       groups: z.array(CandidateGroupSchema),
       tombstones: z.array(CandidateTombstoneSchema),
@@ -1242,6 +1266,13 @@ export const WorldChatLoadedSchema = z
      * transcript is the one thing here that never holds any.
      */
     bibleEdits: z.record(MessageIdSchema, BibleEditRecordSchema).default({}),
+    /**
+     * Tools each studio reply was refused, by the message that was written despite them.
+     *
+     * A map for the same reason `bibleEdits` is one, pointing the other way: this is a record of
+     * what did NOT happen, and it belongs beside the sentence that may claim otherwise.
+     */
+    refusals: z.record(MessageIdSchema, RefusedToolsSchema).default({}),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
@@ -1486,6 +1517,14 @@ export const WorldChatTranscriptMessageSchema = z
     text: z.string(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
     receipts: z.array(z.string().max(200)),
+    /**
+     * What this turn tried to do and was refused, worded for a person: "run a command on your
+     * computer". Empty on almost every turn.
+     *
+     * Beside the reply rather than in the working line, because the working line is gone by the
+     * time the reply is read — and the reply is the thing it contradicts (#506).
+     */
+    refusals: z.array(z.string().max(200)).default([]),
     /**
      * The bible edit this reply made, if it made one (SPEC-022).
      *

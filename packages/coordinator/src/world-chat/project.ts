@@ -328,6 +328,64 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
   }
 }
 
+/** The vocabulary {@link refusalLabel} draws on, in this product's words rather than a harness's. */
+const REFUSAL_LABELS: Record<string, string> = {
+  // The one this exists for. Neither harness grants a shell to any agent, so every one of these
+  // is a turn that believed otherwise.
+  bash: "run a command on your computer",
+  bashoutput: "run a command on your computer",
+  killshell: "run a command on your computer",
+  powershell: "run a command on your computer",
+  shell: "run a command on your computer",
+  // Reading and writing are refused on WHERE, not on what: both roles permit the intent, so what
+  // was wrong was the place — outside the working directory, or an argument naming a place the
+  // gate could not check. Said as place, because that is the part worth telling somebody.
+  read: "read a file outside this conversation",
+  write: "write a file outside this conversation",
+  edit: "change a file outside this conversation",
+  glob: "look through files outside this conversation",
+  grep: "search files outside this conversation",
+  list: "look through files outside this conversation",
+  websearch: "search online",
+  webfetch: "read a page online",
+  task: "hand the work to another agent",
+};
+
+/** The resting phrase: something was refused, and naming it would name a tool. */
+const REFUSAL_FALLBACK = "use a tool it does not have";
+
+/**
+ * What a refused tool was reaching for, in the product's words (SPEC-005 R-10b, R-16).
+ *
+ * Keyed on the tool rather than on the adapter's summary because a person may not be shown a
+ * harness tool name — "refused Bash" is R-16's exact prohibition — and because the summary is
+ * operator text. The phrase names the CAPABILITY, which is what the reply may be claiming to have
+ * used: someone reading "I ran it, exit 0" needs "Refused: run a command on your computer" under
+ * it, not a tool name they have no way to interpret.
+ *
+ * Suffix-matched and case-folded for the reasons {@link workingLabel} gives at length: MCP tools
+ * arrive namespaced, and the same tool is `read` in OpenCode and `Read` in Claude Code.
+ */
+export function refusalLabel(tool: string): string {
+  const key = tool.toLowerCase();
+  const direct = REFUSAL_LABELS[key];
+  if (direct !== undefined) return direct;
+  for (const [name, label] of Object.entries(REFUSAL_LABELS)) {
+    if (key.endsWith(`_${name}`)) return label;
+  }
+  return REFUSAL_FALLBACK;
+}
+
+/**
+ * The refusals of one turn, worded and deduplicated (#506).
+ *
+ * Deduplicated on the PHRASE, not the tool: a turn that tried `Bash` five times and `PowerShell`
+ * twice was doing one thing, and seven lines saying so would read as seven separate events.
+ */
+export function wordRefusals(tools: readonly string[]): string[] {
+  return [...new Set(tools.map(refusalLabel))];
+}
+
 export function projectWorkspace(
   loaded: WorldChatLoaded,
   receiptsByMessage: ReadonlyMap<string, readonly WorldChatCheckReceipt[]>,
@@ -343,6 +401,7 @@ export function projectWorkspace(
       role: m.role,
       text: m.text,
       receipts: (receiptsByMessage.get(m.id) ?? []).map(wordReceipt),
+      refusals: wordRefusals(loaded.refusals[m.id] ?? []),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       createdAt: m.createdAt,
     })),

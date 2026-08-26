@@ -1,5 +1,6 @@
 import {
   newId,
+  REFUSED_TOOLS_MAX,
   type BibleEdit,
   type BibleEditRecord,
   type CandidateChecks,
@@ -187,6 +188,8 @@ async function askOnce(
   timeoutMs: number,
   signal: AbortSignal,
   onProgress?: (label: string) => void,
+  /** Every tool the confinement refused this turn, by harness name, as it happens (#506). */
+  onRefused?: (tool: string) => void,
 ): Promise<string> {
   let finalText = "";
   const abort = new AbortController();
@@ -202,7 +205,17 @@ async function askOnce(
         finalText = event.text ?? "";
         return;
       }
-      if (event.type === "tool.activity") {
+      if (event.type === "tool.refused") {
+        /*
+         * Nothing happened, so nothing is said about it while the turn runs.
+         *
+         * A refusal used to arrive as `tool.activity` and became a progress verb — the working
+         * line saying "Looking through files" for a read the gate had just declined, which is
+         * the studio appearing to do the one thing it refused. It is recorded instead, and shown
+         * beside the reply, where it can contradict a claim to have done it (#506).
+         */
+        onRefused?.(event.tool);
+      } else if (event.type === "tool.activity") {
         // The tool, never its summary: the summary names entities, and that is what receipts are
         // for (R-18). The verb is all a progress line is allowed to be.
         onProgress?.(workingLabel(event.tool));
@@ -477,8 +490,19 @@ export class WorldChatRunner {
       // lands rather than after the first tool call — which may be twenty seconds in.
       progress?.(THINKING_LABEL);
 
+      /*
+       * Refusals accumulate across BOTH attempts of a turn, deduplicated by tool.
+       *
+       * Across both because the corrective attempt is the same turn from the person's side —
+       * they see one reply — and an agent refused a shell on the first attempt is exactly the one
+       * likely to try again on the second. Deduplicated because seven `Bash` calls are one thing
+       * that was refused, not seven (#506).
+       */
+      const refusedTools = new Set<string>();
+      const refused = (tool: string) => refusedTools.add(tool);
+
       const prompt = renderPrompt(assembled);
-      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress);
+      let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused);
 
       let outcome = await this.applyResult(
         store,
@@ -490,6 +514,7 @@ export class WorldChatRunner {
         linked,
         artDirectionLook,
         bible.version,
+        refusedTools,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -516,6 +541,7 @@ export class WorldChatRunner {
           timeoutMs,
           controller.signal,
           progress,
+          refused,
         );
         outcome = await this.applyResult(
           store,
@@ -527,6 +553,7 @@ export class WorldChatRunner {
           linked,
           artDirectionLook,
           bible.version,
+          refusedTools,
         );
       }
 
@@ -657,6 +684,8 @@ export class WorldChatRunner {
     artDirectionLook: CurrentLook | undefined,
     /** The bible version the prompt was assembled against — see RunDeps.bible. */
     bibleBaseVersion: number,
+    /** Tools the confinement refused while this turn ran, deduplicated by the caller (#506). */
+    refusedTools: ReadonlySet<string> = new Set(),
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -764,6 +793,10 @@ export class WorldChatRunner {
         },
         run: { ...runFrom(events, runId), status: "completed", endedAt: this.deps.now() },
         receipts: [...this.deps.receiptsFor(runId)],
+        // Written only when there were refusals, and capped at the schema's bound rather than
+        // left to reject the whole turn: an answer that survived validation must not be lost
+        // because the agent reached for one tool too many.
+        ...(refusedTools.size > 0 ? { refusedTools: [...refusedTools].slice(0, REFUSED_TOOLS_MAX) } : {}),
         candidates: revalidated,
         groups: outcome.turn.groups,
         tombstones: outcome.turn.tombstones,

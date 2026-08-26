@@ -173,6 +173,27 @@ export const HarnessEventSchema = z.discriminatedUnion("type", [
       summary: z.string(),
     })
     .strict(),
+  /**
+   * A tool call the confinement refused. Nothing happened (SPEC-005 R-10b).
+   *
+   * Separate from `tool.activity` rather than a flag on it, because the two mean opposite things
+   * and one consumer already treats activity as a progress verb: rendered as one, a refusal reads
+   * as work in progress — the studio appearing to do the very thing it just declined. It is also
+   * the only event here that is worth keeping after the turn ends. An agent that reports running
+   * a command it never ran is contradicted by nothing on the screen unless this is on it (#506).
+   *
+   * `summary` is the adapter's own wording and is for the trace, not the screen: it names the
+   * harness's tool (R-16 forbids that) and a refusal is not a receipt (#70 R-18). What a person
+   * is shown is worded from `tool` by the coordinator, in the product's language.
+   */
+  z
+    .object({
+      type: z.literal("tool.refused"),
+      sessionId: z.string(),
+      tool: z.string(),
+      summary: z.string(),
+    })
+    .strict(),
   /** A session ended — always with a stated reason, never silently (SPEC-005 R-13). */
   z
     .object({

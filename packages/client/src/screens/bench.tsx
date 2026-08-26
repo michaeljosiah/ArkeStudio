@@ -55,6 +55,7 @@ import {
 import { Button, Badge, cx } from "../components/ui.js";
 import { AppChrome } from "../components/chrome.js";
 import { ComposerMic } from "../components/dictation.js";
+import { dismissQueueNote } from "../components/queue-toaster.js";
 import {
   Book,
   ChevronDown,
@@ -415,7 +416,13 @@ function BenchWorkspace({
   );
 
   // ---- dispatch + its refusal ----
-  const [refusal, setRefusal] = useState<string | null>(null);
+  /**
+   * What the last press was refused with, and the request it was refused for. The request is
+   * carried because the same sentence is also raised as a notification over every screen, and
+   * withdrawing that one needs its id (issue 507). A refusal the screen raised for itself — a
+   * voice whose model is not here — has no request behind it.
+   */
+  const [refusal, setRefusal] = useState<{ reason: string; requestId: string | null } | null>(null);
   const pendingDispatch = useRef<string | null>(null);
   const pendingDispatchAction = useRef<{ kind: "dispatch" } | { kind: "rerun"; takeId: string } | null>(null);
   const [uploadConfirmation, setUploadConfirmation] = useState<{
@@ -429,7 +436,10 @@ function BenchWorkspace({
         pendingDispatch.current = null;
         setRefusal(
           result.disposition === "rejected"
-            ? (result.failures[0]?.reason ?? "That could not be dispatched.")
+            ? {
+                reason: result.failures[0]?.reason ?? "That could not be dispatched.",
+                requestId: result.requestId,
+              }
             : null,
         );
       }),
@@ -443,6 +453,34 @@ function BenchWorkspace({
       }),
     [],
   );
+
+  /**
+   * A refusal does not outlive its cause (issue 507).
+   *
+   * It was said about particular words and particular pictures — "the brief cites @Image 1, which
+   * is not attached" names both. Once either has moved it is a sentence about a request nobody is
+   * holding any more: the words on screen no longer say what it quotes, and a refusal still stated
+   * after the repair has been made is how people learn to stop reading refusals. Cleared from the
+   * same two inputs the composer's own early warning recomputes from, so the two cannot disagree
+   * about when the citation is settled. The notification raised for the same press carries the
+   * same sentence over every other screen, and goes with it.
+   */
+  const composedFor = JSON.stringify([draft.brief, attachedTokens]);
+  const standingRefusal = useRef(refusal);
+  standingRefusal.current = refusal;
+  /** Take back both surfaces at once, from the effect below and from the next press alike. */
+  const clearRefusal = () => {
+    const standing = standingRefusal.current;
+    if (standing === null) return;
+    setRefusal(null);
+    if (standing.requestId !== null) dismissQueueNote(standing.requestId);
+  };
+  useEffect(() => {
+    clearRefusal();
+    // The refusal is read through a ref, so this runs when the words or the pictures move and
+    // at no other time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composedFor]);
 
   const dispatchBench = (voiceUploadConfirmedFor?: string) => {
     pendingDispatchAction.current = { kind: "dispatch" };
@@ -1569,7 +1607,7 @@ function BenchWorkspace({
                 pendingDispatch.current !== null
               }
               onClick={() => {
-                setRefusal(null);
+                clearRefusal();
                 if (pushTimer.current) clearTimeout(pushTimer.current);
                 sendBenchCompose(worldId, session.id, draft);
                 dispatchBench();
@@ -1582,7 +1620,7 @@ function BenchWorkspace({
           </div>
           {refusal !== null && (
             <p role="alert" className="fy-bench__refusal">
-              {refusal}
+              {refusal.reason}
             </p>
           )}
         </div>
@@ -1851,7 +1889,10 @@ function BenchWorkspace({
               (candidate) => candidate.provider === voice.provider && candidate.id === voice.model,
             );
             if (!chosenModel) {
-              setRefusal("That voice's speech model is unavailable — choose another voice.");
+              setRefusal({
+                reason: "That voice's speech model is unavailable — choose another voice.",
+                requestId: null,
+              });
               return;
             }
             setVoiceOpen(false);

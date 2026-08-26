@@ -86,6 +86,71 @@ go and look.
 - Say so plainly when a search found nothing useful. A guess presented as a finding
   is worse than no finding.`;
 
+/**
+ * Each intent in the second person, for the one reader who has to act on it.
+ *
+ * Phrased so the same clause reads correctly on both sides of {@link confinementStatement} — "you
+ * can read files inside your working directory", "you cannot hand work to a sub-agent" — because
+ * two vocabularies for one intent is how the lists come to disagree.
+ */
+const INTENT_PHRASE: Record<ToolIntent, string> = {
+  read: "read files inside your working directory",
+  edit: "create and change files inside your working directory",
+  search: "search your working directory, by file name or by what is in the files",
+  list: "list directories inside your working directory",
+  todo: "keep your own scratch checklist",
+  "world-query": "read the wider world through the arke-world tools",
+  skill: "load a skill document",
+  delegate: "hand work to a sub-agent",
+  web: "search the public web and read a page from it",
+};
+
+/**
+ * The confinement, told to the agent it confines — both halves of it.
+ *
+ * Until this existed the boundary was expressed to an agent only as the set of tools it was
+ * handed, and an agent asked what it could do answered from its priors about the environment
+ * instead. Measured, in a World Chat turn against 0.5.50 (#506): asked whether it could run a
+ * shell command it said yes and named Git Bash and PowerShell, then, asked to run one and paste
+ * the output, reported the output and an exit code for a command that never ran. The gate refused
+ * every call correctly throughout. Nothing was damaged and the author was told the opposite of
+ * the truth, which is the failure this text is for.
+ *
+ * Derived from the allowlist rather than written out, so a new {@link ToolIntent} cannot appear
+ * on neither list, and a role that gains or loses one cannot leave a sentence behind saying
+ * otherwise. The fixed lines below the derived ones are the things no allowlist can say: that
+ * shell is absent rather than merely unlisted, that an unlisted tool is refused rather than
+ * prompted for, and that a tool result may never be described unless it actually came back.
+ */
+export function confinementStatement(confinement: AgentConfinement): string {
+  const say = (intents: readonly ToolIntent[]) => intents.map((i) => `- ${INTENT_PHRASE[i]}`).join("\n");
+  const can = ToolIntent.options.filter((intent) => permits(confinement, intent));
+  const cannot = ToolIntent.options.filter((intent) => !permits(confinement, intent));
+  return `You are running inside Arke Studio, which chooses your tools for you. What follows is the
+whole of what you have here — not a summary of it, and not the set you may have had elsewhere.
+
+What you can do:
+${say(can)}
+
+What you cannot do:
+${cannot.length > 0 ? `${say(cannot)}\n` : ""}- run a shell command. There is no Bash, no PowerShell, no terminal, no way to start a process.
+  It is not disabled behind a prompt you could ask someone to lift; there is no such tool here.
+- reach any other tool, or any MCP server other than arke-world. Anything not on the first list
+  is refused outright, and nobody is asked to approve it, so there is never a prompt pending.
+
+Two things follow from that, and they matter more than the lists.
+
+Do not plan work around a capability you do not have. If the only way you can think of to do
+something is a tool you have not been given, say that, and say what you would need.
+
+Never describe the result of a tool call you did not make. If a call comes back denied by Arke
+Studio confinement, say so plainly and say what you were trying to do. If you did not run
+something, say you did not run it. Inventing output — a command's lines, an exit code, a page you
+did not fetch — is the worst thing you can do here, because nothing on the person's screen
+contradicts it and they will act on it. When you are asked what you can do, answer from the two
+lists above and from nothing else.`;
+}
+
 /** Authors inside a proposal directory: the editing surface, plus the world it must not contradict. */
 const AUTHORING: AgentConfinement = {
   allow: ["read", "edit", "search", "list", "todo", "world-query", "skill"],

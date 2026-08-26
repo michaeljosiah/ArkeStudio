@@ -74,6 +74,7 @@ function stateWithConversation(): ClientState {
           role: "user",
           text: "Her aunt taught her the bells, not her mother.",
           receipts: [],
+          refusals: [],
           createdAt: "2026-08-06T10:00:00Z",
         },
         {
@@ -81,6 +82,7 @@ function stateWithConversation(): ClientState {
           role: "studio",
           text: "That changes the line of inheritance.",
           receipts: ["read Maren Kest v4", "searched 41 canon entries"],
+          refusals: [],
           createdAt: "2026-08-06T10:00:01Z",
         },
       ],
@@ -119,6 +121,18 @@ function stateWithConversation(): ClientState {
 
 function renderConversation(): string {
   __setStateForTest(stateWithConversation());
+  return renderToString(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
+/** The same conversation, with the reply the confinement refused something during. */
+function renderRefusedConversation(): string {
+  const state = stateWithConversation();
+  state.worldChat!.messages[1]!.refusals = ["run a command on your computer"];
+  __setStateForTest(state);
   return renderToString(
     <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
       <App />
@@ -383,6 +397,26 @@ describe("the transcript", () => {
 
   it("announces new replies to assistive technology", () => {
     assert.ok(renderConversation().includes('aria-live="polite"'));
+  });
+
+  /**
+   * A refused tool, under the reply that may be claiming it worked (issue 506).
+   *
+   * The measured failure was a reply saying "Ran it. Exact output: ... exit 0" for a command the
+   * gate had refused. The confinement did its job; nothing on the screen said so, so there was
+   * nothing to read the sentence against.
+   */
+  it("shows what the studio was refused, under the reply that was written anyway", () => {
+    const html = renderRefusedConversation();
+    const refusal = html.indexOf("run a command on your computer");
+    const reply = html.indexOf("That changes the line of inheritance.");
+    assert.ok(refusal > 0, "the refusal reaches the screen at all");
+    assert.ok(refusal > reply, "and sits under the reply, where it contradicts it");
+    assert.ok(html.includes('class="fy-chat__refusals"'), "in its own row, not among the receipts");
+  });
+
+  it("says nothing about refusals on an ordinary turn", () => {
+    assert.equal(renderConversation().includes("fy-chat__refusals"), false);
   });
 });
 

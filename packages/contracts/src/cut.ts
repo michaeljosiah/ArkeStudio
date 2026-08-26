@@ -473,6 +473,28 @@ export function exportAudioClips(
   return resolved;
 }
 
+/**
+ * How long a production with no story runs: everything the export can use, measured to its
+ * furthest reach.
+ *
+ * Resolved rather than counted off the lane records, because no surface may advertise a film the
+ * encode will not produce — a document stretched to 60s beside a 5s image is a 5s film.
+ *
+ * It lives here because several surfaces state this length and they have to state the same one.
+ * Two of them resolved the clips and the rail read the derived clock, which is zero for a
+ * production that never had a story: the rail and the switcher advertised a `0s` cut for a film
+ * the Cut header, the Exports button and the rendered file all agreed ran 28 seconds (issue 508).
+ */
+export function placedFilmSec(
+  overlays: readonly CutOverlay[],
+  artifacts: readonly ClipArtifact[],
+): number {
+  return placedExtentSec([
+    ...exportOverlays(overlays, artifacts),
+    ...exportAudioClips(overlays, artifacts),
+  ]);
+}
+
 /** Assemble from the derived cut: accepted material as clips, gaps as slates (D10, D11). */
 export function buildExportPlan(
   cut: DerivedCut,

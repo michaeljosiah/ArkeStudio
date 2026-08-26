@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { confinementFor, type AgentConfinement, type HarnessEvent } from "@arke-studio/contracts";
+import {
+  confinementFor,
+  confinementStatement,
+  ToolIntent,
+  type AgentConfinement,
+  type HarnessEvent,
+} from "@arke-studio/contracts";
 import { ClaudeAdapter, decideTool, type RunQuery } from "../src/index.js";
 import { tempDir } from "./tmp.js";
 
@@ -177,6 +183,73 @@ describe("what a permitted tool may be pointed at", () => {
   });
 });
 
+/**
+ * The prompt's claims, checked against the gate rather than against themselves (issue 506).
+ *
+ * `confinementStatement` is derived from the allowlist, so it cannot contradict the INTENTS. What
+ * it cannot see is this adapter's table, which decides which tool names carry which intent — and
+ * the sentence a person and an agent both rely on ("there is no shell here") is a claim about
+ * that table. A row added there could make the prompt a lie without touching the prompt.
+ */
+describe("what the prompt promises, and what the gate does", () => {
+  it("refuses every shell name for every role, which is what the prompt says outright", async () => {
+    for (const confinement of [authoring, readOnly, confinementFor({ readOnly: false }, { web: true })]) {
+      assert.match(confinementStatement(confinement), /no Bash, no PowerShell, no terminal/);
+      for (const tool of ["Bash", "BashOutput", "KillShell", "PowerShell", "Shell", "Execute", "Run"]) {
+        const decision = await decide(confinement, tool, { command: "echo probe" });
+        assert.equal(decision.allow, false, `${tool} is refused, so the prompt is telling the truth`);
+      }
+    }
+  });
+
+  it("permits exactly the intents the prompt offers, and nothing the prompt denies", async () => {
+    // One representative tool per intent, so the table and the statement are compared through
+    // the thing that actually decides — `decideTool` — rather than through the allowlist twice.
+    const SAMPLE: Record<ToolIntent, [string, Record<string, unknown>] | null> = {
+      read: ["Read", { file_path: join(CWD, "a.md") }],
+      edit: ["Write", { file_path: join(CWD, "a.md") }],
+      search: ["Grep", { pattern: "x" }],
+      // Claude Code has no tool carrying `list`: listing a directory is `Glob`, which is
+      // `search`. Null rather than a stand-in, so this does not quietly assert `search` twice.
+      list: null,
+      todo: ["TodoWrite", {}],
+      "world-query": ["mcp__arke-world__get_sheet", { id: "maren-kest" }],
+      skill: ["Skill", {}],
+      delegate: ["Task", {}],
+      web: ["WebSearch", { query: "x" }],
+    };
+    for (const readOnlyRole of [true, false]) {
+      for (const web of [true, false]) {
+        const confinement = confinementFor({ readOnly: readOnlyRole }, { web });
+        const statement = confinementStatement(confinement);
+        const offered = statement.slice(0, statement.indexOf("What you cannot do:"));
+        for (const intent of ToolIntent.options) {
+          const sample = SAMPLE[intent];
+          if (sample === null) continue;
+          const decision = await decide(confinement, sample[0], sample[1]);
+          const promised = offered.includes(PHRASE[intent]);
+          assert.equal(
+            decision.allow,
+            promised,
+            `${intent}: the gate says ${decision.allow}, the prompt says ${promised}`,
+          );
+        }
+      }
+    }
+  });
+});
+
+/** The statement's own phrase for an intent, read back out of a single-intent statement. */
+const PHRASE = Object.fromEntries(
+  ToolIntent.options.map((intent) => [
+    intent,
+    confinementStatement({ allow: [intent] })
+      .split("\n")
+      .find((l) => l.startsWith("- ") && !l.includes("shell command") && !l.includes("any other tool"))!
+      .slice(2),
+  ]),
+) as Record<ToolIntent, string>;
+
 describe("the gate the adapter actually installs", () => {
   it("judges a path against the session's own directory, not the process's", async () => {
     const outside = await tempDir("arke-claude-outside-");
@@ -191,6 +264,40 @@ describe("the gate the adapter actually installs", () => {
     assert.equal(denied.behavior, "deny", "the same tool, the same intent, a different place");
     assert.match(denied.message ?? "", /working directory/);
     await adapter.dispose();
+  });
+
+  /**
+   * The shell, which is what #506 was actually about.
+   *
+   * `Bash` is absent from the intent table, so it is refused as unknown — the allowlist working
+   * exactly as designed. What was missing is any record of it: the refusal was an activity event,
+   * and an activity event is a progress verb that is gone the moment the turn ends.
+   */
+  it("refuses a shell and says so as a refusal, so the turn leaves a record of it", async () => {
+    const events: HarnessEvent[] = [];
+    const fake = fakeQuery();
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    const stream = adapter.streamEvents();
+    const pump = (async () => {
+      for await (const event of stream) events.push(event);
+    })();
+
+    const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "sheet-editor" });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    const gate = fake.options()["canUseTool"] as Gate;
+    const denied = await gate("Bash", { command: "echo ARKE_SHELL_PROBE_7731" });
+    await adapter.dispose();
+    await pump;
+
+    assert.equal(denied.behavior, "deny", "no role has a shell, and the authoring role least of all");
+    const refused = events.filter((e) => e.type === "tool.refused");
+    assert.equal(refused.length, 1);
+    assert.equal(refused[0]?.type === "tool.refused" && refused[0].tool, "Bash");
+    assert.equal(
+      events.some((e) => e.type === "tool.activity"),
+      false,
+      "and it is never reported as something the studio did",
+    );
   });
 
   it("keeps the refused path out of what it shows and what it tells the agent", async () => {
@@ -214,9 +321,14 @@ describe("the gate the adapter actually installs", () => {
 
     assert.equal(denied.behavior, "deny");
     assert.equal(denied.message?.includes(secret), false, "the refusal must not echo the file back to the agent");
-    const activity = events.filter((e) => e.type === "tool.activity");
-    assert.equal(activity.length, 1);
-    assert.equal(activity[0]?.type === "tool.activity" && activity[0].summary.includes(secret), false);
+    const refused = events.filter((e) => e.type === "tool.refused");
+    assert.equal(refused.length, 1, "a refusal is its own event, never progress (#506)");
+    assert.equal(
+      events.some((e) => e.type === "tool.activity"),
+      false,
+      "nothing happened, so nothing is reported as activity",
+    );
+    assert.equal(refused[0]?.type === "tool.refused" && refused[0].summary.includes(secret), false);
     // An operator still needs to know WHICH path was refused. That is what the trace is for.
     const refusal = traces.find((l) => l["at"] === "claude.tool-refused");
     assert.equal(refusal?.["reason"], "outside");
