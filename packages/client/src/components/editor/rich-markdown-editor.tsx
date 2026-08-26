@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { cx } from "../ui.js";
 import { commitMarkdown, type ReconcileBaselines } from "./commit.js";
 import { markdownExtensions } from "./extensions.js";
 import { dropStrandedEmptyBlocks, normalizeSoftBreaks } from "./normalize.js";
@@ -37,10 +38,20 @@ const SERIALIZE_MS = 400;
 interface RichMarkdownEditorProps {
   /** Markdown in. Changing this from outside adopts the new document. */
   value: string;
-  /** Markdown out, already carried onto `value`'s formatting. */
-  onChange: (markdown: string) => void;
+  /** Markdown out, already carried onto `value`'s formatting. Never called while read-only. */
+  onChange?: (markdown: string) => void;
   placeholder?: string;
   ariaLabel: string;
+  /**
+   * Show the document, take no edits (issue 477).
+   *
+   * The artifact viewer opens a `.md` artifact through this component so a filed document reads
+   * the way the bible does — headings, lists, tables, task items — rather than as raw markdown in
+   * a grey box. Artifacts are immutable, though: superseding one files new bytes as a new
+   * artifact (SPEC-015 R-5), and there is no such filing path from the shelf yet. Until there
+   * is, the honest surface is one that cannot be typed into and says so.
+   */
+  readOnly?: boolean;
 }
 
 export function RichMarkdownEditor({
@@ -48,6 +59,7 @@ export function RichMarkdownEditor({
   onChange,
   placeholder,
   ariaLabel,
+  readOnly = false,
 }: RichMarkdownEditorProps) {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
@@ -63,6 +75,10 @@ export function RichMarkdownEditor({
 
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Read from a ref for the same reason the menu state is: `commit` is closed over by ProseMirror
+  // and by the unmount flush, and neither re-reads a prop.
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
 
   const [menu, setMenu] = useState<SlashMenuState | null>(null);
   const [commands, setCommands] = useState<SlashCommand[]>(SLASH_COMMANDS);
@@ -98,8 +114,11 @@ export function RichMarkdownEditor({
   }, []);
 
   const commit = useCallback(() => {
+    // A read-only document has nothing to write back, and writing one anyway would hand a caller
+    // that never offered a sink some bytes to file.
+    if (readOnlyRef.current) return;
     const { markdown, changed } = commitMarkdown(editorRef.current, baselines, serializeMarkdown);
-    if (changed) onChangeRef.current(markdown);
+    if (changed) onChangeRef.current?.(markdown);
   }, [baselines]);
 
   const flush = useCallback(() => {
@@ -130,7 +149,12 @@ export function RichMarkdownEditor({
   const mountContent = useRef(value).current;
   const editorProps = useMemo(
     () => ({
-      attributes: { class: "fy-rme__doc", "aria-label": ariaLabel, spellcheck: "true" },
+      attributes: {
+        class: "fy-rme__doc",
+        "aria-label": ariaLabel,
+        spellcheck: readOnly ? "false" : "true",
+        ...(readOnly ? { "aria-readonly": "true" } : {}),
+      },
       handleKeyDown: (_view: unknown, event: KeyboardEvent) => {
         const open = menuRef.current;
         if (!open) return false;
@@ -161,11 +185,12 @@ export function RichMarkdownEditor({
         return false;
       },
     }),
-    [ariaLabel],
+    [ariaLabel, readOnly],
   );
 
   const editor = useEditor({
     immediatelyRender: false,
+    editable: !readOnly,
     content: mountContent,
     contentType: "markdown",
     extensions,
@@ -248,7 +273,7 @@ export function RichMarkdownEditor({
   }, [editor, value]);
 
   return (
-    <div className="fy-rme" ref={shellRef} onBlur={flush}>
+    <div className={cx("fy-rme", readOnly && "fy-rme--read")} ref={shellRef} onBlur={flush}>
       <EditorContent editor={editor} />
       {menu && editor && (
         <SlashMenu

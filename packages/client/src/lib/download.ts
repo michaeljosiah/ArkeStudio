@@ -25,7 +25,12 @@ export function downloadNameFor(path: string, offered?: string | null): string {
   return downloadFileName(path, offered);
 }
 
-async function saveInBrowser(worldSlug: string, path: string, name: string): Promise<DownloadOutcome> {
+async function saveInBrowser(
+  worldSlug: string,
+  path: string,
+  name: string,
+  noun: string,
+): Promise<DownloadOutcome> {
   /*
    * Fetched to a Blob rather than pointed at with `<a download>`.
    *
@@ -37,12 +42,12 @@ async function saveInBrowser(worldSlug: string, path: string, name: string): Pro
   let blob: Blob;
   try {
     const response = await fetch(mediaUrl(worldSlug, path));
-    if (!response.ok) return { ok: false, reason: `the image could not be read (${response.status})` };
+    if (!response.ok) return { ok: false, reason: `the ${noun} could not be read (${response.status})` };
     blob = await response.blob();
   } catch {
-    return { ok: false, reason: "the image could not be read" };
+    return { ok: false, reason: `the ${noun} could not be read` };
   }
-  if (blob.size === 0) return { ok: false, reason: "that image is empty" };
+  if (blob.size === 0) return { ok: false, reason: `that ${noun} is empty` };
   const url = URL.createObjectURL(blob);
   try {
     const anchor = document.createElement("a");
@@ -70,16 +75,23 @@ export async function downloadMedia(
   worldSlug: string | undefined,
   path: string,
   offered?: string | null,
+  /**
+   * What to call the thing in a failure line. Every picture in the app says "image"; the artifact
+   * viewer opens video, audio, documents and PDFs through this same path (issue 477), and telling
+   * somebody their video could not be saved because "the image could not be read" is a message
+   * that sends them looking for a picture.
+   */
+  noun = "image",
 ): Promise<DownloadOutcome> {
-  if (!worldSlug || !path) return { ok: false, reason: "there is no image here to save" };
+  if (!worldSlug || !path) return { ok: false, reason: `there is no ${noun} here to save` };
   const name = downloadNameFor(path, offered);
   const host = typeof window === "undefined" ? undefined : window.arke?.saveMedia;
   if (host) {
     try {
       return await host(worldSlug, path, name);
     } catch {
-      return { ok: false, reason: "the app could not save that image" };
+      return { ok: false, reason: `the app could not save that ${noun}` };
     }
   }
-  return await saveInBrowser(worldSlug, path, name);
+  return await saveInBrowser(worldSlug, path, name, noun);
 }

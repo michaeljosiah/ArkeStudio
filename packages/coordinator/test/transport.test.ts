@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
 import { FrameSchema, vendorAuthUnavailable, type ClientState, type Frame } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
+import { FsWorldProvider } from "../src/world/provider.js";
+import { tempDir } from "./tmp.js";
 
 const STATE: ClientState = {
   app: {
@@ -271,6 +275,91 @@ describe("Transport", () => {
       client.close();
     } finally {
       await transport.stop();
+    }
+  });
+});
+
+/**
+ * The read-only media route, end to end (issue 477).
+ *
+ * `parseByteRange` is unit-tested next door; what is proved here is the plumbing around it — that
+ * a ranged request comes back 206 with a `Content-Range` a `<video>` can seek against, that an
+ * artifact's markdown arrives with a text content type the viewer can read and its bytes intact,
+ * and that the resolver's refusal is a 404 rather than anything the renderer could work around.
+ */
+describe("the media route", () => {
+  const CLIP = Buffer.from("0123456789abcdefghij");
+  // Blank lines, trailing space and a final newline: the parts a viewer would quietly eat.
+  const NOTE = ["# Saltlight", "", "One night on the Vigil.   ", "", ""].join("\n");
+
+  /** A transport serving one world's artifacts through the real resolver; base URL of that world. */
+  async function serving(t: TestContext): Promise<string> {
+    const root = await tempDir("arke-media-route-");
+    await mkdir(join(root, "worlds", "the-undersong", "artifacts"), { recursive: true });
+    await writeFile(join(root, "worlds", "the-undersong", "artifacts", "vigil.mp4"), CLIP);
+    await writeFile(join(root, "worlds", "the-undersong", "artifacts", "treatment.md"), NOTE, "utf8");
+    await writeFile(join(root, "worlds", "the-undersong", "artifacts", "treatment.md.json"), "{}", "utf8");
+    const provider = new FsWorldProvider(root, { clock: () => "2026-08-26T10:00:00.000Z" });
+    const transport = new Transport({
+      getSnapshot: () => STATE,
+      // The same one line the coordinator wires up, so the route under test is the real one.
+      serveFile: async (urlPath) => {
+        const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
+        return match ? await provider.serveMedia(match[1]!, match[2]!) : null;
+      },
+    });
+    const port = await transport.start(0);
+    t.after(async () => {
+      await transport.stop();
+      await provider.close();
+    });
+    return `http://127.0.0.1:${port}/media/the-undersong`;
+  }
+
+  it("sends the whole file when nothing was asked for, and says it takes ranges", async (t) => {
+    const base = await serving(t);
+    const res = await fetch(`${base}/artifacts/vigil.mp4`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "video/mp4");
+    assert.equal(res.headers.get("accept-ranges"), "bytes");
+    assert.equal(res.headers.get("content-length"), String(CLIP.length));
+    assert.equal(Buffer.from(await res.arrayBuffer()).toString(), CLIP.toString());
+  });
+
+  it("answers a range with 206 and the window it actually sent — what seeking runs on", async (t) => {
+    const base = await serving(t);
+    const res = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=4-8" } });
+    assert.equal(res.status, 206);
+    assert.equal(res.headers.get("content-range"), `bytes 4-8/${CLIP.length}`);
+    assert.equal(res.headers.get("content-length"), "5");
+    assert.equal(await res.text(), "45678");
+
+    // The suffix form a player sends looking for the trailing atoms — the one that reads backwards.
+    const tail = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=-4" } });
+    assert.equal(tail.status, 206);
+    assert.equal(tail.headers.get("content-range"), `bytes 16-19/${CLIP.length}`);
+    assert.equal(await tail.text(), "ghij");
+  });
+
+  it("refuses a window past the end with 416 rather than a short body", async (t) => {
+    const base = await serving(t);
+    const res = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=900-999" } });
+    assert.equal(res.status, 416);
+    assert.equal(res.headers.get("content-range"), `bytes */${CLIP.length}`);
+  });
+
+  it("serves an artifact's markdown as text, whitespace and line endings intact", async (t) => {
+    const base = await serving(t);
+    const res = await fetch(`${base}/artifacts/treatment.md`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(await res.text(), NOTE);
+  });
+
+  it("404s what the resolver refuses — the sidecar beside the file included", async (t) => {
+    const base = await serving(t);
+    for (const path of ["artifacts/treatment.md.json", "artifacts/../world.json", "artifacts/missing.mp4"]) {
+      assert.equal((await fetch(`${base}/${path}`)).status, 404, `served ${path}`);
     }
   });
 });
