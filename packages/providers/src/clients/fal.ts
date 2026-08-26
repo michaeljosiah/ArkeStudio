@@ -269,6 +269,7 @@ export class FalClient implements ProviderClient {
         ...imageOutput,
         ...imagePayload,
       }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;
     if (status >= 400 || !requestId) throw new Error(`fal: submit failed (HTTP ${status})`);
