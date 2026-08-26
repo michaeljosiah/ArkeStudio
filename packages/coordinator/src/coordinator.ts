@@ -8,6 +8,8 @@ import {
   JobSchema,
   CHARACTER_REFERENCE_ARTIFACT_TARGETS,
   REFERENCE_FINALIZATION_TARGETS,
+  UlidSchema,
+  keyArtBriefProse,
   imageConstraintSuffix,
   stagedReferenceKey,
   LedgerEntrySchema,
@@ -220,21 +222,22 @@ import {
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
+import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, keyArtPrompt, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
+import { adoptKeyArtCandidate } from "./references/key-art.js";
+import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
-  KEY_ART_EXTENSIONS,
-  WORLD_IMAGE_DIR,
-  WORLD_IMAGE_STEM,
-  keyArtPrompt,
-  worldImageRequest,
-} from "./references/world-image.js";
-import {
+  LOOK_PREVIEW_DIR,
+  LOOK_PREVIEW_META,
+  LOOK_PREVIEW_NAME,
   MASTER_LOOK_DIR,
   MASTER_LOOK_DIR_ACCEPTED,
+  lookPreviewRequest,
   masterLookFile,
   masterLookRequest,
   stagedFor,
   stagedReferenceDir,
 } from "./references/master-look.js";
+import { foldBlueprint } from "./harness/blueprint.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -282,6 +285,7 @@ import {
   settlePermission,
 } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
+import { FoundingBuildService } from "./world/founding-build.js";
 import { isAuthShapedFailure, VendorAuthService } from "./harness/vendor-auth.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
@@ -664,6 +668,8 @@ export class Coordinator {
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
+  /** The founding build (SPEC-031): one press that makes the whole world. */
+  private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
   private readonly lifecycleDisposers = new Set<() => void>();
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
@@ -1138,9 +1144,16 @@ export class Coordinator {
                 event.type === "job.updated" &&
                 (event.job.status === "succeeded" ||
                   event.job.status === "failed" ||
-                  event.job.status === "cancelled")
+                  event.job.status === "cancelled" ||
+                  event.job.status === "needs-reconciliation")
               ) {
-                void this.advancePlansForJob(event.job).catch(() => {});
+                if (event.job.status !== "needs-reconciliation") {
+                  void this.advancePlansForJob(event.job).catch(() => {});
+                }
+                // A founding build waiting on this job wakes without waiting out its tick —
+                // needs-reconciliation included, because that is build-terminal (SPEC-031 R-23).
+                // A held item whose lane the author resumed also lands here (R-49).
+                this.foundingBuild?.noteJobSettled(event.job);
               }
             },
             ledger: {
@@ -1150,6 +1163,14 @@ export class Coordinator {
             },
             landInWorld: async (worldId, fn) => {
               try {
+                // A conversation-scoped job (SPEC-031 R-55) lands in its sandbox: there is
+                // no world, no lock and no watcher — the directory is the whole destination.
+                if (!UlidSchema.safeParse(worldId).success) {
+                  const sandbox = await this.opts.provider.genesisDir?.(worldId);
+                  if (!sandbox) return false;
+                  await fn(sandbox);
+                  return true;
+                }
                 if (this.opts.provider.withWorldStore) {
                   await this.opts.provider.withWorldStore(worldId, (store) =>
                     store.ownedWrite(() => fn(store.dir)),
@@ -1306,6 +1327,13 @@ export class Coordinator {
       },
       // GET /media/<world-slug>/<world-relative-file> — read-only renderer media.
       serveFile: async (urlPath) => {
+        // GET /genesis-media/<genesis-id>/<sandbox-relative-file> — the look preview, which
+        // exists before any world does (SPEC-031 R-50). A distinct prefix, not a magic slug:
+        // sandboxes and worlds are different roots and must never shadow each other.
+        const genesis = /^\/genesis-media\/([^/]+)\/(.+)$/.exec(urlPath);
+        if (genesis && this.opts.provider.serveGenesisMedia) {
+          return this.opts.provider.serveGenesisMedia(genesis[1]!, genesis[2]!);
+        }
         const match = /^\/media\/([^/]+)\/(.+)$/.exec(urlPath);
         if (!match || !this.opts.provider.serveMedia) return null;
         return this.opts.provider.serveMedia(match[1]!, match[2]!);
@@ -1348,6 +1376,75 @@ export class Coordinator {
       opts.adapter && opts.authoring
         ? new GenesisService(opts.adapter, (event) => this.emit(event), {
             sessionInput: this.sessionInput,
+          })
+        : null;
+    // The founding build needs a queue to dispatch through and a provider that can create
+    // worlds; without either, Begin keeps its pre-build shape and the frames are ignored.
+    this.foundingBuild =
+      this.jobQueue && opts.provider.createWorld && opts.provider.genesisDir
+        ? new FoundingBuildService({
+            nowIso: () => new Date().toISOString(),
+            manifest: opts.manifest ?? null,
+            loadSettings: async () => (this.appSettings ? this.appSettings.load() : null),
+            credentialFor: async (provider) =>
+              this.credentials ? this.credentials.get(provider as ProviderId) : null,
+            harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
+            genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
+            discardGenesis: async (genesisId) => this.opts.provider.discardGenesis?.(genesisId),
+            releaseGenesis: (genesisId) => this.genesis?.release(genesisId),
+            createWorld: async (input) => {
+              const created = await this.opts.provider.createWorld!(input);
+              this.readModel.setWorlds(await this.opts.provider.listWorlds());
+              return created;
+            },
+            openWorld: (worldId) => this.openWorld(worldId),
+            openStore: () => this.opts.provider.openStore?.() ?? null,
+            gate: () => this.opts.provider.gate?.() ?? null,
+            carryAttachments: (genesisId, worldId) => this.carryGenesisAttachments(genesisId, worldId),
+            adoptScopedJobs: async (genesisId, worldId) => {
+              for (const job of this.jobQueue?.listJobs() ?? []) {
+                if (job.worldId === genesisId) await this.jobQueue?.adoptWorld(job.id, worldId);
+              }
+            },
+            scopedJobs: (genesisId) =>
+              (this.jobQueue?.listJobs() ?? []).filter((job) => job.worldId === genesisId),
+            cancelScopedJobs: async (genesisId) => {
+              for (const job of this.jobQueue?.listJobs() ?? []) {
+                if (
+                  job.worldId === genesisId &&
+                  (job.status === "queued" || job.status === "submitting" || job.status === "running")
+                ) {
+                  await this.jobQueue?.cancel(job.id).catch(() => {});
+                }
+              }
+            },
+            authorSheet: async (store, gate, input) => {
+              if (!this.authoring || this.opts.adapter?.readiness().ready !== true) return;
+              const worldQueryUrl = await this.worldQuery.start();
+              await this.authoring.run(
+                store,
+                gate,
+                {
+                  worldId: input.worldId,
+                  proposalId: input.proposalId,
+                  purpose: "authoring",
+                  instruction: `${input.scope}\n\nDraft the full ${input.sheetType} sheet in ${input.path} from this seed: "${input.seed}". Fill every section the file already has headings for; keep the name "${input.name}"; leave canonRules and links as they are.`,
+                },
+                worldQueryUrl,
+              );
+            },
+            enqueue: (input) => this.enqueueJob(input),
+            jobById: (jobId) => this.jobQueue?.listJobs().find((job) => job.id === jobId),
+            ledgerEntryFor: async (jobId) =>
+              this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === jobId) : undefined,
+            cancelJob: async (jobId) => {
+              await this.jobQueue?.cancel(jobId);
+            },
+            queueStatuses: () => this.readModel.getState().app.queues,
+            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId),
+            refreshWorldList: () => this.refreshWorldList(),
+            emit: (event) => this.emit(event),
+            log: (record) => void this.appLog?.append(record),
           })
         : null;
     this.setup =
@@ -1608,6 +1705,25 @@ export class Coordinator {
     }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
+    // Founding builds survive the process (SPEC-031 R-32, R-33): every world's build record
+    // is peeked at startup — files only, never a store open — so a run cut off mid-wave is
+    // known before any screen asks, and its notice is still standing (R-45). The run itself
+    // resumes when its world opens; discovery here is what lets the client route back to it.
+    if (this.foundingBuild && this.opts.provider.worldDir) {
+      for (const summary of this.readModel.getState().worlds) {
+        try {
+          const dir = await this.opts.provider.worldDir(summary.worldId);
+          await this.foundingBuild.load(dir, summary.worldId);
+        } catch {
+          /* not a world any more, or no build — nothing to know */
+        }
+      }
+      // Kept in memory only while there is something to know: a run in flight, or work that
+      // did not land. A build whose every item landed years ago is just a record on disk.
+      this.foundingBuild.forgetSettled();
+      this.readModel.setBuilds(this.foundingBuild.states());
+    }
+
     const boundPort = await this.transport.start(port);
     this.readModel.setHealth("coordinator", { status: "healthy" });
 
@@ -1788,6 +1904,9 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+    // A founding build parked when its world stopped being the open one resumes here — a fold
+    // over the record and the journal, never a timer or a live session (SPEC-031 R-32, R-33).
+    void this.foundingBuild?.resume(worldId).catch(() => {});
     /*
      * Worlds filed before measuring existed get measured once, here, after the snapshot (issue 283).
      *
@@ -1986,6 +2105,10 @@ export class Coordinator {
    * surface sees it. Establish candidates just land; the client lists them off the job row.
    */
   private async onJobTerminal(job: Job): Promise<void> {
+    // A conversation-scoped job (SPEC-031 R-55) has no world to finalize into: its landing
+    // was the sandbox, and looking its scope up as a world would scan every world's meta
+    // just to throw. The genesis rail reads the job row itself.
+    if (!UlidSchema.safeParse(job.worldId).success) return;
     if (job.status !== "succeeded") {
       if (job.target.kind === "voice-preview" && typeof job.params["requestId"] === "string") {
         const readIdentity = voiceJobReadIdentity(job);
@@ -2124,7 +2247,10 @@ export class Coordinator {
         if (!take) throw new Error("reference take finalization produced no take");
         // The human's own action rule (frames.ts, assign-voice): a composite the user asked for
         // lands designated — there is no review step for the person who pressed the button.
-        // Sheet generation has no agent path today; if one arrives, it must stage instead.
+        // Sheet generation has no agent path; if one arrives, it must stage instead. A founding
+        // build is NOT that path (SPEC-031 D2): the press is a person's, the cap is stated, and
+        // the spend is authorized before anything runs — its sheets land designated under the
+        // same rule as a user-pressed generation, through this branch and its own landing.
         // Failure leaves the take pending, and the review strip still knows how to offer it.
         if (job.target.kind === "character-sheet" && take.media) {
           const sheetId = job.target.id?.split("/")[0];
@@ -3407,10 +3533,123 @@ export class Coordinator {
       }
       case "genesis-discard": {
         this.genesis?.release(msg.genesisId);
+        // A conversation-scoped job still in flight is cancelled with its conversation
+        // (SPEC-031 row 16): the queue then discards a late delivery rather than landing it
+        // into a sandbox this sweep is about to remove — and would otherwise re-create.
+        // The ledger keeps whatever the cancellation cost; that is the correct record.
+        for (const job of this.jobQueue?.listJobs() ?? []) {
+          if (
+            job.worldId === msg.genesisId &&
+            (job.status === "queued" || job.status === "submitting" || job.status === "running")
+          ) {
+            await this.jobQueue?.cancel(job.id).catch(() => {});
+          }
+        }
         // Anything still being carried into the new world finishes first — otherwise Begin
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
         await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
+        return;
+      }
+      case "generate-look-preview": {
+        // One picture of the look, before any world exists (SPEC-031 R-50). A person pressed
+        // this — the agent can only propose (R-51) — and the spend is conversation-scoped (R-55).
+        const genesisDir = this.opts.provider.genesisDir;
+        if (!genesisDir || !this.opts.manifest) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Look previews are unavailable.");
+          return;
+        }
+        const sandbox = await genesisDir(msg.genesisId);
+        const blueprint = await foldBlueprint(sandbox);
+        if (blueprint.look === undefined) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The conversation has not settled a look yet.");
+          return;
+        }
+        const model = imageModelFor(
+          this.appSettings ? await this.appSettings.load() : null,
+          this.opts.manifest,
+        );
+        if (!model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "No image model is available. Check provider settings.");
+          return;
+        }
+        // One preview at a time (R-51): a second press while one is in flight would be a
+        // second spend for one picture, and its landing could contradict the metadata.
+        const inFlight = this.jobQueue
+          ?.listJobs()
+          .some(
+            (job) =>
+              job.worldId === msg.genesisId &&
+              job.target.kind === "look-preview" &&
+              (job.status === "queued" || job.status === "submitting" || job.status === "running"),
+          );
+        if (inFlight === true) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "A look preview is already being made.");
+          return;
+        }
+        const request = lookPreviewRequest(msg.genesisId, blueprint.look, model);
+        // The exact look text is durable BEFORE the job exists (R-53): without it, Begin
+        // could not tell a preview of the founded look from a preview of rejected words —
+        // and it would have to either install rejected art or discard valid art (R-54).
+        // A stale image from an earlier preview goes with it, so metadata and picture can
+        // never disagree about which generation they describe.
+        for (const extension of KEY_ART_EXTENSIONS) {
+          const stale = LOOK_PREVIEW_NAME.replace(/\.png$/, extension);
+          await rm(toExtendedLength(join(sandbox, LOOK_PREVIEW_DIR, stale)), { force: true }).catch(() => {});
+        }
+        await atomicWriteFile(
+          join(sandbox, LOOK_PREVIEW_DIR, LOOK_PREVIEW_META),
+          JSON.stringify({ look: blueprint.look, requestId: msg.requestId, at: new Date().toISOString() }) + "\n",
+        );
+        await this.enqueueBatch(msg.requestId, msg.kind, [request]);
+        return;
+      }
+      case "plan-founding-build": {
+        if (!this.foundingBuild) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "build.plan",
+            genesisId: msg.genesisId,
+            requestId: msg.requestId,
+            plan: null,
+            reason: "the founding build is not available in this configuration",
+          });
+          return;
+        }
+        await this.foundingBuild.plan(msg.genesisId, msg.requestId);
+        return;
+      }
+      case "begin-founding-build": {
+        if (!this.foundingBuild) return;
+        try {
+          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look);
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "build.plan",
+            genesisId: msg.genesisId,
+            requestId: msg.requestId,
+            plan: null,
+            reason: err instanceof Error ? err.message : "the build could not begin",
+          });
+        }
+        return;
+      }
+      case "stop-founding-build": {
+        await this.foundingBuild?.stop(msg.worldId);
+        return;
+      }
+      case "run-build-item": {
+        if (!this.foundingBuild) return;
+        // The landing paths need the build's world open; Activity may be scoped elsewhere.
+        if (this.opts.provider.openStore?.()?.worldId !== msg.worldId) {
+          await this.openWorld(msg.worldId).catch(() => {});
+        }
+        await this.foundingBuild.runItems(msg.worldId, msg.itemKey, msg.requestId).catch(() => {});
+        return;
+      }
+      case "dismiss-build-notice": {
+        await this.foundingBuild?.dismissNotice(msg.worldId);
         return;
       }
       case "authoring-cancel": {
@@ -6838,6 +7077,41 @@ export class Coordinator {
         );
         return;
       }
+      case "plan-key-art": {
+        // The dialog's honest opening (SPEC-010 R-15): what would be carried and what would
+        // be dropped, named before the user commits — and the words the box opens with are
+        // the words the dispatch would actually compose, brief and bible included (R-58).
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.opts.manifest) return;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        const bundle = store.getBundle();
+        const brief = await readKeyArtBrief(store.dir);
+        const staged = model ? stagedFor(bundle, stagedReferenceKey("world-image"), model)[0] : undefined;
+        const assembly =
+          model && brief !== null
+            ? await assembleKeyArt(store, bundle, brief, model, staged)
+            : { carried: [], dropped: [], references: [], referenceRoles: [], sheets: {} };
+        const prompt =
+          brief !== null
+            ? keyArtComposition({
+                meta: bundle.meta,
+                direction: bundle.artDirection,
+                bible: bundle.bible.present ? bundle.bible.text : "",
+                brief,
+                cast: assembly.carried.filter((r) => r.role === "identity").map((r) => r.name),
+              })
+            : worldImagePrompt(bundle.meta, bundle.artDirection);
+        this.emit({
+          at: new Date().toISOString(),
+          type: "world-image.plan",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          prompt,
+          carried: assembly.carried.map(({ name, role }) => ({ name, role })),
+          dropped: assembly.dropped,
+        });
+        return;
+      }
       case "generate-world-image": {
         const store = this.opts.provider.openStore?.();
         if (!store || !this.opts.manifest) {
@@ -6860,6 +7134,33 @@ export class Coordinator {
           return;
         }
         const bundle = store.getBundle();
+        // The world's key image draws on the bible and the cast, not the logline and two
+        // adjectives (SPEC-031 R-58) — wherever a founding conversation left a brief. The
+        // same assembly serves the build and this Regenerate alike (R-62): the brief says
+        // which characters appear, their anchors ride as identity references, a named drop
+        // is recorded before dispatch, and the staged style image is never displaced (R-59,
+        // R-60).
+        const brief = await readKeyArtBrief(store.dir);
+        const staged = stagedFor(bundle, stagedReferenceKey("world-image"), model)[0];
+        const assembly =
+          brief !== null
+            ? await assembleKeyArt(store, bundle, brief, model, staged)
+            : {
+                // A world has no reference kit, so without a brief the staged image is the
+                // only reference key art can ever carry — role style, as before.
+                references: staged !== undefined ? [staged] : [],
+                referenceRoles: staged !== undefined ? [{ file: staged, role: "style" }] : [],
+                carried: [],
+                dropped: [],
+                sheets: {},
+              };
+        if (assembly.dropped.length > 0) {
+          void this.appLog?.append({
+            kind: "world-image.references-dropped",
+            worldId: msg.worldId,
+            dropped: assembly.dropped,
+          });
+        }
         // Ask the harness to write the prompt, and carry on without it if it cannot. A writing
         // model turns "a drowned god still sings" into light, material and lens; the plain
         // assembly is a weaker prompt, but it is a prompt, and a picture still gets made.
@@ -6869,6 +7170,9 @@ export class Coordinator {
         // to it is a decision about this picture, and rewriting it would discard that decision.
         const authored = "prompt" in msg ? msg.prompt?.trim() : undefined;
         let prompt: string | null = null;
+        const castInFrame = assembly.carried
+          .filter((reference) => reference.role === "identity")
+          .map((reference) => reference.name);
         if (authored === undefined && this.opts.adapter?.readiness().ready) {
           const director = makeArtDirector(
             this.opts.adapter,
@@ -6881,7 +7185,13 @@ export class Coordinator {
             .filter((c) => c.status !== "open")
             .slice(0, 6)
             .map((c) => c.title);
-          prompt = await director(worldBrief(bundle.meta, canonLines)).catch(() => null);
+          prompt = await director(
+            worldBrief(bundle.meta, canonLines, {
+              ...(bundle.bible.present ? { bible: bundle.bible.text } : {}),
+              ...(brief !== null ? { keyArtBrief: keyArtBriefProse(brief) } : {}),
+              cast: castInFrame,
+            }),
+          ).catch(() => null);
           void this.appLog?.append({
             kind: prompt ? "world-image.prompt-written" : "world-image.prompt-unavailable",
             worldId: msg.worldId,
@@ -6892,18 +7202,27 @@ export class Coordinator {
         // sharing one landing name would be four charges and one file — the defect the character
         // candidates were numbered to fix, and there is no reason for this path to relearn it.
         const count = ("count" in msg ? msg.count : undefined) ?? 1;
-        // A world has no reference kit, so a staged image is the only reference key art can ever
-        // carry — and it goes in only when there is one, because an empty references field is one
-        // more thing a provider has to know to ignore, and OpenAI answers unknown fields with 400.
-        const stagedKeyArt = stagedFor(bundle, stagedReferenceKey("world-image"), model);
+        const extras = {
+          // What this was made from (R-61): the look's version rides in params.artDirection
+          // already; the sheets each carried reference was frozen at ride here.
+          provenance: {
+            canonRevision: bundle.meta.canonRevision,
+            artDirectionVersion: bundle.artDirection.version,
+            sheets: assembly.sheets,
+          },
+          dropped: assembly.dropped,
+        };
         const requests = Array.from({ length: count }, (_, index) =>
-          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }, stagedKeyArt),
+          worldImageRequest(bundle.meta, model, bundle.artDirection, { index, count }, assembly.referenceRoles, extras),
         );
         // The suffix survives every branch (#244, round 3): composing constraints upstream in
         // worldImageRequest bound only the fallback, so the directed path — the normal one —
         // quietly dropped them until the precedence moved into one place.
         const words = keyArtPrompt({
-          composed: String(requests[0]!.params["prompt"]),
+          composed:
+            brief !== null
+              ? `${keyArtComposition({ meta: bundle.meta, direction: bundle.artDirection, bible: bundle.bible.present ? bundle.bible.text : "", brief, cast: castInFrame })}${imageConstraintSuffix(bundle.artDirection)}`
+              : String(requests[0]!.params["prompt"]),
           description: bundle.artDirection.description,
           suffix: imageConstraintSuffix(bundle.artDirection),
           ...(authored !== undefined ? { authored } : {}),
@@ -7019,33 +7338,9 @@ export class Coordinator {
         // Which one, of however many are waiting (design 65). A named file must be one of them:
         // the message arrives from the renderer, and copying an arbitrary world-relative path
         // onto the world's key art on request is not a thing this handler should be able to do.
-        const waiting = store.getBundle().keyArtCandidates;
-        const named = "file" in msg ? msg.file : undefined;
-        const candidate = named === undefined ? waiting[0] : waiting.find((path) => path === named);
-        if (candidate === undefined) return;
-        /*
-         * The accepted file keeps the format its bytes carry.
-         *
-         * This used to copy a fixed `candidate.png` onto a fixed `world-art.png`, which was true
-         * while the only way to get one was to generate it. An uploaded JPEG written under a
-         * `.png` name would be served as `image/png` by a media route that reads the extension —
-         * and naming a file for a format it is not is the one thing every other import refuses.
-         */
-        const extension = extname(candidate).toLowerCase() || ".png";
-        await store
-          .gateOp(async () => {
-            await copyFile(
-              toExtendedLength(join(store.dir, fromPortable(candidate))),
-              toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${extension}`)),
-            );
-            // The world has one key art, so a previous one in a different format goes with it.
-            // Two would leave the scan choosing between them by sort order.
-            for (const stale of KEY_ART_EXTENSIONS.filter((other) => other !== extension)) {
-              await rm(toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${stale}`)), { force: true });
-            }
-            await rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true });
-          })
-          .catch(() => {});
+        // The adoption itself — format follows the bytes, stale formats swept — is shared with
+        // the founding build's landing (SPEC-031 R-28) and lives in references/key-art.ts.
+        await adoptKeyArtCandidate(store, "file" in msg ? msg.file : undefined).catch(() => {});
         await this.dropStagedReference(store, stagedReferenceKey("world-image"));
         await this.refreshWorldSnapshot(msg.worldId);
         // The picker reads the registry, not the open world's bundle, so the card that sent you

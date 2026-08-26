@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter, WorldMeta } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
+import { bibleExcerpt } from "./key-art-references.js";
 import { toExtendedLength } from "../world/paths.js";
 
 /**
@@ -27,13 +28,28 @@ import { toExtendedLength } from "../world/paths.js";
  */
 const WALL_CLOCK_MS = 120_000;
 
-/** What the art director is told. Only what the world itself says — no invented context. */
-export function worldBrief(meta: WorldMeta, canonLines: readonly string[]): string {
+/**
+ * What the art director is told. Only what the world itself says — no invented context. The
+ * bible, the cast in frame and the key-art brief joined once a founding conversation left
+ * them (SPEC-031 R-58): a picture assembled from a logline and two adjectives is a picture
+ * of a genre, and the world just spent a conversation becoming specific.
+ */
+export function worldBrief(
+  meta: WorldMeta,
+  canonLines: readonly string[],
+  extras: { bible?: string; cast?: readonly string[]; keyArtBrief?: string } = {},
+): string {
+  const bible = extras.bible !== undefined ? bibleExcerpt(extras.bible, 600) : "";
   const lines = [
     `World: ${meta.name}`,
     meta.logline?.trim() ? `Logline: ${meta.logline.trim()}` : "",
     meta.tone?.trim() ? `Tone: ${meta.tone.trim()}` : "",
     meta.genre?.trim() ? `Genre: ${meta.genre.trim()}` : "",
+    bible !== "" ? `The story's argument: ${bible}` : "",
+    (extras.cast?.length ?? 0) > 0
+      ? `In frame, identities supplied as reference images: ${extras.cast!.join(", ")}`
+      : "",
+    extras.keyArtBrief?.trim() ? `The image the author asked for: ${extras.keyArtBrief.trim()}` : "",
     canonLines.length > 0 ? `Established, and binding:\n${canonLines.map((l) => `- ${l}`).join("\n")}` : "",
   ];
   return lines.filter((l) => l.length > 0).join("\n");

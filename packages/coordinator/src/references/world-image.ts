@@ -77,11 +77,20 @@ export function worldImageRequest(
   direction?: ResolvedArtDirection,
   /** Which of the set this is, and how many there are. One, unless the author asked for more. */
   slot: { index: number; count: number } = { index: 0, count: 1 },
-  /** An image the author staged for this generation, or none (design 67). */
-  references: readonly string[] = [],
+  /**
+   * What rides along, each with its role (SPEC-031 R-59, R-60): the cast's identity anchors,
+   * a place's establishing view, the author's staged style image. Roles stay distinct — a
+   * provider that reads them must never be told a style plate is an identity to preserve.
+   */
+  references: readonly { file: string; role: string }[] = [],
+  /** The record of what this was made from (R-61), and what could not ride, named (R-59). */
+  extras: {
+    provenance?: Record<string, unknown>;
+    dropped?: ReadonlyArray<{ name: string; reason: string }>;
+  } = {},
 ) {
-  // The figure moves with what actually rides: a staged reference is billed like any other, and
-  // an estimate that ignored it would under-quote the one generation the author changed.
+  // The figure moves with what actually rides: a reference is billed like any other, and an
+  // estimate that ignored one would under-quote the generation.
   const estimatedMicroUsd = estimateMicroUsd(model, {
     images: 1,
     megapixels: 1,
@@ -93,12 +102,14 @@ export function worldImageRequest(
     capability: "image" as const,
     provider: model.provider,
     model: model.id,
-    // Only when there is one: a world has no reference kit, so this field is absent unless the
-    // author staged an image. An empty list would be a field the provider has to know to ignore,
-    // and OpenAI does not — it answers unknown fields with 400.
+    // Only when there is one: an empty list would be a field the provider has to know to
+    // ignore, and OpenAI does not — it answers unknown fields with 400.
     params: {
       ...(references.length > 0
-        ? { references: [...references], referenceRoles: references.map((file) => ({ file, role: "style" })) }
+        ? {
+            references: references.map((reference) => reference.file),
+            referenceRoles: references.map(({ file, role }) => ({ file, role })),
+          }
         : {}),
       prompt: `${worldImagePrompt(meta, direction)}${imageConstraintSuffix(direction)}`,
       ...(direction
@@ -109,6 +120,10 @@ export function worldImageRequest(
               transport: "text",
             },
           }
+        : {}),
+      ...(extras.provenance !== undefined ? { provenance: extras.provenance } : {}),
+      ...(extras.dropped !== undefined && extras.dropped.length > 0
+        ? { droppedReferences: [...extras.dropped] }
         : {}),
     },
     estimatedMicroUsd,

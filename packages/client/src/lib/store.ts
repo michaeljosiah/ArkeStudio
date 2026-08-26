@@ -33,7 +33,7 @@ import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 function emptyGenesis(): StoreState["genesis"][string] {
   return {
     turns: [],
-    draft: null,
+    blueprint: null,
     status: null,
     working: null,
     runStartedAt: null,
@@ -106,12 +106,28 @@ interface StoreState {
   transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
   /** Local-runtime setup progress — the whole picture, newest wins. */
   setupStatus: import("@arke-studio/contracts").SetupStatus | null;
+  /** The review before the press, per conversation (SPEC-031 R-12): the plan, or the refusal. */
+  buildPlans: Record<
+    string,
+    { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string }
+  >;
+  /** What key art would carry and drop, per world — the dialog's honest opening (SPEC-010 R-15). */
+  keyArtPlans: Record<
+    string,
+    {
+      requestId: string;
+      prompt: string;
+      carried: Array<{ name: string; role: string }>;
+      dropped: Array<{ name: string; reason: string }>;
+    }
+  >;
   /** Genesis conversations: sandboxed world-shaping before any world exists. */
   genesis: Record<
     string,
     {
       turns: Array<{ role: "user" | "gate"; text: string; at: string }>;
-      draft: import("@arke-studio/contracts").GenesisDraft | null;
+      /** The plan so far, folded from the sandbox directory (SPEC-031 R-2). */
+      blueprint: import("@arke-studio/contracts").GenesisBlueprint | null;
       status: "running" | "completed" | "cancelled" | "timeout" | "budget-exceeded" | "failed" | null;
       detail?: string;
       /** The turn in flight, one verb at a time — cleared when the turn settles. */
@@ -251,6 +267,8 @@ let current: StoreState = {
   authoring: {},
   transcripts: {},
   genesis: {},
+  buildPlans: {},
+  keyArtPlans: {},
   setupStatus: null,
   reading: {},
   archiveNote: null,
@@ -460,6 +478,13 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       if (i === -1) jobs.push(event.job);
       else jobs[i] = event.job;
       return { ...state, app: { ...state.app, jobs } };
+    }
+    case "build.state": {
+      const builds = [...state.app.builds];
+      const i = builds.findIndex((build) => build.buildId === event.state.buildId);
+      if (i === -1) builds.push(event.state);
+      else builds[i] = event.state;
+      return { ...state, app: { ...state.app, builds } };
     }
     case "job.deleted":
       // The row leaves Activity; its ledger entry stays, so spend does not move.
@@ -686,6 +711,8 @@ function handleFrame(json: string): void {
     let authoring = current.authoring;
     let transcripts = current.transcripts;
     let genesis = current.genesis;
+    let buildPlans = current.buildPlans;
+    let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -789,9 +816,28 @@ function handleFrame(json: string): void {
           turns: [...g.turns, { role: event.role, text: event.text, at: event.at }],
         },
       };
-    } else if (event.type === "genesis.draft") {
+    } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
-      genesis = { ...genesis, [event.genesisId]: { ...g, draft: event.draft } };
+      genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+    } else if (event.type === "world-image.plan") {
+      keyArtPlans = {
+        ...keyArtPlans,
+        [event.worldId]: {
+          requestId: event.requestId,
+          prompt: event.prompt,
+          carried: event.carried,
+          dropped: event.dropped,
+        },
+      };
+    } else if (event.type === "build.plan") {
+      buildPlans = {
+        ...buildPlans,
+        [event.genesisId]: {
+          requestId: event.requestId,
+          plan: event.plan,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
     } else if (event.type === "genesis.status") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
@@ -1107,6 +1153,8 @@ function handleFrame(json: string): void {
       authoring,
       transcripts,
       genesis,
+      buildPlans,
+      keyArtPlans,
       setupStatus,
       reading,
       archiveNote,
@@ -1561,6 +1609,47 @@ export function genesisChat(genesisId: string, text: string): void {
 
 export function genesisDiscard(genesisId: string): void {
   send({ kind: "genesis-discard", genesisId });
+}
+
+// ---- The founding build (SPEC-031) ----------------------------------------
+
+export function planFoundingBuild(genesisId: string, requestId: string): void {
+  send({ kind: "plan-founding-build", genesisId, requestId });
+}
+
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+  send({ kind: "begin-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+}
+
+export function stopFoundingBuild(worldId: string): void {
+  send({ kind: "stop-founding-build", worldId });
+}
+
+/** Run one item — or, with no key, everything runnable that has not landed (R-11, R-48). */
+export function runBuildItem(worldId: string, itemKey?: string): void {
+  send({ kind: "run-build-item", worldId, ...(itemKey !== undefined ? { itemKey } : {}), requestId: ulid() });
+}
+
+export function dismissBuildNotice(worldId: string): void {
+  send({ kind: "dismiss-build-notice", worldId });
+}
+
+/** One picture of the look, from inside the conversation (SPEC-031 R-50) — a person pressed. */
+export function generateLookPreview(genesisId: string): void {
+  send({ kind: "generate-look-preview", genesisId, requestId: ulid() });
+}
+
+/** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
+export function planKeyArt(worldId: string): void {
+  send({ kind: "plan-key-art", worldId, requestId: ulid() });
+}
+
+export function useKeyArtPlans(): StoreState["keyArtPlans"] {
+  return useStore().keyArtPlans;
+}
+
+export function useBuildPlans(): StoreState["buildPlans"] {
+  return useStore().buildPlans;
 }
 
 export function useGenesis(): StoreState["genesis"] {
@@ -3067,6 +3156,8 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     authoring: {},
     transcripts: {},
     genesis: {},
+    buildPlans: {},
+    keyArtPlans: {},
     setupStatus: null,
     reading: {},
     archiveNote: null,

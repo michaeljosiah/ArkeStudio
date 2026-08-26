@@ -588,6 +588,67 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The genesis conversation is over (begun or abandoned) — the sandbox is removed. */
   z.object({ kind: z.literal("genesis-discard"), genesisId: GenesisIdSchema }).strict(),
+  /**
+   * The review before the press (SPEC-031 R-10..R-12): fold the blueprint, check every
+   * precondition, compile the plan. Answered by a `build.plan` event; nothing is created.
+   */
+  z
+    .object({ kind: z.literal("plan-founding-build"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .strict(),
+  /**
+   * The press (SPEC-031 R-13, R-16): one aggregate authorization covering every acceptance
+   * in the run. Idempotent on the request id — a second press, a replayed frame or a resumed
+   * session joins the existing run rather than starting a second one. The coordinator drives
+   * everything from this one frame (R-17); the renderer never sequences a build.
+   */
+  z
+    .object({
+      kind: z.literal("begin-founding-build"),
+      genesisId: GenesisIdSchema,
+      requestId: UlidSchema,
+      /**
+       * The look as the author left the words step: absent keeps the blueprint's, non-empty
+       * is their rewrite, and the empty string is "Decide later" — founded with no look.
+       * The record holds what was actually founded on, which is what the carried preview's
+       * staleness test reads (R-54).
+       */
+      look: z.string().trim().max(2000).optional(),
+    })
+    .strict(),
+  /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
+  z.object({ kind: z.literal("stop-founding-build"), worldId: UlidSchema }).strict(),
+  /**
+   * What key art would carry and drop, before anything is paid for (SPEC-031 R-59, R-60;
+   * SPEC-010 R-15): the dialog names the drop before the user commits, and opens its prompt
+   * box with the words the dispatch would actually compose. Answered by a world-image.plan
+   * event; nothing is created.
+   */
+  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
+   * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
+   * The agent proposes; a person presses — the estimate is on the control, and the prompt is
+   * the look's own words unrewritten (R-52). Lands in the sandbox; carries in at Begin only
+   * if the look it was made from is the look the world is founded on (R-53, R-54).
+   */
+  z
+    .object({ kind: z.literal("generate-look-preview"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .strict(),
+  /**
+   * Run one build item — or, with no key, everything runnable that has not landed, which is
+   * how a text-only build's images run later "in one press" (SPEC-031 R-11, R-48, R-49). A
+   * retry and a first run are the same operation with the same landing: settled, anchored,
+   * designated — never a proposal or a candidate.
+   */
+  z
+    .object({
+      kind: z.literal("run-build-item"),
+      worldId: UlidSchema,
+      itemKey: z.string().min(1).max(200).optional(),
+      requestId: UlidSchema,
+    })
+    .strict(),
+  /** The completion notice is dismissed (SPEC-031 R-45). It stays dismissed across restarts. */
+  z.object({ kind: z.literal("dismiss-build-notice"), worldId: UlidSchema }).strict(),
   /** SPEC-005 R-16: a human's decision on a harness backstop prompt. */
   z
     .object({

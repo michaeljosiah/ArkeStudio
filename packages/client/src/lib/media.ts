@@ -16,3 +16,9 @@ export function mediaUrl(worldSlug: string, relPath: string): string {
   const clean = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
   return `${httpBase()}/media/${encodeURIComponent(worldSlug)}/${clean.split("/").map(encodeURIComponent).join("/")}`;
 }
+
+/** The look preview lives in a genesis sandbox, before any world exists (SPEC-031 R-50). */
+export function genesisMediaUrl(genesisId: string, relPath: string): string {
+  const clean = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${httpBase()}/genesis-media/${encodeURIComponent(genesisId)}/${clean.split("/").map(encodeURIComponent).join("/")}`;
+}

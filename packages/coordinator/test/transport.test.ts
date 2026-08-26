@@ -13,6 +13,7 @@ const STATE: ClientState = {
       voice: { status: "unavailable", reason: "not configured" },
     },
     jobs: [],
+    builds: [],
     ledger: [],
     providers: [],
     providerTools: [],

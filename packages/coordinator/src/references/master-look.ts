@@ -64,7 +64,10 @@ export function masterLookFile(version: number, extension: string): string {
   return `${MASTER_LOOK_DIR_ACCEPTED}/look-v${version}${extension}`;
 }
 
-export function masterLookPrompt(direction: ResolvedArtDirection, override?: string | undefined): string {
+export function masterLookPrompt(
+  direction: Pick<ResolvedArtDirection, "description">,
+  override?: string | undefined,
+): string {
   const words = override?.trim();
   return [
     words !== undefined && words !== "" ? words : direction.description,
@@ -143,4 +146,44 @@ export function masterLookRequest(
  */
 export function masterLookCandidateName(index: number, count: number): string {
   return count === 1 ? MASTER_LOOK_CANDIDATE : `candidate-${index + 1}.png`;
+}
+
+// ---------------------------------------------------------------------------
+// The founding look preview (SPEC-031 §1.10)
+// ---------------------------------------------------------------------------
+
+/** Where a genesis look preview waits in the sandbox (R-53). One at a time, like a candidate. */
+export const LOOK_PREVIEW_DIR = "previews";
+export const LOOK_PREVIEW_NAME = "look-preview.png";
+/** The durable metadata beside it: the exact look text the image was generated from (R-53). */
+export const LOOK_PREVIEW_META = "look-preview.json";
+
+/**
+ * The job for one picture of the look, before any world exists (R-50). Scoped to the
+ * conversation (R-55) and landing in its sandbox; the prompt is the look's own words
+ * unrewritten, with the subject-exclusion clause still appended (R-52) — this image may be
+ * promoted to the master look at Begin, and a face in it would arrive in every character
+ * the build makes.
+ */
+export function lookPreviewRequest(genesisId: string, look: string, model: ManifestModel) {
+  const output = imageOutputFor(model, { landscape: true });
+  return {
+    worldId: genesisId,
+    target: { kind: "look-preview", id: genesisId },
+    capability: "image" as const,
+    provider: model.provider,
+    model: model.id,
+    params: {
+      prompt: `${masterLookPrompt({ description: look })}${imageConstraintSuffix(undefined)}`,
+      /** What R-54's carry test reads against the founded look. */
+      lookText: look,
+      output,
+    },
+    estimatedMicroUsd: estimateMicroUsd(model, {
+      images: 1,
+      megapixels: (output.width * output.height) / 1_000_000,
+      ...(output.resolution !== undefined ? { resolution: output.resolution } : {}),
+    }),
+    landing: { dir: LOOK_PREVIEW_DIR, name: LOOK_PREVIEW_NAME },
+  };
 }

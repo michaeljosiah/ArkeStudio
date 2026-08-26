@@ -11,6 +11,7 @@ import { ArtDirectionRecordSchema, ResolvedArtDirectionSchema } from "./art-dire
 import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { FoundingBuildStateSchema } from "./founding-build.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
@@ -454,6 +455,12 @@ export const ClientStateSchema = z
           })
           .strict()
           .default({ available: false, installing: false, note: null }),
+        /**
+         * Founding builds the coordinator knows about (SPEC-031): the run in flight, and any
+         * completed one whose notice is still outstanding. In the snapshot so a client that
+         * reconnects mid-build returns to the building screen without an event replay (R-33).
+         */
+        builds: z.array(FoundingBuildStateSchema).default([]),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),

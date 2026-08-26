@@ -51,6 +51,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
         voice: { status: "unavailable", reason: "x" },
       },
       jobs: [],
+      builds: [],
       ledger: [],
       providers: [],
       providerTools: [],

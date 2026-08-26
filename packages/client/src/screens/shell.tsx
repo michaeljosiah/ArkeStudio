@@ -11,8 +11,10 @@ import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
+import { Loading } from "../components/loading.js";
 import { shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
+import { genesisMediaUrl } from "../lib/media.js";
 import {
   cancelExport as cancelExportMsg,
   cancelJob,
@@ -24,6 +26,11 @@ import {
   attachHostFiles,
   attachHostText,
   archiveWorld,
+  beginFoundingBuild,
+  generateLookPreview,
+  planFoundingBuild,
+  runBuildItem,
+  useBuildPlans,
   setResearchWeb,
   createSheetFromSentence,
   createWorld,
@@ -130,8 +137,13 @@ import {
   type VendorSignIn,
   type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
+  blueprintCoverage,
+  buildWorkingLine,
+  estimateImageMicroUsd,
   legacyVoiceModel,
+  modelForCapability,
   supportsVoiceUse,
+  ulid,
 } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -284,6 +296,13 @@ export function StartupScreen() {
     state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
   const enter = () => {
     if (!settled || !state) return;
+    // A run cut off by closing the app returns to the building screen, continuing (SPEC-031
+    // R-33) — before the library, because the author left mid-build and is coming back to it.
+    const midBuild = state.app.builds.find((build) => build.status === "running");
+    if (midBuild) {
+      navigate(`/building/${midBuild.worldId}`, { replace: true });
+      return;
+    }
     navigate(state.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
   };
 
@@ -671,6 +690,118 @@ function parseSeed(raw: string): { name: string; sentence: string } | null {
   return name.length > 0 && sentence.length > 0 ? { name, sentence } : null;
 }
 
+/**
+ * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
+ * many generations that is, spend as one figure — and every precondition that failed,
+ * stated on the way in rather than discovered at item nine of fifteen (R-11).
+ */
+function BuildReviewStep({
+  plan: entry,
+  pressed,
+  onBack,
+  onBuild,
+}: {
+  plan: { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string } | undefined;
+  pressed: boolean;
+  onBack: () => void;
+  onBuild: () => void;
+}) {
+  if (!entry) return <Loading label="sizing the build" />;
+  if (entry.plan === null) {
+    return (
+      <>
+        <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
+        <Callout tone="danger">{entry.reason ?? "the build could not be sized"}</Callout>
+        <div className="fy-artstep__foot">
+          <Button variant="ghost" onClick={onBack}>
+            Back
+          </Button>
+        </div>
+      </>
+    );
+  }
+  const plan = entry.plan;
+  const counts: Array<[number, string]> = [
+    [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
+    [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
+    [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
+    [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
+  ];
+  return (
+    <>
+      <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
+      <h1 className="fy-artstep__h1">One press makes {plan.worldName}.</h1>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {counts
+          .filter(([count]) => count > 0)
+          .map(([count, label]) => (
+            <div
+              key={label}
+              style={{ flex: 1, minWidth: 120, border: "1px solid var(--border)", borderRadius: 11, padding: "13px 15px" }}
+            >
+              <div style={{ font: "650 20px var(--font-sans)" }}>{count}</div>
+              <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+                {label.toUpperCase()}
+              </div>
+            </div>
+          ))}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          border: "1px solid var(--border)",
+          borderRadius: 11,
+          padding: "13px 15px",
+        }}
+      >
+        <div>
+          <div style={{ font: "650 21px var(--font-sans)" }}>
+            {plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}
+          </div>
+          <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+            {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+          </div>
+        </div>
+        <span style={{ flex: 1 }} />
+        <span style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 260, textAlign: "right" }}>
+          Everything lands settled. Nothing waits for a decision.
+        </span>
+      </div>
+      {plan.notes.length > 0 && (
+        <div
+          style={{
+            borderLeft: "2px solid var(--border)",
+            padding: "9px 13px",
+            font: "400 11.5px/1.6 var(--font-sans)",
+            color: "var(--muted-foreground)",
+          }}
+        >
+          {plan.notes.map((note, index) => (
+            <div key={index}>{note}</div>
+          ))}
+        </div>
+      )}
+      <div className="fy-artstep__foot">
+        <Button variant="ghost" onClick={onBack} disabled={pressed}>
+          Back
+        </Button>
+        <span style={{ flex: 1 }} />
+        <span className="fy-artstep__note">yes once · nothing asks again</span>
+        <Button variant="primary" disabled={pressed} onClick={onBuild}>
+          {pressed
+            ? "Building…"
+            : plan.generations === 0
+              ? `Build ${plan.worldName}`
+              : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
   const { state, connection } = useStore();
@@ -686,9 +817,19 @@ export function NewWorldScreen() {
   // thing before the world exists, because it is the one answer that applies to every image the
   // world will ever make, and asking it while the logline is still being written would be asking
   // about a world nobody has described yet.
-  const [step, setStep] = useState<"draft" | "look" | "words">("draft");
+  const [step, setStep] = useState<"draft" | "look" | "words" | "review">("draft");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [look, setLook] = useState("");
+  // The founding build (SPEC-031): a conversation that settled a name goes through the
+  // review and one press; a bare form still creates and seeds the old way.
+  const [lookForBuild, setLookForBuild] = useState("");
+  const [buildPressed, setBuildPressed] = useState(false);
+  const planRequestRef = useRef<string | null>(null);
+  const buildRequestRef = useRef<string | null>(null);
+  // Where the words came from: the conversation's own proposal, or a preset seed. The look
+  // step arrives pre-filled with the agent's words when it proposed some (SPEC-031 R-3) —
+  // the preset grid stays one press away as the override, never the only way in.
+  const [lookSource, setLookSource] = useState<"conversation" | "preset" | null>(null);
   const seededRef = useRef(false);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
@@ -699,7 +840,7 @@ export function NewWorldScreen() {
   const g = useGenesis()[genesisId];
   const turns = g?.turns ?? [];
   const chatRunning = g?.status === "running";
-  const draft = g?.draft ?? null;
+  const blueprint = g?.blueprint ?? null;
 
   // With a healthy harness, talking is the front door (prototype 12a) — unless the author
   // already picked the form themselves.
@@ -709,14 +850,54 @@ export function NewWorldScreen() {
 
   const charSeed = parseSeed(firstCharacter);
   const locSeed = parseSeed(firstLocation);
-  const shownName = name.trim() || draft?.name?.trim() || "";
-  const shownLogline = logline.trim() || draft?.logline?.trim() || "";
-  const shownTone = tone.trim() || draft?.tone?.trim() || "";
-  const shownGenre = genre.trim() || draft?.genre?.trim() || "";
-  const draftCharacters = (draft?.characters ?? []).filter((c) => c.name !== charSeed?.name);
-  const draftLocations = (draft?.locations ?? []).filter((l) => l.name !== locSeed?.name);
-  const railCharacters = [...(charSeed ? [charSeed] : []), ...draftCharacters.map((c) => ({ name: c.name, sentence: c.line }))];
-  const railLocations = [...(locSeed ? [locSeed] : []), ...draftLocations.map((l) => ({ name: l.name, sentence: l.line }))];
+  const shownName = name.trim() || blueprint?.name?.trim() || "";
+  const shownLogline = logline.trim() || blueprint?.logline?.trim() || "";
+  const shownTone = tone.trim() || blueprint?.tone?.trim() || "";
+  const shownGenre = genre.trim() || blueprint?.genre?.trim() || "";
+  // Never empty: a sentence of "" fails the frame's schema and the character named in
+  // conversation would silently not exist in the created world (SPEC-031 R-8).
+  const oneLine = (e: { name: string; line?: string; description?: string }) =>
+    e.line ?? e.description ?? e.name;
+  const hasBrief = (e: { brief?: object }) => e.brief !== undefined && Object.keys(e.brief).length > 0;
+  const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
+  const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
+  const railCharacters = [
+    ...(charSeed ? [{ ...charSeed, brief: false }] : []),
+    ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c), brief: hasBrief(c) })),
+  ];
+  const railLocations = [
+    ...(locSeed ? [{ ...locSeed, brief: false }] : []),
+    ...draftLocations.map((l) => ({ name: l.name, sentence: oneLine(l), brief: hasBrief(l) })),
+  ];
+  const railFactions = (blueprint?.factions ?? []).map((f) => ({ name: f.name, sentence: oneLine(f) }));
+  const coverage = blueprint ? blueprintCoverage(blueprint) : null;
+  // A conversation that settled a name builds; anything less creates and seeds the old way.
+  const buildMode = blueprint?.name !== undefined;
+  const buildPlan = useBuildPlans()[genesisId];
+  const myBuild = state?.app.builds.find((build) => build.genesisId === genesisId) ?? null;
+  // The look preview (SPEC-031 §1.10): conversation-scoped jobs fold like any other, so the
+  // rail reads the queue rather than keeping a private channel.
+  const previewJob =
+    (state?.app.jobs ?? [])
+      .filter((job) => job.worldId === genesisId && job.target.kind === "look-preview")
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+  const previewFile = previewJob?.status === "succeeded" ? previewJob.landedFiles?.[0] : undefined;
+  const previewStale =
+    previewJob !== null &&
+    typeof previewJob.params["lookText"] === "string" &&
+    previewJob.params["lookText"] !== blueprint?.look;
+  const previewRunning =
+    previewJob !== null &&
+    (previewJob.status === "queued" || previewJob.status === "submitting" || previewJob.status === "running");
+  // The estimate is on the control (R-51): a conversation that could spend by talking would
+  // be a way to spend somebody's money by talking.
+  const previewEstimate = (() => {
+    const manifest = state?.app.manifest;
+    if (!manifest) return null;
+    const routed = modelForCapability(manifest, state?.app.routing.defaults, "image");
+    if (!routed || state?.app.models.disabled.includes(routed.id)) return null;
+    return estimateImageMicroUsd(routed, { landscape: true });
+  })();
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
@@ -740,16 +921,36 @@ export function NewWorldScreen() {
       // sketch that changes by typing in it.
       for (const c of railCharacters.slice(0, 4)) createSheetFromSentence(worldId, "character", c.name, c.sentence, true);
       for (const l of railLocations.slice(0, 4)) createSheetFromSentence(worldId, "location", l.name, l.sentence, true);
-      for (const t of (draft?.threads ?? []).slice(0, 4)) {
+      for (const f of railFactions.slice(0, 4)) createSheetFromSentence(worldId, "faction", f.name, f.sentence, true);
+      for (const t of (blueprint?.threads ?? []).slice(0, 4)) {
         openThread(worldId, t.length > 80 ? `${t.slice(0, 77)}…` : t, t, []);
       }
       genesisDiscard(genesisId);
     }
     navigate(`/w/${worldId}`, { replace: true });
-  }, [submittedName, state?.world, navigate, railCharacters, railLocations, draft, genesisId]);
+  }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
+
+  // The build begins server-side from one frame (SPEC-031 R-17); the screen's whole job is
+  // to follow it to the building screen the moment the coordinator names the world.
+  useEffect(() => {
+    if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
+  }, [buildPressed, myBuild, navigate]);
+  // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
+  // refusal can be read and the author can go back — never a button stuck on "Building…".
+  useEffect(() => {
+    if (buildPressed && buildPlan !== undefined && buildPlan.plan === null) setBuildPressed(false);
+  }, [buildPressed, buildPlan]);
+
+  const enterReview = (lookText: string) => {
+    setLookForBuild(lookText);
+    planRequestRef.current = ulid();
+    planFoundingBuild(genesisId, planRequestRef.current);
+    setStep("review");
+  };
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
-  const entries = 1 + railCharacters.length + railLocations.length + (draft?.threads.length ?? 0);
+  const entries =
+    1 + railCharacters.length + railLocations.length + railFactions.length + (blueprint?.threads.length ?? 0);
 
   const begin = (artDirection?: string) => {
     setSubmittedName(shownName);
@@ -762,7 +963,7 @@ export function NewWorldScreen() {
       // The conversation's own prose, kept as the world's bible. Not shown on this screen and
       // not confirmed separately: pressing Begin is the yes, and the bible is the one file the
       // author can rewrite immediately without asking anyone.
-      ...(draft?.bible && draft.bible.trim().length > 0 ? { bible: draft.bible.trim() } : {}),
+      ...(blueprint?.bible && blueprint.bible.trim().length > 0 ? { bible: blueprint.bible.trim() } : {}),
       // Whatever was handed to the conversation follows it in. Sent always, not only when
       // something is attached: the sandbox is the source of truth for what is waiting, and the
       // screen's idea of it can lag an event behind.
@@ -808,6 +1009,7 @@ export function NewWorldScreen() {
                   // The preset seeds the words and is then forgotten. Re-picking the same one
                   // rewrites the draft; that is what picking it again means.
                   setLook(seedFrom(preset));
+                  setLookSource("preset");
                   setStep("words");
                 }}
               />
@@ -819,11 +1021,22 @@ export function NewWorldScreen() {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => begin()}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? enterReview("") : begin())}>
                   Decide later
                 </Button>
               </div>
             </>
+          ) : step === "review" ? (
+            <BuildReviewStep
+              plan={buildPlan}
+              pressed={buildPressed}
+              onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
+              onBuild={() => {
+                if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                setBuildPressed(true);
+                beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
+              }}
+            />
           ) : (
             <>
               <div className="fy-artstep__steps">
@@ -832,12 +1045,20 @@ export function NewWorldScreen() {
                 <i />
                 <i />
               </div>
-              <h1 className="fy-artstep__h1">The preset writes a first draft.</h1>
+              <h1 className="fy-artstep__h1">
+                {lookSource === "conversation" ? "The conversation proposed this look." : "The preset writes a first draft."}
+              </h1>
               <p className="fy-artstep__lede">
-                These are the words that ride along with every generation. Edit them, or replace
-                them entirely. A preset seeds the text; it never locks it.
+                {lookSource === "conversation"
+                  ? "Drawn from the tone, genre and story you just settled. These words ride along with every generation — edit them, replace them, or pick a preset instead."
+                  : "These are the words that ride along with every generation. Edit them, or replace them entirely. A preset seeds the text; it never locks it."}
               </p>
-              <ArtStyleWords selectedId={presetId} value={look} onChange={setLook} />
+              <ArtStyleWords
+                selectedId={presetId}
+                value={look}
+                onChange={setLook}
+                {...(lookSource === "conversation" ? { provenance: "PROPOSED IN CONVERSATION" } : {})}
+              />
               <div className="fy-artstep__reaches">
                 <div className="fy-prov__eyebrow">WHAT THIS LOOK REACHES</div>
                 <div>The world image · generated later, from the hub</div>
@@ -856,7 +1077,7 @@ export function NewWorldScreen() {
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => begin(look)}
+                  onClick={() => (buildMode ? enterReview(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -1048,6 +1269,34 @@ export function NewWorldScreen() {
               {entries} entr{entries === 1 ? "y" : "ies"} · all proposed
             </span>
           </div>
+          {/* Coverage (SPEC-031 R-7): what is covered and what is open, as labels and counts.
+              The world's one image is on the list so a missing key-art brief is visible while
+              it can still be answered, not as a line on the completion notice. */}
+          {coverage && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+              {(
+                [
+                  { label: "premise", covered: coverage.premise },
+                  { label: `cast ${coverage.cast}`, covered: coverage.cast > 0 },
+                  { label: `places ${coverage.places}`, covered: coverage.places > 0 },
+                  // Not on R-7's list, so present only once one exists — never an open chip.
+                  ...(coverage.factions > 0 ? [{ label: `factions ${coverage.factions}`, covered: true }] : []),
+                  { label: "through-line", covered: coverage.throughLine },
+                  { label: "look", covered: coverage.look },
+                  { label: "key image", covered: coverage.keyArt },
+                ] as const
+              ).map((c) => (
+                <span
+                  key={c.label}
+                  className="fy-pill"
+                  style={c.covered ? undefined : { opacity: 0.55 }}
+                >
+                  {c.label}
+                  {c.covered ? "" : " · open"}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
             <div
               style={{
@@ -1110,7 +1359,7 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      sketch · no face yet
+                      {c.brief ? "sketch · brief kept" : "sketch · no face yet"}
                     </span>
                   </div>
                 </div>
@@ -1127,14 +1376,14 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      sketch
+                      {l.brief ? "sketch · brief kept" : "sketch"}
                     </span>
                   </div>
                 </div>
               ))}
             </div>
           )}
-          {(draft?.threads.length ?? 0) > 0 && (
+          {(blueprint?.threads.length ?? 0) > 0 && (
             <div className="fy-draftcard" style={{ padding: "12px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 6, height: 6 }} />
@@ -1142,17 +1391,96 @@ export function NewWorldScreen() {
                 <span className="fy-mono">pull one to keep going</span>
               </div>
               <div style={{ font: "400 12px/1.7 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
-                {draft!.threads.slice(0, 4).map((t, i) => (
+                {blueprint!.threads.slice(0, 4).map((t, i) => (
                   <div key={i}>{t}</div>
                 ))}
               </div>
             </div>
           )}
+          {/* The look, previewable while the conversation is still a conversation (SPEC-031
+              §1.10): the agent proposed the words; the press and the spend are the author's.
+              Build mode only — the legacy create path sweeps the sandbox without a carry,
+              and the card must not promise one. */}
+          {buildMode && blueprint?.look !== undefined && (
+            <div className="fy-draftcard" style={{ padding: "12px 14px" }}>
+              <div className="fy-mono" style={{ fontSize: 10 }}>
+                THE LOOK
+              </div>
+              <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
+                {blueprint.look}
+              </div>
+              {previewFile !== undefined && (
+                <>
+                  <img
+                    src={genesisMediaUrl(genesisId, previewFile)}
+                    alt="The look, previewed"
+                    style={{ width: "100%", borderRadius: 8, marginTop: 9, display: "block" }}
+                  />
+                  <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
+                    {previewStale
+                      ? "the look changed since this was made · it will not carry"
+                      : "carries in as the master look at Begin"}
+                  </div>
+                </>
+              )}
+              {previewRunning && <Loading inline label="making the look" />}
+              {(previewJob?.status === "failed" ||
+                previewJob?.status === "cancelled" ||
+                previewJob?.status === "needs-reconciliation") && (
+                <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
+                  {previewJob.status === "cancelled"
+                    ? "the preview was cancelled"
+                    : previewJob.status === "needs-reconciliation"
+                      ? "the preview is held in Activity"
+                      : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
+                </div>
+              )}
+              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
+                <div style={{ marginTop: 9 }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={previewEstimate === null}
+                    onClick={() => generateLookPreview(genesisId)}
+                  >
+                    See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
+                  </Button>
+                  {previewEstimate === null && (
+                    <span className="fy-mono" style={{ fontSize: 9.5, marginLeft: 8 }}>
+                      needs an image provider
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ flex: 1, minHeight: 16 }} />
           <div style={{ display: "grid", gap: 8 }}>
-            <Button variant="primary" disabled={!canCreate} onClick={() => setStep("look")}>
+            <Button
+              variant="primary"
+              disabled={!canCreate}
+              onClick={() => {
+                const proposed = blueprint?.look?.trim();
+                if (proposed && look.trim().length === 0) {
+                  // The conversation proposed the look; the step opens on its words, not on
+                  // a grid of presets that never heard the conversation.
+                  setLook(proposed);
+                  setLookSource("conversation");
+                  setPresetId(null);
+                  setStep("words");
+                } else {
+                  setStep("look");
+                }
+              }}
+            >
               {submittedName ? "Creating…" : "Begin in this world"}
             </Button>
+            {/* A bound is stated, never enforced in silence (SPEC-031 R-8). */}
+            {(railCharacters.length > 4 || railLocations.length > 4 || railFactions.length > 4) && (
+              <div className="fy-mono" style={{ textAlign: "center", color: "var(--warning)" }}>
+                Begin seeds the first 4 of each · the rest are let go
+              </div>
+            )}
             <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
               One more question — how it should look — then the hub. Everything arrives as sketches:
               lock what holds, discard what doesn't.
@@ -3389,6 +3717,23 @@ export function ActivityScreen() {
 
   const running = state ? computeRunning(state, { sidecar, exports: exportsState }) : [];
   const needsYou = state ? computeNeedsYou(state) : [];
+  // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build
+  // record's own keys, so an item never dispatched — no route, no credential — is as visible
+  // and as runnable as a failed one. Held items are deliberately absent: their queue rows
+  // are already here, and resuming the lane is that row's action (row 32 — no duplicates).
+  const NOT_LANDED = new Set(["failed", "skipped", "unauthorized"]);
+  const builds = scoped([...(state?.app.builds ?? [])]).filter((build) => build.status !== "running");
+  const buildMissing = builds
+    .map((build) => ({ build, missing: build.items.filter((item) => NOT_LANDED.has(item.state)) }))
+    .filter(({ missing }) => missing.length > 0);
+  /** The build item a failed job belongs to, for the retry that lands as the build would (R-49). */
+  const buildItemForJob = (jobId: string) => {
+    for (const build of state?.app.builds ?? []) {
+      const item = build.items.find((candidate) => candidate.jobId === jobId);
+      if (item) return { build, item };
+    }
+    return null;
+  };
   const spend = state ? spendSummary(state.app.ledger, state.app.spend?.settings.periodDays ?? 7, new Date()) : null;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);
@@ -3528,6 +3873,33 @@ export function ActivityScreen() {
               ))}
             </>
           )}
+          {buildMissing.map(({ build, missing }) => (
+            <div key={build.buildId}>
+              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
+                THE FOUNDING BUILD · {missing.length} NOT LANDED
+              </div>
+              {missing.length > 1 && (
+                <div className="fy-activityrow">
+                  <span className="fy-dot" />
+                  <div className="fy-activityrow__main">
+                    <span>{build.worldName} · everything outstanding</span>
+                  </div>
+                  <Button onClick={() => runBuildItem(build.worldId)}>Run all {missing.length}</Button>
+                </div>
+              )}
+              {missing.map((item) => (
+                <div key={item.key} className="fy-activityrow">
+                  <span className="fy-dot fy-dot--warn" />
+                  <div className="fy-activityrow__main">
+                    <span>{buildWorkingLine(item)}</span>
+                    {item.detail && <span className="fy-mono">{item.detail}</span>}
+                  </div>
+                  {/* Lands exactly as the build would have — settled, anchored, designated (R-49). */}
+                  <Button onClick={() => runBuildItem(build.worldId, item.key)}>Run</Button>
+                </div>
+              ))}
+            </div>
+          ))}
           <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
             EARLIER TODAY
           </div>
@@ -3540,6 +3912,19 @@ export function ActivityScreen() {
                   reference work that belongs to no production and has no such dialog. */}
               {jobActions(job).includes("retry") &&
                 (() => {
+                  // A founding-build job retries through the build's own landing (SPEC-031
+                  // R-49): the photo becomes the anchor, never a staged proposal.
+                  const owned = buildItemForJob(job.id);
+                  if (owned) {
+                    return (
+                      <>
+                        <span className="scr-field__hint">failed — runs again and lands settled</span>
+                        <Button variant="ghost" onClick={() => runBuildItem(owned.build.worldId, owned.item.key)}>
+                          Run again
+                        </Button>
+                      </>
+                    );
+                  }
                   const origin = jobOrigin(job);
                   return origin ? (
                     <>

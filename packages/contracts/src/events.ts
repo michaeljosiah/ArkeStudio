@@ -5,6 +5,8 @@ import { BenchPresetSchema } from "./bench.js";
 import { BibleHelperKindSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
+import { GenesisBlueprintSchema } from "./genesis.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
@@ -67,6 +69,7 @@ export const QueueCommandSchema = z.enum([
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
+  "generate-look-preview",
   "upload-master-look",
   "pick-staged-reference",
   "establish-look",
@@ -83,39 +86,8 @@ export const QueueCommandSchema = z.enum([
 ]);
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 
-/**
- * The genesis draft as the world-author agent maintains it in the sandbox's draft.json.
- * Deliberately tolerant — every field optional, unknown keys stripped — because an agent's
- * enthusiasm should degrade to a smaller draft, never to a parse failure.
- */
-export const GenesisDraftSchema = z
-  .object({
-    name: z.string().min(1).max(120).optional(),
-    logline: z.string().min(1).max(500).optional(),
-    tone: z.string().min(1).max(120).optional(),
-    genre: z.string().min(1).max(120).optional(),
-    characters: z
-      .array(z.object({ name: z.string().min(1).max(120), line: z.string().min(1).max(300) }).strip())
-      .max(8)
-      .default([]),
-    locations: z
-      .array(z.object({ name: z.string().min(1).max(120), line: z.string().min(1).max(300) }).strip())
-      .max(8)
-      .default([]),
-    threads: z.array(z.string().min(1).max(300)).max(8).default([]),
-    /**
-     * The through-line, in prose, as the conversation settled it (SPEC-022, 2026-08-22).
-     *
-     * The other fields are the world's furniture — who is in it, where it happens, what is
-     * unresolved. None of them hold the reason any of it is worth telling, so a world door that
-     * talked for twenty minutes handed over a cast and lost the argument that produced it. This
-     * is the argument, and it becomes `bible.md` at v1. Longer than the rest on purpose: it is
-     * the only field meant to be read as writing rather than looked up.
-     */
-    bible: z.string().min(1).max(8000).optional(),
-  })
-  .strip();
-export type GenesisDraft = z.infer<typeof GenesisDraftSchema>;
+// The genesis draft and blueprint schemas moved to ./genesis.js with the blueprint work
+// (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
@@ -1042,16 +1014,56 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /**
-   * The world-so-far, as the agent maintains it in the sandbox's draft.json after each turn.
+   * The blueprint-so-far, folded from the sandbox directory after each turn (SPEC-031 R-2).
    * Everything here is proposed; nothing exists until "Begin in this world" walks it through
    * the ordinary creation gates.
    */
   z
     .object({
       ...base,
-      type: z.literal("genesis.draft"),
+      type: z.literal("genesis.blueprint"),
       genesisId: z.string().min(1),
-      draft: GenesisDraftSchema,
+      blueprint: GenesisBlueprintSchema,
+    })
+    .strict(),
+  /**
+   * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
+   * many generations, spend as one figure — or the refusal, stated on the way in (R-11).
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("build.plan"),
+      genesisId: z.string().min(1),
+      requestId: UlidSchema,
+      plan: BuildReviewSchema.nullable(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
+   * What key art would carry and drop, computed for the dialog before the press (SPEC-031
+   * R-59, R-60; SPEC-010 R-15) — and the composed words its prompt box should open with.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-image.plan"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      prompt: z.string(),
+      carried: z.array(z.object({ name: z.string(), role: z.string() }).strict()),
+      dropped: z.array(z.object({ name: z.string(), reason: z.string() }).strict()),
+    })
+    .strict(),
+  /**
+   * A founding build's whole picture, each time it changes (SPEC-031 §1.8). The fold is the
+   * truth; this is its projection — the client never sequences or invents build state.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("build.state"),
+      state: FoundingBuildStateSchema,
     })
     .strict(),
 

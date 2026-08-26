@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { JobEngineIdentitySchema, RecipeIdentitySchema } from "./comfyui.js";
-import { IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, IsoDateTimeSchema, JobIdSchema, ShotIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { CapabilitySchema } from "./provider.js";
+
+/**
+ * What a job or a ledger entry is scoped to (SPEC-031 R-55, amending SPEC-009): a world, or —
+ * for the one generation that exists before any world does, the founding look preview — the
+ * genesis conversation it was made in. Never a placeholder world. When the conversation
+ * becomes a world at Begin, the job is re-associated; a ledger entry keeps the scope the money
+ * was actually spent under, joinable to the world through its build record's genesisId.
+ */
+export const JobScopeSchema = z.union([UlidSchema, GenesisIdSchema]);
 
 /**
  * The job queue (master spec §10.1). App-level, durable, append-only at
@@ -77,7 +86,7 @@ export const JobSchema = z
     id: JobIdSchema,
     /** Generated before any network call; attached to the provider request where honoured (§10.1). */
     idempotencyKey: UlidSchema,
-    worldId: UlidSchema,
+    worldId: JobScopeSchema,
     productionId: SlugSchema.optional(),
     target: JobTargetSchema,
     capability: CapabilitySchema,
@@ -198,7 +207,7 @@ export type ReconcileAction = z.infer<typeof ReconcileActionSchema>;
 export const LedgerEntrySchema = z
   .object({
     ts: IsoDateTimeSchema,
-    worldId: UlidSchema,
+    worldId: JobScopeSchema,
     productionId: SlugSchema.optional(),
     jobId: JobIdSchema,
     provider: z.string().min(1),

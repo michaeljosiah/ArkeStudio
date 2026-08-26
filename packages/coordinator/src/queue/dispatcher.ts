@@ -209,6 +209,9 @@ const FORMAT_PRESERVING_IMAGE_TARGETS = new Set([
   "character-sheet",
   "character-look",
   "reference-tile",
+  // The look preview may be promoted to the master look (SPEC-031 R-54); a JPEG under a
+  // .png name would then be carried under a name its bytes contradict.
+  "look-preview",
 ]);
 const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
@@ -320,6 +323,17 @@ export class JobQueue {
       this.lanes.set(provider, lane);
     }
     return lane;
+  }
+
+  /**
+   * Re-associate a conversation-scoped job with the world its conversation became
+   * (SPEC-031 R-55): one appended row folding latest-wins, like every other transition.
+   * The ledger entry is untouched — it keeps the scope the money was actually spent under.
+   */
+  async adoptWorld(jobId: string, worldId: string): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job || job.worldId === worldId) return;
+    await this.transition({ ...job, worldId, updatedAt: this.clock() });
   }
 
   /** Durable transition: journal first, then memory, then the event (D1). */

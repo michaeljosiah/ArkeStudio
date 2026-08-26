@@ -27,6 +27,7 @@ export class ReadModel {
           voice: unavailable,
         },
         jobs: [],
+        builds: [],
         ledger: [],
         providers: [],
         providerTools: [],
@@ -171,6 +172,11 @@ export class ReadModel {
     this.state = { ...this.state, app: { ...this.state.app, jobs } };
   }
 
+  /** Founding builds known at startup (SPEC-031 R-33); later changes fold from build.state. */
+  setBuilds(builds: ClientState["app"]["builds"]): void {
+    this.state = { ...this.state, app: { ...this.state.app, builds } };
+  }
+
   seedLedger(ledger: ClientState["app"]["ledger"]): void {
     this.state = { ...this.state, app: { ...this.state.app, ledger } };
   }
@@ -191,6 +197,14 @@ export class ReadModel {
         if (i === -1) jobs.push(event.job);
         else jobs[i] = event.job;
         this.state = { ...this.state, app: { ...this.state.app, jobs } };
+        return;
+      }
+      case "build.state": {
+        const builds = [...this.state.app.builds];
+        const i = builds.findIndex((build) => build.buildId === event.state.buildId);
+        if (i === -1) builds.push(event.state);
+        else builds[i] = event.state;
+        this.state = { ...this.state, app: { ...this.state.app, builds } };
         return;
       }
       case "job.deleted": {

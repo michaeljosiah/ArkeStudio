@@ -11,6 +11,8 @@ export * from "./reference.js";
 export * from "./proposal.js";
 export * from "./job.js";
 export * from "./change.js";
+export * from "./genesis.js";
+export * from "./founding-build.js";
 export * from "./events.js";
 export * from "./client-state.js";
 export * from "./pass-compiler.js";
