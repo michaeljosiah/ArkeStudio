@@ -6,6 +6,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
+  CHARACTER_REFERENCE_ARTIFACT_TARGETS,
   REFERENCE_FINALIZATION_TARGETS,
   imageConstraintSuffix,
   stagedReferenceKey,
@@ -57,6 +58,7 @@ import {
   type RuntimeProbes,
   type VoiceCandidate,
   type ArtifactGeneration,
+  type CharacterReferenceWorkflow,
   type BenchSession,
   type SessionId,
   deliveryParams as mapDelivery,
@@ -255,6 +257,7 @@ import {
   recordUploadedLocationViewTake,
   referenceReviewDecision,
 } from "./references/takes.js";
+import { fileGeneratedReferenceArtifact } from "./references/artifacts.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
@@ -2020,6 +2023,34 @@ export class Coordinator {
         if (!sheet || !angle) throw new Error("reference tile finalization target is unavailable");
         const withinKit = job.landedFiles[0].replace(`references/${sheetId}/`, "");
         await supersedeTile(store, sheetId, angle, { file: withinKit, sheetVersion: sheet.version });
+        // The tile is also a world artifact (issue 475), filed from the kit's own copy — a tile
+        // has no take, and `incoming/` is where its kit row points, so that IS the durable path.
+        //
+        // Best-effort here and nowhere else in this method: `reference-tile` is absent from
+        // REPLAYABLE_FINALIZATION_TARGETS because `supersedeTile` pushes a row every time it
+        // runs. Throwing would strand the job in Needs You with no retry the user could press,
+        // while its tile is already in the kit. Reported to the app log instead of swallowed.
+        await fileGeneratedReferenceArtifact(store, {
+          job,
+          workflow: "reference-tile",
+          sheetId,
+          sourceFile: job.landedFiles[0],
+          // The tile path freezes no provenance at dispatch, so this is the pair the kit row is
+          // being stamped with in the same breath — as true as what the kit itself records.
+          provenance: {
+            canonRevision: store.getBundle().meta.canonRevision,
+            sheets: { [sheetId]: sheet.version },
+          },
+          cost: { estimatedMicroUsd: job.estimatedMicroUsd, actualMicroUsd: null },
+        }).catch((err: unknown) => {
+          void this.appLog?.append({
+            kind: "reference.artifact-filing-failed",
+            worldId: job.worldId,
+            jobId: job.id,
+            targetKind: job.target.kind,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
       // The shared set, not a copy of it. This branch used to carry its own inline list of the
       // four kinds that existed when it was written, while contracts already published the same
@@ -2073,6 +2104,28 @@ export class Coordinator {
               review,
             }).catch(() => {});
           }
+        }
+        // And the world's shelf keeps it, whatever the kit later decides (issue 475).
+        //
+        // Last, so a filing fault cannot cost the sheet its acceptance, and unconditional, so a
+        // candidate still awaiting review — or one the kit rejects tomorrow — is retained all the
+        // same: the shelf is the durable history of what this application made. Filed from the
+        // take's own directory, which is the copy that outlives staging (issue 231).
+        //
+        // This one throws. Every take-backed target is replayable, `recordReferenceTake` and
+        // `fileGeneratedArtifact` are both idempotent, and a retry contacts no provider — so a
+        // failure that says so and offers the retry beats a paid picture the shelf silently lost.
+        const referenceSheetId = take.reference?.sheetId;
+        if (CHARACTER_REFERENCE_ARTIFACT_TARGETS.has(job.target.kind) && take.media && referenceSheetId) {
+          await fileGeneratedReferenceArtifact(store, {
+            job,
+            workflow: job.target.kind as CharacterReferenceWorkflow,
+            sheetId: referenceSheetId,
+            sourceFile: `references/${referenceSheetId}/takes/${take.id}/${take.media}`,
+            take,
+            provenance: take.provenance,
+            cost: take.cost,
+          });
         }
       }
       if (
@@ -5565,6 +5618,7 @@ export class Coordinator {
           return;
         }
         const generation: ArtifactGeneration = {
+          source: "bench",
           sessionId: bench.session.id,
           takeId: take.id,
           takeNumber: take.n,

@@ -267,6 +267,21 @@ describe("the Artifacts door (issue 305 §2)", () => {
             hash: "sha256:beadbead",
             origin: { by: "system" as const, producedBy: "bench" },
             links: [],
+            // A kept bench take always carries its generation record — that IS what makes it
+            // "made here" (issue 475), rather than the producer's name being on a list.
+            generation: {
+              source: "bench" as const,
+              sessionId: SESSION_ID,
+              takeId: TAKE_ID,
+              takeNumber: 1,
+              brief: "A rusted tide-clock face.",
+              references: [],
+              keyframes: [],
+              provider: "fal",
+              model: "test-image",
+              params: { kind: "image" as const, count: 2 },
+              costMicroUsd: 60000,
+            },
             created: "2026-08-16T10:02:00.000Z",
           },
         ],

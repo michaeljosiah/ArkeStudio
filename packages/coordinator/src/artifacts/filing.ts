@@ -354,19 +354,66 @@ export function pickable(artifacts: ArtifactSidecar[]): ArtifactSidecar[] {
 }
 
 /**
- * File a bench take's media as a world artifact (issue 305 §7): trusted system origin, explicit
- * generation provenance, world-owned.
+ * What a generated filing is *about*, per producing surface (issue 305 §7, issue 475).
+ *
+ * Three things vary and nothing else does: the identity a replay recognises, the name the file
+ * takes on the shelf, and what the artifact links to. Written once here so a second producer
+ * cannot quietly disagree with the first about any of them.
+ */
+function generatedIdentity(
+  generation: ArtifactGeneration,
+  /** The source file's own name, without extension — what a reference is recognisable by. */
+  originalStem: string,
+): {
+  producedBy: string;
+  /** Already filed? Compared against sidecars, so it reads the union the same way. */
+  isSame: (artifact: ArtifactSidecar) => boolean;
+  /** Filename stem, before the collision suffix. */
+  stem: string;
+  links: string[];
+} {
+  if (generation.source === "bench") {
+    return {
+      producedBy: "bench",
+      isSame: (artifact) =>
+        artifact.generation?.source === "bench" && artifact.generation.takeId === generation.takeId,
+      stem: `${slugify(generation.brief.slice(0, 48)) || "bench"}-take-${generation.takeNumber}`,
+      // No links: the bench answers to no sheet, and a world-owned artifact needs none.
+      links: [],
+    };
+  }
+  return {
+    producedBy: "character-reference",
+    // The job, not the take: the legacy tile path records no take at all, and one succeeded job
+    // made these bytes exactly once however they were then stored.
+    isSame: (artifact) =>
+      artifact.generation?.source === "character-reference" &&
+      artifact.generation.jobId === generation.jobId,
+    // The character, then the file the generation actually made — `maren-kest-look-g1-2.png`.
+    // The workflow is in the sidecar; a shelf of six `maren-kest-reference-tile-4.png` would
+    // tell nobody which angle they were looking at.
+    stem: `${slugify(generation.sheetId) || "character"}-${slugify(originalStem) || "reference"}`,
+    // Linked to the sheet it is a picture of — linkage, never ownership (SPEC-020): a character's
+    // reference belongs to the world's shelf, which is where its history is kept.
+    links: [generation.sheetId],
+  };
+}
+
+/**
+ * File a generated result as a world artifact (issue 305 §7, issue 475): trusted system origin,
+ * explicit generation provenance, world-owned.
  *
  * Deliberately NOT `fileArtifact`. Content-hash dedup is the wrong rule here twice over: a
  * generated occurrence must not collapse into an earlier user upload of the same bytes, and two
  * generated occurrences with different provenance stay two artifacts — why and how the bytes
- * were made is part of the artifact's identity. The idempotency key is the take id instead: a
- * retry of Keep for the same take returns the artifact it already made.
+ * were made is part of the artifact's identity. The idempotency key is the producing surface's
+ * own identity instead: a retry of Keep, or a replayed finalization, returns the artifact it
+ * already made rather than a second copy of it.
  */
 export async function fileGeneratedArtifact(
   store: WorldStore,
   input: {
-    /** Absolute path to the take's landed media, inside the session directory. */
+    /** Absolute path to the durable copy of the media — a bench take, or a reference take. */
     sourcePath: string;
     generation: ArtifactGeneration;
     mediaProbe?: MediaProbe | null;
@@ -378,16 +425,14 @@ export async function fileGeneratedArtifact(
 
   const original = basename(input.sourcePath);
   const ext = extname(original).toLowerCase();
-  const stem = slugify(input.generation.brief.slice(0, 48)) || "bench";
+  const identity = generatedIdentity(input.generation, basename(original, extname(original)));
   const kind = kindForFile(original);
   const filed = await store.gateOp(async () => {
-    const existing = store
-      .getBundle()
-      .artifacts.find((artifact) => artifact.generation?.takeId === input.generation.takeId);
+    const existing = store.getBundle().artifacts.find(identity.isSame);
     if (existing) return { artifact: existing, created: false };
 
     const taken = new Set(store.getBundle().artifacts.map((artifact) => artifact.file));
-    let file = `${stem}-take-${input.generation.takeNumber}${ext}`;
+    let file = `${identity.stem}${ext}`;
     for (let i = 2; ; i += 1) {
       const media = join(store.dir, "artifacts", file);
       const occupied =
@@ -395,7 +440,7 @@ export async function fileGeneratedArtifact(
         (await lstat(toExtendedLength(media)).catch(() => null)) !== null ||
         (await lstat(toExtendedLength(`${media}.json`)).catch(() => null)) !== null;
       if (!occupied) break;
-      file = `${stem}-take-${input.generation.takeNumber}-${i}${ext}`;
+      file = `${identity.stem}-${i}${ext}`;
     }
 
     const created: ArtifactSidecar = {
@@ -403,9 +448,10 @@ export async function fileGeneratedArtifact(
       kind,
       file,
       hash: hash as ArtifactSidecar["hash"],
-      origin: { by: "system", producedBy: "bench" },
-      links: [],
-      // No `production` key: the world owns it (SPEC-020 R-13). The bench never belongs to one.
+      origin: { by: "system", producedBy: identity.producedBy },
+      links: identity.links,
+      // No `production` key: the world owns it (SPEC-020 R-13). Neither the bench nor a
+      // character's reference shelf belongs to one.
       generation: input.generation,
       created: store.now(),
     };

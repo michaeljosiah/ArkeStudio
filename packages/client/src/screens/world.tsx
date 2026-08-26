@@ -21,6 +21,7 @@ import {
   voiceTargetKey,
   supportsVoiceUse,
   isClonedVoice,
+  isGeneratedArtifact,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -39,7 +40,7 @@ import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
-import { shortDateTime } from "../lib/format.js";
+import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -4041,8 +4042,9 @@ export function ArtifactsScreen() {
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
-  const madeHere = (a: (typeof artifacts)[number]) =>
-    a.origin.by === "system" && a.origin.producedBy === "bench";
+  // Whatever made it, not the bench alone (issue 475): a character's generated references are
+  // filed here too, and the chip that counts what this application made counts those as well.
+  const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
@@ -4260,7 +4262,7 @@ export function ArtifactsScreen() {
           // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
             name.includes(".") ? name.split(".").pop() : a.kind,
-            ...(madeHere(a) ? ["made here"] : []),
+            ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
             ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
           ].join(" · ");

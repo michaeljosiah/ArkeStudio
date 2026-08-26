@@ -61,3 +61,14 @@ export function initials(name: string): string {
     .map((w) => w[0]!.toUpperCase())
     .join("");
 }
+
+/**
+ * What the shelf calls a generated artifact's maker (issue 475).
+ *
+ * One word for the bench, another for a character's own references, because a shelf that called
+ * both "made here" would answer "which of these came from a character?" with silence. Spelled
+ * once, so the card and the picker tile can never disagree about the same file.
+ */
+export function generatedOriginLabel(artifact: { origin: { by: string; producedBy?: string } }): string {
+  return artifact.origin.producedBy === "character-reference" ? "character reference" : "made here";
+}

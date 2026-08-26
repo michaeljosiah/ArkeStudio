@@ -6,6 +6,7 @@ import {
   formatSeconds,
   multimediaCapacity,
   parseBenchToken,
+  isGeneratedArtifact,
   pickableArtifacts,
   type ArtifactSidecar,
   type BenchSession,
@@ -16,6 +17,7 @@ import {
   type Take,
 } from "@arke-studio/contracts";
 import { Button, cx } from "./ui.js";
+import { generatedOriginLabel } from "../lib/format.js";
 import { Portrait } from "./portrait.js";
 import { Search, Upload } from "./icons.js";
 import { Wave } from "../screens/production.js";
@@ -75,7 +77,7 @@ export function worldPickerSources(
       meta: [
         a.file.includes(".") ? a.file.split(".").pop() : a.kind,
         ...(a.mediaInfo ? [formatSeconds(a.mediaInfo.durationSec)] : []),
-        ...(a.origin.by === "system" && a.origin.producedBy === "bench" ? ["made here"] : []),
+        ...(isGeneratedArtifact(a) ? [generatedOriginLabel(a)] : []),
       ].join(" · "),
       durationSec: kind === "image" ? 0 : (a.mediaInfo?.durationSec ?? null),
       ...(token !== undefined ? { existingToken: token, active: active.has(token) } : {}),
@@ -102,6 +104,8 @@ export function characterPickerSources(
     referenceKits: readonly ReferenceKit[];
     referenceTakes: readonly Take[];
     referenceCandidates: Readonly<Record<string, readonly string[]>>;
+    /** The world's shelf, so a picture filed from a reference is offered under ONE identity. */
+    artifacts?: readonly ArtifactSidecar[];
   },
   session: BenchSession | null,
   activeIn: "reference" | "keyframe" = "reference",
@@ -110,22 +114,38 @@ export function characterPickerSources(
   const active = new Set(
     (activeIn === "keyframe" ? session?.composer.keyframeTokens : session?.composer.activeTokens) ?? [],
   );
+  /**
+   * Reference path to the artifact filed from it (issue 475).
+   *
+   * Every generated reference is now also an artifact, so this lane and the world lane hold the
+   * same picture. The row stays here — "Aurora · identity" is what a person is looking for, and
+   * an artifact filename is not — but it picks by artifact id, so the two lanes share one token
+   * instead of offering the same bytes twice under two names.
+   */
+  const artifactByFile = new Map<string, ArtifactSidecar>();
+  for (const artifact of pickableArtifacts(world.artifacts ?? [])) {
+    if (artifact.generation?.source === "character-reference") {
+      artifactByFile.set(artifact.generation.sourceFile, artifact);
+    }
+  }
   const nameOf = new Map(world.sheets.map((sheet) => [sheet.id, sheet.name]));
   const rows: PickerSource[] = [];
   const add = (sheetId: string, file: string, what: string): void => {
     if (!/\.(png|jpg|jpeg|webp)$/i.test(file)) return; // a path alone cannot price a clip
     const path = `references/${sheetId}/${file}`;
-    if (rows.some((r) => r.key === `file:${path}`)) return; // a tile and a compilation can name one file
-    const token = registry.get(`file:${path}`);
+    const artifact = artifactByFile.get(path);
+    const key = artifact ? `artifact:${artifact.id}` : `file:${path}`;
+    if (rows.some((r) => r.key === key)) return; // a tile and a compilation can name one file
+    const token = registry.get(key);
     rows.push({
-      key: `file:${path}`,
+      key,
       kind: "image",
       name: `${nameOf.get(sheetId) ?? sheetId} · ${what}`,
       imagePath: path,
       meta: [what, file.split("/").pop()].filter(Boolean).join(" · "),
       durationSec: 0,
       ...(token !== undefined ? { existingToken: token, active: active.has(token) } : {}),
-      pick: { source: "world-file", path },
+      pick: artifact ? { source: "artifact", artifactId: artifact.id } : { source: "world-file", path },
     });
   };
 
