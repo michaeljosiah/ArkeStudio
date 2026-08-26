@@ -47,7 +47,7 @@ import {
 } from "../references/generate.js";
 import { acceptCharacterSheet, acceptLocationView, readKit } from "../references/kit.js";
 import { acceptMainPhoto } from "../references/main-photo.js";
-import { LOOK_PREVIEW_DIR, LOOK_PREVIEW_META, LOOK_PREVIEW_NAME, masterLookFile } from "../references/master-look.js";
+import { LOOK_PREVIEW_DIR, LOOK_PREVIEW_META, masterLookFile } from "../references/master-look.js";
 import { adoptKeyArtCandidate } from "../references/key-art.js";
 import { assembleKeyArt, keyArtComposition } from "../references/key-art-references.js";
 import { pendingReferenceTake, recordReferenceTake, referenceReviewDecision } from "../references/takes.js";
