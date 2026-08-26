@@ -244,6 +244,24 @@ export function benchSourceKey(source: BenchReferenceSource): string {
 }
 
 /**
+ * What may sit immediately before a citation's "@" (issue 476).
+ *
+ * An address — write to me@image.example — is not an attempt to cite Image 1, and neither is
+ * anything else with an at-sign buried inside a word. One set, exported, because the editor
+ * decides where a menu may OPEN and this file decides what IS a mention: two spellings of that
+ * rule would let the menu offer a completion the gate then refuses to recognise.
+ */
+const MENTION_OPENERS = [" ", "\t", "\n", "(", "[", "{", '"', "'", "/", "\u2014", "\u2013"] as const;
+export const BENCH_MENTION_OPENERS: ReadonlySet<string> = new Set(MENTION_OPENERS);
+
+/**
+ * The openers as one character class. Written raw, which is safe for every character above and
+ * for punctuation generally — but `]`, `^`, `-` and a backslash would each have to be escaped
+ * before they could join the set, so add one of those and this line has to change with it.
+ */
+const OPENER_CLASS = MENTION_OPENERS.join("");
+
+/**
  * A mention: the name a brief cites a reference by, written with an at-sign — "@Image 3"
  * (issue 476).
  *
@@ -251,8 +269,15 @@ export function benchSourceKey(source: BenchReferenceSource): string {
  * own prose, so the completion menu, the chip in the words, and the gate before dispatch all
  * agree on which characters name a reference. A bare "Image 3" stays prose: briefs written
  * before mentions existed are not retroactively bound to a reference that may since have gone.
+ *
+ * Bounded on both sides, and it has to be. Without the opener, "foo@Image 1" would read as a
+ * citation the editor would never have offered; without the closing boundary, "@Image 1st of May"
+ * reads as "@Image 1", and ordinary prose is refused at dispatch over a reference nobody cited.
  */
-export const BENCH_MENTION = /@(?:Image|Video|Audio) [1-9][0-9]*/;
+export const BENCH_MENTION = new RegExp(
+  `(?<![^${OPENER_CLASS}])@(?:Image|Video|Audio) [1-9][0-9]*(?![\\p{L}\\p{N}])`,
+  "u",
+);
 
 /** The canonical spelling, in one place, so nothing writes a second dialect of it. */
 export function benchMentionFor(token: string): string {
@@ -262,7 +287,7 @@ export function benchMentionFor(token: string): string {
 /** Every mention a brief makes, in order, each with the span it occupies. */
 export function benchMentionsIn(text: string): Array<{ token: string; start: number; end: number }> {
   const found: Array<{ token: string; start: number; end: number }> = [];
-  for (const match of text.matchAll(new RegExp(BENCH_MENTION.source, "g"))) {
+  for (const match of text.matchAll(new RegExp(BENCH_MENTION.source, "gu"))) {
     const start = match.index ?? 0;
     found.push({ token: match[0].slice(1), start, end: start + match[0].length });
   }

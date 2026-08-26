@@ -374,32 +374,25 @@ function BenchWorkspace({
    * What a citation in the brief may name (issue 476): the references attached RIGHT NOW.
    *
    * Read exactly the way `planBenchDispatch` reads them — a shot carries its frames as well as
-   * its references, a picture carries only references, and a spoken line carries neither. The
-   * screen has to agree with the gate to the letter here: a name the composer drew as resolved
-   * and dispatch then refused would be a refusal arriving after the press, over words the author
-   * had already been told were fine.
+   * its references, a picture carries only references, and neither mode that makes a sound
+   * carries any. The screen has to agree with the gate to the letter here: a name the composer
+   * drew as resolved and dispatch then refused would be a refusal arriving after the press, over
+   * words the author had already been told were fine.
    */
   const attachedTokens = useMemo(
     () =>
-      speaking
+      soundOnly
         ? []
         : draft.mode === "video"
           ? [...session.composer.activeTokens, ...session.composer.keyframeTokens]
           : session.composer.activeTokens,
-    [speaking, draft.mode, session.composer.activeTokens, session.composer.keyframeTokens],
+    [soundOnly, draft.mode, session.composer.activeTokens, session.composer.keyframeTokens],
   );
   const attached = useMemo(() => new Set(attachedTokens), [attachedTokens]);
-  /**
-   * What the menu offers. The picker's own rows are where a mention gets its thumbnail, its name
-   * and its second line — and the two modes that make a sound offer nothing at all, because
-   * neither shows a lane the author could attach or remove a picture in.
-   */
+  /** The picker's own rows are where a mention gets its thumbnail, its name and its second line. */
   const mentions = useMemo(
-    () =>
-      soundOnly
-        ? []
-        : mentionOptions(attachedTokens, [...worldSources, ...sessionSources, ...characterSources]),
-    [soundOnly, attachedTokens, worldSources, sessionSources, characterSources],
+    () => mentionOptions(attachedTokens, [...worldSources, ...sessionSources, ...characterSources]),
+    [attachedTokens, worldSources, sessionSources, characterSources],
   );
   /** Said in the composer with the same function dispatch refuses with, so the two cannot differ. */
   const lostMentions = useMemo(
@@ -2110,23 +2103,37 @@ function longestOffered(models: readonly ManifestModel[]): number {
  * and left alone otherwise, because a brief written before mentions existed never claimed it.
  */
 function briefWithChips(text: string, tokens: Set<string>, attached: Set<string>): ReactNode[] {
-  return text.split(/(@?(?:Image|Video|Audio) [1-9][0-9]*)/g).map((part, i) => {
-    if (part.startsWith("@")) {
-      const lost = !attached.has(part.slice(1));
-      return (
-        <mark key={i} className={cx("fy-bench__briefchip", lost && "fy-bench__briefchip--lost")}>
-          {part}
-        </mark>
+  const out: ReactNode[] = [];
+  let key = 0;
+  // Everything between the mentions, where only the older bare spelling can be chipped.
+  const prose = (slice: string): void => {
+    for (const part of slice.split(/((?:Image|Video|Audio) [1-9][0-9]*)/g)) {
+      out.push(
+        tokens.has(part) ? (
+          <mark key={key++} className="fy-bench__briefchip">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
       );
     }
-    return tokens.has(part) ? (
-      <mark key={i} className="fy-bench__briefchip">
-        {part}
-      </mark>
-    ) : (
-      part
+  };
+  // The spans `benchMentionsIn` finds, not a second regex of the screen's own: a chip drawn
+  // where the gate sees no citation is a promise the press then breaks.
+  let at = 0;
+  for (const mention of benchMentionsIn(text)) {
+    prose(text.slice(at, mention.start));
+    const lost = !attached.has(mention.token);
+    out.push(
+      <mark key={key++} className={cx("fy-bench__briefchip", lost && "fy-bench__briefchip--lost")}>
+        {text.slice(mention.start, mention.end)}
+      </mark>,
     );
-  });
+    at = mention.end;
+  }
+  prose(text.slice(at));
+  return out;
 }
 
 /**

@@ -1,4 +1,10 @@
-import { benchMentionFor, parseBenchToken, type ReferenceKind } from "@arke-studio/contracts";
+import {
+  BENCH_MENTION_OPENERS,
+  benchMentionFor,
+  benchMentionsIn,
+  parseBenchToken,
+  type ReferenceKind,
+} from "@arke-studio/contracts";
 
 /**
  * The @ completion in a bench brief (issue 476), as plain functions.
@@ -31,14 +37,6 @@ export interface MentionQuery {
 }
 
 /**
- * What may sit immediately before the "@" for it to read as a citation.
- *
- * An address — write to me@image.example — is not an attempt to cite Image 1, and opening a
- * menu over one would be a menu the author has to dismiss to finish their sentence.
- */
-const OPENERS = new Set([" ", "\n", "\t", "(", "[", "{", '"', "'", "—", "–", "/"]);
-
-/**
  * What the typed query may be made of: a word, optionally then one space and a second word.
  *
  * The space matters — "Image 1" has one in it, so a query that stopped at the first space could
@@ -50,15 +48,47 @@ const QUERY = /^[\p{L}\p{N}._-]*(?: [\p{L}\p{N}._-]*)?$/u;
 /** Long enough for "Image 10" and a filename; short enough that ordinary prose closes the menu. */
 const MAX_QUERY = 32;
 
-/** The query the caret sits inside, or null when the caret is not in one. */
+/**
+ * The query the caret sits inside, or null when the caret is not in one.
+ *
+ * The rule about what may precede the "@" is the contracts one, imported rather than restated:
+ * a menu that opened where `BENCH_MENTION` sees no citation would offer a completion the gate
+ * then refuses to recognise.
+ */
 export function mentionQueryAt(text: string, caret: number): MentionQuery | null {
   if (caret <= 0 || caret > text.length) return null;
   const start = text.lastIndexOf("@", caret - 1);
   if (start < 0) return null;
-  if (start > 0 && !OPENERS.has(text[start - 1] ?? "")) return null;
+  if (start > 0 && !BENCH_MENTION_OPENERS.has(text[start - 1] ?? "")) return null;
   const query = text.slice(start + 1, caret);
   if (query.length > MAX_QUERY || !QUERY.test(query)) return null;
   return { start, query };
+}
+
+/** One character of a query word — the run a half-typed name is finished through. */
+const WORD = /[\p{L}\p{N}._-]/u;
+
+/**
+ * Where the citation being written ENDS, which is not always the caret.
+ *
+ * Put the caret back inside a name already written — "@Im|age 1" — and the characters after it
+ * belong to the same citation. Replacing only as far as the caret left the tail behind, so
+ * choosing a name there wrote "@Image 1 age 1" and corrupted the brief (raised on review).
+ *
+ * Two rules, in order. A whole citation already sitting at this "@" is replaced whole, asked of
+ * `benchMentionsIn` so that what counts as one is the gate's answer and not a second opinion.
+ * Otherwise the current word is finished — enough to complete a half-typed filename, and no
+ * more. Deliberately not "as far as the query grammar still parses": that grammar carries one
+ * space so a name like "Image 1" can be spelled, and following it rightwards through "@im and
+ * then" would swallow the word after the citation along with it.
+ */
+export function mentionQueryEnd(text: string, query: MentionQuery): number {
+  const caret = query.start + 1 + query.query.length;
+  const whole = benchMentionsIn(text).find((m) => m.start === query.start);
+  if (whole !== undefined && whole.end > caret) return whole.end;
+  let end = caret;
+  while (end < text.length && WORD.test(text[end] ?? "")) end += 1;
+  return end;
 }
 
 /**
@@ -92,16 +122,17 @@ function rank(option: MentionOption, needle: string): number {
 /**
  * The words with the query replaced by one canonical mention, and where the caret then sits.
  *
- * Everything either side of the query is untouched — a completion is an edit to the characters
- * the author typed after the "@" and to nothing else. A single space follows, unless the words
- * already have one there, so writing simply carries on.
+ * Everything either side of the citation is untouched — a completion is an edit to the citation
+ * being written and to nothing else. It replaces the whole of it, not merely as far as the
+ * caret, so a name re-entered halfway through is corrected rather than doubled. A single space
+ * follows, unless the words already have one there, so writing simply carries on.
  */
 export function insertMention(
   text: string,
   query: MentionQuery,
   token: string,
 ): { text: string; caret: number } {
-  const end = query.start + 1 + query.query.length;
+  const end = mentionQueryEnd(text, query);
   const mention = benchMentionFor(token);
   const rest = text.slice(end);
   const gap = rest.startsWith(" ") || rest.startsWith("\n") ? "" : " ";

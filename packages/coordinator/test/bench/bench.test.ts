@@ -536,6 +536,25 @@ describe("citations in the brief (issue 476)", () => {
     }
   });
 
+  it("reads no citation where the editor would have offered none (review, issue 476)", async () => {
+    // Unbounded, these were both read as "@Image 1" and refused as stale citations — the worst
+    // kind of refusal, because the words the author is told to fix were never meant as one.
+    for (const brief of ["write to me@Image 1.example", "released @Image 1st of May"]) {
+      const { dir, store } = await open();
+      const opened = await freshBench(dir);
+      await opened.store.append(
+        { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief },
+        { at: CLOCK() },
+      );
+      const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST, {
+        worldId: store.worldId,
+        requestId: "r1",
+        at: CLOCK(),
+      });
+      assert.equal(plan.ok, true, brief);
+    }
+  });
+
   it("the live composer, with the same picture taken off, refuses the words it left behind", async () => {
     const made = await withBrief("@Image 1, lit low");
     await made.opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
@@ -1287,6 +1306,55 @@ describe("a lane the mode has no use for rides along (found live, 2026-08-17)", 
     if (plan.ok) {
       // Ignored, not sent: the reference stays attached to the session for the modes that can
       // carry it, and nothing about it reaches a route that takes none.
+      assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
+      assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
+    }
+  });
+
+  it("does not refuse a song over one either — music is the other mode that makes a sound", async () => {
+    // Raised on review (issue 476). Music arrived a turn after the rule above was written and
+    // never joined it: it hides the reference lane exactly as voice does, and its snapshot
+    // refuses references outright, so a session carrying a picture refused every song over one
+    // the author could no longer see, let alone remove. Same shape, same answer.
+    const MUSIC_ROW: ManifestModel = {
+      id: "test-music-2",
+      provider: "fal",
+      capability: "music",
+      displayName: "Test Music",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    };
+    const manifest: ModelManifest = {
+      manifestVersion: 1,
+      generated: "2026-08-26",
+      models: [IMAGE_MODEL, MUSIC_ROW],
+    };
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+      source: { source: "artifact", artifactId },
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "music",
+        provider: "fal",
+        model: "test-music-2",
+        params: { kind: "music", count: 1, lyrics: "[verse]\nnobody wound it" },
+        brief: "Slow sea shanty, close harmony",
+      },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), manifest, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
       assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
       assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
     }

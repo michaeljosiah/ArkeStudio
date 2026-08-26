@@ -6,6 +6,7 @@ import {
   insertMention,
   mentionOptions,
   mentionQueryAt,
+  mentionQueryEnd,
   type MentionOption,
 } from "../src/lib/bench-mention.js";
 
@@ -120,6 +121,33 @@ describe("what the words look like afterwards (issue 476)", () => {
     assert.equal(next.caret, 8);
   });
 
+  it("replaces the whole name when the caret is put back inside one (review, issue 476)", () => {
+    // "@Im|age 1" — everything after the caret belongs to the same citation. Replacing only as
+    // far as the caret left the tail behind and wrote "@Image 1 age 1".
+    const text = "lit by @Image 1, cold";
+    const query = mentionQueryAt(text, 10);
+    assert.deepEqual(query, { start: 7, query: "Im" });
+    assert.equal(mentionQueryEnd(text, query!), 15);
+    const next = insertMention(text, query!, "Image 2");
+    assert.equal(next.text, "lit by @Image 2 , cold");
+    assert.equal(benchMentionsIn(next.text).length, 1);
+  });
+
+  it("finishes a half-typed filename, and takes nothing past the word", () => {
+    const text = "@harbour-night.png and then";
+    const query = mentionQueryAt(text, 4);
+    assert.deepEqual(query, { start: 0, query: "har" });
+    assert.equal(mentionQueryEnd(text, query!), 18);
+    assert.equal(insertMention(text, query!, "Image 1").text, "@Image 1 and then");
+  });
+
+  it("stops at the citation, not at the prose after it", () => {
+    const text = "@im lit from behind";
+    assert.equal(mentionQueryEnd(text, mentionQueryAt(text, 3)!), 3);
+    const next = insertMention(text, mentionQueryAt(text, 3)!, "Image 1");
+    assert.equal(next.text, "@Image 1 lit from behind");
+  });
+
   it("survives a second completion in the same sentence", () => {
     const first = insertMention("cite @", mentionQueryAt("cite @", 6)!, "Image 1");
     const typed = `${first.text}and @`;
@@ -175,5 +203,46 @@ describe("a citation nothing answers for (issue 476)", () => {
 
   it("says nothing when every citation is riding", () => {
     assert.deepEqual(unresolvedBenchMentions("@Image 1 and @Audio 1", ["Audio 1", "Image 1"]), []);
+  });
+
+  /**
+   * Both bounds matter, and both were missing (raised on review). Unbounded, ordinary prose gets
+   * refused at dispatch over a reference nobody cited — the worst kind of refusal, because the
+   * words the author is asked to fix are words they never meant as a citation.
+   */
+  it("is not a citation with an at-sign buried inside a word", () => {
+    assert.deepEqual(benchMentionsIn("write to me@Image 1.example"), []);
+    assert.deepEqual(unresolvedBenchMentions("write to me@Image 1.example", []), []);
+  });
+
+  it("is not a citation where the number runs on into a word", () => {
+    assert.deepEqual(benchMentionsIn("released @Image 1st of May"), []);
+    assert.deepEqual(unresolvedBenchMentions("released @Image 1st of May", []), []);
+  });
+
+  it("still reads a citation the editor would have offered — after an opener, or first", () => {
+    for (const text of ["@Image 1", "lit by @Image 1", "(@Image 1)", 'said "@Image 1"']) {
+      assert.deepEqual(
+        benchMentionsIn(text).map((m) => m.token),
+        ["Image 1"],
+        text,
+      );
+    }
+  });
+
+  it("reads the whole number, and stops at ordinary punctuation", () => {
+    assert.deepEqual(
+      benchMentionsIn("@Image 10, then @Image 2.").map((m) => m.token),
+      ["Image 10", "Image 2"],
+    );
+  });
+
+  it("agrees with the editor about where a citation may start", () => {
+    // Whatever the editor refuses to open a menu over, the gate must refuse to read as one.
+    for (const text of ["me@Image 1", "a/@Image 1", "lit by @Image 1"]) {
+      const at = text.lastIndexOf("@") + 1 + "Image 1".length;
+      const opened = mentionQueryAt(text, at) !== null;
+      assert.equal(benchMentionsIn(text).length > 0, opened, text);
+    }
   });
 });

@@ -184,6 +184,41 @@ describe("citing a reference in the brief (issue 476)", () => {
     assert.doesNotMatch(html, /data-testid="bench-lost-mentions"/);
   });
 
+  it("a mode that makes a sound carries no picture, so a citation in one is unresolved", () => {
+    // Raised on review: `speaking` left music's hidden reference riding, which drew "@Image 1"
+    // as resolved over a request that could never carry it. Both sound modes now say the same
+    // thing the coordinator does.
+    const state = stateWithBench();
+    const bench = state.bench!;
+    const singing: ClientState = {
+      ...state,
+      bench: {
+        ...bench,
+        session: {
+          ...bench.session,
+          composer: {
+            ...bench.session.composer,
+            mode: "music",
+            params: { kind: "music", count: 1, lyrics: "[verse]\nnobody wound it" },
+            brief: "Slow shanty, like @Image 1.",
+          },
+        },
+      },
+    };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, singing);
+    assert.match(html, /fy-bench__briefchip--lost/);
+    assert.match(html, /data-testid="bench-lost-mentions"/);
+  });
+
+  it("does not chip, or warn over, an at-sign the editor would never have offered a menu at", () => {
+    const html = renderAt(
+      `/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`,
+      wrote("released @Image 4th of May, write to me@Image 9.example"),
+    );
+    assert.doesNotMatch(html, /fy-bench__briefchip--lost/);
+    assert.doesNotMatch(html, /data-testid="bench-lost-mentions"/);
+  });
+
   it("the write-large window is the same editor, so the completion cannot exist in only one", () => {
     const options: MentionOption[] = [
       { token: "Image 1", kind: "image", name: "harbour-night.png", meta: "png" },

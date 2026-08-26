@@ -472,9 +472,14 @@ export function planBenchDispatch(
   // follows for an image request. Found live: a session that had carried a reference for a shot
   // refused a spoken line over it, and voice mode hides the very lane that could have removed
   // it, so the refusal named something the user had no way to act on (design 70).
+  //
+  // A song is the same shape and had been left out of it (raised on review, issue 476). Music
+  // arrived a turn later, hides the reference lane exactly as voice does, and its snapshot
+  // refuses references outright — so a session that had carried a picture refused every song
+  // over one the author could no longer see, let alone remove. Both modes that make a sound.
   const references: BenchReferenceToken[] = options.fromTake
     ? options.fromTake.request.references
-    : composer.mode === "voice"
+    : composer.mode === "voice" || composer.mode === "music"
       ? []
       : session.composer.activeTokens
           .map((token) => session.tokenRegistry.find((e) => e.token === token))
