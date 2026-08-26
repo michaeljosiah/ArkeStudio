@@ -4996,6 +4996,7 @@ export class Coordinator {
             );
             return;
           }
+          const slateFont = runner.slateFont;
           /*
            * A production cut to a track renders against the song, not against scene order (#253).
            *
@@ -5089,7 +5090,7 @@ export class Coordinator {
             const stem = production.episodeFiles[episode.id] ?? episode.id;
             const handle = runExport(
               store.dir,
-              (stage) => buildFfmpegArgs(plan, store.dir, stage),
+              (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               // The episode stem keeps filenames collision-free across episodes; the stamp keeps
               // retries from overwriting what a person may already have sent on.
               `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
@@ -5127,7 +5128,7 @@ export class Coordinator {
               return;
             }
             const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
-            buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage);
+            buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage, slateFont);
           } else {
             if (spine && trackDurationSec === null) {
               // Falling through silently would export a spine production as though it had none.
@@ -5150,7 +5151,7 @@ export class Coordinator {
             const overlays = exportOverlays(production.cut.overlays, artifacts);
             const audio = exportAudioClips(production.cut.overlays, artifacts);
             const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
-            buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage);
+            buildArgs = (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont);
           }
           const stamp = new Date()
             .toISOString()

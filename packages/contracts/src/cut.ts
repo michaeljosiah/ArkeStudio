@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
+import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js";
 import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
@@ -439,7 +440,7 @@ export function buildExportPlan(
  * One ffmpeg invocation for the whole plan (D11): slates from the lavfi color source with a
  * drawtext label; clips trimmed by their ranges; everything concatenated in a single encode.
  */
-export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string): string[] {
+export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
   const p = PRESETS[plan.preset];
   const args: string[] = ["-y"];
   const filters: string[] = [];
@@ -472,8 +473,9 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
       );
     } else {
       args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      assertSlateLabelSupported(item.label);
       const text = item.label.replace(/[':\\]/g, " ");
-      filters.push(`[${inputIndex}:v]drawtext=text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);
+      filters.push(`[${inputIndex}:v]drawtext=fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);
     }
     inputIndex += 1;
   }

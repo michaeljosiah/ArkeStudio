@@ -37,6 +37,8 @@ directories:
 files:
   - dist/**
   - assets/**
+  # This TTF is a loose resource below, not duplicated inside app.asar.
+  - "!assets/Geist-Regular.ttf"
   - package.json
   # The Claude Agent SDK declares per-platform optionalDependencies that each carry a ~312MB
   # `claude.exe` — the whole Claude Code runtime — under "© Anthropic PBC. All rights reserved".
@@ -70,6 +72,11 @@ extraResources:
   - from: build-resources/ffmpeg
     to: ffmpeg
     filter: ["**/*"]
+  # Unmodified Geist Regular v1.7.2, sha256 85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117.
+  - from: assets/Geist-Regular.ttf
+    to: fonts/Geist-Regular.ttf
+  - from: ../../licenses/LICENSE.Geist.txt
+    to: fonts/LICENSE.Geist.txt
   # espeak-ng stays a SEPARATE EXECUTABLE, never linked (R-10, D6) — GPL, same arrangement Voxa makes.
   - from: build-resources/espeak-ng/${arch}
     to: espeak-ng

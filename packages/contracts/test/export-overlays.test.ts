@@ -73,7 +73,7 @@ describe("resolving overlays for the exporter", () => {
 
 describe("the arguments an overlay produces", () => {
   const args = (overlays: Parameters<typeof buildExportPlan>[2], of: DerivedCut = cut) =>
-    buildFfmpegArgs(buildExportPlan(of, "review-cut", overlays), "/w", "/out.mp4");
+    buildFfmpegArgs(buildExportPlan(of, "review-cut", overlays), "/w", "/out.mp4", "/fonts/Geist-Regular.ttf");
   /** The filter graph is one argument; reading it is what most of these assert against. */
   const graphOf = (a: string[]) => a[a.indexOf("-filter_complex") + 1] ?? "";
 
@@ -149,7 +149,7 @@ describe("the arguments an overlay produces", () => {
 describe("a shot's slot is what a clip is conformed to", () => {
   const graphFor = (entries: { durationSec: number; media: { path: string } | null }[]) => {
     const of = { entries: entries.map((e, i) => ({ ...e, label: `SHOT ${i + 1}` })), totalSec: entries.reduce((a, e) => a + e.durationSec, 0) } as unknown as DerivedCut;
-    const a = buildFfmpegArgs(buildExportPlan(of, "review-cut"), "/w", "/out.mp4");
+    const a = buildFfmpegArgs(buildExportPlan(of, "review-cut"), "/w", "/out.mp4", "/fonts/Geist-Regular.ttf");
     return a[a.indexOf("-filter_complex") + 1] ?? "";
   };
 

@@ -1,4 +1,5 @@
 import { PRESETS, type ExportPreset } from "./cut.js";
+import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js";
 import type { DerivedSpineCut, SpineCutSegment } from "./spine-cut.js";
 
 /**
@@ -141,7 +142,7 @@ function itemFor(segment: SpineCutSegment, startSec: number, durationSec: number
  * default divides every input by the number of inputs, so a shot that keeps its audio would
  * quietly pull the song down for exactly its duration — the automatic duck this design refuses.
  */
-export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, outFile: string): string[] {
+export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
   const p = PRESETS[plan.preset];
   const args: string[] = ["-y"];
   const filters: string[] = [];
@@ -181,9 +182,10 @@ export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, ou
         // expansion=none: a shot titled "100% Practical" is a label, not a drawtext expression.
         // ffmpeg expands %{...} in text by default, so a percent sign in somebody's own shot
         // title could fail their review cut instead of appearing on the slate (Codex round 1).
+        assertSlateLabelSupported(item.label);
         const text = item.label.replace(/[':\\]/g, " ");
         filters.push(
-          `[${index}:v]drawtext=expansion=none:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${index}]`,
+          `[${index}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${index}]`,
         );
       } else {
         filters.push(`[${index}:v]null[v${index}]`);

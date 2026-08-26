@@ -2,6 +2,7 @@
 // its obligations recorded in THIRD-PARTY-NOTICES.md BEFORE it may be bundled. A missing row
 // fails the package step — a licence question found here is a task, not a shipping delay.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
@@ -63,6 +64,19 @@ for (const required of ["CLA.md", "CONTRIBUTING.md", "contributors.md"]) {
 // Components always in the bundle regardless of build-resources.
 for (const always of ["better-sqlite3", "Electron", "SQLite", "Geist"]) {
   if (!notices.includes(always)) failures.push(`"${always}" ships in every build but has no notice row`);
+}
+for (const [path, reason] of [
+  ["apps/desktop/assets/Geist-Regular.ttf", "the redistributed Geist slate font is absent"],
+  ["licenses/LICENSE.Geist.txt", "the redistributed Geist slate font has no retained OFL text in licenses/"],
+]) {
+  if (!existsSync(join(repoRoot, path))) failures.push(reason);
+}
+const geistFont = join(repoRoot, "apps", "desktop", "assets", "Geist-Regular.ttf");
+if (existsSync(geistFont)) {
+  const digest = createHash("sha256").update(readFileSync(geistFont)).digest("hex");
+  if (digest !== "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117") {
+    failures.push("the redistributed Geist slate font does not match the reviewed v1.7.2 binary");
+  }
 }
 
 if (existsSync(buildResources)) {
