@@ -384,6 +384,14 @@ async function createWindow(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      /*
+       * Chromium's PDF viewer is a plugin, and Electron defaults `plugins` to false. Without it
+       * the artifact viewer's `<object>` gets the `application/pdf` bytes and has nothing to draw
+       * them with — the document loads and renders as an empty frame (issue 530). This turns on
+       * that one built-in viewer, not NPAPI or anything fetched: `webSecurity`, `sandbox` and
+       * `contextIsolation` above are what hold the boundary, and they are unchanged.
+       */
+      plugins: true,
       additionalArguments: [
         `--arke-app-version=${__APP_VERSION__}`,
         `--arke-theme-preference=${themePreference}`,
