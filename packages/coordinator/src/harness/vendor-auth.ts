@@ -199,7 +199,12 @@ export class VendorAuthService {
     this.setSignIn({ vendor, method: methodLabel, phase: "waiting", instructions: null, codeEntry: false, detail: null });
     try {
       const attempt = await adapter.beginVendorOAuth(vendor, methodId, answers);
-      if (this.inFlight !== flight) return; // replaced or cancelled while beginning
+      if (this.inFlight !== flight) {
+        // Replaced or cancelled while beginning. The cancel could not release an attempt whose
+        // id did not exist yet, so the release happens here, on arrival.
+        void this.releaseAttempt(vendor, attempt.attemptId);
+        return;
+      }
       flight.attempt = attempt;
       this.setSignIn({
         vendor,
@@ -249,9 +254,10 @@ export class VendorAuthService {
       await adapter.completeVendorOAuth(flight.vendor, flight.attempt.attemptId, code);
       // The poll confirms from what it observes rather than from this call (R-9b) — but ask
       // now instead of waiting out the interval.
-      await this.pollOnce();
+      if (this.inFlight === flight) await this.pollOnce();
     } catch (err) {
-      this.failSignIn(messageOf(err));
+      // A rejection from a superseded completion must not fail the flow that replaced it.
+      if (this.inFlight === flight) this.failSignIn(messageOf(err));
     }
   }
 
@@ -290,12 +296,19 @@ export class VendorAuthService {
   /**
    * A turn failed because a token could not be refreshed (R-13). Mark the connection where
    * it can be named; where it cannot, state the fault on the surface rather than guessing.
+   *
+   * `providerHint` is the provider the failed session actually ran on, where the caller can
+   * name it — an agent's model override routes past the harness default, and marking the
+   * default's vendor for an override's failure would send the person to re-authenticate a
+   * connection that was never the problem.
    */
-  async noteAuthFailure(): Promise<void> {
+  async noteAuthFailure(providerHint?: string | null): Promise<void> {
     const adapter = this.adapterWithAuth();
-    let target: string | null = null;
-    // The turn ran on the default model; its provider names the vendor when anything can.
-    if (adapter?.listModels) {
+    const credentialed = this.vendors.filter((v) => v.connections.some((c) => c.kind === "stored"));
+    let target: string | null =
+      providerHint != null && credentialed.some((v) => v.id === providerHint) ? providerHint : null;
+    // Without a hint, the turn ran on the default model; its provider names the vendor.
+    if (target === null && adapter?.listModels) {
       try {
         const models = await adapter.listModels();
         target = models.find((m) => m.isDefault === true)?.provider ?? null;
@@ -303,7 +316,6 @@ export class VendorAuthService {
         /* the mark falls back below */
       }
     }
-    const credentialed = this.vendors.filter((v) => v.connections.some((c) => c.kind === "stored"));
     if (target === null || !credentialed.some((v) => v.id === target)) {
       target = credentialed.length === 1 ? credentialed[0]!.id : null;
     }
@@ -347,7 +359,9 @@ export class VendorAuthService {
     }
     try {
       const state = await adapter.pollVendorOAuth(flight.vendor, flight.attempt.attemptId);
-      if (this.inFlight !== flight) return; // replaced or cancelled while polling
+      // Replaced, cancelled, or shutting down while polling: a late answer starts nothing —
+      // shutdown especially, where a settle would dial a harness being torn down.
+      if (this.inFlight !== flight || this.stopped) return;
       flight.consecutivePollErrors = 0;
       if (state.status === "complete") {
         await this.settleSuccess(flight.vendor);
@@ -363,7 +377,7 @@ export class VendorAuthService {
       }
       this.schedulePoll();
     } catch (err) {
-      if (this.inFlight !== flight) return;
+      if (this.inFlight !== flight || this.stopped) return;
       flight.consecutivePollErrors += 1;
       if (flight.consecutivePollErrors >= POLL_ERROR_LIMIT) {
         this.failSignIn(messageOf(err));
@@ -458,7 +472,10 @@ function sleep(ms: number): Promise<void> {
  */
 export function isAuthShapedFailure(detail: string | null | undefined): boolean {
   if (!detail) return false;
-  return /^provider\.auth\b/i.test(detail) || /token refresh/i.test(detail);
+  // One leading `Name: ` is allowed because the operator log's cause is written as
+  // `${err.name}: ${err.message}` — "Error: provider.auth" is the same failure. A single word
+  // only, so prose that merely mentions provider.auth mid-sentence stays unmatched.
+  return /^(?:\w+: )?provider\.auth\b/i.test(detail) || /token refresh/i.test(detail);
 }
 
 /** R-13's stated reason, shared by every turn surface so the words cannot drift apart. */

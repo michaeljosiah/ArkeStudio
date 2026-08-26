@@ -1331,7 +1331,14 @@ export class Coordinator {
             agentForPurpose: opts.authoring.agentForPurpose,
             // R-13: the failed refresh marks the connection, so the sign-in surface says
             // "sign-in needed" by the time the person goes looking for why the turn ended.
-            onAuthFailure: () => void this.vendorAuth.noteAuthFailure().catch(() => {}),
+            // The agent that ran may carry a model override, whose provider outranks the
+            // harness default as the vendor to mark.
+            onAuthFailure: (purpose) => {
+              const agent = opts.authoring?.agentForPurpose(purpose);
+              const override = agent !== undefined ? this.agentOverrides?.[agent]?.model : undefined;
+              const hint = override?.split("/")[0] ?? null;
+              void this.vendorAuth.noteAuthFailure(hint).catch(() => {});
+            },
           })
         : null;
     this.genesis =

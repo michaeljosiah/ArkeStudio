@@ -1768,7 +1768,15 @@ export function SettingsSignInScreen() {
   useEffect(() => {
     if (harnessReady) listHarnessModels();
   }, [harnessReady, storedConnections]);
-  const authoringProvider = state?.app.harnessModels.find((m) => m.isDefault === true)?.provider ?? null;
+  // Authoring runs on the default model — and on any agent's model override, which routes past
+  // it. The label follows every provider an agent can actually bill, not only the default's.
+  const authoringProviders = new Set<string>();
+  const defaultProvider = state?.app.harnessModels.find((m) => m.isDefault === true)?.provider;
+  if (defaultProvider !== undefined) authoringProviders.add(defaultProvider);
+  for (const agent of state?.app.agents ?? []) {
+    const overrideProvider = agent.model?.split("/")[0];
+    if (overrideProvider) authoringProviders.add(overrideProvider);
+  }
   if (!auth || !auth.available) {
     return (
       <div data-screen="settings-signin" className="fy-set">
@@ -1799,7 +1807,7 @@ export function SettingsSignInScreen() {
           vendor={vendor}
           signIn={auth.signIn}
           linked={auth.carry === "linked"}
-          usedForAuthoring={authoringProvider === vendor.id}
+          usedForAuthoring={authoringProviders.has(vendor.id)}
         />
       ))}
       {auth.carryDetail !== null && <div className="fy-set__note">{auth.carryDetail}</div>}

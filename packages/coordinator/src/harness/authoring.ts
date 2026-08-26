@@ -23,9 +23,11 @@ export interface AuthoringOptions {
   /**
    * A turn died because a vendor token could not be refreshed (SPEC-030 R-13). The caller
    * marks the connection; this service's part is only to say it happened — and to state the
-   * ending as a sign-in request rather than a provider error.
+   * ending as a sign-in request rather than a provider error. The purpose travels along so
+   * the caller can resolve which agent ran, and through it a model override's provider —
+   * the failed session's vendor is not always the harness default's.
    */
-  onAuthFailure?: () => void;
+  onAuthFailure?: (purpose: RunInput["purpose"]) => void;
 }
 
 export interface RunInput {
@@ -309,7 +311,7 @@ export class AuthoringService {
     if (final.state === "failed" && isAuthShapedFailure(final.detail)) {
       final = { state: "failed", detail: AUTH_FAILURE_REASON };
       try {
-        this.opts.onAuthFailure?.();
+        this.opts.onAuthFailure?.(input.purpose);
       } catch {
         /* marking the connection must not change the turn's ending */
       }

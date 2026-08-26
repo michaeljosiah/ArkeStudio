@@ -162,7 +162,12 @@ const coordinator = new Coordinator({
         : process.platform === "darwin"
           ? { command: "open", args: [url] }
           : { command: "xdg-open", args: [url] };
-    spawn(opener.command, opener.args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    const child = spawn(opener.command, opener.args, { detached: true, stdio: "ignore", windowsHide: true });
+    // A machine without the platform opener emits an async error on a detached child — with no
+    // listener that is an unhandled event, which would take the whole dev coordinator down for
+    // a browser that simply could not open.
+    child.on("error", () => {});
+    child.unref();
   },
   // The dev coordinator carries the app's own preset speakers so the voice picker has a
   // catalogue to show without a sidecar or a provider key. No cloud sources: unkeyed

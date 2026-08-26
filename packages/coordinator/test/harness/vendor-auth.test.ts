@@ -346,6 +346,31 @@ describe("marking a connection that needs sign-in (R-13, R-14)", () => {
     assert.equal(last.vendors.find((v) => v.id === "xai")?.needsSignIn, false);
   });
 
+  it("a caller's provider hint outranks the harness default — an override ran, not the default", async () => {
+    const adapter = fakeAdapter();
+    adapter.models = [{ id: "gpt", provider: "openai", isDefault: true }];
+    adapter.integrations = [
+      vendor({
+        id: "openai",
+        name: "OpenAI",
+        methods: [OAUTH_METHOD],
+        connections: [{ kind: "stored", id: "cred_1", label: "default" }],
+      }),
+      vendor({
+        id: "xai",
+        name: "xAI",
+        methods: [OAUTH_METHOD],
+        connections: [{ kind: "stored", id: "cred_2", label: "default" }],
+      }),
+    ];
+    const { service, published } = makeService(adapter);
+    await service.refresh();
+    await service.noteAuthFailure("xai");
+    const last = published.at(-1)!;
+    assert.equal(last.vendors.find((v) => v.id === "xai")?.needsSignIn, true);
+    assert.equal(last.vendors.find((v) => v.id === "openai")?.needsSignIn, false);
+  });
+
   it("falls back to the single credentialed vendor, and to a stated fault past that", async () => {
     const adapter = fakeAdapter();
     adapter.models = [];
@@ -451,6 +476,71 @@ describe("review round 2026-08-26: races, releases and retained refusals", () =>
     assert.equal(last.vendors[0]?.connections.length, 1, "the connection is still shown");
   });
 
+  it("an attempt that arrives after its flow was replaced is released, not leaked", async () => {
+    const adapter = fakeAdapter();
+    let resolveFirst: ((attempt: typeof adapter.attempt) => void) | null = null;
+    let calls = 0;
+    adapter.beginVendorOAuth = async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return { ...adapter.attempt, attemptId: "con_new" };
+    };
+    const { service, published } = makeService(adapter);
+    const first = service.beginOAuth("openai", "browser");
+    await service.beginOAuth("xai", "device");
+    resolveFirst!({ ...adapter.attempt, attemptId: "con_old" });
+    await first;
+    await until(() => adapter.cancelCalls.includes("con_old"));
+    assert.equal(published.at(-1)!.signIn?.vendor, "xai");
+  });
+
+  it("a rejection from a superseded code completion does not fail the flow that replaced it", async () => {
+    const adapter = fakeAdapter();
+    adapter.attempt = { ...adapter.attempt, mode: "code" };
+    let rejectComplete: ((err: Error) => void) | null = null;
+    adapter.completeVendorOAuth = async () =>
+      new Promise((_resolve, reject) => {
+        rejectComplete = reject;
+      });
+    const { service, published } = makeService(adapter);
+    await service.beginOAuth("openai", "browser");
+    const submitted = service.submitCode("AAAA-BBBBB");
+    adapter.attempt = { ...adapter.attempt, attemptId: "con_2", mode: "auto" };
+    await service.beginOAuth("xai", "device");
+    rejectComplete!(new Error("the old completion died"));
+    await submitted;
+    const last = published.at(-1)!;
+    assert.equal(last.signIn?.vendor, "xai");
+    assert.equal(last.signIn?.phase, "waiting");
+  });
+
+  it("a poll answered after stop() starts nothing", async () => {
+    const adapter = fakeAdapter();
+    let resolvePoll: ((state: VendorOAuthAttemptState) => void) | null = null;
+    adapter.pollVendorOAuth = async () =>
+      new Promise((resolve) => {
+        resolvePoll = resolve;
+      });
+    let listCalls = 0;
+    adapter.listIntegrations = async () => {
+      listCalls += 1;
+      return adapter.integrations.map((v) => ({ ...v }));
+    };
+    const { service, published } = makeService(adapter);
+    await service.beginOAuth("openai", "browser");
+    await until(() => resolvePoll !== null);
+    const listedBefore = listCalls;
+    service.stop();
+    resolvePoll!({ status: "complete" });
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(listCalls, listedBefore, "no settle, no refresh, no harness work after stop");
+    assert.equal(published.at(-1)!.signIn?.phase, "waiting", "nothing was settled after shutdown");
+  });
+
   it("an adapter error's stated detail is what reaches the screen, never the route", async () => {
     const adapter = fakeAdapter();
     adapter.beginVendorOAuth = async () => {
@@ -469,8 +559,13 @@ describe("R-13's classifier", () => {
     assert.equal(isAuthShapedFailure("provider.auth"), true);
     assert.equal(isAuthShapedFailure("provider.auth: something"), true);
     assert.equal(isAuthShapedFailure("Token refresh failed: 401"), true);
+    // The operator log's shape: `${err.name}: ${err.message}` — the same failure, one prefix in.
+    assert.equal(isAuthShapedFailure("Error: provider.auth"), true);
+    assert.equal(isAuthShapedFailure("OpenCodeError: provider.auth: refresh declined"), true);
     assert.equal(isAuthShapedFailure("HTTP 500 from the provider"), false);
     assert.equal(isAuthShapedFailure("the model declined"), false);
+    // Two words before the colon is prose, not an error name — stays unmatched.
+    assert.equal(isAuthShapedFailure("answer rejected: provider.auth looked odd"), false);
     assert.equal(isAuthShapedFailure(""), false);
     assert.equal(isAuthShapedFailure(null), false);
     assert.equal(isAuthShapedFailure(undefined), false);

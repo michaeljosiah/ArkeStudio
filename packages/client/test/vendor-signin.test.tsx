@@ -139,6 +139,37 @@ describe("Settings · Sign-in", () => {
     assert.ok(html.includes("Dismiss"));
   });
 
+  it("the authoring label follows an agent's model override, not only the harness default", () => {
+    const base = authWith({
+      vendors: [
+        { ...OPENAI, connections: [{ kind: "stored", id: "cred_1", label: "default" }] },
+        { id: "xai", name: "xAI", methods: OPENAI.methods, connections: [{ kind: "stored", id: "cred_2", label: "default" }], needsSignIn: false },
+      ],
+    });
+    __setStateForTest({
+      ...base,
+      app: {
+        ...base.app,
+        health: { ...base.app.health, harness: { status: "healthy" } },
+        harnessModels: [{ id: "gpt", provider: "openai", isDefault: true }],
+        agents: [
+          {
+            name: "scene-writer",
+            description: "writes scenes",
+            shippedBrief: "brief",
+            brief: "brief",
+            model: "xai/grok-code",
+            edited: true,
+          },
+        ],
+      },
+    });
+    const html = render();
+    // Both providers can bill an authoring turn: the default's and the override's.
+    const labels = html.split("used for authoring").length - 1;
+    assert.equal(labels, 2);
+  });
+
   it("the carry limitation is stated when personal harness state exists (R-4)", () => {
     __setStateForTest(
       authWith({
