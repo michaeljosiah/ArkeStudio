@@ -590,6 +590,84 @@ describe("SPEC-017 art direction and scoped looks", () => {
     await store.close();
   });
 
+  it("uses the production's visual language in both dispatch modes instead of the world look", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const styleOverride = "Bleached documentary realism with hard noon shadows.";
+
+    for (const mode of ["per-shot", "whole-scene"] as const) {
+      const plan = planScene(
+        {
+          world: bundle.meta,
+          artDirection: bundle.artDirection,
+          productionId: production.meta.id,
+          production: { styleOverride, failureModes: production.meta.failureModes },
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits,
+          scene,
+          selections: production.selections,
+          model: VIDEO_MODEL,
+        },
+        mode,
+      );
+      const requests = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, VIDEO_MODEL, bundle);
+      assert.equal(plan.effectiveStyle, styleOverride);
+      assert.equal(plan.productionStyleOverride, styleOverride);
+      for (const request of requests) {
+        const prompt = String(request.params["prompt"]);
+        assert.match(prompt, /Bleached documentary realism with hard noon shadows/);
+        assert.ok(!prompt.includes(bundle.artDirection.description), `${mode} does not re-read the world look`);
+        assert.deepEqual(request.params["artDirection"], {
+          version: bundle.artDirection.version,
+          source: "production",
+          transport: "text",
+          description: styleOverride,
+        });
+      }
+    }
+    await store.close();
+  });
+
+  it("keeps a full shot prompt override independent of the production look", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const override = "Hand-tuned shot prompt with its own visual treatment.";
+    const scene: Scene = {
+      ...production.scenes[0]!,
+      shots: [
+        {
+          ...production.scenes[0]!.shots[0]!,
+          promptOverride: { text: override, sheetVersions: {} },
+        },
+      ],
+    };
+    const plan = planScene(
+      {
+        world: bundle.meta,
+        artDirection: bundle.artDirection,
+        productionId: production.meta.id,
+        production: {
+          styleOverride: "Bleached documentary realism",
+          failureModes: production.meta.failureModes,
+        },
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: production.selections,
+        model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, VIDEO_MODEL, bundle);
+    assert.match(String(request!.params["prompt"]), /Hand-tuned shot prompt/);
+    assert.ok(!String(request!.params["prompt"]).includes("Bleached documentary realism"));
+    assert.equal((request!.params["artDirection"] as { source: string }).source, "generation");
+    await store.close();
+  });
+
   it("carries an attached look only inside its named production", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

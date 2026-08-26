@@ -2179,10 +2179,19 @@ export function GenerateScreen() {
               : "steering only · no frame route on this model"}
           </span>
         </div>
-        {world && (
+        {world && production && (
           <div className="fy-worldlook-line">
-            <span>World look · v{world.artDirection.version}</span>
-            <small>inherited · carries as text</small>
+            <span>
+              {shot?.promptOverride
+                ? "Shot prompt override"
+                : production.meta.styleOverride?.trim()
+                ? "Production look"
+                : `World look · v${world.artDirection.version}`}
+            </span>
+            <small>
+              {shot?.promptOverride ? "edited by you" : production.meta.styleOverride?.trim() || "inherited"} · carries
+              as text
+            </small>
           </div>
         )}
         <div className="fy-framerow">
@@ -2359,18 +2368,24 @@ function GeneratePromptEditor({
   worldId: string;
   prodId: string;
 }) {
+  const style = production.meta.styleOverride?.trim() || world.artDirection.description;
   // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
   // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
   const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
-  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
-  const current = promptFor(world.meta, world.sheets, scene, shot, undefined, undefined, capability);
+  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
+  const current = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const stale = overrideStaleAgainst(shot, world.sheets);
   const [draft, setDraft] = useState<string | null>(null);
   const value = draft ?? current.text;
   return (
     <>
       <div className="fy-gen__label" style={{ marginTop: 16 }}>
-        Prompt <span className="fy-mono">assembled from the world, edit freely</span>
+        Prompt{" "}
+        <span className="fy-mono">
+          {shot.promptOverride
+            ? "edited for this shot"
+            : `assembled from ${production.meta.styleOverride?.trim() ? "the production and world" : "the world"}, edit freely`}
+        </span>
         <span
           style={{
             marginLeft: "auto",
@@ -2850,12 +2865,20 @@ export function DispatchDialogScreen() {
             {plans.perShot.steering.statement}
           </Callout>
         )}
-        {world && model && (
-          <Callout title={`World look · v${world.artDirection.version}`}>
-            Inherited from this world and carried in the prompt.{" "}
+        {world && production && model && (
+          <Callout
+            title={
+              production.meta.styleOverride?.trim()
+                ? "Production look"
+                : `World look · v${world.artDirection.version}`
+            }
+          >
+            {production.meta.styleOverride?.trim()
+              ? `This production overrides the world look with “${production.meta.styleOverride.trim()}”. It is carried by assembled prompts; a full shot prompt override keeps its own text. `
+              : "Inherited from this world and carried in the prompt. "}
             {model.accepts.referenceImages === 0
               ? `${model.displayName} accepts no reference images. Those images are omitted; only existing sheet descriptions and art-direction text remain.`
-              : "Identity references remain distinct from the world's style treatment."}
+              : "Identity references remain distinct from the visual style treatment."}
           </Callout>
         )}
         {/* Controls only: the two mode cards below each carry their own estimate, computed from

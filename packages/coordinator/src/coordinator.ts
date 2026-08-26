@@ -4923,6 +4923,9 @@ export class Coordinator {
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
             production: {
+              ...(production.meta.styleOverride !== undefined
+                ? { styleOverride: production.meta.styleOverride }
+                : {}),
               ...(production.meta.musicPolicy !== undefined
                 ? { musicPolicy: production.meta.musicPolicy }
                 : {}),
@@ -5204,6 +5207,9 @@ export class Coordinator {
             // The production's own standing constraints, merged with the world's inside planning
             // (#244). Passed as the record rather than looked up there, because planning is pure.
             production: {
+              ...(production.meta.styleOverride !== undefined
+                ? { styleOverride: production.meta.styleOverride }
+                : {}),
               ...(production.meta.musicPolicy !== undefined
                 ? { musicPolicy: production.meta.musicPolicy }
                 : {}),

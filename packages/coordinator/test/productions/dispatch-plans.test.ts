@@ -269,6 +269,52 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     assert.equal(queue.jobs.size, 1, "pass 0 runs on; pass 1 never materialises (R-24)");
   });
 
+  it("a moved production look halts future materialisation without changing the strict plan schema", async () => {
+    const fixture = await open();
+    fixture.scenePlan.effectiveStyle = "Muted winter naturalism";
+    fixture.scenePlan.productionStyleOverride = "Muted winter naturalism";
+    const styledProduction = {
+      ...fixture.production,
+      meta: { ...fixture.production.meta, styleOverride: "Muted winter naturalism" },
+    };
+    const plan = await create({ ...fixture, production: styledProduction });
+    assert.equal(
+      (plan.passes[0]!.compiled.params["artDirection"] as { source: string }).source,
+      "production",
+      "the open params bag freezes the source without widening the strict aggregate schema",
+    );
+
+    const queue = fakeQueue();
+    await advancePlan(fixture.store, styledProduction, fixture.bundle, plan, deps(queue, workingMaker));
+    const moved = { ...styledProduction, meta: { ...styledProduction.meta, styleOverride: "Hot saturated pulp" } };
+    const state = await advancePlan(fixture.store, moved, fixture.bundle, plan, deps(queue, workingMaker));
+    assert.equal(state.status, "stale");
+    assert.match(state.haltReason!, /production look moved/);
+    assert.equal(queue.jobs.size, 1, "the running pass remains; no later pass materialises");
+
+    const legacyPlanId = `${plan.planId.slice(0, -1)}${plan.planId.endsWith("0") ? "1" : "0"}`;
+    const legacy = DispatchPlanSchema.parse({
+      ...plan,
+      planId: legacyPlanId,
+      passes: plan.passes.map((pass) => ({
+        ...pass,
+        compiled: {
+          ...pass.compiled,
+          params: Object.fromEntries(Object.entries(pass.compiled.params).filter(([key]) => key !== "artDirection")),
+        },
+      })),
+    });
+    const legacyState = await advancePlan(
+      fixture.store,
+      styledProduction,
+      fixture.bundle,
+      legacy,
+      deps(fakeQueue(), workingMaker),
+    );
+    assert.equal(legacyState.status, "stale", "an old plan cannot spend after a production override appears");
+    assert.match(legacyState.haltReason!, /production look moved \(inherited → overridden\)/);
+  });
+
   it("T-11: cancellation stops future materialisation and marks the record, not the media", async () => {
     const fixture = await open();
     const plan = await create(fixture);

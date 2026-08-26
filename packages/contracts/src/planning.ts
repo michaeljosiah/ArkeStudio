@@ -104,6 +104,17 @@ function styleFor(world: WorldMeta, artDirection?: string): string {
   );
 }
 
+/** The production's visual language, nearest first; blank overrides mean inherit. */
+export function productionStyleFor(
+  production: { styleOverride?: string } | null | undefined,
+  worldArtDirection?: string,
+): string | undefined {
+  const override = production?.styleOverride?.trim();
+  if (override) return override;
+  const inherited = worldArtDirection?.trim();
+  return inherited || undefined;
+}
+
 /**
  * The blocks of an assembled prompt (R-5). Kept separate rather than pre-joined so that the
  * dispatch dialog can show them, the tests can assert on one without matching the rest, and the
@@ -1184,7 +1195,11 @@ export interface ScenePlanInput {
    * `productionId` because planning is pure and cannot look a production up — the caller holds
    * the bundle. Absent means the production adds nothing, which is the common case.
    */
-  production?: { musicPolicy?: "environmental-only"; failureModes?: readonly string[] };
+  production?: {
+    styleOverride?: string;
+    musicPolicy?: "environmental-only";
+    failureModes?: readonly string[];
+  };
   /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
    * means no score track is known, and only the subtitle negative is emitted.
@@ -1238,6 +1253,10 @@ export interface ShotDispatchPlan {
 
 export interface ScenePlan {
   mode: "per-shot" | "whole-scene";
+  /** The effective production/world visual language frozen into every assembled prompt. */
+  effectiveStyle: string;
+  /** The normalized production override when it won; compiled into the existing params bag. */
+  productionStyleOverride?: string;
   shots: ShotDispatchPlan[];
   passReferences: Array<{
     passIndex: number;
@@ -1369,6 +1388,8 @@ function resolveBoundaryFrames(
 /** The whole plan, computed before a dollar moves (R-17, R-20). Nothing here blocks (D12). */
 export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene"): ScenePlan {
   const { world, sheets, kits, scene, selections, model } = input;
+  const productionStyleOverride = input.production?.styleOverride?.trim() || undefined;
+  const effectiveStyle = styleFor(world, productionStyleFor(input.production, input.artDirection?.description));
   const { resolved, perShot } = sceneCast(scene, sheets);
   const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
@@ -1432,7 +1453,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       sheets,
       scene,
       shot,
-      input.artDirection?.description,
+      effectiveStyle,
       new Set(bound.map((reference) => reference.sheetId)),
       model.capability,
     );
@@ -1674,6 +1695,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   return {
     mode,
+    effectiveStyle,
+    ...(productionStyleOverride !== undefined ? { productionStyleOverride } : {}),
     shots,
     passReferences,
     pack,

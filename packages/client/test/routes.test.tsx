@@ -588,6 +588,58 @@ describe("screen inventory", () => {
     assert.ok(dispatch.includes("World look · v"));
     assert.ok(dispatch.includes("carried in the prompt"));
   });
+
+  it("names a production look instead of claiming the world look is inherited", () => {
+    const world = FIXTURE_STATE.world!;
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: {
+        ...world,
+        productions: world.productions.map((production) =>
+          production.meta.id === "saltlight"
+            ? { ...production, meta: { ...production.meta, styleOverride: "Bleached documentary realism" } }
+            : production,
+        ),
+      },
+    });
+    try {
+      const worldId = world.meta.worldId;
+      const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
+      const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
+      assert.ok(workspace.includes("Production look"));
+      assert.ok(workspace.includes("Bleached documentary realism"));
+      assert.ok(dispatch.includes("Production look"));
+      assert.ok(dispatch.includes("This production overrides the world look"));
+      assert.ok(dispatch.includes("Bleached documentary realism"));
+      assert.ok(dispatch.includes("a full shot prompt override keeps its own text"));
+
+      const overriddenWorld = {
+        ...world,
+        productions: world.productions.map((production) =>
+          production.meta.id === "saltlight"
+            ? {
+                ...production,
+                meta: { ...production.meta, styleOverride: "Bleached documentary realism" },
+                scenes: production.scenes.map((scene) => ({
+                  ...scene,
+                  shots: scene.shots.map((shot, index) =>
+                    index === 0
+                      ? { ...shot, promptOverride: { text: "Hand-tuned shot prompt", sheetVersions: {} } }
+                      : shot,
+                  ),
+                })),
+              }
+            : production,
+        ),
+      };
+      __setStateForTest({ ...FIXTURE_STATE, world: overriddenWorld });
+      const overriddenWorkspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
+      assert.ok(overriddenWorkspace.includes("Shot prompt override"));
+      assert.ok(overriddenWorkspace.includes("edited by you"));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
 });
 
 describe("the dispatch bar (design-system turn 39)", () => {

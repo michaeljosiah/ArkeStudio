@@ -773,12 +773,18 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
   // Counted alongside, because a proposal replacing the current look turns all of these into
   // earlier ones the moment it lands — see acceptedTakesAtCurrentVersion.
   let acceptedTakesAtCurrentVersion = 0;
-  const countTake = (take: { kind?: string; provenance: { artDirectionVersion?: number } }): void => {
+  const countTake = (take: {
+    kind?: string;
+    provenance: { artDirectionVersion?: number };
+    params?: Record<string, unknown>;
+  }): void => {
     // Voice is not a look. A line of audio records no art direction version — nothing about it
     // depends on one — and the fallback below would otherwise read that silence as "made under
     // the current look" and count it among the work a new look strands. The same scan already
     // leaves voice out of visual assets for the same reason.
     if (take.kind === "voice") return;
+    const style = take.params?.["artDirection"] as { source?: unknown } | undefined;
+    if (style?.source !== undefined && style.source !== "world") return;
     // A visual take with no recorded version is a legacy or uploaded one, and the rest of the app
     // resolves that to the current look — accepting a character reference does exactly this.
     // Dropping it from both counts told somebody less work would be pinned than actually is.

@@ -214,6 +214,25 @@ function sourceDrift(plan: DispatchPlan, production: ProductionBundle, world: Wo
   if (world.artDirection.version !== plan.sources.artDirectionVersion) {
     return `art direction moved v${plan.sources.artDirectionVersion} → v${world.artDirection.version}`;
   }
+  const plannedStyles = plan.passes.flatMap((pass) => {
+    const style = pass.compiled.params["artDirection"] as
+      | { source?: unknown; description?: unknown }
+      | undefined;
+    return style === undefined ? [] : [style];
+  });
+  const currentStyle = production.meta.styleOverride?.trim() || undefined;
+  const allGenerationOverrides =
+    plannedStyles.length === plan.passes.length && plannedStyles.every((style) => style.source === "generation");
+  const recordedProductionStyle = plannedStyles.find((style) => style.source === "production");
+  const plannedProductionStyle =
+    recordedProductionStyle && typeof recordedProductionStyle.description === "string"
+      ? recordedProductionStyle.description
+      : undefined;
+  if (!allGenerationOverrides && plannedProductionStyle !== currentStyle) {
+    const from = plannedProductionStyle === undefined ? "inherited" : "overridden";
+    const to = currentStyle === undefined ? "inherited" : "overridden";
+    return `the production look moved (${from} → ${to})`;
+  }
   for (const [sheetId, version] of Object.entries(plan.sources.sheets)) {
     const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
     if (sheet === undefined) return `${sheetId} is gone`;

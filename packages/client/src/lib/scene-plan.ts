@@ -39,6 +39,9 @@ export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-s
     // without them the preview showed a prompt missing the production's own negatives while the
     // server sent them.
     production: {
+      ...(production.meta.styleOverride !== undefined
+        ? { styleOverride: production.meta.styleOverride }
+        : {}),
       ...(production.meta.musicPolicy !== undefined ? { musicPolicy: production.meta.musicPolicy } : {}),
       failureModes: production.meta.failureModes,
     },
