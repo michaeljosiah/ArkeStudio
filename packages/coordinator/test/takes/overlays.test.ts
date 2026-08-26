@@ -49,12 +49,13 @@ describe("overlays on the cut (82a)", () => {
     // would take a production's dialogue and score with it.
     const { dir, store, artifactId } = await open();
     const path = join(dir, "productions/saltlight/cut.json");
-    await writeFile(
-      path,
-      JSON.stringify({ audio: [{ kind: "score", label: "the verse, low", entries: [{ offsetSec: 0 }] }] }, null, 2),
-      "utf8",
+    await store.ownedWrite(() =>
+      writeFile(
+        path,
+        JSON.stringify({ audio: [{ kind: "score", label: "the verse, low", entries: [{ offsetSec: 0 }] }] }, null, 2),
+        "utf8",
+      ),
     );
-    await store.reload();
     await placeOverlay(store, "saltlight", { artifactId, startSec: 1, endSec: 2 });
     const cut = await cutOf(dir);
     assert.equal(cut.audio.length, 1, "the score is still there");

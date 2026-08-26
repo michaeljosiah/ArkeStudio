@@ -80,8 +80,9 @@ async function fileImage(dir: string, name: string, id: string, hash: string) {
 /** A world with one filed image, scanned — the reference every lane test attaches. */
 async function withImage(name = "frame.png") {
   const { dir, store } = await open();
-  await fileImage(dir, name, `ar_${"01JKKKKKKKKKKKKKKKKKKKKKKK".slice(0, 26)}`, "sha256:deadbeefdeadbeef");
-  await store.reload();
+  await store.ownedWrite(() =>
+    fileImage(dir, name, `ar_${"01JKKKKKKKKKKKKKKKKKKKKKKK".slice(0, 26)}`, "sha256:deadbeefdeadbeef"),
+  );
   const mine = store.getBundle().artifacts.find((a) => a.file === name);
   if (!mine) throw new Error("the filed sidecar did not scan");
   return { dir, store, artifactId: mine.id };
@@ -169,19 +170,20 @@ describe("opening and discovery", () => {
 describe("reference allocation (issue 305 §4)", () => {
   async function withArtifact(kindFile: string, bytes = "png bytes") {
     const { dir, store } = await open();
-    await mkdir(join(dir, "artifacts"), { recursive: true });
-    await writeFile(join(dir, "artifacts", kindFile), bytes);
-    const sidecar = {
-      id: `ar_${"01JMMMMMMMMMMMMMMMMMMMMMMM".slice(0, 26)}`,
-      kind: kindFile.endsWith(".png") ? "image" : kindFile.endsWith(".wav") ? "audio" : "document",
-      file: kindFile,
-      hash: "sha256:deadbeefdeadbeef",
-      origin: { by: "user" },
-      links: [],
-      created: CLOCK(),
-    };
-    await writeFile(join(dir, "artifacts", `${kindFile}.json`), JSON.stringify(sidecar));
-    await store.reload();
+    await store.ownedWrite(async () => {
+      await mkdir(join(dir, "artifacts"), { recursive: true });
+      await writeFile(join(dir, "artifacts", kindFile), bytes);
+      const sidecar = {
+        id: `ar_${"01JMMMMMMMMMMMMMMMMMMMMMMM".slice(0, 26)}`,
+        kind: kindFile.endsWith(".png") ? "image" : kindFile.endsWith(".wav") ? "audio" : "document",
+        file: kindFile,
+        hash: "sha256:deadbeefdeadbeef",
+        origin: { by: "user" },
+        links: [],
+        created: CLOCK(),
+      };
+      await writeFile(join(dir, "artifacts", `${kindFile}.json`), JSON.stringify(sidecar));
+    });
     const mine = store.getBundle().artifacts.find((a) => a.file === kindFile);
     if (!mine) throw new Error("the filed sidecar did not scan");
     return { dir, store, artifactId: mine.id };
@@ -541,9 +543,10 @@ describe("citations in the brief (issue 476)", () => {
     // a session token is never renumbered — but the provider is handed one image and counts from
     // one. Sent as written, the prompt asked a model with a single picture to look at its second.
     const { dir, store } = await open();
-    await fileImage(dir, "first.png", newId("ar"), `sha256:${"a".repeat(64)}`);
-    await fileImage(dir, "second.png", newId("ar"), `sha256:${"b".repeat(64)}`);
-    await store.reload();
+    await store.ownedWrite(async () => {
+      await fileImage(dir, "first.png", newId("ar"), `sha256:${"a".repeat(64)}`);
+      await fileImage(dir, "second.png", newId("ar"), `sha256:${"b".repeat(64)}`);
+    });
     const idOf = (file: string) => store.getBundle().artifacts.find((a) => a.file === file)!.id;
     let opened = await freshBench(dir);
     for (const file of ["first.png", "second.png"]) {
@@ -732,21 +735,22 @@ describe("the Keyframe lane (issue 305 §3)", () => {
 
   it("only a picture rides as a keyframe, in those words", async () => {
     const { dir, store } = await open();
-    await mkdir(join(dir, "artifacts"), { recursive: true });
-    await writeFile(join(dir, "artifacts", "bells.wav"), "wav bytes");
-    await writeFile(
-      join(dir, "artifacts", "bells.wav.json"),
-      JSON.stringify({
-        id: `ar_${"01JRRRRRRRRRRRRRRRRRRRRRRR".slice(0, 26)}`,
-        kind: "audio",
-        file: "bells.wav",
-        hash: "sha256:deadbeefdeadbeef",
-        origin: { by: "user" },
-        links: [],
-        created: CLOCK(),
-      }),
-    );
-    await store.reload();
+    await store.ownedWrite(async () => {
+      await mkdir(join(dir, "artifacts"), { recursive: true });
+      await writeFile(join(dir, "artifacts", "bells.wav"), "wav bytes");
+      await writeFile(
+        join(dir, "artifacts", "bells.wav.json"),
+        JSON.stringify({
+          id: `ar_${"01JRRRRRRRRRRRRRRRRRRRRRRR".slice(0, 26)}`,
+          kind: "audio",
+          file: "bells.wav",
+          hash: "sha256:deadbeefdeadbeef",
+          origin: { by: "user" },
+          links: [],
+          created: CLOCK(),
+        }),
+      );
+    });
     const artifactId = store.getBundle().artifacts.find((a) => a.file === "bells.wav")!.id;
     const opened = await freshBench(dir);
     const outcome = await addBenchReference(opened, store.getBundle(), VIDEO_MODEL, {
@@ -760,9 +764,10 @@ describe("the Keyframe lane (issue 305 §3)", () => {
 
   it("the lane's ceiling is the frame modes' own: a third frame refuses with the missing route", async () => {
     const { dir, store } = await withImage("one.png");
-    await fileImage(dir, "two.png", `ar_${"01JNNNNNNNNNNNNNNNNNNNNNNN".slice(0, 26)}`, "sha256:beefbeefbeefbeef");
-    await fileImage(dir, "three.png", `ar_${"01JPPPPPPPPPPPPPPPPPPPPPPP".slice(0, 26)}`, "sha256:feedfeedfeedfeed");
-    await store.reload();
+    await store.ownedWrite(async () => {
+      await fileImage(dir, "two.png", `ar_${"01JNNNNNNNNNNNNNNNNNNNNNNN".slice(0, 26)}`, "sha256:beefbeefbeefbeef");
+      await fileImage(dir, "three.png", `ar_${"01JPPPPPPPPPPPPPPPPPPPPPPP".slice(0, 26)}`, "sha256:feedfeedfeedfeed");
+    });
     const bundle = store.getBundle();
     const ids = ["one.png", "two.png", "three.png"].map((f) => bundle.artifacts.find((a) => a.file === f)!.id);
     const opened = await freshBench(dir);
@@ -827,8 +832,9 @@ describe("the Keyframe lane (issue 305 §3)", () => {
 
   it("references and keyframes refuse to ride one request together", async () => {
     const { dir, store } = await withImage("one.png");
-    await fileImage(dir, "two.png", `ar_${"01JQQQQQQQQQQQQQQQQQQQQQQQ".slice(0, 26)}`, "sha256:beefbeefbeefbeef");
-    await store.reload();
+    await store.ownedWrite(() =>
+      fileImage(dir, "two.png", `ar_${"01JQQQQQQQQQQQQQQQQQQQQQQQ".slice(0, 26)}`, "sha256:beefbeefbeefbeef"),
+    );
     const bundle = store.getBundle();
     const firstId = bundle.artifacts.find((a) => a.file === "one.png")!.id;
     const secondId = bundle.artifacts.find((a) => a.file === "two.png")!.id;
@@ -949,18 +955,19 @@ describe("the review's reckonings (issue 305 §3)", () => {
 
   async function threeImages() {
     const { dir, store } = await open();
-    await mkdir(join(dir, "artifacts"), { recursive: true });
     const ids: string[] = [];
-    for (const [i, name] of ["kf-a.png", "kf-b.png", "kf-c.png"].entries()) {
-      await writeFile(join(dir, "artifacts", name), `bytes ${name}`);
-      const id = `ar_01JW${"WWWWWWWWWWWWWWWWWWWWW"}${i}`;
-      await writeFile(
-        join(dir, "artifacts", `${name}.json`),
-        JSON.stringify({ id, kind: "image", file: name, hash: `sha256:ab${i}dab${i}dab${i}dab${i}d`, origin: { by: "user" }, links: [], created: CLOCK() }),
-      );
-      ids.push(id);
-    }
-    await store.reload();
+    await store.ownedWrite(async () => {
+      await mkdir(join(dir, "artifacts"), { recursive: true });
+      for (const [i, name] of ["kf-a.png", "kf-b.png", "kf-c.png"].entries()) {
+        await writeFile(join(dir, "artifacts", name), `bytes ${name}`);
+        const id = `ar_01JW${"WWWWWWWWWWWWWWWWWWWWW"}${i}`;
+        await writeFile(
+          join(dir, "artifacts", `${name}.json`),
+          JSON.stringify({ id, kind: "image", file: name, hash: `sha256:ab${i}dab${i}dab${i}dab${i}d`, origin: { by: "user" }, links: [], created: CLOCK() }),
+        );
+        ids.push(id);
+      }
+    });
     const found = ["kf-a.png", "kf-b.png", "kf-c.png"].map((f) => store.getBundle().artifacts.find((a) => a.file === f)!.id);
     return { dir, store, ids: found };
   }
