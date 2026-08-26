@@ -142,8 +142,12 @@ export const OPENCODE2_MIN_BUILD = 17_444;
  * `0.0.0-beta-<build>` — off ONE monotonic counter, so a channel name change must not read as
  * "older than the pin". Named rather than wildcarded because other channels number differently:
  * `0.0.0-tui-v2-202606261840` would clear any floor on a date-shaped build.
+ *
+ * Anchored end to end, and that is the whole point: a substring match reads the trusted name out
+ * of an untrusted compound channel, so `0.0.0-tui-beta-202606261840` would pass the allowlist
+ * built to exclude it. Only the complete shape counts as a channel.
  */
-const V2_BUILD_CHANNELS = /(?:next|beta|dev)-(\d+)/;
+const V2_BUILD_CHANNELS = /^\d+\.\d+\.\d+-(?:next|beta|dev)-(\d+)$/;
 
 /** Whether a discovered v2 version satisfies the pinned-contract gate. */
 export function meetsV2Gate(version: string | null, minBuild: number = OPENCODE2_MIN_BUILD): boolean {

@@ -547,6 +547,9 @@ describe("v2 discovery and the build gate (issue 327 §3)", () => {
     // Channels that number differently are not trusted against the floor: this one is a
     // date, and a wildcarded channel match would clear any build number ever pinned.
     assert.equal(meetsV2Gate("0.0.0-tui-v2-202606261840"), false);
+    // A compound channel that merely CONTAINS a trusted name is still untrusted — an
+    // unanchored match would read "beta-202606261840" out of it and clear the floor on a date.
+    assert.equal(meetsV2Gate("0.0.0-tui-beta-202606261840"), false);
   });
 
   it("prefers v2, falls back to v1, and honours the Settings escape hatch", async () => {
