@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { agentPromptFor, confinementFor, permits, ROSTER, ToolIntent } from "../src/index.js";
+import {
+  agentPromptFor,
+  confinementFor,
+  confinementStatement,
+  permits,
+  ROSTER,
+  ToolIntent,
+} from "../src/index.js";
+
+/** The two halves of the statement, read back the way an agent reads them. */
+function halves(statement: string): { can: string; cannot: string } {
+  const split = statement.indexOf("What you cannot do:");
+  assert.ok(split > 0, "the statement has both headings");
+  return { can: statement.slice(0, split), cannot: statement.slice(split) };
+}
 
 describe("agent confinement (SPEC-005 R-10, R-17)", () => {
   it("lets an authoring agent edit inside its proposal and read the world", () => {
@@ -101,3 +115,99 @@ describe("agent confinement (SPEC-005 R-10, R-17)", () => {
     }
   });
 });
+
+/**
+ * #506. The gate refused every one of these calls correctly; what was wrong was what the agent
+ * said about itself. Asked whether it could run a shell command it said yes and named Git Bash
+ * and PowerShell, then reported the output and an exit code of a command that never ran.
+ */
+describe("what an agent is told about its own confinement (SPEC-005 R-10a)", () => {
+  it("puts every intent on exactly one of the two lists, whichever role is asking", () => {
+    for (const readOnly of [true, false]) {
+      for (const web of [true, false]) {
+        const confinement = confinementFor({ readOnly }, { web });
+        const { can, cannot } = halves(confinementStatement(confinement));
+        for (const intent of ToolIntent.options) {
+          const allowed = permits(confinement, intent);
+          // Matched on the confinement's own vocabulary, so a phrase that appeared on neither
+          // list — the state this whole statement exists to prevent — fails here.
+          const phrase = phraseFor(intent);
+          assert.equal(can.includes(phrase), allowed, `${intent} is offered iff it is permitted`);
+          assert.equal(cannot.includes(phrase), !allowed, `${intent} is denied iff it is refused`);
+        }
+      }
+    }
+  });
+
+  it("says there is no shell, and says it as absence rather than as a locked door", () => {
+    for (const readOnly of [true, false]) {
+      const { cannot } = halves(confinementStatement(confinementFor({ readOnly }, { web: true })));
+      assert.match(cannot, /run a shell command/);
+      assert.match(cannot, /no Bash, no PowerShell, no terminal/);
+      // The measured failure named both shells by name, so both are named back. And the second
+      // sentence is the one that matters: an agent that thinks the shell is behind a prompt
+      // spends the turn asking for it.
+      assert.match(cannot, /there is no such tool here/);
+    }
+  });
+
+  it("says an unlisted tool is refused outright, so nothing is waited on", () => {
+    const { cannot } = halves(confinementStatement(confinementFor({ readOnly: false })));
+    assert.match(cannot, /refused outright/);
+    assert.match(cannot, /nobody is asked to approve it/);
+    // The same turn volunteered that two MCP servers "need authorization before I can reach
+    // them". Only arke-world is ever configured, and neither of those two was.
+    assert.match(cannot, /MCP server other than arke-world/);
+  });
+
+  it("forbids reporting a tool result that never came back", () => {
+    const statement = confinementStatement(confinementFor({ readOnly: true }));
+    assert.match(statement, /Never describe the result of a tool call you did not make/);
+    assert.match(statement, /denied by Arke\s+Studio confinement/, "and says the refusal verbatim");
+    assert.match(statement, /exit code/, "the exact shape the fabrication took");
+  });
+
+  it("reaches every agent on the roster, including the ones with no proposal directory", () => {
+    for (const member of ROSTER) {
+      assert.match(member.prompt, /What you cannot do:/, `${member.name} is told its boundary`);
+      assert.match(member.prompt, /no Bash, no PowerShell/, `${member.name} is told there is no shell`);
+    }
+    // The one that got it wrong is the one the proposal preamble skips — it has no proposal
+    // directory — which is why this block is gated by nothing.
+    const worldBuilder = ROSTER.find((a) => a.name === "world-builder")!;
+    assert.equal(worldBuilder.needsProposal, false);
+    assert.equal(
+      worldBuilder.prompt.includes("You are working inside an Arke Studio proposal directory"),
+      false,
+      "the preamble does not reach it, and that is exactly the gap",
+    );
+  });
+
+  it("writes the statement for the confinement the agent actually gets, research included", () => {
+    // The invariant that keeps the prompt and the gate from disagreeing: whatever
+    // `confinementFor` hands the adapter is what the prompt describes, verbatim.
+    for (const member of ROSTER) {
+      for (const web of [true, false]) {
+        const prompt = agentPromptFor({ ...member, researchWeb: web });
+        const expected = confinementStatement(confinementFor(member, { web }));
+        assert.ok(prompt.includes(expected), `${member.name} is described by its own confinement`);
+        const { can, cannot } = halves(expected);
+        const research = "search the public web and read a page from it";
+        assert.equal(can.includes(research), web, `${member.name} is offered research iff Settings allows it`);
+        assert.equal(cannot.includes(research), !web);
+      }
+    }
+  });
+});
+
+/**
+ * The phrase the statement uses for one intent, derived the same way the statement derives it —
+ * from a confinement that permits exactly that intent and nothing else.
+ */
+function phraseFor(intent: ToolIntent): string {
+  const line = confinementStatement({ allow: [intent] })
+    .split("\n")
+    .find((l) => l.startsWith("- ") && !l.includes("shell command") && !l.includes("any other tool"));
+  assert.ok(line, `the statement has a phrase for ${intent}`);
+  return line.slice(2);
+}

@@ -466,9 +466,23 @@ describe("per-agent settings", () => {
     assert.equal(edited.permission["websearch"], "deny");
   });
 
-  it("canon-qa keeps standing alone — it has no proposal directory to be confined to", () => {
+  /**
+   * canon-qa has no proposal directory, so it gets no proposal preamble — but it is confined all
+   * the same, and since #506 it is told so. The distinction is the whole of that issue: "no
+   * directory to be confined to" was read as "nothing to say about its confinement", and the
+   * agent filled the silence from its priors about the environment.
+   */
+  it("canon-qa gets no proposal preamble, and its confinement anyway", () => {
     const config = buildSessionConfig({ agents: { "canon-qa": { brief: "Answer from canon only." } } });
-    assert.equal(agentsIn(config)["canon-qa"]!.prompt, "Answer from canon only.");
+    const prompt = agentsIn(config)["canon-qa"]!.prompt;
+    assert.equal(
+      prompt.includes("You are working inside an Arke Studio proposal directory"),
+      false,
+      "there is no directory for that preamble to be about",
+    );
+    assert.ok(prompt.endsWith("Answer from canon only."), "the brief is the last word, and is honoured whole");
+    assert.match(prompt, /What you cannot do:/, "and it can still say what it cannot do");
+    assert.match(prompt, /no Bash, no PowerShell/);
   });
 
   /**

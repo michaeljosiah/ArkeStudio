@@ -1,4 +1,4 @@
-import { confinementFor, permits, WEB_RESEARCH_RULE } from "./confinement.js";
+import { confinementFor, confinementStatement, permits, WEB_RESEARCH_RULE } from "./confinement.js";
 import { CHARACTER_ROLE_MAX } from "./world.js";
 import { worldChatResultShapeGuide } from "./world-chat.js";
 
@@ -70,11 +70,17 @@ directory are the complete scope of what you may change. Rules that are not your
  * rules the accept gate and the turn validators assume — a skill adds craft guidance and has no
  * way to reach the confinement, the tool denials, the proposal directory or the result shape.
  *
- * Two rule blocks, and they are gated differently on purpose. The proposal preamble is about a
+ * Three rule blocks, and they are gated differently on purpose. The proposal preamble is about a
  * directory, so only an agent that has one is told about it. The research rule is about a
  * capability the person controls, so it is written only when the confinement actually permits
  * `web` — an agent told it can search while the gate refuses every search learns to distrust its
  * own instructions, and the same prompt would be a promise the Settings toggle does not keep.
+ *
+ * The confinement statement is gated by nothing at all, and that is the correction (#506). Every
+ * agent here runs behind the same allowlist, so every agent needs to be able to answer what it
+ * can and cannot do — and the one measured getting it wrong, in World Chat, is precisely the one
+ * the proposal preamble skips, because it has no proposal directory. Written from the confinement
+ * this agent actually gets, `web` included, so the two lists and the gate cannot disagree.
  */
 export function agentPromptFor(agent: {
   brief: string;
@@ -88,6 +94,7 @@ export function agentPromptFor(agent: {
   const confinement = confinementFor(agent, { web: agent.researchWeb === true });
   const blocks = [
     agent.needsProposal ? CONFINEMENT_PREAMBLE : "",
+    confinementStatement(confinement),
     permits(confinement, "web") ? WEB_RESEARCH_RULE : "",
     agent.brief,
   ].filter((block) => block.length > 0);

@@ -7,6 +7,7 @@ import type { WorldStore } from "../world/store.js";
 import type { GrantStore } from "./grants.js";
 import { sessionTokenBudget } from "./token-budget.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "./vendor-auth.js";
+import { refusalLabel } from "../world-chat/project.js";
 
 /**
  * Authoring sessions over proposals (SPEC-005 §2.4): one session, one proposal; cancellable,
@@ -260,7 +261,17 @@ export class AuthoringService {
 
       for await (const event of events) {
         if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-        if (event.type === "tool.activity") {
+        if (event.type === "tool.refused") {
+          /*
+           * A refusal, said as a refusal (SPEC-005 R-10b).
+           *
+           * It used to arrive as `tool.activity` and land on the line below, which reported it as
+           * work — and reported it under the harness's own tool name, which R-16 forbids. These
+           * lines accumulate rather than replacing one another, so this is the durable record an
+           * answer describing the refused work has to be read against (#506).
+           */
+          progress(`refused — ${refusalLabel(event.tool)}`);
+        } else if (event.type === "tool.activity") {
           progress(event.summary);
         } else if (event.type === "message.delta") {
           // Streaming text is progress enough at coarse grain; avoid flooding.

@@ -86,6 +86,12 @@ export function ConversationTranscript({
               // read", and repeating it turned a footnote into a checklist.
               <div className="fy-chat__receipts">{`✓ ${m.receipts.join(" · ")}`}</div>
             )}
+            {m.role === "studio" && m.refusals.length > 0 && (
+              // Inside the bubble, under the reply it contradicts. A turn that says it ran a
+              // command it was refused reads as wrong only if the refusal is right there
+              // (issue 506); the same line a scroll away would never be joined up.
+              <div className="fy-chat__refusals">{`✕ Refused: ${m.refusals.join(" · ")}`}</div>
+            )}
           </div>
           {/*
             Outside the bubble, because it is not something the Studio said — it is something it

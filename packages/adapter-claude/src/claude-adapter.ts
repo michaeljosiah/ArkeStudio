@@ -398,8 +398,12 @@ export class ClaudeAdapter implements HarnessAdapter {
     return async (toolName: string, input: Record<string, unknown>) => {
       const decision = await decideTool(session.confinement, toolName, { input, root: session.root });
       if (decision.allow) return { behavior: "allow" as const, updatedInput: input };
+      // `tool.refused`, not `tool.activity`. It was the latter, which meant a refusal reached a
+      // World Chat turn as a progress verb and left nothing behind once the turn ended — so an
+      // answer claiming to have run a shell command had nothing on the screen contradicting it
+      // (#506). The distinction is the whole point: this event says nothing happened.
       this.emit({
-        type: "tool.activity",
+        type: "tool.refused",
         sessionId: session.id,
         tool: toolName,
         summary: REFUSAL_SUMMARY[decision.reason](toolName),

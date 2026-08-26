@@ -65,6 +65,8 @@ export function foldConversation(
   const messages: WorldChatMessage[] = [];
   /** Landed bible edits, by the studio message that reported them (SPEC-022). */
   const bibleEdits = new Map<string, BibleEditRecord>();
+  /** Tools each turn was refused, by the studio message written despite them (#506). */
+  const refusals = new Map<string, readonly string[]>();
   /** The log sequence each message arrived at, so paging can use a real cursor. */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
@@ -160,6 +162,9 @@ export function foldConversation(
         runs.set(e.run.id, e.run);
         // Keyed by the reply that made it, so the card renders beside the sentence describing it.
         if (e.bibleEdit) bibleEdits.set(e.message.id, e.bibleEdit);
+        // Same keying, and for the same reason: a refusal has to sit beside the sentence it
+        // contradicts, not somewhere the reader has to go and look for it.
+        if (e.refusedTools && e.refusedTools.length > 0) refusals.set(e.message.id, e.refusedTools);
         for (const c of e.candidates) applyCandidate(c, envelope.seq);
         for (const g of e.groups) groups.set(g.id, g);
         for (const t of e.tombstones) {
@@ -327,6 +332,12 @@ export function foldConversation(
       shown.flatMap((m) => {
         const edit = bibleEdits.get(m.id);
         return edit ? [[m.id, edit] as const] : [];
+      }),
+    ),
+    refusals: Object.fromEntries(
+      shown.flatMap((m) => {
+        const refused = refusals.get(m.id);
+        return refused ? [[m.id, [...refused]] as const] : [];
       }),
     ),
     hasMore: shown.length < windowed.length,
