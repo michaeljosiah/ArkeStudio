@@ -36,7 +36,8 @@ const NOW = () => AT;
  */
 function fakeAdapter(
   answers: Array<string | (() => string | Promise<string>)>,
-  options: { hang?: boolean; prompts?: string[] } = {},
+  /** `refuses` names the tools the gate turned down before the answer arrived (issue 506). */
+  options: { hang?: boolean; prompts?: string[]; refuses?: readonly string[] } = {},
 ): HarnessAdapter {
   let turn = 0;
   return {
@@ -56,6 +57,14 @@ function fakeAdapter(
             signal?.addEventListener("abort", resolve, { once: true });
           });
           return;
+        }
+        for (const tool of options.refuses ?? []) {
+          yield {
+            type: "tool.refused",
+            sessionId: "s1",
+            tool,
+            summary: `refused ${tool} — outside what this agent may do`,
+          } as never;
         }
         const answer = answers[Math.min(turn++, answers.length - 1)]!;
         const text = typeof answer === "function" ? await answer() : answer;
@@ -490,5 +499,75 @@ describe("a turn that never answers", () => {
     const finalDetail = (finished as { run?: { safeDetail?: string } }).run?.safeDetail ?? "";
     assert.match(finalDetail, /^rejected: /, "the person is told it was rejected, and why");
     assert.ok(finalDetail.length > "rejected: ".length, `and the why is present: ${finalDetail}`);
+  });
+});
+
+/**
+ * A refusal is the one thing in a turn that can contradict the answer (issue 506).
+ *
+ * Measured against 0.5.50: asked to run `echo ARKE_SHELL_PROBE_7731` and paste the output, the
+ * studio reported the output and an exit code. The gate had refused every call; nothing on the
+ * screen said so, so there was nothing to read the reply against.
+ */
+describe("what a turn was refused", () => {
+  async function landing(refuses: readonly string[]) {
+    const said = "Her aunt taught her the bells, not her mother.";
+    const worldPath = await tempDir("arke-run-refused-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const answer = async () => {
+      const meta = await store.readMeta();
+      const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+      return goodAnswer(said, "Her aunt taught her the bells", view.messages[0]!.id);
+    };
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([answer], { refuses }),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      now: NOW,
+    });
+    const outcome = await runner.send(store, conversationId, said);
+    const meta = await store.readMeta();
+    const view = foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+    return { outcome, view, store };
+  }
+
+  it("records it against the reply that was written anyway", async () => {
+    const { outcome, view } = await landing(["Bash"]);
+    assert.equal(outcome.status, "completed", "a refused tool does not fail the turn");
+    const reply = view.messages.find((m) => m.role === "studio")!;
+    assert.deepEqual(view.refusals[reply.id], ["Bash"], "keyed by the message it sits under");
+  });
+
+  it("says it once however many times the agent tried", async () => {
+    const { view } = await landing(["Bash", "Bash", "Bash"]);
+    const reply = view.messages.find((m) => m.role === "studio")!;
+    // Deduplicated at the source: three attempts at one thing are one thing, and three lines
+    // saying so would read as three separate events.
+    assert.deepEqual(view.refusals[reply.id], ["Bash"]);
+  });
+
+  it("leaves an ordinary turn with nothing to say", async () => {
+    const { view, store } = await landing([]);
+    const reply = view.messages.find((m) => m.role === "studio")!;
+    assert.equal(view.refusals[reply.id], undefined, "the field is absent, not empty");
+    const completed = (await store.read()).events
+      .map((e) => e.event)
+      .find((e) => e.type === "turn.completed") as { refusedTools?: unknown };
+    assert.equal(completed.refusedTools, undefined, "and nothing is written to the log either");
   });
 });
