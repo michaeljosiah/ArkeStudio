@@ -32,11 +32,13 @@ export const UlidSchema = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/, "expected
 
 /**
  * A genesis conversation's id. Not a ULID: it exists before the world does, and it names a
- * directory on disk, so it is held to what a directory name may safely be.
+ * directory on disk, so it is held to what a directory name may safely be. At least one
+ * lowercase letter is required so no genesis id can also parse as a ULID — job and ledger
+ * scopes are a union of the two (SPEC-031 R-55), and a 26-digit string would match both.
  */
 export const GenesisIdSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{2,40}$/, "expected a genesis id: lowercase, digits and dashes");
+  .regex(/^(?=.*[a-z])[a-z0-9][a-z0-9-]{2,40}$/, "expected a genesis id: lowercase, digits and dashes");
 
 /** Record-kind prefixes used across the world model and the app-level logs. */
 export const ID_PREFIXES = {
