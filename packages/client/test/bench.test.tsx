@@ -9,6 +9,8 @@ import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { ReferencePickerBody, type PickerSource } from "../src/components/reference-picker.js";
+import { BenchBrief } from "../src/components/bench-brief.js";
+import type { MentionOption } from "../src/lib/bench-mention.js";
 
 /**
  * The bench (issue 305): the screen restores a session — strip, references, brief, selection —
@@ -134,6 +136,114 @@ describe("the bench screen (issue 305 §3)", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
     // count: 2 at $0.06/image → ~$0.12
     assert.match(html, /~\$0\.12/);
+  });
+});
+
+describe("citing a reference in the brief (issue 476)", () => {
+  /** The same session, with `brief` written over it. */
+  const wrote = (brief: string): ClientState => {
+    const state = stateWithBench();
+    const bench = state.bench!;
+    return {
+      ...state,
+      bench: { ...bench, session: { ...bench.session, composer: { ...bench.session.composer, brief } } },
+    };
+  };
+
+  it("the brief is the combobox the completion hangs off, shut until an @ is written", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(html, /role="combobox"/);
+    assert.match(html, /aria-autocomplete="list"/);
+    assert.match(html, /aria-expanded="false"/);
+    assert.doesNotMatch(html, /data-testid="bench-mentions"/);
+  });
+
+  it("says how to cite one, rather than naming tokens the author has to remember", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(html, /Type @ to cite a reference/);
+  });
+
+  it("a citation whose picture is riding is a chip, and dispatch is not warned about", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, wrote("Lit like @Image 1."));
+    assert.match(html, /fy-bench__briefchip[^"]*"[^>]*>@Image 1</);
+    assert.doesNotMatch(html, /fy-bench__briefchip--lost/);
+    assert.doesNotMatch(html, /data-testid="bench-lost-mentions"/);
+  });
+
+  it("a citation nothing is attached for is visibly lost, and named before Generate is pressed", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, wrote("Lit like @Image 4."));
+    assert.match(html, /fy-bench__briefchip--lost/);
+    assert.match(html, /data-testid="bench-lost-mentions"/);
+    assert.match(html, /@Image 4 — not attached/);
+  });
+
+  it("the older bare spelling still reads as the session's own name, and warns of nothing", () => {
+    // The fixture's brief cites "Image 1" without an at-sign - written before mentions existed.
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
+    assert.match(html, /fy-bench__briefchip[^"]*"[^>]*>Image 1</);
+    assert.doesNotMatch(html, /data-testid="bench-lost-mentions"/);
+  });
+
+  it("a mode that makes a sound carries no picture, so a citation in one is unresolved", () => {
+    // Raised on review: `speaking` left music's hidden reference riding, which drew "@Image 1"
+    // as resolved over a request that could never carry it. Both sound modes now say the same
+    // thing the coordinator does.
+    const state = stateWithBench();
+    const bench = state.bench!;
+    const singing: ClientState = {
+      ...state,
+      bench: {
+        ...bench,
+        session: {
+          ...bench.session,
+          composer: {
+            ...bench.session.composer,
+            mode: "music",
+            params: { kind: "music", count: 1, lyrics: "[verse]\nnobody wound it" },
+            brief: "Slow shanty, like @Image 1.",
+          },
+        },
+      },
+    };
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, singing);
+    assert.match(html, /fy-bench__briefchip--lost/);
+    assert.match(html, /data-testid="bench-lost-mentions"/);
+  });
+
+  it("does not chip, or warn over, an at-sign the editor would never have offered a menu at", () => {
+    const html = renderAt(
+      `/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`,
+      wrote("released @Image 4th of May, write to me@Image 9.example"),
+    );
+    assert.doesNotMatch(html, /fy-bench__briefchip--lost/);
+    assert.doesNotMatch(html, /data-testid="bench-lost-mentions"/);
+  });
+
+  it("the write-large window is the same editor, so the completion cannot exist in only one", () => {
+    const options: MentionOption[] = [
+      { token: "Image 1", kind: "image", name: "harbour-night.png", meta: "png" },
+    ];
+    const dressed = (variant: "compact" | "large") =>
+      renderToString(
+        <BenchBrief
+          variant={variant}
+          value="Lit like @Image 1."
+          onChange={() => {}}
+          options={options}
+          worldSlug="the-undersong"
+          underlay={<span>Lit like @Image 1.</span>}
+          label="Brief"
+        />,
+      );
+    for (const variant of ["compact", "large"] as const) {
+      const html = dressed(variant);
+      assert.match(html, /role="combobox"/);
+      assert.match(html, /aria-autocomplete="list"/);
+      assert.match(html, /class="fy-bench__brieftext"/);
+      assert.match(html, /fy-bench__briefunder/);
+    }
+    assert.match(dressed("large"), /fy-bench__briefstack--large/);
+    assert.doesNotMatch(dressed("compact"), /fy-bench__briefstack--large/);
   });
 });
 

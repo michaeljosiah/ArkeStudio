@@ -4650,6 +4650,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
    the words to be. */
 .fy-bench__briefstack { position: relative; flex: 1; min-height: 120px; }
 .fy-bench__briefunder,
+.fy-bench__briefmirror,
 .fy-bench__brieftext {
   position: absolute; inset: 0; width: 100%; height: 100%; padding: 11px 12px;
   font: 400 12px/1.65 var(--font-sans); white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
@@ -4665,6 +4666,45 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-bench__briefchip {
   background: var(--secondary); color: var(--foreground); border-radius: 5px;
   box-shadow: 0 0 0 2.5px var(--secondary);
+}
+/* A citation whose source is no longer attached. Marked, not hidden: dispatch refuses over it,
+   so the words have to show which ones they are while there is still time to fix them. */
+.fy-bench__briefchip--lost {
+  background: color-mix(in srgb, var(--destructive) 13%, transparent);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--destructive) 13%, transparent);
+  color: var(--destructive);
+}
+/* A third copy of the words, laid out and never drawn (issue 476). The @ completion measures
+   its query on this, so the menu hangs off the citation itself rather than off the box's
+   corner - and it does so without the underlay having to know anything about the caret. */
+.fy-bench__briefmirror { visibility: hidden; overflow: hidden; }
+
+/* The @ menu (issue 476): the references attached right now, offered by name.
+   Fixed rather than absolute, and so out of the composer's own overflow: the brief is 380px of
+   a scrolling column, and a menu clipped by it would be a menu you cannot read the bottom of. */
+.fy-bench__mentions {
+  position: fixed; z-index: 70; min-width: 216px; max-width: 260px; max-height: 232px; overflow-y: auto;
+  margin: 0; padding: 5px; list-style: none;
+  display: flex; flex-direction: column; gap: 1px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-lg);
+}
+.fy-bench__mentionrow {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 7px;
+  cursor: pointer; transition: var(--transition-control);
+}
+.fy-bench__mentionrow[aria-selected="true"] { background: var(--accent); }
+.fy-bench__mentionthumb {
+  width: 28px; height: 28px; flex: none; border-radius: 5px; overflow: hidden;
+  background: var(--muted); display: grid; place-items: center;
+}
+.fy-bench__mentionthumb .fy-portrait,
+.fy-bench__mentionthumb .fy-portrait--fallback { width: 100%; height: 100%; object-fit: cover; }
+.fy-bench__mentionkind { font: 400 9px var(--font-mono); color: var(--muted-foreground); }
+.fy-bench__mentiontext { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fy-bench__mentiontoken { font: 500 11.5px var(--font-sans); color: var(--foreground); }
+.fy-bench__mentionname {
+  font: 400 10px var(--font-mono); color: var(--muted-foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .fy-bench__brieffoot { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--border); flex: none; }
 .fy-bench__footicon {
@@ -4747,9 +4787,13 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   width: min(720px, 100%); height: min(480px, 100%); display: flex; flex-direction: column; gap: 8px;
   border: 1px solid var(--border); border-radius: 14px; background: var(--card); box-shadow: var(--shadow-lg); padding: 14px;
 }
-.fy-bench__briefmodalpanel textarea {
-  flex: 1; resize: none; border: 0; outline: none; background: transparent; color: var(--foreground);
-  font: 400 13px/1.7 var(--font-sans);
+/* The same editor as the composer's, in a bigger dress (issue 476) - one component, so the @
+   completion cannot exist in one of the two places the brief is written. */
+.fy-bench__briefstack--large { flex: 1; min-height: 0; }
+.fy-bench__briefstack--large .fy-bench__briefunder,
+.fy-bench__briefstack--large .fy-bench__briefmirror,
+.fy-bench__briefstack--large .fy-bench__brieftext {
+  padding: 0; font: 400 13px/1.7 var(--font-sans);
 }
 
 .fy-bench__settings { display: flex; align-items: center; gap: 5px; margin-top: 10px; flex: none; flex-wrap: wrap; }

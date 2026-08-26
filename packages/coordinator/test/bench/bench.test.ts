@@ -438,6 +438,177 @@ describe("dispatch planning (issue 305 §9)", () => {
   });
 });
 
+describe("citations in the brief (issue 476)", () => {
+  /** A session with the world's one image attached and `brief` written over it. */
+  async function withBrief(brief: string) {
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    const outcome = await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+      source: { source: "artifact", artifactId },
+      requestId: "r-add",
+      at: CLOCK(),
+    });
+    assert.equal(outcome.outcome, "added");
+    await opened.store.append(
+      { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief },
+      { at: CLOCK() },
+    );
+    return { store, opened };
+  }
+
+  const planFor = async (
+    made: Awaited<ReturnType<typeof withBrief>>,
+  ) =>
+    planBenchDispatch((await made.opened.store.fold())!, made.store.getBundle(), MANIFEST, {
+      worldId: made.store.worldId,
+      requestId: "r1",
+      at: CLOCK(),
+    });
+
+  it("a cited reference that is riding dispatches, and the words go out as written", async () => {
+    const plan = await planFor(await withBrief("@Image 1, lit low"));
+    assert.ok(plan.ok);
+    if (plan.ok) {
+      assert.equal(plan.reserved[0]!.request.brief, "@Image 1, lit low");
+      assert.equal(plan.reserved[0]!.request.references[0]!.token, "Image 1");
+      // The provider sees the author's own words, at-sign and all - one canonical spelling.
+      assert.equal(plan.inputs[0]!.params.prompt, "@Image 1, lit low");
+    }
+  });
+
+  it("a citation nothing is attached for refuses, by name, before anything is reserved", async () => {
+    const plan = await planFor(await withBrief("@Image 3, lit low"));
+    assert.equal(plan.ok, false);
+    if (!plan.ok) {
+      assert.match(plan.reason, /@Image 3/);
+      assert.match(plan.reason, /not attached/);
+    }
+  });
+
+  it("names every lost citation once, and only the lost ones", async () => {
+    const plan = await planFor(await withBrief("@Image 1 with @Image 4 and @Image 4"));
+    assert.equal(plan.ok, false);
+    if (!plan.ok) {
+      assert.equal(plan.reason.match(/@Image 4/g)?.length, 1);
+      assert.doesNotMatch(plan.reason, /@Image 1/);
+    }
+  });
+
+  it("leaves the older bare spelling alone - a brief from before mentions is not bound by one", async () => {
+    const { dir, store } = await open();
+    const opened = await freshBench(dir);
+    await opened.store.append(
+      { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "citing Image 3" },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST, {
+      worldId: store.worldId,
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    assert.equal(plan.ok, true);
+  });
+
+  it("a re-run is judged against its own snapshot, not against what the composer holds now", async () => {
+    const made = await withBrief("@Image 1, lit low");
+    const first = await planFor(made);
+    assert.ok(first.ok);
+    if (!first.ok) return;
+    const reserved = first.reserved[0]!;
+    await made.opened.store.append(
+      { type: "takes-reserved", takes: [{ id: reserved.id, n: reserved.n, requestId: "r1", request: reserved.request, createdAt: CLOCK() }] },
+      { at: CLOCK() },
+    );
+    // The picture is taken off the bench afterwards; the take still means what it meant.
+    await made.opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
+    const session = (await made.opened.store.fold())!;
+    assert.deepEqual(session.composer.activeTokens, []);
+    const rerun = planBenchDispatch(session, made.store.getBundle(), MANIFEST, {
+      worldId: made.store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+      fromTake: session.takes[0]!,
+    });
+    assert.ok(rerun.ok);
+    if (rerun.ok) {
+      assert.equal(rerun.reserved[0]!.request.brief, "@Image 1, lit low");
+      assert.equal(rerun.reserved[0]!.request.references[0]!.token, "Image 1");
+    }
+  });
+
+  it("names each citation by the place its picture takes on the wire (review, issue 476)", async () => {
+    // Two pictures attached, the FIRST then taken off. The author still sees "@Image 2", because
+    // a session token is never renumbered — but the provider is handed one image and counts from
+    // one. Sent as written, the prompt asked a model with a single picture to look at its second.
+    const { dir, store } = await open();
+    await fileImage(dir, "first.png", newId("ar"), `sha256:${"a".repeat(64)}`);
+    await fileImage(dir, "second.png", newId("ar"), `sha256:${"b".repeat(64)}`);
+    await store.reload();
+    const idOf = (file: string) => store.getBundle().artifacts.find((a) => a.file === file)!.id;
+    let opened = await freshBench(dir);
+    for (const file of ["first.png", "second.png"]) {
+      const outcome = await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+        source: { source: "artifact", artifactId: idOf(file) },
+        requestId: `add-${file}`,
+        at: CLOCK(),
+      });
+      assert.equal(outcome.outcome, "added", `${file}: ${JSON.stringify(outcome)}`);
+      // Allocation reads the session it is handed, so the second add needs the first one folded
+      // in — otherwise both claim Image 1 and the case under test never arises.
+      opened = (await refolded(opened))!;
+    }
+    await opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
+    await opened.store.append(
+      { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "lit like @Image 2, cold" },
+      { at: CLOCK() },
+    );
+    const session = (await opened.store.fold())!;
+    assert.deepEqual(session.composer.activeTokens, ["Image 2"]);
+    const plan = planBenchDispatch(session, store.getBundle(), MANIFEST, {
+      worldId: store.worldId,
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      // The words the provider reads name the one image it is handed.
+      assert.equal(plan.inputs[0]!.params.prompt, "lit like @Image 1, cold");
+      assert.deepEqual(plan.inputs[0]!.params.references, ["artifacts/second.png"]);
+      // The author's own words are what the take remembers, so a re-run redoes this arithmetic
+      // against the snapshot's own references rather than inheriting a renamed prompt.
+      assert.equal(plan.reserved[0]!.request.brief, "lit like @Image 2, cold");
+      assert.equal(plan.reserved[0]!.request.references[0]!.token, "Image 2");
+    }
+  });
+
+  it("reads no citation where the editor would have offered none (review, issue 476)", async () => {
+    // Unbounded, these were both read as "@Image 1" and refused as stale citations — the worst
+    // kind of refusal, because the words the author is told to fix were never meant as one.
+    for (const brief of ["write to me@Image 1.example", "released @Image 1st of May"]) {
+      const { dir, store } = await open();
+      const opened = await freshBench(dir);
+      await opened.store.append(
+        { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief },
+        { at: CLOCK() },
+      );
+      const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), MANIFEST, {
+        worldId: store.worldId,
+        requestId: "r1",
+        at: CLOCK(),
+      });
+      assert.equal(plan.ok, true, brief);
+    }
+  });
+
+  it("the live composer, with the same picture taken off, refuses the words it left behind", async () => {
+    const made = await withBrief("@Image 1, lit low");
+    await made.opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
+    const plan = await planFor(made);
+    assert.equal(plan.ok, false);
+    if (!plan.ok) assert.match(plan.reason, /@Image 1.*not attached/);
+  });
+});
+
 describe("recovery (issue 305 §6)", () => {
   it("window one: a reserved take with no job fails with 'nothing was spent'", async () => {
     const { dir } = await open();
@@ -1180,6 +1351,55 @@ describe("a lane the mode has no use for rides along (found live, 2026-08-17)", 
     if (plan.ok) {
       // Ignored, not sent: the reference stays attached to the session for the modes that can
       // carry it, and nothing about it reaches a route that takes none.
+      assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
+      assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
+    }
+  });
+
+  it("does not refuse a song over one either — music is the other mode that makes a sound", async () => {
+    // Raised on review (issue 476). Music arrived a turn after the rule above was written and
+    // never joined it: it hides the reference lane exactly as voice does, and its snapshot
+    // refuses references outright, so a session carrying a picture refused every song over one
+    // the author could no longer see, let alone remove. Same shape, same answer.
+    const MUSIC_ROW: ManifestModel = {
+      id: "test-music-2",
+      provider: "fal",
+      capability: "music",
+      displayName: "Test Music",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    };
+    const manifest: ModelManifest = {
+      manifestVersion: 1,
+      generated: "2026-08-26",
+      models: [IMAGE_MODEL, MUSIC_ROW],
+    };
+    const { dir, store, artifactId } = await withImage();
+    const opened = await freshBench(dir);
+    await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+      source: { source: "artifact", artifactId },
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    await opened.store.append(
+      {
+        type: "composer-set",
+        mode: "music",
+        provider: "fal",
+        model: "test-music-2",
+        params: { kind: "music", count: 1, lyrics: "[verse]\nnobody wound it" },
+        brief: "Slow sea shanty, close harmony",
+      },
+      { at: CLOCK() },
+    );
+    const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), manifest, {
+      worldId: store.worldId,
+      requestId: "r2",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
       assert.ok(!("references" in plan.inputs[0]!.params), "no references on the wire");
       assert.equal(plan.reserved[0]!.request.references.length, 0, "and none recorded on the take");
     }

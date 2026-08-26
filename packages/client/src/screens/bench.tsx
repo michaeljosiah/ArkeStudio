@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
+  benchMentionsIn,
   deriveCapabilityAvailability,
   estimateMicroUsd,
   formatMicroUsd,
@@ -17,6 +18,7 @@ import {
   presetFault,
   supportedDeliveries,
   tiersFor,
+  unresolvedBenchMentions,
   type BenchMode,
   type BenchParams,
   type BenchSession,
@@ -77,6 +79,8 @@ import {
 } from "../components/icons.js";
 import { Portrait } from "../components/portrait.js";
 import { ImageDownload } from "../components/image-actions.js";
+import { BenchBrief } from "../components/bench-brief.js";
+import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { posterNameFor } from "../lib/poster.js";
@@ -273,7 +277,6 @@ function BenchWorkspace({
     return { image: via("image"), video: via("video"), voice: via("voice"), music: via("music") } as const;
   }, [state?.app.providers]);
   const [briefExpanded, setBriefExpanded] = useState(false);
-  const briefUnder = useRef<HTMLDivElement>(null);
 
   // ---- the lyrics helper's round trip (design turn 73) -------------------
   // Deliberately unlike the enhancer's: that one may auto-apply into the composer when the
@@ -322,12 +325,23 @@ function BenchWorkspace({
           setEnhanceNote(answer.reason ?? "the art director had no answer this time");
           return;
         }
+        // A rewrite that drops "@Image 1" turns an attached picture into words nobody will
+        // resolve. The prompt says to keep them; this is what happens when it did not.
+        const dropped = droppedMentions(pending.sentBrief, answer.prompt);
+        setEnhanceNote(
+          dropped.length > 0 ? `${dropped.map((token) => `@${token}`).join(", ")} dropped` : null,
+        );
         const unmoved =
           draftRef.current.brief === pending.sentBrief &&
           draftRef.current.provider === pending.provider &&
           draftRef.current.model === pending.model &&
           draftRef.current.mode === pending.mode;
-        if (unmoved) {
+        // A rewrite that lost one is never applied for you, however still the words have been.
+        // Auto-apply is a convenience that rests on the answer meaning what the ask meant, and
+        // a brief whose citation has gone means something else — it will not dispatch, and if
+        // it did it would be a paid take grounded on a picture nobody asked it to look at. It
+        // is offered instead, beside a note naming what went, and applying it is the author's.
+        if (unmoved && dropped.length === 0) {
           // Unmoved words: the enhancement lands, and the originals are one press away.
           setEnhanceUndo(pending.sentBrief);
           compose({ ...draftRef.current, brief: answer.prompt });
@@ -357,6 +371,36 @@ function BenchWorkspace({
   );
 
   const tokens = useMemo(() => new Set(session.tokenRegistry.map((e) => e.token)), [session.tokenRegistry]);
+
+  /**
+   * What a citation in the brief may name (issue 476): the references attached RIGHT NOW.
+   *
+   * Read exactly the way `planBenchDispatch` reads them — a shot carries its frames as well as
+   * its references, a picture carries only references, and neither mode that makes a sound
+   * carries any. The screen has to agree with the gate to the letter here: a name the composer
+   * drew as resolved and dispatch then refused would be a refusal arriving after the press, over
+   * words the author had already been told were fine.
+   */
+  const attachedTokens = useMemo(
+    () =>
+      soundOnly
+        ? []
+        : draft.mode === "video"
+          ? [...session.composer.activeTokens, ...session.composer.keyframeTokens]
+          : session.composer.activeTokens,
+    [soundOnly, draft.mode, session.composer.activeTokens, session.composer.keyframeTokens],
+  );
+  const attached = useMemo(() => new Set(attachedTokens), [attachedTokens]);
+  /** The picker's own rows are where a mention gets its thumbnail, its name and its second line. */
+  const mentions = useMemo(
+    () => mentionOptions(attachedTokens, [...worldSources, ...sessionSources, ...characterSources]),
+    [attachedTokens, worldSources, sessionSources, characterSources],
+  );
+  /** Said in the composer with the same function dispatch refuses with, so the two cannot differ. */
+  const lostMentions = useMemo(
+    () => unresolvedBenchMentions(draft.brief, attachedTokens),
+    [draft.brief, attachedTokens],
+  );
 
   // ---- dispatch + its refusal ----
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -938,26 +982,19 @@ function BenchWorkspace({
           {singing && <div className="fy-bench__eyebrow">STYLE</div>}
           {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
           <div className={cx("fy-bench__brief", singing && "fy-bench__brief--style")}>
-            <div className="fy-bench__briefstack">
-              <div ref={briefUnder} className="fy-bench__briefunder" aria-hidden>
-                {briefWithChips(draft.brief, tokens)}
-                {"​"}
-              </div>
-              <textarea
-                aria-label={singing ? "Style" : "Brief"}
-                className="fy-bench__brieftext"
-                value={draft.brief}
-                onChange={(e) => compose({ ...draft, brief: e.target.value })}
-                onScroll={(e) => {
-                  if (briefUnder.current) briefUnder.current.scrollTop = e.currentTarget.scrollTop;
-                }}
-                placeholder={
-                  singing
-                    ? "Instrumentation, mood, arrangement — what the song sounds like, not what it says."
-                    : "Say what to make. Reference tokens — Image 1, Audio 2 — may be cited by name."
-                }
-              />
-            </div>
+            <BenchBrief
+              value={draft.brief}
+              onChange={(brief) => compose({ ...draft, brief })}
+              options={mentions}
+              worldSlug={worldSlug}
+              underlay={briefWithChips(draft.brief, tokens, attached)}
+              label={singing ? "Style" : "Brief"}
+              placeholder={
+                singing
+                  ? "Instrumentation, mood, arrangement — what the song sounds like, not what it says."
+                  : "Say what to make. Type @ to cite a reference."
+              }
+            />
             <div className="fy-bench__brieffoot">
               <button
                 type="button"
@@ -1075,6 +1112,13 @@ function BenchWorkspace({
               )}
             </div>
           </div>
+          {/* Said here rather than at dispatch: the coordinator refuses this, and a refusal that
+              only arrives on the press is a refusal the author could not have seen coming. */}
+          {lostMentions.length > 0 && (
+            <p className="fy-bench__refusal" data-testid="bench-lost-mentions">
+              {`${lostMentions.map((token) => `@${token}`).join(", ")} — not attached`}
+            </p>
+          )}
 
           {/* The second of the two things a song asks for (design turn 73). Its own box, not a
               heading inside the style: one of these is a sentence about instrumentation and the
@@ -1953,14 +1997,16 @@ function BenchWorkspace({
         {briefExpanded && (
           <div className="fy-bench__briefmodal" role="dialog" aria-label="The brief, large">
             <div className="fy-bench__briefmodalpanel">
-              <textarea
+              <BenchBrief
+                variant="large"
                 autoFocus
-                aria-label="Brief"
                 value={draft.brief}
-                onChange={(e) => compose({ ...draft, brief: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setBriefExpanded(false);
-                }}
+                onChange={(brief) => compose({ ...draft, brief })}
+                options={mentions}
+                worldSlug={worldSlug}
+                underlay={briefWithChips(draft.brief, tokens, attached)}
+                label="Brief"
+                onEscape={() => setBriefExpanded(false)}
               />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 {promptCap !== undefined && (
@@ -2049,17 +2095,47 @@ function longestOffered(models: readonly ManifestModel[]): number {
   }, 0);
 }
 
-/** The brief's text with the session's own tokens marked — never token-shaped strangers. */
-function briefWithChips(text: string, tokens: Set<string>): ReactNode[] {
-  return text.split(/((?:Image|Video|Audio) [1-9][0-9]*)/g).map((part, i) =>
-    tokens.has(part) ? (
-      <mark key={i} className="fy-bench__briefchip">
-        {part}
-      </mark>
-    ) : (
-      part
-    ),
-  );
+/**
+ * The brief's text with its citations marked — never token-shaped strangers.
+ *
+ * Two kinds, and they are not marked the same. A mention ("@Image 1", issue 476) is a citation
+ * the author made deliberately, so one whose source is no longer attached is drawn as visibly
+ * lost rather than quietly reading as prose — it is what dispatch will refuse over. A bare
+ * "Image 1" is the older spelling and stays as it was: chipped where the session knows the name,
+ * and left alone otherwise, because a brief written before mentions existed never claimed it.
+ */
+function briefWithChips(text: string, tokens: Set<string>, attached: Set<string>): ReactNode[] {
+  const out: ReactNode[] = [];
+  let key = 0;
+  // Everything between the mentions, where only the older bare spelling can be chipped.
+  const prose = (slice: string): void => {
+    for (const part of slice.split(/((?:Image|Video|Audio) [1-9][0-9]*)/g)) {
+      out.push(
+        tokens.has(part) ? (
+          <mark key={key++} className="fy-bench__briefchip">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      );
+    }
+  };
+  // The spans `benchMentionsIn` finds, not a second regex of the screen's own: a chip drawn
+  // where the gate sees no citation is a promise the press then breaks.
+  let at = 0;
+  for (const mention of benchMentionsIn(text)) {
+    prose(text.slice(at, mention.start));
+    const lost = !attached.has(mention.token);
+    out.push(
+      <mark key={key++} className={cx("fy-bench__briefchip", lost && "fy-bench__briefchip--lost")}>
+        {text.slice(mention.start, mention.end)}
+      </mark>,
+    );
+    at = mention.end;
+  }
+  prose(text.slice(at));
+  return out;
 }
 
 /**

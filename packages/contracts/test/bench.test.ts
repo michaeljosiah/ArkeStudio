@@ -11,6 +11,7 @@ import {
   BenchReferenceSourceSchema,
   benchSourceKey,
   benchTokenFor,
+  briefForProvider,
   foldBenchSession,
   formatSeconds,
   frameTaskModes,
@@ -634,5 +635,61 @@ describe("a song's request snapshot (design turn 73)", () => {
 
   it("prices sixty seconds at the shipped rate, which is what the screens draw", () => {
     assert.equal(MUSIC_DURATION_SEC, 60);
+  });
+});
+
+/**
+ * The provider counts from one; the session never renumbers (raised on review, issue 476).
+ * Between those two facts sits a take that can be paid for and grounded on the wrong picture.
+ */
+describe("the brief a provider actually reads (issue 476)", () => {
+  const image = (n: number): { token: string; kind: "image" } => ({ token: benchTokenFor("image", n), kind: "image" });
+
+  it("renames a citation to the place its picture occupies on the wire", () => {
+    // Image 1 was taken off. Image 2 is now the FIRST image the provider is handed, and the
+    // words have to say so, or the model looks for a second image that was never sent.
+    assert.equal(
+      briefForProvider("lit like @Image 2, cold", [image(2)]),
+      "lit like @Image 1, cold",
+    );
+  });
+
+  it("numbers by the order sent, not by the names the author sees", () => {
+    assert.equal(
+      briefForProvider("@Image 4 against @Image 2", [image(4), image(2)]),
+      "@Image 1 against @Image 2",
+    );
+    // ...and the other way round, which is the case a restore in another order produces.
+    assert.equal(
+      briefForProvider("@Image 4 against @Image 2", [image(2), image(4)]),
+      "@Image 2 against @Image 1",
+    );
+  });
+
+  it("counts each kind in its own field", () => {
+    assert.equal(
+      briefForProvider("@Image 3 over @Audio 2", [
+        { token: "Image 3", kind: "image" },
+        { token: "Audio 2", kind: "audio" },
+      ]),
+      "@Image 1 over @Audio 1",
+    );
+  });
+
+  it("leaves a brief that cites nothing exactly as it was written", () => {
+    const words = "A rusted tide-clock face, and no citation in it at all.";
+    assert.equal(briefForProvider(words, [image(1)]), words);
+    assert.equal(briefForProvider(words, []), words);
+  });
+
+  it("leaves the older bare spelling alone — it was never a citation", () => {
+    assert.equal(briefForProvider("citing Image 2 by name", [image(2)]), "citing Image 2 by name");
+  });
+
+  it("is unchanged where the names already match the wire, which is the ordinary case", () => {
+    assert.equal(
+      briefForProvider("@Image 1 and @Image 2", [image(1), image(2)]),
+      "@Image 1 and @Image 2",
+    );
   });
 });

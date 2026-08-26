@@ -243,6 +243,114 @@ export function benchSourceKey(source: BenchReferenceSource): string {
   }
 }
 
+/**
+ * What may sit immediately before a citation's "@" (issue 476).
+ *
+ * An address — write to me@image.example — is not an attempt to cite Image 1, and neither is
+ * anything else with an at-sign buried inside a word. One set, exported, because the editor
+ * decides where a menu may OPEN and this file decides what IS a mention: two spellings of that
+ * rule would let the menu offer a completion the gate then refuses to recognise.
+ */
+const MENTION_OPENERS = [" ", "\t", "\n", "(", "[", "{", '"', "'", "/", "\u2014", "\u2013"] as const;
+export const BENCH_MENTION_OPENERS: ReadonlySet<string> = new Set(MENTION_OPENERS);
+
+/**
+ * The openers as one character class. Written raw, which is safe for every character above and
+ * for punctuation generally — but `]`, `^`, `-` and a backslash would each have to be escaped
+ * before they could join the set, so add one of those and this line has to change with it.
+ */
+const OPENER_CLASS = MENTION_OPENERS.join("");
+
+/**
+ * A mention: the name a brief cites a reference by, written with an at-sign — "@Image 3"
+ * (issue 476).
+ *
+ * The token is the identity; the at-sign is only what tells a citation apart from the author's
+ * own prose, so the completion menu, the chip in the words, and the gate before dispatch all
+ * agree on which characters name a reference. A bare "Image 3" stays prose: briefs written
+ * before mentions existed are not retroactively bound to a reference that may since have gone.
+ *
+ * Bounded on both sides, and it has to be. Without the opener, "foo@Image 1" would read as a
+ * citation the editor would never have offered; without the closing boundary, "@Image 1st of May"
+ * reads as "@Image 1", and ordinary prose is refused at dispatch over a reference nobody cited.
+ *
+ * The closing boundary is in two halves because a full stop is both the end of a sentence and
+ * the middle of a filename. A letter or a digit ends it outright; a dot, dash or underscore ends
+ * it only when a word follows, so "cite @Image 1." is a citation and "@Image 1.foo" is not —
+ * which is the same reading the editor's query gives those characters (raised on review).
+ */
+export const BENCH_MENTION = new RegExp(
+  `(?<![^${OPENER_CLASS}])@(?:Image|Video|Audio) [1-9][0-9]*(?![\\p{L}\\p{N}])(?![._-][\\p{L}\\p{N}])`,
+  "u",
+);
+
+/** The canonical spelling, in one place, so nothing writes a second dialect of it. */
+export function benchMentionFor(token: string): string {
+  return `@${token}`;
+}
+
+/** Every mention a brief makes, in order, each with the span it occupies. */
+export function benchMentionsIn(text: string): Array<{ token: string; start: number; end: number }> {
+  const found: Array<{ token: string; start: number; end: number }> = [];
+  for (const match of text.matchAll(new RegExp(BENCH_MENTION.source, "gu"))) {
+    const start = match.index ?? 0;
+    found.push({ token: match[0].slice(1), start, end: start + match[0].length });
+  }
+  return found;
+}
+
+/**
+ * The brief as the provider will read it: every citation renamed to the place its bytes will
+ * actually occupy on the wire (raised on review, issue 476).
+ *
+ * A session token is stable for the session's whole life and never renumbered — that is what
+ * makes "@Image 2" still mean the same picture after Image 1 has been taken off. A provider is
+ * handed a dense array and counts from one. So the moment anything is removed, or restored in
+ * another order, the two disagree: the prompt says "the second image" and the second image is
+ * not there. The model cannot see the registry, only the array, and a take grounded on the
+ * wrong picture is a take that was paid for.
+ *
+ * So the author keeps the stable names — on screen, in the snapshot, and therefore across a
+ * re-run — and the provider is given the positions. Numbered per kind, because the kinds travel
+ * in fields of their own, and derived from the ordered list that is being sent, which is what
+ * makes a re-run of an old take reproduce that take's own numbering rather than today's.
+ */
+export function briefForProvider(
+  brief: string,
+  riding: readonly { token: string; kind: ReferenceKind }[],
+): string {
+  const place = new Map<string, string>();
+  const used = new Map<ReferenceKind, number>();
+  for (const entry of riding) {
+    const n = (used.get(entry.kind) ?? 0) + 1;
+    used.set(entry.kind, n);
+    place.set(entry.token, benchTokenFor(entry.kind, n));
+  }
+  let out = "";
+  let at = 0;
+  for (const mention of benchMentionsIn(brief)) {
+    const renamed = place.get(mention.token);
+    if (renamed === undefined) continue; // the gate refuses these; nothing here invents a name
+    out += brief.slice(at, mention.start) + benchMentionFor(renamed);
+    at = mention.end;
+  }
+  return out + brief.slice(at);
+}
+
+/**
+ * The tokens a brief cites that nothing attached answers for — de-duplicated, first mention
+ * first. The one function the composer warns from and the coordinator refuses from, so a
+ * sentence the screen calls fine is never one dispatch then rejects.
+ */
+export function unresolvedBenchMentions(text: string, attached: Iterable<string>): string[] {
+  const riding = new Set(attached);
+  const lost: string[] = [];
+  for (const { token } of benchMentionsIn(text)) {
+    if (!riding.has(token) && !lost.includes(token)) lost.push(token);
+  }
+  return lost;
+}
+
 // ---------------------------------------------------------------------------
 // The request snapshot — immutable once a take is reserved. Selection and
 // re-run read THIS, never the live composer, which is what makes an older

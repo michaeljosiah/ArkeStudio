@@ -6,6 +6,7 @@ import {
   deliveryParams,
   benchSourceKey,
   benchTokenFor,
+  briefForProvider,
   dispatchDuration,
   estimateMicroUsd,
   imageOutputFor,
@@ -19,6 +20,7 @@ import {
   pricedDuration,
   routeFor,
   sizeParamsFor,
+  unresolvedBenchMentions,
   validateReferences,
   voiceFormatForModel,
   type ArtifactSidecar,
@@ -471,9 +473,14 @@ export function planBenchDispatch(
   // follows for an image request. Found live: a session that had carried a reference for a shot
   // refused a spoken line over it, and voice mode hides the very lane that could have removed
   // it, so the refusal named something the user had no way to act on (design 70).
+  //
+  // A song is the same shape and had been left out of it (raised on review, issue 476). Music
+  // arrived a turn later, hides the reference lane exactly as voice does, and its snapshot
+  // refuses references outright — so a session that had carried a picture refused every song
+  // over one the author could no longer see, let alone remove. Both modes that make a sound.
   const references: BenchReferenceToken[] = options.fromTake
     ? options.fromTake.request.references
-    : composer.mode === "voice"
+    : composer.mode === "voice" || composer.mode === "music"
       ? []
       : session.composer.activeTokens
           .map((token) => session.tokenRegistry.find((e) => e.token === token))
@@ -538,6 +545,32 @@ export function planBenchDispatch(
       paths,
     };
   }
+
+  // Mentions (issue 476): a brief may cite an attached reference by name — "@Image 1". What it
+  // cites has to still be riding. A stale mention is refused with the name in it rather than
+  // sent on as prose, because the prompt would then tell the model to look at a picture that
+  // never arrived, and the take would be paid for before anyone could see that it had.
+  const lost = unresolvedBenchMentions(composer.brief, [
+    ...references.map((entry) => entry.token),
+    ...keyframes.map((entry) => entry.token),
+  ]);
+  if (lost.length > 0) {
+    const named = lost.map((token) => `@${token}`).join(", ");
+    return {
+      ok: false,
+      reason:
+        lost.length === 1
+          ? `The brief cites ${named}, which is not attached. Attach it again, or take the mention out.`
+          : `The brief cites ${named}, which are not attached. Attach them again, or take the mentions out.`,
+    };
+  }
+
+  // The citations validated above name session tokens; the provider is handed a dense array and
+  // counts from one. `briefForProvider` renames them to the places the bytes actually occupy, so
+  // the words the model reads and the pictures it is given cannot drift apart once a reference
+  // has been removed or restored in another order (raised on review, issue 476). The snapshot
+  // keeps the author's own words, which is what makes a re-run reproduce this same arithmetic.
+  const wirePrompt = briefForProvider(composer.brief, frame !== null ? keyframes : references);
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
@@ -619,7 +652,7 @@ export function planBenchDispatch(
         provider: model.provider,
         model: model.id,
         params: {
-          prompt: composer.brief,
+          prompt: wirePrompt,
           output,
           ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
         },
@@ -655,7 +688,7 @@ export function planBenchDispatch(
         provider: model.provider,
         model: model.id,
         params: {
-          prompt: composer.brief,
+          prompt: wirePrompt,
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the
