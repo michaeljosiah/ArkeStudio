@@ -1041,6 +1041,21 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   /**
+   * What key art would carry and drop, computed for the dialog before the press (SPEC-031
+   * R-59, R-60; SPEC-010 R-15) — and the composed words its prompt box should open with.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-image.plan"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      prompt: z.string(),
+      carried: z.array(z.object({ name: z.string(), role: z.string() }).strict()),
+      dropped: z.array(z.object({ name: z.string(), reason: z.string() }).strict()),
+    })
+    .strict(),
+  /**
    * A founding build's whole picture, each time it changes (SPEC-031 §1.8). The fold is the
    * truth; this is its projection — the client never sequences or invents build state.
    */

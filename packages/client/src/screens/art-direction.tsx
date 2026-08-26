@@ -23,6 +23,8 @@ import {
   discardWorldImage,
   generateMasterLook,
   generateWorldImage,
+  planKeyArt,
+  useKeyArtPlans,
   pickStagedReference,
   sendStageArtifactReference,
   setArtDirection,
@@ -294,10 +296,23 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   // From the disk, not from the job: a finished job stays in the queue log for good, so asking it
   // "did you land a file" answered yes long after that file had been used or thrown away.
   const candidates = world.keyArtCandidates;
-  // What the app composes when nobody writes anything — the same function the coordinator uses,
-  // so the box opens showing exactly what would otherwise be sent.
-  const composed = worldImagePrompt(world.meta, world.artDirection);
+  // What the app composes when nobody writes anything. A world founded by a build carries a
+  // key-art brief, and its composition — bible, brief, the cast in frame — lives with the
+  // coordinator, so the dialog asks for it on open (plan-key-art) and shows what would
+  // actually be sent: the carried references, the drops named before the press (SPEC-010
+  // R-15), and the words the box opens with. Until the plan answers, the plain assembly
+  // stands, exactly as it did for worlds with no brief.
+  const plan = useKeyArtPlans()[worldId];
+  const composed = plan?.prompt ?? worldImagePrompt(world.meta, world.artDirection);
   const prompt = draft ?? composed;
+  const carriedLine =
+    plan !== undefined && plan.carried.length > 0
+      ? `Carries ${plan.carried.map((r) => `${r.name} · ${r.role}`).join(", ")}. `
+      : "";
+  const droppedLine =
+    plan !== undefined && plan.dropped.length > 0
+      ? `Dropped: ${plan.dropped.map((d) => `${d.name} (${d.reason})`).join("; ")}. `
+      : "";
 
   const doors = (
     <div className="fy-artdirection__hover">
@@ -307,6 +322,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         disabled={running}
         onClick={() => {
           setDraft(null);
+          planKeyArt(worldId);
           setDialogOpen(true);
         }}
       >
@@ -383,7 +399,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         promptHint="Opens as the words this would send on its own — the look, the logline, the tone. Edit them and yours are sent as written, with the standing clause added after, and the studio writes nothing of its own on top."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
-        referenceHint="Optional. A photograph, a painting, a frame — whatever the world should look like. It is the only reference key art can carry, since a world has no reference kit of its own."
+        referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
         onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
         onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("world-image"))}
         workflow="main-photo"

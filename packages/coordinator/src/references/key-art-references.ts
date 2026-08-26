@@ -81,20 +81,21 @@ export async function assembleKeyArt(
   const dropped: Array<{ name: string; reason: string }> = [];
   const sheets: Record<string, number> = {};
 
-  // The style role is reserved first and never lost to identity overflow (R-60).
-  if (staged !== undefined) {
-    if (budget > 0) {
-      carried.push({ file: staged, role: "style", sheetId: null, sheetVersion: null, name: "staged reference" });
-    } else {
-      dropped.push({ name: "staged reference", reason: `${model.displayName} takes no reference images` });
-    }
+  // The style role is reserved first and never lost to identity overflow (R-60). Callers
+  // already withhold a staged image from a zero-slot route (`stagedFor`), so no drop entry.
+  if (staged !== undefined && budget > 0) {
+    carried.push({ file: staged, role: "style", sheetId: null, sheetVersion: null, name: "staged reference" });
   }
 
   const room = () => carried.length < budget;
   const sheetByName = (type: Sheet["type"], name: string): Sheet | undefined =>
     bundle.sheets.find((sheet) => sheet.type === type && sheet.name.toLowerCase() === name.toLowerCase());
 
+  const seen = new Set<string>();
   for (const name of brief?.characters ?? []) {
+    // A name the brief repeats is one person, one slot.
+    if (seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
     const sheet = sheetByName("character", name);
     if (!sheet) {
       dropped.push({ name, reason: "is not in the world" });
@@ -152,7 +153,7 @@ export async function assembleKeyArt(
 }
 
 /** The first stretch of the bible, sized for a prompt rather than a reader. */
-function bibleExcerpt(text: string, max = 500): string {
+export function bibleExcerpt(text: string, max = 500): string {
   const clean = text.replace(/^#.*$/gm, "").replace(/\s+/g, " ").trim();
   if (clean.length <= max) return clean;
   const cut = clean.slice(0, max);

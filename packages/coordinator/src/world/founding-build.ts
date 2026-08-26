@@ -1140,7 +1140,8 @@ export class FoundingBuildService {
           composed: `${keyArtComposition({
             meta: bundle.meta,
             direction: bundle.artDirection,
-            bible: blueprint.bible ?? "",
+            // The world's own bible — the same source Regenerate reads (R-62).
+            bible: bundle.bible.present ? bundle.bible.text : "",
             brief,
             cast,
           })}${imageConstraintSuffix(bundle.artDirection)}`,

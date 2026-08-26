@@ -111,6 +111,16 @@ interface StoreState {
     string,
     { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string }
   >;
+  /** What key art would carry and drop, per world — the dialog's honest opening (SPEC-010 R-15). */
+  keyArtPlans: Record<
+    string,
+    {
+      requestId: string;
+      prompt: string;
+      carried: Array<{ name: string; role: string }>;
+      dropped: Array<{ name: string; reason: string }>;
+    }
+  >;
   /** Genesis conversations: sandboxed world-shaping before any world exists. */
   genesis: Record<
     string,
@@ -258,6 +268,7 @@ let current: StoreState = {
   transcripts: {},
   genesis: {},
   buildPlans: {},
+  keyArtPlans: {},
   setupStatus: null,
   reading: {},
   archiveNote: null,
@@ -701,6 +712,7 @@ function handleFrame(json: string): void {
     let transcripts = current.transcripts;
     let genesis = current.genesis;
     let buildPlans = current.buildPlans;
+    let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -807,6 +819,16 @@ function handleFrame(json: string): void {
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+    } else if (event.type === "world-image.plan") {
+      keyArtPlans = {
+        ...keyArtPlans,
+        [event.worldId]: {
+          requestId: event.requestId,
+          prompt: event.prompt,
+          carried: event.carried,
+          dropped: event.dropped,
+        },
+      };
     } else if (event.type === "build.plan") {
       buildPlans = {
         ...buildPlans,
@@ -1132,6 +1154,7 @@ function handleFrame(json: string): void {
       transcripts,
       genesis,
       buildPlans,
+      keyArtPlans,
       setupStatus,
       reading,
       archiveNote,
@@ -1614,6 +1637,15 @@ export function dismissBuildNotice(worldId: string): void {
 /** One picture of the look, from inside the conversation (SPEC-031 R-50) — a person pressed. */
 export function generateLookPreview(genesisId: string): void {
   send({ kind: "generate-look-preview", genesisId, requestId: ulid() });
+}
+
+/** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
+export function planKeyArt(worldId: string): void {
+  send({ kind: "plan-key-art", worldId, requestId: ulid() });
+}
+
+export function useKeyArtPlans(): StoreState["keyArtPlans"] {
+  return useStore().keyArtPlans;
 }
 
 export function useBuildPlans(): StoreState["buildPlans"] {
@@ -3125,6 +3157,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     transcripts: {},
     genesis: {},
     buildPlans: {},
+    keyArtPlans: {},
     setupStatus: null,
     reading: {},
     archiveNote: null,

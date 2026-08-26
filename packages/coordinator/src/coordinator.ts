@@ -222,7 +222,7 @@ import {
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
-import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
+import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, keyArtPrompt, worldImagePrompt, worldImageRequest } from "./references/world-image.js";
 import { adoptKeyArtCandidate } from "./references/key-art.js";
 import { assembleKeyArt, keyArtComposition, readKeyArtBrief } from "./references/key-art-references.js";
 import {
@@ -7062,6 +7062,41 @@ export class Coordinator {
           Uint8Array.from(Buffer.from(msg.audioBase64, "base64")),
           msg.contentType,
         );
+        return;
+      }
+      case "plan-key-art": {
+        // The dialog's honest opening (SPEC-010 R-15): what would be carried and what would
+        // be dropped, named before the user commits — and the words the box opens with are
+        // the words the dispatch would actually compose, brief and bible included (R-58).
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.opts.manifest) return;
+        const model = imageModelFor(this.appSettings ? await this.appSettings.load() : null, this.opts.manifest);
+        const bundle = store.getBundle();
+        const brief = await readKeyArtBrief(store.dir);
+        const staged = model ? stagedFor(bundle, stagedReferenceKey("world-image"), model)[0] : undefined;
+        const assembly =
+          model && brief !== null
+            ? await assembleKeyArt(store, bundle, brief, model, staged)
+            : { carried: [], dropped: [], references: [], referenceRoles: [], sheets: {} };
+        const prompt =
+          brief !== null
+            ? keyArtComposition({
+                meta: bundle.meta,
+                direction: bundle.artDirection,
+                bible: bundle.bible.present ? bundle.bible.text : "",
+                brief,
+                cast: assembly.carried.filter((r) => r.role === "identity").map((r) => r.name),
+              })
+            : worldImagePrompt(bundle.meta, bundle.artDirection);
+        this.emit({
+          at: new Date().toISOString(),
+          type: "world-image.plan",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          prompt,
+          carried: assembly.carried.map(({ name, role }) => ({ name, role })),
+          dropped: assembly.dropped,
+        });
         return;
       }
       case "generate-world-image": {

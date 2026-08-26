@@ -410,13 +410,20 @@ export interface BuildImageRoute {
   referenceImages: number;
 }
 
-/** One estimate per image kind, from the frozen route — the figures the review sums. */
-export function buildImageEstimates(model: ManifestModel): Record<"mainPhoto" | "establishingView" | "sheetImage" | "keyArt", number> {
+/**
+ * One estimate per image kind, from the frozen route — the figures the review sums. Key art
+ * bills the references it will carry, so its figure counts the knowable upper bound: every
+ * cast member and place the brief names, capped at the route's slots (R-59, R-60).
+ */
+export function buildImageEstimates(
+  model: ManifestModel,
+  keyArtReferences = 0,
+): Record<"mainPhoto" | "establishingView" | "sheetImage" | "keyArt", number> {
   return {
     mainPhoto: estimateCharacterImageMicroUsd(model, "main-photo", 1, 0),
     establishingView: estimateCharacterImageMicroUsd(model, "location-view", 1, 0),
     sheetImage: estimateCharacterImageMicroUsd(model, "character-sheet", 1, 1),
-    keyArt: estimateMicroUsd(model, { images: 1, megapixels: 1, referenceImages: 0 }),
+    keyArt: estimateMicroUsd(model, { images: 1, megapixels: 1, referenceImages: keyArtReferences }),
   };
 }
 
@@ -438,7 +445,14 @@ export function compileBuildItems(
     route !== null && route.referenceImages === 0
       ? `${route.model.displayName} takes no reference images, so character sheets cannot carry the main photo`
       : undefined;
-  const estimates = route !== null ? buildImageEstimates(route.model) : null;
+  const keyArtReferences =
+    route === null || blueprint.keyArt === undefined
+      ? 0
+      : Math.min(
+          blueprint.keyArt.characters.length + (blueprint.keyArt.location !== undefined ? 1 : 0),
+          route.referenceImages,
+        );
+  const estimates = route !== null ? buildImageEstimates(route.model, keyArtReferences) : null;
 
   items.push({
     key: "world:world",

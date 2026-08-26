@@ -618,6 +618,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
   z.object({ kind: z.literal("stop-founding-build"), worldId: UlidSchema }).strict(),
   /**
+   * What key art would carry and drop, before anything is paid for (SPEC-031 R-59, R-60;
+   * SPEC-010 R-15): the dialog names the drop before the user commits, and opens its prompt
+   * box with the words the dispatch would actually compose. Answered by a world-image.plan
+   * event; nothing is created.
+   */
+  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /**
    * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
    * The agent proposes; a person presses — the estimate is on the control, and the prompt is
    * the look's own words unrewritten (R-52). Lands in the sandbox; carries in at Begin only
