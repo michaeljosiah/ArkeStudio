@@ -250,9 +250,10 @@ export interface StageInput {
 
 /**
  * Written inside a proposal the moment its change lands, so the decision survives a
- * directory that cannot be deleted yet (Windows busy handles). `listOpen` reads it.
+ * directory that cannot be deleted yet (Windows busy handles). Every reader of `.proposals/`
+ * honours it: `listOpen` here, and the world scan that feeds the screens.
  */
-const SETTLED_FILE = "settled.json";
+export const SETTLED_FILE = "settled.json";
 
 const PROPOSALS_DIR = ".proposals";
 

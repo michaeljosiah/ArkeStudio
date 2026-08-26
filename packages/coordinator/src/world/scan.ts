@@ -52,6 +52,7 @@ import {
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { readBible } from "./bible.js";
 import { projectReview } from "../gate/review.js";
+import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
 
@@ -652,6 +653,13 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
 
   const proposals: StagedProposal[] = [];
   for (const pid of await listDir(join(dir, ".proposals"))) {
+    // A settled proposal is over, whatever is still on disk. `accept` writes the tombstone and
+    // then deletes best-effort, so a directory that lost its delete to a busy handle lingers with
+    // the decision already recorded — and a founding build, accepting several in quick succession
+    // under its own write pressure, leaves a whole set of them. Counting those would ask the
+    // author again for a yes already given (SPEC-031 R-25, R-30). The gate's `listOpen` reads the
+    // same file; this is the other reader, and every screen renders this snapshot.
+    if (await exists(join(dir, ".proposals", pid, SETTLED_FILE))) continue;
     if (!(await exists(join(dir, ".proposals", pid, "proposal.json")))) continue;
     const proposal = await tryParse(`.proposals/${pid}/proposal.json`, (raw) => ProposalSchema.parse(JSON.parse(raw)));
     if (!proposal) continue;
