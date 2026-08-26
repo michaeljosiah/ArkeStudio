@@ -155,7 +155,7 @@ const coordinator = new Coordinator({
   relaunchHarness: wiring.relaunchHarness,
   // SPEC-030 R-6: no Electron shell here, so the platform opener carries the vendor's page.
   openExternal: (url) => {
-    if (!/^https:\/\//.test(url)) return;
+    if (!url.startsWith("https://")) return;
     const opener =
       process.platform === "win32"
         ? { command: "cmd", args: ["/c", "start", "", url] }

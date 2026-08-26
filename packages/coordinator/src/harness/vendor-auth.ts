@@ -208,7 +208,7 @@ export class VendorAuthService {
         codeEntry: attempt.mode === "code",
         detail: null,
       });
-      if (/^https:\/\//.test(attempt.url)) this.opts.openExternal(attempt.url);
+      if (attempt.url.startsWith("https://")) this.opts.openExternal(attempt.url);
       void this.opts.log?.append({ kind: "vendor.sign-in-begun", vendor, method: methodId });
       this.schedulePoll();
     } catch (err) {
