@@ -4,6 +4,7 @@ import { Button, Textarea } from "./ui.js";
 import { DispatchBar } from "./dispatch-bar.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
+import { ImageDownload } from "./image-actions.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -423,22 +424,33 @@ export function GenerationDialog({
             ) : (
               <div className="fy-gendialog__previews-grid">
                 {previews.map((preview, index) => (
-                  <button
-                    type="button"
-                    key={preview.key}
-                    className={selected === preview.key ? "is-selected" : ""}
-                    aria-pressed={selected === preview.key}
-                    aria-label={preview.label ?? `Preview ${index + 1}`}
-                    onClick={() => onSelect?.(preview.key)}
-                  >
-                    <Portrait
+                  /*
+                   * The cell, not the choice. Picking a preview is a button and saving a copy of
+                   * it is another, and one cannot live inside the other — so the pair are
+                   * siblings in a box that owns the frame they share (issue 478).
+                   */
+                  <div key={preview.key} className="fy-imghost">
+                    <button
+                      type="button"
+                      className={selected === preview.key ? "is-selected" : ""}
+                      aria-pressed={selected === preview.key}
+                      aria-label={preview.label ?? `Preview ${index + 1}`}
+                      onClick={() => onSelect?.(preview.key)}
+                    >
+                      <Portrait
+                        worldSlug={worldSlug}
+                        path={preview.path}
+                        label={preview.label ?? `Preview ${index + 1}`}
+                        radius={10}
+                      />
+                      <span>{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
+                    </button>
+                    <ImageDownload
                       worldSlug={worldSlug}
                       path={preview.path}
-                      label={preview.label ?? `Preview ${index + 1}`}
-                      radius={10}
+                      name={preview.label ?? `Preview ${index + 1}`}
                     />
-                    <span>{selected === preview.key ? "SELECTED" : `0${index + 1}`}</span>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}

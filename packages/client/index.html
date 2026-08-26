@@ -2,9 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      `connect-src` names the loopback coordinator over http as well as ws (issue 478): saving a
+      picture reads the very bytes `img-src` already lets the page display, from the very origin
+      `media-src` already lets it play. Reading them was refused while showing them was allowed,
+      which is not a boundary — it is the same origin twice with two different answers.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:* ws://localhost:*"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arke Studio</title>

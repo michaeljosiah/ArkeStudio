@@ -1045,7 +1045,7 @@ function SheetGrid({
           {featured && (
             <div className="fy-split__side">
               <div className="fy-feature">
-                <div className="fy-feature__frame">
+                <div className="fy-feature__frame fy-imghost">
                   {kind === "character" ? (
                     <ImageDialog
                       worldSlug={slug}
@@ -1057,6 +1057,8 @@ function SheetGrid({
                       triggerLabel={`View larger portrait of ${featured.name}`}
                       closeLabel="Close portrait"
                       triggerClassName="fy-feature__portrait-button"
+                      download
+                      downloadName={`${featured.name} main photo`}
                     />
                   ) : (
                     <Portrait
@@ -4289,8 +4291,14 @@ export function ArtifactsScreen() {
               style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}
             >
               {isImage ? (
-                <div style={{ width: "100%", height: 110 }}>
-                  <Portrait worldSlug={world?.meta.slug} path={`artifacts/${a.file}`} label={name} />
+                <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
+                  <Portrait
+                    worldSlug={world?.meta.slug}
+                    path={`artifacts/${a.file}`}
+                    label={name}
+                    download
+                    downloadName={name}
+                  />
                 </div>
               ) : a.kind === "audio" ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>

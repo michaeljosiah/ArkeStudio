@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mainPhotoFor, orderedLocationViews, type WorldBundle } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
+import { ImageDownload } from "./image-actions.js";
 
 /**
  * A world media image with the prototype's placeholder behaviour: the frame keeps its size
@@ -11,6 +12,8 @@ export function Portrait({
   path,
   label,
   radius = 7,
+  download = false,
+  downloadName,
   onAvailabilityChange,
 }: {
   worldSlug: string | undefined;
@@ -18,9 +21,27 @@ export function Portrait({
   path: string;
   label: string;
   radius?: number;
+  /**
+   * Offer to save this picture (issue 478). Opt-in, because most pictures on these screens are
+   * an avatar, a card frame or a chip standing in for something else — user media is the subset
+   * a person would actually want a copy of, and only the screen knows which is which.
+   *
+   * The host box needs `fy-imghost`, which is what the control positions and reveals against.
+   */
+  download?: boolean;
+  /** A human name for the saved file. The extension always comes from the file itself. */
+  downloadName?: string;
   onAvailabilityChange?: (available: boolean) => void;
 }) {
   const [failed, setFailed] = useState(false);
+  /*
+   * Which picture is known to have arrived, rather than a bare "something has" — the same shape
+   * ImageDialog's trigger uses, and for the same reason. A save control enabled by the *previous*
+   * subject's load would write the wrong bytes, or none.
+   */
+  const subject = `${worldSlug ?? ""}|${path}`;
+  const [loadedSubject, setLoadedSubject] = useState<string | null>(null);
+  const loaded = loadedSubject === subject;
   useEffect(() => {
     setFailed(false);
   }, [worldSlug, path]);
@@ -39,24 +60,38 @@ export function Portrait({
    * for the very portraits its rows link to), which made that the normal case rather than a race:
    * the enlarge trigger on the character detail page stayed disabled every time.
    */
-  const settle = useCallback((node: HTMLImageElement | null) => {
-    if (!node || !node.complete) return;
-    if (node.naturalWidth > 0) notify.current?.(true);
-    else {
-      setFailed(true);
-      notify.current?.(false);
-    }
-  }, []);
+  const settle = useCallback(
+    (node: HTMLImageElement | null) => {
+      if (!node || !node.complete) return;
+      if (node.naturalWidth > 0) {
+        setLoadedSubject(subject);
+        notify.current?.(true);
+      } else {
+        setFailed(true);
+        notify.current?.(false);
+      }
+    },
+    [subject],
+  );
 
   if (!worldSlug || failed) {
-    return (
+    const frame = (
       <div className="fy-portrait--fallback" style={{ borderRadius: radius }}>
         {label}
       </div>
     );
+    // A frame with no file behind it is a placeholder, not a failure — nothing to offer to save.
+    // A path that was recorded and did not arrive is the other thing, and says so.
+    if (!download || path === "") return frame;
+    return (
+      <>
+        {frame}
+        <ImageDownload worldSlug={worldSlug} path={path} name={downloadName} ready={false} />
+      </>
+    );
   }
   const src = mediaUrl(worldSlug, path);
-  return (
+  const picture = (
     <img
       // Remounted per source, so `settle` runs again for the next picture rather than only for
       // the first one to occupy this slot.
@@ -67,12 +102,28 @@ export function Portrait({
       src={src}
       alt={label}
       draggable={false}
-      onLoad={() => notify.current?.(true)}
+      onLoad={() => {
+        setLoadedSubject(subject);
+        notify.current?.(true);
+      }}
       onError={() => {
         setFailed(true);
         notify.current?.(false);
       }}
     />
+  );
+  if (!download) return picture;
+  /*
+   * A fragment, not a wrapper. Half the screens in this app style the picture as a direct child
+   * of its frame (`.fy-artdirection__master > .fy-portrait`), and a box put between the two
+   * silently unstyles every one of them. The control is a sibling instead, absolutely placed
+   * against the `fy-imghost` the screen already draws.
+   */
+  return (
+    <>
+      {picture}
+      <ImageDownload worldSlug={worldSlug} path={path} name={downloadName} ready={loaded} />
+    </>
   );
 }
 

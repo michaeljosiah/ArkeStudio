@@ -103,9 +103,27 @@ export function proposedMasterLookNote(proposed: string | null, current: string 
   return "New master image";
 }
 
-function directionImage(worldSlug: string, path: string | undefined, label: string, radius = 0) {
+/**
+ * `download` is off by default because one of the four places this is called is a 44x30 history
+ * chip standing in for a version — a control over that covers the picture it is offering. The
+ * pictures a person came here to keep say so (issue 478).
+ */
+function directionImage(
+  worldSlug: string,
+  path: string | undefined,
+  label: string,
+  radius = 0,
+  download = false,
+) {
   return path ? (
-    <Portrait worldSlug={worldSlug} path={path} label={label} radius={radius} />
+    <Portrait
+      worldSlug={worldSlug}
+      path={path}
+      label={label}
+      radius={radius}
+      download={download}
+      downloadName={label}
+    />
   ) : (
     <div className="fy-artdirection__empty-image">No master look set</div>
   );
@@ -187,8 +205,8 @@ function MasterLookHero({
 
   if (direction.masterLook) {
     return (
-      <div className="fy-artdirection__master">
-        {directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0)}
+      <div className="fy-artdirection__master fy-imghost">
+        {directionImage(world.meta.slug, direction.masterLook, `${world.meta.name} master look`, 0, true)}
         {controls}
         <div className="fy-artdirection__master-caption">
           <div>
@@ -305,11 +323,19 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
       <section className="fy-artdirection__keyartband">
         <div
           className={
-            world.keyArt ? "fy-artdirection__keyart" : "fy-artdirection__keyart fy-artdirection__keyart--empty"
+            world.keyArt
+              ? "fy-artdirection__keyart fy-imghost"
+              : "fy-artdirection__keyart fy-artdirection__keyart--empty"
           }
         >
           {world.keyArt ? (
-            <Portrait worldSlug={world.meta.slug} path={world.keyArt} label={`${world.meta.name} key art`} />
+            <Portrait
+              worldSlug={world.meta.slug}
+              path={world.keyArt}
+              label={`${world.meta.name} key art`}
+              download
+              downloadName={`${world.meta.name} key art`}
+            />
           ) : (
             <div className="fy-artdirection__empty-mark">NO KEY ART</div>
           )}
@@ -713,11 +739,13 @@ export function ArtDirectionProposalScreen() {
         </header>
         <div className="fy-artproposal__previews">
           <div className="fy-artproposal__preview">
-            <div>{directionImage(world.meta.slug, direction.masterLook, "Current look", 0)}</div>
+            <div className="fy-imghost">
+              {directionImage(world.meta.slug, direction.masterLook, "Current look", 0, true)}
+            </div>
             <p>Current · v{direction.version}</p>
           </div>
           <div className="fy-artproposal__preview">
-            <div className="fy-artproposal__proposed-image">
+            <div className="fy-artproposal__proposed-image fy-imghost">
               {/*
                 A staged look says what it says, including saying nothing.
 
@@ -733,6 +761,7 @@ export function ArtDirectionProposalScreen() {
                 proposed ? proposed.masterLook : direction.masterLook,
                 "Proposed look",
                 0,
+                true,
               )}
               <span>PROPOSED</span>
             </div>

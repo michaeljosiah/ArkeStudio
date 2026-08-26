@@ -20,6 +20,7 @@ import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, cx } from "../components/ui.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
+import { ImageDownload } from "../components/image-actions.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import {
   acceptCharacterLook,
@@ -65,6 +66,8 @@ function CharacterSheetPreview({
       triggerClassName="fy-character-sheet-preview"
       triggerRadius={0}
       dialogClassName="fy-character-sheet-dialog"
+      download
+      downloadName={`${characterName} character sheet`}
     />
   );
 }
@@ -243,7 +246,7 @@ export function CharacterReferenceScreen() {
       <CharacterHeader active="reference" />
       <main className="fy-reference-grid">
         <section className="fy-reference-card">
-          <div className="fy-reference-card__image fy-reference-card__image--photo">
+          <div className="fy-reference-card__image fy-reference-card__image--photo fy-imghost">
             <ImageDialog
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : ""}
@@ -254,6 +257,8 @@ export function CharacterReferenceScreen() {
               closeLabel="Close main photo"
               triggerClassName="fy-reference-card__zoom"
               triggerRadius={0}
+              download
+              downloadName={`${sheet.name} main photo`}
             />
             <span className="fy-reference-card__status">
               {photo ? "ACCEPTED · IDENTITY ANCHOR" : "OUTSTANDING"}
@@ -281,7 +286,7 @@ export function CharacterReferenceScreen() {
           )}
         </section>
         <section className="fy-reference-card">
-          <div className="fy-reference-card__image fy-reference-card__image--sheet">
+          <div className="fy-reference-card__image fy-reference-card__image--sheet fy-imghost">
             {runningSheet ? (
               <div className="fy-reference-card__generating">
                 <Loading label={`Generating character sheet for ${sheet.name}`} size={48} />
@@ -1031,16 +1036,24 @@ export function CharacterLooksScreen() {
             <>
               <div className="fy-looks-results__grid" ref={resultsRef}>
                 {visible.map((image) => (
-                  <button
-                    type="button"
+                  /* The cell, not the choice: selecting a look and saving a copy of one are two
+                     controls, and neither may sit inside the other (issue 478). The selected
+                     modifier moves out here with the frame, because it is the cell that spans. */
+                  <div
                     key={image.key}
-                    className={selected === image.key ? "is-selected" : ""}
-                    title={image.take?.prompt ?? image.look?.prompt}
-                    onClick={() => setSelected(image.key)}
+                    className={cx("fy-imghost", selected === image.key && "is-selected")}
                   >
-                    <Portrait worldSlug={world.meta.slug} path={image.path} label={image.label} radius={12} />
-                    <span>{image.label}</span>
-                  </button>
+                    <button
+                      type="button"
+                      className={selected === image.key ? "is-selected" : ""}
+                      title={image.take?.prompt ?? image.look?.prompt}
+                      onClick={() => setSelected(image.key)}
+                    >
+                      <Portrait worldSlug={world.meta.slug} path={image.path} label={image.label} radius={12} />
+                      <span>{image.label}</span>
+                    </button>
+                    <ImageDownload worldSlug={world.meta.slug} path={image.path} name={image.label} />
+                  </div>
                 ))}
               </div>
               {older > 0 && (

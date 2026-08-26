@@ -1,0 +1,80 @@
+/* ---- saving a picture out of the app (issue 478) ---------------------------
+   The secondary-action pattern the audio buttons use, moved over the picture:
+   out of the way until the frame is hovered or something in it holds focus,
+   hidden with opacity rather than display so revealing it shifts nothing.
+
+   `fy-imghost` is the box the picture fills. The control is a *sibling* of the
+   image, never a wrapper around it — half these screens style `.fy-portrait`
+   as a direct child of their frame, and a box between the two unstyles them. */
+
+.fy-imghost {
+  position: relative;
+}
+
+.fy-imgdl {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Over a photograph, not over a surface: the plate is what keeps a dark glyph
+     legible on a pale sky and a pale one on a dark coat. */
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--foreground);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-standard), var(--transition-control);
+}
+
+.fy-imghost:hover > .fy-imgdl,
+.fy-imghost:focus-within > .fy-imgdl,
+.fy-imgdl:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.fy-imgdl:hover:not(:disabled) {
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.fy-imgdl:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.fy-imgdl:disabled {
+  cursor: default;
+  color: var(--neutral-400);
+}
+
+/* No hover to reveal it with, so it is simply there. A control that only exists
+   under a pointer does not exist at all on a touch screen. */
+@media (hover: none) {
+  .fy-imgdl {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fy-imgdl {
+    transition: none;
+  }
+}
+
+/* The enlarged copy is a picture to look at, so the control clears the panel's
+   own 14px padding rather than straddling the edge of the image. */
+.fy-portrait-dialog__image > .fy-imgdl {
+  top: 22px;
+  right: 22px;
+}

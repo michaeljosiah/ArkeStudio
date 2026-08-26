@@ -262,6 +262,17 @@ export const Upload = icon(
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
   </>,
 );
+/**
+ * Save this picture somewhere of your own (issue 478). Upload's glyph turned around, because the
+ * two are the same journey in opposite directions and the tray is the part that says "a file".
+ */
+export const Download = icon(
+  <>
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+  </>,
+);
 export const Expand = icon(
   <>
     <path d="m15 15 6 6" />

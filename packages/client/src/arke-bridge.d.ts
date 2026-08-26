@@ -36,6 +36,20 @@ export interface ArkeBridge {
     name: string,
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Save a world image somewhere of the person's choosing (issue 478). Desktop only, and
+   * optional for that reason: a browser session has no native save dialog, and the download
+   * manager does this job instead.
+   *
+   * The renderer names the picture the same way it displayed it — world slug and world-relative
+   * path — and the host resolves that pair through the very same confined lookup the media
+   * server uses. No filesystem path crosses in either direction (SPEC-001 R-9).
+   */
+  saveMedia?(
+    worldSlug: string,
+    path: string,
+    name: string,
+  ): Promise<{ ok: true } | { ok: false; cancelled: true } | { ok: false; cancelled?: false; reason: string }>;
 }
 
 export type ThemePreference = "system" | "light" | "dark";

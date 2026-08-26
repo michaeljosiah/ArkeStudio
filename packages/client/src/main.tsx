@@ -23,6 +23,7 @@ import "./components/ui.css";
 import "./components/layout.css";
 import "./components/toast.css";
 import "./components/player.css";
+import "./components/image-actions.css";
 import "./components/editor/editor.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
