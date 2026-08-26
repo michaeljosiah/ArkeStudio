@@ -548,13 +548,15 @@ ines-half-hitch, the-saltmarket — dropping perrin-tallow
             <tr><td><strong>ElevenLabs</strong></td><td>Speech, and voice cloning in the cloud.</td><td>Yours</td></tr>
             <tr><td><strong>Ollama</strong></td><td>Text, on your own machine.</td><td>None</td></tr>
             <tr><td><strong>Kokoro</strong></td><td>Preset speech on your own machine, through the speech helper below. Present only when that helper can run.</td><td>None</td></tr>
+            <tr><td><strong>whisper.cpp</strong></td><td>Transcription on your own machine, through the same speech helper. Present only when that helper can run.</td><td>None</td></tr>
             <tr><td><strong>ComfyUI</strong></td><td>The engine behind Arke's local picture, video and cloned-voice recipes. Present only when an engine is wired up.</td><td>None</td></tr>
           </table>
         </div>
         <p class="note">
-          <span class="pill pill--part">listed, not wired</span> whisper.cpp appears in Arke's table
-          of services as the one that transcribes, but it has no entry in the register and never
-          dispatches. Dictation does not travel this road.
+          Push-to-talk dictation does not travel this road. It calls the speech helper directly and
+          throws the recording away the moment it has words, because the words are what you were
+          after and the recording is not. whisper.cpp is in the register for transcription that has
+          to <em>last</em> — numbered, re-runnable, and landed with the rest of a production's work.
         </p>
 
         <h4>Generating on your own machine</h4>

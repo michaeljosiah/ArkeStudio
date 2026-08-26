@@ -677,6 +677,7 @@ async function initialize(): Promise<{ port: number }> {
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
     voxa: voxaBaseUrl,
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
+    voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
       baseUrl: () => comfyUiEngine.baseUrl(),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),

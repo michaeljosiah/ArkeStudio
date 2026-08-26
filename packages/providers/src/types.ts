@@ -23,6 +23,15 @@ export interface SubmitRequest {
   imageReferences?: PreparedImageReference[];
   /** A host-read voice reference, resolved immediately before submission and never journalled. */
   voiceReference?: PreparedVoiceReference;
+  /**
+   * The recording a transcription reads, resolved immediately before submission and never
+   * journalled (SPEC-018 R-13, R-15). Deliberately not `params`: params are written verbatim
+   * into the durable job row, and a recording that landed there would outlive the transcript it
+   * produced — the transcript is the artefact, the audio is a buffer. Separate from
+   * `voiceReference` because that one is a *voice* being cloned, restricted to the two formats
+   * a cloning endpoint accepts; this is whatever the microphone or the file on disk produced.
+   */
+  audioSource?: PreparedAudioSource;
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
   /**
@@ -44,6 +53,18 @@ export interface PreparedVoiceReference {
   /** Opaque, content-addressed upload name. It carries no world, character, or local path. */
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
+  data: Uint8Array;
+}
+
+/**
+ * Bytes and the type they are, and nothing else. Unlike the image and voice references there is
+ * no `name` here: a transcription posts the recording as the request body, so there is no
+ * filename for a name to become, and a field the wire never carries is one somebody will
+ * eventually fill in with a local path.
+ */
+export interface PreparedAudioSource {
+  /** The recording's own type, as the engine must be told it — `audio/webm`, `audio/wav`, … */
+  contentType: string;
   data: Uint8Array;
 }
 
