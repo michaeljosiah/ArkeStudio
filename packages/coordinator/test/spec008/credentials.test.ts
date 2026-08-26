@@ -222,6 +222,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
           voice: { status: "unavailable", reason: "not configured" },
         },
         jobs: [],
+        builds: [],
         ledger: [],
         providers: [
           {

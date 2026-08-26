@@ -5,6 +5,7 @@ import { BenchPresetSchema } from "./bench.js";
 import { BibleHelperKindSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
@@ -1016,6 +1017,31 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("genesis.blueprint"),
       genesisId: z.string().min(1),
       blueprint: GenesisBlueprintSchema,
+    })
+    .strict(),
+  /**
+   * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
+   * many generations, spend as one figure — or the refusal, stated on the way in (R-11).
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("build.plan"),
+      genesisId: z.string().min(1),
+      requestId: UlidSchema,
+      plan: BuildReviewSchema.nullable(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /**
+   * A founding build's whole picture, each time it changes (SPEC-031 §1.8). The fold is the
+   * truth; this is its projection — the client never sequences or invents build state.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("build.state"),
+      state: FoundingBuildStateSchema,
     })
     .strict(),
 

@@ -312,6 +312,10 @@ export class FsWorldProvider implements WorldProvider {
     return installSampleWorld({ sourceDir, appRoot: this.appRoot });
   }
 
+  async worldDir(worldId: string): Promise<string> {
+    return this.findWorldDir(worldId);
+  }
+
   private async findWorldDir(worldId: string): Promise<string> {
     for (const slug of await readdir(toExtendedLength(this.worldsDir())).catch(() => [] as string[])) {
       const dir = join(this.worldsDir(), slug);

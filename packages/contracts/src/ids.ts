@@ -71,6 +71,8 @@ export const ID_PREFIXES = {
   overlay: "ov",
   /** One durable scene-dispatch plan (SPEC-024 R-1). */
   dispatchPlan: "pl",
+  /** One founding build's authorization record (SPEC-031 R-13). */
+  foundingBuild: "fb",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];

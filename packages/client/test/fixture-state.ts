@@ -18,6 +18,7 @@ const state: ClientState = {
       harness: { status: "unavailable", reason: "OpenCode is not configured" },
       voice: { status: "unavailable", reason: "Voxa is not configured" },
     },
+    builds: [],
     jobs: [
       {
         id: "jb_01J8E0000000000000000000J5",

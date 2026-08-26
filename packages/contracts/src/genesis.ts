@@ -68,6 +68,48 @@ export function keyArtBriefSettled(brief: GenesisKeyArtBrief | undefined): boole
   return brief !== undefined && (brief.subject !== undefined || brief.moment !== undefined);
 }
 
+/**
+ * A brief compiled to prose (R-19): the subject facts, one clause each, in a fixed order.
+ * The style, the treatment and the route's constraints are someone else's — the request
+ * builders carry those — so this is deliberately nothing but the facts.
+ */
+export function characterBriefProse(brief: GenesisCharacterBrief | undefined): string {
+  if (brief === undefined) return "";
+  return [
+    brief.apparentAge !== undefined ? `Apparent age ${brief.apparentAge}` : null,
+    brief.build !== undefined ? `build ${brief.build}` : null,
+    brief.colouring !== undefined ? `colouring ${brief.colouring}` : null,
+    brief.hair !== undefined ? `hair ${brief.hair}` : null,
+    brief.wardrobe !== undefined ? `wearing ${brief.wardrobe}` : null,
+    brief.bearing !== undefined ? `bearing ${brief.bearing}` : null,
+    brief.defaultExpression !== undefined ? `default expression ${brief.defaultExpression}` : null,
+  ]
+    .filter((clause): clause is string => clause !== null)
+    .join("; ");
+}
+
+export function locationBriefProse(brief: GenesisLocationBrief | undefined): string {
+  if (brief === undefined) return "";
+  return [
+    brief.establishingView,
+    brief.hour !== undefined ? `at ${brief.hour}` : null,
+    brief.weather,
+    brief.season,
+  ]
+    .filter((clause): clause is string => clause !== null && clause !== undefined)
+    .join("; ");
+}
+
+export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
+  return [
+    brief.subject,
+    brief.moment !== undefined ? `The moment: ${brief.moment}` : null,
+    brief.stakes !== undefined ? `At stake: ${brief.stakes}` : null,
+  ]
+    .filter((clause): clause is string => clause !== null && clause !== undefined)
+    .join(". ");
+}
+
 // ---------------------------------------------------------------------------
 // draft.json (R-3)
 // ---------------------------------------------------------------------------

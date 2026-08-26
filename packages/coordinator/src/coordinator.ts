@@ -217,13 +217,8 @@ import {
 import { makeArtDirector, worldBrief } from "./references/art-director.js";
 import { enhancerBrief } from "./bench/enhancer.js";
 import { LYRICS_MAX_CHARS, lyricistBrief } from "./bench/lyricist.js";
-import {
-  KEY_ART_EXTENSIONS,
-  WORLD_IMAGE_DIR,
-  WORLD_IMAGE_STEM,
-  keyArtPrompt,
-  worldImageRequest,
-} from "./references/world-image.js";
+import { WORLD_IMAGE_DIR, keyArtPrompt, worldImageRequest } from "./references/world-image.js";
+import { adoptKeyArtCandidate } from "./references/key-art.js";
 import {
   MASTER_LOOK_DIR,
   MASTER_LOOK_DIR_ACCEPTED,
@@ -273,6 +268,7 @@ import {
 import { ChangeLog } from "./change-log.js";
 import { AuthoringService, settlePermission } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
+import { FoundingBuildService } from "./world/founding-build.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
   SETUP_CATALOGUE,
@@ -648,6 +644,8 @@ export class Coordinator {
   private readonly grants: GrantStore | null;
   private readonly authoring: AuthoringService | null;
   private readonly genesis: GenesisService | null;
+  /** The founding build (SPEC-031): one press that makes the whole world. */
+  private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
   private readonly lifecycleDisposers = new Set<() => void>();
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
@@ -1102,9 +1100,15 @@ export class Coordinator {
                 event.type === "job.updated" &&
                 (event.job.status === "succeeded" ||
                   event.job.status === "failed" ||
-                  event.job.status === "cancelled")
+                  event.job.status === "cancelled" ||
+                  event.job.status === "needs-reconciliation")
               ) {
-                void this.advancePlansForJob(event.job).catch(() => {});
+                if (event.job.status !== "needs-reconciliation") {
+                  void this.advancePlansForJob(event.job).catch(() => {});
+                }
+                // A founding build waiting on this job wakes without waiting out its tick —
+                // needs-reconciliation included, because that is build-terminal (SPEC-031 R-23).
+                this.foundingBuild?.noteJobSettled(event.job.id);
               }
             },
             ledger: {
@@ -1293,6 +1297,56 @@ export class Coordinator {
       opts.adapter && opts.authoring
         ? new GenesisService(opts.adapter, (event) => this.emit(event), {
             sessionInput: this.sessionInput,
+          })
+        : null;
+    // The founding build needs a queue to dispatch through and a provider that can create
+    // worlds; without either, Begin keeps its pre-build shape and the frames are ignored.
+    this.foundingBuild =
+      this.jobQueue && opts.provider.createWorld && opts.provider.genesisDir
+        ? new FoundingBuildService({
+            nowIso: () => new Date().toISOString(),
+            manifest: opts.manifest ?? null,
+            loadSettings: async () => (this.appSettings ? this.appSettings.load() : null),
+            credentialFor: async (provider) =>
+              this.credentials ? this.credentials.get(provider as ProviderId) : null,
+            harnessReady: () => this.opts.adapter?.readiness().ready === true && this.authoring !== null,
+            genesisDir: (genesisId) => this.opts.provider.genesisDir!(genesisId),
+            discardGenesis: async (genesisId) => this.opts.provider.discardGenesis?.(genesisId),
+            releaseGenesis: (genesisId) => this.genesis?.release(genesisId),
+            createWorld: async (input) => {
+              const created = await this.opts.provider.createWorld!(input);
+              this.readModel.setWorlds(await this.opts.provider.listWorlds());
+              return created;
+            },
+            openWorld: (worldId) => this.openWorld(worldId),
+            openStore: () => this.opts.provider.openStore?.() ?? null,
+            gate: () => this.opts.provider.gate?.() ?? null,
+            carryAttachments: (genesisId, worldId) => this.carryGenesisAttachments(genesisId, worldId),
+            authorSheet: async (store, gate, input) => {
+              if (!this.authoring || this.opts.adapter?.readiness().ready !== true) return;
+              const worldQueryUrl = await this.worldQuery.start();
+              await this.authoring.run(
+                store,
+                gate,
+                {
+                  worldId: input.worldId,
+                  proposalId: input.proposalId,
+                  purpose: "authoring",
+                  instruction: `${input.scope}\n\nDraft the full ${input.sheetType} sheet in ${input.path} from this seed: "${input.seed}". Fill every section the file already has headings for; keep the name "${input.name}"; leave canonRules and links as they are.`,
+                },
+                worldQueryUrl,
+              );
+            },
+            enqueue: (input) => this.enqueueJob(input),
+            jobById: (jobId) => this.jobQueue?.listJobs().find((job) => job.id === jobId),
+            cancelJob: async (jobId) => {
+              await this.jobQueue?.cancel(jobId);
+            },
+            queueStatuses: () => this.readModel.getState().app.queues,
+            refreshWorldSnapshot: (worldId) => this.refreshWorldSnapshot(worldId),
+            refreshWorldList: () => this.refreshWorldList(),
+            emit: (event) => this.emit(event),
+            log: (record) => void this.appLog?.append(record),
           })
         : null;
     this.setup =
@@ -1534,6 +1588,22 @@ export class Coordinator {
     }
     this.readModel.setWorlds(await this.opts.provider.listWorlds());
 
+    // Founding builds survive the process (SPEC-031 R-32, R-33): every world's build record
+    // is peeked at startup — files only, never a store open — so a run cut off mid-wave is
+    // known before any screen asks, and its notice is still standing (R-45). The run itself
+    // resumes when its world opens; discovery here is what lets the client route back to it.
+    if (this.foundingBuild && this.opts.provider.worldDir) {
+      for (const summary of this.readModel.getState().worlds) {
+        try {
+          const dir = await this.opts.provider.worldDir(summary.worldId);
+          await this.foundingBuild.load(dir, summary.worldId);
+        } catch {
+          /* not a world any more, or no build — nothing to know */
+        }
+      }
+      this.readModel.setBuilds(this.foundingBuild.states());
+    }
+
     const boundPort = await this.transport.start(port);
     this.readModel.setHealth("coordinator", { status: "healthy" });
 
@@ -1670,6 +1740,9 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
+    // A founding build parked when its world stopped being the open one resumes here — a fold
+    // over the record and the journal, never a timer or a live session (SPEC-031 R-32, R-33).
+    void this.foundingBuild?.resume(worldId).catch(() => {});
     /*
      * Worlds filed before measuring existed get measured once, here, after the snapshot (issue 283).
      *
@@ -1973,7 +2046,10 @@ export class Coordinator {
         if (!take) throw new Error("reference take finalization produced no take");
         // The human's own action rule (frames.ts, assign-voice): a composite the user asked for
         // lands designated — there is no review step for the person who pressed the button.
-        // Sheet generation has no agent path today; if one arrives, it must stage instead.
+        // Sheet generation has no agent path; if one arrives, it must stage instead. A founding
+        // build is NOT that path (SPEC-031 D2): the press is a person's, the cap is stated, and
+        // the spend is authorized before anything runs — its sheets land designated under the
+        // same rule as a user-pressed generation, through this branch and its own landing.
         // Failure leaves the take pending, and the review strip still knows how to offer it.
         if (job.target.kind === "character-sheet" && take.media) {
           const sheetId = job.target.id?.split("/")[0];
@@ -3238,6 +3314,49 @@ export class Coordinator {
         // races the sweep and the files handed over are the ones that vanish.
         await this.carrying.get(msg.genesisId)?.catch(() => {});
         await this.opts.provider.discardGenesis?.(msg.genesisId)?.catch(() => {});
+        return;
+      }
+      case "plan-founding-build": {
+        if (!this.foundingBuild) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "build.plan",
+            genesisId: msg.genesisId,
+            requestId: msg.requestId,
+            plan: null,
+            reason: "the founding build is not available in this configuration",
+          });
+          return;
+        }
+        await this.foundingBuild.plan(msg.genesisId, msg.requestId);
+        return;
+      }
+      case "begin-founding-build": {
+        if (!this.foundingBuild) return;
+        try {
+          await this.foundingBuild.begin(msg.genesisId, msg.requestId);
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "build.plan",
+            genesisId: msg.genesisId,
+            requestId: msg.requestId,
+            plan: null,
+            reason: err instanceof Error ? err.message : "the build could not begin",
+          });
+        }
+        return;
+      }
+      case "stop-founding-build": {
+        await this.foundingBuild?.stop(msg.worldId);
+        return;
+      }
+      case "run-build-item": {
+        await this.foundingBuild?.runItems(msg.worldId, msg.itemKey).catch(() => {});
+        return;
+      }
+      case "dismiss-build-notice": {
+        await this.foundingBuild?.dismissNotice(msg.worldId);
         return;
       }
       case "authoring-cancel": {
@@ -6818,33 +6937,9 @@ export class Coordinator {
         // Which one, of however many are waiting (design 65). A named file must be one of them:
         // the message arrives from the renderer, and copying an arbitrary world-relative path
         // onto the world's key art on request is not a thing this handler should be able to do.
-        const waiting = store.getBundle().keyArtCandidates;
-        const named = "file" in msg ? msg.file : undefined;
-        const candidate = named === undefined ? waiting[0] : waiting.find((path) => path === named);
-        if (candidate === undefined) return;
-        /*
-         * The accepted file keeps the format its bytes carry.
-         *
-         * This used to copy a fixed `candidate.png` onto a fixed `world-art.png`, which was true
-         * while the only way to get one was to generate it. An uploaded JPEG written under a
-         * `.png` name would be served as `image/png` by a media route that reads the extension —
-         * and naming a file for a format it is not is the one thing every other import refuses.
-         */
-        const extension = extname(candidate).toLowerCase() || ".png";
-        await store
-          .gateOp(async () => {
-            await copyFile(
-              toExtendedLength(join(store.dir, fromPortable(candidate))),
-              toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${extension}`)),
-            );
-            // The world has one key art, so a previous one in a different format goes with it.
-            // Two would leave the scan choosing between them by sort order.
-            for (const stale of KEY_ART_EXTENSIONS.filter((other) => other !== extension)) {
-              await rm(toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${stale}`)), { force: true });
-            }
-            await rm(toExtendedLength(join(store.dir, WORLD_IMAGE_DIR)), { recursive: true, force: true });
-          })
-          .catch(() => {});
+        // The adoption itself — format follows the bytes, stale formats swept — is shared with
+        // the founding build's landing (SPEC-031 R-28) and lives in references/key-art.ts.
+        await adoptKeyArtCandidate(store, "file" in msg ? msg.file : undefined).catch(() => {});
         await this.dropStagedReference(store, stagedReferenceKey("world-image"));
         await this.refreshWorldSnapshot(msg.worldId);
         // The picker reads the registry, not the open world's bundle, so the card that sent you
