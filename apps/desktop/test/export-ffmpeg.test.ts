@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { setImmediate as waitForImmediate } from "node:timers/promises";
 import { describe, it } from "node:test";
 import { createExportFfmpegRunner } from "../src/export-ffmpeg.js";
 
@@ -13,142 +14,124 @@ class FakeChild extends EventEmitter {
 }
 
 function fakeSpawn() {
-  const child = new FakeChild();
+  const children: FakeChild[] = [];
   const calls: Array<{ file: string; args: string[] }> = [];
   const spawn = ((file: string, args: string[]) => {
+    const child = new FakeChild();
+    children.push(child);
     calls.push({ file, args });
     return child;
   }) as never;
-  return { child, calls, spawn };
+  return { children, calls, spawn };
 }
 
+const DRAW_ARGS = ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"];
+
 describe("the desktop export ffmpeg runner", () => {
-  it("runs unshelled, reports progress, and resolves a clean encode", async () => {
-    const { child, calls, spawn } = fakeSpawn();
+  it("probes the exact escaped font before a slate encode, then reports encode progress", async () => {
+    const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
+    const { children, calls, spawn } = fakeSpawn();
     const progress: number[] = [];
-    const pending = createExportFfmpegRunner("C:\\ffmpeg.exe", "C:\\font.ttf", spawn, () => true).run(
-      ["-i", "C:\\a world\\clip.mp4"],
+    const pending = createExportFfmpegRunner("C:\\ffmpeg.exe", font, spawn, () => true).run(
+      DRAW_ARGS,
       (value) => progress.push(value),
       new AbortController().signal,
     );
-    child.stderr.emit("data", Buffer.from("frame=1 time=00:00:12.00"));
-    child.emit("exit", 0);
+
+    const escaped = String.raw`C\\:/Users/D\\\'Angelo/Arke Studio\, Inc\; Stable \[x64\]/Geist-Regular.ttf`;
+    assert.ok(
+      calls[0]!.args.join(" ").includes(`drawtext=expansion=none:fontfile=${escaped}:text=probe`),
+      `expected escaped probe font path in ${calls[0]!.args.join(" ")}`,
+    );
+    children[0]!.emit("exit", 0);
+    await waitForImmediate();
+    assert.deepEqual(calls[1], { file: "C:\\ffmpeg.exe", args: ["-hide_banner", ...DRAW_ARGS] });
+    children[1]!.stderr.emit("data", Buffer.from("frame=1 time=00:00:12.00"));
+    children[1]!.emit("exit", 0);
     await pending;
-    assert.deepEqual(calls, [{ file: "C:\\ffmpeg.exe", args: ["-hide_banner", "-i", "C:\\a world\\clip.mp4"] }]);
     assert.deepEqual(progress, [12]);
   });
 
-  it("names drawtext and font failures instead of exposing only the process code", async () => {
-    for (const diagnostic of [
-      "[Parsed_drawtext_0] Could not load font",
-      "Fontconfig error: Cannot load default config file",
-      "Error applying option 'fontfile' to filter 'drawtext'",
-    ]) {
-      const { child, spawn } = fakeSpawn();
-      const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-        ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"],
-        () => {},
-        new AbortController().signal,
-      );
-      child.stderr.emit("data", Buffer.from(diagnostic));
-      child.emit("exit", 3221225477);
-      await assert.rejects(pending, /could not draw an export slate with the bundled font/);
-    }
+  it("caches only a successful drawtext probe", async () => {
+    const { children, calls, spawn } = fakeSpawn();
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const first = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    children[0]!.emit("exit", 0);
+    await waitForImmediate();
+    children[1]!.emit("exit", 0);
+    await first;
+
+    const second = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    assert.equal(calls.length, 3, "the second encode starts without another probe");
+    children[2]!.emit("exit", 0);
+    await second;
   });
 
-  it("retains the ordinary exit-code failure for an unrelated encode fault", async () => {
-    const { child, spawn } = fakeSpawn();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run([], () => {}, new AbortController().signal);
-    child.stderr.emit("data", Buffer.from("No such file or directory"));
-    child.emit("exit", 2);
-    await assert.rejects(pending, /ffmpeg exited 2/);
-  });
-
-  it("does not mistake the ffmpeg configuration banner for a font failure", async () => {
-    const { child, spawn } = fakeSpawn();
+  it("names a failed drawtext capability probe without inspecting user-influenced encode stderr", async () => {
+    const { children, calls, spawn } = fakeSpawn();
     const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-      ["-i", "missing.mp4"],
+      DRAW_ARGS,
       () => {},
       new AbortController().signal,
     );
-    child.stderr.emit("data", Buffer.from("configuration: --enable-libfreetype\nmissing.mp4: No such file"));
-    child.emit("exit", 2);
-    await assert.rejects(pending, /ffmpeg exited 2/);
+    children[0]!.emit("exit", 3221225477);
+    await assert.rejects(pending, /could not draw an export slate with the bundled font/);
+    assert.equal(calls.length, 1, "the real encode never starts after a failed probe");
   });
 
-  it("does not mistake an unrelated media path containing font for a slate failure", async () => {
-    for (const path of [
-      "C:/world/font-reference-missing.mp4",
-      "C:/Users/Fontaine/missing.mp4",
-      "C:/world/drawtext-reference-missing.mp4",
-      "C:/world/fontfile-reference-missing.mp4",
-      "C:/Users/Freetype/missing.mp4",
-    ]) {
-      const { child, spawn } = fakeSpawn();
-      const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-        ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate", "-i", path],
-        () => {},
-        new AbortController().signal,
-      );
-      child.stderr.emit("data", Buffer.from(`${path}: No such file or directory`));
-      child.emit("exit", 2);
+  it("leaves every real encode failure in its original exit-code category", async () => {
+    const { children, spawn } = fakeSpawn();
+    const runner = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true);
+    const warm = runner.run(DRAW_ARGS, () => {}, new AbortController().signal);
+    children[0]!.emit("exit", 0);
+    await waitForImmediate();
+    children[1]!.emit("exit", 0);
+    await warm;
+    const paths = [
+      "option fontfile-reference-missing.mp4",
+      "filter drawtext-reference-missing.mp4",
+      "[Parsed_drawtext_0]-invalid-reference-missing.mp4",
+      "[drawtext]-failed-reference-missing.mp4",
+    ];
+    for (const path of paths) {
+      const pending = runner.run([...DRAW_ARGS, "-i", path], () => {}, new AbortController().signal);
+      const encode = children.at(-1)!;
+      encode.stderr.emit("data", Buffer.from(`Error opening input file ${path}`));
+      encode.emit("exit", 2);
       await assert.rejects(pending, /ffmpeg exited 2/);
     }
-  });
-
-  it("recognizes an explicit Fontconfig diagnostic split across stderr chunks", async () => {
-    const { child, spawn } = fakeSpawn();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-      ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"],
-      () => {},
-      new AbortController().signal,
-    );
-    child.stderr.emit("data", Buffer.from("Fontconfig "));
-    child.stderr.emit("data", Buffer.from("error: Cannot load default config file\n"));
-    child.emit("exit", 2);
-    await assert.rejects(pending, /could not draw an export slate with the bundled font/);
-  });
-
-  it("names the observed Windows drawtext crash even when it exits before diagnostics", async () => {
-    const { child, spawn } = fakeSpawn();
-    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-      ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"],
-      () => {},
-      new AbortController().signal,
-    );
-    child.emit("exit", 3221225477);
-    await assert.rejects(pending, /could not draw an export slate with the bundled font/);
-  });
-
-  it("kills an active encode when cancellation is requested", async () => {
-    const { child, spawn } = fakeSpawn();
-    const controller = new AbortController();
-    void createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run([], () => {}, controller.signal);
-    controller.abort();
-    assert.equal(child.killed, "SIGKILL");
   });
 
   it("refuses a missing bundled font before ffmpeg can fall back to host discovery", async () => {
     const { calls, spawn } = fakeSpawn();
     await assert.rejects(
       createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
-        ["-filter_complex", "drawtext=text=slate"],
+        DRAW_ARGS,
         () => {},
         new AbortController().signal,
       ),
       /bundled font is missing — reinstall Arke Studio/,
     );
-    assert.deepEqual(calls, [], "a missing font is refused before ffmpeg starts");
+    assert.deepEqual(calls, []);
   });
 
-  it("does not require the slate font for an export whose graph draws no text", async () => {
-    const { child, spawn } = fakeSpawn();
+  it("skips the font probe for an export whose graph draws no text", async () => {
+    const { children, calls, spawn } = fakeSpawn();
     const pending = createExportFfmpegRunner("ffmpeg", "C:\\missing\\Geist.ttf", spawn, () => false).run(
       ["-filter_complex", "null"],
       () => {},
       new AbortController().signal,
     );
-    child.emit("exit", 0);
+    assert.equal(calls.length, 1);
+    children[0]!.emit("exit", 0);
     await pending;
+  });
+
+  it("kills a drawtext probe when cancellation is requested", async () => {
+    const { children, spawn } = fakeSpawn();
+    const controller = new AbortController();
+    void createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(DRAW_ARGS, () => {}, controller.signal);
+    controller.abort();
+    assert.equal(children[0]!.killed, "SIGKILL");
   });
 });
