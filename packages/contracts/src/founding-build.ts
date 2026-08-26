@@ -58,13 +58,10 @@ export const BuildItemKindSchema = z.enum([
 ]);
 export type BuildItemKind = z.infer<typeof BuildItemKindSchema>;
 
-/** Which image-bearing kinds exist — the generations the review screen counts (R-12). */
-export const BUILD_IMAGE_KINDS: ReadonlySet<BuildItemKind> = new Set([
-  "main-photo",
-  "establishing-view",
-  "sheet-image",
-  "key-art",
-]);
+/** The kinds that dispatch a paid generation — the number the review screen states (R-12). */
+export function buildItemDispatches(kind: BuildItemKind): boolean {
+  return kind === "main-photo" || kind === "establishing-view" || kind === "sheet-image" || kind === "key-art";
+}
 
 export const BuildItemSchema = z
   .object({
@@ -152,8 +149,21 @@ export const BuildOutcomeSchema = z.enum([
 export type BuildOutcome = z.infer<typeof BuildOutcomeSchema>;
 
 export const BuildJournalEntrySchema = z.discriminatedUnion("kind", [
-  /** The work is about to be dispatched — fsynced before anything runs (R-31). */
-  z.object({ kind: z.literal("intent"), key: z.string().min(1), at: IsoDateTimeSchema }).strict(),
+  /**
+   * The work is about to be dispatched — fsynced before anything runs (R-31). An image
+   * item's intent carries the queue idempotency key the dispatch will use, so the crash
+   * window between this append and the enqueue has nothing to invent on ANY attempt —
+   * a retry's fresh key included: recovery re-enqueues the journalled key and the queue
+   * returns the existing job rather than journalling a second spend (R-34).
+   */
+  z
+    .object({
+      kind: z.literal("intent"),
+      key: z.string().min(1),
+      idempotencyKey: UlidSchema.optional(),
+      at: IsoDateTimeSchema,
+    })
+    .strict(),
   /** The queue returned a job id for the intent (R-31). */
   z
     .object({

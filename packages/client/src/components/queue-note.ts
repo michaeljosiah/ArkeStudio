@@ -1,4 +1,4 @@
-import type { Job, ModelManifest } from "@arke-studio/contracts";
+import type { FoundingBuildState, Job, ModelManifest } from "@arke-studio/contracts";
 import { humanNumber, usd } from "../lib/format.js";
 import type { QueueEnqueueResult } from "../lib/store.js";
 
@@ -295,6 +295,27 @@ export function readyNote(
     meta: [modelName(job, manifest), money([job], true)].join(" · "),
     action: { label: to === "/activity" ? "Activity" : "View", to },
     ...(landed ? { thumb: { worldId: job.worldId, path: landed } } : {}),
+  };
+}
+
+/**
+ * The founding build's completion notice (SPEC-031 §1.9). The same shape as every other
+ * note — a title, a reason, one call to action — but never a toast: the build's last moments
+ * are exactly when the author is least likely to be watching, so it persists on the world
+ * until dismissed or the work it names is no longer outstanding (R-45). A count and a cause,
+ * once — fifteen failures from one dead credential is one sentence (R-46). It informs and
+ * points; Activity acts (R-47): no retry, no accept, no discard.
+ */
+export function foundingNote(build: FoundingBuildState): QueueNote | null {
+  if (build.status === "running" || build.shortfall === null || build.noticeDismissed) return null;
+  const { count, cause } = build.shortfall;
+  return {
+    id: `build:${build.buildId}`,
+    tone: "warning",
+    title: `${count} item${count === 1 ? "" : "s"} from the founding build did not land`,
+    meta: build.status === "stopped" ? "stopped by you" : "the world is open and usable",
+    reason: cause,
+    action: { label: "Activity", to: "/activity" },
   };
 }
 

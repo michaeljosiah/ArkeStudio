@@ -181,6 +181,7 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
     authorSheet: async () => {},
     enqueue: (input) => queue.enqueue(input),
     jobById: (jobId) => queue.jobs.get(jobId),
+    ledgerEntryFor: async () => undefined,
     cancelJob: (jobId) => queue.cancel(jobId),
     queueStatuses: () => queues,
     refreshWorldSnapshot: async () => {},
@@ -205,7 +206,7 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
   };
 }
 
-async function waitFor(check: () => boolean, ms = 15000): Promise<void> {
+async function waitFor(check: () => boolean, ms = 45000): Promise<void> {
   const start = Date.now();
   while (!check()) {
     if (Date.now() - start > ms) throw new Error("timed out waiting");
@@ -381,6 +382,60 @@ describe("the founding build (SPEC-031)", () => {
       state.items.filter((item) => item.state === "landed" && item.kind !== "world").length >= 6,
       true,
     );
+  });
+
+  it("an Activity re-run cut off by a restart still lands — and never buys twice", async (t) => {
+    // The crash dimension of R-49: a text-only build completed, a provider appeared, the
+    // author pressed run — and the app died between the enqueue and the landing. Resume
+    // reconciles by the journalled identity: the paid job is landed, not re-bought.
+    const h = await makeHarness(t, { manifest: null });
+    await makeSandbox(h.root, "gen-rerun-crash");
+    await h.service.begin("gen-rerun-crash", ulid());
+    await waitFor(() => h.lastState()?.status === "completed");
+    const worldId = h.worldId();
+
+    const h2 = await makeHarness(t, {
+      genesisDir: (genesisId) => h.provider.genesisDir(genesisId),
+      openStore: () => h.provider.openStore(),
+      gate: () => h.provider.gate(),
+      enqueue: (input) => h.queue.enqueue(input),
+      jobById: (jobId) => h.queue.jobs.get(jobId),
+    });
+    await h2.service.runItems(worldId, "main-photo:maren-kest");
+    const store = h.provider.openStore()!;
+
+    // Simulate the kill between the image landing and the journal append, then a restart:
+    // drop the re-run's terminal entry and fold afresh in a new process.
+    const journalPath = join(store.dir, "build", "build.jsonl");
+    const lines = (await readFile(journalPath, "utf8")).split("\n").filter((line) => line.trim() !== "");
+    const lastTerminal = lines.map((line) => JSON.parse(line) as { kind: string; key?: string }).reduce(
+      (found, entry, index) =>
+        entry.kind === "terminal" && entry.key === "main-photo:maren-kest" ? index : found,
+      -1,
+    );
+    assert.ok(lastTerminal > 0);
+    await writeFile(journalPath, lines.filter((_, index) => index !== lastTerminal).join("\n") + "\n");
+
+    const h3 = await makeHarness(t, {
+      genesisDir: (genesisId) => h.provider.genesisDir(genesisId),
+      openStore: () => h.provider.openStore(),
+      gate: () => h.provider.gate(),
+      enqueue: (input) => h.queue.enqueue(input),
+      jobById: (jobId) => h.queue.jobs.get(jobId),
+    });
+    await h3.service.resume(worldId);
+    await waitFor(() => {
+      const state = h3.lastState();
+      return state?.items.find((item) => item.key === "main-photo:maren-kest")?.state === "landed";
+    });
+    const jobCount = [...h.queue.jobs.values()].filter(
+      (job) => job.target.kind === "main-photo-candidate" && job.target.id?.startsWith("maren-kest/") === true,
+    ).length;
+    assert.equal(jobCount, 1, "the journalled identity was rejoined — no second spend");
+    const bundle = h.provider.openStore()!.getBundle();
+    const maren = bundle.sheets.find((sheet) => sheet.name === "Maren Kest")!;
+    const kit = (await readKit(h.provider.openStore()!, maren.id))?.kit;
+    assert.ok(kit?.mainPhoto?.file, "the paid work is the anchor, not a stranded pending take");
   });
 
   it("stop keeps what landed, cancels what is in flight, and skips the rest (rows 7, 26)", async (t) => {

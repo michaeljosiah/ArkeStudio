@@ -11,6 +11,7 @@ import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
+import { Loading } from "../components/loading.js";
 import { shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import {
@@ -24,6 +25,10 @@ import {
   attachHostFiles,
   attachHostText,
   archiveWorld,
+  beginFoundingBuild,
+  planFoundingBuild,
+  runBuildItem,
+  useBuildPlans,
   setResearchWeb,
   createSheetFromSentence,
   createWorld,
@@ -121,8 +126,10 @@ import {
   type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
   blueprintCoverage,
+  buildWorkingLine,
   legacyVoiceModel,
   supportsVoiceUse,
+  ulid,
 } from "@arke-studio/contracts";
 
 /** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
@@ -275,6 +282,13 @@ export function StartupScreen() {
     state?.app.version ?? (typeof window === "undefined" ? null : window.arke?.appVersion ?? null);
   const enter = () => {
     if (!settled || !state) return;
+    // A run cut off by closing the app returns to the building screen, continuing (SPEC-031
+    // R-33) — before the library, because the author left mid-build and is coming back to it.
+    const midBuild = state.app.builds.find((build) => build.status === "running");
+    if (midBuild) {
+      navigate(`/building/${midBuild.worldId}`, { replace: true });
+      return;
+    }
     navigate(state.worlds.length === 0 ? "/first-run" : "/worlds", { replace: true });
   };
 
@@ -662,6 +676,118 @@ function parseSeed(raw: string): { name: string; sentence: string } | null {
   return name.length > 0 && sentence.length > 0 ? { name, sentence } : null;
 }
 
+/**
+ * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
+ * many generations that is, spend as one figure — and every precondition that failed,
+ * stated on the way in rather than discovered at item nine of fifteen (R-11).
+ */
+function BuildReviewStep({
+  plan: entry,
+  pressed,
+  onBack,
+  onBuild,
+}: {
+  plan: { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string } | undefined;
+  pressed: boolean;
+  onBack: () => void;
+  onBuild: () => void;
+}) {
+  if (!entry) return <Loading label="sizing the build" />;
+  if (entry.plan === null) {
+    return (
+      <>
+        <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
+        <Callout tone="danger">{entry.reason ?? "the build could not be sized"}</Callout>
+        <div className="fy-artstep__foot">
+          <Button variant="ghost" onClick={onBack}>
+            Back
+          </Button>
+        </div>
+      </>
+    );
+  }
+  const plan = entry.plan;
+  const counts: Array<[number, string]> = [
+    [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
+    [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
+    [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
+    [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
+  ];
+  return (
+    <>
+      <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
+      <h1 className="fy-artstep__h1">One press makes {plan.worldName}.</h1>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {counts
+          .filter(([count]) => count > 0)
+          .map(([count, label]) => (
+            <div
+              key={label}
+              style={{ flex: 1, minWidth: 120, border: "1px solid var(--border)", borderRadius: 11, padding: "13px 15px" }}
+            >
+              <div style={{ font: "650 20px var(--font-sans)" }}>{count}</div>
+              <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+                {label.toUpperCase()}
+              </div>
+            </div>
+          ))}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          border: "1px solid var(--border)",
+          borderRadius: 11,
+          padding: "13px 15px",
+        }}
+      >
+        <div>
+          <div style={{ font: "650 21px var(--font-sans)" }}>
+            {plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}
+          </div>
+          <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+            {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+          </div>
+        </div>
+        <span style={{ flex: 1 }} />
+        <span style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 260, textAlign: "right" }}>
+          Everything lands settled. Nothing waits for a decision.
+        </span>
+      </div>
+      {(plan.notes.length > 0 || plan.dropped.length > 0) && (
+        <div
+          style={{
+            borderLeft: "2px solid var(--border)",
+            padding: "9px 13px",
+            font: "400 11.5px/1.6 var(--font-sans)",
+            color: "var(--muted-foreground)",
+          }}
+        >
+          {plan.notes.map((note, index) => (
+            <div key={index}>{note}</div>
+          ))}
+        </div>
+      )}
+      <div className="fy-artstep__foot">
+        <Button variant="ghost" onClick={onBack} disabled={pressed}>
+          Back
+        </Button>
+        <span style={{ flex: 1 }} />
+        <span className="fy-artstep__note">yes once · nothing asks again</span>
+        <Button variant="primary" disabled={pressed} onClick={onBuild}>
+          {pressed
+            ? "Building…"
+            : plan.generations === 0
+              ? `Build ${plan.worldName}`
+              : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+        </Button>
+      </div>
+    </>
+  );
+}
+
 /** World genesis (prototype 12a): the whole window is the surface — form beside the world-so-far rail. */
 export function NewWorldScreen() {
   const { state, connection } = useStore();
@@ -677,9 +803,15 @@ export function NewWorldScreen() {
   // thing before the world exists, because it is the one answer that applies to every image the
   // world will ever make, and asking it while the logline is still being written would be asking
   // about a world nobody has described yet.
-  const [step, setStep] = useState<"draft" | "look" | "words">("draft");
+  const [step, setStep] = useState<"draft" | "look" | "words" | "review">("draft");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [look, setLook] = useState("");
+  // The founding build (SPEC-031): a conversation that settled a name goes through the
+  // review and one press; a bare form still creates and seeds the old way.
+  const [lookForBuild, setLookForBuild] = useState("");
+  const [buildPressed, setBuildPressed] = useState(false);
+  const planRequestRef = useRef<string | null>(null);
+  const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
   // step arrives pre-filled with the agent's words when it proposed some (SPEC-031 R-3) —
   // the preset grid stays one press away as the override, never the only way in.
@@ -725,6 +857,10 @@ export function NewWorldScreen() {
   ];
   const railFactions = (blueprint?.factions ?? []).map((f) => ({ name: f.name, sentence: oneLine(f) }));
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
+  // A conversation that settled a name builds; anything less creates and seeds the old way.
+  const buildMode = blueprint?.name !== undefined;
+  const buildPlan = useBuildPlans()[genesisId];
+  const myBuild = state?.app.builds.find((build) => build.genesisId === genesisId) ?? null;
   const sendGenesis = () => {
     if (!harnessReady || chatRunning || message.trim().length === 0) return;
     genesisChat(genesisId, message.trim());
@@ -756,6 +892,19 @@ export function NewWorldScreen() {
     }
     navigate(`/w/${worldId}`, { replace: true });
   }, [submittedName, state?.world, navigate, railCharacters, railLocations, railFactions, blueprint, genesisId]);
+
+  // The build begins server-side from one frame (SPEC-031 R-17); the screen's whole job is
+  // to follow it to the building screen the moment the coordinator names the world.
+  useEffect(() => {
+    if (buildPressed && myBuild) navigate(`/building/${myBuild.worldId}`, { replace: true });
+  }, [buildPressed, myBuild, navigate]);
+
+  const enterReview = (lookText: string) => {
+    setLookForBuild(lookText);
+    planRequestRef.current = ulid();
+    planFoundingBuild(genesisId, planRequestRef.current);
+    setStep("review");
+  };
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
   const entries =
@@ -830,11 +979,22 @@ export function NewWorldScreen() {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => begin()}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? enterReview("") : begin())}>
                   Decide later
                 </Button>
               </div>
             </>
+          ) : step === "review" ? (
+            <BuildReviewStep
+              plan={buildPlan}
+              pressed={buildPressed}
+              onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
+              onBuild={() => {
+                if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                setBuildPressed(true);
+                beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
+              }}
+            />
           ) : (
             <>
               <div className="fy-artstep__steps">
@@ -875,7 +1035,7 @@ export function NewWorldScreen() {
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => begin(look)}
+                  onClick={() => (buildMode ? enterReview(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -3172,6 +3332,23 @@ export function ActivityScreen() {
 
   const running = state ? computeRunning(state, { sidecar, exports: exportsState }) : [];
   const needsYou = state ? computeNeedsYou(state) : [];
+  // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build
+  // record's own keys, so an item never dispatched — no route, no credential — is as visible
+  // and as runnable as a failed one. Held items are deliberately absent: their queue rows
+  // are already here, and resuming the lane is that row's action (row 32 — no duplicates).
+  const NOT_LANDED = new Set(["failed", "skipped", "unauthorized"]);
+  const builds = scoped([...(state?.app.builds ?? [])]).filter((build) => build.status !== "running");
+  const buildMissing = builds
+    .map((build) => ({ build, missing: build.items.filter((item) => NOT_LANDED.has(item.state)) }))
+    .filter(({ missing }) => missing.length > 0);
+  /** The build item a failed job belongs to, for the retry that lands as the build would (R-49). */
+  const buildItemForJob = (jobId: string) => {
+    for (const build of state?.app.builds ?? []) {
+      const item = build.items.find((candidate) => candidate.jobId === jobId);
+      if (item) return { build, item };
+    }
+    return null;
+  };
   const spend = state ? spendSummary(state.app.ledger, state.app.spend?.settings.periodDays ?? 7, new Date()) : null;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);
@@ -3311,6 +3488,33 @@ export function ActivityScreen() {
               ))}
             </>
           )}
+          {buildMissing.map(({ build, missing }) => (
+            <div key={build.buildId}>
+              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
+                THE FOUNDING BUILD · {missing.length} NOT LANDED
+              </div>
+              {missing.length > 1 && (
+                <div className="fy-activityrow">
+                  <span className="fy-dot" />
+                  <div className="fy-activityrow__main">
+                    <span>{build.worldName} · everything outstanding</span>
+                  </div>
+                  <Button onClick={() => runBuildItem(build.worldId)}>Run all {missing.length}</Button>
+                </div>
+              )}
+              {missing.map((item) => (
+                <div key={item.key} className="fy-activityrow">
+                  <span className="fy-dot fy-dot--warn" />
+                  <div className="fy-activityrow__main">
+                    <span>{buildWorkingLine(item)}</span>
+                    {item.detail && <span className="fy-mono">{item.detail}</span>}
+                  </div>
+                  {/* Lands exactly as the build would have — settled, anchored, designated (R-49). */}
+                  <Button onClick={() => runBuildItem(build.worldId, item.key)}>Run</Button>
+                </div>
+              ))}
+            </div>
+          ))}
           <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
             EARLIER TODAY
           </div>
@@ -3323,6 +3527,19 @@ export function ActivityScreen() {
                   reference work that belongs to no production and has no such dialog. */}
               {jobActions(job).includes("retry") &&
                 (() => {
+                  // A founding-build job retries through the build's own landing (SPEC-031
+                  // R-49): the photo becomes the anchor, never a staged proposal.
+                  const owned = buildItemForJob(job.id);
+                  if (owned) {
+                    return (
+                      <>
+                        <span className="scr-field__hint">failed — runs again and lands settled</span>
+                        <Button variant="ghost" onClick={() => runBuildItem(owned.build.worldId, owned.item.key)}>
+                          Run again
+                        </Button>
+                      </>
+                    );
+                  }
                   const origin = jobOrigin(job);
                   return origin ? (
                     <>

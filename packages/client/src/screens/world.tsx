@@ -43,6 +43,7 @@ import { shortDateTime } from "../lib/format.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
+import { foundingNote } from "../components/queue-note.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -90,6 +91,8 @@ import {
   useImportReport,
   useAskResults,
   useAuthoring,
+  useClientState,
+  dismissBuildNotice,
   useCanonRefs,
   useCanonSearches,
   usePermissions,
@@ -200,13 +203,36 @@ function WorldConditionBanners() {
   const { worldId } = useParams();
   const world = useWorld();
   const permissions = usePermissions();
+  const navigate = useNavigate();
+  const clientState = useClientState();
   if (!world || world.meta.worldId !== worldId) return null;
   const permissionEntries = Object.entries(permissions);
+  // The completion notice (SPEC-031 R-44..R-47): persists until dismissed or the work it
+  // names is no longer outstanding, and its one action opens the screen that can act.
+  const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
+  const notice = build ? foundingNote(build) : null;
   const hasConditions =
-    world.externalEdits.length > 0 || world.problems.length > 0 || permissionEntries.length > 0;
+    world.externalEdits.length > 0 ||
+    world.problems.length > 0 ||
+    permissionEntries.length > 0 ||
+    notice !== null;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+      {notice && (
+        <Callout tone="warning" title={notice.title}>
+          {notice.reason}
+          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", alignItems: "center" }}>
+            <Button onClick={() => navigate(notice.action!.to)}>{notice.action!.label}</Button>
+            <Button variant="ghost" onClick={() => dismissBuildNotice(worldId!)}>
+              Dismiss
+            </Button>
+            <span className="mono" style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
+              {notice.meta}
+            </span>
+          </div>
+        </Callout>
+      )}
       {permissionEntries.map(([id, p]) => (
         <Callout key={id} tone="warning" title="The drafting agent is asking permission">
           {p.description}. This is the backstop, not the gate — nothing lands in the world without your accept
@@ -266,6 +292,14 @@ export function WorldOverviewScreen() {
   const navigate = useNavigate();
   // Before the guard: hooks cannot run behind a return.
   const authoring = useAuthoring();
+  // Arriving at a world mid-build returns to the building screen, run continuing (SPEC-031
+  // R-33). Only the running state redirects — a finished build's world is just a world.
+  const clientState = useClientState();
+  const runningBuild =
+    clientState?.app.builds.find((build) => build.worldId === worldId && build.status === "running") ?? null;
+  useEffect(() => {
+    if (runningBuild) navigate(`/building/${worldId}`, { replace: true });
+  }, [runningBuild !== null, worldId, navigate]);
   /** The title is editable in place; the folder underneath never moves. */
   const [renaming, setRenaming] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);

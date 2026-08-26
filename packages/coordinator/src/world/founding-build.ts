@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import {
   BuildJournalEntrySchema,
   BuildReviewSchema,
+  buildItemDispatches,
   FoundingBuildRecordSchema,
   characterBriefProse,
   compileBuildItems,
@@ -23,6 +24,7 @@ import {
   type FoundingBuildState,
   type GenesisBlueprint,
   type Job,
+  type LedgerEntry,
   type ManifestModel,
   type ModelManifest,
   type QueueStatus,
@@ -96,6 +98,8 @@ export interface FoundingBuildPorts {
   ): Promise<void>;
   enqueue(input: EnqueueInput): Promise<Job>;
   jobById(jobId: string): Job | undefined;
+  /** The job's ledger row, when it has landed — a take should record what it actually cost. */
+  ledgerEntryFor(jobId: string): Promise<LedgerEntry | undefined>;
   cancelJob(jobId: string): Promise<void>;
   queueStatuses(): QueueStatus[];
   refreshWorldSnapshot(worldId: string): Promise<void>;
@@ -164,6 +168,7 @@ export class FoundingBuildService {
   /** Builds this process knows about, keyed by worldId. */
   private readonly builds = new Map<string, ActiveBuild>();
   private readonly beginning = new Map<string, Promise<void>>();
+  private readonly runningItems = new Map<string, Promise<void>>();
   /** Wakes the driver when a watched job settles, without waiting out the tick. */
   private readonly jobWakers = new Map<string, Set<() => void>>();
 
@@ -266,16 +271,16 @@ export class FoundingBuildService {
   // The press (R-13, R-16, R-17)
   // -------------------------------------------------------------------------
 
-  async begin(genesisId: string, requestId: string): Promise<void> {
+  async begin(genesisId: string, requestId: string, look?: string): Promise<void> {
     // Two presses in one tick are one run (row 8): the second joins the first's promise.
     const inFlight = this.beginning.get(genesisId);
     if (inFlight) return inFlight;
-    const work = this.beginWork(genesisId, requestId).finally(() => this.beginning.delete(genesisId));
+    const work = this.beginWork(genesisId, requestId, look).finally(() => this.beginning.delete(genesisId));
     this.beginning.set(genesisId, work);
     return work;
   }
 
-  private async beginWork(genesisId: string, requestId: string): Promise<void> {
+  private async beginWork(genesisId: string, requestId: string, look?: string): Promise<void> {
     const sandbox = await this.ports.genesisDir(genesisId);
     const markerPath = join(sandbox, BEGUN_MARKER);
     const marker = await readFile(toExtendedLength(markerPath), "utf8")
@@ -283,12 +288,29 @@ export class FoundingBuildService {
       .catch(() => null);
     if (marker?.worldId !== undefined) {
       // A second press, a replayed frame or a resumed session joins the existing run (R-16).
-      // A world builds once (R-37): there is no path here that builds it again.
-      await this.resume(marker.worldId);
-      return;
+      // A world builds once (R-37): there is no path here that builds it again. A marker
+      // whose record never got written — the press died between the two — falls through and
+      // finishes the founding against the world the marker names, rather than founding another.
+      await this.ports.openWorld(marker.worldId);
+      const store = this.ports.openStore();
+      if (store && store.worldId === marker.worldId) {
+        const known = await this.load(store.dir, marker.worldId);
+        if (known) {
+          await this.resume(marker.worldId);
+          return;
+        }
+      }
     }
 
-    const blueprint = await foldBlueprint(sandbox);
+    const folded = await foldBlueprint(sandbox);
+    // The look as the author left the words step (R-3): absent keeps the conversation's,
+    // non-empty is their rewrite, the empty string is "Decide later" — founded with none.
+    const effectiveLook = look === undefined ? folded.look : look.trim() === "" ? undefined : look.trim();
+    const blueprint: GenesisBlueprint = {
+      ...folded,
+      ...(effectiveLook !== undefined ? { look: effectiveLook } : {}),
+    };
+    if (effectiveLook === undefined) delete (blueprint as { look?: string }).look;
     if (blueprint.name === undefined) {
       this.ports.emit({
         at: this.ports.nowIso(),
@@ -308,16 +330,22 @@ export class FoundingBuildService {
     const capMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
 
     // Wave 0 is the world itself: world.json, art direction v1 from the look the conversation
-    // proposed, and the bible it wrote (R-18). The record needs the world's folder to live in,
-    // so this precedes it — the begun marker is what makes a crash here recoverable.
-    const { worldId } = await this.ports.createWorld({
-      name: blueprint.name,
-      ...(blueprint.logline !== undefined ? { logline: blueprint.logline } : {}),
-      ...(blueprint.tone !== undefined ? { tone: blueprint.tone.toLowerCase() } : {}),
-      ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
-      ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
-      ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
-    });
+    // proposed, and the bible it wrote (R-18). The marker is written the moment the world's
+    // identity exists and BEFORE the record — so every crash window on this path re-enters
+    // through the marker and finishes the same founding, never founding a second world (R-16).
+    let worldId = marker?.worldId;
+    if (worldId === undefined) {
+      const created = await this.ports.createWorld({
+        name: blueprint.name,
+        ...(blueprint.logline !== undefined ? { logline: blueprint.logline } : {}),
+        ...(blueprint.tone !== undefined ? { tone: blueprint.tone.toLowerCase() } : {}),
+        ...(blueprint.genre !== undefined ? { genre: blueprint.genre.toLowerCase() } : {}),
+        ...(blueprint.look !== undefined ? { artDirection: blueprint.look } : {}),
+        ...(blueprint.bible !== undefined ? { bible: blueprint.bible } : {}),
+      });
+      worldId = created.worldId;
+      await atomicWriteFile(markerPath, JSON.stringify({ worldId, requestId }) + "\n");
+    }
     await this.ports.openWorld(worldId);
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) throw new Error("the new world did not open");
@@ -343,7 +371,6 @@ export class FoundingBuildService {
       createdAt: this.ports.nowIso(),
     });
     await atomicWriteFile(join(store.dir, BUILD_DIR, BUILD_RECORD), JSON.stringify(record, null, 2) + "\n");
-    await atomicWriteFile(markerPath, JSON.stringify({ worldId, buildId: record.buildId, requestId }) + "\n");
 
     const active: ActiveBuild = {
       record,
@@ -388,8 +415,9 @@ export class FoundingBuildService {
   }
 
   /**
-   * Resume a run wherever the journal left it (R-33): a no-op for a completed or stopped
-   * build beyond publishing its state, so the notice survives every restart (R-45).
+   * Resume a run wherever the journal left it (R-33). A completed or stopped build still
+   * reconciles anything in doubt — an Activity re-run cut off by a restart is work the
+   * author paid for, and it lands here rather than showing "running" forever (R-34, R-49).
    */
   async resume(worldId: string): Promise<void> {
     const store = this.ports.openStore();
@@ -398,12 +426,47 @@ export class FoundingBuildService {
     if (!active) return;
     this.publish(active);
     const state = this.fold(active);
-    if (state.status === "running" && !active.driving) this.drive(active);
+    if (state.status === "running") {
+      if (!active.driving) this.drive(active);
+    } else {
+      await this.reconcileInDoubt(active).catch(() => {});
+    }
   }
 
-  /** Whether this world has a build at all — the world screen's "founded by a build" record (R-37). */
-  has(worldId: string): boolean {
-    return this.builds.has(worldId);
+  /**
+   * Every item whose last journal word is an intent or an enqueue is in doubt (R-34): the
+   * work may be running, landed, or dead. Reconcile against the queue by the journalled
+   * job id — or re-enqueue the journalled idempotency key, which joins rather than re-buys —
+   * and record the outcome. Never a timer, never a screen: this runs from resume and from
+   * the driver's own first step.
+   */
+  private async reconcileInDoubt(active: ActiveBuild): Promise<void> {
+    const lastByKey = new Map<string, BuildJournalEntry>();
+    for (const entry of active.entries) {
+      if (entry.kind === "intent" || entry.kind === "enqueued" || entry.kind === "terminal") {
+        lastByKey.set(entry.key, entry);
+      }
+    }
+    for (const [key, last] of lastByKey) {
+      if (last.kind === "terminal") continue;
+      const item = active.record.items.find((candidate) => candidate.key === key);
+      if (!item) continue;
+      if (item.kind === "world" || item.kind === "author-sheet" || item.kind === "thread" || item.kind === "finalize") {
+        // Local work re-runs idempotently through the driver; an intent alone is enough.
+        continue;
+      }
+      if (last.kind === "enqueued") {
+        await this.settleDispatched(active, item, last.jobId).catch(() => {});
+        continue;
+      }
+      // An intent with a journalled key and no job id: the crash window between the append
+      // and the enqueue. Re-enqueueing the same key joins the existing job when one was
+      // made, and is the first dispatch when none was (row 22).
+      const { route } = await this.resolveImageRoute();
+      const jobId = await this.dispatchOne(active, item, route?.model ?? null).catch(() => null);
+      await this.settleDispatched(active, item, jobId).catch(() => {});
+    }
+    this.publish(active);
   }
 
   // -------------------------------------------------------------------------
@@ -440,14 +503,29 @@ export class FoundingBuildService {
 
   /**
    * Run one item — or, with no key, everything runnable that has not landed — landing it
-   * exactly as the build would have: settled, anchored, designated (R-49).
+   * exactly as the build would have: settled, anchored, designated (R-49). Refused while
+   * the run itself is going (its driver owns pending work, and two writers would race the
+   * wave barrier and the authoring sessions), and serialized per world so a double press
+   * joins rather than doubling.
    */
   async runItems(worldId: string, itemKey?: string): Promise<void> {
+    const inFlight = this.runningItems.get(worldId);
+    if (inFlight) return inFlight;
+    const work = this.runItemsWork(worldId, itemKey).finally(() => this.runningItems.delete(worldId));
+    this.runningItems.set(worldId, work);
+    return work;
+  }
+
+  private async runItemsWork(worldId: string, itemKey?: string): Promise<void> {
     const store = this.ports.openStore();
     if (!store || store.worldId !== worldId) return;
     const active = await this.load(store.dir, worldId);
     if (!active) return;
-    const state = this.fold(active);
+    let state = this.fold(active);
+    if (state.status === "running" || active.driving) return;
+    // Work a crash left mid-air settles first, with its journalled identity (R-34).
+    await this.reconcileInDoubt(active).catch(() => {});
+    state = this.fold(active);
     const runnable = new Set(["failed", "skipped", "held", "unauthorized", "pending"]);
     const keys = state.items
       .filter((item) => (itemKey === undefined ? runnable.has(item.state) : item.key === itemKey))
@@ -459,7 +537,6 @@ export class FoundingBuildService {
     for (const key of keys) {
       const item = active.record.items.find((candidate) => candidate.key === key);
       if (!item) continue;
-      if (active.stopped && itemKey === undefined) break;
       await this.runOne(active, item, route?.model ?? null).catch((err) => {
         this.ports.log({ kind: "build.item-failed", worldId, key, message: err instanceof Error ? err.message : String(err) });
       });
@@ -498,6 +575,9 @@ export class FoundingBuildService {
 
   private async driveWork(active: ActiveBuild): Promise<void> {
     const { record } = active;
+    // Anything a crash left in doubt settles first, with its journalled identity — never a
+    // second dispatch for work the queue already has (R-34, rows 1 and 22).
+    await this.reconcileInDoubt(active).catch(() => {});
     const model = await this.frozenModel(record);
     // The phases are the stages (R-39): one per wave boundary, and a wave does not begin
     // until every item in the wave before it is terminal (R-18).
@@ -572,7 +652,7 @@ export class FoundingBuildService {
   // -------------------------------------------------------------------------
 
   private async runOne(active: ActiveBuild, item: BuildItem, model: ManifestModel | null): Promise<void> {
-    if (item.idempotencyKey !== undefined || BUILD_IMAGE_ITEM(item)) {
+    if (buildItemDispatches(item.kind)) {
       const jobId = await this.dispatchOne(active, item, model);
       await this.settleDispatched(active, item, jobId);
       return;
@@ -585,12 +665,13 @@ export class FoundingBuildService {
     await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
     this.publish(active);
     try {
+      let detail: string | undefined;
       switch (item.kind) {
         case "world":
           await this.runWorld(active);
           break;
         case "author-sheet":
-          await this.runAuthorSheet(active, item, store, gate);
+          detail = await this.runAuthorSheet(active, item, store, gate);
           break;
         case "thread":
           await this.runThread(active, item, store, gate);
@@ -601,7 +682,13 @@ export class FoundingBuildService {
         default:
           throw new Error(`${item.kind} is not a local item`);
       }
-      await this.append(active, { kind: "terminal", key: item.key, outcome: "landed", at: this.ports.nowIso() });
+      await this.append(active, {
+        kind: "terminal",
+        key: item.key,
+        outcome: "landed",
+        ...(detail !== undefined ? { detail } : {}),
+        at: this.ports.nowIso(),
+      });
     } catch (err) {
       // The item fails alone; the run continues to the end (R-23).
       await this.append(active, {
@@ -621,12 +708,13 @@ export class FoundingBuildService {
     await this.ports.carryAttachments(active.record.genesisId, active.record.worldId);
   }
 
+  /** Returns a detail worth journalling — a sheet that stands on its seed because the agent failed. */
   private async runAuthorSheet(
     active: ActiveBuild,
     item: BuildItem,
     store: WorldStore,
     gate: ProposalManager,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const blueprint = active.record.blueprint;
     const entity =
       item.sheetType === "character"
@@ -637,7 +725,9 @@ export class FoundingBuildService {
     if (!entity || item.sheetType === undefined) throw new Error("the blueprint no longer holds this entity");
     // Idempotent across recovery: a sheet that already exists under this name landed (R-34).
     const bundle = store.getBundle();
-    if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) return;
+    if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
+      return undefined;
+    }
     const seed = entity.line ?? entity.description ?? entity.name;
     const draft = await createSheetFromSentence(store, gate, {
       sheetType: item.sheetType,
@@ -650,6 +740,7 @@ export class FoundingBuildService {
       worldId: active.record.worldId,
       proposalId: draft.proposal.id,
     });
+    let authoringNote: string | undefined;
     if (this.ports.harnessReady()) {
       const brief =
         item.sheetType === "character"
@@ -659,7 +750,9 @@ export class FoundingBuildService {
             : "";
       const description = entity.description !== undefined ? `\n\nThe conversation settled: ${entity.description}` : "";
       const facts = brief !== "" ? `\n\nAppearance facts the conversation settled: ${brief}.` : "";
-      await this.ports
+      // A drafting agent that dies must not take the sheet with it — the seed stands and is
+      // settled below — but neither may it vanish silently: the detail rides the journal.
+      authoringNote = await this.ports
         .authorSheet(store, gate, {
           worldId: active.record.worldId,
           proposalId: draft.proposal.id,
@@ -669,7 +762,11 @@ export class FoundingBuildService {
           name: entity.name,
           seed: `${seed}${description}${facts}`,
         })
-        .catch(() => {});
+        .then(
+          () => undefined,
+          (err: unknown) =>
+            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+        );
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).
@@ -679,6 +776,7 @@ export class FoundingBuildService {
       throw new Error(`the ${item.sheetType} sheet could not be settled${outcome ? ` (${outcome.status})` : ""}`);
     }
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
+    return authoringNote;
   }
 
   private async runThread(
@@ -715,10 +813,16 @@ export class FoundingBuildService {
     const state = this.fold(active);
     const folded = state.items.find((candidate) => candidate.key === item.key);
     if (folded?.state === "landed") return null;
-    // Recovery: an intent with a job id reconciles against the queue before anything is
-    // dispatched again (R-34) — the pre-allocated idempotency key would dedup anyway, and
-    // the journalled id saves even the lookup.
-    if (folded?.state === "running" && folded.jobId !== undefined) return folded.jobId;
+    // Rejoin journalled work before anything is bought twice (R-34): the item's last
+    // enqueued job, still alive or already succeeded, IS this item's work — a held photo
+    // whose lane was resumed in Activity lands through its original job, never a second one.
+    const lastEnqueued = [...active.entries]
+      .reverse()
+      .find((entry): entry is Extract<BuildJournalEntry, { kind: "enqueued" }> => entry.kind === "enqueued" && entry.key === item.key);
+    if (lastEnqueued !== undefined) {
+      const job = this.ports.jobById(lastEnqueued.jobId);
+      if (job && job.status !== "failed" && job.status !== "cancelled") return lastEnqueued.jobId;
+    }
 
     if (model === null) {
       await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
@@ -767,18 +871,33 @@ export class FoundingBuildService {
       });
       return null;
     }
-    await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
+    // Every attempt's key is journalled in its intent BEFORE the enqueue, so no attempt's
+    // crash window has anything to invent (R-31, R-34): an unsettled intent re-enqueues its
+    // own key and joins whatever the queue already made of it. The first attempt uses the
+    // record's pre-allocated key (SPEC-024 D2); a retry after a terminal outcome is new work
+    // the author just authorized, so it mints fresh rather than joining the failure.
+    const lastForKey = [...active.entries]
+      .reverse()
+      .find(
+        (entry): entry is Extract<BuildJournalEntry, { kind: "intent" | "enqueued" | "terminal" }> =>
+          (entry.kind === "intent" || entry.kind === "enqueued" || entry.kind === "terminal") &&
+          entry.key === item.key,
+      );
+    let idempotencyKey: string;
+    if (lastForKey?.kind === "intent" && lastForKey.idempotencyKey !== undefined) {
+      idempotencyKey = lastForKey.idempotencyKey;
+    } else {
+      const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
+      idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
+      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, at: this.ports.nowIso() });
+    }
     this.publish(active);
     try {
-      // The pre-allocated key protects the first attempt's crash window — re-enqueueing it
-      // joins the existing job (SPEC-024 D2). A retry after a terminal outcome is new work
-      // the author just authorized, so it mints a fresh key rather than joining the failure.
-      const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
-      const job = await this.ports.enqueue({
-        ...input,
-        idempotencyKey: retried ? ulid() : (item.idempotencyKey ?? ulid()),
-      });
+      const job = await this.ports.enqueue({ ...input, idempotencyKey });
       await this.append(active, { kind: "enqueued", key: item.key, jobId: job.id, at: this.ports.nowIso() });
+      // A stop that raced this dispatch still reaches the job (R-35): the sweep in stop()
+      // saw no job id to cancel, so the request is made here instead.
+      if (active.stopped) await this.ports.cancelJob(job.id).catch(() => {});
       this.publish(active);
       return job.id;
     } catch (err) {
@@ -947,6 +1066,10 @@ export class FoundingBuildService {
     if (!store || store.worldId !== active.record.worldId) throw new Error("the world is not open");
     const job = this.ports.jobById(jobId);
     if (!job) throw new Error("the job is gone from the queue");
+    // Best effort: the wake can outrun the ledger append, and a take with no cost row is
+    // how the recovery path already records — but when the row is there, the take says
+    // what the work actually cost.
+    const ledgerEntry = await this.ports.ledgerEntryFor(jobId).catch(() => undefined);
     const bundle = store.getBundle();
     const blueprint = active.record.blueprint;
     const sheetOf = (type: "character" | "location") => {
@@ -961,7 +1084,7 @@ export class FoundingBuildService {
     switch (item.kind) {
       case "main-photo": {
         const sheet = sheetOf("character");
-        const take = await recordReferenceTake(store, job);
+        const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take) throw new Error("the immutable take was not recorded");
         const kit = (await readKit(store, sheet.id))?.kit ?? null;
         if (kit?.mainPhoto?.sourceTakeId === take.id) return; // landed on an earlier pass (R-34)
@@ -972,7 +1095,7 @@ export class FoundingBuildService {
       }
       case "establishing-view": {
         const sheet = sheetOf("location");
-        const take = await recordReferenceTake(store, job);
+        const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take?.media) throw new Error("the immutable take was not recorded");
         const kit = (await readKit(store, sheet.id))?.kit ?? null;
         if (kit?.locationViews?.some((view) => view.sourceTakeId === take.id)) return;
@@ -993,7 +1116,7 @@ export class FoundingBuildService {
       }
       case "sheet-image": {
         const sheet = sheetOf("character");
-        const take = await recordReferenceTake(store, job);
+        const take = await recordReferenceTake(store, job, ledgerEntry);
         if (!take?.media) throw new Error("the immutable take was not recorded");
         const fresh = store.getBundle();
         if (fresh.referenceReviews.some((review) => review.takeId === take.id)) return; // designated already
@@ -1015,7 +1138,10 @@ export class FoundingBuildService {
         return;
       }
       case "key-art": {
-        await adoptKeyArtCandidate(store);
+        const adopted = await adoptKeyArtCandidate(store);
+        if (!adopted && store.getBundle().keyArt === null) {
+          throw new Error("no key-art candidate landed to adopt");
+        }
         await this.ports.refreshWorldList().catch(() => {});
         return;
       }
@@ -1048,6 +1174,20 @@ export class FoundingBuildService {
     return [...this.builds.values()].map((active) => this.fold(active));
   }
 
+  /**
+   * Drop finished builds with nothing left to say — every item landed — from memory and the
+   * snapshot. The record stays on disk; opening the world reloads it if it is ever needed.
+   */
+  forgetSettled(): void {
+    const settled: string[] = [];
+    for (const [worldId, active] of this.builds) {
+      const state = this.fold(active);
+      if (state.status === "running") continue;
+      if (state.items.every((item) => item.state === "landed")) settled.push(worldId);
+    }
+    for (const worldId of settled) this.builds.delete(worldId);
+  }
+
   private publish(active: ActiveBuild): void {
     this.ports.emit({ at: this.ports.nowIso(), type: "build.state", state: this.fold(active) });
   }
@@ -1065,12 +1205,3 @@ export class FoundingBuildService {
 
 /** A sheet-image whose anchor did not land is skipped, not failed (R-22). */
 class AnchorMissing extends Error {}
-
-function BUILD_IMAGE_ITEM(item: BuildItem): boolean {
-  return (
-    item.kind === "main-photo" ||
-    item.kind === "establishing-view" ||
-    item.kind === "sheet-image" ||
-    item.kind === "key-art"
-  );
-}

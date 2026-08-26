@@ -105,6 +105,11 @@ interface StoreState {
   transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
   /** Local-runtime setup progress — the whole picture, newest wins. */
   setupStatus: import("@arke-studio/contracts").SetupStatus | null;
+  /** The review before the press, per conversation (SPEC-031 R-12): the plan, or the refusal. */
+  buildPlans: Record<
+    string,
+    { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string }
+  >;
   /** Genesis conversations: sandboxed world-shaping before any world exists. */
   genesis: Record<
     string,
@@ -251,6 +256,7 @@ let current: StoreState = {
   authoring: {},
   transcripts: {},
   genesis: {},
+  buildPlans: {},
   setupStatus: null,
   reading: {},
   archiveNote: null,
@@ -460,6 +466,13 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       if (i === -1) jobs.push(event.job);
       else jobs[i] = event.job;
       return { ...state, app: { ...state.app, jobs } };
+    }
+    case "build.state": {
+      const builds = [...state.app.builds];
+      const i = builds.findIndex((build) => build.buildId === event.state.buildId);
+      if (i === -1) builds.push(event.state);
+      else builds[i] = event.state;
+      return { ...state, app: { ...state.app, builds } };
     }
     case "job.deleted":
       // The row leaves Activity; its ledger entry stays, so spend does not move.
@@ -677,6 +690,7 @@ function handleFrame(json: string): void {
     let authoring = current.authoring;
     let transcripts = current.transcripts;
     let genesis = current.genesis;
+    let buildPlans = current.buildPlans;
     let reading = current.reading;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
@@ -783,6 +797,15 @@ function handleFrame(json: string): void {
     } else if (event.type === "genesis.blueprint") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = { ...genesis, [event.genesisId]: { ...g, blueprint: event.blueprint } };
+    } else if (event.type === "build.plan") {
+      buildPlans = {
+        ...buildPlans,
+        [event.genesisId]: {
+          requestId: event.requestId,
+          plan: event.plan,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
     } else if (event.type === "genesis.status") {
       const g = genesis[event.genesisId] ?? emptyGenesis();
       genesis = {
@@ -1094,6 +1117,7 @@ function handleFrame(json: string): void {
       authoring,
       transcripts,
       genesis,
+      buildPlans,
       setupStatus,
       reading,
       archiveNote,
@@ -1548,6 +1572,33 @@ export function genesisChat(genesisId: string, text: string): void {
 
 export function genesisDiscard(genesisId: string): void {
   send({ kind: "genesis-discard", genesisId });
+}
+
+// ---- The founding build (SPEC-031) ----------------------------------------
+
+export function planFoundingBuild(genesisId: string, requestId: string): void {
+  send({ kind: "plan-founding-build", genesisId, requestId });
+}
+
+export function beginFoundingBuild(genesisId: string, requestId: string, look?: string): void {
+  send({ kind: "begin-founding-build", genesisId, requestId, ...(look !== undefined ? { look } : {}) });
+}
+
+export function stopFoundingBuild(worldId: string): void {
+  send({ kind: "stop-founding-build", worldId });
+}
+
+/** Run one item — or, with no key, everything runnable that has not landed (R-11, R-48). */
+export function runBuildItem(worldId: string, itemKey?: string): void {
+  send({ kind: "run-build-item", worldId, ...(itemKey !== undefined ? { itemKey } : {}), requestId: ulid() });
+}
+
+export function dismissBuildNotice(worldId: string): void {
+  send({ kind: "dismiss-build-notice", worldId });
+}
+
+export function useBuildPlans(): StoreState["buildPlans"] {
+  return useStore().buildPlans;
 }
 
 export function useGenesis(): StoreState["genesis"] {
@@ -3025,6 +3076,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     authoring: {},
     transcripts: {},
     genesis: {},
+    buildPlans: {},
     setupStatus: null,
     reading: {},
     archiveNote: null,

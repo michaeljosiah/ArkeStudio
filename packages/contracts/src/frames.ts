@@ -602,7 +602,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * everything from this one frame (R-17); the renderer never sequences a build.
    */
   z
-    .object({ kind: z.literal("begin-founding-build"), genesisId: GenesisIdSchema, requestId: UlidSchema })
+    .object({
+      kind: z.literal("begin-founding-build"),
+      genesisId: GenesisIdSchema,
+      requestId: UlidSchema,
+      /**
+       * The look as the author left the words step: absent keeps the blueprint's, non-empty
+       * is their rewrite, and the empty string is "Decide later" — founded with no look.
+       * The record holds what was actually founded on, which is what the carried preview's
+       * staleness test reads (R-54).
+       */
+      look: z.string().trim().max(2000).optional(),
+    })
     .strict(),
   /** The author's Stop — the only halt a run has (SPEC-031 R-35). */
   z.object({ kind: z.literal("stop-founding-build"), worldId: UlidSchema }).strict(),

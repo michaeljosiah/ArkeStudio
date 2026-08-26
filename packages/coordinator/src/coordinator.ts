@@ -1339,6 +1339,8 @@ export class Coordinator {
             },
             enqueue: (input) => this.enqueueJob(input),
             jobById: (jobId) => this.jobQueue?.listJobs().find((job) => job.id === jobId),
+            ledgerEntryFor: async (jobId) =>
+              this.ledger ? (await this.ledger.readAll()).find((entry) => entry.jobId === jobId) : undefined,
             cancelJob: async (jobId) => {
               await this.jobQueue?.cancel(jobId);
             },
@@ -1601,6 +1603,9 @@ export class Coordinator {
           /* not a world any more, or no build — nothing to know */
         }
       }
+      // Kept in memory only while there is something to know: a run in flight, or work that
+      // did not land. A build whose every item landed years ago is just a record on disk.
+      this.foundingBuild.forgetSettled();
       this.readModel.setBuilds(this.foundingBuild.states());
     }
 
@@ -3334,7 +3339,7 @@ export class Coordinator {
       case "begin-founding-build": {
         if (!this.foundingBuild) return;
         try {
-          await this.foundingBuild.begin(msg.genesisId, msg.requestId);
+          await this.foundingBuild.begin(msg.genesisId, msg.requestId, msg.look);
         } catch (err) {
           this.emit({
             at: new Date().toISOString(),
