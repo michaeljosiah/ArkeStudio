@@ -80,7 +80,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { ImageDownload } from "../components/image-actions.js";
 import { BenchBrief } from "../components/bench-brief.js";
-import { mentionOptions } from "../lib/bench-mention.js";
+import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
 import { posterNameFor } from "../lib/poster.js";
@@ -327,10 +327,7 @@ function BenchWorkspace({
         }
         // A rewrite that drops "@Image 1" turns an attached picture into words nobody will
         // resolve. The prompt says to keep them; this is what happens when it did not.
-        const kept = new Set(benchMentionsIn(answer.prompt).map((m) => m.token));
-        const dropped = [...new Set(benchMentionsIn(pending.sentBrief).map((m) => m.token))].filter(
-          (token) => !kept.has(token),
-        );
+        const dropped = droppedMentions(pending.sentBrief, answer.prompt);
         setEnhanceNote(
           dropped.length > 0 ? `${dropped.map((token) => `@${token}`).join(", ")} dropped` : null,
         );
@@ -339,7 +336,12 @@ function BenchWorkspace({
           draftRef.current.provider === pending.provider &&
           draftRef.current.model === pending.model &&
           draftRef.current.mode === pending.mode;
-        if (unmoved) {
+        // A rewrite that lost one is never applied for you, however still the words have been.
+        // Auto-apply is a convenience that rests on the answer meaning what the ask meant, and
+        // a brief whose citation has gone means something else — it will not dispatch, and if
+        // it did it would be a paid take grounded on a picture nobody asked it to look at. It
+        // is offered instead, beside a note naming what went, and applying it is the author's.
+        if (unmoved && dropped.length === 0) {
           // Unmoved words: the enhancement lands, and the originals are one press away.
           setEnhanceUndo(pending.sentBrief);
           compose({ ...draftRef.current, brief: answer.prompt });

@@ -6,6 +6,7 @@ import {
   deliveryParams,
   benchSourceKey,
   benchTokenFor,
+  briefForProvider,
   dispatchDuration,
   estimateMicroUsd,
   imageOutputFor,
@@ -564,6 +565,13 @@ export function planBenchDispatch(
     };
   }
 
+  // The citations validated above name session tokens; the provider is handed a dense array and
+  // counts from one. `briefForProvider` renames them to the places the bytes actually occupy, so
+  // the words the model reads and the pictures it is given cannot drift apart once a reference
+  // has been removed or restored in another order (raised on review, issue 476). The snapshot
+  // keeps the author's own words, which is what makes a re-run reproduce this same arithmetic.
+  const wirePrompt = briefForProvider(composer.brief, frame !== null ? keyframes : references);
+
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
   const recipeVersion = options.fromTake?.request.recipeVersion ?? options.recipeVersionOf?.(model.id);
@@ -644,7 +652,7 @@ export function planBenchDispatch(
         provider: model.provider,
         model: model.id,
         params: {
-          prompt: composer.brief,
+          prompt: wirePrompt,
           output,
           ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
         },
@@ -680,7 +688,7 @@ export function planBenchDispatch(
         provider: model.provider,
         model: model.id,
         params: {
-          prompt: composer.brief,
+          prompt: wirePrompt,
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the

@@ -273,9 +273,14 @@ const OPENER_CLASS = MENTION_OPENERS.join("");
  * Bounded on both sides, and it has to be. Without the opener, "foo@Image 1" would read as a
  * citation the editor would never have offered; without the closing boundary, "@Image 1st of May"
  * reads as "@Image 1", and ordinary prose is refused at dispatch over a reference nobody cited.
+ *
+ * The closing boundary is in two halves because a full stop is both the end of a sentence and
+ * the middle of a filename. A letter or a digit ends it outright; a dot, dash or underscore ends
+ * it only when a word follows, so "cite @Image 1." is a citation and "@Image 1.foo" is not —
+ * which is the same reading the editor's query gives those characters (raised on review).
  */
 export const BENCH_MENTION = new RegExp(
-  `(?<![^${OPENER_CLASS}])@(?:Image|Video|Audio) [1-9][0-9]*(?![\\p{L}\\p{N}])`,
+  `(?<![^${OPENER_CLASS}])@(?:Image|Video|Audio) [1-9][0-9]*(?![\\p{L}\\p{N}])(?![._-][\\p{L}\\p{N}])`,
   "u",
 );
 
@@ -292,6 +297,44 @@ export function benchMentionsIn(text: string): Array<{ token: string; start: num
     found.push({ token: match[0].slice(1), start, end: start + match[0].length });
   }
   return found;
+}
+
+/**
+ * The brief as the provider will read it: every citation renamed to the place its bytes will
+ * actually occupy on the wire (raised on review, issue 476).
+ *
+ * A session token is stable for the session's whole life and never renumbered — that is what
+ * makes "@Image 2" still mean the same picture after Image 1 has been taken off. A provider is
+ * handed a dense array and counts from one. So the moment anything is removed, or restored in
+ * another order, the two disagree: the prompt says "the second image" and the second image is
+ * not there. The model cannot see the registry, only the array, and a take grounded on the
+ * wrong picture is a take that was paid for.
+ *
+ * So the author keeps the stable names — on screen, in the snapshot, and therefore across a
+ * re-run — and the provider is given the positions. Numbered per kind, because the kinds travel
+ * in fields of their own, and derived from the ordered list that is being sent, which is what
+ * makes a re-run of an old take reproduce that take's own numbering rather than today's.
+ */
+export function briefForProvider(
+  brief: string,
+  riding: readonly { token: string; kind: ReferenceKind }[],
+): string {
+  const place = new Map<string, string>();
+  const used = new Map<ReferenceKind, number>();
+  for (const entry of riding) {
+    const n = (used.get(entry.kind) ?? 0) + 1;
+    used.set(entry.kind, n);
+    place.set(entry.token, benchTokenFor(entry.kind, n));
+  }
+  let out = "";
+  let at = 0;
+  for (const mention of benchMentionsIn(brief)) {
+    const renamed = place.get(mention.token);
+    if (renamed === undefined) continue; // the gate refuses these; nothing here invents a name
+    out += brief.slice(at, mention.start) + benchMentionFor(renamed);
+    at = mention.end;
+  }
+  return out + brief.slice(at);
 }
 
 /**

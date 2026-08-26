@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { benchMentionsIn, unresolvedBenchMentions } from "@arke-studio/contracts";
 import {
+  droppedMentions,
   filterMentions,
   insertMention,
   mentionOptions,
@@ -102,9 +103,30 @@ describe("what the words look like afterwards (issue 476)", () => {
     const query = mentionQueryAt("A face lit by @im, cold", 17);
     assert.notEqual(query, null);
     const next = insertMention("A face lit by @im, cold", query!, "Image 1");
-    assert.equal(next.text, "A face lit by @Image 1 , cold");
-    assert.equal(next.caret, 23);
-    assert.equal(next.text.slice(0, next.caret), "A face lit by @Image 1 ");
+    // No space before the comma. The earlier version wrote "@Image 1 , cold" — a completion the
+    // author asked for to name a picture, punctuating their sentence for them (raised on review).
+    assert.equal(next.text, "A face lit by @Image 1, cold");
+    assert.equal(next.caret, 22);
+    assert.equal(next.text.slice(0, next.caret), "A face lit by @Image 1");
+  });
+
+  it("puts no space in front of punctuation that closes", () => {
+    for (const [after, expected] of [
+      [", cold", "@Image 1, cold"],
+      [".", "@Image 1."],
+      [")", "@Image 1)"],
+      [": low light", "@Image 1: low light"],
+      ["; then", "@Image 1; then"],
+    ] as const) {
+      const text = `@im${after}`;
+      assert.equal(insertMention(text, mentionQueryAt(text, 3)!, "Image 1").text, expected, after);
+    }
+  });
+
+  it("still leaves one where the next word needs it", () => {
+    assert.equal(insertMention("@im", mentionQueryAt("@im", 3)!, "Image 1").text, "@Image 1 ");
+    const text = "@imcold";
+    assert.equal(insertMention(text, mentionQueryAt(text, 3)!, "Image 1").text, "@Image 1 ");
   });
 
   it("inserts exactly one mention, at the query, from a bare @", () => {
@@ -129,7 +151,7 @@ describe("what the words look like afterwards (issue 476)", () => {
     assert.deepEqual(query, { start: 7, query: "Im" });
     assert.equal(mentionQueryEnd(text, query!), 15);
     const next = insertMention(text, query!, "Image 2");
-    assert.equal(next.text, "lit by @Image 2 , cold");
+    assert.equal(next.text, "lit by @Image 2, cold");
     assert.equal(benchMentionsIn(next.text).length, 1);
   });
 
@@ -187,6 +209,37 @@ describe("what the menu may offer (issue 476)", () => {
     const rows = mentionOptions(["Video 2"], sources);
     assert.deepEqual(rows, [{ token: "Video 2", kind: "video", name: "Video 2", meta: "" }]);
   });
+
+  it("offers one row per name, however many lanes the picture rides (review, issue 476)", () => {
+    // A shot's reference lane and its keyframe lane are checked separately when attaching, so
+    // one picture can sit in both — and two identical rows share one React key.
+    const rows = mentionOptions(["Image 1", "Image 1"], sources);
+    assert.deepEqual(
+      rows.map((r) => r.token),
+      ["Image 1"],
+    );
+  });
+});
+
+describe("a rewrite that lost a citation (issue 476)", () => {
+  it("names what went, once, in the order the ask made them", () => {
+    assert.deepEqual(
+      droppedMentions("@Image 1 beside @Audio 1 and @Image 1", "a picture beside @Audio 1"),
+      ["Image 1"],
+    );
+  });
+
+  it("counts a citation flattened into plain words as gone", () => {
+    assert.deepEqual(droppedMentions("lit like @Image 2", "lit like Image 2"), ["Image 2"]);
+  });
+
+  it("says nothing of a rewrite that kept them, wherever it moved them to", () => {
+    assert.deepEqual(droppedMentions("@Image 1 and @Audio 1", "@Audio 1, then @Image 1, closer"), []);
+  });
+
+  it("says nothing of an ask that cited nothing", () => {
+    assert.deepEqual(droppedMentions("a rusted tide-clock", "a rusted tide-clock, lit low"), []);
+  });
 });
 
 describe("a citation nothing answers for (issue 476)", () => {
@@ -235,6 +288,24 @@ describe("a citation nothing answers for (issue 476)", () => {
       benchMentionsIn("@Image 10, then @Image 2.").map((m) => m.token),
       ["Image 10", "Image 2"],
     );
+  });
+
+  it("stops at a word-suffix the editor treats as part of the query (review, issue 476)", () => {
+    // The editor's query word carries "._-", so it offers no completion for these; the gate must
+    // not recognise a prefix of one as a citation and refuse the sentence over it.
+    for (const text of ["@Image 1_extra", "@Image 1.foo", "@Image 1-more"]) {
+      assert.deepEqual(benchMentionsIn(text), [], text);
+    }
+  });
+
+  it("but a full stop that ends a sentence still ends a citation", () => {
+    for (const text of ["cite @Image 1.", "cite @Image 1. Then more", "cite @Image 1-"]) {
+      assert.deepEqual(
+        benchMentionsIn(text).map((m) => m.token),
+        ["Image 1"],
+        text,
+      );
+    }
   });
 
   it("agrees with the editor about where a citation may start", () => {

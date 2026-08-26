@@ -536,6 +536,51 @@ describe("citations in the brief (issue 476)", () => {
     }
   });
 
+  it("names each citation by the place its picture takes on the wire (review, issue 476)", async () => {
+    // Two pictures attached, the FIRST then taken off. The author still sees "@Image 2", because
+    // a session token is never renumbered — but the provider is handed one image and counts from
+    // one. Sent as written, the prompt asked a model with a single picture to look at its second.
+    const { dir, store } = await open();
+    await fileImage(dir, "first.png", newId("ar"), `sha256:${"a".repeat(64)}`);
+    await fileImage(dir, "second.png", newId("ar"), `sha256:${"b".repeat(64)}`);
+    await store.reload();
+    const idOf = (file: string) => store.getBundle().artifacts.find((a) => a.file === file)!.id;
+    let opened = await freshBench(dir);
+    for (const file of ["first.png", "second.png"]) {
+      const outcome = await addBenchReference(opened, store.getBundle(), IMAGE_MODEL, {
+        source: { source: "artifact", artifactId: idOf(file) },
+        requestId: `add-${file}`,
+        at: CLOCK(),
+      });
+      assert.equal(outcome.outcome, "added", `${file}: ${JSON.stringify(outcome)}`);
+      // Allocation reads the session it is handed, so the second add needs the first one folded
+      // in — otherwise both claim Image 1 and the case under test never arises.
+      opened = (await refolded(opened))!;
+    }
+    await opened.store.append({ type: "reference-removed", token: "Image 1" }, { at: CLOCK() });
+    await opened.store.append(
+      { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "lit like @Image 2, cold" },
+      { at: CLOCK() },
+    );
+    const session = (await opened.store.fold())!;
+    assert.deepEqual(session.composer.activeTokens, ["Image 2"]);
+    const plan = planBenchDispatch(session, store.getBundle(), MANIFEST, {
+      worldId: store.worldId,
+      requestId: "r1",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+    if (plan.ok) {
+      // The words the provider reads name the one image it is handed.
+      assert.equal(plan.inputs[0]!.params.prompt, "lit like @Image 1, cold");
+      assert.deepEqual(plan.inputs[0]!.params.references, ["artifacts/second.png"]);
+      // The author's own words are what the take remembers, so a re-run redoes this arithmetic
+      // against the snapshot's own references rather than inheriting a renamed prompt.
+      assert.equal(plan.reserved[0]!.request.brief, "lit like @Image 2, cold");
+      assert.equal(plan.reserved[0]!.request.references[0]!.token, "Image 2");
+    }
+  });
+
   it("reads no citation where the editor would have offered none (review, issue 476)", async () => {
     // Unbounded, these were both read as "@Image 1" and refused as stale citations — the worst
     // kind of refusal, because the words the author is told to fix were never meant as one.

@@ -65,8 +65,19 @@ export function mentionQueryAt(text: string, caret: number): MentionQuery | null
   return { start, query };
 }
 
-/** One character of a query word — the run a half-typed name is finished through. */
-const WORD = /[\p{L}\p{N}._-]/u;
+/** A letter or a digit — the body of a query word. */
+const ALNUM = /[\p{L}\p{N}]/u;
+/** Joins two halves of one word, and only then: "harbour-night.png" is a name, "@im." is not. */
+const JOINER = /[._-]/;
+
+/**
+ * Characters that close rather than follow, so a name completed in front of one gets no space.
+ *
+ * Completing "@im" in "a face lit by @im, cold" wrote "@Image 1 , cold" — a space before the
+ * comma, in the author's own sentence, put there by a completion they only asked to name a
+ * picture (raised on review). The same held for every full stop, colon and closing bracket.
+ */
+const CLOSERS = new Set([",", ".", ";", ":", "!", "?", ")", "]", "}", '"', "'", "…", "—", "–", "/"]);
 
 /**
  * Where the citation being written ENDS, which is not always the caret.
@@ -87,7 +98,21 @@ export function mentionQueryEnd(text: string, query: MentionQuery): number {
   const whole = benchMentionsIn(text).find((m) => m.start === query.start);
   if (whole !== undefined && whole.end > caret) return whole.end;
   let end = caret;
-  while (end < text.length && WORD.test(text[end] ?? "")) end += 1;
+  while (end < text.length) {
+    const here = text[end] ?? "";
+    if (ALNUM.test(here)) {
+      end += 1;
+      continue;
+    }
+    // A dot joins a filename to its extension and ends a sentence, and only the next character
+    // says which. Taking it either way left "@im." completing to "@Image 1 ." — the full stop
+    // pushed off the end of the sentence it belonged to.
+    if (JOINER.test(here) && ALNUM.test(text[end + 1] ?? "")) {
+      end += 1;
+      continue;
+    }
+    break;
+  }
   return end;
 }
 
@@ -125,7 +150,8 @@ function rank(option: MentionOption, needle: string): number {
  * Everything either side of the citation is untouched — a completion is an edit to the citation
  * being written and to nothing else. It replaces the whole of it, not merely as far as the
  * caret, so a name re-entered halfway through is corrected rather than doubled. A single space
- * follows, unless the words already have one there, so writing simply carries on.
+ * follows so writing carries on, but only where a space belongs: never before punctuation that
+ * closes, and never where the words already have one.
  */
 export function insertMention(
   text: string,
@@ -135,11 +161,29 @@ export function insertMention(
   const end = mentionQueryEnd(text, query);
   const mention = benchMentionFor(token);
   const rest = text.slice(end);
-  const gap = rest.startsWith(" ") || rest.startsWith("\n") ? "" : " ";
+  const next = rest[0];
+  const gap = next !== undefined && (/\s/.test(next) || CLOSERS.has(next)) ? "" : " ";
   return {
     text: `${text.slice(0, query.start)}${mention}${gap}${rest}`,
     caret: query.start + mention.length + gap.length,
   };
+}
+
+/**
+ * The citations an answer lost, in the order the ask made them.
+ *
+ * The enhancer is told to keep every one verbatim; this is what happens when it did not. A
+ * rewrite that dropped one, or flattened it into plain words, has changed what the brief means
+ * — the reference it named will not be cited, and the composer must say so rather than applying
+ * the words as though nothing had gone.
+ */
+export function droppedMentions(sent: string, answer: string): string[] {
+  const kept = new Set(benchMentionsIn(answer).map((m) => m.token));
+  const lost: string[] = [];
+  for (const { token } of benchMentionsIn(sent)) {
+    if (!kept.has(token) && !lost.includes(token)) lost.push(token);
+  }
+  return lost;
 }
 
 /** What a menu row needs, from the same picker rows the reference tiles are drawn from. */
@@ -162,7 +206,13 @@ export function mentionOptions(
   sources: readonly MentionSource[],
 ): MentionOption[] {
   const rows: MentionOption[] = [];
+  // One row per name. A picture may ride the reference lane and the keyframe lane at once —
+  // attaching checks only the lane it is going to — and offering it twice is two identical rows
+  // under one React key, which reconciles the wrong one the moment either lane changes.
+  const once = new Set<string>();
   for (const token of attached) {
+    if (once.has(token)) continue;
+    once.add(token);
     const parsed = parseBenchToken(token);
     if (parsed === null) continue;
     const source = sources.find((candidate) => candidate.existingToken === token);
