@@ -212,6 +212,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       "POST",
       "/api/session",
       location ? { location: { directory: wireDirectory(location) } } : {},
+      { signal: input.signal },
     );
     const sessionId = session?.id ?? "";
     if (!sessionId) throw new Error("OpenCode v2 did not return a session id");
@@ -226,7 +227,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
     // backing carried (the `build` fallback that silently ate turns). 204 on success;
     // confirmation arrives as session.agent.selected on the stream.
     if (input.agent) {
-      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent });
+      await this.http.req("POST", `/api/session/${sessionId}/agent`, { agent: input.agent }, { signal: input.signal });
     }
     this.sessions.set(sessionId, {
       purpose: input.purpose,
@@ -405,6 +406,26 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
     const sessionId = this.permissionSessions.get(decision.permissionId);
     if (!sessionId) return { permissionId: decision.permissionId, status: "stale" };
+    const confirmation = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.turnListeners.delete(listener);
+        resolve(false);
+      }, 3_000);
+      (timer as { unref?: () => void }).unref?.();
+      const listener = (event: HarnessEvent) => {
+        if (
+          event.type === "permission.replied" &&
+          event.sessionId === sessionId &&
+          event.permissionId === decision.permissionId &&
+          event.decision === decision.decision
+        ) {
+          clearTimeout(timer);
+          this.turnListeners.delete(listener);
+          resolve(true);
+        }
+      };
+      this.turnListeners.add(listener);
+    });
     try {
       // The contracts' verbs are v2's verbs — once | always | reject — and the optional
       // message carries the refusal reason to the agent (issue 327 §6).
@@ -418,21 +439,7 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
       return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
     }
     // Confirmation comes only from the replied event, never HTTP status; wait briefly.
-    const confirmed = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.turnListeners.delete(listener);
-        resolve(false);
-      }, 3_000);
-      (timer as { unref?: () => void }).unref?.();
-      const listener = (event: HarnessEvent) => {
-        if (event.type === "permission.replied" && event.permissionId === decision.permissionId) {
-          clearTimeout(timer);
-          this.turnListeners.delete(listener);
-          resolve(true);
-        }
-      };
-      this.turnListeners.add(listener);
-    });
+    const confirmed = await confirmation;
     if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
   }

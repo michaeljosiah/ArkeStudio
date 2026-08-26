@@ -12,11 +12,14 @@ describe("permission backstops", () => {
         p1: {
           actionClass: "future-tool",
           description: "The agent wants to use a capability Studio does not recognise yet",
+          rememberable: false,
         },
       },
     });
     const html = renderToString(<PermissionBackstops />);
     assert.match(html, /does not recognise yet/);
     assert.match(html, /Allow once/);
+    assert.doesNotMatch(html, /Always allow/);
+    assert.match(html, /aria-live="assertive"/);
   });
 });

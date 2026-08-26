@@ -272,7 +272,12 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
-import { AuthoringService, settlePendingPermission, settlePermission } from "./harness/authoring.js";
+import {
+  AuthoringService,
+  describeActionClass,
+  settlePendingPermission,
+  settlePermission,
+} from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
@@ -655,7 +660,8 @@ export class Coordinator {
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
-  private readonly pendingPermissions = new Map<string, string>();
+  private readonly pendingPermissions = new Map<string, { actionClass: string; rememberable: boolean }>();
+  private readonly settlingPermissions = new Set<string>();
   /** Unconfirmed automatic decisions retry without turning a denied action into a user prompt. */
   private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
@@ -1243,6 +1249,15 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
+      getInitialEvents: () =>
+        [...this.pendingPermissions].map(([permissionId, permission]) => ({
+          at: new Date().toISOString(),
+          type: "permission.pending" as const,
+          permissionId,
+          actionClass: permission.actionClass,
+          description: describeActionClass(permission.actionClass),
+          rememberable: permission.rememberable,
+        })),
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1637,36 +1652,44 @@ export class Coordinator {
     if (adapter && this.grants) {
       const grants = this.grants;
       const handlePermission = async (request: PermissionRequest, recordDefect: boolean): Promise<void> => {
-        const settlement = await settlePermission(
-          adapter,
-          grants,
-          (e) => this.emit(e),
-          request,
-          recordDefect
-            ? (defect) =>
-                this.appLog?.append({
-                  level: "warn",
-                  event: "harness.permission-confinement-defect",
-                  ...defect,
-                })
-            : undefined,
-        );
-        if (settlement === "retry") {
-          if (this.stopping) return;
-          if (this.permissionRetryTimers.has(request.permissionId)) return;
-          const timer = setTimeout(() => {
-            this.permissionRetryTimers.delete(request.permissionId);
-            if (!this.stopping) void handlePermission(request, false);
-          }, 1_000);
-          timer.unref?.();
-          this.permissionRetryTimers.set(request.permissionId, timer);
-          return;
+        if (this.settlingPermissions.has(request.permissionId)) return;
+        this.settlingPermissions.add(request.permissionId);
+        try {
+          const settlement = await settlePermission(
+            adapter,
+            grants,
+            (e) => this.emit(e),
+            request,
+            recordDefect
+              ? (defect) =>
+                  this.appLog?.append({
+                    level: "warn",
+                    event: "harness.permission-confinement-defect",
+                    ...defect,
+                  })
+              : undefined,
+          );
+          if (settlement === "retry") {
+            if (this.stopping) return;
+            if (this.permissionRetryTimers.has(request.permissionId)) return;
+            const timer = setTimeout(() => {
+              this.permissionRetryTimers.delete(request.permissionId);
+              if (!this.stopping) void handlePermission(request, false);
+            }, 1_000);
+            timer.unref?.();
+            this.permissionRetryTimers.set(request.permissionId, timer);
+            return;
+          }
+          const retry = this.permissionRetryTimers.get(request.permissionId);
+          if (retry) clearTimeout(retry);
+          this.permissionRetryTimers.delete(request.permissionId);
+          if (settlement === "pending") {
+            const rememberable = adapter.assessPermission?.(request)?.status === "allowed";
+            this.pendingPermissions.set(request.permissionId, { actionClass: request.actionClass, rememberable });
+          } else this.pendingPermissions.delete(request.permissionId);
+        } finally {
+          this.settlingPermissions.delete(request.permissionId);
         }
-        const retry = this.permissionRetryTimers.get(request.permissionId);
-        if (retry) clearTimeout(retry);
-        this.permissionRetryTimers.delete(request.permissionId);
-        if (settlement === "pending") this.pendingPermissions.set(request.permissionId, request.actionClass);
-        else this.pendingPermissions.delete(request.permissionId);
       };
       void (async () => {
         try {
@@ -8100,22 +8123,28 @@ export class Coordinator {
       case "permission-reply": {
         const adapter = this.opts.adapter;
         if (!adapter) return;
-        const actionClass = this.pendingPermissions.get(msg.permissionId);
-        if (!actionClass) return;
-        const settlement = await settlePendingPermission(adapter, this.grants, {
-          permissionId: msg.permissionId,
-          actionClass,
-          decision: msg.decision,
-        });
-        if (settlement === "retry") return;
-        this.pendingPermissions.delete(msg.permissionId);
-        this.emit({
-          at: new Date().toISOString(),
-          type: "permission.settled",
-          permissionId: msg.permissionId,
-          decision: msg.decision,
-          remembered: false,
-        });
+        const permission = this.pendingPermissions.get(msg.permissionId);
+        if (!permission || this.settlingPermissions.has(msg.permissionId)) return;
+        if (msg.decision === "always" && !permission.rememberable) return;
+        this.settlingPermissions.add(msg.permissionId);
+        try {
+          const settlement = await settlePendingPermission(adapter, this.grants, {
+            permissionId: msg.permissionId,
+            actionClass: permission.actionClass,
+            decision: msg.decision,
+          });
+          if (settlement === "retry") return;
+          this.pendingPermissions.delete(msg.permissionId);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "permission.settled",
+            permissionId: msg.permissionId,
+            decision: msg.decision,
+            remembered: false,
+          });
+        } finally {
+          this.settlingPermissions.delete(msg.permissionId);
+        }
         return;
       }
     }

@@ -201,7 +201,9 @@ export class OpenCodeAdapter implements HarnessAdapter {
     };
     let sessionId: string;
     try {
-      const res = await this.http.req<{ data?: { id?: string }; id?: string }>("POST", "/api/session", body);
+      const res = await this.http.req<{ data?: { id?: string }; id?: string }>("POST", "/api/session", body, {
+        signal: input.signal,
+      });
       sessionId = res.data?.id ?? res.id ?? "";
     } catch {
       // Legacy generation: directory travels as a query parameter.
@@ -209,7 +211,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
         "POST",
         "/session",
         {},
-        input.cwd ? { directory: input.cwd } : {},
+        { ...(input.cwd ? { directory: input.cwd } : {}), signal: input.signal },
       );
       sessionId = res.id ?? "";
     }
@@ -405,6 +407,25 @@ export class OpenCodeAdapter implements HarnessAdapter {
   async respondToPermission(decision: PermissionDecision): Promise<PermissionAck> {
     const sessionId = this.permissionSessions.get(decision.permissionId);
     const body = { response: decision.decision, reply: decision.decision };
+    const confirmation = new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.turnListeners.delete(listener);
+        resolve(false);
+      }, 3_000);
+      const listener = (event: HarnessEvent) => {
+        if (
+          event.type === "permission.replied" &&
+          event.permissionId === decision.permissionId &&
+          event.decision === decision.decision &&
+          (sessionId === undefined || event.sessionId === sessionId)
+        ) {
+          clearTimeout(timer);
+          this.turnListeners.delete(listener);
+          resolve(true);
+        }
+      };
+      this.turnListeners.add(listener);
+    });
     try {
       if (sessionId) {
         await this.http.req(
@@ -421,20 +442,7 @@ export class OpenCodeAdapter implements HarnessAdapter {
       return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
     }
     // Confirmation comes only from the replied event, never HTTP status; wait briefly.
-    const confirmed = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.turnListeners.delete(listener);
-        resolve(false);
-      }, 3_000);
-      const listener = (event: HarnessEvent) => {
-        if (event.type === "permission.replied" && event.permissionId === decision.permissionId) {
-          clearTimeout(timer);
-          this.turnListeners.delete(listener);
-          resolve(true);
-        }
-      };
-      this.turnListeners.add(listener);
-    });
+    const confirmed = await confirmation;
     if (confirmed) this.permissionSessions.delete(decision.permissionId);
     return { permissionId: decision.permissionId, status: confirmed ? "confirmed" : "unconfirmed" };
   }

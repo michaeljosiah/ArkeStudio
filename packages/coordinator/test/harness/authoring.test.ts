@@ -162,6 +162,48 @@ function writingAdapter(target: string, bodies: string[], written: string[]): Ha
 }
 
 describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
+  it("counts session setup as active so a second start cannot enter the proposal", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = [];
+    const adapter = new MockHarnessAdapter();
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const create = adapter.createSession.bind(adapter);
+    adapter.createSession = async (input) => {
+      await wait;
+      return create(input);
+    };
+    const authoring = service(adapter, events);
+    const first = authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: proposal.id,
+      purpose: "authoring",
+      instruction: "first",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(authoring.isRunning(proposal.id), true);
+
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: proposal.id,
+      purpose: "authoring",
+      instruction: "second",
+    });
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "authoring.status" &&
+          event.proposalId === proposal.id &&
+          event.detail === "a session is already running on this proposal",
+      ),
+    );
+    release();
+    await first;
+    await store.close();
+  });
+
   it("writes the session config into the proposal, runs, and ends completed with the work kept", async () => {
     const { dir, store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];

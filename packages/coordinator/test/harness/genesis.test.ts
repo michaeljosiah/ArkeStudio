@@ -201,6 +201,37 @@ const DRAFT_JSON = JSON.stringify({
 });
 
 describe("genesis conversations in the sandbox (prototype 12a)", () => {
+  it("counts session setup as a running turn so a duplicate start is refused", async () => {
+    const dir = await tempDir("arke-genesis-");
+    const events: DomainEvent[] = [];
+    const adapter = talkingAdapter();
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const create = adapter.createSession.bind(adapter);
+    adapter.createSession = async (input) => {
+      await wait;
+      return create(input);
+    };
+    const genesis = new GenesisService(adapter, (event) => events.push(event), { sessionInput: (input) => input });
+
+    const first = genesis.run(dir, "gen-setup", "first");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(genesis.isRunning("gen-setup"), true);
+    await genesis.run(dir, "gen-setup", "second");
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "genesis.status" &&
+          event.genesisId === "gen-setup" &&
+          event.detail === "a turn is already running in this conversation",
+      ),
+    );
+    release();
+    await first;
+  });
+
   it("runs the world-author in the sandbox, records both turns, and surfaces the draft", async () => {
     const dir = await tempDir("arke-genesis-");
     const events: DomainEvent[] = [];

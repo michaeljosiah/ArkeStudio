@@ -27,6 +27,8 @@ interface Connection {
 
 export interface TransportOptions {
   getSnapshot(): ClientState;
+  /** Transient state that must be replayed after a fresh snapshot, such as held permissions. */
+  getInitialEvents?(): DomainEvent[];
   /** Client → coordinator messages, after the hello. */
   onMessage?: (msg: ClientMessage) => void;
   /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
@@ -166,6 +168,9 @@ export class Transport {
         // Whatever lastSeq the client saw, the answer is a fresh snapshot (D4).
         conn.helloed = true;
         this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state: this.opts.getSnapshot() });
+        for (const event of this.opts.getInitialEvents?.() ?? []) {
+          this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+        }
         return;
       }
       if (!conn.helloed) {
@@ -197,6 +202,9 @@ export class Transport {
     for (const conn of this.connections) {
       if (!conn.helloed) continue;
       this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state });
+      for (const event of this.opts.getInitialEvents?.() ?? []) {
+        this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+      }
     }
   }
 

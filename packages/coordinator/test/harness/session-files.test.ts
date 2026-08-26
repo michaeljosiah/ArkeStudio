@@ -73,4 +73,30 @@ describe("session preparation lifetime", () => {
     await Promise.all([first, second]);
     assert.deepEqual(order, ["prepare:first", "create:first", "prepare:second", "create:second"]);
   });
+
+  it("bounds a session creation that never returns and releases the directory queue", async () => {
+    const adapter = {
+      id: "stuck",
+      capabilities: () => new Set(),
+      readiness: () => ({ ready: true }),
+      sessionFiles: () => [],
+      createSession: ({ signal }: CreateSessionInput) =>
+        new Promise<never>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true })),
+      async sendMessage() {
+        throw new Error("unused");
+      },
+      async dispatchAsync() {
+        throw new Error("unused");
+      },
+      streamEvents() {
+        return { [Symbol.asyncIterator]: async function* () {} };
+      },
+    } as HarnessAdapter;
+    const dir = await tempDir("arke-session-files-");
+
+    await assert.rejects(
+      createPreparedSession(adapter, dir, {}, { purpose: "authoring" }, 10),
+      /session creation timed out/,
+    );
+  });
 });

@@ -28,7 +28,7 @@ export interface GenesisOptions {
 }
 
 interface ActiveTurn {
-  sessionId: string;
+  sessionId: string | null;
   cancelled: boolean;
 }
 
@@ -153,6 +153,9 @@ export class GenesisService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    const run: ActiveTurn = { sessionId: null, cancelled: false };
+    this.turns.set(genesisId, run);
+    status("running");
 
     let sessionId = this.sessions.get(genesisId);
     const firstTurn = sessionId === undefined;
@@ -168,19 +171,17 @@ export class GenesisService {
         sessionId = session.sessionId;
         this.sessions.set(genesisId, sessionId);
       } catch (err) {
+        this.turns.delete(genesisId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
     }
+    run.sessionId = sessionId;
 
     // What the rail already holds, so we can tell a draft the agent updated from one it ignored.
     const draftBefore = await this.readDraft(dir);
 
     this.emit({ at: at(), type: "genesis.turn", genesisId, role: "user", text });
-
-    const run: ActiveTurn = { sessionId, cancelled: false };
-    this.turns.set(genesisId, run);
-    status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
     const tokenBudget =

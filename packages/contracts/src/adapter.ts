@@ -30,6 +30,8 @@ export interface CreateSessionInput {
   purpose: SessionPurpose;
   /** The one-use preparation returned by the coordinator's session-file step. */
   preparationId?: string;
+  /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
+  signal?: AbortSignal;
   /**
    * The working directory the session runs in — for authoring, the proposal directory, never
    * the world root (SPEC-005). Absolute path; the adapter scopes every request to it.

@@ -152,6 +152,56 @@ describe("Transport", () => {
     }
   });
 
+  it("replays held transient prompts immediately after the fresh snapshot", async () => {
+    const pending = {
+      at: "2026-08-01T10:00:00Z",
+      type: "permission.pending" as const,
+      permissionId: "p1",
+      actionClass: "future-tool",
+      description: "The agent wants to use a capability Studio does not recognise yet",
+      rememberable: false,
+    };
+    const transport = new Transport({ getSnapshot: () => STATE, getInitialEvents: () => [pending] });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello" });
+      await client.nextFrame(2);
+      assert.equal(client.frames[0]!.kind, "snapshot");
+      assert.deepEqual(client.frames[1], { kind: "event", seq: 2, event: pending });
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
+
+  it("replays held transient prompts after a broadcast snapshot too", async () => {
+    const pending = {
+      at: "2026-08-01T10:00:00Z",
+      type: "permission.pending" as const,
+      permissionId: "p1",
+      actionClass: "future-tool",
+      description: "The agent wants to use a capability Studio does not recognise yet",
+      rememberable: false,
+    };
+    const transport = new Transport({ getSnapshot: () => STATE, getInitialEvents: () => [pending] });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello" });
+      await client.nextFrame(2);
+      transport.broadcastSnapshot();
+      await client.nextFrame(4);
+      assert.equal(client.frames[2]!.kind, "snapshot");
+      assert.deepEqual(client.frames[3], { kind: "event", seq: 4, event: pending });
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
+
   it("routes non-hello messages to the coordinator only after hello", async () => {
     const seen: unknown[] = [];
     const transport = new Transport({ getSnapshot: () => STATE, onMessage: (m) => seen.push(m) });

@@ -31,7 +31,7 @@ export interface RunInput {
 }
 
 interface ActiveRun {
-  sessionId: string;
+  sessionId: string | null;
   cancelled: boolean;
 }
 
@@ -103,7 +103,7 @@ export class AuthoringService {
     if (!run) return;
     run.cancelled = true;
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-    if (interrupt) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
+    if (interrupt && run.sessionId) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
   }
 
   isRunning(proposalId: string): boolean {
@@ -164,6 +164,9 @@ export class AuthoringService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    const run: ActiveRun = { sessionId: null, cancelled: false };
+    this.runs.set(input.proposalId, run);
+    status("running");
     // A fresh instruction supersedes a stale Stop — without this, one cancelled turn would
     // silently disable the repair loop for the proposal's whole remaining life.
     if (input.repairTurn !== true) this.cancelledRepairs.delete(input.proposalId);
@@ -188,9 +191,16 @@ export class AuthoringService {
         sessionId = session.sessionId;
         this.sessions.set(input.proposalId, sessionId);
       } catch (err) {
+        this.runs.delete(input.proposalId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
+    }
+    run.sessionId = sessionId;
+    if (run.cancelled) {
+      this.runs.delete(input.proposalId);
+      status("cancelled", "cancelled by you");
+      return;
     }
 
     /*
@@ -206,10 +216,6 @@ export class AuthoringService {
       role: input.repairTurn === true ? "gate" : "user",
       text: input.instruction,
     });
-
-    const run: ActiveRun = { sessionId, cancelled: false };
-    this.runs.set(input.proposalId, run);
-    status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
     const tokenBudget =
@@ -402,6 +408,7 @@ export async function settlePermission(
     permissionId: request.permissionId,
     actionClass: request.actionClass,
     description: describeActionClass(request.actionClass),
+    rememberable: assessment.status === "allowed",
   });
   return "pending";
 }
