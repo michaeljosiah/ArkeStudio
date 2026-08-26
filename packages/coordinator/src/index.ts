@@ -64,6 +64,7 @@ export {
   measureMediaInfo,
   parseFfprobeJson,
   type MediaProbe,
+  type ProbeOptions,
 } from "./media/probe.js";
 export { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./references/png.js";
 export {

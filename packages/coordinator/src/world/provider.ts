@@ -1,4 +1,4 @@
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   BIBLE_PATH,
@@ -13,7 +13,7 @@ import { ProposalManager } from "../gate/proposals.js";
 import { AppIndex } from "../index-db/app-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import type { WorldProvider } from "../world-provider.js";
-import { atomicWriteFile } from "./atomic.js";
+import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
@@ -37,6 +37,23 @@ export interface CreateWorldInput {
   artDirection?: string;
   /** The through-line the founding conversation wrote. Absent means the world has no bible yet. */
   bible?: string;
+}
+
+/** Codes a held handle produces. The rename has already retried through them (issue 288). */
+const HELD_OPEN = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
+
+/**
+ * What the person who pressed Archive is told.
+ *
+ * A folder held open fails with a permissions code, and reporting that verbatim describes a
+ * problem nobody has — the world is not read-only, something is reading it. Anything else is
+ * reported as it came: a full disk or a missing folder is its own fault and its own message.
+ */
+function archiveFailure(err: unknown): Error {
+  if (HELD_OPEN.has((err as NodeJS.ErrnoException).code ?? "")) {
+    return new Error("something is still using that world's files — nothing moved, so try again in a moment");
+  }
+  return err instanceof Error ? err : new Error(String(err));
 }
 
 export interface FsWorldProviderOptions {
@@ -446,10 +463,39 @@ export class FsWorldProvider implements WorldProvider {
    *
    * The store is closed first. Windows will not move a directory holding an open SQLite index,
    * and the failure it gives for that reads as a permissions problem, which it is not.
+   *
+   * Closing is not on its own enough, because the app is not the only thing that can be holding
+   * the folder (issue 288). A media probe is a child process reading an artifact, and Defender
+   * and the search indexer take transient handles on anything in a user profile. So the move
+   * goes through the same backoff every other exclusive-access operation here uses, and a world
+   * that still will not move is *reopened* before the failure is reported: it was closed in order
+   * to be archived, it was not archived, and leaving it closed but still in the library would
+   * strand the screen on a world nothing has open.
    */
   async archiveWorld(worldId: string): Promise<{ folder: string }> {
     const dir = await this.findWorldDir(worldId);
-    if (this.store?.worldId === worldId) await this.closeStore();
+    const wasOpen = this.store?.worldId === worldId;
+    if (wasOpen) await this.closeStore();
+    try {
+      const target = await this.moveToArchive(dir);
+      this.appIndex?.removeWorld(worldId);
+      return { folder: target };
+    } catch (err) {
+      // Reopened before the throw, so the refusal the user reads describes a library that is
+      // still exactly as it was. Every step after the close is inside this — making `archive/`
+      // and reading it can fail too, and a world left closed by one of those is stranded just
+      // as thoroughly as one left closed by the rename.
+      //
+      // Never during shutdown: there is no screen left to strand, and reopening behind a close
+      // that has already released the lock would leave the process holding a world it has no
+      // remaining opportunity to put down.
+      if (wasOpen && !this.closing) await this.loadWorld(worldId).catch(() => {});
+      throw archiveFailure(err);
+    }
+  }
+
+  /** `archive/<slug>`, or a stamped name when something is already there. Returns where it went. */
+  private async moveToArchive(dir: string): Promise<string> {
     const archiveRoot = join(this.appRoot, "archive");
     await mkdir(toExtendedLength(archiveRoot), { recursive: true });
 
@@ -463,9 +509,11 @@ export class FsWorldProvider implements WorldProvider {
     } catch {
       /* nothing there under that name — the plain one will do */
     }
-    await rename(toExtendedLength(dir), toExtendedLength(target));
-    this.appIndex?.removeWorld(worldId);
-    return { folder: target };
+    // The same backoff as every other exclusive-access operation on a world (D7): Defender, the
+    // search indexer and a media probe all take handles nobody asked them to hold, and each is
+    // gone a moment later.
+    await renameWithRetry(dir, target);
+    return target;
   }
 
   /** Media file types the renderer may fetch — nothing else is servable. */

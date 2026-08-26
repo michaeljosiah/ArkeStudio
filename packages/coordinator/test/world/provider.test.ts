@@ -479,4 +479,46 @@ describe("archiving a world", () => {
     await stat(join(folder, "world.json"));
     await provider.close();
   });
+
+  it("reopens the world it closed when the move does not happen (issue 288)", async () => {
+    // The store is closed so the folder can move. When it does not move — a probe or an indexer
+    // holding a file open, or `archive/` being unusable, as here — the world has to come back:
+    // it is still in the library, the refusal says so, and a library whose selected world is
+    // open nowhere is the one state no screen can describe.
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+    await provider.loadWorld(world.worldId);
+    // A file where the archive folder belongs: nothing can be moved into it, on any platform.
+    await writeFile(join(root, "archive"), "not a folder");
+
+    await assert.rejects(provider.archiveWorld(world.worldId));
+    assert.equal(provider.openStore()?.worldId, world.worldId, "the world it closed is open again");
+    await stat(join(root, "worlds", "the-undersong", "world.json"));
+    assert.deepEqual(
+      (await provider.listWorlds()).map((w) => w.worldId),
+      [world.worldId],
+      "and the library still lists it",
+    );
+    await provider.close();
+  });
+
+  it("says a world is in use rather than reporting a permissions problem (issue 288)", async () => {
+    // EPERM is what Windows answers for a directory somebody has a handle inside, and reporting
+    // that verbatim describes a problem the person does not have. The retry has already run by
+    // the time this is written, so it is the answer for a handle that stayed.
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: CLOCK });
+    const [world] = await provider.listWorlds();
+    assert.ok(world);
+    const held = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+    held.code = "EPERM";
+    const provider_ = provider as unknown as { moveToArchive: () => Promise<string> };
+    provider_.moveToArchive = async () => {
+      throw held;
+    };
+    await assert.rejects(provider.archiveWorld(world.worldId), /still using that world's files/);
+    await provider.close();
+  });
 });
