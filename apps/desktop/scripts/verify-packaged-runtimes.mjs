@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 
@@ -75,6 +76,12 @@ export default async function verifyPackagedRuntimes(context) {
     if (!existsSync(join(resources, "fonts", fontFile))) {
       throw new Error(`resources/fonts is missing ${fontFile} — export slates cannot rely on host fonts`);
     }
+  }
+  const packagedFontHash = createHash("sha256")
+    .update(readFileSync(join(resources, "fonts", "Geist-Regular.ttf")))
+    .digest("hex");
+  if (packagedFontHash !== "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117") {
+    throw new Error("resources/fonts/Geist-Regular.ttf does not match the reviewed v1.7.2 binary");
   }
 
   /*

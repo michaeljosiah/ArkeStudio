@@ -34,7 +34,7 @@ describe("the desktop export ffmpeg runner", () => {
     child.stderr.emit("data", Buffer.from("frame=1 time=00:00:12.00"));
     child.emit("exit", 0);
     await pending;
-    assert.deepEqual(calls, [{ file: "C:\\ffmpeg.exe", args: ["-i", "C:\\a world\\clip.mp4"] }]);
+    assert.deepEqual(calls, [{ file: "C:\\ffmpeg.exe", args: ["-hide_banner", "-i", "C:\\a world\\clip.mp4"] }]);
     assert.deepEqual(progress, [12]);
   });
 
@@ -46,7 +46,7 @@ describe("the desktop export ffmpeg runner", () => {
     ]) {
       const { child, spawn } = fakeSpawn();
       const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
-        [],
+        ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"],
         () => {},
         new AbortController().signal,
       );
@@ -60,6 +60,18 @@ describe("the desktop export ffmpeg runner", () => {
     const { child, spawn } = fakeSpawn();
     const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run([], () => {}, new AbortController().signal);
     child.stderr.emit("data", Buffer.from("No such file or directory"));
+    child.emit("exit", 2);
+    await assert.rejects(pending, /ffmpeg exited 2/);
+  });
+
+  it("does not mistake the ffmpeg configuration banner for a font failure", async () => {
+    const { child, spawn } = fakeSpawn();
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+      ["-i", "missing.mp4"],
+      () => {},
+      new AbortController().signal,
+    );
+    child.stderr.emit("data", Buffer.from("configuration: --enable-libfreetype\nmissing.mp4: No such file"));
     child.emit("exit", 2);
     await assert.rejects(pending, /ffmpeg exited 2/);
   });

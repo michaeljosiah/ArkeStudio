@@ -33,7 +33,7 @@ const CLIP = {
 };
 
 describe("spine export", () => {
-  const font = "C:\\Program Files\\Arke Studio\\fonts\\Geist-Regular.ttf";
+  const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
   it("quantises boundaries so error cannot accumulate across a long cut", () => {
     // Sixty contiguous 1.02s segments: rounding each length independently makes a 61.2s song
     // export as 60s, truncated by its own -t.
@@ -74,7 +74,17 @@ describe("spine export", () => {
     );
     const graph = filtersOf(buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font));
     assert.match(graph, /drawtext=expansion=none:/);
-    assert.match(graph, /fontfile='C\\:\/Program Files\/Arke Studio\/fonts\/Geist-Regular\.ttf'/);
+    const escaped = String.raw`C\\:/Users/D\\\'Angelo/Arke Studio\, Inc\; Stable \[x64\]/Geist-Regular.ttf`;
+    assert.ok(graph.includes(`fontfile=${escaped}`), `expected escaped font path in ${graph}`);
+  });
+
+  it("refuses a non-Latin slate label the redistributed face cannot render", () => {
+    const plan = buildSpineExportPlan(
+      cutOf([{ kind: "slate", startSec: 0, endSec: 4, label: "SHOT 2 · 海", shotId: "sh_2" }], 4),
+      "review-cut",
+      "a/m.mp3",
+    );
+    assert.throws(() => buildSpineFfmpegArgs(plan, "/w", "/o.mp4", font), /cannot render "海" \(U\+6D77\)/);
   });
 
   it("drops a segment too short to be a frame", () => {

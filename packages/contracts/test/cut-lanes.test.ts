@@ -185,7 +185,7 @@ describe("which clips are known to carry sound", () => {
 });
 
 describe("the arguments sound produces", () => {
-  const font = "C:\\Program Files\\Arke Studio\\fonts\\Geist-Regular.ttf";
+  const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
   const argsFor = (
     overlays: Parameters<typeof buildExportPlan>[2],
     audio: Parameters<typeof buildExportPlan>[3],
@@ -195,8 +195,20 @@ describe("the arguments sound produces", () => {
   it("pins every slate to the redistributed font with Windows filter escaping", () => {
     const slateCut = { entries: [{ durationSec: 6, label: "SHOT 1", media: null }], totalSec: 6 } as unknown as DerivedCut;
     const graph = graphOf(buildFfmpegArgs(buildExportPlan(slateCut, "review-cut"), "/w", "/out.mp4", font));
-    assert.match(graph, /drawtext=fontfile='C\\:\/Program Files\/Arke Studio\/fonts\/Geist-Regular\.ttf':text=/);
+    const escaped = String.raw`C\\:/Users/D\\\'Angelo/Arke Studio\, Inc\; Stable \[x64\]/Geist-Regular.ttf`;
+    assert.ok(
+      graph.includes(`drawtext=fontfile=${escaped}:text=`),
+      `expected escaped font path in ${graph}`,
+    );
     assert.doesNotMatch(graph, /drawtext=text=/, "host font discovery is never the fallback");
+  });
+
+  it("refuses a slate label the redistributed face would render as missing-glyph boxes", () => {
+    const slateCut = { entries: [{ durationSec: 6, label: "SHOT 1 · 海", media: null }], totalSec: 6 } as unknown as DerivedCut;
+    assert.throws(
+      () => buildFfmpegArgs(buildExportPlan(slateCut, "review-cut"), "/w", "/out.mp4", font),
+      /cannot render "海" \(U\+6D77\).*SHOT 1/,
+    );
   });
 
   it("emits no audio map at all when nothing placed carries sound", () => {
