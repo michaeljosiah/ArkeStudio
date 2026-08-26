@@ -294,7 +294,16 @@ export const PRESETS: Record<ExportPreset, { width: number; height: number; fps:
 
 export type ExportItem =
   | { type: "clip"; path: string; inSec?: number; outSec?: number; durationSec: number; label: string }
-  | { type: "slate"; label: string; durationSec: number };
+  | { type: "slate"; label: string; durationSec: number }
+  /**
+   * Ground for a production that orders no picture (issue 453): black, and silent about it.
+   *
+   * Distinct from a slate rather than a slate with an empty label, because the two say opposite
+   * things. A slate names work the story asked for and nobody has delivered; this names nothing,
+   * because nothing was asked for — the clips are the film. Rendering the same black rectangle is
+   * a coincidence, and folding them together would make "unfinished" and "finished" identical.
+   */
+  | { type: "black"; durationSec: number };
 
 /**
  * One overlay, in the exporter's terms (82a): a file, a window, and whether it is a still.
@@ -318,6 +327,58 @@ export interface ExportPlan {
   /** Mixed under the whole film, each delayed to its own window. */
   audio: ExportAudioClip[];
   totalSec: number;
+}
+
+// ---------------------------------------------------------------------------
+// A production that is only media (issue 453)
+// ---------------------------------------------------------------------------
+
+/*
+ * A production with no story still has a film: whatever somebody placed on a lane.
+ *
+ * The picture stays derived for a production that HAS a story — there is still exactly one answer
+ * to what such a film is (R-14, D9), and none of this touches it. What it adds is the case that
+ * derivation has nothing to work from: no scenes, so no shots, so no clock. Until now that meant
+ * no timeline at all, because the ruler's only source was the sum of shot durations and every
+ * gesture refuses at zero — you could not drop the first clip, which made the empty state a dead
+ * end rather than a beginning.
+ *
+ * Two lengths, deliberately, because they answer different questions. The CANVAS is how much
+ * timeline to draw: it has to extend past the last clip or there is nowhere to drop the next one.
+ * The FILM is how long the thing actually is, and trailing empty canvas is not part of it — an
+ * export that padded to the canvas would end in black nobody asked for, and would grow every time
+ * the canvas did.
+ */
+
+/** Room to work in before anything is placed. A canvas of zero cannot be dropped onto. */
+export const MEDIA_CANVAS_MIN_SEC = 60;
+
+/** Space kept past the last clip, so there is always somewhere to drop the next one. */
+export const MEDIA_CANVAS_HEADROOM_SEC = 15;
+
+/**
+ * True when the production orders no picture of its own, so the clips ARE the film.
+ *
+ * Read off the derived cut rather than the production, because that is what both callers already
+ * hold, and because "no entries" is the precise condition — a production with scenes that hold no
+ * shots derives nothing either, and wants the same treatment as one with no scenes at all.
+ */
+export function isMediaOnly(cut: DerivedCut): boolean {
+  return cut.entries.length === 0;
+}
+
+/**
+ * How far the placed work reaches. Picture and sound both count: a bed laid past the last picture
+ * is still part of the film, and cutting the film short of it would silently discard what someone
+ * placed.
+ */
+export function placedExtentSec(placed: readonly { endSec: number }[]): number {
+  return placed.reduce((furthest, one) => Math.max(furthest, one.endSec), 0);
+}
+
+/** How much timeline to draw: the work, plus somewhere to put the next thing. */
+export function mediaCanvasSec(placed: readonly { endSec: number }[]): number {
+  return Math.max(MEDIA_CANVAS_MIN_SEC, placedExtentSec(placed) + MEDIA_CANVAS_HEADROOM_SEC);
 }
 
 /** Which artifact kinds are picture. A document is not a frame; audio has no picture to lay. */
@@ -419,6 +480,25 @@ export function buildExportPlan(
   overlays: readonly ExportOverlay[] = [],
   audio: readonly ExportAudioClip[] = [],
 ): ExportPlan {
+  /*
+   * Nothing derived, so the placed work is the whole film (issue 453): one black bed as long as
+   * the furthest thing reaches, with the clips laid over it exactly as they are laid over a
+   * derived picture. The overlay and audio machinery below needs no special case — it already
+   * works in absolute time and has never known what a shot is.
+   *
+   * An empty plan cannot be the answer here: `concat=n=0` is not a filter graph, so a production
+   * with no story would fail the encode rather than export what it has.
+   */
+  if (isMediaOnly(cut)) {
+    const film = placedExtentSec([...overlays, ...audio]);
+    return {
+      preset,
+      items: film > 0 ? [{ type: "black" as const, durationSec: film }] : [],
+      overlays: [...overlays],
+      audio: [...audio],
+      totalSec: film,
+    };
+  }
   const items: ExportItem[] = cut.entries.map((entry) => {
     if (entry.media) {
       return {
@@ -471,6 +551,11 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
       filters.push(
         `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps},tpad=stop_mode=clone:stop_duration=${slot},trim=duration=${slot},setpts=PTS-STARTPTS[v${inputIndex}]`,
       );
+    } else if (item.type === "black") {
+      // Ground for a production with no story (issue 453). The same source a slate is drawn on
+      // and nothing written on it: there is no missing work to name, so naming it would be a lie.
+      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      filters.push(`[${inputIndex}:v]null[v${inputIndex}]`);
     } else {
       args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
       assertSlateLabelSupported(item.label);
