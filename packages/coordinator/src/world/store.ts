@@ -539,18 +539,24 @@ export class WorldStore {
   /** Seed the current committed snapshot when adopting a world that predates history tracking. */
   private async ensureCurrentHistorySnapshots(): Promise<void> {
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
-    for (const [portablePath, hash] of Object.entries(this.scan.manifest)) {
-      if (unresolved.has(portablePath)) continue;
-      if (historyDirectory(portablePath) === null) continue;
-      const content = await this.readEntity(portablePath);
-      if (content === null || sha256(content) !== hash) continue;
-      const snapshot = historySnapshot(portablePath, content);
-      if (snapshot === null) continue;
-      const existing = await this.readEntity(snapshot.path);
-      if (existing === null) await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
-      else if (existing !== content) {
-        throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
-      }
+    const seeds = Object.entries(this.scan.manifest)
+      .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
+      .map(async ([portablePath, hash]) => {
+        const content = await this.readEntity(portablePath);
+        if (content === null || sha256(content) !== hash) return;
+        const snapshot = historySnapshot(portablePath, content);
+        if (snapshot === null) return;
+        const existing = await this.readEntity(snapshot.path);
+        if (existing === null) await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+        else if (existing !== content) {
+          throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
+        }
+      });
+    // A failed open must not release the world lock while another seed is still writing.
+    const results = await Promise.allSettled(seeds);
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failure) {
+      throw failure.reason;
     }
   }
 
