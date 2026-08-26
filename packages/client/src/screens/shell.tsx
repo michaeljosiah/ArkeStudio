@@ -3734,7 +3734,13 @@ export function ActivityScreen() {
     }
     return null;
   };
-  const spend = state ? spendSummary(state.app.ledger, state.app.spend?.settings.periodDays ?? 7, new Date()) : null;
+  // Spend obeys the screen's scope like every other collection here (issue 305 §8). Bench jobs
+  // omit productionId but keep worldId, so their ledger entries are world-owned already; what was
+  // missing was reading that. The threshold alert below stays app-wide deliberately — it is one
+  // durable app setting about one app-wide rolling total, not a per-world figure.
+  const spend = state
+    ? spendSummary(scoped(state.app.ledger), state.app.spend?.settings.periodDays ?? 7, new Date())
+    : null;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);
   const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));
