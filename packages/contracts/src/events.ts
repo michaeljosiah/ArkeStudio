@@ -32,6 +32,7 @@ import {
   SpendStatusSchema,
 } from "./settings.js";
 import { SetupStatusSchema } from "./setup.js";
+import { VendorAuthStatusSchema } from "./vendor-auth.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import {
   RankedVoiceSchema,
@@ -864,6 +865,11 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   z
     .object({ ...base, type: z.literal("provider.tool-status"), tools: z.array(ProviderToolStatusSchema) })
     .strict(),
+  /**
+   * The vendor sign-in surface, whole each time (SPEC-030). Whole deliberately: a renderer
+   * that merged patches could hold a vendor list no harness ever reported.
+   */
+  z.object({ ...base, type: z.literal("vendor-auth.status"), auth: VendorAuthStatusSchema }).strict(),
   /** Routing defaults or their faults changed (SPEC-008 R-20, §2.7). */
   z
     .object({
