@@ -77,7 +77,13 @@ describe("the desktop export ffmpeg runner", () => {
   });
 
   it("does not mistake an unrelated media path containing font for a slate failure", async () => {
-    for (const path of ["C:/world/font-reference-missing.mp4", "C:/Users/Fontaine/missing.mp4"]) {
+    for (const path of [
+      "C:/world/font-reference-missing.mp4",
+      "C:/Users/Fontaine/missing.mp4",
+      "C:/world/drawtext-reference-missing.mp4",
+      "C:/world/fontfile-reference-missing.mp4",
+      "C:/Users/Freetype/missing.mp4",
+    ]) {
       const { child, spawn } = fakeSpawn();
       const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
         ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate", "-i", path],
@@ -88,6 +94,19 @@ describe("the desktop export ffmpeg runner", () => {
       child.emit("exit", 2);
       await assert.rejects(pending, /ffmpeg exited 2/);
     }
+  });
+
+  it("recognizes an explicit Fontconfig diagnostic split across stderr chunks", async () => {
+    const { child, spawn } = fakeSpawn();
+    const pending = createExportFfmpegRunner("ffmpeg", "font.ttf", spawn, () => true).run(
+      ["-filter_complex", "drawtext=fontfile=font.ttf:text=slate"],
+      () => {},
+      new AbortController().signal,
+    );
+    child.stderr.emit("data", Buffer.from("Fontconfig "));
+    child.stderr.emit("data", Buffer.from("error: Cannot load default config file\n"));
+    child.emit("exit", 2);
+    await assert.rejects(pending, /could not draw an export slate with the bundled font/);
   });
 
   it("names the observed Windows drawtext crash even when it exits before diagnostics", async () => {
