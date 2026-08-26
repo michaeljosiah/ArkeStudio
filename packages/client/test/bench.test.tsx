@@ -247,6 +247,42 @@ describe("citing a reference in the brief (issue 476)", () => {
   });
 });
 
+describe("a reference picked from a character (issue 505)", () => {
+  /** The fixture kit's accepted identity, attached as the session's only image. */
+  const CHARACTER_PHOTO = "references/maren-kest/head-front.png";
+
+  const withCharacterReference = (): ClientState => {
+    const base = stateWithBench();
+    const session = base.bench!.session;
+    return {
+      ...base,
+      bench: {
+        worldId: FIXTURE_WORLD_ID,
+        session: {
+          ...session,
+          composer: { ...session.composer, brief: "Her face at the harbour.", activeTokens: ["Image 1"] },
+          tokenRegistry: [
+            {
+              token: "Image 1",
+              kind: "image",
+              source: { source: "world-file", path: CHARACTER_PHOTO, hash: "sha256:cafebabe" },
+            },
+          ],
+        },
+      },
+    };
+  };
+
+  it("the tile shows the picture, not the word missing", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, withCharacterReference());
+    // The tile resolves its token across every lane the picker offers, characters included —
+    // the same list the mention menu reads, so the two cannot disagree about one reference.
+    assert.match(html, /alt="Image 1"/);
+    assert.match(html, /references\/maren-kest\/head-front\.png/);
+    assert.doesNotMatch(html, /fy-bench__takestate">missing/);
+  });
+});
+
 describe("the Artifacts door (issue 305 §2)", () => {
   it("carries Generate, and the made-here count appears only when a bench artifact exists", () => {
     const plain = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, FIXTURE_STATE);
