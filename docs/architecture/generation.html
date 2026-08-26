@@ -582,11 +582,9 @@ ines-half-hitch, the-saltmarket — dropping perrin-tallow
           </div>
         </div>
         <p>
-          A recipe is a fixed thing, not a workshop: no graph editor, no importing someone else's
-          workflow. It is also a promise about what it will need, so each names the exact model files
-          and add-ons it depends on, down to a fingerprint of the contents, checked immediately before
-          every dispatch. A file that does not match what the recipe pinned switches the recipe off
-          with that as the reason, rather than producing a picture from something else.
+          A recipe is a fixed thing, not a workshop, and it is a promise about what it will need.
+          <a href="#comfyui">The engine underneath</a> — how it gets onto the machine, how it is
+          held, and what changes when it is one you run yourself — is the next section.
         </p>
         <p>
           Speech and dictation run separately, through a small supervised helper Arke starts on your
@@ -594,6 +592,135 @@ ines-half-hitch, the-saltmarket — dropping perrin-tallow
           push-to-talk dictation into any chat box. Cloud speech does not go through it — that takes
           the ordinary road, through the queue, with an errand number and a ledger line, so there is
           exactly one path where money is concerned.
+        </p>
+      </section>
+
+      <section id="comfyui">
+        <div class="eyebrow">The local engine</div>
+        <h2>ComfyUI, held at arm's length</h2>
+        <p class="lede">
+          Every local picture, clip and cloned voice line is made by ComfyUI — an open-source engine
+          with a node-graph editor and a large following. Arke uses it and never shows it to you.
+        </p>
+        <p>
+          That distance is the whole design. ComfyUI's power is that anything can be wired to
+          anything; a production tool cannot offer that and also promise a picture made the same way
+          twice. So Arke treats the engine as a component with a job, the way it treats a media
+          encoder — something that must be present, correct and answering, and is otherwise not your
+          problem.
+        </p>
+
+        <h4>Three ways an engine gets here</h4>
+        <p>
+          Arke resolves one engine, and the order is fixed: a URL you gave beats an install folder
+          you chose, which beats the copy Arke fetched for itself. Choosing nothing is a valid state
+          and reads as <em>Not installed</em>, not as an error.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h3><span class="pill pill--yes">managed</span> Arke's own copy</h3>
+            <p>
+              A pinned build of the official portable release, fetched on demand, checked against a
+              fingerprint before it is unpacked, and installed as one whole folder — an interrupted
+              download is never mistaken for an engine. Arke starts it, watches it and stops it with
+              the app. About 2 GB to fetch and 6 GB on disk, almost none of which is ComfyUI: it is
+              an embedded Python with the graphics libraries.
+            </p>
+          </div>
+          <div class="card">
+            <h3><span class="pill pill--part">your folder</span> An install you point at</h3>
+            <p>
+              A portable install you already have. Arke starts and watches it exactly as it does its
+              own copy, and still writes nothing into it — a folder you own is never modified. If it
+              has no embedded Python for Arke to launch, Arke says so and asks you to run it yourself
+              and give it the address instead.
+            </p>
+          </div>
+          <div class="card">
+            <h3><span class="pill pill--part">your URL</span> One already running</h3>
+            <p>
+              An engine you started, on this machine or another. Arke only ever asks it questions —
+              it is never started, restarted or stopped by Arke, because it was not Arke's to begin
+              with. This is the escape hatch for a setup Arke does not manage.
+            </p>
+          </div>
+        </div>
+        <p class="note">
+          Detection is an offer, never a decision. Arke looks at the usual folders and the usual
+          port, and lists what it found beside a <em>Use this install</em> button. Finding something
+          does not adopt it, and does not take away the option of the managed copy — only choosing it
+          does.
+        </p>
+
+        <h4>What being held actually means</h4>
+        <p>
+          When the engine is Arke's to run — its own copy, or a folder you chose — Arke starts it on
+          a loopback port picked at launch, so it is reachable from this machine and nowhere else,
+          and two engines can never fight over one port. It waits for the engine to say what version
+          it is before treating it as ready, refuses anything older than the floor the recipes need,
+          and thereafter asks every fifteen seconds. Three unanswered asks and the engine is replaced
+          rather than left sitting there looking ready. The whole thing is disposed with the app.
+        </p>
+        <p>
+          It is also started with a deliberately small environment rather than everything Arke has.
+          That is not tidiness. Two things follow from it:
+        </p>
+        <dl class="kv">
+          <dt>no keys</dt>
+          <dd>
+            Your paid provider keys are not in the engine's environment, so no add-on running inside
+            it can read them.
+          </dd>
+          <dt>no quiet fetching</dt>
+          <dd>
+            The model-download switches every Python machine-learning library reads are turned off.
+            An add-on that would otherwise fetch a few gigabytes mid-render fails instead — because a
+            generation is not an installer, and a download must be a thing you agreed to.
+          </dd>
+        </dl>
+        <p>
+          One more flag matters: the engine is told not to write its metadata into the pictures it
+          saves. A ComfyUI output normally carries the entire graph that made it, embedded in the
+          file. Arke's recipes are its own, and a take you hand to someone is a picture, not a
+          workflow to lift.
+        </p>
+
+        <h4>The recipe is the unit, not the graph</h4>
+        <p>
+          What sits in the model picker is a <strong>recipe</strong>: one fixed graph Arke wrote,
+          with a handful of labelled slots — a prompt, a size, a length. There is no graph editor, no
+          importing someone else's workflow, and no node names anywhere in the interface. Swapping a
+          checkpoint is not a setting.
+        </p>
+        <p>
+          Every recipe also declares exactly what it needs — each model file with its size and
+          fingerprint, and each add-on pinned to one immutable version. Two numbers are frozen onto
+          every job at the moment you press the button: one for the graph, one for everything it
+          depends on. A job that outlives an app update is therefore still readable as the thing it
+          was sent as, and a recipe that has since changed is refused rather than quietly re-run
+          against a newer graph.
+        </p>
+
+        <h4>The model files</h4>
+        <p>
+          The engine ships; the weights do not. They are large — about 6.5 GB for stills, about
+          17 GB for video — and which of them you want is a decision about your disk, so each recipe's
+          files are offered on the recipe's own row and fetched only when you ask.
+        </p>
+        <p>
+          They are described in exactly one place, the recipe itself, and everything downstream reads
+          from that: what is offered, what is fetched, and what is checked. Each file streams to a
+          temporary name, is fingerprinted, and only takes its real name if it matches — so a
+          half-finished download is never mistaken for a model. A file you already have is
+          recognised where it sits and left alone. Before any of it starts, Arke measures the free
+          space <em>on the drive the files are actually going to</em>, which is frequently not the
+          drive Arke is on, and refuses with both figures rather than dying two-thirds of the way
+          through.
+        </p>
+        <p class="note">
+          There is a <em>Repair</em> beside the download for the one case a retry cannot answer: a
+          file that arrived whole, sits there looking complete, and is not the bytes the recipe
+          pinned. Retry trusts what is on disk. Repair throws it away and fetches it again.
         </p>
 
         <h4>Readiness, checked before you press anything</h4>
@@ -613,6 +740,74 @@ ines-half-hitch, the-saltmarket — dropping perrin-tallow
           <em>unknown</em> and dispatches anyway: refusing on a machine that would have worked costs
           you the feature, while allowing one that then refuses in a quarter of a second costs you a
           click.
+        </p>
+
+        <h4>What the URL gives up</h4>
+        <p>
+          Connecting to an engine you run yourself works, and for some setups it is the only thing
+          that will. It is worth being plain about what Arke can no longer do for you when it is not
+          holding the engine:
+        </p>
+        <div class="scroller">
+          <table>
+            <tr><th>&nbsp;</th><th>Arke runs it</th><th>You run it, Arke connects</th></tr>
+            <tr>
+              <td><strong>Interrupted work</strong></td>
+              <td>A stopped engine took its queue with it, and Arke can prove the replacement is a
+                different process — so the work is simply run again, free.</td>
+              <td>The engine outlived Arke. Whether your job is still in there is unknowable, so a
+                job caught mid-flight waits on your decision rather than being duplicated.</td>
+            </tr>
+            <tr>
+              <td><strong>Seeing the files</strong></td>
+              <td>Arke knows where the models are, because it put them there.</td>
+              <td>Arke cannot see the engine's disk. Until you map the models folder, recipes that
+                need a model file stay off — unverifiable, not assumed fine.</td>
+            </tr>
+            <tr>
+              <td><strong>Hardware limits</strong></td>
+              <td>The card measured is the card that will do the work.</td>
+              <td>For anything not on this machine, the local card describes nothing. Hardware reads
+                <em>unknown</em> and the dispatch is allowed to try.</td>
+            </tr>
+            <tr>
+              <td><strong>Keys and downloads</strong></td>
+              <td>Started with no provider keys in reach and quiet model-fetching switched off.</td>
+              <td>Started by you, with whatever environment you gave it.</td>
+            </tr>
+            <tr>
+              <td><strong>Version and add-ons</strong></td>
+              <td>A known build, pinned. Add-ons a recipe needs are Arke's to install.</td>
+              <td>Whatever you have. A recipe naming a node your engine lacks stays off, and the
+                remedy is yours to carry out.</td>
+            </tr>
+            <tr>
+              <td><strong>A dead engine</strong></td>
+              <td>Noticed within seconds and restarted, up to a limit, then reported.</td>
+              <td>Noticed and reported. Restarting it is not Arke's to do.</td>
+            </tr>
+            <tr>
+              <td><strong>Where the work happens</strong></td>
+              <td>This machine. Nothing leaves it.</td>
+              <td>Wherever that address points. A non-loopback address is labelled
+                <strong>remote</strong> throughout, because a voice clip going to another machine is
+                a different act from one that stays.</td>
+            </tr>
+          </table>
+        </div>
+        <p>
+          None of that makes the URL a lesser citizen — it is the same picker, the same queue, the
+          same ledger line at zero. It is a trade: you keep an engine you control, and Arke stops
+          being able to promise things that depend on having put it there.
+        </p>
+
+        <h4>Not built yet</h4>
+        <p>
+          Two gaps, stated rather than discovered. <strong>Local · Cloned Voice</strong> names an
+          add-on and a set of model files that are not yet published as fixed, fingerprinted
+          downloads, so the recipe is switched off with exactly that as its reason — an empty list of
+          dependencies would be a lie, not a shortcut. And the managed copy is a Windows build for
+          NVIDIA cards; on any other machine the engine has to be one you run and point Arke at.
         </p>
       </section>
 
