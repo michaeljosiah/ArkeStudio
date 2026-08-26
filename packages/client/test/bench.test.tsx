@@ -792,6 +792,29 @@ describe("the strip shows a video take's first frame", () => {
   });
 });
 
+/**
+ * The one list, kept one (issue 505).
+ *
+ * The tiles resolved a token against world + session while the mention menu resolved it against
+ * world + session + characters, so a character's photo read `missing` on the tile the menu one
+ * line below named. `tokenSources` fixed that; `carriedForPicker` is now type-guarded against a
+ * caller passing a partial list, but the three lookups inside the screen are not — nothing stops
+ * the next one being written as its own concatenation again.
+ *
+ * That the tile renders the picture is pinned above, where it can be seen. This pins the shape
+ * underneath it, at the only place the tile-menu agreement can be read at all: the menu is a
+ * popover, shut in a server render, so no rendered assertion can catch the two drifting apart.
+ */
+describe("every token lookup on the bench reads one list", () => {
+  it("names the memo rather than rebuilding a list of its own", () => {
+    const source = readFileSync(new URL("../src/screens/bench.tsx", import.meta.url), "utf8");
+    const lookups = [...source.matchAll(/(\S+)\.find\(\(s\) => s\.existingToken === token\)/g)].map((m) => m[1]);
+    assert.equal(lookups.length, 2, "the reference tile and the keyframe tile");
+    for (const list of lookups) assert.equal(list, "tokenSources");
+    assert.match(source, /mentionOptions\(attachedTokens, tokenSources\)/);
+  });
+});
+
 describe("the poster convention", () => {
   it("is spelled the same on both sides of the wire", () => {
     // The coordinator writes the file and the client asks for it. Two regexes in two packages
