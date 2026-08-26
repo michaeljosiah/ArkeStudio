@@ -24,7 +24,7 @@ const COLD_MS = 5 * 60_000;
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Leave a real interrupted commit on disk: journal in `prepared`, snapshots and staging written,
+ * Leave a real interrupted commit on disk: journal in `planning`, snapshots and staging written,
  * nothing live touched. This is the state a kill mid-commit leaves, and the state recovery is
  * entitled to resolve — once it owns the world.
  */
@@ -77,7 +77,7 @@ describe("world ownership: recovery runs under the lock (R-3, R-15)", () => {
 
     assert.equal(
       await journalPhase(dir, commitId),
-      "prepared",
+      "planning",
       "the refused opener left the owner's journal exactly as it found it",
     );
     assert.ok(
@@ -103,7 +103,7 @@ describe("world ownership: recovery runs under the lock (R-3, R-15)", () => {
 
     const store = await WorldStore.open(dir, { clock: CLOCK });
     closeOnCleanup(() => store.close().catch(() => {}));
-    assert.equal(await journalPhase(dir, commitId), null, "the prepared journal was rolled back");
+    assert.equal(await journalPhase(dir, commitId), null, "the planning journal was rolled back");
     assert.equal(await readFile(join(dir, "characters/maren-kest.md"), "utf8"), sheet, "wholly old, byte for byte");
     assert.deepEqual(store.getBundle().problems, [], "a resolved world reports nothing");
     await store.close();
@@ -118,7 +118,7 @@ describe("world ownership: a read-only open resolves nothing (R-15)", () => {
     const store = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
     closeOnCleanup(() => store.close().catch(() => {}));
 
-    assert.equal(await journalPhase(dir, commitId), "prepared", "a read-only open renames nothing");
+    assert.equal(await journalPhase(dir, commitId), "planning", "a read-only open renames nothing");
     assert.equal(await readFile(join(dir, "characters/maren-kest.md"), "utf8"), sheet, "the world is untouched");
     assert.equal(
       await stat(join(dir, LOCK_FILE)).then(

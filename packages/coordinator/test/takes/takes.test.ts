@@ -9,7 +9,7 @@ import {
   type ExportPlan,
   type Job,
 } from "@arke-studio/contracts";
-import { tempDir } from "../tmp.js";
+import { closeOnCleanup, tempDir } from "../tmp.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/export.js";
@@ -23,6 +23,7 @@ const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 async function open() {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir, { clock: CLOCK });
+  closeOnCleanup(() => store.close());
   return { dir, store };
 }
 
@@ -146,17 +147,16 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
 
     await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
-    // The user trims into the footage they selected.
-    const withTrim = JSON.parse(
-      await readFile(join(dir, "productions/saltlight/selections.json"), "utf8"),
-    ) as Record<string, { acceptedTakeId?: string; trimInSec?: number }>;
-    withTrim["sh_12"] = { ...withTrim["sh_12"], trimInSec: 4.25 };
-    await writeFile(
-      join(dir, "productions/saltlight/selections.json"),
-      JSON.stringify(withTrim, null, 2),
-      "utf8",
-    );
-    await store.reload();
+    // Inject the legacy backing-pass state this regression protects; setTrim no longer offers it.
+    await store.ownedWrite(async () => {
+      const path = join(dir, "productions/saltlight/selections.json");
+      const withTrim = JSON.parse(await readFile(path, "utf8")) as Record<
+        string,
+        { acceptedTakeId?: string; trimInSec?: number }
+      >;
+      withTrim["sh_12"] = { ...withTrim["sh_12"], trimInSec: 4.25 };
+      await writeFile(path, JSON.stringify(withTrim, null, 2), "utf8");
+    });
 
     // Re-accepting the same take changes nothing about the footage, so the in-point stands.
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
@@ -443,6 +443,7 @@ describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
     map["sh_13"] = { ...map["sh_13"], trimInSec: 99 };
     await writeFile(path, JSON.stringify(map, null, 2), "utf8");
     await store.reload();
+    await store.reconcileExternalEdit("productions/saltlight/selections.json");
 
     const entry = deriveCut(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!)
       .entries.find((e) => e.shot.id === "sh_13")!;
