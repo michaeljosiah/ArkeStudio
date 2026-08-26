@@ -77,7 +77,41 @@ import { QueueToaster } from "./components/queue-toaster.js";
 import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
 import { dismissPlayback } from "./lib/audio.js";
-import { useUpdateStatus } from "./lib/store.js";
+import { replyToPermission, usePermissions, useUpdateStatus } from "./lib/store.js";
+import { Button, Callout } from "./components/ui.js";
+
+export function PermissionBackstops() {
+  const permissions = Object.entries(usePermissions());
+  if (permissions.length === 0) return null;
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      style={{
+        position: "fixed",
+        top: "var(--space-4)",
+        right: "var(--space-4)",
+        zIndex: 80,
+        maxWidth: 520,
+        maxHeight: "calc(100vh - var(--space-8))",
+        overflowY: "auto",
+      }}
+    >
+      {permissions.map(([id, permission]) => (
+        <Callout key={id} tone="warning" title="The drafting agent is asking permission">
+          {permission.description}. This is the backstop, not the gate. Nothing lands in a world without your accept.
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+            <Button variant="primary" onClick={() => replyToPermission(id, "once")}>Allow once</Button>
+            {permission.rememberable ? (
+              <Button onClick={() => replyToPermission(id, "always")}>Always allow</Button>
+            ) : null}
+            <Button variant="ghost" onClick={() => replyToPermission(id, "reject")}>Reject</Button>
+          </div>
+        </Callout>
+      ))}
+    </div>
+  );
+}
 
 export function UpdateTransition() {
   const update = useUpdateStatus();
@@ -114,6 +148,7 @@ export function App() {
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
       <QueueToaster />
+      <PermissionBackstops />
       <PlayerDock />
       <UpdateTransition />
       <Routes>

@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { writeSessionFiles, type SessionInput } from "./harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -17,6 +17,7 @@ import {
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
+  type PermissionRequest,
   type HealthComponent,
   buildExportPlan,
   exportAudioClips,
@@ -271,7 +272,12 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
-import { AuthoringService, settlePermission } from "./harness/authoring.js";
+import {
+  AuthoringService,
+  describeActionClass,
+  settlePendingPermission,
+  settlePermission,
+} from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
@@ -654,7 +660,10 @@ export class Coordinator {
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
   private comfyUiLifecycleWork: Promise<void> = Promise.resolve();
   /** actionClass per pending permission id, for remember-on-always (R-16). */
-  private readonly pendingPermissions = new Map<string, string>();
+  private readonly pendingPermissions = new Map<string, { actionClass: string; rememberable: boolean }>();
+  private readonly settlingPermissions = new Set<string>();
+  /** Unconfirmed automatic decisions retry without turning a denied action into a user prompt. */
+  private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
@@ -1240,6 +1249,15 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
+      getInitialEvents: () =>
+        [...this.pendingPermissions].map(([permissionId, permission]) => ({
+          at: new Date().toISOString(),
+          type: "permission.pending" as const,
+          permissionId,
+          actionClass: permission.actionClass,
+          description: describeActionClass(permission.actionClass),
+          rememberable: permission.rememberable,
+        })),
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1633,15 +1651,59 @@ export class Coordinator {
     const adapter = this.opts.adapter;
     if (adapter && this.grants) {
       const grants = this.grants;
+      const handlePermission = async (request: PermissionRequest, recordDefect: boolean): Promise<void> => {
+        if (this.settlingPermissions.has(request.permissionId)) return;
+        this.settlingPermissions.add(request.permissionId);
+        try {
+          const settlement = await settlePermission(
+            adapter,
+            grants,
+            (e) => this.emit(e),
+            request,
+            recordDefect
+              ? (defect) =>
+                  this.appLog?.append({
+                    level: "warn",
+                    event: "harness.permission-confinement-defect",
+                    ...defect,
+                  })
+              : undefined,
+          );
+          if (settlement === "retry") {
+            if (this.stopping) return;
+            if (this.permissionRetryTimers.has(request.permissionId)) return;
+            const timer = setTimeout(() => {
+              this.permissionRetryTimers.delete(request.permissionId);
+              if (!this.stopping) void handlePermission(request, false);
+            }, 1_000);
+            timer.unref?.();
+            this.permissionRetryTimers.set(request.permissionId, timer);
+            return;
+          }
+          const retry = this.permissionRetryTimers.get(request.permissionId);
+          if (retry) clearTimeout(retry);
+          this.permissionRetryTimers.delete(request.permissionId);
+          if (settlement === "pending") {
+            const rememberable = adapter.assessPermission?.(request)?.status === "allowed";
+            this.pendingPermissions.set(request.permissionId, { actionClass: request.actionClass, rememberable });
+          } else this.pendingPermissions.delete(request.permissionId);
+        } finally {
+          this.settlingPermissions.delete(request.permissionId);
+        }
+      };
       void (async () => {
         try {
           for await (const event of adapter.streamEvents()) {
             if (event.type === "permission.requested") {
-              this.pendingPermissions.set(event.permissionId, event.actionClass);
-              await settlePermission(adapter, grants, (e) => this.emit(e), {
-                permissionId: event.permissionId,
-                actionClass: event.actionClass,
-              });
+              await handlePermission(
+                {
+                  sessionId: event.sessionId,
+                  permissionId: event.permissionId,
+                  actionClass: event.actionClass,
+                  ...(event.detail !== undefined ? { detail: event.detail } : {}),
+                },
+                true,
+              );
             }
           }
         } catch {
@@ -8061,21 +8123,28 @@ export class Coordinator {
       case "permission-reply": {
         const adapter = this.opts.adapter;
         if (!adapter) return;
-        const actionClass = this.pendingPermissions.get(msg.permissionId);
-        if (msg.decision === "always" && actionClass && this.grants) {
-          await this.grants.remember(actionClass, new Date().toISOString());
+        const permission = this.pendingPermissions.get(msg.permissionId);
+        if (!permission || this.settlingPermissions.has(msg.permissionId)) return;
+        if (msg.decision === "always" && !permission.rememberable) return;
+        this.settlingPermissions.add(msg.permissionId);
+        try {
+          const settlement = await settlePendingPermission(adapter, this.grants, {
+            permissionId: msg.permissionId,
+            actionClass: permission.actionClass,
+            decision: msg.decision,
+          });
+          if (settlement === "retry") return;
+          this.pendingPermissions.delete(msg.permissionId);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "permission.settled",
+            permissionId: msg.permissionId,
+            decision: msg.decision,
+            remembered: false,
+          });
+        } finally {
+          this.settlingPermissions.delete(msg.permissionId);
         }
-        this.pendingPermissions.delete(msg.permissionId);
-        await adapter
-          .respondToPermission?.({ permissionId: msg.permissionId, decision: msg.decision })
-          .catch(() => {});
-        this.emit({
-          at: new Date().toISOString(),
-          type: "permission.settled",
-          permissionId: msg.permissionId,
-          decision: msg.decision,
-          remembered: false,
-        });
         return;
       }
     }
@@ -8587,17 +8656,9 @@ export class Coordinator {
           },
         });
         tokenByRun.set(runId, lease.token);
-        const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
         const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
-        if (this.opts.adapter) {
-          await writeSessionFiles(
-            this.opts.adapter,
-            cwd,
-            this.sessionInput(url ? { worldQueryUrl: url } : {}),
-          );
-        }
         return { cwd, leaseToken: lease.token };
       },
       release: async ({ conversationId, runId }) => {
@@ -8612,6 +8673,16 @@ export class Coordinator {
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
       receiptsFor: (runId) => receipts.get(runId) ?? [],
+      createSession: ({ cwd, runId }) => {
+        const token = tokenByRun.get(runId);
+        const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
+        return createPreparedSession(
+          this.opts.adapter!,
+          cwd,
+          this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          { purpose: "world-chat", agent: "world-builder" },
+        );
+      },
       runCheckPlan: async ({ draft, leaseToken }) => {
         const plan = planFor(draft);
         const produced: WorldChatCheckReceipt[] = [];
@@ -8910,6 +8981,8 @@ export class Coordinator {
       this.lifecycleDisposers.clear();
       for (const timer of this.lifecycleTimers) clearInterval(timer);
       this.lifecycleTimers.clear();
+      for (const timer of this.permissionRetryTimers.values()) clearTimeout(timer);
+      this.permissionRetryTimers.clear();
       for (const controller of this.reading.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused

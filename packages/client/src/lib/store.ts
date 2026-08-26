@@ -79,6 +79,7 @@ export interface AuthoringActivity {
 export interface PendingPermission {
   description: string;
   actionClass: string;
+  rememberable: boolean;
 }
 
 export interface CanonSearchState {
@@ -654,6 +655,9 @@ function handleFrame(json: string): void {
       state: frame.state,
       gateNotices,
       authoring,
+      // Snapshot replay is followed by current permission.pending events. Clear stale prompts
+      // first so a request that disappeared while the renderer was away does not survive reload.
+      permissions: {},
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceClips: changedWorld ? {} : current.voiceClips,
@@ -862,7 +866,11 @@ function handleFrame(json: string): void {
     } else if (event.type === "permission.pending") {
       permissions = {
         ...permissions,
-        [event.permissionId]: { description: event.description, actionClass: event.actionClass },
+        [event.permissionId]: {
+          description: event.description,
+          actionClass: event.actionClass,
+          rememberable: event.rememberable,
+        },
       };
     } else if (event.type === "permission.settled") {
       permissions = { ...permissions };

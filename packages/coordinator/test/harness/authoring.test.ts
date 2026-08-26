@@ -10,7 +10,7 @@ import {
   type HarnessEvent,
 } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { AuthoringService } from "../../src/harness/authoring.js";
+import { AuthoringService, settlePendingPermission } from "../../src/harness/authoring.js";
 import { GrantStore } from "../../src/harness/grants.js";
 import { settlePermission } from "../../src/harness/authoring.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -162,6 +162,48 @@ function writingAdapter(target: string, bodies: string[], written: string[]): Ha
 }
 
 describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
+  it("counts session setup as active so a second start cannot enter the proposal", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = [];
+    const adapter = new MockHarnessAdapter();
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const create = adapter.createSession.bind(adapter);
+    adapter.createSession = async (input) => {
+      await wait;
+      return create(input);
+    };
+    const authoring = service(adapter, events);
+    const first = authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: proposal.id,
+      purpose: "authoring",
+      instruction: "first",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(authoring.isRunning(proposal.id), true);
+
+    await authoring.run(store, gate, {
+      worldId: WORLD_ID,
+      proposalId: proposal.id,
+      purpose: "authoring",
+      instruction: "second",
+    });
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "authoring.status" &&
+          event.proposalId === proposal.id &&
+          event.detail === "a session is already running on this proposal",
+      ),
+    );
+    release();
+    await first;
+    await store.close();
+  });
+
   it("writes the session config into the proposal, runs, and ends completed with the work kept", async () => {
     const { dir, store, gate, proposal } = await setup();
     const events: DomainEvent[] = [];
@@ -476,14 +518,22 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     assert.equal(await second.covers("bash"), false, "revocation holds");
   });
 
-  it("settles covered requests silently and surfaces the rest in Studio language", async () => {
+  it("settles an allowed covered request silently and surfaces an allowed uncovered one", async () => {
     const root = await tempDir("arke-grants-");
     const grants = new GrantStore(root);
     await grants.remember("webfetch", CLOCK());
     const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ preparationId: "prep_allowed", researchWeb: true });
+    const session = await adapter.createSession({
+      purpose: "authoring",
+      cwd: root,
+      agent: "sheet-editor",
+      preparationId: "prep_allowed",
+    });
     const events: DomainEvent[] = [];
 
     await settlePermission(adapter, grants, (e) => events.push(e), {
+      sessionId: session.sessionId,
       permissionId: "p1",
       actionClass: "webfetch",
     });
@@ -492,10 +542,163 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
     assert.equal(settled.type === "permission.settled" && settled.remembered, true);
 
     await settlePermission(adapter, grants, (e) => events.push(e), {
+      sessionId: session.sessionId,
       permissionId: "p2",
-      actionClass: "bash",
+      actionClass: "edit",
     });
     const pending = events.findLast((e) => e.type === "permission.pending");
-    assert.equal(pending?.type === "permission.pending" && pending.description, "The agent wants to run a shell command");
+    assert.equal(pending?.type === "permission.pending" && pending.description, "The agent wants to edit a file");
+  });
+
+  it("rejects a remembered grant denied by the session confinement and records the defect", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    await grants.remember("edit", CLOCK());
+    const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ preparationId: "prep_denied" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_denied",
+    });
+    const events: DomainEvent[] = [];
+    const defects: Array<{ adapter: string; sessionId: string; reason: string }> = [];
+
+    const result = await settlePermission(
+      adapter,
+      grants,
+      (event) => events.push(event),
+      {
+        sessionId: session.sessionId,
+        permissionId: "p-denied",
+        actionClass: "edit",
+        detail: "C:/world/private.md",
+      },
+      (defect) => {
+        defects.push(defect);
+      },
+    );
+
+    assert.equal(result, "settled");
+    assert.deepEqual(adapter.permissionDecisions.at(-1), {
+      permissionId: "p-denied",
+      decision: "reject",
+      message: "Denied by Arke Studio's active confinement.",
+    });
+    assert.ok(!events.some((event) => event.type === "permission.pending"), "denial never reaches the prompt UI");
+    assert.deepEqual(events.at(-1), {
+      at: events.at(-1)!.at,
+      type: "permission.settled",
+      permissionId: "p-denied",
+      decision: "reject",
+      remembered: false,
+    });
+    assert.equal(defects.length, 1);
+    assert.equal(defects[0]!["reason"], "edit is denied by the active confinement");
+    assert.ok(!("actionClass" in defects[0]!), "raw harness action classes are not logged");
+    assert.ok(!("detail" in defects[0]!), "paths and harness resources are not logged");
+    assert.equal(await grants.covers("edit"), true, "the durable grant remains stored but inert");
+  });
+
+  it("does not apply a remembered grant to an action the adapter has not mapped", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    await grants.remember("future-tool", CLOCK());
+    const adapter = new MockHarnessAdapter();
+    adapter.prepareSession?.({ preparationId: "prep_unknown" });
+    const session = await adapter.createSession({
+      purpose: "authoring",
+      cwd: root,
+      agent: "sheet-editor",
+      preparationId: "prep_unknown",
+    });
+    const events: DomainEvent[] = [];
+
+    const result = await settlePermission(adapter, grants, (event) => events.push(event), {
+      sessionId: session.sessionId,
+      permissionId: "p-unknown",
+      actionClass: "future-tool",
+    });
+
+    assert.equal(result, "pending");
+    assert.equal(adapter.permissionDecisions.length, 0, "an unmapped action cannot be silently granted");
+    const pending = events.at(-1);
+    assert.equal(pending?.type, "permission.pending");
+    assert.equal(
+      pending?.type === "permission.pending" && pending.description,
+      "The agent wants to use a capability Studio does not recognise yet",
+    );
+  });
+
+  it("does not claim an automatic denial settled until the harness confirms it", async () => {
+    const root = await tempDir("arke-grants-");
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "unconfirmed";
+    adapter.prepareSession?.({ preparationId: "prep_unconfirmed" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_unconfirmed",
+    });
+    const events: DomainEvent[] = [];
+
+    const result = await settlePermission(adapter, new GrantStore(root), (event) => events.push(event), {
+      sessionId: session.sessionId,
+      permissionId: "p-unconfirmed",
+      actionClass: "edit",
+    });
+
+    assert.equal(result, "retry");
+    assert.equal(events.length, 0, "no settled or pending event is emitted without acknowledgement");
+  });
+
+  it("retires an automatic decision when the harness says the request is stale", async () => {
+    const root = await tempDir("arke-grants-");
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "stale";
+    adapter.prepareSession?.({ preparationId: "prep_stale" });
+    const session = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: root,
+      agent: "world-builder",
+      preparationId: "prep_stale",
+    });
+
+    const result = await settlePermission(adapter, new GrantStore(root), () => {}, {
+      sessionId: session.sessionId,
+      permissionId: "p-stale",
+      actionClass: "edit",
+    });
+    assert.equal(result, "gone");
+  });
+
+  it("remembers a visible always choice only after the harness confirms it", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "unconfirmed";
+
+    assert.equal(
+      await settlePendingPermission(adapter, grants, {
+        permissionId: "p-user",
+        actionClass: "future-tool",
+        decision: "always",
+      }),
+      "retry",
+    );
+    assert.equal(await grants.covers("future-tool"), false);
+
+    adapter.permissionAckStatus = "confirmed";
+    assert.equal(
+      await settlePendingPermission(adapter, grants, {
+        permissionId: "p-user",
+        actionClass: "future-tool",
+        decision: "always",
+      }),
+      "settled",
+    );
+    assert.equal(await grants.covers("future-tool"), true);
   });
 });

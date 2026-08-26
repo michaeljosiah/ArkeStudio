@@ -28,6 +28,10 @@ export type SessionPurpose = z.infer<typeof SessionPurpose>;
 
 export interface CreateSessionInput {
   purpose: SessionPurpose;
+  /** The one-use preparation returned by the coordinator's session-file step. */
+  preparationId?: string;
+  /** Bounds session creation; adapters SHALL pass it to every request on the creation path. */
+  signal?: AbortSignal;
   /**
    * The working directory the session runs in — for authoring, the proposal directory, never
    * the world root (SPEC-005). Absolute path; the adapter scopes every request to it.
@@ -79,6 +83,20 @@ export interface ModelInfo {
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
 export type PermissionVerb = z.infer<typeof PermissionVerb>;
 
+/** A harness permission ask, retaining the session whose confinement governs it. */
+export interface PermissionRequest {
+  sessionId: string;
+  permissionId: string;
+  actionClass: string;
+  detail?: string;
+}
+
+/** Whether the active session policy permits a remembered grant to settle this ask. */
+export type PermissionAssessment =
+  | { status: "allowed" }
+  | { status: "ask" }
+  | { status: "denied"; reason: string };
+
 export interface PermissionDecision {
   permissionId: string;
   decision: PermissionVerb;
@@ -89,7 +107,7 @@ export interface PermissionDecision {
  * The outcome of relaying a permission decision. Success is confirmed only by the matching
  * `permission.replied` event, never inferred from HTTP status.
  */
-export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "stale", "duplicate"]);
+export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "failed", "stale", "duplicate"]);
 export type PermissionAckStatus = z.infer<typeof PermissionAckStatus>;
 
 export interface PermissionAck {
@@ -213,6 +231,8 @@ export interface HarnessAdapter {
    * Called with the same input, immediately before that session's `createSession`.
    */
   prepareSession?(input: SessionConfigInput): void;
+  /** Forget a preparation whose file write or caller failed before session creation. */
+  abandonSessionPreparation?(preparationId: string): void;
 
   // ---- core ----
   createSession(input: CreateSessionInput): Promise<SessionRef>;
@@ -233,5 +253,7 @@ export interface HarnessAdapter {
   /** Async iterator of normalised, schema-validated harness events (capability: events). */
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent>;
   listModels?(): Promise<ModelInfo[]>;
+  /** Adapter-owned action vocabulary checked against the exact session's captured confinement. */
+  assessPermission?(request: PermissionRequest): PermissionAssessment;
   respondToPermission?(decision: PermissionDecision): Promise<PermissionAck>;
 }

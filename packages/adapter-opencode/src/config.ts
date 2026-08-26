@@ -8,6 +8,7 @@ import {
   type AgentConfinement,
   type SessionConfigInput,
 } from "@arke-studio/contracts";
+import { assessMappedPermission, type SessionPermissionPolicy } from "./permission-policy.js";
 
 /**
  * Session configuration written by Studio (SPEC-005 R-5, R-6, R-10, D5).
@@ -45,6 +46,14 @@ const V1_TOOLS: Partial<Record<ToolIntent, readonly string[]>> = {
  * refusal into a suggestion.
  */
 const V1_NEVER = ["bash"] as const;
+
+/** A runtime ask checked against the same vocabulary used to write v1's session config. */
+export function assessV1Permission(
+  policy: SessionPermissionPolicy | null | undefined,
+  actionClass: string,
+) {
+  return assessMappedPermission(policy, actionClass, V1_TOOLS, V1_NEVER);
+}
 
 /**
  * One confinement, rendered into v1's two parallel surfaces: `tools` decides what exists at all,

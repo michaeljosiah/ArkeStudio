@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter } from "@arke-studio/contracts";
@@ -56,8 +56,10 @@ export function makeAdapterExtractor(
     if (signal?.aborted) throw stopped();
     const sandbox = join(scratchRoot, `extract-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    await writeSessionFiles(adapter, sandbox, sessionInput({}));
-    const session = await adapter.createSession({ purpose: "extraction", cwd: sandbox, agent: "extraction" });
+    const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
+      purpose: "extraction",
+      agent: "canon-author",
+    });
     // Making the sandbox and opening the session takes long enough to be stopped inside — on a
     // slow machine, easily. Checked here so a stop during setup ends it before a turn is ever
     // dispatched, rather than starting one nobody is waiting for.

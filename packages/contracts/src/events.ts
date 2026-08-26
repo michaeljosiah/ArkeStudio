@@ -1117,6 +1117,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       /** What the agent is asking to do, already translated for the user. */
       description: z.string().min(1),
       actionClass: z.string().min(1),
+      /** Whether this known, allowed action may create a durable grant. */
+      rememberable: z.boolean(),
     })
     .strict(),
   z

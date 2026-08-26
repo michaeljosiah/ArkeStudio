@@ -68,6 +68,8 @@ export interface RunDeps {
     runId: RunId;
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
+  /** Atomically configure and create the harness session after preparation succeeds. */
+  createSession?: (input: { cwd: string; runId: RunId }) => Promise<{ sessionId: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
@@ -454,14 +456,17 @@ export class WorldChatRunner {
     }
 
     const linked = attachmentIds as readonly ChatAttachmentId[];
-    const { cwd, leaseToken } = await this.deps.prepare({
-      conversationId,
-      runId,
-      attachmentIds: linked,
-    });
-
+    let prepared = false;
     try {
-      const session = await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
+      const { cwd, leaseToken } = await this.deps.prepare({
+        conversationId,
+        runId,
+        attachmentIds: linked,
+      });
+      prepared = true;
+      const session = this.deps.createSession
+        ? await this.deps.createSession({ cwd, runId })
+        : await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
       const timeoutMs = this.deps.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
 
       const progress = this.deps.onProgress
@@ -572,7 +577,10 @@ export class WorldChatRunner {
       return { status: "failed", reason: safeDetail(err) };
     } finally {
       this.cancelling.delete(conversationId);
-      await this.deps.release({ conversationId, runId });
+      // `prepare` may fail after minting a lease; release is idempotent and owns partial cleanup.
+      await this.deps.release({ conversationId, runId }).catch((error) => {
+        if (prepared) throw error;
+      });
     }
   }
 

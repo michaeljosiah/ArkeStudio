@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { writeSessionFiles, type SessionInput } from "./session-files.js";
-import type { DomainEvent, HarnessAdapter } from "@arke-studio/contracts";
+import { createPreparedSession, type SessionInput } from "./session-files.js";
+import type { DomainEvent, HarnessAdapter, PermissionRequest } from "@arke-studio/contracts";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "../world/store.js";
@@ -31,7 +31,7 @@ export interface RunInput {
 }
 
 interface ActiveRun {
-  sessionId: string;
+  sessionId: string | null;
   cancelled: boolean;
 }
 
@@ -103,7 +103,7 @@ export class AuthoringService {
     if (!run) return;
     run.cancelled = true;
     const interrupt = (this.adapter as { interrupt?: (id: string) => Promise<void> }).interrupt;
-    if (interrupt) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
+    if (interrupt && run.sessionId) await interrupt.call(this.adapter, run.sessionId).catch(() => {});
   }
 
   isRunning(proposalId: string): boolean {
@@ -164,6 +164,9 @@ export class AuthoringService {
       status("failed", this.adapter.readiness().reason ?? "the harness is not ready");
       return;
     }
+    const run: ActiveRun = { sessionId: null, cancelled: false };
+    this.runs.set(input.proposalId, run);
+    status("running");
     // A fresh instruction supersedes a stale Stop — without this, one cancelled turn would
     // silently disable the repair loop for the proposal's whole remaining life.
     if (input.repairTurn !== true) this.cancelledRepairs.delete(input.proposalId);
@@ -175,19 +178,29 @@ export class AuthoringService {
     if (sessionId === undefined) {
       // Studio writes the session's configuration — roster, tool denials, the world-query MCP
       // registration — into the working directory (R-5). Never a credential (R-6).
-      await writeSessionFiles(this.adapter, proposalDir, this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}));
       try {
-        const session = await this.adapter.createSession({
-          purpose: input.purpose,
-          cwd: proposalDir,
-          agent: this.opts.agentForPurpose(input.purpose),
-        });
+        const session = await createPreparedSession(
+          this.adapter,
+          proposalDir,
+          this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+          {
+            purpose: input.purpose,
+            agent: this.opts.agentForPurpose(input.purpose),
+          },
+        );
         sessionId = session.sessionId;
         this.sessions.set(input.proposalId, sessionId);
       } catch (err) {
+        this.runs.delete(input.proposalId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
+    }
+    run.sessionId = sessionId;
+    if (run.cancelled) {
+      this.runs.delete(input.proposalId);
+      status("cancelled", "cancelled by you");
+      return;
     }
 
     /*
@@ -203,10 +216,6 @@ export class AuthoringService {
       role: input.repairTurn === true ? "gate" : "user",
       text: input.instruction,
     });
-
-    const run: ActiveRun = { sessionId, cancelled: false };
-    this.runs.set(input.proposalId, run);
-    status("running");
 
     const wallClock = this.opts.wallClockMs ?? DEFAULT_WALL_CLOCK_MS;
     const tokenBudget =
@@ -337,16 +346,53 @@ export class AuthoringService {
   }
 }
 
-/** Backstop permission flow (R-16, R-17, D9): remembered grants answer without prompting. */
+export interface PermissionConfinementDefect {
+  adapter: string;
+  sessionId: string;
+  reason: string;
+}
+
+/** Backstop permission flow (R-16, R-17, D9): confinement is checked before any remembered grant. */
 export async function settlePermission(
   adapter: HarnessAdapter,
   grants: GrantStore,
   emit: (event: DomainEvent) => void,
-  request: { permissionId: string; actionClass: string },
-): Promise<void> {
+  request: PermissionRequest,
+  recordDefect?: (defect: PermissionConfinementDefect) => void | Promise<void>,
+): Promise<"gone" | "pending" | "retry" | "settled"> {
   const at = new Date().toISOString();
-  if (await grants.covers(request.actionClass)) {
-    await adapter.respondToPermission?.({ permissionId: request.permissionId, decision: "always" });
+  const assessment = adapter.assessPermission?.(request) ?? {
+    status: "denied" as const,
+    reason: "adapter cannot assess the active confinement",
+  };
+  if (assessment.status === "denied") {
+    await Promise.resolve(
+      recordDefect?.({
+        adapter: adapter.id,
+        sessionId: request.sessionId,
+        reason: assessment.reason,
+      }),
+    ).catch(() => {});
+    const ack = await adapter.respondToPermission?.({
+      permissionId: request.permissionId,
+      decision: "reject",
+      message: "Denied by Arke Studio's active confinement.",
+    });
+    if (ack?.status === "stale" || ack?.status === "duplicate") return "gone";
+    if (ack?.status !== "confirmed") return "retry";
+    emit({
+      at,
+      type: "permission.settled",
+      permissionId: request.permissionId,
+      decision: "reject",
+      remembered: false,
+    });
+    return "settled";
+  }
+  if (assessment.status === "allowed" && (await grants.covers(request.actionClass))) {
+    const ack = await adapter.respondToPermission?.({ permissionId: request.permissionId, decision: "always" });
+    if (ack?.status === "stale" || ack?.status === "duplicate") return "gone";
+    if (ack?.status !== "confirmed") return "retry";
     emit({
       at,
       type: "permission.settled",
@@ -354,7 +400,7 @@ export async function settlePermission(
       decision: "always",
       remembered: true,
     });
-    return;
+    return "settled";
   }
   emit({
     at,
@@ -362,7 +408,26 @@ export async function settlePermission(
     permissionId: request.permissionId,
     actionClass: request.actionClass,
     description: describeActionClass(request.actionClass),
+    rememberable: assessment.status === "allowed",
   });
+  return "pending";
+}
+
+/** Relay a visible permission choice; persist `always` only after the harness confirms it. */
+export async function settlePendingPermission(
+  adapter: HarnessAdapter,
+  grants: GrantStore | null,
+  request: { permissionId: string; actionClass: string; decision: "once" | "always" | "reject" },
+): Promise<"gone" | "retry" | "settled"> {
+  const ack = await adapter
+    .respondToPermission?.({ permissionId: request.permissionId, decision: request.decision })
+    .catch(() => null);
+  if (ack?.status === "failed" || ack?.status === "unconfirmed" || ack === null || ack === undefined) return "retry";
+  if (ack.status === "stale" || ack.status === "duplicate") return "gone";
+  if (request.decision === "always" && grants) {
+    await grants.remember(request.actionClass, new Date().toISOString());
+  }
+  return "settled";
 }
 
 /** Harness-internal tool names become Studio language (R-16). */
@@ -372,5 +437,5 @@ export function describeActionClass(actionClass: string): string {
   if (lower.includes("webfetch") || lower.includes("network") || lower.includes("http"))
     return "The agent wants to reach the network";
   if (lower.includes("edit") || lower.includes("write")) return "The agent wants to edit a file";
-  return `The agent wants to use ${actionClass}`;
+  return "The agent wants to use a capability Studio does not recognise yet";
 }
