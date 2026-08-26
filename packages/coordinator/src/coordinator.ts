@@ -1424,6 +1424,19 @@ export class Coordinator {
   }
 
   /**
+   * The world provider this coordinator took ownership of when it was constructed.
+   *
+   * The host builds the provider before there is a coordinator to give it to, and drops its own
+   * reference once it has handed it over. Anything that still needs the provider's confined
+   * lookups after that — the desktop's save-a-picture handler, which resolves exactly the pair
+   * `/media/<world>/<file>` is served by — asks the owner rather than keeping a second reference
+   * that would outlive it (issue 503).
+   */
+  get worldProvider(): WorldProvider {
+    return this.opts.provider;
+  }
+
+  /**
    * Refuse an action that writes into a proposal while an authoring turn is still writing to it
    * (issue 239). Answers true when it has refused, so the caller returns.
    *

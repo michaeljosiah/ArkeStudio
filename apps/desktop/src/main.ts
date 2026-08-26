@@ -57,7 +57,7 @@ import { BackgroundNotificationController } from "./background-notifications.js"
 import { launchDesktop, StartupController, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
-import { saveMedia } from "./save-media.js";
+import { saveMediaHandler } from "./save-media.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -298,32 +298,31 @@ function registerHostIpc(): void {
    * The destination is the platform's to ask for, and so is what to do about a name already in
    * use — the dialog confirms an overwrite rather than this deciding one silently.
    */
+  const saveMediaFromHost = saveMediaHandler({
+    allowedSender: () => window?.webContents ?? null,
+    // The world provider's own confined lookup — the one the media server serves through, so a
+    // path the renderer could not fetch is a path it cannot save either. Read when a save is
+    // asked for rather than when this is registered, and from whoever is holding the provider
+    // then: by the time there is a window to click in, that is the coordinator and never the
+    // startup reference, which is why this used to refuse every single time (issue 503).
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
+    ask: async ({ defaultName, extension }) => {
+      const parent = window;
+      if (!parent) return null;
+      const chosen = await dialog.showSaveDialog(parent, {
+        title: "Save image",
+        defaultPath: join(app.getPath("downloads"), defaultName),
+        filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : [],
+        properties: ["createDirectory", "showOverwriteConfirmation"],
+      });
+      return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
+    },
+    copy: (from, to) => copyFile(from, to),
+  });
   ipcMain.handle(
     "arke:save-media",
-    async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) => {
-      if (!window || event.sender !== window.webContents) return { ok: false, reason: "that window cannot save" };
-      const provider = startupProvider;
-      const parent = window;
-      if (!provider) return { ok: false, reason: "the library is not open yet" };
-      return await saveMedia(
-        {
-          // The world provider's own confined lookup — the one the media server serves through,
-          // so a path the renderer could not fetch is a path it cannot save either.
-          resolve: (worldSlug, path) => provider.serveMedia(worldSlug, path),
-          ask: async ({ defaultName, extension }) => {
-            const chosen = await dialog.showSaveDialog(parent, {
-              title: "Save image",
-              defaultPath: join(app.getPath("downloads"), defaultName),
-              filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : [],
-              properties: ["createDirectory", "showOverwriteConfirmation"],
-            });
-            return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
-          },
-          copy: (from, to) => copyFile(from, to),
-        },
-        input,
-      );
-    },
+    async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) =>
+      await saveMediaFromHost(event.sender, input),
   );
   ipcMain.on("arke:activity-activation-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;

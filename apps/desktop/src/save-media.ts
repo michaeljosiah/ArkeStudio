@@ -23,6 +23,30 @@ export interface SaveMediaDeps {
   copy(from: string, to: string): Promise<void>;
 }
 
+/** Whoever is holding the world provider: the only thing wanted of it here is the media lookup. */
+export interface MediaSource {
+  serveMedia?(worldSlug: string, path: string): Promise<{ path: string } | null>;
+}
+
+/**
+ * The confined lookup a save resolves through right now, or null while there is nothing to save
+ * from.
+ *
+ * The world provider changes hands during startup: the host builds it, and the coordinator takes
+ * ownership the moment it is constructed, which is well before the window has loaded the client.
+ * A handler that reads only the pre-handover reference therefore finds nothing at every moment
+ * anyone could click — which is exactly how saving a picture came to refuse every time it was
+ * asked (issue 503). So the owner is asked, not the reference that was dropped.
+ */
+function mediaLookup(sources: {
+  starting: MediaSource | null;
+  live: MediaSource | null;
+}): SaveMediaDeps["resolve"] | null {
+  const source = sources.live ?? sources.starting;
+  if (!source?.serveMedia) return null;
+  return (worldSlug, path) => source.serveMedia!(worldSlug, path);
+}
+
 export type SaveMediaResult =
   | { ok: true }
   | { ok: false; cancelled: true }
@@ -52,4 +76,40 @@ export async function saveMedia(
     return { ok: false, reason: "that image could not be written there" };
   }
   return { ok: true };
+}
+
+/**
+ * Everything the IPC handler reads at the moment it is asked — nothing captured at registration.
+ *
+ * The handler is registered before the app has started, so every one of these is a question and
+ * not a value: the window does not exist yet, and neither does the provider that will answer.
+ */
+export interface SaveMediaHost extends Pick<SaveMediaDeps, "ask" | "copy"> {
+  /** The one sender allowed to ask — the window's own contents. Null until there is a window. */
+  allowedSender(): unknown;
+  /** Both places the world provider can be: the host's own hand, and the coordinator that took it. */
+  providers(): { starting: MediaSource | null; live: MediaSource | null };
+}
+
+/**
+ * The `arke:save-media` handler, assembled where it can be exercised (issue 503).
+ *
+ * The defect this exists to keep out was never in `saveMedia`: it was one line of wiring above
+ * it, reading a provider reference that is always null by the time a window can ask. Registering
+ * the handler needs Electron and so cannot be tested, but choosing the sender and the provider
+ * does not — so that choosing lives here, and `main.ts` supplies the Electron.
+ */
+export function saveMediaHandler(
+  host: SaveMediaHost,
+): (
+  sender: unknown,
+  input: { worldSlug?: unknown; path?: unknown; name?: unknown },
+) => Promise<SaveMediaResult> {
+  return async (sender, input) => {
+    const allowed = host.allowedSender();
+    if (!allowed || sender !== allowed) return { ok: false, reason: "that window cannot save" };
+    const resolve = mediaLookup(host.providers());
+    if (!resolve) return { ok: false, reason: "the library is not open yet" };
+    return await saveMedia({ resolve, ask: host.ask, copy: host.copy }, input);
+  };
 }
