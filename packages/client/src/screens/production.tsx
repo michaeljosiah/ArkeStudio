@@ -4457,9 +4457,17 @@ export function CutScreen() {
           </div>
         </div>
         <div style={{ marginTop: "auto" }}>
+          {/*
+           * What restoring an earlier cut would mean, which is not the same sentence for both
+           * clocks (issue 504's neighbour). A derived cut holds nothing of its own, so the warning
+           * is that the selections are what to keep. A production with no story derives nothing:
+           * the placements ARE the record, and telling somebody their work recomputes from shot
+           * selections they do not have is false about the one thing this note exists to say.
+           */}
           <span className="fy-mono">
-            the cut is a projection — it recomputes from shot selections; restoring an earlier cut means
-            restoring the selections that produced it
+            {mediaOnly
+              ? "the cut is what you placed — nothing recomputes it; the clips themselves are the record"
+              : "the cut is a projection — it recomputes from shot selections; restoring an earlier cut means restoring the selections that produced it"}
           </span>
         </div>
       </div>

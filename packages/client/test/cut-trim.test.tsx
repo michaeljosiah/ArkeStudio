@@ -303,4 +303,20 @@ describe("the cut footer of a production with no story (504)", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.match(html, /shots placed/, "a production with a story still reports its coverage");
   });
+
+  it("does not tell a media-only cut it recomputes from selections it has not got", () => {
+    // The note under the timeline warns that a derived cut holds nothing of its own. Here the
+    // placements are the record, so the warning is not merely irrelevant — it is false about the
+    // one thing the note exists to say, and would send somebody after selections to keep.
+    const html = renderCut(mediaOnlyState());
+    assert.doesNotMatch(html, /recomputes from shot selections/, "there are no shot selections");
+    assert.doesNotMatch(html, /a projection/, "nor a derivation to project from");
+    assert.match(html, /the clips themselves are the record/, "what is true of this cut instead");
+  });
+
+  it("leaves the note on a story cut alone", () => {
+    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
+    assert.match(html, /the cut is a projection — it recomputes from shot selections/, "24a's note, unchanged");
+    assert.doesNotMatch(html, /the clips themselves are the record/);
+  });
 });
