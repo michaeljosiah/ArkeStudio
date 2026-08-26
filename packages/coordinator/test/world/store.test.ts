@@ -80,6 +80,50 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  /**
+   * Issue 274. The suppression above was written when main photos were the only thing that
+   * landed in `candidates/`, and it tested the kind by name. Location views land there too, so
+   * every accepted view came back as a loose candidate — and the Reference tab, once it started
+   * reading them, would offer a decision that had already been made.
+   */
+  it("suppresses a generated location-view candidate too, not only a main photo's", async () => {
+    const dir = await makeTempWorld();
+    const candidateDir = join(dir, "references", "the-vigil", "candidates");
+    const takeDir = join(dir, "references", "the-vigil", "takes", "tk_01J8A0000000000000000000V1");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(candidateDir, { recursive: true });
+    await mkdir(takeDir, { recursive: true });
+    await writeFile(join(candidateDir, "location-view-abc123-1.png"), "duplicate");
+    await writeFile(join(candidateDir, "location-view-abc123-2.png"), "stranded");
+    await writeFile(join(takeDir, "location-view-abc123-1.png"), "immutable");
+    await writeFile(
+      join(takeDir, "take.json"),
+      JSON.stringify({
+        id: "tk_01J8A0000000000000000000V1",
+        jobId: "jb_01J8E0000000000000000000V1",
+        coversShots: [],
+        kind: "location-view",
+        reference: { sheetId: "the-vigil" },
+        provider: "openai",
+        model: "gpt-image-2",
+        provenance: { canonRevision: 42, sheets: { "the-vigil": 4 } },
+        references: [],
+        params: {},
+        cost: { estimatedMicroUsd: 53000, actualMicroUsd: null },
+        dispatchedAt: CLOCK(),
+        completedAt: CLOCK(),
+        media: "location-view-abc123-1.png",
+      }),
+    );
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    // The sibling stays: it is the one nothing recorded a take for, and it is the whole reason
+    // the tab reads candidates back at all.
+    assert.deepEqual(store.getBundle().referenceCandidates["the-vigil"], [
+      "references/the-vigil/candidates/location-view-abc123-2.png",
+    ]);
+    await store.close();
+  });
+
   it("enforces single-process ownership and reclaims stale locks (R-3)", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });

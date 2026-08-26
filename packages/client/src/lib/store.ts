@@ -2191,14 +2191,14 @@ export function generateLocationView(
 export function acceptLocationView(
   worldId: string,
   sheetId: string,
-  takeId: string,
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
   input: { name: string; establishing?: boolean; replaceExistingName?: boolean },
 ): void {
   send({
     kind: "accept-location-view",
     worldId,
     sheetId,
-    takeId,
+    selection,
     name: input.name,
     ...(input.establishing !== undefined ? { establishing: input.establishing } : {}),
     ...(input.replaceExistingName !== undefined ? { replaceExistingName: input.replaceExistingName } : {}),

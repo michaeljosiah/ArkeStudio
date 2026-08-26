@@ -1093,13 +1093,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * `replaceExistingName` is the confirmation the design turn requires: without it a colliding
    * name refuses, because superseding an angle somebody may still want is a loss they would
    * only notice later, in a shot.
+   *
+   * The selection is the same union `choose-anchor` carries, for the same reason (issue 274): a
+   * generated view lands in `candidates/` and only becomes a take when its job finalizes, so a
+   * finalization that never ran leaves a picture somebody paid for with no take to name it by.
+   * Accepting one by filename records the take from its job first, then accepts that.
    */
   z
     .object({
       kind: z.literal("accept-location-view"),
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      takeId: TakeIdSchema,
+      selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+        z
+          .object({
+            source: z.literal("candidate"),
+            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
+          })
+          .strict(),
+      ]),
       name: z.string().trim().min(1).max(80),
       establishing: z.boolean().optional(),
       replaceExistingName: z.boolean().optional(),
