@@ -124,6 +124,7 @@ import {
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
   type ComfyUiEngineStatus,
+  type LedgerEntry,
   type LocalRuntimeStatus,
   type NarratorSettings,
   type ManifestModel,
@@ -3738,8 +3739,23 @@ export function ActivityScreen() {
   // omit productionId but keep worldId, so their ledger entries are world-owned already; what was
   // missing was reading that. The threshold alert below stays app-wide deliberately — it is one
   // durable app setting about one app-wide rolling total, not a per-world figure.
+  //
+  // The ledger cannot use `scoped` as it stands, because it is the one collection here whose
+  // scope is not always a world id. A founding look preview is paid for before any world exists,
+  // and while the job is re-associated to the world at Begin, the ledger entry keeps the genesis
+  // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
+  // The build holds the join, so read it: dropping those entries would underreport every world
+  // that was founded from a paid preview.
+  const genesisForActiveWorld = new Set(
+    (state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
+  );
+  const inScope = (entry: LedgerEntry): boolean =>
+    scope === "all" ||
+    activeWorldId === null ||
+    entry.worldId === activeWorldId ||
+    genesisForActiveWorld.has(entry.worldId);
   const spend = state
-    ? spendSummary(scoped(state.app.ledger), state.app.spend?.settings.periodDays ?? 7, new Date())
+    ? spendSummary(state.app.ledger.filter(inScope), state.app.spend?.settings.periodDays ?? 7, new Date())
     : null;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import type { ClientState, LedgerEntry } from "@arke-studio/contracts";
+import type { ClientState, FoundingBuildState, LedgerEntry } from "@arke-studio/contracts";
 import { ActivityScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -27,6 +27,29 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 // Inside the default 7-day window, wherever this runs.
 const RECENT = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 const OTHER_WORLD_ID = "01J8E9000000000000000000W2";
+const GENESIS_ID = "gen-undersong";
+const OTHER_GENESIS_ID = "gen-elsewhere";
+
+/** The join between a world and the genesis its founding preview was charged under. */
+const BUILD: FoundingBuildState = {
+  buildId: "fb_01J8E0000000000000000000B1",
+  worldId: FIXTURE_WORLD_ID,
+  genesisId: GENESIS_ID,
+  worldName: "The Undersong",
+  status: "completed",
+  stages: (["understanding", "shaping", "creating", "forging", "finalizing"] as const).map((id) => ({
+    id,
+    label: id,
+    state: "complete" as const,
+  })),
+  progress: { terminal: 1, authorized: 1 },
+  working: [],
+  items: [],
+  shortfall: null,
+  noticeDismissed: true,
+  capMicroUsd: 5_000_000,
+  estimatedSpendMicroUsd: 1_000_000,
+};
 
 function entry(overrides: Partial<LedgerEntry>): LedgerEntry {
   return {
@@ -44,7 +67,7 @@ function entry(overrides: Partial<LedgerEntry>): LedgerEntry {
 }
 
 function render(ledger: LedgerEntry[]): string {
-  const state: ClientState = { ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, ledger } };
+  const state: ClientState = { ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, ledger, builds: [BUILD] } };
   __setStateForTest(state);
   return renderToString(
     <MemoryRouter>
@@ -82,5 +105,25 @@ describe("Activity spend obeys the screen's world scope (issue 305 §8)", () => 
   it("shows nothing spent when this world's work is all in another world's ledger", () => {
     const html = render([entry({ worldId: OTHER_WORLD_ID, actualMicroUsd: 4_000_000 })]);
     assert.ok(html.includes("$0.00"), "no entries in scope is $0.00, not another world's figure");
+  });
+
+  /**
+   * A founding look preview is paid for before the world exists. The job is re-associated at
+   * Begin, but the ledger entry keeps the genesis it was spent under (SPEC-031 R-55) — so a
+   * plain worldId equality drops the one charge every founded world starts life with.
+   */
+  it("counts the founding preview this world was made from, which the ledger holds under its genesis", () => {
+    const html = render([
+      entry({ actualMicroUsd: 250_000 }),
+      entry({ jobId: "jb_01J8E0000000000000000000K3", worldId: GENESIS_ID, actualMicroUsd: 1_000_000 }),
+    ]);
+    assert.ok(html.includes("$1.25"), "the preview's $1.00 belongs to the world it founded");
+  });
+
+  it("does not claim another world's founding preview", () => {
+    const html = render([
+      entry({ jobId: "jb_01J8E0000000000000000000K4", worldId: OTHER_GENESIS_ID, actualMicroUsd: 1_000_000 }),
+    ]);
+    assert.ok(html.includes("$0.00"), "a genesis with no build for this world is not this world's");
   });
 });
