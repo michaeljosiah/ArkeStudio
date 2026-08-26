@@ -12,13 +12,23 @@ import {
   type QueueEnqueueResult,
 } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
-import { enqueueNote, failedNote, readyNote, type QueueNote } from "./queue-note.js";
+import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
 import { Button, cx } from "./ui.js";
 
 /**
  * The notification that follows a dispatch (design turn 79). It is the Activity row for that
  * work, arriving early — so the bands, the dot and the copy are 26a's.
  */
+
+/**
+ * Take back the notification raised for one request (issue 507). This one rides above every
+ * screen, so a refusal left standing after its cause is repaired is read over screens that could
+ * not have caused it. The surface that made the request is the only thing that knows the cause
+ * has gone, which is why the withdrawal is offered rather than inferred here.
+ */
+export function dismissQueueNote(requestId: string): void {
+  toast.dismiss(queueNoteId(requestId));
+}
 
 /**
  * The picture that came back stands where the dot would be (79g). Only the open world's slug is
