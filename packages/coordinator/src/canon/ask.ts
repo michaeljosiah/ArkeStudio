@@ -1,5 +1,5 @@
 import { mkdir, rm } from "node:fs/promises";
-import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import {
   AskModelResponseSchema,
@@ -155,19 +155,16 @@ export class AskService {
     // The ask sandbox: an empty directory holding only the session config — never a world.
     const sandbox = join(this.opts.scratchRoot, `ask-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    const preparationId = await writeSessionFiles(
-      this.adapter,
-      sandbox,
-      this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
-    );
-
     try {
-      const session = await this.adapter.createSession({
-        purpose: "ask",
-        cwd: sandbox,
-        agent: "canon-qa",
-        preparationId,
-      });
+      const session = await createPreparedSession(
+        this.adapter,
+        sandbox,
+        this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+        {
+          purpose: "ask",
+          agent: "canon-qa",
+        },
+      );
 
       const turn = async (prompt: string): Promise<string> => {
         let finalText = "";
@@ -269,7 +266,6 @@ export class AskService {
     } catch (err) {
       return refusal(err instanceof Error ? err.message : String(err));
     } finally {
-      this.adapter.abandonSessionPreparation?.(preparationId);
       await rm(toExtendedLength(sandbox), { recursive: true, force: true }).catch(() => {});
     }
   }

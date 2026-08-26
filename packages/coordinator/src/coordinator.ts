@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { writeSessionFiles, type SessionInput } from "./harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -272,7 +272,7 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
-import { AuthoringService, settlePermission } from "./harness/authoring.js";
+import { AuthoringService, settlePendingPermission, settlePermission } from "./harness/authoring.js";
 import { GenesisService } from "./harness/genesis.js";
 import { LocalSetupService, type SetupDeps } from "./setup/local-setup.js";
 import {
@@ -8101,13 +8101,14 @@ export class Coordinator {
         const adapter = this.opts.adapter;
         if (!adapter) return;
         const actionClass = this.pendingPermissions.get(msg.permissionId);
-        if (msg.decision === "always" && actionClass && this.grants) {
-          await this.grants.remember(actionClass, new Date().toISOString());
-        }
+        if (!actionClass) return;
+        const settlement = await settlePendingPermission(adapter, this.grants, {
+          permissionId: msg.permissionId,
+          actionClass,
+          decision: msg.decision,
+        });
+        if (settlement === "retry") return;
         this.pendingPermissions.delete(msg.permissionId);
-        await adapter
-          .respondToPermission?.({ permissionId: msg.permissionId, decision: msg.decision })
-          .catch(() => {});
         this.emit({
           at: new Date().toISOString(),
           type: "permission.settled",
@@ -8626,22 +8627,12 @@ export class Coordinator {
           },
         });
         tokenByRun.set(runId, lease.token);
-        const url = this.worldQuery.leasedUrl(lease.token) ?? undefined;
         // Without a configured app root — a dev or test coordinator — the OS temp directory
         // still satisfies what §8.2 actually requires: somewhere outside the world.
         const cwd = await createRunScratch({ appRoot: this.opts.appRoot ?? tmpdir(), conversationId, runId });
-        if (this.opts.adapter) {
-          const preparationId = await writeSessionFiles(
-            this.opts.adapter,
-            cwd,
-            this.sessionInput(url ? { worldQueryUrl: url } : {}),
-          );
-          return { cwd, leaseToken: lease.token, preparationId };
-        }
         return { cwd, leaseToken: lease.token };
       },
-      release: async ({ conversationId, runId, preparationId }) => {
-        if (preparationId !== undefined) this.opts.adapter?.abandonSessionPreparation?.(preparationId);
+      release: async ({ conversationId, runId }) => {
         const token = tokenByRun.get(runId);
         if (token) {
           this.worldQuery.detachLease(token);
@@ -8653,6 +8644,16 @@ export class Coordinator {
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
       receiptsFor: (runId) => receipts.get(runId) ?? [],
+      createSession: ({ cwd, runId }) => {
+        const token = tokenByRun.get(runId);
+        const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
+        return createPreparedSession(
+          this.opts.adapter!,
+          cwd,
+          this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          { purpose: "world-chat", agent: "world-builder" },
+        );
+      },
       runCheckPlan: async ({ draft, leaseToken }) => {
         const plan = planFor(draft);
         const produced: WorldChatCheckReceipt[] = [];

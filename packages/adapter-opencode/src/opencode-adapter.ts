@@ -17,7 +17,7 @@ import {
   type SessionFile,
 } from "@arke-studio/contracts";
 import { probeCapabilities } from "./capabilities.js";
-import { OpenCodeHttp } from "./http.js";
+import { OpenCodeError, OpenCodeHttp } from "./http.js";
 import { createNormalizeState, normalizeOpenCode, type NormalizeState } from "./normalize.js";
 import { assessV1Permission, buildSessionConfig } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
@@ -415,8 +415,10 @@ export class OpenCodeAdapter implements HarnessAdapter {
       } else {
         await this.http.req("POST", `/permission/${decision.permissionId}/reply`, body);
       }
-    } catch {
-      return { permissionId: decision.permissionId, status: "stale" };
+    } catch (error) {
+      const stale = error instanceof OpenCodeError && (error.status === 404 || error.status === 409);
+      if (stale) this.permissionSessions.delete(decision.permissionId);
+      return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
     }
     // Confirmation comes only from the replied event, never HTTP status; wait briefly.
     const confirmed = await new Promise<boolean>((resolve) => {

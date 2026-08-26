@@ -10,7 +10,7 @@ import {
   type HarnessEvent,
 } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
-import { AuthoringService } from "../../src/harness/authoring.js";
+import { AuthoringService, settlePendingPermission } from "../../src/harness/authoring.js";
 import { GrantStore } from "../../src/harness/grants.js";
 import { settlePermission } from "../../src/harness/authoring.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -581,7 +581,12 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
 
     assert.equal(result, "pending");
     assert.equal(adapter.permissionDecisions.length, 0, "an unmapped action cannot be silently granted");
-    assert.equal(events.at(-1)?.type, "permission.pending");
+    const pending = events.at(-1);
+    assert.equal(pending?.type, "permission.pending");
+    assert.equal(
+      pending?.type === "permission.pending" && pending.description,
+      "The agent wants to use a capability Studio does not recognise yet",
+    );
   });
 
   it("does not claim an automatic denial settled until the harness confirms it", async () => {
@@ -625,5 +630,33 @@ describe("permission backstop and remembered grants (R-16, R-17)", () => {
       actionClass: "edit",
     });
     assert.equal(result, "gone");
+  });
+
+  it("remembers a visible always choice only after the harness confirms it", async () => {
+    const root = await tempDir("arke-grants-");
+    const grants = new GrantStore(root);
+    const adapter = new MockHarnessAdapter();
+    adapter.permissionAckStatus = "unconfirmed";
+
+    assert.equal(
+      await settlePendingPermission(adapter, grants, {
+        permissionId: "p-user",
+        actionClass: "future-tool",
+        decision: "always",
+      }),
+      "retry",
+    );
+    assert.equal(await grants.covers("future-tool"), false);
+
+    adapter.permissionAckStatus = "confirmed";
+    assert.equal(
+      await settlePendingPermission(adapter, grants, {
+        permissionId: "p-user",
+        actionClass: "future-tool",
+        decision: "always",
+      }),
+      "settled",
+    );
+    assert.equal(await grants.covers("future-tool"), true);
   });
 });

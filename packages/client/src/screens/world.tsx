@@ -68,7 +68,6 @@ import {
   reconcileExternalEdit,
   promoteGuest,
   renameSheet,
-  replyToPermission,
   requestCanonRefs,
   requestSheetRefs,
   retireEntity,
@@ -92,7 +91,6 @@ import {
   useAuthoring,
   useCanonRefs,
   useCanonSearches,
-  usePermissions,
   useSheetRefs,
   useStore,
   useTranscripts,
@@ -195,33 +193,15 @@ export function WorldLayout() {
   );
 }
 
-/** Staleness, closed-world edits, parse failures and permission backstops — stated, never silent. */
+/** Staleness, closed-world edits and parse failures — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
   const world = useWorld();
-  const permissions = usePermissions();
   if (!world || world.meta.worldId !== worldId) return null;
-  const permissionEntries = Object.entries(permissions);
-  const hasConditions =
-    world.externalEdits.length > 0 || world.problems.length > 0 || permissionEntries.length > 0;
+  const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
-      {permissionEntries.map(([id, p]) => (
-        <Callout key={id} tone="warning" title="The drafting agent is asking permission">
-          {p.description}. This is the backstop, not the gate — nothing lands in the world without your accept
-          either way.
-          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
-            <Button variant="primary" onClick={() => replyToPermission(id, "once")}>
-              Allow once
-            </Button>
-            <Button onClick={() => replyToPermission(id, "always")}>Always allow</Button>
-            <Button variant="ghost" onClick={() => replyToPermission(id, "reject")}>
-              Reject
-            </Button>
-          </div>
-        </Callout>
-      ))}
       {world.externalEdits.length > 0 && (
         <Callout
           tone="warning"

@@ -105,7 +105,7 @@ export interface PermissionDecision {
  * The outcome of relaying a permission decision. Success is confirmed only by the matching
  * `permission.replied` event, never inferred from HTTP status.
  */
-export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "stale", "duplicate"]);
+export const PermissionAckStatus = z.enum(["confirmed", "unconfirmed", "failed", "stale", "duplicate"]);
 export type PermissionAckStatus = z.infer<typeof PermissionAckStatus>;
 
 export interface PermissionAck {

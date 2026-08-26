@@ -1,5 +1,5 @@
 import { mkdir } from "node:fs/promises";
-import { writeSessionFiles, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
 import { join } from "node:path";
 import { z } from "zod";
 import type { HarnessAdapter, WorldMeta } from "@arke-studio/contracts";
@@ -63,18 +63,10 @@ export function makeArtDirector(
   return async (brief) => {
     const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
-    const preparationId = await writeSessionFiles(adapter, sandbox, sessionInput({}));
-    const session = await adapter
-      .createSession({
-        purpose: "art-prompt",
-        cwd: sandbox,
-        agent: options.agent ?? "art-director",
-        preparationId,
-      })
-      .catch((error) => {
-        adapter.abandonSessionPreparation?.(preparationId);
-        throw error;
-      });
+    const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
+      purpose: "art-prompt",
+      agent: options.agent ?? "art-director",
+    });
 
     let finalText = "";
     const abort = new AbortController();

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { writeSessionFiles, type SessionInput } from "./session-files.js";
+import { createPreparedSession, type SessionInput } from "./session-files.js";
 import type { DomainEvent, HarnessAdapter, PermissionRequest } from "@arke-studio/contracts";
 import { fromPortable } from "../world/paths.js";
 import type { ProposalManager } from "../gate/proposals.js";
@@ -175,22 +175,19 @@ export class AuthoringService {
     if (sessionId === undefined) {
       // Studio writes the session's configuration — roster, tool denials, the world-query MCP
       // registration — into the working directory (R-5). Never a credential (R-6).
-      const preparationId = await writeSessionFiles(
-        this.adapter,
-        proposalDir,
-        this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
-      );
       try {
-        const session = await this.adapter.createSession({
-          purpose: input.purpose,
-          cwd: proposalDir,
-          agent: this.opts.agentForPurpose(input.purpose),
-          preparationId,
-        });
+        const session = await createPreparedSession(
+          this.adapter,
+          proposalDir,
+          this.opts.sessionInput(worldQueryUrl ? { worldQueryUrl } : {}),
+          {
+            purpose: input.purpose,
+            agent: this.opts.agentForPurpose(input.purpose),
+          },
+        );
         sessionId = session.sessionId;
         this.sessions.set(input.proposalId, sessionId);
       } catch (err) {
-        this.adapter.abandonSessionPreparation?.(preparationId);
         status("failed", `could not create a session: ${err instanceof Error ? err.message : String(err)}`);
         return;
       }
@@ -409,6 +406,23 @@ export async function settlePermission(
   return "pending";
 }
 
+/** Relay a visible permission choice; persist `always` only after the harness confirms it. */
+export async function settlePendingPermission(
+  adapter: HarnessAdapter,
+  grants: GrantStore | null,
+  request: { permissionId: string; actionClass: string; decision: "once" | "always" | "reject" },
+): Promise<"gone" | "retry" | "settled"> {
+  const ack = await adapter
+    .respondToPermission?.({ permissionId: request.permissionId, decision: request.decision })
+    .catch(() => null);
+  if (ack?.status === "failed" || ack?.status === "unconfirmed" || ack === null || ack === undefined) return "retry";
+  if (ack.status === "stale" || ack.status === "duplicate") return "gone";
+  if (request.decision === "always" && grants) {
+    await grants.remember(request.actionClass, new Date().toISOString());
+  }
+  return "settled";
+}
+
 /** Harness-internal tool names become Studio language (R-16). */
 export function describeActionClass(actionClass: string): string {
   const lower = actionClass.toLowerCase();
@@ -416,5 +430,5 @@ export function describeActionClass(actionClass: string): string {
   if (lower.includes("webfetch") || lower.includes("network") || lower.includes("http"))
     return "The agent wants to reach the network";
   if (lower.includes("edit") || lower.includes("write")) return "The agent wants to edit a file";
-  return `The agent wants to use ${actionClass}`;
+  return "The agent wants to use a capability Studio does not recognise yet";
 }

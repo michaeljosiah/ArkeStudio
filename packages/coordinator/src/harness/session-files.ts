@@ -1,7 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import type { HarnessAdapter, SessionConfigInput } from "@arke-studio/contracts";
+import { join, resolve } from "node:path";
+import type { CreateSessionInput, HarnessAdapter, SessionConfigInput, SessionRef } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+
+const setupByDir = new Map<string, Promise<void>>();
+
+async function serialized<T>(dir: string, work: () => Promise<T>): Promise<T> {
+  const absolute = resolve(dir).replaceAll("\\", "/");
+  const key = process.platform === "win32" || process.platform === "darwin" ? absolute.toLowerCase() : absolute;
+  const previous = setupByDir.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  setupByDir.set(key, tail);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (setupByDir.get(key) === tail) setupByDir.delete(key);
+  }
+}
 
 /**
  * Lay down whatever the wired harness needs beside a session's work, before the session opens.
@@ -34,6 +55,23 @@ export async function writeSessionFiles(
     adapter.abandonSessionPreparation?.(preparationId);
     throw error;
   }
+}
+
+/** Write configuration and create its session as one per-directory critical section. */
+export async function createPreparedSession(
+  adapter: HarnessAdapter,
+  dir: string,
+  input: SessionConfigInput,
+  session: CreateSessionInput,
+): Promise<SessionRef> {
+  return serialized(dir, async () => {
+    const preparationId = await writeSessionFiles(adapter, dir, input);
+    try {
+      return await adapter.createSession({ ...session, cwd: dir, preparationId });
+    } finally {
+      adapter.abandonSessionPreparation?.(preparationId);
+    }
+  });
 }
 
 /**

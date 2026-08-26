@@ -20,6 +20,7 @@ import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
+import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
 
 /**
@@ -411,8 +412,10 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
         reply: decision.decision,
         ...(decision.message !== undefined ? { message: decision.message } : {}),
       });
-    } catch {
-      return { permissionId: decision.permissionId, status: "stale" };
+    } catch (error) {
+      const stale = error instanceof OpenCodeError && (error.status === 404 || error.status === 409);
+      if (stale) this.permissionSessions.delete(decision.permissionId);
+      return { permissionId: decision.permissionId, status: stale ? "stale" : "failed" };
     }
     // Confirmation comes only from the replied event, never HTTP status; wait briefly.
     const confirmed = await new Promise<boolean>((resolve) => {
