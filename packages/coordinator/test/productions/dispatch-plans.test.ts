@@ -424,6 +424,62 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     );
   });
 
+  /* Plans outlive the build that wrote them. Requiring the fields an older build never wrote
+     would fail the strict parse on read, and `listPlans` skips what it cannot read — so an
+     unfinished chain stops being recovered, and the requestId dedup that runs through that same
+     listing stops finding the plan, letting a retry author a second one and spend again
+     (codex round 4). */
+  it("still reads a plan written before the compiled reference carried subject and mode", async () => {
+    const fixture = await open();
+    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "@maren-kest at the rail")] };
+    const plan = await createDispatchPlan(fixture.store, {
+      worldId: WORLD_ID,
+      productionId: fixture.production.meta.id,
+      scene,
+      plan: planScene(
+        {
+          world: fixture.bundle.meta,
+          productionId: fixture.production.meta.id,
+          sheets: fixture.bundle.sheets,
+          kits: fixture.bundle.referenceKits,
+          scene,
+          selections: {},
+          model: CHAINING,
+        },
+        "whole-scene",
+      ),
+      model: CHAINING,
+      world: fixture.bundle,
+      policy: "review-gated",
+      requestId: "01J8E0000000000000000000R8",
+      clock: CLOCK,
+    });
+    assert.ok(plan.passes.flatMap((pass) => pass.compiled.references).length > 0);
+
+    // Age the aggregate on disk: strip the two fields, exactly as an older build left it.
+    const file = join(fixture.dir, "productions", fixture.production.meta.id, "plans", `${plan.planId}.json`);
+    const aged = JSON.parse(await readFile(file, "utf8")) as {
+      passes: { compiled: { references: Record<string, unknown>[] } }[];
+    };
+    for (const pass of aged.passes)
+      for (const reference of pass.compiled.references) {
+        delete reference["subject"];
+        delete reference["mode"];
+      }
+    await writeFile(file, JSON.stringify(aged, null, 2));
+
+    const plans = await listPlans(fixture.store, fixture.production.meta.id);
+    assert.ok(
+      plans.some((candidate) => candidate.planId === plan.planId),
+      "an aggregate an older build wrote is still readable, not silently skipped",
+    );
+    assert.equal(
+      plans.find((candidate) => candidate.planId === plan.planId)!.requestId,
+      "01J8E0000000000000000000R8",
+      "so the requestId dedup still finds it, and a retry cannot spend twice",
+    );
+  });
+
   it("T-20: a world holding plans still scans, and the bundle is unmoved by them", async () => {
     const fixture = await open();
     await create(fixture);

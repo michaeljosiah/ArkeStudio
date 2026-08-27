@@ -38,6 +38,7 @@ import {
   type PlanState,
   worldSheets,
   attachmentFor,
+  lookHoldingScope,
   type CharacterLook,
   type ProductionBundle,
   type Scene,
@@ -561,11 +562,11 @@ function ProductionWardrobe({
           // The file the dispatcher would actually attach, resolved by the same function it
           // resolves with — not a second opinion about what rides.
           const riding = attachmentFor(kit, sheet, "primary", { productionId: production.meta.id });
-          const held = looks.find(
-            (look) =>
-              look.attachedTo?.kind === "production" &&
-              look.attachedTo.productionId === production.meta.id,
-          );
+          // The same rule the dispatcher resolves with, not a second `.find` over the same array
+          // (codex round 4): on an upgraded kit holding two production-scoped looks, marking the
+          // first while the dispatcher carries the latest is a false confirmation of the one
+          // thing this row exists to confirm.
+          const held = lookHoldingScope(kit, { kind: "production", productionId: production.meta.id });
           /* Scene attachments are stated, not offered: this row is the production's altitude,
              and a scene's own choice belongs on the scene. Narrower scope wins at dispatch, so
              a row claiming to be the whole answer while a scene overrides it would be lying. */

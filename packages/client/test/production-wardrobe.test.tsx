@@ -121,6 +121,34 @@ describe("the production's wardrobe row", () => {
     }
   });
 
+  /* An upgraded kit can hold two production-scoped looks. `attachmentFor` carries the most
+     recently accepted, so a row marking the first in the array would confirm an appearance the
+     dispatcher is not sending — a false confirmation of the one thing it exists to confirm
+     (codex round 4). */
+  it("marks the same legacy look the dispatcher would carry, not the first in the array", () => {
+    const scope = { kind: "production" as const, productionId: PRODUCTION.meta.id };
+    __setStateForTest(
+      stateWithLooks([
+        { ...COAT, acceptedAt: "2026-08-01T10:00:00Z", attachedTo: scope },
+        { ...OILSKIN, acceptedAt: "2026-08-09T10:00:00Z", attachedTo: scope },
+      ]),
+    );
+    try {
+      const html = renderCast();
+      assert.match(
+        html,
+        /<option[^>]*selected[^>]*value="storm-oilskin"|value="storm-oilskin"[^>]*selected/,
+        "the later acceptance is the one marked",
+      );
+      assert.ok(
+        html.includes("references/maren-kest/looks/storm-oilskin.png"),
+        "and it is the thumbnail too, so the row agrees with itself",
+      );
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("ignores an attachment belonging to another production", () => {
     __setStateForTest(stateWithLooks([{ ...COAT, attachedTo: { kind: "production", productionId: "elsewhere" } }]));
     try {

@@ -991,6 +991,41 @@ export function passStructure(input: {
   return `One continuous clip: ${input.askedSec}s${frame}, ${input.shotCount} shots. Cut between shots only at the boundaries given below, in that order.`;
 }
 
+/**
+ * The look holding one exact scope, by the rule collisions are resolved with (codex round 4).
+ *
+ * A world written before attaching displaced can hold two looks claiming one production, and
+ * "the first in the array" is a different answer from "the most recently accepted" — so the
+ * production's cast row marked one look active while the dispatcher carried the other, which is
+ * a false confirmation of the very thing that row exists to confirm. One rule, exported, so the
+ * screen and the resolver cannot drift.
+ */
+export function lookHoldingScope(
+  kit: ReferenceKit | null,
+  scope: NonNullable<NonNullable<ReferenceKit["looks"]>[number]["attachedTo"]>,
+): NonNullable<ReferenceKit["looks"]>[number] | undefined {
+  return (kit?.looks ?? [])
+    .filter((look) => {
+      const held = look.attachedTo;
+      if (!held || held.kind !== scope.kind || held.productionId !== scope.productionId) return false;
+      return held.kind !== "scene" || scope.kind !== "scene" || held.sceneId === scope.sceneId;
+    })
+    .reduce<NonNullable<ReferenceKit["looks"]>[number] | undefined>(
+      (best, look) => (best === undefined || acceptedAt(look) > acceptedAt(best) ? look : best),
+      undefined,
+    );
+}
+
+/**
+ * Acceptance as an instant, never as a string. `IsoDateTimeSchema` admits an offset and optional
+ * fractional seconds, and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above
+ * `2026-08-01T23:00:00Z` while being the earlier moment, and `…:00.500Z` sorts below `…:00Z`.
+ * Both spellings occur here — the store's clock writes milliseconds, older records do not.
+ */
+function acceptedAt(look: NonNullable<ReferenceKit["looks"]>[number]): number {
+  return Date.parse(look.acceptedAt);
+}
+
 export function attachmentFor(
   kit: ReferenceKit | null,
   sheet: Sheet,
@@ -1016,15 +1051,10 @@ export function attachmentFor(
    * have gone on dispatching the older appearance until somebody happened to reattach.
    */
   const narrower = (look: (typeof scopedLooks)[number]): boolean => look.attachedTo?.kind === "scene";
-  // Instants, not strings. `IsoDateTimeSchema` admits an offset and optional fractional seconds,
-  // and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above `2026-08-01T23:00:00Z`
-  // while being the earlier moment, and `…:00.500Z` sorts below `…:00Z` for the same reason.
-  // Both spellings occur here — the store's clock writes milliseconds, older records do not.
-  const at = (look: (typeof scopedLooks)[number]): number => Date.parse(look.acceptedAt);
   const scopedLook = scopedLooks.reduce<(typeof scopedLooks)[number] | undefined>((best, look) => {
     if (best === undefined) return look;
     if (narrower(look) !== narrower(best)) return narrower(look) ? look : best;
-    return at(look) > at(best) ? look : best;
+    return acceptedAt(look) > acceptedAt(best) ? look : best;
   }, undefined);
   if (role === "primary" && scopedLook) {
     return {
