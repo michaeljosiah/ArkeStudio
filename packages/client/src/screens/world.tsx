@@ -28,6 +28,7 @@ import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components
 import { ChevronRight, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
+import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
 import {
@@ -129,6 +130,7 @@ export function WorldLayout() {
   useOpenWorldGuard(worldId);
   const { state } = useStore();
   const world = state?.world;
+  const refusal = useWorldOpenRefusal(worldId);
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
   // addresses — /cast, /locations, /factions — and a chip row on each moves between them, so
   // the tab lights on all three.
@@ -156,7 +158,11 @@ export function WorldLayout() {
     return (
       <div className="fy-app">
         <div className="fy-content fy-content--fixed">
-          <Outlet />
+          {refusal ? (
+            <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} stranded />
+          ) : (
+            <Outlet />
+          )}
         </div>
       </div>
     );
@@ -193,7 +199,7 @@ export function WorldLayout() {
           ))}
         </nav>
         <WorldConditionBanners />
-        <Outlet />
+        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
       </div>
     </div>
   );

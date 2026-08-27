@@ -210,6 +210,9 @@ import {
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
+import { CommitPlanError } from "./world/commit.js";
+import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
+import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
@@ -671,6 +674,34 @@ export function refusalDetail(text: string): string {
   const cut = flat.slice(0, REFUSAL_DETAIL_MAX - 1);
   const at = cut.lastIndexOf(" ");
   return `${(at > 80 ? cut.slice(0, at) : cut).replace(/[.,;:\s]+$/, "")}…`;
+}
+
+/**
+ * Why a world would not open, in words that belong to this codebase rather than to the world
+ * (issue 571, Codex round 3).
+ *
+ * `app.jsonl` cannot take a refusal's own message. `buildDiagnosticsBundle` ships this file's
+ * tail and promises no world content, and the wording is world content more often than not: the
+ * history conflict names a character's file, and `world.json does not parse: ...` carries V8's
+ * excerpt of the offending source — which is the world's own title or logline, sitting in a
+ * bundle somebody pastes into a support thread.
+ *
+ * Round two filtered paths out of that string, and the excerpt walks straight past a path filter.
+ * The lesson is that sanitising free text is the wrong shape of answer: the next error to embed
+ * something is one refactor away and nothing would catch it. So no free text goes here at all.
+ * These names are a closed set this repository owns, and `WorldOpenError` already carries a
+ * stable code of its own. The wording still reaches the person, on screen and in the
+ * `world.open-failed` event journalled to `coordinator.jsonl` — neither of which is in the bundle.
+ *
+ * Matched by class, not by `constructor.name`: the desktop ships through a bundler, and a name
+ * that survives today is not a guarantee anybody has written down.
+ */
+function worldOpenFailureKind(err: unknown): string {
+  if (err instanceof WorldLockedError) return "locked";
+  if (err instanceof WorldLockDeposedError) return "deposed";
+  if (err instanceof WorldOpenError) return err.reason;
+  if (err instanceof CommitPlanError) return "commit-plan";
+  return "unknown";
 }
 
 export class Coordinator {
@@ -1931,13 +1962,29 @@ export class Coordinator {
     // does check, but a repair that can destroy live state should not depend on it.
     const wasAlreadyOpen = this.opts.provider.openStore?.()?.worldId === worldId;
     await this.opts.provider.loadWorld(worldId);
-    await this.jobQueue?.retryFinalizationsForWorld(worldId);
+    /*
+     * Everything past the load is repair, and repair does not decide whether the world opened
+     * (issue 571, Codex round 3).
+     *
+     * The provider has installed the store by now, so a fault in one of these — a jobs journal
+     * that will not append, a conversation whose recovery throws — used to escape into the
+     * `open-world` catch and be reported as a world that would not open. It took `world.opened`,
+     * the founding-build resume and the media pass down with it, leaving a world that was
+     * interactive but half-started: an interrupted conversation still marked running.
+     *
+     * Each is isolated and stated on its own instead. A world that loaded is open.
+     */
+    await this.repairOnOpen(worldId, "job-finalizations", () =>
+      this.jobQueue?.retryFinalizationsForWorld(worldId),
+    );
     const bundle =
       this.opts.provider.openStore?.()?.getBundle() ?? (await this.opts.provider.loadWorld(worldId));
     this.readModel.setWorld(bundle);
     // Before the rows are broadcast, not after: recovery changes what several of them say.
     const store = this.opts.provider.openStore?.();
-    if (store && !wasAlreadyOpen) await this.recoverWorldChat(store);
+    if (store && !wasAlreadyOpen) {
+      await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
+    }
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -1975,6 +2022,83 @@ export class Coordinator {
       this.backfillStore = store;
       this.startBackfill(store, this.opts.mediaProbe, abort.signal);
     }
+  }
+
+  /**
+   * State a refused world open in all three of the places somebody looks for it (issue 571):
+   * `logs/app.jsonl`, `logs/coordinator.jsonl` by way of the event, and the screen.
+   *
+   * The read model is reconciled with the provider first, because a failed open is not always a
+   * closed world. `loadWorld` closes the outgoing store before it opens the incoming one, so a
+   * store that refuses leaves nothing open — but an unknown world id is refused before that
+   * point, with the current world untouched. Asking the provider which it was is the difference
+   * between reporting no open world and throwing away the one the person is still looking at.
+   */
+  /**
+   * Run one post-load repair without letting it decide the open (issue 571). Stated when it
+   * fails — silence is what this whole change is about — and by its step, never its words.
+   */
+  private async repairOnOpen(worldId: string, step: string, run: () => unknown): Promise<void> {
+    try {
+      await run();
+    } catch (err) {
+      await this.appLog?.append({
+        level: "warn",
+        event: "world.open-repair-failed",
+        worldId,
+        step,
+        kind: worldOpenFailureKind(err),
+      });
+    }
+  }
+
+  private async failWorldOpen(worldId: string, err: unknown): Promise<void> {
+    // `app.jsonl` takes the classification and never the wording (Codex round 3). See
+    // `worldOpenFailureKind` for why nothing free-form can go in this file.
+    const kind = worldOpenFailureKind(err);
+    // The store's own words wherever there are any: "world is open in another Arke Studio process
+    // (pid 1234)" is the answer, and paraphrasing it here would only lose the pid.
+    const message = err instanceof Error ? err.message.trim() : String(err).trim();
+    const reason = (message.length > 0 ? message : "the world could not be opened").slice(0, 500);
+    const open = this.opts.provider.openStore?.() ?? null;
+
+    /*
+     * The world is open despite this, so it is not refused (Codex round 1).
+     *
+     * Two ways here, and both are real. Overlapping `open-world` messages — `WorldLayout` and the
+     * screen inside it each run the open guard — race for the world lock, and the loser reports
+     * "open in another process" after the winner has already succeeded. And `openWorld` does more
+     * than load: `retryFinalizationsForWorld` runs after the provider has installed the store, so
+     * a job-persistence fault there would refuse a world that is sitting open.
+     *
+     * Recording a failure in either case hides a loaded world behind a refusal that Try again
+     * cannot clear, because the retry succeeds and changes nothing. The read model is reconciled
+     * to what the provider actually holds instead, which is also what the post-load path skipped.
+     *
+     * Nothing is awaited between reading the provider and writing the state — the logs come after,
+     * deliberately (Codex round 2). Checking and then awaiting the log write reopened the same
+     * hole one turn further along: the loser sees no store, yields at the await, and the winner
+     * installs one while the write is in flight, so the failure lands on top of a world that is
+     * now open. A synchronous decision cannot be interleaved, which beats rechecking after each
+     * await and hoping the list of awaits stays short.
+     */
+    if (open?.worldId === worldId) {
+      this.readModel.setWorld(open.getBundle());
+      this.transport.broadcastSnapshot();
+      await this.appLog?.append({ level: "warn", event: "world.open-recovered", worldId, kind });
+      return;
+    }
+
+    if (open === null) this.readModel.setWorld(null);
+    // The screen and the event carry the reason whole. Neither leaves the machine: the event is
+    // journalled to `coordinator.jsonl`, which the diagnostics bundle does not read, and the
+    // person looking at the refusal is the one who needs to know which file it was.
+    this.readModel.setWorldOpenFailure({ worldId, reason });
+    this.emit({ at: new Date().toISOString(), type: "world.open-failed", worldId, reason });
+    this.transport.broadcastSnapshot();
+    // Last, and still awaited so the line is on disk before the message is answered — the whole
+    // complaint was that there was nothing to read afterwards.
+    await this.appLog?.append({ level: "error", event: "world.open-failed", worldId, kind });
   }
 
   /**
@@ -2741,8 +2865,24 @@ export class Coordinator {
       case "open-world":
         try {
           await this.openWorld(msg.worldId);
-        } catch {
-          // An unknown world id is a stale client; the next snapshot corrects it.
+        } catch (err) {
+          /*
+           * Every way a world can fail to open ends here, and this used to end nowhere (issue 571).
+           *
+           * The catch was written for one of them — an unknown world id from a stale client, which
+           * the next snapshot corrects — and swallowed the rest. But `WorldStore.open` also refuses
+           * for reasons it has already worded: the world is open in another process, an entity's
+           * history conflicts with its committed version, a scan cannot read the folder. Those
+           * refusals were dropped in silence: no log line, and the throw lands before both
+           * `world.opened` and the snapshot that follows it, so the screen sat on "opening the
+           * world" indefinitely with nothing anywhere saying why. There is no next snapshot to be
+           * corrected by, because nothing else sends one.
+           *
+           * All three of the ways out are needed. The log is for afterwards, the event for anything
+           * listening, and the snapshot for the screen — which has no correlation to its own
+           * request and cannot otherwise tell a refusal from a world still opening.
+           */
+          await this.failWorldOpen(msg.worldId, err);
         }
         return;
       case "create-world": {

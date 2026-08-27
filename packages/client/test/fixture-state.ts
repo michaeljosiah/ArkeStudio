@@ -498,6 +498,7 @@ const state: ClientState = {
     stagedReferences: {},
     externalEdits: [],
   },
+  worldOpenFailure: null,
   // No conversation open by default: the workspace is loaded by id when one is chosen.
   worldChat: null,
   bench: null,

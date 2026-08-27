@@ -270,6 +270,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
         },
       ],
       world: null,
+      worldOpenFailure: null,
       worldChat: null,
       bench: null,
       authoringRuns: [],

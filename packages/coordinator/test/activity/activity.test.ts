@@ -82,6 +82,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
     },
     worlds: [],
     world,
+    worldOpenFailure: null,
     worldChat: null,
     bench: null,
     authoringRuns: [],

@@ -57,6 +57,7 @@ export class ReadModel {
       },
       worlds: [],
       world: null,
+      worldOpenFailure: null,
       worldChat: null,
       bench: null,
       // Always empty here, and filled on the way out by the coordinator, which is the only thing
@@ -127,12 +128,34 @@ export class ReadModel {
     // Closing or switching worlds drops the open conversation with it: a transcript belongs to
     // the world it was about, and leaving one behind would show it under the next world opened.
     // The open bench session goes the same way, for the same reason (issue 305).
+    /*
+     * A refusal is settled by *its own* world opening, and by nothing else (issue 571, Codex
+     * round 2).
+     *
+     * Clearing on any world at all looked right and was not: an unknown id refused while another
+     * world stays open leaves that world being refreshed constantly — a media backfill, an
+     * adopted Bible edit — and each refresh came through here and wiped the refusal for a world
+     * that still had not opened. The route for it then fell back to the loader for good, because
+     * `useOpenWorldGuard` sees an unchanged route, connection and open-world id, so its effect
+     * never runs again and nothing re-asks.
+     */
+    const settled = world !== null && this.state.worldOpenFailure?.worldId === world.meta.worldId;
     this.state = {
       ...this.state,
       world,
+      worldOpenFailure: settled ? null : this.state.worldOpenFailure,
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
     };
+  }
+
+  /**
+   * A world was asked for and did not open (issue 571). Recorded beside `world` rather than
+   * left to the event alone, because the client's request carries no correlation and its
+   * loader has nothing else to end on.
+   */
+  setWorldOpenFailure(failure: ClientState["worldOpenFailure"]): void {
+    this.state = { ...this.state, worldOpenFailure: failure };
   }
 
   /**
@@ -351,6 +374,7 @@ export class ReadModel {
       }
       case "world.opened":
       case "world.closed":
+      case "world.open-failed":
       case "proposal.staged":
       case "proposal.resolved":
       case "proposal.blocked":
