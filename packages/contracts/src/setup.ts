@@ -91,6 +91,14 @@ export const SetupComponentSchema = z
      */
     requires: z.array(z.string().min(1)).optional(),
     /**
+     * Whether Arke may take this one away (SPEC-033 R-43).
+     *
+     * Absent means it may not, and a row must not offer a Remove that cannot act: a component
+     * setup fetches unasked comes back on the next launch, and a weight file inside a folder the
+     * user mapped may already have been theirs before Arke ever saw it.
+     */
+    removable: z.boolean().optional(),
+    /**
      * What a cancelled or failed install left behind and could not delete (R-45).
      *
      * Reported rather than claimed away. *Nothing remains* would be a requirement no
@@ -167,7 +175,10 @@ export function setupClosure(components: readonly SetupComponent[], componentId:
     componentIds: ordered,
     downloadMb,
     installedMb,
-    supporting: Math.max(0, ordered.length - 1),
+    // What is in the closure besides the thing that was asked for. Counted by exclusion rather
+    // than by subtracting one: a component that is already settled is not in `ordered` at all,
+    // and `length - 1` would then quietly undercount every supporting component by one.
+    supporting: ordered.filter((id) => id !== componentId).length,
   };
 }
 
@@ -183,7 +194,6 @@ export interface TransferProgress {
   /** 0..100, and 0 where the server never said how big the file is. */
   percent: number;
   doneMb: number;
-  totalMb: number;
   /** Measured, never guessed; null while nothing is moving. */
   mbPerSecond: number | null;
   /** Whether bytes are actually moving right now. */
@@ -193,11 +203,9 @@ export interface TransferProgress {
 const MB = 1024 * 1024;
 
 export function transferProgress(component: SetupComponent): TransferProgress {
-  const totalMb = Math.round(component.bytesTotal / MB);
   return {
     percent: component.bytesTotal > 0 ? Math.min(100, Math.round((component.bytesDone / component.bytesTotal) * 100)) : 0,
     doneMb: Math.round(component.bytesDone / MB),
-    totalMb,
     mbPerSecond: component.bytesPerSecond === null ? null : Math.round((component.bytesPerSecond / MB) * 10) / 10,
     active: component.state === "downloading" || component.state === "installing",
   };

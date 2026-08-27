@@ -58,6 +58,9 @@ const MODEL = component({
   sizeMb: 7600,
   requires: ["ollama-runtime"],
   provides: [GEMMA.id],
+  // Declared by the service for an optional component Arke can take back — an Ollama pull is
+  // removed by asking Ollama, and the model is what the disk is actually spent on.
+  removable: true,
 });
 
 function stateWith(components: SetupComponent[]): ClientState {
@@ -115,10 +118,17 @@ describe("the row states the whole chain's size, and only the count of the rest 
     assert.doesNotMatch(text, /supporting component/);
   });
 
-  it("offers Remove wherever a size on disk is stated (R-43)", () => {
+  it("offers Remove wherever a size on disk is stated, and only where it can act (R-43)", () => {
     const text = plain(render("/settings/local-ai", stateWith([RUNTIME, { ...MODEL, state: "ready" }])));
     assert.match(text, /Gemma 4 12B[\s\S]{0,200}Remove/);
     assert.doesNotMatch(text, /Install ·/);
+
+    // A component Arke did not put there offers nothing: setup fetches a non-optional one again
+    // on the next launch, and a weight file in a mapped folder may have been the user's first.
+    const notOurs = plain(
+      render("/settings/local-ai", stateWith([RUNTIME, { ...MODEL, state: "ready", removable: undefined }])),
+    );
+    assert.doesNotMatch(notOurs, /Remove/);
   });
 });
 

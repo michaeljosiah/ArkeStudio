@@ -4,6 +4,7 @@ import {
   ENGINE_CAPABILITIES,
   ENGINE_LABEL,
   comfyUiWeightsComponentId,
+  transferProgress,
   type ComfyUiEngineStatus,
   type EngineId,
   type ComponentHealth,
@@ -87,7 +88,8 @@ function ComponentRows({ components }: { components: readonly SetupComponent[] }
       {components.map((c) => {
         const settled = c.state === "ready" || c.state === "present";
         const offered = c.state === "available";
-        const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
+        // Downloads owns progress; every other surface renders the same projection (R-82).
+        const pct = transferProgress(c).percent;
         return (
           <div key={c.id} className={cx("fy-set__row", "fy-set__row--stack", c.state === "skipped" && "fy-set__row--off")}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -439,10 +441,10 @@ function ComfyUiDetail() {
       {recipes.map((recipe) => {
         const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
         const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
-        const pct =
-          weights && weights.bytesTotal > 0
-            ? Math.min(100, Math.round((weights.bytesDone / weights.bytesTotal) * 100))
-            : 0;
+        // The shared projection, not a second derivation: Downloads owns progress, and a row
+        // that computes its own figure is how two surfaces come to disagree about one transfer
+        // with nothing left to arbitrate between them (R-82, D15).
+        const pct = weights === undefined ? 0 : transferProgress(weights).percent;
         // While the weights are moving or stuck, that IS what this recipe is doing, and the dot
         // has to agree with the word beside it: a running download is not a fault, and a failed
         // one is not the recipe's own "disabled".

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setupClosure, transferProgress, type DomainEvent, type SetupComponent } from "@arke-studio/contracts";
 import { LocalSetupService } from "../../src/setup/local-setup.js";
@@ -130,6 +130,85 @@ describe("one press starts the chain (SPEC-028 R-5, R-40)", () => {
   });
 });
 
+describe("remove answers for what Arke owns, and nothing else (R-43)", () => {
+  it("refuses a component setup fetches unasked, because the next launch undoes it", async () => {
+    const root = await tempDir("arke-setup-");
+    const required: CatalogueEntry = { ...SIBLING, id: "required-weights", optional: false };
+    const { svc, status } = service([required], root);
+    const result = await svc.remove(required.id);
+    assert.equal(result.freedMb, 0);
+    assert.match(status().components[0]!.detail ?? "", /Arke did not put this here/);
+    assert.notEqual(status().components[0]!.removable, true, "and the row is never offered one");
+    await svc.dispose();
+  });
+
+  it("refuses a weight file living in a folder the user mapped", async () => {
+    // The row can read `present` because the person already owned the checkpoint — `install`
+    // recognises a file that is already there rather than re-fetching it — so a Remove here
+    // would delete somebody's own 28 GB weights from a folder Arke does not own.
+    const root = await tempDir("arke-setup-");
+    const mapped = await tempDir("arke-mapped-");
+    const theirs: CatalogueEntry = {
+      ...SIBLING,
+      id: "engine-weights-mapped",
+      spec: { kind: "files", dir: "", externalRoot: "engine-models", files: SIBLING.spec.kind === "files" ? SIBLING.spec.files : [] },
+    };
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(
+      {
+        fetchStream: async () => ({ ok: false, status: 500, contentLength: null, body: (async function* () {})() }),
+        run: async () => ({ code: 1, output: "" }),
+        which: async () => null,
+        probeUrl: async () => false,
+        diskFreeMb: async () => 1_000_000,
+      },
+      (event) => events.push(event),
+      { appRoot: root, catalogue: [theirs], throttleMs: 0, externalDirs: { "engine-models": () => mapped } },
+    );
+    await mkdir(mapped, { recursive: true });
+    await writeFile(join(mapped, "s.bin"), Buffer.alloc(1024));
+    const result = await svc.remove(theirs.id);
+    assert.equal(result.freedMb, 0);
+    assert.ok((await stat(join(mapped, "s.bin")).catch(() => null)) !== null, "their file is still there");
+    await svc.dispose();
+  });
+
+  it("asks the runtime to take back what the runtime pulled", async () => {
+    // `rm -rf` on a store Arke does not own is not a removal, it is damage — so a pulled model
+    // is removed the way it arrived, by asking Ollama.
+    const root = await tempDir("arke-setup-");
+    const pulled: CatalogueEntry = {
+      id: "ollama-gemma4-12b",
+      displayName: "Gemma 4 · 12B",
+      purpose: "Writes with you",
+      sizeMb: 7600,
+      optional: true,
+      requires: ["engine-runtime"],
+      spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
+    };
+    const asked: string[][] = [];
+    const events: DomainEvent[] = [];
+    const svc = new LocalSetupService(
+      {
+        fetchStream: async () => ({ ok: false, status: 500, contentLength: null, body: (async function* () {})() }),
+        run: async (command, args) => {
+          asked.push([command, ...args]);
+          return { code: 0, output: "" };
+        },
+        which: async () => null,
+        probeUrl: async () => false,
+        diskFreeMb: async () => 1_000_000,
+      },
+      (event) => events.push(event),
+      { appRoot: root, catalogue: [pulled], throttleMs: 0 },
+    );
+    const result = await svc.remove(pulled.id);
+    assert.deepEqual(asked, [["ollama", "rm", "gemma4:12b"]]);
+    assert.equal(result.freedMb, 7600);
+    await svc.dispose();
+  });
+});
+
 describe("remove gives the disk back, and says what would not go (R-43, R-45)", () => {
   it("removes the files it declared and reports what it freed", async () => {
     const root = await tempDir("arke-setup-");
@@ -179,13 +258,7 @@ describe("one projection for a transfer, computed once (R-82)", () => {
       bytesTotal: 10 * 1024 * 1024 * 1024,
       bytesPerSecond: 12 * 1024 * 1024,
     };
-    assert.deepEqual(transferProgress(moving), {
-      percent: 25,
-      doneMb: 2560,
-      totalMb: 10_240,
-      mbPerSecond: 12,
-      active: true,
-    });
+    assert.deepEqual(transferProgress(moving), { percent: 25, doneMb: 2560, mbPerSecond: 12, active: true });
     // A server that never said how big the file is gives 0 rather than a made-up denominator.
     assert.equal(transferProgress({ ...moving, bytesTotal: 0 }).percent, 0);
     assert.equal(transferProgress({ ...moving, state: "ready", bytesPerSecond: null }).active, false);

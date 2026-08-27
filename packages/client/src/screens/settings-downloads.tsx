@@ -48,11 +48,16 @@ function ProgressRow({ component, progress }: { component: SetupComponent; progr
         <RuntimeStatus tone={needsAttention(component) ? "warn" : componentIsSettled(component.state) ? "ok" : "idle"}>
           {progress.active
             ? `${progress.percent}%${progress.mbPerSecond === null ? "" : ` · ${progress.mbPerSecond} MB/s`}`
-            : component.state}
+            : (component.leftovers?.length ?? 0) > 0 && !componentIsSettled(component.state)
+              ? `${component.leftovers!.length} file${component.leftovers!.length === 1 ? "" : "s"}`
+              : component.state}
         </RuntimeStatus>
-        {isMoving(component) && (
+        {/* Only what is still waiting can be taken out of the queue. A transfer already
+            streaming cannot be stopped one component at a time — the run holds one abort — so a
+            per-row Stop would be a word the code does not honour. Stop all is the one that acts. */}
+        {component.state === "queued" && (
           <button type="button" className="fy-set__link" onClick={() => setupSkip(component.id)}>
-            Stop
+            Skip
           </button>
         )}
         {needsAttention(component) &&
@@ -65,7 +70,7 @@ function ProgressRow({ component, progress }: { component: SetupComponent; progr
               Retry
             </button>
           ))}
-        {componentIsSettled(component.state) && (
+        {componentIsSettled(component.state) && component.removable === true && (
           <button type="button" className="fy-set__link" onClick={() => setupRemove(component.id)}>
             Remove
           </button>
@@ -109,9 +114,13 @@ export function SettingsDownloadsScreen() {
   const setup = useSetup();
   const navigate = useNavigate();
   const components = setup?.components ?? [];
+  // Four sections, and a component is in exactly one of them: a row that appears twice is a
+  // transfer somebody has to reconcile by eye, which is the whole thing this screen removes.
   const moving = components.filter(isMoving);
   const attention = components.filter(needsAttention);
-  const leftovers = components.filter((c) => (c.leftovers?.length ?? 0) > 0 && !needsAttention(c));
+  const leftovers = components.filter(
+    (c) => (c.leftovers?.length ?? 0) > 0 && !needsAttention(c) && !isMoving(c) && !componentIsSettled(c.state),
+  );
   const installed = components.filter((c) => componentIsSettled(c.state));
   const remaining = moving.reduce((sum, c) => sum + Math.max(0, c.sizeMb - transferProgress(c).doneMb), 0);
 

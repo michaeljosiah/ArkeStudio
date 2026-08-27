@@ -4520,7 +4520,15 @@ export class Coordinator {
         return;
       }
       case "setup-install": {
-        this.setup?.installClosure(msg.componentId);
+        const setup = this.setup;
+        if (!setup) return;
+        setup.installClosure(msg.componentId);
+        // A run already in flight has an `attempted` set, and a component it has been past this
+        // round is never picked up again by it — so the press would queue the closure and then
+        // do nothing. The repair handler pays the same cost for the same reason: await the pass
+        // that is running, then start one that will collect what was just queued.
+        await setup.run().catch(() => {});
+        await setup.run().catch(() => {});
         return;
       }
       case "setup-remove": {
