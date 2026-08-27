@@ -445,19 +445,28 @@ export async function attachCharacterLook(
   const looks = [...(kit.looks ?? [])];
   const index = looks.findIndex((look) => look.id === lookId);
   if (index === -1) throw new Error(`no accepted look "${lookId}"`);
+  const previous = looks[index]!.attachedTo;
   const next = { ...looks[index]! };
   if (scope) next.attachedTo = scope;
   else delete next.attachedTo;
   looks[index] = next;
-  // One look per scope (design 67). Two looks claiming the same production is a question the
-  // resolver has no answer to, and the production's cast row offers one choice per character —
-  // so attaching displaces the incumbent rather than joining it.
-  if (scope) {
+  /*
+   * One look per scope (design 67), enforced in both directions.
+   *
+   * Two looks claiming one production is a question the resolver has no answer to, and the
+   * production's cast row offers exactly one choice per character — so attaching displaces the
+   * incumbent rather than joining it, and detaching empties the scope the look was holding
+   * rather than leaving a second claimant behind it (codex round 2). Worlds written before this
+   * rule can hold such a pair, and clearing one of two left the row still showing a look after
+   * the reader had asked for the identity package.
+   */
+  const emptied = scope ?? previous;
+  if (emptied) {
     for (let other = 0; other < looks.length; other += 1) {
       if (other === index) continue;
       const held = looks[other]!.attachedTo;
-      if (!held || held.productionId !== scope.productionId || held.kind !== scope.kind) continue;
-      if (held.kind === "scene" && scope.kind === "scene" && held.sceneId !== scope.sceneId) continue;
+      if (!held || held.productionId !== emptied.productionId || held.kind !== emptied.kind) continue;
+      if (held.kind === "scene" && emptied.kind === "scene" && held.sceneId !== emptied.sceneId) continue;
       const cleared = { ...looks[other]! };
       delete cleared.attachedTo;
       looks[other] = cleared;

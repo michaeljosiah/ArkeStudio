@@ -49,6 +49,7 @@ import {
   supersedeTile,
 } from "../../src/references/kit.js";
 import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { WorldStore } from "../../src/world/store.js";
 import {
   pendingReferenceTake,
@@ -731,6 +732,63 @@ describe("kit mutations through the one commit primitive", () => {
     scopes = await held();
     assert.equal(scopes["council-coat"]?.kind, "scene");
     assert.equal(scopes["storm-oilskin"]?.kind, "production", "the production keeps its own choice");
+    await store.close();
+  });
+
+  /* Detaching empties the scope, it does not hand it to the next claimant (codex round 2). A
+     world written before attaching displaced can hold two looks claiming one production, and
+     clearing one of two left the row still showing a look after the reader asked for the
+     identity package. */
+  it("empties the scope a detached look was holding, legacy collision and all", async () => {
+    const { store } = await open();
+    await chooseAnchor(store, "maren-kest", {
+      file: "main-photo.png",
+      jobId: "jb_01J8E0000000000000000000J1",
+      sheetVersion: 4,
+      artDirectionVersion: 3,
+      acceptedAt: CLOCK(),
+    });
+    for (const [id, file] of [
+      ["council-coat", "looks/council-coat.png"],
+      ["storm-oilskin", "looks/storm-oilskin.png"],
+      ["winter-greys", "looks/winter-greys.png"],
+    ] as const) {
+      await acceptCharacterLook(store, "maren-kest", {
+        id,
+        file,
+        kind: "costume",
+        prompt: id,
+        takeId: "tk_01J8E0000000000000000000T3",
+        artDirectionVersion: 3,
+      });
+    }
+    // The legacy state, written straight past the mutation that now forbids it.
+    const loaded = (await readKit(store, "maren-kest"))!;
+    const collided = loaded.kit.looks!.map((look) =>
+      look.id === "winter-greys"
+        ? look
+        : { ...look, attachedTo: { kind: "production" as const, productionId: "saltlight" } },
+    );
+    await store.commit({
+      kind: "reference.kit",
+      source: "test",
+      files: [
+        {
+          path: "references/maren-kest/kit.json",
+          action: "replace",
+          content: `${JSON.stringify({ ...loaded.kit, looks: collided }, null, 2)}\n`,
+          baseHash: sha256(loaded.raw),
+        },
+      ],
+    });
+
+    await attachCharacterLook(store, "maren-kest", "council-coat", null);
+    const after = (await readKit(store, "maren-kest"))!.kit.looks!;
+    assert.deepEqual(
+      after.filter((look) => look.attachedTo !== undefined).map((look) => look.id),
+      [],
+      "the production holds nothing, rather than falling back to the other claimant",
+    );
     await store.close();
   });
 

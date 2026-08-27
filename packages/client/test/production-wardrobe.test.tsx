@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { CharacterLook, ClientState, CompiledPass, CompiledReference } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { carriedSubjects, lookOptionScope, passRow } from "../src/screens/production.js";
+import { carriedSubjects, lookOptionScope, lookPickerLabels, passRow } from "../src/screens/production.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -308,6 +308,50 @@ describe("what the wardrobe picker says a look would be moved from", () => {
         productions,
       ),
       null,
+    );
+  });
+});
+
+/**
+ * One exploration returns several results, and accepting more than one from a batch gives looks
+ * whose prompt and kind are identical and whose images are not (codex round 2). The gallery tells
+ * them apart by showing them; a text picker cannot.
+ */
+describe("the wardrobe picker's labels", () => {
+  const look = (id: string, prompt: string): CharacterLook => ({
+    id,
+    file: `looks/${id}.png`,
+    kind: "costume",
+    prompt,
+    acceptedAt: "2026-08-01T10:05:30Z",
+  });
+
+  it("numbers the ones that share a caption, in acceptance order", () => {
+    const labels = lookPickerLabels([
+      look("tk_1", "Formal Ebb Council coat"),
+      look("tk_2", "Formal Ebb Council coat"),
+      look("tk_3", "Formal Ebb Council coat"),
+    ]);
+    assert.deepEqual(
+      [...labels.values()],
+      ["Formal Ebb Council coat 1", "Formal Ebb Council coat 2", "Formal Ebb Council coat 3"],
+    );
+  });
+
+  it("leaves a caption nobody else claims exactly as it reads", () => {
+    const labels = lookPickerLabels([look("tk_1", "Formal Ebb Council coat"), look("tk_2", "Storm oilskin")]);
+    assert.deepEqual([...labels.values()], ["Formal Ebb Council coat", "Storm oilskin"]);
+  });
+
+  it("numbers only the caption that collides, not its neighbours", () => {
+    const labels = lookPickerLabels([
+      look("tk_1", "Storm oilskin"),
+      look("tk_2", "Formal Ebb Council coat"),
+      look("tk_3", "Formal Ebb Council coat"),
+    ]);
+    assert.deepEqual(
+      [...labels.values()],
+      ["Storm oilskin", "Formal Ebb Council coat 1", "Formal Ebb Council coat 2"],
     );
   });
 });

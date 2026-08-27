@@ -461,6 +461,36 @@ export function ProductionLayout() {
  * world's permanent record.
  */
 /**
+ * The picker's labels, disambiguated only where they collide (codex round 2).
+ *
+ * A look's caption is the exploration's own words, and one exploration returns several results —
+ * so accepting more than one from a batch gives looks whose `prompt` and `kind` are identical and
+ * whose ids and files are not. The picker is text, unlike the gallery it came from, so those
+ * arrived as several indistinguishable options over different images.
+ *
+ * Numbered in acceptance order, which is the order the kit stores them in, and only where a
+ * caption is claimed more than once — a lone look carries no number to read.
+ */
+export function lookPickerLabels(looks: readonly CharacterLook[]): Map<string, string> {
+  const caption = (look: CharacterLook): string => lookTileLabel(look.prompt, look.kind);
+  const claims = new Map<string, number>();
+  for (const look of looks) claims.set(caption(look), (claims.get(caption(look)) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const look of looks) {
+    const text = caption(look);
+    if ((claims.get(text) ?? 0) < 2) {
+      labels.set(look.id, text);
+      continue;
+    }
+    const nth = (seen.get(text) ?? 0) + 1;
+    seen.set(text, nth);
+    labels.set(look.id, `${text} ${nth}`);
+  }
+  return labels;
+}
+
+/**
  * What choosing this option would take it away from (design 67, codex round 1).
  *
  * A look holds one `attachedTo`, so picking one that is already spoken for is a *move*: the
@@ -538,11 +568,12 @@ function ProductionWardrobe({
           /* Scene attachments are stated, not offered: this row is the production's altitude,
              and a scene's own choice belongs on the scene. Narrower scope wins at dispatch, so
              a row claiming to be the whole answer while a scene overrides it would be lying. */
+          const labels = lookPickerLabels(looks);
           const perScene = looks.flatMap((look) => {
             const scope = look.attachedTo;
             if (scope?.kind !== "scene" || scope.productionId !== production.meta.id) return [];
             const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
-            return scene ? [{ id: look.id, scene, label: lookTileLabel(look.prompt, look.kind) }] : [];
+            return scene ? [{ id: look.id, scene, label: labels.get(look.id) ?? "" }] : [];
           });
           return (
             <div className="fy-wardrobe__row" key={sheet.id}>
@@ -586,7 +617,7 @@ function ProductionWardrobe({
                     const elsewhere = lookOptionScope(look, production, world.productions);
                     return (
                       <option key={look.id} value={look.id}>
-                        {lookTileLabel(look.prompt, look.kind)}
+                        {labels.get(look.id) ?? ""}
                         {elsewhere ? ` · ${elsewhere}` : ""}
                       </option>
                     );

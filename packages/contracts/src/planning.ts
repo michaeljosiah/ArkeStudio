@@ -1015,12 +1015,17 @@ export function attachmentFor(
    * first in the array picked the OLDEST, because acceptance appends. An upgraded world would
    * have gone on dispatching the older appearance until somebody happened to reattach.
    */
-  const rank = (look: (typeof scopedLooks)[number]): string =>
-    `${look.attachedTo?.kind === "scene" ? "1" : "0"}${look.acceptedAt}`;
-  const scopedLook = scopedLooks.reduce<(typeof scopedLooks)[number] | undefined>(
-    (best, look) => (best === undefined || rank(look) > rank(best) ? look : best),
-    undefined,
-  );
+  const narrower = (look: (typeof scopedLooks)[number]): boolean => look.attachedTo?.kind === "scene";
+  // Instants, not strings. `IsoDateTimeSchema` admits an offset and optional fractional seconds,
+  // and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above `2026-08-01T23:00:00Z`
+  // while being the earlier moment, and `…:00.500Z` sorts below `…:00Z` for the same reason.
+  // Both spellings occur here — the store's clock writes milliseconds, older records do not.
+  const at = (look: (typeof scopedLooks)[number]): number => Date.parse(look.acceptedAt);
+  const scopedLook = scopedLooks.reduce<(typeof scopedLooks)[number] | undefined>((best, look) => {
+    if (best === undefined) return look;
+    if (narrower(look) !== narrower(best)) return narrower(look) ? look : best;
+    return at(look) > at(best) ? look : best;
+  }, undefined);
   if (role === "primary" && scopedLook) {
     return {
       sheetId: sheet.id,
