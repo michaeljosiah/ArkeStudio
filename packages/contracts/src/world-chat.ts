@@ -777,7 +777,14 @@ const ShotDraftSchema = z
       .optional(),
     framing: ShotFramingSchema.optional(),
     continuity: z
-      .object({ openOnPrevious: z.boolean().optional(), keepOut: z.string().max(600).optional() })
+      .object({
+        openOnPrevious: z.boolean().optional(),
+        // SPEC-019 R-50. Admitted here as well as on the screen because a story author writing a
+        // scene is exactly who knows a shot carries straight on from the one before it, and a key
+        // this strict object omits is not a dropped field — it refuses the whole turn.
+        continuesPrevious: z.boolean().optional(),
+        keepOut: z.string().max(600).optional(),
+      })
       .strict()
       .optional(),
   })

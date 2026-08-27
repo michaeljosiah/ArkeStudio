@@ -2978,6 +2978,21 @@ export function DispatchDialogScreen() {
         key: `sf-${f.shotId}`,
         text: `shot ${f.number}'s start frame is unusable: ${f.detail} — this blocks dispatch`,
       });
+    // SPEC-019 R-50: the shot extends the previous take instead of opening on a still cut out of
+    // it, and what stepped aside is named for the reason a framed shot's is.
+    for (const c of warnings.continuedShots)
+      warningRows.push({
+        key: `cn-${c.shotId}`,
+        text: `shot ${c.number} continues the previous shot's take${
+          c.setAside.length > 0
+            ? ` — ${c.setAside.join(", ")} step aside, the extend route takes one video`
+            : ""
+        }`,
+      });
+    // R-51, R-52: it asked and cannot. Named rather than quietly generating from scratch, which
+    // is paid-for footage that does not cut against what came before it.
+    for (const c of warnings.continuationUnavailable)
+      warningRows.push({ key: `cu-${c.shotId}`, text: `shot ${c.number} cannot continue: ${c.reason}` });
     // Issue 389: an impossible delivery shape refuses, consistently — composition throws the
     // same refusal server-side, so this row is the dialog saying it first.
     if (warnings.aspectUnsupported) {

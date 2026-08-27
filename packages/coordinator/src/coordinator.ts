@@ -5084,6 +5084,9 @@ export class Coordinator {
             model,
             audioDesign,
             artifacts: bundle.artifacts,
+            // The takes, so a shot flagged to continue resolves its predecessor here exactly as
+            // the dialog did (SPEC-019 R-50).
+            takes: production.takes,
             ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
             ...(msg.resolution !== undefined ? { resolution: msg.resolution } : {}),
             ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
@@ -5369,6 +5372,9 @@ export class Coordinator {
             audioDesign,
             // The world's shelf, for resolving durable boundary frames (issue 154).
             artifacts: bundle.artifacts,
+            // The production's takes, for resolving a continuation's predecessor (R-50). Both
+            // are here for one reason: the request the dialog showed is the one executed.
+            takes: production.takes,
             // The production's delivery aspect (issue 389): stills shape to it, video routes
             // receive it, and an impossible shape is refused by composition below.
             ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),

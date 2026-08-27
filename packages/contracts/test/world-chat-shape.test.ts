@@ -231,7 +231,10 @@ describe("nested shapes in the guide", () => {
   const guide = worldChatResultShapeGuide();
 
   it("gives every key in a nested object a type", () => {
-    assert.match(guide, /continuity \(\{openOnPrevious: boolean\?, keepOut: string\?\}/);
+    assert.match(
+      guide,
+      /continuity \(\{openOnPrevious: boolean\?, continuesPrevious: boolean\?, keepOut: string\?\}/,
+    );
     assert.match(guide, /beats \(array of \{span: string, text: string\}/);
   });
 
