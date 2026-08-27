@@ -47,6 +47,7 @@ const STATE: ClientState = {
   },
   worlds: [],
   world: null,
+  worldOpenFailure: null,
   worldChat: null,
   bench: null,
   authoringRuns: [],

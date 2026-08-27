@@ -468,6 +468,19 @@ export const ClientStateSchema = z
     /** Null until a world is opened. */
     world: WorldBundleSchema.nullable(),
     /**
+     * Why the last world asked for is not the one above (issue 571).
+     *
+     * In the snapshot rather than only in its event, for the same reason `env` and `builds` are:
+     * the request is fire-and-forget, so a client that asks and then re-renders — or reconnects —
+     * would otherwise have nothing to distinguish a refusal from a world still opening, and would
+     * wait on the loader indefinitely. Cleared the moment any world opens.
+     */
+    worldOpenFailure: z
+      .object({ worldId: UlidSchema, reason: z.string().min(1) })
+      .strict()
+      .nullable()
+      .default(null),
+    /**
      * The one conversation currently open, or null.
      *
      * Deliberately singular. A creator reads one conversation at a time, and holding every

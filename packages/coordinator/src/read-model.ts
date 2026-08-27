@@ -57,6 +57,7 @@ export class ReadModel {
       },
       worlds: [],
       world: null,
+      worldOpenFailure: null,
       worldChat: null,
       bench: null,
       // Always empty here, and filled on the way out by the coordinator, which is the only thing
@@ -130,9 +131,22 @@ export class ReadModel {
     this.state = {
       ...this.state,
       world,
+      // Any world reaching this point settles the last refusal: it is the answer to "why is
+      // there no world open", and there now is one (issue 571). A close clears it too — nobody
+      // asked for a world, so there is nothing outstanding to explain.
+      worldOpenFailure: null,
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
     };
+  }
+
+  /**
+   * A world was asked for and did not open (issue 571). Recorded beside `world` rather than
+   * left to the event alone, because the client's request carries no correlation and its
+   * loader has nothing else to end on.
+   */
+  setWorldOpenFailure(failure: ClientState["worldOpenFailure"]): void {
+    this.state = { ...this.state, worldOpenFailure: failure };
   }
 
   /**
@@ -351,6 +365,7 @@ export class ReadModel {
       }
       case "world.opened":
       case "world.closed":
+      case "world.open-failed":
       case "proposal.staged":
       case "proposal.resolved":
       case "proposal.blocked":

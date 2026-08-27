@@ -1969,6 +1969,30 @@ export class Coordinator {
   }
 
   /**
+   * State a refused world open in all three of the places somebody looks for it (issue 571):
+   * `logs/app.jsonl`, `logs/coordinator.jsonl` by way of the event, and the screen.
+   *
+   * The read model is reconciled with the provider first, because a failed open is not always a
+   * closed world. `loadWorld` closes the outgoing store before it opens the incoming one, so a
+   * store that refuses leaves nothing open — but an unknown world id is refused before that
+   * point, with the current world untouched. Asking the provider which it was is the difference
+   * between reporting no open world and throwing away the one the person is still looking at.
+   */
+  private async failWorldOpen(worldId: string, err: unknown): Promise<void> {
+    // The store's own words wherever there are any: "world is open in another Arke Studio process
+    // (pid 1234)" is the answer, and paraphrasing it here would only lose the pid.
+    const message = err instanceof Error ? err.message.trim() : String(err).trim();
+    const reason = (message.length > 0 ? message : "the world could not be opened").slice(0, 500);
+    if ((this.opts.provider.openStore?.() ?? null) === null) this.readModel.setWorld(null);
+    await this.appLog?.append({ level: "error", event: "world.open-failed", worldId, reason });
+    // After the read model, because `setWorld` clears the failure — it is the answer to "why is
+    // no world open", and a stale one outliving its question is worse than none.
+    this.readModel.setWorldOpenFailure({ worldId, reason });
+    this.emit({ at: new Date().toISOString(), type: "world.open-failed", worldId, reason });
+    this.transport.broadcastSnapshot();
+  }
+
+  /**
    * Run the measurement pass without anything waiting for it.
    *
    * Deliberately not tracked as background work: `trackBackground` puts a promise in the shutdown
@@ -2685,8 +2709,24 @@ export class Coordinator {
       case "open-world":
         try {
           await this.openWorld(msg.worldId);
-        } catch {
-          // An unknown world id is a stale client; the next snapshot corrects it.
+        } catch (err) {
+          /*
+           * Every way a world can fail to open ends here, and this used to end nowhere (issue 571).
+           *
+           * The catch was written for one of them — an unknown world id from a stale client, which
+           * the next snapshot corrects — and swallowed the rest. But `WorldStore.open` also refuses
+           * for reasons it has already worded: the world is open in another process, an entity's
+           * history conflicts with its committed version, a scan cannot read the folder. Those
+           * refusals were dropped in silence: no log line, and the throw lands before both
+           * `world.opened` and the snapshot that follows it, so the screen sat on "opening the
+           * world" indefinitely with nothing anywhere saying why. There is no next snapshot to be
+           * corrected by, because nothing else sends one.
+           *
+           * All three of the ways out are needed. The log is for afterwards, the event for anything
+           * listening, and the snapshot for the screen — which has no correlation to its own
+           * request and cannot otherwise tell a refusal from a world still opening.
+           */
+          await this.failWorldOpen(msg.worldId, err);
         }
         return;
       case "create-world": {

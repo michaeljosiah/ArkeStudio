@@ -106,6 +106,7 @@ import {
   useVoiceSidecar,
   useWorld,
   type AuthoringActivity,
+  openWorld,
   renameWorld,
 } from "../lib/store.js";
 
@@ -129,6 +130,10 @@ export function WorldLayout() {
   useOpenWorldGuard(worldId);
   const { state } = useStore();
   const world = state?.world;
+  // Only this world's refusal: switching to another world leaves the failure on the wire until
+  // one opens, and it would otherwise follow the person onto a world that is opening fine.
+  const refusal =
+    state?.worldOpenFailure?.worldId === worldId ? (state?.worldOpenFailure ?? null) : null;
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
   // addresses — /cast, /locations, /factions — and a chip row on each moves between them, so
   // the tab lights on all three.
@@ -156,7 +161,7 @@ export function WorldLayout() {
     return (
       <div className="fy-app">
         <div className="fy-content fy-content--fixed">
-          <Outlet />
+          {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
         </div>
       </div>
     );
@@ -193,8 +198,28 @@ export function WorldLayout() {
           ))}
         </nav>
         <WorldConditionBanners />
-        <Outlet />
+        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The world was asked for and refused (issue 571). Here rather than on each screen inside the
+ * world, because every one of them reads the same absent bundle: before this, a world that would
+ * not open left whichever route you were on rendering its loader forever, and the refusal that
+ * caused it existed nowhere.
+ */
+function WorldOpenRefusal({ worldId, reason }: { worldId: string; reason: string }) {
+  return (
+    // `overflow-wrap` inherits, and the reason is usually a path: without it a deep
+    // `.history/productions/…` runs past the dashed edge rather than wrapping inside it.
+    <div style={{ padding: "var(--space-6) var(--gutter)", overflowWrap: "anywhere" }}>
+      <EmptyState
+        title="This world did not open"
+        hint={reason}
+        action={<Button onClick={() => openWorld(worldId)}>Try again</Button>}
+      />
     </div>
   );
 }

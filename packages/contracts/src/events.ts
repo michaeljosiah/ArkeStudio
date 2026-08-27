@@ -93,6 +93,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
+  /**
+   * A world was asked for and did not open (issue 571).
+   *
+   * The counterpart to `world.opened`, and it exists because its absence was indistinguishable
+   * from a slow open: a world whose derived `.index/` made `WorldStore.open` throw sat on
+   * "opening the world" forever, with nothing in any log and no way to tell stuck from slow.
+   * The reason is the error's message, which the store already words for a person.
+   */
+  z
+    .object({ ...base, type: z.literal("world.open-failed"), worldId: UlidSchema, reason: z.string().min(1) })
+    .strict(),
   /** Correlated answer to a reviewed chat-to-Bench handoff. It never means Generate was pressed. */
   z
     .object({
