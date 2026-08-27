@@ -284,6 +284,17 @@ export class JobQueue {
   private readonly retryTimers = new Set<NodeJS.Timeout>();
   /** Submits without a remote id can still be interrupted, notably queue-backed local speech. */
   private readonly submitAborts = new Map<string, AbortController>();
+  /**
+   * Jobs whose cancellation is underway, held from the moment the abort fires until the terminal
+   * row is written. The abort makes the in-flight submit reject, and that rejection reaches the
+   * submit catch before `cancel()` has written `cancelled` — one microtask is not enough for a
+   * transition. Reading the status alone therefore saw `submitting` and sent a *deliberate* user
+   * cancellation into `handleSubmitError`, where a paid non-idempotent provider takes the hold
+   * branch: the job settled as needs-reconciliation, telling the user Arke could not witness the
+   * outcome and might charge again for something they had just called off. The intent is the fact
+   * the error path needs, and the status is only a lagging record of it.
+   */
+  private readonly cancelling = new Set<string>();
   /** Old spawned-engine runs fenced off before their durable requeue is awaited. */
   private readonly retiredEngineRuns = new Set<string>();
 
@@ -722,7 +733,9 @@ export class JobQueue {
       await this.pollToTerminal(running, client, key);
     } catch (err) {
       if (this.disposed) return;
-      if (this.jobs.get(job.id)?.status === "cancelled") return; // already terminal by the user
+      // Cancelled by the user, or being cancelled right now: the abort IS the error, and `cancel()`
+      // owns the terminal row. Never let it reach handleSubmitError.
+      if (this.cancelling.has(job.id) || this.jobs.get(job.id)?.status === "cancelled") return;
       if (!this.stillSubmitting(submitting)) return;
       await this.handleSubmitError(submitting, client, err);
     } finally {
@@ -1109,9 +1122,20 @@ export class JobQueue {
   async cancel(jobId: string): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job || TERMINAL.has(job.status)) return;
+    try {
+      await this.cancelInner(jobId, job);
+    } finally {
+      this.cancelling.delete(jobId);
+    }
+  }
+
+  private async cancelInner(jobId: string, job: Job): Promise<void> {
     const lane = this.lane(job.provider);
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
     const submitAbort = this.submitAborts.get(jobId);
+    // Claimed before the abort, not after: the rejection it causes races this method, and the
+    // submit's error path has to be able to tell a cancellation from a transport failure.
+    this.cancelling.add(jobId);
     submitAbort?.abort();
     if (submitAbort !== undefined) await Promise.resolve();
     if (TERMINAL.has(this.jobs.get(jobId)?.status ?? "")) return;

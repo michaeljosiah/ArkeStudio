@@ -47,6 +47,7 @@ export class AnthropicClient implements ProviderClient {
       method: "POST",
       headers: this.headers(key),
       body: JSON.stringify({ model: request.model, max_tokens: 4096, ...request.params }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (status >= 400) throw new Error(`anthropic: message failed (HTTP ${status})`);
     const blocks = (body as { content?: Array<{ type?: string; text?: string }> } | null)?.content ?? [];

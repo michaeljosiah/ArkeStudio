@@ -269,6 +269,12 @@ export class FalClient implements ProviderClient {
         ...imageOutput,
         ...imagePayload,
       }),
+      // Deliberately NOT abortable, unlike the synchronous providers. This POST is an enqueue:
+      // fal takes the work and answers with the `request_id` that `cancel()` needs to call it off.
+      // Aborting discards that id while the remote job keeps running — the request was still
+      // accepted, and we would have thrown away the only handle for stopping it. Letting a
+      // sub-second enqueue finish is what makes the remote cancel at dispatcher.ts:701 reachable;
+      // there is no long local wait here to save, which is the thing abort exists for.
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;
     if (status >= 400 || !requestId) throw new Error(`fal: submit failed (HTTP ${status})`);
