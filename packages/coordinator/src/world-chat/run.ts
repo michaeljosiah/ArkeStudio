@@ -873,6 +873,7 @@ function contextAttachments(
         fileName: a.fileName,
         kind: a.kind,
         readable: a.readability !== "not-readable",
+        ...(a.readability === "extracted-text-available" ? { extracted: true } : {}),
         ...(body !== undefined ? { text: body } : {}),
       };
     });

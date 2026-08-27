@@ -252,6 +252,24 @@ describe("context assembly", () => {
     );
   });
 
+  /**
+   * A PDF's words are the file's text and are not the file.
+   *
+   * Told only "here is treatment.pdf" above a body of prose, the model has a name that promises a
+   * document and a body that is only part of one, and it will answer about the figure on page
+   * four in the same voice it answers about the paragraph beside it.
+   */
+  it("says when the text is what was got out of a file rather than the file", () => {
+    const doc = attachment({ fileName: "treatment.pdf", extracted: true, text: "The drowned god sings." });
+    const context = assembleContext({ ...baseInput(), attachments: [doc] });
+    assert.match(context.attachments, /pictures, tables and layout are not here/);
+    assert.match(context.attachments, /The drowned god sings\./, "and the words still arrive");
+
+    // Not said about a file that is its own text: there is nothing missing from a .txt.
+    const plain = assembleContext({ ...baseInput(), attachments: [attachment({ text: "Plain." })] });
+    assert.doesNotMatch(plain.attachments, /pictures, tables and layout/);
+  });
+
   it("is empty when nothing was handed over, so the prompt gains no empty section", () => {
     assert.equal(assembleContext(baseInput()).attachments, "");
   });

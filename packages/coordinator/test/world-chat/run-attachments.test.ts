@@ -13,6 +13,7 @@ import {
   WorldChatAttachmentStore,
   type AttachmentRange,
 } from "../../src/world-chat/attachments.js";
+import { onePagePdf } from "./build-documents.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -224,6 +225,31 @@ describe("reading an attachment", () => {
     });
 
     const outcome = await runner.send(c.freshStore(), c.conversationId, "read my notes", [doc.id]);
+    assert.equal(outcome.status, "completed");
+  });
+
+  /**
+   * The whole chain, for a file whose words had to be got out of it first.
+   *
+   * A PDF's bytes are not its text, so everything downstream of the extraction — what the prompt
+   * inlines, what a quotation is checked against, what the content hash identifies — has to be
+   * reading the extraction and not the file. Verification passing is what proves it: the quote is
+   * in the document and nowhere in the bytes of it.
+   */
+  it("verifies a quotation from a PDF", async () => {
+    const c = await conversation("arke-att-pdf-");
+    const doc = await c.attachments.ingest(c.conversationId, {
+      fileName: "treatment.pdf",
+      bytes: onePagePdf("The lock was built in the year the god drowned."),
+    });
+    assert.equal(doc.readability, "extracted-text-available");
+
+    const runner = runnerFor({
+      ...c,
+      adapter: fakeAdapter([citing(c.freshStore(), doc.id, doc.contentHash, "the year the god drowned")]),
+    });
+
+    const outcome = await runner.send(c.freshStore(), c.conversationId, "read my treatment", [doc.id]);
     assert.equal(outcome.status, "completed");
   });
 

@@ -12,6 +12,12 @@ import {
 } from "@arke-studio/contracts";
 import { kindForFile } from "../artifacts/filing.js";
 import { spoolName } from "../artifacts/spool.js";
+import {
+  EXTRACTED_EXTENSIONS,
+  extractDocumentText,
+  extractionRefusal,
+  isExtractable,
+} from "./document-text.js";
 import { toExtendedLength } from "../world/paths.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 
@@ -91,6 +97,14 @@ export const MAX_LINKED_ATTACHMENTS_PER_TURN = 20;
 /** Longer typed input becomes a document attachment rather than being cut (§19). */
 export const MAX_MESSAGE_CHARS = 16_000;
 
+/**
+ * Where the words got out of a PDF or a Word file are kept, beside the file itself.
+ *
+ * The leading dot is what makes the name safe to hard-code: `spoolName` strips leading dots from
+ * every name it is given, so no attachment can ever be called this and collide with it.
+ */
+export const EXTRACTED_TEXT_FILE = ".extracted.txt";
+
 /** CON, PRN, AUX, NUL, COM0–9, LPT0–9 — reserved on Windows in any directory. */
 const RESERVED_DEVICE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 
@@ -144,9 +158,12 @@ function chatKind(fileName: string): WorldChatAttachment["kind"] {
 /**
  * What may honestly be claimed about this file (§13.2).
  *
- * Decided from the bytes, not the extension. A `.txt` holding a binary blob is not text, and a
- * PDF is a document that this version cannot read without an extraction step — saying otherwise
- * would let the Studio imply it had read something it never opened.
+ * Decided from the bytes, not the extension. A `.txt` holding a binary blob is not text, and
+ * saying otherwise would let the Studio imply it had read something it never opened.
+ *
+ * This answers one question only: are these bytes themselves text. A PDF's are not, and never
+ * will be — what makes a PDF readable is the extraction step, which `ingest` runs and records as
+ * a readability of its own.
  *
  * The sample is decoded as a *stream*, and that is the whole of the difference between this
  * working and this rejecting ordinary prose. Cutting at a fixed 4096 bytes cuts wherever 4096
@@ -183,22 +200,32 @@ function digest(bytes: Uint8Array): string {
  * A conversation may only be handed what it can honestly read (§13.2). Images, audio and video
  * would arrive as a chip the Studio could name but never open — multimodal understanding is
  * explicitly deferred (§23.2) — and a chip that looks attached while the reply cannot see it is
- * worse than a refusal, because the person goes on talking as though it had been read. PDF is a
- * document by extension and unreadable in fact until an extraction step exists, so it is out too;
- * the bytes decide, and `detectReadability` is what actually decides them.
+ * worse than a refusal, because the person goes on talking as though it had been read.
+ *
+ * PDF and Word were out for the same reason and are in now for the reason the refusal named:
+ * there is an extraction step. The rule has not moved. What can be read is still decided by the
+ * file rather than by its name, only now that decision has two ways of coming out true — the
+ * bytes are text, or text can be got out of them — and a file that satisfies neither is refused
+ * as plainly as before.
  */
-export const CHAT_DOCUMENT_EXTENSIONS: readonly string[] = ["md", "txt"];
+export const CHAT_DOCUMENT_EXTENSIONS: readonly string[] = ["md", "txt", ...EXTRACTED_EXTENSIONS];
 
 /**
  * Whether this file can be handed to a conversation, or the sentence explaining why not.
  *
  * Checked before anything is written, so a refused file leaves nothing behind to clean up.
+ *
+ * The kind gate is here; the deeper one is not. Whether there are words inside a PDF is only
+ * answerable by taking it apart, and `ingest` is where that happens — once, on the way in,
+ * rather than twice because two callers each wanted an answer. It refuses in the same breath and
+ * just as early: nothing is written until the text is in hand.
  */
 export function refuseUnreadable(fileName: string, bytes: Uint8Array): string | null {
   const kind = chatKind(fileName);
   if (kind !== "document") {
     return `World Chat can only read text for now, and ${fileName} is ${kind === "other" ? "not a document" : `${kind === "image" ? "an" : "a"} ${kind} file`}.`;
   }
+  if (isExtractable(fileName)) return null;
   if (detectReadability(kind, bytes) !== "text-readable") {
     return `${fileName} is not readable as text — World Chat cannot open it yet.`;
   }
@@ -286,6 +313,24 @@ export class WorldChatAttachmentStore {
     const fileName = attachmentFileName(input.fileName);
     if (!fileName) throw new AttachmentError("unsafe-name", "That file name cannot be used.");
 
+    /**
+     * A PDF or a Word file is read by getting its words out first (§13.2).
+     *
+     * Before anything is written, so a file with nothing in it leaves nothing behind — and
+     * before the id is minted, so the refusal is about the file rather than about an attachment
+     * that briefly existed. What comes back is kept beside the original: the original is what
+     * gets filed into the world if the person promotes it, and the extraction is what the
+     * conversation reads and quotes.
+     */
+    let extracted: string | null = null;
+    if (isExtractable(fileName)) {
+      const result = extractDocumentText(fileName, input.bytes);
+      if (result && !result.ok) {
+        throw new AttachmentError("not-text-readable", extractionRefusal(fileName, result.reason));
+      }
+      extracted = result?.text ?? null;
+    }
+
     const id = newId("wca") as ChatAttachmentId;
     const finalDir = attachmentDir(this.worldPath, conversationId, id);
     const target = resolve(finalDir, fileName);
@@ -298,6 +343,9 @@ export class WorldChatAttachmentStore {
     await mkdir(toExtendedLength(staging), { recursive: true });
     try {
       await writeFile(toExtendedLength(join(staging, fileName)), input.bytes);
+      if (extracted !== null) {
+        await writeFile(toExtendedLength(join(staging, EXTRACTED_TEXT_FILE)), extracted, "utf8");
+      }
       await mkdir(toExtendedLength(join(finalDir, "..")), { recursive: true });
       await rename(toExtendedLength(staging), toExtendedLength(finalDir));
     } catch (err) {
@@ -313,7 +361,10 @@ export class WorldChatAttachmentStore {
       kind,
       contentHash: digest(input.bytes),
       byteLength: input.bytes.byteLength,
-      readability: detectReadability(kind, input.bytes),
+      // The hash stays the file's own. What is quoted is the extraction, and it is derived from
+      // these bytes by one function — so the hash still identifies what any quotation came from,
+      // and a different file cannot produce the same one.
+      readability: extracted !== null ? "extracted-text-available" : detectReadability(kind, input.bytes),
       linkedMessageIds: [],
       ...(input.source !== undefined ? { source: input.source } : {}),
       createdAt: this.now(),
@@ -425,6 +476,28 @@ ${text}`),
   }
 
   /**
+   * The characters this attachment reads as — the file itself, or what was got out of it.
+   *
+   * One method rather than a branch at every call site, because the difference is exactly what
+   * the rest of the system should not have to know: a conversation reads text, and whether that
+   * text was decoded or extracted is settled once, at the door.
+   */
+  private async readCharacters(attachment: WorldChatAttachment): Promise<string> {
+    if (attachment.readability !== "extracted-text-available") {
+      return new TextDecoder("utf-8").decode(await this.readBytes(attachment));
+    }
+    const path = join(
+      attachmentDir(this.worldPath, attachment.conversationId, attachment.id),
+      EXTRACTED_TEXT_FILE,
+    );
+    try {
+      return await readFile(toExtendedLength(path), "utf8");
+    } catch {
+      throw new AttachmentError("not-found", "That attachment is no longer on disk.");
+    }
+  }
+
+  /**
    * A bounded window of an attachment's text (§9.2, §13.2).
    *
    * Refuses rather than guessing when the file is not text. Returns the content hash alongside
@@ -452,8 +525,7 @@ ${text}`),
         `${attachment.fileName} cannot be read as text in this chat.`,
       );
     }
-    const bytes = await this.readBytes(attachment);
-    const whole = new TextDecoder("utf-8").decode(bytes);
+    const whole = await this.readCharacters(attachment);
     const offset = Math.max(0, Math.trunc(range.offset ?? 0));
     // No upper clamp: the caller's limit is the caller's business, and the run's text budget is
     // what actually bounds it. Clamping here bounded the prompt as well, which was never the point.

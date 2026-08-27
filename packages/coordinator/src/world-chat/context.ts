@@ -148,6 +148,14 @@ export interface ContextAttachment {
   fileName: string;
   kind: string;
   readable: boolean;
+  /**
+   * Set when the text is what was got out of the file rather than the file itself.
+   *
+   * The model has to know, because what it is holding is the words and not the document: no
+   * figures, no tables as tables, no layout. Told only "here is treatment.pdf", it will answer a
+   * question about the chart on page four as confidently as one about the paragraph beside it.
+   */
+  extracted?: boolean;
   text?: string;
 }
 
@@ -304,6 +312,16 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
 const CUT_NOTE = "[Cut off here. Read further with get_attachment_text rather than guessing at the rest.]";
 
 /**
+ * What a PDF or a Word file arrives as, said once, above the words.
+ *
+ * The same honesty the unreadable line carries, one step further in. The text is real and the
+ * document around it is not here: a figure, a photograph, a table's shape on the page. Without
+ * this the model has a file name that promises a document and a body that is only its prose, and
+ * it will answer about the rest of it in the same voice.
+ */
+const EXTRACTED_NOTE = "[The text of this file. Its pictures, tables and layout are not here — do not describe them.]";
+
+/**
  * The budget is shared out per document rather than spent in order.
  *
  * Cutting the concatenation at a total bound spends it first-come: five documents with long
@@ -342,13 +360,14 @@ function renderAttachments(attachments: readonly ContextAttachment[], room?: num
       if (!a.readable || a.text === undefined) {
         return `${head}\nAttached, and cannot be read as text here. Say so plainly if it is relevant; do not guess at what it contains.`;
       }
-      if (share === undefined || a.text.length <= share - head.length - CUT_NOTE.length - 5) {
-        return `${head}\n${a.text}`;
+      const opening = a.extracted === true ? `${head}\n${EXTRACTED_NOTE}` : head;
+      if (share === undefined || a.text.length <= share - opening.length - CUT_NOTE.length - 5) {
+        return `${opening}\n${a.text}`;
       }
       // The beginning: a document was handed over whole and starts at its start, so keeping the
       // tail would give the model the last page of something it never saw page one of.
-      const keep = Math.max(0, share - head.length - CUT_NOTE.length - 5);
-      return `${head}\n${a.text.slice(0, keep)}\n\n${CUT_NOTE}`;
+      const keep = Math.max(0, share - opening.length - CUT_NOTE.length - 5);
+      return `${opening}\n${a.text.slice(0, keep)}\n\n${CUT_NOTE}`;
     })
     .join("\n\n");
 }

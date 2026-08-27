@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { Composer } from "../components/composer.js";
-import { ConversationTranscript } from "../components/conversation.js";
+import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
 import { EmptyState } from "../components/layout.js";
 import { Button, IconButton, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight, More, PanelLeft, Plus } from "../components/icons.js";
@@ -670,7 +670,7 @@ export function WorldChatScreen() {
     .filter((a) => !dismissed.includes(a.id))
     .map((a) => ({
       id: a.id,
-      file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
+      file: attachmentChipLabel(a),
       kind: a.kind,
     }));
 

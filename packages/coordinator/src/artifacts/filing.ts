@@ -44,6 +44,7 @@ const KIND_BY_EXT: Record<string, ArtifactKind> = {
   ".md": "document",
   ".txt": "document",
   ".pdf": "document",
+  ".docx": "document",
 };
 
 export function kindForFile(name: string): ArtifactKind {
