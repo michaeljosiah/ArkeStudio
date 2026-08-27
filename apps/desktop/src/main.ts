@@ -674,6 +674,7 @@ async function initialize(): Promise<{ port: number }> {
     sizeMb: recipe.requires.checkpoints.reduce((sum, c) => sum + c.sizeMb, 0),
     optional: true,
     requires: ["comfyui-runtime"],
+    engine: "comfyui",
     spec: {
       kind: "files",
       dir: "",

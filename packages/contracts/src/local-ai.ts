@@ -29,6 +29,31 @@ export const ActivationStateSchema = z.enum([
 ]);
 export type ActivationState = z.infer<typeof ActivationStateSchema>;
 
+/**
+ * The local services that host models (SPEC-033 R-68). Three, with independent lifecycles,
+ * overlapping capabilities, and one of them — Voxa — hosting two providers.
+ *
+ * Not the same list as the local providers, and deliberately so: an engine is not a provider and
+ * a provider is not an engine (R-72). Voxa hosts Kokoro and whisper.cpp; ComfyUI hosts every
+ * recipe. The authoring harness is not here at all — it governs agent execution, and R-5 puts it
+ * on exactly one surface.
+ */
+export const EngineIdSchema = z.enum(["comfyui", "ollama", "voxa"]);
+export type EngineId = z.infer<typeof EngineIdSchema>;
+
+/** What each engine is used for, in the same five capability words the two screens share. */
+export const ENGINE_CAPABILITIES: Record<EngineId, string> = {
+  comfyui: "images, video, voice",
+  ollama: "language",
+  voxa: "voice",
+};
+
+export const ENGINE_LABEL: Record<EngineId, string> = {
+  comfyui: "ComfyUI",
+  ollama: "Ollama",
+  voxa: "Voxa",
+};
+
 /** The closed set of headline states R-26's table produces. Nothing else may reach a row. */
 export type LocalModelRowState =
   | "served-elsewhere"

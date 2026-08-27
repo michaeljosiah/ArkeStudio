@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EngineIdSchema } from "./local-ai.js";
 
 /**
  * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
@@ -55,6 +56,15 @@ export const SetupComponentSchema = z
      * the recipe catalogue, and a second declaration of the same weights is what drifts.
      */
     provides: z.array(z.string().min(1)).optional(),
+    /**
+     * Which engine requires this component (SPEC-033 R-71). Declared, so Engines can state a
+     * component under the engine that needs it rather than in one flat list that mixes a runtime
+     * with a set of weights.
+     *
+     * Absent means no engine requires it — a CLI, a native dependency. Those keep a place on
+     * Engines and are not the organising idea.
+     */
+    engine: EngineIdSchema.optional(),
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;

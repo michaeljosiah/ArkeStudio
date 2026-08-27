@@ -85,6 +85,14 @@ export interface CatalogueEntry {
    */
   provides?: readonly string[];
   /**
+   * The engine this component belongs to (SPEC-033 R-71). Declared rather than read off an id
+   * prefix, for the reason `provides` is: `ollama-gemma4-12b` naming its runtime in its id is
+   * the leak this whole rearrangement exists to stop.
+   *
+   * Absent means no engine requires it. Those keep a place on Engines without organising it.
+   */
+  engine?: "comfyui" | "ollama" | "voxa";
+  /**
    * Peak disk this component needs, where that differs from what it downloads — an archive
    * that is extracted holds both copies at once before the archive is deleted. The free-disk
    * guard measures against this; progress still counts the download, so a bar that reaches
@@ -143,6 +151,7 @@ export function voxaSetupCompleted(
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
     id: "ollama-runtime",
+    engine: "ollama",
     displayName: "Ollama",
     purpose: "Runs language models here — choose one in Settings · Local runtime",
     sizeMb: 750,
@@ -156,6 +165,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
+    engine: "voxa",
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines on this machine, in the six preset voices",
     sizeMb: 400,
@@ -178,6 +188,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
+    engine: "voxa",
     displayName: "Whisper base.en · dictation",
     purpose: "Turns your speech into text, without the audio leaving this machine",
     // The manifest's dictation row keeps `whisper-large-v3` as its id because that string is a
@@ -236,6 +247,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
   {
     id: "comfyui-runtime",
+    engine: "comfyui",
     displayName: "ComfyUI",
     purpose: "Runs image and video recipes — install managed, or explicitly reuse another engine",
     sizeMb: 2034,
@@ -262,6 +274,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   // follow the manifest's convention of the weights plus a couple of gigabytes to work in.
   {
     id: "ollama-gemma4-e2b-it-qat",
+    engine: "ollama",
     displayName: "Gemma 4 · E2B (quantised)",
     purpose: "The small Gemma 4 — the one to try first on a modest graphics card",
     sizeMb: 4300,
@@ -272,6 +285,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: "ollama-gemma4-12b",
+    engine: "ollama",
     displayName: "Gemma 4 · 12B",
     purpose: "Reads images and holds a 256K context — the one worth having if it fits",
     sizeMb: 7600,
@@ -282,6 +296,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: "ollama-gemma4-26b",
+    engine: "ollama",
     displayName: "Gemma 4 · 26B",
     purpose: "The large one, for a machine with the memory to hold it",
     sizeMb: 18000,

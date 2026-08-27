@@ -172,14 +172,14 @@ export function SettingsLocalAiScreen() {
                 entry={entry}
                 open={open === entry.model.id}
                 onToggle={() => setOpen(open === entry.model.id ? null : entry.model.id)}
-                onOpenEngines={() => navigate("/settings/local-runtime")}
+                onOpenEngines={() => navigate("/settings/engines")}
               />
             ))}
           </div>
         );
       })}
       <div className="fy-set__actions">
-        <Button variant="secondary" onClick={() => navigate("/settings/local-runtime")}>
+        <Button variant="secondary" onClick={() => navigate("/settings/engines")}>
           Engines
         </Button>
       </div>
