@@ -223,17 +223,34 @@ describe("continuation dispatch (SPEC-019 T-31, issue 461)", () => {
   });
 
   it("carries a pass segment's range, so the dispatch cuts before it sends (R-50, T-32)", async () => {
-    // A segment owns a range into media holding several shots (SPEC-013 R-3). Sending the backing
-    // file would extend whatever sits at its end, which is usually a different shot entirely.
+    /*
+     * A segment owns a range into media holding several shots (SPEC-013 R-3). Sending the backing
+     * file would extend whatever sits at its end, which is usually a different shot entirely.
+     *
+     * The segment deliberately carries NO `media` of its own, because arrival writes that field
+     * onto the pass take alone. A fixture that gave the segment one would let a resolver reading
+     * `predecessor.media` pass here and refuse every real segment in the product — which is how
+     * `materialiseForContinuation` carried the same mistake for as long as nothing called it.
+     */
     const segment = take(TK_1, {
       segment: { passTakeId: TK_PASS, inSec: 6, outSec: 12 },
     } as Partial<Take>);
-    const { plan } = await planFor({ takes: [segment] });
+    delete (segment as { media?: string }).media;
+    const pass = take(TK_PASS, { coversShots: ["sh_1", "sh_2"] } as Partial<Take>);
+    const { plan } = await planFor({ takes: [segment, pass] });
 
     const resolved = plan.shots[1]!.continuation!;
     assert.equal(resolved.takeId, TK_1, "the edge names the segment, which is what was selected");
     assert.equal(resolved.mediaTakeId, TK_PASS, "but the bytes live with the pass that produced it");
+    assert.equal(resolved.media, "clip.mp4", "read off the pass, never off the segment");
     assert.deepEqual(resolved.segment, { inSec: 6, outSec: 12 });
+  });
+
+  it("refuses a segment whose pass is gone rather than composing a path out of nothing", async () => {
+    const orphan = take(TK_1, { segment: { passTakeId: TK_PASS, inSec: 6, outSec: 12 } } as Partial<Take>);
+    delete (orphan as { media?: string }).media;
+    const { plan } = await planFor({ takes: [orphan] });
+    assert.match(plan.warnings.continuationUnavailable[0]!.reason, /no footage to extend/);
   });
 
   it("a continued shot is not also a shot missing its start frame", async () => {

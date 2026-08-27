@@ -261,6 +261,16 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     const later = render(FIXTURE_STATE, `${SCENE_PATH}/shots/sh_13`, <ShotSheetScreen />, ROUTE);
     assert.ok(later.includes("Open on the last frame of shot 12"));
   });
+
+  it("offers the stronger form beside it, and refuses it on the first shot too (SPEC-019 R-50)", () => {
+    // Continuation extends the footage where a boundary frame only reproduces its last picture.
+    // Both are authored intents on the same record, so both are offered in the same place — and
+    // the first shot has nothing before it either way.
+    const first = render(FIXTURE_STATE, SHOT_PATH, <ShotSheetScreen />, ROUTE);
+    assert.ok(first.includes("First shot — nothing to continue"));
+    const later = render(FIXTURE_STATE, `${SCENE_PATH}/shots/sh_13`, <ShotSheetScreen />, ROUTE);
+    assert.ok(later.includes("Continue the footage of shot 12"));
+  });
 });
 
 describe("removing a scene (round 3's other gap)", () => {

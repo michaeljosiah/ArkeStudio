@@ -1566,7 +1566,18 @@ function resolveContinuations(
     }
     const predecessor = availability.predecessor;
     const from = scene.shots[shotIndex - 1]!;
-    if (predecessor.media === undefined) {
+    /*
+     * The file lives with the PASS, not with the segment (SPEC-013 R-3).
+     *
+     * Arrival writes `media` onto the pass take only, so a segment's own is always undefined —
+     * reading it here would have refused every pass segment with "no footage to extend", which is
+     * exactly the case T-32 exists for. `spine-cut.ts` and `takes/boundary.ts` resolve it the same
+     * way, and this is the third place that has had to learn it.
+     */
+    const mediaTakeId = predecessor.segment?.passTakeId ?? predecessor.id;
+    const mediaTake =
+      predecessor.segment === undefined ? predecessor : takes.find((candidate) => candidate.id === mediaTakeId);
+    if (mediaTake?.media === undefined) {
       states.set(shot.id, { unavailable: `shot ${from.number}'s accepted take has no footage to extend` });
       continue;
     }
@@ -1575,8 +1586,8 @@ function resolveContinuations(
         takeId: predecessor.id,
         fromShotId: from.id,
         fromShotNumber: from.number,
-        mediaTakeId: predecessor.segment?.passTakeId ?? predecessor.id,
-        media: predecessor.media,
+        mediaTakeId,
+        media: mediaTake.media,
         ...(predecessor.segment !== undefined
           ? { segment: { inSec: predecessor.segment.inSec, outSec: predecessor.segment.outSec } }
           : {}),

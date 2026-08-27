@@ -42,6 +42,13 @@ export { continuationAvailable, type ContinuationAvailability } from "@arke-stud
  *
  * So a segment is materialised to its own file first. Never re-encoded, on the same grounds
  * SPEC-013 R-13 gives for frame extraction: a stream copy preserves exactly what was reviewed.
+ *
+ * The media take is resolved rather than assumed (issue 461). This function read `take.media` for
+ * a segment and built a path out of it, which is wrong twice over: arrival writes `media` onto the
+ * pass take alone, so a segment's is `undefined`, and the guard above it therefore refused every
+ * segment before the path could be wrong. Neither showed, because nothing had ever called this —
+ * which is the same way `continuedFrom` came to be read by four guards and written by nothing.
+ * `spine-cut.ts` and `takes/boundary.ts` both look the pass up; this now agrees with them.
  */
 export async function materialiseForContinuation(
   store: WorldStore,
@@ -50,9 +57,16 @@ export async function materialiseForContinuation(
   ffmpeg: FfmpegRunner | null,
   signal: AbortSignal,
 ): Promise<{ path: string; materialised: boolean }> {
-  if (!take.media) throw new Error(`take ${take.id} has no media to continue`);
-  // A segment's media lives with the pass that produced it, not with the segment.
-  const source = `productions/${productionId}/takes/${take.segment?.passTakeId ?? take.id}/${take.media}`;
+  const mediaTakeId = take.segment?.passTakeId ?? take.id;
+  const mediaTake =
+    take.segment === undefined
+      ? take
+      : store
+          .getBundle()
+          .productions.find((candidate) => candidate.meta.id === productionId)
+          ?.takes.find((candidate) => candidate.id === mediaTakeId);
+  if (!mediaTake?.media) throw new Error(`take ${mediaTakeId} has no media to continue`);
+  const source = `productions/${productionId}/takes/${mediaTakeId}/${mediaTake.media}`;
   const range = take.segment;
   if (!range) {
     // A whole take is already its own file; nothing to cut, so nothing to copy.
