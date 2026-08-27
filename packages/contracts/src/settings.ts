@@ -301,19 +301,76 @@ export const RuntimeProbesSchema = z
   .object({
     vramMb: z.number().int().min(0).nullable(),
     memMb: z.number().int().min(0).nullable(),
+    /**
+     * Free disk where the app lives. Kept because the machine header states it and the install
+     * guard turns on it — but SPEC-033 R-17 took it out of the fit calculation: it is the one
+     * floor the model itself moves, so a 40 GB model on a 50 GB volume would turn a verdict
+     * `insufficient` the instant it finished installing.
+     */
     diskFreeMb: z.number().int().min(0).nullable(),
+    /**
+     * What this machine reports it can accelerate with — `["cuda"]`, `["metal"]`, and so on.
+     *
+     * Absent and `null` both mean unmeasured — an older payload never carried the field, and a
+     * probe that failed answers null. `[]` is the only reading that can refuse a model: SPEC-033
+     * R-22 forbids a refusing verdict drawn from an unmeasured probe, and a machine whose
+     * adapter list could not be read is not a machine without a graphics card.
+     */
+    accelerators: z.array(z.string().min(1)).nullable().optional(),
+    /** `process.platform` as the host reports it. Absent or null means it was not stated. */
+    platform: z.string().min(1).nullable().optional(),
   })
   .strict();
 export type RuntimeProbes = z.infer<typeof RuntimeProbesSchema>;
 
+/**
+ * Can this machine run this model (SPEC-033 R-16)? A property of a model and a machine alone —
+ * never of whether it is installed, whether its engine is running, or whether anyone turned it
+ * off (R-14). Those are three other axes with three other owners.
+ *
+ * `insufficient` and `unsupported` are kept apart on purpose. A machine short of VRAM can be
+ * given more, and the remedy is the smaller models for that capability; a machine with no
+ * supported accelerator cannot, and offering it smaller models would be a lie of omission.
+ */
+export const FitVerdictSchema = z.enum([
+  "runs-well",
+  "runs-slowly",
+  "insufficient",
+  "unsupported",
+  "unknown",
+]);
+export type FitVerdict = z.infer<typeof FitVerdictSchema>;
+
+/**
+ * Which machine the work actually runs on (SPEC-033 R-9). A property of the **resolved engine**,
+ * not of `PROVIDERS[x].local` — that flag stays `true` for every ComfyUI recipe while the
+ * concrete engine may be a URL on another continent, and reading locality off it would judge
+ * another computer's work against this machine's VRAM.
+ */
+export const LocalitySchema = z.enum(["local", "remote"]);
+export type Locality = z.infer<typeof LocalitySchema>;
+
+/**
+ * One local model as the gate judged it.
+ *
+ * `state` was `ready | disabled | unknown` and carried two questions in one word — *can this
+ * machine run it* here, and *can this recipe dispatch right now* over in `RecipeReadiness`.
+ * SPEC-033 §2.2 splits them: this row answers fit and nothing else, and eligibility stays
+ * SPEC-028 R-35's to answer. Nothing on disk carried the old spelling — the status is derived
+ * from a fresh probe on every detection and never written to a settings file — so the rename
+ * costs no migration, only the call sites.
+ */
 export const LocalRuntimeModelSchema = z
   .object({
     modelId: z.string().min(1),
     provider: ProviderIdSchema,
     displayName: z.string().min(1),
     capability: CapabilitySchema,
-    state: z.enum(["ready", "disabled", "unknown"]),
-    /** The measured reason, both figures: "Needs 24 GB VRAM. This machine has 12 GB." (R-22). */
+    /** Where the work would run. `remote` carries no fit verdict at all (R-15). */
+    locality: LocalitySchema,
+    /** Absent exactly when `locality` is `remote` — stated as *served elsewhere*, not `unknown`. */
+    fit: FitVerdictSchema.optional(),
+    /** The verdict's figures, always both: "Needs 16 GB VRAM · this machine has 12 GB" (R-19). */
     reason: z.string().optional(),
     /** The cloud alternative worth noting, when one exists. */
     cloudAlternative: z.string().optional(),
@@ -326,6 +383,12 @@ export const LocalRuntimeStatusSchema = z
     probes: RuntimeProbesSchema,
     detectedAt: z.string().min(1),
     models: z.array(LocalRuntimeModelSchema),
+    /**
+     * capability → the one model id recommended for it (R-35, R-38). Authored order, measured
+     * filter: absent for a capability where nothing runs well here, which is an absence rather
+     * than a fault (R-37).
+     */
+    recommended: z.record(CapabilitySchema, z.string().min(1)).default({}),
   })
   .strict();
 export type LocalRuntimeStatus = z.infer<typeof LocalRuntimeStatusSchema>;

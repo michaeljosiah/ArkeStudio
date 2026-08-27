@@ -41,6 +41,7 @@ import {
   estimateMicroUsd,
   modelForCapability,
   gateLocalRuntimes,
+  type EngineLocalities,
   PROVIDERS,
   planScene,
   previewLineFor,
@@ -689,6 +690,14 @@ export class Coordinator {
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
+  /**
+   * The last hardware measurement, with the moment it was taken. Held rather than read back off
+   * the read model because the re-gate needs the original `detectedAt`: re-gating is not a
+   * measurement, and a fresh timestamp would claim a probe that never ran.
+   */
+  private lastRuntimeDetection: { probes: RuntimeProbes; detectedAt: string } | null = null;
+  /** The last gate result on the wire, so an unchanged re-gate stays off it. */
+  private lastRuntimeStatus = "";
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
@@ -2509,6 +2518,49 @@ export class Coordinator {
     await this.refreshComfyUi();
   }
 
+  /**
+   * Where each local provider's engine actually resolved to (SPEC-033 R-9). Only ComfyUI can
+   * answer anything but `local`: the rest are runtimes this machine hosts, while a ComfyUI
+   * engine may be a URL somebody pasted. `PROVIDERS.comfyui.local` stays `true` either way,
+   * which is exactly why the flag cannot be the source of this.
+   */
+  private engineLocalities(): EngineLocalities {
+    const locality = this.opts.comfyui?.service.engineStatus().locality;
+    return locality === undefined ? {} : { comfyui: locality };
+  }
+
+  /**
+   * Re-gate the manifest's local models against the last measured figures and publish the
+   * result. Separate from the probe because the verdict turns on two things and only one of
+   * them is the machine: changing the selected engine from managed to a remote URL reclassifies
+   * every model that engine serves, and R-13 requires that without a restart or a manual
+   * refresh.
+   *
+   * `detectedAt` is carried, never re-stamped. Re-gating is not a measurement, and a fresh
+   * timestamp would claim a probe that never ran — which is precisely the distinction the
+   * machine header has to draw between *not yet measured* and *measured and failed* (R-58).
+   *
+   * Unchanged answers stay off the wire. This runs on every engine publish — a supervised child
+   * changing state, a manual refresh, a recipe re-verification — and `runtime.status` is
+   * journalled, so an engine that flaps would otherwise write one identical gate result per
+   * transition and re-render Settings behind it. Same guard, same reason, as the local-provider
+   * poll above.
+   */
+  private emitLocalRuntimeStatus(): void {
+    const measured = this.lastRuntimeDetection;
+    if (!this.opts.manifest || measured === null) return;
+    const runtime = gateLocalRuntimes(
+      this.opts.manifest,
+      measured.probes,
+      measured.detectedAt,
+      this.engineLocalities(),
+    );
+    const fingerprint = JSON.stringify(runtime);
+    if (fingerprint === this.lastRuntimeStatus) return;
+    this.lastRuntimeStatus = fingerprint;
+    this.emit({ at: new Date().toISOString(), type: "runtime.status", runtime });
+  }
+
   /** Publish the combined engine + recipe readiness (SPEC-021 §2.12), whole each time. */
   private async refreshComfyUi(): Promise<void> {
     const service = this.opts.comfyui?.service;
@@ -2516,6 +2568,10 @@ export class Coordinator {
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
     const status = await service.status(probes);
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
+    // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move
+    // together (R-13). Nothing is re-probed — a machine that was never measured has no verdict
+    // to correct, and `emitLocalRuntimeStatus` returns without emitting.
+    this.emitLocalRuntimeStatus();
   }
 
   private retireAndReleaseComfyUi(): Promise<void> {
@@ -8699,11 +8755,8 @@ export class Coordinator {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
           const probes = await this.opts.probeRuntime();
-          this.emit({
-            at: new Date().toISOString(),
-            type: "runtime.status",
-            runtime: gateLocalRuntimes(this.opts.manifest, probes, new Date().toISOString()),
-          });
+          this.lastRuntimeDetection = { probes, detectedAt: new Date().toISOString() };
+          this.emitLocalRuntimeStatus();
         } catch {
           // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
           // the last known figures, and nothing gets disabled by a broken probe.

@@ -36,6 +36,7 @@ export * from "./money.js";
 export * from "./settings.js";
 export * from "./setup.js";
 export * from "./vendor-auth.js";
+export * from "./local-ai.js";
 export * from "./runtime-gate.js";
 export * from "./reference-budget.js";
 export * from "./bench.js";

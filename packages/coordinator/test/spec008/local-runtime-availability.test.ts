@@ -5,10 +5,12 @@ import {
   deriveCapabilityAvailability,
   PROVIDERS,
   type CapabilityProbe,
+  type ClientMessage,
   type DomainEvent,
   type ProviderId,
   type ProviderStatus,
 } from "@arke-studio/contracts";
+import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -129,5 +131,150 @@ describe("a runtime with no client says so in the runtime's terms (issue 462)", 
     // Not a key story: these providers have no key, and "invalid" against a credential that
     // does not exist sends whoever reads it looking for a box to paste something into.
     assert.doesNotMatch(status.probes[0]!.reason!, /key|credential|sidecar/i);
+  });
+});
+
+/**
+ * Where the work runs is the resolved engine's answer, and Settings has to hear it (SPEC-033
+ * R-9, R-13). `PROVIDERS.comfyui.local` is `true` whether the engine is the managed child or a
+ * URL on another continent, so a gate reading that flag would evaluate this machine's card for
+ * work running somewhere else — the thing SPEC-028 R-37 forbids in as many words.
+ */
+describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)", () => {
+  const MODEL = {
+    id: "comfyui-draft-image",
+    provider: "comfyui" as const,
+    capability: "image" as const,
+    displayName: "Draft image",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" as const },
+    // A floor this machine plainly misses, so a verdict computed here would be visible.
+    requires: { vramMb: 512 * 1024 },
+  };
+
+  /**
+   * A ComfyUI service that is nothing but a locality, which is all the gate asks it for. The
+   * locality is mutable because the case that matters is the switch, not either end of it.
+   */
+  function engineStub() {
+    const state = { locality: "local" as "local" | "remote" };
+    const engineStatus = () => ({
+      source: state.locality === "remote" ? "user-url" : "managed",
+      state: "ready",
+      locality: state.locality,
+      location: state.locality === "remote" ? "https://gpu.example:8188" : "127.0.0.1:8188",
+      version: "0.3.45",
+      instanceId: "engine-1",
+      detail: null,
+      detected: [],
+    });
+    const service = {
+      engineStatus,
+      status: async () => ({ engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" }),
+      reverify: async () => {},
+      subscribe: () => () => {},
+      dispose: async () => {},
+    } as unknown as ComfyUiEngineService;
+    return { service, state };
+  }
+
+  async function harness() {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: () => "2026-08-27T12:00:00.000Z" });
+    const events: DomainEvent[] = [];
+    const engine = engineStub();
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      changeLogPath: join(root, "logs", "changes.jsonl"),
+      appVersion: "test",
+      appRoot: root,
+      manifest: { manifestVersion: 1, generated: "2026-08-27", models: [MODEL] },
+      probeRuntime: async () => ({
+        vramMb: 12 * 1024,
+        memMb: 32 * 1024,
+        diskFreeMb: 500 * 1024,
+        accelerators: ["cuda"],
+        platform: "win32",
+      }),
+      comfyui: { service: engine.service },
+      observeEvent: (event) => events.push(event),
+    });
+    const send = (message: ClientMessage) =>
+      (
+        coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
+      ).handleClientMessage(message);
+    const statuses = () => events.filter((e) => e.type === "runtime.status");
+    const latest = () => {
+      const last = statuses().at(-1);
+      assert.ok(last && last.type === "runtime.status", "expected a runtime status on the wire");
+      return last.runtime;
+    };
+    return {
+      engine,
+      send,
+      statuses,
+      latest,
+      close: async () => {
+        await coordinator.stop();
+        await provider.close();
+      },
+    };
+  }
+
+  it("a managed engine's models are judged against this machine", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const model = h.latest().models.find((m) => m.modelId === MODEL.id);
+      assert.equal(model?.locality, "local");
+      assert.equal(model?.fit, "insufficient");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("switching to a remote engine reclassifies without a restart or a re-probe (row 12)", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const measured = h.latest().detectedAt;
+      assert.equal(h.latest().models[0]?.fit, "insufficient");
+
+      h.engine.state.locality = "remote";
+      await h.send({ kind: "comfyui-refresh" });
+
+      const model = h.latest().models.find((m) => m.modelId === MODEL.id);
+      assert.equal(model?.locality, "remote");
+      // Not `unknown` — nobody failed to measure anything. The machine this model runs on was
+      // simply never the subject, and the row states that as *served elsewhere*.
+      assert.equal(model?.fit, undefined);
+      assert.equal(model?.reason, undefined);
+      // Re-gating is not a measurement. A fresh timestamp here would claim a probe that never
+      // ran, and the machine header has to tell *not yet measured* from *measured and failed*.
+      assert.equal(h.latest().detectedAt, measured);
+
+      h.engine.state.locality = "local";
+      await h.send({ kind: "comfyui-refresh" });
+      assert.equal(h.latest().models[0]?.fit, "insufficient");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("an unchanged answer stays off the wire", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const before = h.statuses().length;
+      // Every engine publish re-gates, and `runtime.status` is journalled — so an engine that
+      // flaps would otherwise write one identical gate result per transition.
+      await h.send({ kind: "comfyui-refresh" });
+      await h.send({ kind: "comfyui-refresh" });
+      assert.equal(h.statuses().length, before);
+    } finally {
+      await h.close();
+    }
   });
 });

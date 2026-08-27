@@ -1,14 +1,64 @@
+import type { Capability } from "./provider.js";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
-import { PROVIDERS } from "./provider.js";
-import type { LocalRuntimeModel, LocalRuntimeStatus, RuntimeProbes } from "./settings.js";
+import { PROVIDERS, type ProviderId } from "./provider.js";
+import type {
+  FitVerdict,
+  LocalRuntimeModel,
+  LocalRuntimeStatus,
+  Locality,
+  RuntimeProbes,
+} from "./settings.js";
 
 /**
- * Gate the manifest's local models against measured machine figures (SPEC-008 §2.8, R-22).
+ * Gate the manifest's local models against measured machine figures (SPEC-033 §1.5).
  * Pure: probing is the platform's business (@arke-studio/providers); the judgement is shared.
- * A failed probe means unknown, never unavailable (D12).
+ * A failed probe means unknown, never unavailable (SPEC-008 D12).
+ *
+ * The gate answers exactly one question — *can this machine run it* — and stopped answering the
+ * other two it used to blur into the same three words. Whether a model can dispatch right now is
+ * SPEC-028 R-35's, and whether it has arrived is the setup ledger's.
  */
 
-const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
+/**
+ * The margin over a declared floor that separates *runs well* from *runs slowly*: **25 percent**,
+ * for VRAM and for system memory (SPEC-033 R-20).
+ *
+ * Meeting a floor by two hundred megabytes and meeting it by six gigabytes are the same boolean
+ * and very different experiences — the weights are the floor, and activations, the KV cache and
+ * the compositor's own framebuffer live above it, so a machine at the floor spills into system
+ * memory and slows by an order of magnitude. The number is arguable, which is exactly why it is
+ * a contract constant: two conforming builds must not disagree about the same machine (R-24).
+ */
+export const LOCAL_FIT_HEADROOM_RATIO = 0.25;
+
+/**
+ * Gigabytes to one decimal, dropping a bare `.0`. The old spelling rounded to whole gigabytes,
+ * which printed a machine holding 12.1 GB against a 12 GB floor as `12 GB` — the one figure that
+ * makes `runs-slowly` legible, rendered as though the floor were met exactly.
+ *
+ * Exported so that every surface stating a machine figure states it the same way. Three
+ * roundings of one number on one screen is how a rail saying `6 GB VRAM` ends up beside a row
+ * saying `needs 6.2 GB`.
+ */
+export function formatGb(mb: number): string {
+  const rounded = Math.round((mb / 1024) * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} GB`;
+}
+
+/**
+ * A floor and what the machine answered for it, in figures that differ.
+ *
+ * One decimal shrinks the window where two different numbers print the same string; it does not
+ * close it. Kokoro's floor is 4000 MB, so a laptop reporting 3993 refused with
+ * `Needs 3.9 GB memory · this machine has 3.9 GB` — a refusal whose two figures agree, which is
+ * the one thing R-19's *both figures* rule exists to prevent. Where the gigabyte spellings
+ * collide, both drop to megabytes, where they cannot.
+ */
+function figures(need: number, have: number): { need: string; have: string } {
+  const asGb = { need: formatGb(need), have: formatGb(have) };
+  if (asGb.need !== asGb.have) return asGb;
+  return { need: `${need} MB`, have: `${have} MB` };
+}
 
 /** The one cloud alternative worth naming, when the same capability has a cloud model. */
 function cloudAlternative(manifest: ModelManifest, model: ManifestModel): string | undefined {
@@ -17,48 +67,199 @@ function cloudAlternative(manifest: ModelManifest, model: ManifestModel): string
   return `Cloud ${model.capability} still works via ${PROVIDERS[cloud.provider].displayName}.`;
 }
 
+/** The platform names a person recognises. An unlisted one prints as the host spells it. */
+const PLATFORM_LABEL: Record<string, string> = {
+  win32: "Windows",
+  darwin: "macOS",
+  linux: "Linux",
+};
+
+function platformLabel(value: string): string {
+  return PLATFORM_LABEL[value] ?? value;
+}
+
+/** Accelerators as a row names them, rather than as a driver does. */
+const ACCELERATOR_LABEL: Record<string, string> = {
+  cuda: "CUDA",
+  rocm: "ROCm",
+  metal: "Metal",
+  directml: "DirectML",
+};
+
+function acceleratorLabel(value: string): string {
+  return ACCELERATOR_LABEL[value] ?? value;
+}
+
+/** A list a sentence can hold: `CUDA`, `CUDA or ROCm`, `CUDA, ROCm or Metal`. */
+function orList(values: readonly string[]): string {
+  if (values.length <= 1) return values[0] ?? "";
+  return `${values.slice(0, -1).join(", ")} or ${values[values.length - 1]}`;
+}
+
+/** Where a model's work would run. Absent means this machine, which is every provider's default. */
+export type EngineLocalities = Partial<Record<ProviderId, Locality>>;
+
+/** One measured floor and what the machine answered for it. */
+interface Floor {
+  need: number;
+  have: number | null;
+  what: string;
+}
+
+export interface FitResult {
+  fit: FitVerdict;
+  /** Both figures, always — the verdict is the label and these are what make it checkable. */
+  reason?: string;
+}
+
+/**
+ * The fit verdict for one model on one machine (R-16..R-22). Exported because #569's install
+ * closure and #566's rows both want it for a single model without re-gating the manifest.
+ */
+export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
+  const req = model.requires ?? {};
+  /** What was asked for and not answered — a declared requirement counts as much as a floor. */
+  const unmeasured: string[] = [];
+
+  // 1 · The declared refusals first. `unsupported` is the stronger statement — no machine of
+  //     this kind will work — and stating a VRAM shortfall over it would offer a remedy that
+  //     cannot help. R-22 keeps an unmeasured probe from producing either of them: `null` is
+  //     *nobody answered*, and only a measured empty list refuses.
+  const platform = probes.platform ?? null;
+  if (req.platform !== undefined) {
+    if (platform === null) unmeasured.push("the platform");
+    else if (!req.platform.includes(platform)) {
+      return {
+        fit: "unsupported",
+        reason: `Runs on ${orList(req.platform.map(platformLabel))} · this machine is ${platformLabel(platform)}`,
+      };
+    }
+  }
+  const accelerators = probes.accelerators ?? null;
+  if (req.accelerator !== undefined) {
+    if (accelerators === null) unmeasured.push("the accelerator");
+    else if (!req.accelerator.some((name) => accelerators.includes(name))) {
+      const has = accelerators.length === 0 ? "none" : orList(accelerators.map(acceleratorLabel));
+      return {
+        fit: "unsupported",
+        reason: `Needs ${orList(req.accelerator.map(acceleratorLabel))} · this machine reports ${has}`,
+      };
+    }
+  }
+
+  // 2 · The measured floors. Free disk is deliberately not among them (R-17).
+  const floors: Floor[] = [];
+  if (req.vramMb !== undefined) floors.push({ need: req.vramMb, have: probes.vramMb, what: "VRAM" });
+  if (req.memMb !== undefined) floors.push({ need: req.memMb, have: probes.memMb, what: "memory" });
+  for (const floor of floors) if (floor.have === null) unmeasured.push(floor.what);
+
+  const short = floors.find((f) => f.have !== null && f.have < f.need);
+
+  // 3 · A measured refusal beats an unmeasured probe (R-21, D9). Without the precedence, a
+  //     machine whose VRAM probe failed and whose memory is plainly short reads `unknown`, and
+  //     R-28 then offers an install that is known to fail. The failed probe is noted rather
+  //     than allowed to soften the refusal.
+  if (short !== undefined) {
+    const both = figures(short.need, short.have!);
+    const note = unmeasured.length === 0 ? "" : ` · ${unmeasured[0]} could not be measured`;
+    return {
+      fit: "insufficient",
+      reason: `Needs ${both.need} ${short.what} · this machine has ${both.have}${note}`,
+    };
+  }
+
+  // 4 · Nothing refuses, and something was not measured. That is `unknown` whichever probe
+  //     failed: a declared requirement nobody could check is exactly as unanswered as a floor
+  //     nobody could measure, and calling it `runs-well` would let R-35 recommend a model on a
+  //     claim about a machine no one made (R-36).
+  if (unmeasured.length > 0) {
+    return { fit: "unknown", reason: `${unmeasured[0]} could not be measured on this machine` };
+  }
+
+  // 5 · Every floor is met. The binding one — the one closest to its floor — is what decides
+  //     between the two passing verdicts, and it is the figure worth stating either way.
+  if (floors.length === 0) return { fit: "runs-well" };
+  const binding = floors.reduce((tightest, f) => (f.have! / f.need < tightest.have! / tightest.need ? f : tightest));
+  const comfortable = binding.have! >= binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  const both = figures(binding.need, binding.have!);
+  return {
+    fit: comfortable ? "runs-well" : "runs-slowly",
+    reason: `Needs ${both.need} ${binding.what} · this machine has ${both.have}`,
+  };
+}
+
+/**
+ * The recommendation for each capability (R-33..R-38): authored order in, measured filter over
+ * it, first `runs-well` entry out. Nothing whose fit is `unknown` is ever recommended — a
+ * recommendation is a claim about the machine, and no claim can rest on an unmeasured one.
+ */
+export function recommendLocalModels(
+  manifest: ModelManifest,
+  models: readonly LocalRuntimeModel[],
+): Partial<Record<Capability, string>> {
+  const byId = new Map(models.map((m) => [m.modelId, m]));
+  const recommended: Partial<Record<Capability, string>> = {};
+  for (const [capability, order] of Object.entries(manifest.localPreference ?? {}) as Array<
+    [Capability, readonly string[] | undefined]
+  >) {
+    if (order === undefined) continue;
+    for (const modelId of order) {
+      const gated = byId.get(modelId);
+      // Locality is filtered before the verdict (R-34): a model served by a remote engine is
+      // not a recommendation about this machine, and it carries no verdict to select on anyway.
+      if (!gated || gated.locality !== "local" || gated.fit !== "runs-well") continue;
+      // The order is keyed by capability, so an entry naming a model of another one is a
+      // manifest fault. Skipped here rather than trusted, because the alternative is a voice
+      // model recommended as the writing model — and the check belongs beside the data rather
+      // than in the test that noticed it.
+      if (gated.capability !== capability) continue;
+      recommended[capability] = modelId;
+      break;
+    }
+  }
+  return recommended;
+}
+
 export function gateLocalRuntimes(
   manifest: ModelManifest,
   probes: RuntimeProbes,
   detectedAt: string,
+  /**
+   * Where each local provider's engine actually resolved to. Absent means this machine, which
+   * is every provider's answer but ComfyUI's — and ComfyUI's only when the user pointed it at a
+   * non-loopback URL. Reading `PROVIDERS[x].local` instead would judge another computer's work
+   * against this machine's VRAM (R-9, SPEC-028 R-37).
+   */
+  engineLocality: EngineLocalities = {},
 ): LocalRuntimeStatus {
   const models: LocalRuntimeModel[] = [];
   for (const model of manifest.models) {
     if (!PROVIDERS[model.provider].local) continue;
-    const req = model.requires ?? {};
-    const checks: Array<{ need: number | undefined; have: number | null; what: string }> = [
-      { need: req.vramMb, have: probes.vramMb, what: "VRAM" },
-      { need: req.memMb, have: probes.memMb, what: "memory" },
-      { need: req.diskMb, have: probes.diskFreeMb, what: "free disk" },
-    ];
-    const alt = cloudAlternative(manifest, model);
-    let state: LocalRuntimeModel["state"] = "ready";
-    let reason: string | undefined;
-    for (const c of checks) {
-      if (c.need === undefined) continue;
-      if (c.have === null) {
-        // The probe failed → unknown beats a false "disabled" (D12), unless a later check disables.
-        if (state === "ready") {
-          state = "unknown";
-          reason = `${c.what} could not be measured on this machine`;
-        }
-        continue;
-      }
-      if (c.have < c.need) {
-        state = "disabled";
-        reason = `Needs ${gb(c.need)} ${c.what}. This machine has ${gb(c.have)}.${alt ? ` ${alt}` : ""}`;
-        break;
-      }
+    const locality = engineLocality[model.provider] ?? "local";
+    if (locality === "remote") {
+      // No verdict at all, and the absence is stated as *served elsewhere* rather than as
+      // `unknown` (R-15). It keeps dispatching; this only governs what Settings claims (R-12).
+      models.push({
+        modelId: model.id,
+        provider: model.provider,
+        displayName: model.displayName,
+        capability: model.capability,
+        locality,
+      });
+      continue;
     }
+    const { fit, reason } = fitFor(model, probes);
+    const alt = fit === "insufficient" || fit === "unsupported" ? cloudAlternative(manifest, model) : undefined;
     models.push({
       modelId: model.id,
       provider: model.provider,
       displayName: model.displayName,
       capability: model.capability,
-      state,
+      locality,
+      fit,
       ...(reason !== undefined ? { reason } : {}),
-      ...(state === "disabled" && alt !== undefined ? { cloudAlternative: alt } : {}),
+      ...(alt !== undefined ? { cloudAlternative: alt } : {}),
     });
   }
-  return { probes, detectedAt, models };
+  return { probes, detectedAt, models, recommended: recommendLocalModels(manifest, models) };
 }

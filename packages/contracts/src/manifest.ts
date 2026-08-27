@@ -294,12 +294,30 @@ export const ManifestModelSchema = z
      * overstating one costs a dispatch that dies after the estimate was accepted.
      */
     unverified: z.boolean().optional(),
-    /** Local-runtime requirements, measured against the machine (R-22). */
+    /**
+     * What this model needs of the machine it runs on. Two kinds of requirement, and they
+     * produce different verdicts (SPEC-033 R-18, R-19).
+     *
+     * `vramMb` and `memMb` are **measured** floors: a machine that misses one is `insufficient`,
+     * and a bigger machine would work.
+     *
+     * `platform` and `accelerator` are **declared**: a machine outside the list is `unsupported`,
+     * whatever its figures, and no amount of memory changes the answer. They are lists because a
+     * model routinely runs on more than one — `["cuda", "rocm"]` is a real row, and folding it
+     * into one string would have made the second one unrepresentable.
+     *
+     * `diskMb` is the install size, and deliberately **not** a fit input: SPEC-033 R-17 moved it
+     * to the install-closure guard, because it is the one floor the model itself moves.
+     */
     requires: z
       .object({
-        vramMb: z.number().int().min(0).optional(),
-        memMb: z.number().int().min(0).optional(),
-        diskMb: z.number().int().min(0).optional(),
+        vramMb: z.number().int().min(1).optional(),
+        memMb: z.number().int().min(1).optional(),
+        diskMb: z.number().int().min(1).optional(),
+        /** `process.platform` spellings: `win32`, `darwin`, `linux`. */
+        platform: z.array(z.string().min(1)).min(1).optional(),
+        /** Accelerator names as the probe reports them: `cuda`, `rocm`, `metal`. */
+        accelerator: z.array(z.string().min(1)).min(1).optional(),
       })
       .strict()
       .optional(),
@@ -312,6 +330,19 @@ export const ModelManifestSchema = z
     manifestVersion: z.number().int().min(1),
     generated: IsoDateSchema,
     models: z.array(ManifestModelSchema),
+    /**
+     * capability → local model ids, best first (SPEC-033 R-33). Authored, and expressing
+     * **quality alone**: it makes no claim about any machine, because the gate already answers
+     * that and an authored per-machine flag goes stale the moment the hardware moves.
+     *
+     * Local models only, by construction rather than by a filter applied late. A cloud model
+     * declares no requirements, so its fit would be vacuously `runs-well` and a shared order
+     * would recommend it on Local AI — the one screen R-2 forbids it from appearing on.
+     *
+     * Optional: a manifest that authors no order recommends nothing, which is the honest
+     * reading and keeps a fixture from having to carry an empty one.
+     */
+    localPreference: z.record(CapabilitySchema, z.array(z.string().min(1))).optional(),
   })
   .strict();
 export type ModelManifest = z.infer<typeof ModelManifestSchema>;

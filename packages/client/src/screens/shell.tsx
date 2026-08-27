@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
@@ -6,6 +6,7 @@ import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
+import { RuntimeHead, RuntimeSection, TONE_CLASS } from "./settings-parts.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -19,10 +20,8 @@ import {
   cancelExport as cancelExportMsg,
   cancelJob,
   checkUpdates,
-  chooseVoxaExecutable,
   cancelProviderToolSignIn,
   clearCredential,
-  clearVoxaExecutable,
   attachHostFiles,
   attachHostText,
   archiveWorld,
@@ -42,27 +41,15 @@ import {
   chooseClaudeExecutable,
   clearClaudeExecutable,
   detectHarnesses,
-  detectRuntimes,
-  chooseComfyUiPath,
-  chooseComfyUiModelsDir,
-  clearComfyUiModelsDir,
-  clearComfyUiEngine,
-  setComfyUiUrl,
-  useDetectedComfyUi,
-  refreshComfyUi,
-  verifyComfyUiRecipe,
   downloadUpdate,
   installUpdateAndRestart,
   installUpdateOnClose,
   generateDiagnostics,
   listProviderCalls,
   openDataFolder,
-  openModelFolder,
   openThread,
   openWorld,
   resolveHeldJob,
-  repairVoiceModels,
-  restartVoxa,
   retryJobFinalization,
   resumeQueue,
   refreshProviderTool,
@@ -90,24 +77,17 @@ import {
   useExports as useExportsState,
   useGenesis,
   useSetup,
-  setupCancel,
   setupRetry,
-  setupRepair,
-  setupSkip,
   useReconcileReport,
   useStore,
   useUpdateStatus,
   useVoiceSidecar as useVoiceSidecarState,
-  useVoiceRuntimeTest,
-  useBundledVoxa,
-  testLocalVoice,
   validateProvider,
   setNarrator,
   type ReadingVoice,
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
-import { playClip, usePlayback } from "../lib/audio.js";
 import {
   computeNeedsYou,
   computeRunning,
@@ -124,22 +104,15 @@ import {
   type HarnessAvailability,
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
-  comfyUiWeightsComponentId,
-  isComfyUiWeightsComponent,
-  type ComfyUiEngineStatus,
   type LedgerEntry,
-  type LocalRuntimeStatus,
-  type NarratorSettings,
   type ManifestModel,
   type ProviderId,
   type ProviderCallRecord,
   type ProviderStatus,
   type ProviderWorkspace,
-  type SetupComponent,
   type VendorAuthMethod,
   type VendorIntegration,
   type VendorSignIn,
-  type VoiceRuntimeStatus,
   DEFAULT_NARRATOR,
   blueprintCoverage,
   buildWorkingLine,
@@ -1555,12 +1528,13 @@ export function SettingsLayout() {
                 {(
                   [
                     ["providers", "Providers"],
-                    ["sign-in", "Sign-in"],
+                    ["who-does-what", "Who does what"],
+                    ["local-ai", "Local AI"],
+                    ["engines", "Engines"],
+                    ["harness", "Harness"],
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
-                    ["local-runtime", "Local runtime"],
-                    ["harness", "Harness"],
-                    ["who-does-what", "Who does what"],
+                    ["sign-in", "Sign-in"],
                     ["sample-world", "Sample world"],
                     ["about", "About"],
                   ] as const
@@ -2421,8 +2395,13 @@ const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; de
 ];
 
 export function SettingsAppearanceScreen() {
+  const { state } = useStore();
   const preference = useThemePreference();
   const resolved = useResolvedTheme();
+  const stored = state?.app.narrator ?? null;
+  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
+  const worldIdForVoices = state?.world?.meta.worldId;
+  const [narratorOpen, setNarratorOpen] = useState(false);
   return (
     <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
       <div className="fy-set__eyebrow">THEME</div>
@@ -2446,323 +2425,12 @@ export function SettingsAppearanceScreen() {
       </fieldset>
       <div className="fy-set__note">currently using {resolved}</div>
       {/*
-       * The two themes, side by side. Fixed swatches rather than a live preview of the current
-       * one: the point is to show what the choice above would look like, and a card that followed
-       * the active theme would only ever show you what you can already see.
+       * The narrator arrived here from the Voice group inside Local runtime, and it is the one
+       * thing on that group that was never about a runtime. It is a voice the app speaks in, and
+       * it may be a cloud one — so Local AI is forbidden it (R-2) and Engines is wrong in kind,
+       * because an engine is not a provider (R-72). What is left is how the app presents itself.
        */}
-      <div className="fy-themeswatches" aria-hidden="true">
-        {(["light", "dark"] as const).map((theme) => (
-          <div key={theme} className={`fy-themeswatch fy-themeswatch--${theme}`}>
-            <div className="fy-themeswatch__frame">
-              <span className="fy-themeswatch__block" />
-              <span className="fy-themeswatch__lines">
-                <i />
-                <i />
-              </span>
-            </div>
-            <div className="fy-themeswatch__caption">{theme.toUpperCase()}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * A component this pane already states somewhere else, and the group that states it. Every one
- * of these arrived twice: the catalogue row said the weights were on disk, and the section below
- * said the engine was answering — two facts about one thing, two rows apart, in different words.
- *
- * Restated is not the same as redundant. A component that has not settled is only reachable from
- * Components (Download, Skip and Retry are that group's controls), so it stays listed until it
- * arrives and its own group can speak for it. Higgsfield is the exception with no state at all:
- * its install button lives on the Providers pane, which owns the credential it is for.
- */
-const STATED_ELSEWHERE: Record<string, "providers" | "voice" | "comfyui" | "local-models"> = {
-  "higgsfield-cli": "providers",
-  "tts-kokoro-82m": "voice",
-  "stt-whisper-base-en": "voice",
-  "comfyui-runtime": "comfyui",
-  "ollama-gemma4-e2b-it-qat": "local-models",
-  "ollama-gemma4-12b": "local-models",
-  "ollama-gemma4-26b": "local-models",
-};
-
-/**
- * Which group speaks for a component, or undefined for one only Components states. The weight
- * entries are matched by prefix rather than listed: there is one per shipped recipe, and a
- * build that adds a recipe would otherwise have to remember to add its id here too.
- */
-function statedElsewhere(componentId: string): "providers" | "voice" | "comfyui" | "local-models" | undefined {
-  if (isComfyUiWeightsComponent(componentId)) return "comfyui";
-  return STATED_ELSEWHERE[componentId];
-}
-
-/** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
-type RuntimeTone = "ok" | "warn" | "idle";
-const TONE_CLASS: Record<RuntimeTone, string> = {
-  ok: "fy-set__dot--ok",
-  warn: "fy-set__dot--warn",
-  idle: "",
-};
-
-/** A dot leading the word it qualifies — the pairing every runtime row states its state with. */
-function RuntimeStatus({ tone, children }: { tone: RuntimeTone; children: ReactNode }) {
-  return (
-    <span className="fy-set__status">
-      <span className={cx("fy-set__dot", TONE_CLASS[tone])} />
-      <span className="fy-set__state">{children}</span>
-    </span>
-  );
-}
-
-/**
- * The head every runtime detail opens with: what this is, what it does, and where it stands.
- * The same three-part head 40a gives a provider, because the rail is the heading either way.
- */
-function RuntimeHead({
-  title,
-  caps,
-  tone,
-  state,
-}: {
-  title: string;
-  caps: string;
-  tone: RuntimeTone;
-  state: string;
-}) {
-  return (
-    <div className="fy-rt__head">
-      <span className="fy-rt__title">{title}</span>
-      <span className="fy-rt__caps">{caps}</span>
-      <span style={{ flex: 1 }} />
-      <RuntimeStatus tone={tone}>{state}</RuntimeStatus>
-    </div>
-  );
-}
-
-/** A labelled band inside a detail, with whatever acts on the band as a whole on its right. */
-function RuntimeSection({ label, children }: { label: string; children?: ReactNode }) {
-  return (
-    <div className="fy-rt__sechead">
-      <div className="fy-rt__eyebrow">{label}</div>
-      <span style={{ flex: 1 }} />
-      {children}
-    </div>
-  );
-}
-
-/** What this machine measured, and the way to measure it again. */
-function MachineDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
-  const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
-  const probes: Array<[string, number | null]> = [
-    ["VRAM", runtime?.probes.vramMb ?? null],
-    ["Memory", runtime?.probes.memMb ?? null],
-    ["Free disk", runtime?.probes.diskFreeMb ?? null],
-  ];
-  return (
-    <>
-      <RuntimeHead
-        title="This machine"
-        caps={runtime ? "MEASURED AT START-UP" : ""}
-        tone={runtime ? "ok" : "idle"}
-        state={runtime ? "measured" : "not yet measured"}
-      />
-      <RuntimeSection label="PROBES">
-        <button type="button" className="fy-set__link" onClick={() => detectRuntimes()}>
-          Re-detect
-        </button>
-      </RuntimeSection>
-      {probes.map(([label, mb]) => (
-        <div key={label} className="fy-set__row">
-          <span className="fy-rt__rowname">{label}</span>
-          <span style={{ flex: 1 }} />
-          {/* A failed probe is unknown, never zero — a measurement nobody took is not a shortage. */}
-          <span className="fy-set__state">{runtime ? gbOrUnknown(mb) : "not yet measured"}</span>
-        </div>
-      ))}
-    </>
-  );
-}
-
-/**
- * The catalogue: what has arrived and what has not. Setup shows a bar and nothing else; this is
- * where the detail lives (prototype 22a), and since turn 75 it is a group of its own rather than
- * a section every other group's rows had to be read past.
- */
-function ComponentsDetail({ components, running }: { components: readonly SetupComponent[]; running: boolean }) {
-  const outstanding = components.filter((c) => c.state !== "ready" && c.state !== "present");
-  return (
-    <>
-      <RuntimeHead
-        title="Components"
-        caps={`${components.length} IN THE CATALOGUE`}
-        tone={componentsTone(components)}
-        state={outstanding.length === 0 ? "all here" : `${outstanding.length} outstanding`}
-      />
-      <RuntimeSection label="ON THIS MACHINE">
-        {running && (
-          <button type="button" className="fy-set__link" onClick={() => setupCancel()}>
-            Stop all
-          </button>
-        )}
-      </RuntimeSection>
-      {components.map((c) => {
-        const settled = c.state === "ready" || c.state === "present";
-        const offered = c.state === "available";
-        const pct = c.bytesTotal > 0 ? Math.min(100, Math.round((c.bytesDone / c.bytesTotal) * 100)) : 0;
-        return (
-          <div key={c.id} className={cx("fy-set__row", "fy-set__row--stack", c.state === "skipped" && "fy-set__row--off")}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{c.displayName}</div>
-                <div className="fy-set__caps">
-                  {c.purpose} · {sizeMb(c.sizeMb)}
-                </div>
-              </div>
-              <RuntimeStatus tone={c.state === "failed" ? "warn" : settled ? "ok" : "idle"}>
-                {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
-              </RuntimeStatus>
-              {offered && <Button onClick={() => setupRetry(c.id)}>Download · {sizeMb(c.sizeMb)}</Button>}
-              {!settled && !offered && c.state !== "skipped" && (
-                <button type="button" className="fy-set__link" onClick={() => setupSkip(c.id)}>
-                  Skip
-                </button>
-              )}
-              {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") &&
-                c.repairRequired !== true && (
-                <button type="button" className="fy-set__link" onClick={() => setupRetry(c.id)}>
-                  Retry
-                </button>
-              )}
-              {c.repairRequired === true && (
-                <button type="button" className="fy-set__link" onClick={() => setupRepair(c.id)}>
-                  Repair
-                </button>
-              )}
-            </div>
-            {/* The bar only exists while something is actually moving. */}
-            {c.state === "downloading" && (
-              <div className="fy-set__bar">
-                <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
-              </div>
-            )}
-            {c.detail !== undefined && (
-              <div className="fy-set__why">
-                <span className={cx("fy-set__dot", c.state === "failed" && "fy-set__dot--warn")} />
-                <span>{c.detail}</span>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-/** A download size as the catalogue states it. One spelling: the same figure on every row. */
-function sizeMb(mbytes: number): string {
-  return mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`;
-}
-
-/** Failed beats moving beats arrived — the worst thing in the group is what its dot says. */
-function componentsTone(components: readonly SetupComponent[]): RuntimeTone {
-  if (components.some((c) => c.state === "failed" || c.state === "blocked")) return "warn";
-  if (components.some((c) => c.state !== "ready" && c.state !== "present")) return "idle";
-  return "ok";
-}
-
-const VOICE_ENGINES = ["kokoro", "whisper", "phonemizer"] as const;
-const VOICE_ENGINE_LABEL: Record<(typeof VOICE_ENGINES)[number], string> = {
-  kokoro: "Kokoro voice",
-  whisper: "Whisper dictation",
-  phonemizer: "espeak-ng phonemizer",
-};
-
-/**
- * The local voice runtime, the narrator it reads with, and the engines it supervises. Seven loose
- * links used to sit under this in one wrapped row; each one now hangs off the thing it acts on —
- * the path is changed on the field that shows the path — and only the three that act on the
- * runtime as a whole are left at the foot (turn 75).
- */
-function VoiceDetail({
-  voiceRuntime,
-  narrator,
-  health,
-  worldIdForVoices,
-}: {
-  voiceRuntime: VoiceRuntimeStatus | null;
-  narrator: NarratorSettings;
-  health: ComponentHealth | undefined;
-  worldIdForVoices: string | undefined;
-}) {
-  const voiceTest = useVoiceRuntimeTest();
-  const playback = usePlayback();
-  const [narratorOpen, setNarratorOpen] = useState(false);
-  const playedTest = useRef<string | null>(null);
-  useEffect(() => {
-    if (voiceTest?.status !== "ready" || !voiceTest.audioBase64 || playedTest.current === voiceTest.requestId) return;
-    playedTest.current = voiceTest.requestId;
-    void playClip({
-      id: voiceTest.requestId,
-      url: `data:audio/wav;base64,${voiceTest.audioBase64}`,
-      title: "Local voice test",
-      sub: "settings · local runtime",
-    });
-  }, [voiceTest]);
-  const sourceLabel =
-    voiceRuntime?.source === "environment"
-      ? "Environment override"
-      : voiceRuntime?.source === "configured"
-        ? "Configured Voxa"
-        : voiceRuntime?.source === "bundled"
-          ? "Bundled Voxa"
-          : "Runtime missing";
-  const engineTone = (engine: { state: string } | undefined): RuntimeTone =>
-    engine?.state === "ready" ? "ok" : engine?.state === "unknown" || engine === undefined ? "idle" : "warn";
-  const ready = VOICE_ENGINES.filter((e) => voiceRuntime?.engineStatus[e]?.state === "ready").length;
-  return (
-    <>
-      <RuntimeHead
-        title="Voice"
-        caps="VOICE TTS · VOICE STT"
-        tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
-        state={voiceRuntime?.processState ?? "unconfigured"}
-      />
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">RUNTIME</div>
-        <div className="fy-set__field">
-          <span style={{ flex: 1 }}>
-            {sourceLabel}
-            {voiceRuntime?.version ? ` ${voiceRuntime.version}` : ""} ·{" "}
-            {voiceRuntime?.architecture ?? voiceRuntime?.expectedArchitecture ?? "unknown architecture"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => chooseVoxaExecutable()}>
-            Change
-          </button>
-          {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
-            <button type="button" className="fy-set__link" onClick={() => useBundledVoxa()}>
-              Use bundled
-            </button>
-          )}
-          {voiceRuntime?.configured && (
-            <button type="button" className="fy-set__link" onClick={() => clearVoxaExecutable()}>
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="fy-set__why">
-        <span className={cx("fy-set__dot", voiceRuntime?.detail === "Ready" ? "fy-set__dot--ok" : "fy-set__dot--warn")} />
-        <span>{voiceRuntime?.detail ?? "Runtime discovery has not completed."}</span>
-      </div>
-      {voiceRuntime?.configurationWarning && (
-        <div className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{voiceRuntime.configurationWarning}</span>
-        </div>
-      )}
-
+      <div className="fy-set__eyebrow">NARRATOR</div>
       {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
           a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
           local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
@@ -2803,364 +2471,26 @@ function VoiceDetail({
           setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
         }}
       />
-
-      <RuntimeSection label="ENGINES">
-        <span className="fy-rt__count">
-          {ready} OF {VOICE_ENGINES.length} READY
-        </span>
-      </RuntimeSection>
-      {VOICE_ENGINES.map((engine) => {
-        const engineStatus = voiceRuntime?.engineStatus[engine];
-        return (
-          <div key={engine} className="fy-set__row">
-            <div className="fy-set__name fy-set__name--wide">
-              <div className="fy-set__title">{VOICE_ENGINE_LABEL[engine]}</div>
-              <div className="fy-set__caps">{engineStatus?.detail ?? "Managed by Arke Studio"}</div>
+      {/*
+       * The two themes, side by side. Fixed swatches rather than a live preview of the current
+       * one: the point is to show what the choice above would look like, and a card that followed
+       * the active theme would only ever show you what you can already see.
+       */}
+      <div className="fy-themeswatches" aria-hidden="true">
+        {(["light", "dark"] as const).map((theme) => (
+          <div key={theme} className={`fy-themeswatch fy-themeswatch--${theme}`}>
+            <div className="fy-themeswatch__frame">
+              <span className="fy-themeswatch__block" />
+              <span className="fy-themeswatch__lines">
+                <i />
+                <i />
+              </span>
             </div>
-            <RuntimeStatus tone={engineTone(engineStatus)}>{engineStatus?.state ?? "unknown"}</RuntimeStatus>
+            <div className="fy-themeswatch__caption">{theme.toUpperCase()}</div>
           </div>
-        );
-      })}
-
-      <div className="fy-rt__actions">
-        <Button onClick={() => testLocalVoice()} disabled={voiceTest?.status === "testing"}>
-          {voiceTest?.status === "testing" ? "Testing…" : "Test voice"}
-        </Button>
-        <button type="button" className="fy-set__link" onClick={() => restartVoxa()}>
-          Restart
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => repairVoiceModels()}>
-          Repair models
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => openModelFolder()}>
-          Open folder
-        </button>
-        <span style={{ flex: 1 }} />
-        <HealthDot label="Voxa local speech" health={health} />
-      </div>
-      {voiceTest && (
-        <div className="fy-set__note">
-          {voiceTest.detail}
-          {voiceTest.status === "ready" && voiceTest.audioBase64 && playback.status !== "playing" && (
-            <>
-              {" · "}
-              <button
-                type="button"
-                className="fy-set__link"
-                onClick={() =>
-                  void playClip({
-                    id: voiceTest.requestId,
-                    url: `data:audio/wav;base64,${voiceTest.audioBase64}`,
-                    title: "Local voice test",
-                    sub: "settings · local runtime",
-                  })
-                }
-              >
-                Play test
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
-/** Ready is ok; starting has not failed yet; every other state owes a reason, so it warns. */
-function engineTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
-  if (engine === null) return "idle";
-  if (engine.state === "ready") return "ok";
-  return engine.state === "starting" ? "idle" : "warn";
-}
-
-/**
- * The ComfyUI engine and its recipes (SPEC-021 §2.2, §2.12, design turn 72). The engine row
- * states its source; detection offers are adopted, never typed; and a disabled recipe carries
- * its one measured clause.
- *
- * A recipe's weights hang off the recipe (SPEC-028 T-25). They are catalogue components like
- * any other and stayed under Components for that reason, which left the row that says "1 of 1
- * model files missing" two panes away from the Download for those exact files. The action now
- * sits on the row that states the lack; Components keeps them until they arrive, as it does for
- * everything else spoken for elsewhere.
- */
-function ComfyUiDetail() {
-  const { state } = useStore();
-  const setup = useSetup();
-  const comfyui = state?.app.comfyui ?? null;
-  const [urlDraft, setUrlDraft] = useState("");
-  const engine = comfyui?.engine ?? null;
-  const sourceLabel =
-    engine?.source === "user-path"
-      ? "Your install"
-      : engine?.source === "user-url"
-        ? "Your URL · never spawned"
-        : engine?.source === "managed"
-          ? "Arke-managed"
-          : "Not installed";
-  const sourceWithLocality = engine?.source === "user-url" && engine.locality === "remote"
-    ? `${sourceLabel} · remote`
-    : sourceLabel;
-  const recipes = comfyui?.recipes ?? [];
-  const ready = recipes.filter((r) => r.state === "ready").length;
-  const managedRuntime = setup?.components.find((component) => component.id === "comfyui-runtime");
-  const managedAvailable = engine?.source === "absent" && managedRuntime !== undefined;
-  return (
-    <div data-testid="comfyui-engine">
-      <RuntimeHead
-        title="ComfyUI"
-        caps="IMAGE · VIDEO"
-        tone={engineTone(engine)}
-        state={engine?.state ?? "unknown"}
-      />
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">ENGINE</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path">
-            {sourceWithLocality}
-            {engine?.version ? ` · v${engine.version}` : ""}
-            {engine?.location ? ` · ${engine.location}` : ""}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => chooseComfyUiPath()}>
-            Change
-          </button>
-          {engine !== null && engine.source !== "absent" && engine.source !== "managed" && (
-            <button type="button" className="fy-set__link" onClick={() => clearComfyUiEngine()}>
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
-      {engine?.detail && (
-        <div className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{engine.detail}</span>
-        </div>
-      )}
-      {/* Installs detection found: adopted by selection among the host's own offers (D10). */}
-      {(engine?.detected ?? []).map((found) => (
-        <div key={found.location} className="fy-set__why" data-testid="comfyui-detected">
-          <span className="fy-set__dot" />
-          <span>
-            Found · {found.location}
-            {found.version ? ` · v${found.version}` : ""}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => useDetectedComfyUi(found.location)}>
-            Use this install
-          </button>
-        </div>
-      ))}
-      {managedAvailable && (
-        <div className="fy-set__why" data-testid="comfyui-managed-option">
-          <span className="fy-set__dot" />
-          <span>Arke-managed ComfyUI · {managedRuntime.sizeMb} MB download</span>
-          <button
-            type="button"
-            className="fy-set__link"
-            disabled={managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"}
-            onClick={() => setupRetry(managedRuntime.id)}
-          >
-            {managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"
-              ? "installing…"
-              : "Download"}
-          </button>
-        </div>
-      )}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">URL</div>
-        <div className="fy-set__field">
-          <input
-            className="fy-set__input"
-            aria-label="ComfyUI URL"
-            placeholder="http://127.0.0.1:8188"
-            value={urlDraft}
-            onChange={(e) => setUrlDraft(e.target.value)}
-          />
-          <button
-            type="button"
-            className="fy-set__link"
-            disabled={urlDraft.trim().length === 0}
-            onClick={() => {
-              setComfyUiUrl(urlDraft.trim());
-              setUrlDraft("");
-            }}
-          >
-            Use this URL
-          </button>
-        </div>
-      </div>
-      {/* No path here: the mapped folder is a setting the coordinator does not publish on the
-          engine status, and a location this pane cannot read is one it must not draw. The two
-          actions are the whole of what it can offer until modelsDir reaches the wire. */}
-      <RuntimeSection label="MODELS FOLDER">
-        <button type="button" className="fy-set__link" onClick={() => chooseComfyUiModelsDir()}>
-          Map a folder
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => clearComfyUiModelsDir()}>
-          Use the engine's own
-        </button>
-      </RuntimeSection>
-
-      <RuntimeSection label="RECIPES">
-        <span className="fy-rt__count">
-          {recipes.length === 0 ? "NONE IN THIS BUILD" : `${ready} OF ${recipes.length} READY`}
-        </span>
-      </RuntimeSection>
-      {recipes.map((recipe) => {
-        const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
-        const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
-        const pct =
-          weights && weights.bytesTotal > 0
-            ? Math.min(100, Math.round((weights.bytesDone / weights.bytesTotal) * 100))
-            : 0;
-        // While the weights are moving or stuck, that IS what this recipe is doing, and the dot
-        // has to agree with the word beside it: a running download is not a fault, and a failed
-        // one is not the recipe's own "disabled".
-        const speaksForRecipe =
-          !settled && weights.state !== "available" && weights.state !== "skipped";
-        const tone: RuntimeTone = speaksForRecipe
-          ? weights.state === "failed" || weights.state === "blocked"
-            ? "warn"
-            : "idle"
-          : recipe.state === "ready"
-            ? "ok"
-            : recipe.state === "disabled"
-              ? "warn"
-              : "idle";
-        return (
-          <div
-            key={recipe.recipeId}
-            className={cx("fy-set__row--stack", "fy-set__row", recipe.state === "disabled" && "fy-set__row--off")}
-            data-testid="comfyui-recipe"
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{recipe.displayName}</div>
-                <div className="fy-set__caps fy-set__caps--tokens">
-                  {recipe.capability} · v{recipe.recipeVersion}
-                </div>
-              </div>
-              {weights?.state === "available" && (
-                <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
-              )}
-              {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") &&
-                weights.repairRequired !== true && (
-                  <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
-                    Retry
-                  </button>
-                )}
-              {/* For the file that is on disk, intact, and not the bytes the recipe pins — the
-                  one case Retry cannot answer, because presence is completion to it. */}
-              {(settled || weights?.repairRequired === true) && weights !== undefined && (
-                <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
-                  Repair
-                </button>
-              )}
-              <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
-                Re-verify
-              </button>
-              <RuntimeStatus tone={tone}>
-                {speaksForRecipe
-                  ? weights.state === "downloading"
-                    ? `${pct}%`
-                    : weights.state
-                  : recipe.state}
-              </RuntimeStatus>
-            </div>
-            {/* The bar only exists while something is actually moving. */}
-            {weights?.state === "downloading" && (
-              <div className="fy-set__bar">
-                <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
-              </div>
-            )}
-            {/* Kept visible, disabled, with the measured reason — never quietly absent (R-10).
-                A stalled weights fetch states its own cause instead: "1 of 1 model files
-                missing" is true but says nothing about the disk that refused it. */}
-            {speaksForRecipe && weights.detail !== undefined ? (
-              <div className="fy-set__why">
-                <span className={cx("fy-set__dot", weights.state === "failed" && "fy-set__dot--warn")} />
-                <span>{weights.detail}</span>
-              </div>
-            ) : (
-              recipe.reason && (
-                <div className="fy-set__why">
-                  <span className={cx("fy-set__dot", recipe.state === "disabled" && "fy-set__dot--warn")} />
-                  <span>{recipe.reason}</span>
-                </div>
-              )
-            )}
-          </div>
-        );
-      })}
-      <div className="fy-rt__actions">
-        <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
-          Refresh
-        </button>
+        ))}
       </div>
     </div>
-  );
-}
-
-/** The manifest's local models, gated against what this machine measured (R-22). */
-function LocalModelsDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
-  const models = runtime?.models ?? [];
-  const ready = models.filter((m) => m.state === "ready").length;
-  return (
-    <>
-      <RuntimeHead
-        title="Local models"
-        caps="FREE · NEVER METERED"
-        tone={models.some((m) => m.state === "disabled") ? "warn" : models.length === 0 ? "idle" : "ok"}
-        state={runtime === null ? "not yet measured" : `${ready} of ${models.length} ready`}
-      />
-      <RuntimeSection label="ON THIS MACHINE" />
-      {models.map((m) => (
-        <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", m.state === "disabled" && "fy-set__row--off")}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div className="fy-set__name fy-set__name--wide">
-              <div className="fy-set__title">{m.displayName}</div>
-              <div className="fy-set__caps fy-set__caps--tokens">
-                {PROVIDER_TABLE[m.provider].displayName} · {m.capability}
-              </div>
-            </div>
-            <RuntimeStatus tone={m.state === "ready" ? "ok" : m.state === "disabled" ? "warn" : "idle"}>
-              {m.state}
-            </RuntimeStatus>
-          </div>
-          {/* Kept visible, disabled, with the measured reason — never quietly absent. */}
-          {m.reason && (
-            <div className="fy-set__why">
-              <span className="fy-set__dot fy-set__dot--warn" />
-              <span>{m.reason}</span>
-            </div>
-          )}
-        </div>
-      ))}
-      {runtime === null && <div className="fy-set__note">detection runs at start-up · Re-detect is under This machine</div>}
-    </>
-  );
-}
-
-/** The authoring harness. Voxa is not here: Voice states it, beside the runtime it describes. */
-function HarnessDetail({ health }: { health: ComponentHealth | undefined }) {
-  const status = health?.status ?? "starting";
-  return (
-    <>
-      <RuntimeHead
-        title="Authoring harness"
-        caps="OPENCODE"
-        tone={status === "healthy" ? "ok" : status === "starting" ? "idle" : "warn"}
-        state={status === "healthy" ? "ready" : status}
-      />
-      <RuntimeSection label="SUPERVISED" />
-      <div className="fy-set__row">
-        <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">OpenCode</div>
-          <div className="fy-set__caps">{health?.reason ?? "supervised by Arke Studio"}</div>
-        </div>
-        <HealthDot label="OpenCode (authoring harness)" health={health} />
-      </div>
-    </>
   );
 }
 
@@ -3331,134 +2661,6 @@ function HarnessPane({
         </Button>
       </div>
     </>
-  );
-}
-
-/** The groups the rail offers, in the order it offers them. */
-type RuntimeGroupId = "machine" | "components" | "voice" | "comfyui" | "models" | "harness";
-
-/**
- * Local runtime, master and detail (design turn 75). The rail is the heading: what used to be
- * nine eyebrows in one scroll is now six groups, each stating one thing once. Selection rides in
- * the address so a group can be linked to, and so the pane can be rendered at a given group
- * without a click — the flat version had no way to ask for one section.
- */
-export function SettingsLocalRuntimeScreen() {
-  const { state } = useStore();
-  const setup = useSetup();
-  const runtime = state?.app.runtime ?? null;
-  const voiceRuntime = state?.app.voiceRuntime ?? null;
-  const narrator = state?.app.narrator ?? null;
-  const displayedNarrator = narrator && supportsVoiceUse(narrator, "narration") ? narrator : null;
-  const comfyui = state?.app.comfyui ?? null;
-  // The catalogue is fetched per world; Settings uses whichever world is open.
-  const worldIdForVoices = state?.world?.meta.worldId;
-  const [searchParams, setSearchParams] = useSearchParams();
-  useEffect(() => {
-    if (!runtime) detectRuntimes();
-    // Detection runs once per mount when nothing is known yet; Re-detect is the manual path.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // LOCAL MODELS is drawn from a detection that may not have returned, or may have failed. Until
-  // it does, that group is empty, and hiding a settled component on its behalf would leave the
-  // component stated nowhere at all.
-  const modelsAreListed = (runtime?.models.length ?? 0) > 0;
-  const components = (setup?.components ?? []).filter((c) => {
-    const restated = statedElsewhere(c.id);
-    if (restated === undefined) return true;
-    // Providers owns the credential this tool is for, so its row there is the only one needed —
-    // installed or not. The rest are only spoken for once they have arrived.
-    if (restated === "providers") return false;
-    if (restated === "local-models" && !modelsAreListed) return true;
-    return c.state !== "ready" && c.state !== "present";
-  });
-  const outstanding = components.filter((c) => c.state !== "ready" && c.state !== "present").length;
-  const voiceEnginesReady = VOICE_ENGINES.filter((e) => voiceRuntime?.engineStatus[e]?.state === "ready").length;
-  const recipes = comfyui?.recipes ?? [];
-  const models = runtime?.models ?? [];
-  const harness = state?.app.health.harness;
-  const harnessStatus = harness?.status ?? "starting";
-
-  const groups: Array<{ id: RuntimeGroupId; label: string; tone: RuntimeTone; count: string }> = [
-    {
-      id: "machine",
-      label: "This machine",
-      tone: runtime ? "ok" : "idle",
-      // The figure the gating actually turns on, so the rail answers "will this run here?".
-      count: runtime?.probes.vramMb == null ? "—" : `${Math.round(runtime.probes.vramMb / 1024)} GB VRAM`,
-    },
-    {
-      id: "components",
-      label: "Components",
-      tone: componentsTone(components),
-      count: outstanding === 0 ? "all here" : `${outstanding} left`,
-    },
-    {
-      id: "voice",
-      label: "Voice",
-      tone: voiceEnginesReady === VOICE_ENGINES.length ? "ok" : voiceRuntime === null ? "idle" : "warn",
-      count: `${voiceEnginesReady} of ${VOICE_ENGINES.length}`,
-    },
-    {
-      id: "comfyui",
-      label: "ComfyUI",
-      tone: engineTone(comfyui?.engine ?? null),
-      count: recipes.length === 0 ? "—" : `${recipes.filter((r) => r.state === "ready").length} of ${recipes.length}`,
-    },
-    {
-      id: "models",
-      label: "Local models",
-      tone: models.some((m) => m.state === "disabled") ? "warn" : models.length === 0 ? "idle" : "ok",
-      count: models.length === 0 ? "—" : `${models.filter((m) => m.state === "ready").length} of ${models.length}`,
-    },
-    {
-      id: "harness",
-      label: "Authoring harness",
-      tone: harnessStatus === "healthy" ? "ok" : harnessStatus === "starting" ? "idle" : "warn",
-      count: harnessStatus === "healthy" ? "ready" : harnessStatus,
-    },
-  ];
-
-  const asked = searchParams.get("group");
-  const current = groups.some((g) => g.id === asked) ? (asked as RuntimeGroupId) : groups[0]!.id;
-  return (
-    <div data-screen="settings-local-runtime" className="fy-set fy-set--runtime">
-      <div className="fy-rt">
-        <div className="fy-rt__rail" role="tablist" aria-label="Local runtimes">
-          {groups.map((g) => (
-            <button
-              type="button"
-              key={g.id}
-              role="tab"
-              aria-selected={g.id === current}
-              className={cx("fy-rt__railitem", g.id === current && "is-current")}
-              onClick={() => setSearchParams({ group: g.id }, { replace: true })}
-            >
-              <span className={cx("fy-set__dot", TONE_CLASS[g.tone])} />
-              <span>{g.label}</span>
-              <span style={{ flex: 1 }} />
-              <span className="fy-rt__count">{g.count}</span>
-            </button>
-          ))}
-        </div>
-        <div className="fy-rt__pane">
-          {current === "machine" && <MachineDetail runtime={runtime} />}
-          {current === "components" && <ComponentsDetail components={components} running={setup?.running === true} />}
-          {current === "voice" && (
-            <VoiceDetail
-              voiceRuntime={voiceRuntime}
-              narrator={displayedNarrator}
-              health={state?.app.health.voice}
-              worldIdForVoices={worldIdForVoices}
-            />
-          )}
-          {current === "comfyui" && <ComfyUiDetail />}
-          {current === "models" && <LocalModelsDetail runtime={runtime} />}
-          {current === "harness" && <HarnessDetail health={harness} />}
-        </div>
-      </div>
-    </div>
   );
 }
 
