@@ -189,14 +189,20 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       requires: { memMb: 4000, diskMb: 400 },
     },
     {
+      // The row named Large v3 and setup has always fetched base.en — 141 MB against a stated
+      // 3.1 GB, and a memory floor Large v3's rather than this model's. Nothing sends this id
+      // anywhere: the whisper.cpp client posts audio to Voxa and never names a model, so the
+      // string is a routing key and a persisted default, and renaming it would strand one. The
+      // name, the size and the floors are what a row states, and those are now the shipped
+      // model's own.
       id: "whisper-large-v3",
       provider: "whispercpp",
       capability: "voice-stt",
-      displayName: "Whisper Large v3",
+      displayName: "Whisper base.en",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: {},
       pricing: { kind: "unmetered" },
-      requires: { memMb: 4000, diskMb: 3100 },
+      requires: { memMb: 1000, diskMb: 141 },
     },
   ],
 });

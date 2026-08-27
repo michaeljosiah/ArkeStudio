@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { comfyUiWeightsComponentId } from "./comfyui.js";
+import { comfyUiWeightsComponentId, type ComfyUiEngineState } from "./comfyui.js";
 import type { ProviderId } from "./provider.js";
 import type { SetupComponent, SetupComponentState } from "./setup.js";
 import type { FitVerdict, Locality } from "./settings.js";
@@ -115,9 +115,9 @@ export function activationOfComponent(state: SetupComponentState): ActivationSta
 }
 
 /**
- * Worst first. A model needs everything in its chain, so the chain's activation is the least
- * settled link — and anything in flight beats anything absent, because what is moving is what
- * the reader wants to know about.
+ * Worst first. A model's own files can be in several components at once, so its activation is
+ * the least settled of them — and anything in flight beats anything absent, because what is
+ * moving is what the reader wants to know about.
  */
 const ACTIVATION_ORDER: readonly ActivationState[] = [
   "needs-attention",
@@ -128,19 +128,35 @@ const ACTIVATION_ORDER: readonly ActivationState[] = [
   "ready",
 ];
 
-function worst(states: readonly ActivationState[]): ActivationState {
-  for (const candidate of ACTIVATION_ORDER) if (states.includes(candidate)) return candidate;
-  return "ready";
+function worst(states: readonly ActivationState[]): ActivationState | undefined {
+  return ACTIVATION_ORDER.find((candidate) => states.includes(candidate));
 }
-
-/** The engine that hosts a ComfyUI recipe, as a setup component. */
-export const COMFYUI_RUNTIME_COMPONENT = "comfyui-runtime";
 
 export interface ActivationInputs {
   /** Every setup component, as published. `provides` is what links one to a manifest model. */
   components: readonly SetupComponent[];
   /** The resolved ComfyUI engine's state, where one has been asked. */
-  comfyUiEngineState?: "absent" | "starting" | "ready" | "unreachable" | "incompatible" | "failed";
+  comfyUiEngineState?: ComfyUiEngineState;
+}
+
+/**
+ * What the engine adds to a model it hosts — and it only ever *degrades* one.
+ *
+ * A `ready` engine adds nothing, because the model's own files already answered. An `absent` one
+ * adds nothing either: the model is still installed, and *installed but unable to run* is
+ * eligibility's sentence (R-31), not a claim that the weights are missing. What is left is the
+ * two states that are genuinely about this model right now — the engine coming up, and the
+ * engine in trouble.
+ *
+ * The `comfyui-runtime` setup component is deliberately not consulted. It is `optional`, so it
+ * sits at `available` forever on a machine whose owner runs their own ComfyUI — and folding that
+ * into the model's activation printed `available` beside weights that were downloaded, installed
+ * and dispatching.
+ */
+function engineActivation(state: ComfyUiEngineState | undefined): ActivationState | undefined {
+  if (state === "starting") return "starting";
+  if (state === "unreachable" || state === "incompatible" || state === "failed") return "needs-attention";
+  return undefined;
 }
 
 /**
@@ -152,31 +168,27 @@ export interface ActivationInputs {
  * from the recipe catalogue exactly as it already was — a second declaration of those weights is
  * the bug, not the fix.
  *
+ * **A model's own absence is final.** An engine that is starting does not make an uninstalled
+ * model *starting* — nothing is coming for it — so the engine's state is consulted only once the
+ * model's own files are here.
+ *
  * A model nothing provides is `not-installed`. Arke cannot fetch it and cannot see it, and the
  * honest reading of that is absence rather than a claim either way; the detail names the engine
  * so the reader knows where it would come from.
  */
 export function activationFor(provider: ProviderId, modelId: string, inputs: ActivationInputs): ActivationState {
-  const byId = new Map(inputs.components.map((c) => [c.id, c]));
-  const parts: ActivationState[] = [];
-
+  const own: ActivationState[] = [];
   if (provider === "comfyui") {
-    // The engine speaks for itself where it has answered — a starting engine is a starting
-    // model, and one that failed is a model needing attention, whatever is on disk.
-    const engine = inputs.comfyUiEngineState;
-    if (engine === "starting") parts.push("starting");
-    else if (engine === "unreachable" || engine === "incompatible" || engine === "failed") {
-      parts.push("needs-attention");
+    const weights = inputs.components.find((c) => c.id === comfyUiWeightsComponentId(modelId));
+    if (weights) own.push(activationOfComponent(weights.state));
+  } else {
+    for (const component of inputs.components) {
+      if (component.provides?.includes(modelId) === true) own.push(activationOfComponent(component.state));
     }
-    const runtime = byId.get(COMFYUI_RUNTIME_COMPONENT);
-    if (runtime) parts.push(activationOfComponent(runtime.state));
-    const weights = byId.get(comfyUiWeightsComponentId(modelId));
-    if (weights) parts.push(activationOfComponent(weights.state));
-    return parts.length === 0 ? "not-installed" : worst(parts);
   }
-
-  for (const component of inputs.components) {
-    if (component.provides?.includes(modelId) === true) parts.push(activationOfComponent(component.state));
-  }
-  return parts.length === 0 ? "not-installed" : worst(parts);
+  const mine = worst(own) ?? "not-installed";
+  if (mine === "not-installed") return mine;
+  if (provider !== "comfyui") return mine;
+  const engine = engineActivation(inputs.comfyUiEngineState);
+  return engine === undefined ? mine : (worst([mine, engine]) ?? mine);
 }

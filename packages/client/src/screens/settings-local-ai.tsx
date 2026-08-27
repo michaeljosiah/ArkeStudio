@@ -10,7 +10,6 @@ import {
   PROVIDERS as PROVIDER_TABLE,
   type Capability,
   type LocalModelRowState,
-  type LocalRuntimeModel,
   type ManifestModel,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
@@ -37,8 +36,12 @@ import { RuntimeSection, RuntimeStatus, sizeMb, type RuntimeTone } from "./setti
  * cannot disagree about one model.
  */
 
-/** The five, in order, and the manifest capabilities each one speaks for (R-47). */
-const ROWS: ReadonlyArray<{ label: string; capabilities: readonly Capability[] }> = [
+/**
+ * The five, in order, and the manifest capabilities each one speaks for (R-47). Exported so a
+ * test can assert every capability a local provider declares lands in exactly one row — a
+ * capability drawn nowhere renders no models and nothing else would notice.
+ */
+export const LOCAL_AI_ROWS: ReadonlyArray<{ label: string; capabilities: readonly Capability[] }> = [
   { label: "Images", capabilities: ["image"] },
   { label: "Video", capabilities: ["video"] },
   // Dictation folds in here (epic decision 13): `voice-stt` is the one capability with no cloud
@@ -62,7 +65,6 @@ const STATE_TONE: Record<LocalModelRowState, RuntimeTone> = {
 
 interface Entry {
   model: ManifestModel;
-  gated: LocalRuntimeModel | undefined;
   state: LocalModelRowState;
   /** The verdict's own figures — the refusal, or the floor a passing verdict cleared. */
   reason: string | undefined;
@@ -90,6 +92,7 @@ export function SettingsLocalAiScreen() {
 
   const manifest = state?.app.manifest ?? null;
   const components = setup?.components ?? [];
+  const disabled = new Set(state?.app.models.disabled ?? []);
   const gatedById = new Map((runtime?.models ?? []).map((m) => [m.modelId, m]));
 
   /**
@@ -119,16 +122,31 @@ export function SettingsLocalAiScreen() {
       );
       return {
         model,
-        gated,
         state: rowState,
         reason: gated?.reason,
-        fitLabel: gated?.fit === undefined ? undefined : FIT_LABEL[gated.fit],
+        // Before the probe returns there is no verdict, and R-28 offers the model anyway — so
+        // the row says the machine has not been measured rather than leaving the line a word
+        // short. A remote model is the one case with no verdict to state at all.
+        fitLabel:
+          gated?.fit !== undefined
+            ? FIT_LABEL[gated.fit]
+            : locality === "local"
+              ? FIT_LABEL.unknown
+              : undefined,
         sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
         recommended: runtime?.recommended[model.capability] === model.id,
         // Installed and still unable to run is a different sentence from unsupported, and it is
         // not this screen's to compose: R-30 forbids a second eligibility answer, so the row
         // states the one the dispatch bar and enqueue admission already read.
-        ineligible: rowState === "installed" && !usableIds.has(model.id) ? strandReason(state, model) : undefined,
+        //
+        // Switched off is stated at any row state, not only when installed: being turned down is
+        // a decision and the other three are conditions, and R-32 forbids letting a decision
+        // read as an absence.
+        ineligible: disabled.has(model.id)
+          ? "turned off in Providers"
+          : rowState === "installed" && !usableIds.has(model.id)
+            ? strandReason(state, model)
+            : undefined,
       };
     });
   };
@@ -137,7 +155,7 @@ export function SettingsLocalAiScreen() {
     <div data-screen="settings-local-ai" className="fy-set">
       <div className="fy-set__eyebrow">LOCAL AI</div>
       <MachineHeader />
-      {ROWS.map(({ label, capabilities }) => {
+      {LOCAL_AI_ROWS.map(({ label, capabilities }) => {
         const entries = entriesFor(capabilities);
         const installed = entries.filter((e) => e.state === "installed").length;
         return (
@@ -314,6 +332,9 @@ function ModelRow({
       {open && (
         <div className="fy-set__why">
           <span className="fy-set__dot" />
+          {/* R-51 also names quantisation and install location for this disclosure. Neither is
+              stated: no manifest row carries a quantisation, and an absolute install path is
+              host-owned and belongs to Engines, where SPEC-028 R-4's constraint already puts it. */}
           <span>
             {PROVIDER_TABLE[model.provider].displayName} · {model.id}
             {model.limits.maxContextTokens ? ` · ${Math.round(model.limits.maxContextTokens / 1000)}K context` : ""}

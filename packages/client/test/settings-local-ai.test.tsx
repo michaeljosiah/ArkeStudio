@@ -17,6 +17,7 @@ import {
   type SetupComponent,
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { LOCAL_AI_ROWS } from "../src/screens/settings-local-ai.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -62,8 +63,24 @@ const DRAFT_VIDEO: ManifestModel = {
   requires: { vramMb: 16000 },
 };
 
-/** The one cloud row the fixture already carries, kept so R-2 has something to fail on. */
-const CLOUD = FIXTURE_STATE.app.manifest!.models[0]!;
+/**
+ * One cloud row per non-local provider, on a capability Local AI actually draws.
+ *
+ * A single fal row would make R-2's enumeration pass for the other four providers whatever the
+ * code did, because a provider with no model in the manifest cannot render whatever the filter
+ * says. The loop is only a boundary check if every provider it names has something to render.
+ */
+const CLOUD: ManifestModel[] = (Object.keys(PROVIDERS) as Array<keyof typeof PROVIDERS>)
+  .filter((id) => !PROVIDERS[id].local)
+  .map((id, at) => ({
+    id: `cloud-${id}`,
+    provider: id,
+    capability: PROVIDERS[id].capabilities.find((c) => c !== "voice-clone") ?? "image",
+    displayName: `Cloud model ${at}`,
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" },
+  }));
 
 function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">): SetupComponent {
   return {
@@ -115,7 +132,7 @@ function stateWith(over: Partial<ClientState["app"]> = {}): ClientState {
       manifest: {
         manifestVersion: 17,
         generated: "2026-08-27",
-        models: [CLOUD, KOKORO, GEMMA, DRAFT_VIDEO],
+        models: [...CLOUD, KOKORO, GEMMA, DRAFT_VIDEO],
       },
       runtime: runtime(),
       setup: {
@@ -168,8 +185,30 @@ describe("Local AI: five rows, and no cloud provider anywhere (SPEC-033 R-2, R-4
       if (info.local) continue;
       assert.doesNotMatch(text, new RegExp(info.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), id);
     }
-    // And not the cloud model the fixture routes video to either.
-    assert.doesNotMatch(text, /Seedance/);
+    // And not one of their models, in any state, under any row.
+    assert.ok(CLOUD.length >= 4, "the manifest under test must carry a row for each of them");
+    for (const model of CLOUD) {
+      assert.doesNotMatch(text, new RegExp(model.displayName), model.id);
+      assert.doesNotMatch(text, new RegExp(model.id), model.id);
+    }
+  });
+
+  it("gives every capability a local provider declares exactly one row (R-47)", () => {
+    // `voice-clone` is the hole this closes: nothing local declares it today, so a local model
+    // that did would render in no row at all and no other assertion would notice.
+    const local = new Set(
+      (Object.keys(PROVIDERS) as Array<keyof typeof PROVIDERS>)
+        .filter((id) => PROVIDERS[id].local)
+        .flatMap((id) => PROVIDERS[id].capabilities),
+    );
+    const drawn = LOCAL_AI_ROWS.flatMap((row) => row.capabilities);
+    for (const capability of local) {
+      assert.equal(
+        drawn.filter((c) => c === capability).length,
+        1,
+        `${capability} is declared by a local provider and drawn in ${drawn.filter((c) => c === capability).length} rows`,
+      );
+    }
   });
 
   it("states the machine in every figure a verdict turns on (R-53)", () => {
@@ -218,6 +257,21 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
     const text = plain(render(stateWith()));
     assert.doesNotMatch(text, /Ollama/);
     assert.doesNotMatch(text, /gemma4-12b/);
+  });
+
+  it("states a model switched off in Providers as switched off, at any row state (R-32)", () => {
+    // Being turned down is a decision; unsupported, unavailable and missing are conditions, and
+    // letting the first read as one of the other three sends the reader to the wrong screen.
+    const text = plain(
+      render(stateWith({ models: { disabled: [GEMMA.id] } })),
+    );
+    assert.match(text, /Gemma 4 12B[\s\S]{0,120}turned off in Providers/);
+  });
+
+  it("says the machine has not been measured on the row, not only in the header (R-28)", () => {
+    const text = plain(render(stateWith({ runtime: null })));
+    assert.match(text, /Kokoro 82M\s+installed · not measured · 400 MB/);
+    assert.match(text, /Gemma 4 12B\s+available · not measured · 7\.4 GB/);
   });
 
   it("routes a remote engine's models out rather than judging them here (row 10, R-11)", () => {
@@ -277,20 +331,18 @@ describe("the row state is a projection, never a new vocabulary (R-26)", () => {
   const FITS: Array<FitVerdict | undefined> = [...FitVerdictSchema.options, undefined];
   const ACTIVATIONS: ActivationState[] = [...ActivationStateSchema.options];
 
-  it("is total over fit × activation, with nothing outside the table's outputs", () => {
-    const allowed = new Set([
-      "served-elsewhere",
-      "unsupported",
-      "installed",
-      "available",
-      "downloading",
-      "installing",
-      "starting",
-      "needs-attention",
-    ]);
+  it("is R-26's table exactly, over every combination of the two vocabularies", () => {
+    // The table transcribed from the specification, not from the implementation. Membership in
+    // the return type is guaranteed by TypeScript and proves nothing; the mapping is the claim.
+    const expected = (fit: FitVerdict | undefined, activation: ActivationState): string => {
+      if (fit === "insufficient" || fit === "unsupported") return "unsupported";
+      if (activation === "ready") return "installed";
+      if (activation === "not-installed") return "available";
+      return activation;
+    };
     for (const fit of FITS) {
       for (const activation of ACTIVATIONS) {
-        assert.ok(allowed.has(localModelRowState("local", fit, activation)), `${fit} × ${activation}`);
+        assert.equal(localModelRowState("local", fit, activation), expected(fit, activation), `${fit} × ${activation}`);
         // Remote wins over everything: a model served elsewhere has no verdict to show (R-15).
         assert.equal(localModelRowState("remote", fit, activation), "served-elsewhere");
       }
@@ -327,26 +379,64 @@ describe("activation is read from the ledger, not inferred from an id (R-39)", (
     assert.equal(activationFor("ollama", "llama3.3-70b", { components: [ready] }), "not-installed");
   });
 
-  it("a ComfyUI recipe takes the worst of its engine and its derived weights component", () => {
-    const weights = component({ id: comfyUiWeightsComponentId("comfyui-draft-video"), state: "ready" });
-    const engine = component({ id: "comfyui-runtime", state: "ready" });
+  it("does not read the optional managed-runtime component as the model's own state", () => {
+    // Somebody running their own ComfyUI never installs `comfyui-runtime`, so it sits at
+    // `available` forever. Folding it in printed `available` beside weights that were
+    // downloaded, installed and dispatching — the one word this screen exists to state.
+    const weights = component({ id: comfyUiWeightsComponentId("comfyui-draft-image"), state: "ready" });
+    const runtime = component({ id: "comfyui-runtime", state: "available" });
     assert.equal(
-      activationFor("comfyui", "comfyui-draft-video", { components: [weights, engine] }),
+      activationFor("comfyui", "comfyui-draft-image", {
+        components: [weights, runtime],
+        comfyUiEngineState: "ready",
+      }),
       "ready",
     );
+  });
+
+  it("a model's own absence is final — a busy engine does not make it starting", () => {
+    // Nothing is coming for a model whose weights were never fetched, whatever the engine is
+    // doing, so the row reads Available rather than starting or needing attention.
+    const absent = component({ id: comfyUiWeightsComponentId("comfyui-draft-video"), state: "available" });
+    for (const engine of ["starting", "unreachable", "failed", "absent"] as const) {
+      assert.equal(
+        activationFor("comfyui", "comfyui-draft-video", { components: [absent], comfyUiEngineState: engine }),
+        "not-installed",
+        engine,
+      );
+    }
+  });
+
+  it("an absent engine leaves an installed model installed, for eligibility to refuse (R-31)", () => {
+    const weights = component({ id: comfyUiWeightsComponentId("comfyui-draft-video"), state: "ready" });
     assert.equal(
-      activationFor("comfyui", "comfyui-draft-video", {
-        components: [{ ...weights, state: "failed" }, engine],
-      }),
+      activationFor("comfyui", "comfyui-draft-video", { components: [weights], comfyUiEngineState: "absent" }),
+      "ready",
+    );
+  });
+
+  it("a ComfyUI recipe takes the worst of its engine and its derived weights component", () => {
+    const weights = component({ id: comfyUiWeightsComponentId("comfyui-draft-video"), state: "ready" });
+    assert.equal(activationFor("comfyui", "comfyui-draft-video", { components: [weights] }), "ready");
+    assert.equal(
+      activationFor("comfyui", "comfyui-draft-video", { components: [{ ...weights, state: "failed" }] }),
       "needs-attention",
     );
-    // An engine that has not finished starting is a model that has not finished starting.
+    // An engine that has not finished starting is a model that has not finished starting —
+    // but only once the model's own files are here.
     assert.equal(
       activationFor("comfyui", "comfyui-draft-video", {
-        components: [weights, engine],
+        components: [weights],
         comfyUiEngineState: "starting",
       }),
       "starting",
+    );
+    assert.equal(
+      activationFor("comfyui", "comfyui-draft-video", {
+        components: [weights],
+        comfyUiEngineState: "unreachable",
+      }),
+      "needs-attention",
     );
   });
 });

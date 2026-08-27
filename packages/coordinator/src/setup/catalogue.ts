@@ -180,9 +180,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
     displayName: "Whisper base.en · dictation",
     purpose: "Turns your speech into text, without the audio leaving this machine",
-    // The manifest's dictation row is the wire id Voxa is asked for, and this is the model it
-    // answers with. The two spell the size differently and the manifest row is the one that is
-    // wrong; correcting it is a manifest change, which SPEC-033 §1.2 keeps out of this work.
+    // The manifest's dictation row keeps `whisper-large-v3` as its id because that string is a
+    // persisted routing key, and this is the component that satisfies it.
     provides: ["whisper-large-v3"],
     // The small English model, deliberately: enough to dictate an instruction, and a fraction
     // of Large v3's 3.1 GB. A bigger one is a choice for Settings, not a cost at setup.
