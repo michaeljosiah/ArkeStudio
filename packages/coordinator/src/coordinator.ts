@@ -2006,16 +2006,23 @@ export class Coordinator {
      * Recording a failure in either case hides a loaded world behind a refusal that Try again
      * cannot clear, because the retry succeeds and changes nothing. The read model is reconciled
      * to what the provider actually holds instead, which is also what the post-load path skipped.
+     *
+     * Nothing is awaited between reading the provider and writing the state — the logs come after,
+     * deliberately (Codex round 2). Checking and then awaiting the log write reopened the same
+     * hole one turn further along: the loser sees no store, yields at the await, and the winner
+     * installs one while the write is in flight, so the failure lands on top of a world that is
+     * now open. A synchronous decision cannot be interleaved, which beats rechecking after each
+     * await and hoping the list of awaits stays short.
      */
     if (open?.worldId === worldId) {
       this.readModel.setWorld(open.getBundle());
+      this.transport.broadcastSnapshot();
       await this.appLog?.append({
         level: "warn",
         event: "world.open-recovered",
         worldId,
         reason: withoutWorldPaths(reason),
       });
-      this.transport.broadcastSnapshot();
       return;
     }
 
@@ -2034,21 +2041,20 @@ export class Coordinator {
      * path to the file, and a filter at the read end would have to be remembered by everything
      * that ever logs a path afterwards.
      */
-    await this.appLog?.append({
-      level: "error",
-      event: "world.open-failed",
-      worldId,
-      reason: withoutWorldPaths(reason),
-    });
-    // After the read model, because `setWorld` clears the failure — it is the answer to "why is
-    // no world open", and a stale one outliving its question is worse than none.
-    //
     // The screen and the event carry the reason whole. Neither leaves the machine: the event is
     // journalled to `coordinator.jsonl`, which the diagnostics bundle does not read, and the
     // person looking at the refusal is the one who needs to know which file it was.
     this.readModel.setWorldOpenFailure({ worldId, reason });
     this.emit({ at: new Date().toISOString(), type: "world.open-failed", worldId, reason });
     this.transport.broadcastSnapshot();
+    // Last, and still awaited so the line is on disk before the message is answered — the whole
+    // complaint was that there was nothing to read afterwards.
+    await this.appLog?.append({
+      level: "error",
+      event: "world.open-failed",
+      worldId,
+      reason: withoutWorldPaths(reason),
+    });
   }
 
   /**

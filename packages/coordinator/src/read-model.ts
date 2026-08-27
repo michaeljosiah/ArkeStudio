@@ -128,13 +128,22 @@ export class ReadModel {
     // Closing or switching worlds drops the open conversation with it: a transcript belongs to
     // the world it was about, and leaving one behind would show it under the next world opened.
     // The open bench session goes the same way, for the same reason (issue 305).
+    /*
+     * A refusal is settled by *its own* world opening, and by nothing else (issue 571, Codex
+     * round 2).
+     *
+     * Clearing on any world at all looked right and was not: an unknown id refused while another
+     * world stays open leaves that world being refreshed constantly — a media backfill, an
+     * adopted Bible edit — and each refresh came through here and wiped the refusal for a world
+     * that still had not opened. The route for it then fell back to the loader for good, because
+     * `useOpenWorldGuard` sees an unchanged route, connection and open-world id, so its effect
+     * never runs again and nothing re-asks.
+     */
+    const settled = world !== null && this.state.worldOpenFailure?.worldId === world.meta.worldId;
     this.state = {
       ...this.state,
       world,
-      // Any world reaching this point settles the last refusal: it is the answer to "why is
-      // there no world open", and there now is one (issue 571). A close clears it too — nobody
-      // asked for a world, so there is nothing outstanding to explain.
-      worldOpenFailure: null,
+      worldOpenFailure: settled ? null : this.state.worldOpenFailure,
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
     };

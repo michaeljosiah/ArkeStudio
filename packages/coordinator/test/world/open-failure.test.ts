@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import type { ClientMessage, DomainEvent, WorldBundle } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { withoutWorldPaths } from "../../src/redact.js";
@@ -46,8 +46,12 @@ async function harness(root: string) {
       worldId,
       err,
     );
+  // An ordinary refresh of whichever world is open — what a media-backfill callback or an
+  // adopted Bible edit does, and the path that used to wipe an unrelated world's refusal.
+  const refresh = (bundle: WorldBundle) =>
+    (coordinator as unknown as { readModel: { setWorld(b: WorldBundle): void } }).readModel.setWorld(bundle);
   const failures = () => events.filter((e): e is OpenFailed => e.type === "world.open-failed");
-  return { provider, events, send, state, fail, failures };
+  return { provider, events, send, state, fail, refresh, failures };
 }
 
 /**
@@ -159,6 +163,29 @@ describe("a refused world open (issue 571)", () => {
 
     assert.equal(h.state().worldOpenFailure, null, "a stale refusal outliving its question is worse than none");
     assert.equal(h.state().world?.meta.worldId, WORLD_ID);
+  });
+
+  it("keeps a refusal alive while the world it is not about is refreshed", async () => {
+    /*
+     * A refusal for one world sits beside another world that stays open, and that world gets
+     * refreshed constantly — a media backfill, an adopted Bible edit. Each refresh reaches
+     * `setWorld`, and clearing on any world at all wiped a refusal for a world that still had not
+     * opened. Its route then fell back to the loader for good: `useOpenWorldGuard` sees an
+     * unchanged route, connection and open-world id, so nothing re-asks.
+     */
+    const { root } = await makeTempRoot();
+    const h = await harness(root);
+    await h.send({ kind: "open-world", worldId: WORLD_ID });
+    const missing = "01M0F0DPTXSFXA50JQTM391BXX";
+    await h.send({ kind: "open-world", worldId: missing });
+    assert.equal(h.state().worldOpenFailure?.worldId, missing, "refused to begin with");
+
+    // An ordinary refresh of the world that IS open, which is all a backfill callback does.
+    await h.provider.loadWorld(WORLD_ID);
+    h.refresh(h.provider.openStore()!.getBundle());
+
+    assert.equal(h.state().worldOpenFailure?.worldId, missing, "the refusal is not about this world");
+    assert.equal(h.state().world?.meta.worldId, WORLD_ID, "and the open world still refreshed");
   });
 
   it("does not close the open world when the id is the thing that was wrong", async () => {
