@@ -65,7 +65,7 @@ export interface PreparedImageReference {
  * routes all declare a `video_url`, and a data URI needs its type spelled out to be one.
  */
 export interface PreparedVideoSource {
-  contentType: "video/mp4" | "video/quicktime";
+  contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
 

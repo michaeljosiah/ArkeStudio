@@ -54,7 +54,7 @@ export interface DispatchVoiceReference {
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
 export interface DispatchVideoSource {
-  contentType: "video/mp4" | "video/quicktime";
+  contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
 

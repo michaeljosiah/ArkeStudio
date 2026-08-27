@@ -155,6 +155,19 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { materialiseForContinuation } from "./productions/continuation.js";
+
+/**
+ * The four extensions `isVideoMedia` admits, each as the type a data URI must declare it to be
+ * (SPEC-019 R-50). A map rather than a ternary because the wrong label does not fail as "we do
+ * not support webm" — the route decodes the bytes as what we said they were and reports a corrupt
+ * file, which reads as the model's fault rather than as ours.
+ */
+const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "video/webm"> = {
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+};
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
@@ -1265,13 +1278,15 @@ export class Coordinator {
                   this.opts.ffmpeg ?? null,
                   new AbortController().signal,
                 );
+                // Named from the file, not guessed. A data URI IS its declared type as far as the
+                // route is concerned, so labelling a webm as mp4 would not fail as "wrong format"
+                // — it would fail as a corrupt file, which reads as the model's fault.
+                const type = VIDEO_CONTENT_TYPES[extname(path).toLowerCase()];
+                if (type === undefined) {
+                  throw new Error(`${extname(path) || "that file"} is not a video this can send`);
+                }
                 const data = await readFile(toExtendedLength(join(store.dir, fromPortable(path))));
-                return {
-                  contentType: path.toLowerCase().endsWith(".mov")
-                    ? ("video/quicktime" as const)
-                    : ("video/mp4" as const),
-                  data,
-                };
+                return { contentType: type, data };
               };
               if (this.opts.provider.withWorldStore) {
                 return this.opts.provider.withWorldStore(job.worldId, prepare);
