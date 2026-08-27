@@ -75,6 +75,7 @@ import {
   Waveform,
 } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
+import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
@@ -220,6 +221,7 @@ function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
 export function ProductionLayout() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const refusal = useWorldOpenRefusal(worldId);
   const navigate = useNavigate();
   const location = useLocation();
   const exportsState = useExports();
@@ -443,7 +445,10 @@ export function ProductionLayout() {
           </NavLink>
         </div>
         <div className="fy-prodwrap">
-          <Outlet />
+          {/* The production tree is a sibling of the world tree, not a child of it (App.tsx), so
+              the world-open refusal has to be stated here too — otherwise a reload or deep link
+              onto a production leaves every screen under it on its loader forever (issue 571). */}
+          {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
         </div>
       </div>
     </div>

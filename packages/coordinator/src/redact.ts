@@ -58,3 +58,20 @@ export function redactDeep(value: unknown, registry: SecretRegistry): unknown {
   }
   return value;
 }
+
+/**
+ * Strip file paths out of a message bound for `app.jsonl` (issue 571, Codex round 1).
+ *
+ * The diagnostics bundle ships that file's tail verbatim apart from secret redaction, and
+ * promises no world content — "not a sheet, not a canon line, not a path inside a world". A
+ * refusal worded by the store routinely breaks that: `.history/characters/<character>/v6.md:
+ * history snapshot conflicts with the committed version` carries a character's slug and the
+ * world's shape into a bundle somebody pastes into a support thread.
+ *
+ * The split is deliberate. What went wrong is the sentence and it is kept; which file it was is
+ * the identifying half and it goes. A token counts as a path when it holds a separator, which is
+ * what distinguishes `characters/maren-kest.md` from an ordinary word.
+ */
+export function withoutWorldPaths(message: string): string {
+  return message.replace(/\S*[\\/]\S*/g, (token) => (token.endsWith(":") ? "<path>:" : "<path>"));
+}

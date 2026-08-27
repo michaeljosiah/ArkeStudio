@@ -273,7 +273,7 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
-import { SecretRegistry } from "./redact.js";
+import { SecretRegistry, withoutWorldPaths } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
@@ -1992,10 +1992,60 @@ export class Coordinator {
     // (pid 1234)" is the answer, and paraphrasing it here would only lose the pid.
     const message = err instanceof Error ? err.message.trim() : String(err).trim();
     const reason = (message.length > 0 ? message : "the world could not be opened").slice(0, 500);
-    if ((this.opts.provider.openStore?.() ?? null) === null) this.readModel.setWorld(null);
-    await this.appLog?.append({ level: "error", event: "world.open-failed", worldId, reason });
+    const open = this.opts.provider.openStore?.() ?? null;
+
+    /*
+     * The world is open despite this, so it is not refused (Codex round 1).
+     *
+     * Two ways here, and both are real. Overlapping `open-world` messages — `WorldLayout` and the
+     * screen inside it each run the open guard — race for the world lock, and the loser reports
+     * "open in another process" after the winner has already succeeded. And `openWorld` does more
+     * than load: `retryFinalizationsForWorld` runs after the provider has installed the store, so
+     * a job-persistence fault there would refuse a world that is sitting open.
+     *
+     * Recording a failure in either case hides a loaded world behind a refusal that Try again
+     * cannot clear, because the retry succeeds and changes nothing. The read model is reconciled
+     * to what the provider actually holds instead, which is also what the post-load path skipped.
+     */
+    if (open?.worldId === worldId) {
+      this.readModel.setWorld(open.getBundle());
+      await this.appLog?.append({
+        level: "warn",
+        event: "world.open-recovered",
+        worldId,
+        reason: withoutWorldPaths(reason),
+      });
+      this.transport.broadcastSnapshot();
+      return;
+    }
+
+    if (open === null) this.readModel.setWorld(null);
+    /*
+     * The log gets the reason with its paths taken out (Codex round 1).
+     *
+     * `buildDiagnosticsBundle` ships the last hundred lines of this file verbatim apart from
+     * secret redaction, and it promises no world content — "not a sheet, not a canon line, not a
+     * path inside a world". An ordinary reason here is exactly that: the history conflict names
+     * `.history/characters/<character>/v6.md`, which carries a character's slug out of the world
+     * and into a bundle somebody pastes into a support thread. The sentence is the diagnostic
+     * part and it survives; the path identifies whose world it is and does not.
+     *
+     * Stripped at the write, not at the bundle: `AppLog` is built so there is no unredacted write
+     * path to the file, and a filter at the read end would have to be remembered by everything
+     * that ever logs a path afterwards.
+     */
+    await this.appLog?.append({
+      level: "error",
+      event: "world.open-failed",
+      worldId,
+      reason: withoutWorldPaths(reason),
+    });
     // After the read model, because `setWorld` clears the failure — it is the answer to "why is
     // no world open", and a stale one outliving its question is worse than none.
+    //
+    // The screen and the event carry the reason whole. Neither leaves the machine: the event is
+    // journalled to `coordinator.jsonl`, which the diagnostics bundle does not read, and the
+    // person looking at the refusal is the one who needs to know which file it was.
     this.readModel.setWorldOpenFailure({ worldId, reason });
     this.emit({ at: new Date().toISOString(), type: "world.open-failed", worldId, reason });
     this.transport.broadcastSnapshot();

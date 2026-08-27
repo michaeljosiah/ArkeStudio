@@ -47,6 +47,23 @@ describe("a refused world open, on screen (issue 571)", () => {
     assert.equal(html.includes("This world did not open"), false);
   });
 
+  it("states it on a production route too, which is a sibling tree and not a child", () => {
+    // `/w/:worldId/p/:prodId` renders under ProductionLayout, not WorldLayout. A refusal surfaced
+    // only in the world tree leaves every production screen on its loader — and productions are
+    // where the world in the report kept its work.
+    const html = render(refused, `/w/${FIXTURE_WORLD_ID}/p/the-drowning-season`);
+    assert.ok(html.includes("This world did not open"));
+    assert.ok(html.includes("history snapshot conflicts"));
+  });
+
+  it("offers a way out where the layout draws no chrome", () => {
+    // The fixed workspaces render no AppChrome — their child supplies the breadcrumb — so a
+    // refusal in that slot with only Try again strands anybody who reloaded at such a URL.
+    const html = render(refused, `/w/${FIXTURE_WORLD_ID}/art-direction/propose`);
+    assert.ok(html.includes("This world did not open"));
+    assert.ok(html.includes("Worlds"), "and a route back that is not a retry");
+  });
+
   it("keeps another world's refusal off this world's screen", () => {
     // The failure sits in the snapshot until some world opens, so a person who gives up on one
     // world and opens another must not be met by the first one's refusal.
