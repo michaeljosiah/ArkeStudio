@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { WorldBundleSchema } from "@arke-studio/contracts";
 import { scanWorld } from "../src/world/scan.js";
+import { makeTempWorld } from "./world/helpers.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_WORLD = resolve(here, "../../../fixtures/worlds/the-undersong");
@@ -63,5 +65,25 @@ describe("scanWorld over the fixture corpus (T-18)", () => {
     assert.ok(manifest["characters/maren-kest.md"]?.startsWith("sha256:"));
     assert.ok(manifest["canon/CANON-002.md"]);
     assert.ok(manifest["productions/saltlight/scenes/04-the-verse-rises.json"]);
+  });
+
+  it("does not attribute a production-styled take to the world look", async () => {
+    const dir = await makeTempWorld();
+    const before = await scanWorld(dir);
+    const path = join(dir, "productions/saltlight/takes/tk_01J8F0000000000000000000B2/take.json");
+    const take = JSON.parse(await readFile(path, "utf8")) as { params: Record<string, unknown> };
+    take.params["artDirection"] = {
+      version: before.bundle.artDirection.version,
+      source: "production",
+      transport: "text",
+      description: "Bleached documentary realism",
+    };
+    await writeFile(path, JSON.stringify(take, null, 2), "utf8");
+
+    const after = await scanWorld(dir);
+    assert.equal(
+      after.bundle.artDirection.reach.acceptedTakesAtCurrentVersion ?? 0,
+      (before.bundle.artDirection.reach.acceptedTakesAtCurrentVersion ?? 0) - 1,
+    );
   });
 });

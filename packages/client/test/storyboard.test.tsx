@@ -212,6 +212,22 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     const image = render(stills, SHOT_PATH, <ShotSheetScreen />, ROUTE);
     assert.ok(image.includes("infer unset camera choices from this"), "cinematic intent still guides one frame");
     assert.ok(!image.includes("Shot timing 0–4s"), "a still preview cannot save temporal rows into an override");
+
+    const productionLook = "Bleached documentary realism with hard noon shadows";
+    const overridden: ClientState = {
+      ...withTiming,
+      world: {
+        ...world,
+        productions: world.productions.map((production) =>
+          production.meta.id === "saltlight"
+            ? { ...production, meta: { ...production.meta, styleOverride: productionLook } }
+            : production,
+        ),
+      },
+    };
+    const productionPreview = render(overridden, SHOT_PATH, <ShotSheetScreen />, ROUTE);
+    assert.ok(productionPreview.includes(productionLook));
+    assert.ok(!productionPreview.includes(world.artDirection.description), "the editor shows the nearest look");
   });
 
   it("camera fields say where their value comes from: a scene default reads as from scene", () => {

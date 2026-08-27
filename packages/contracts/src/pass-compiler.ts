@@ -217,6 +217,17 @@ export interface CompilePassesInput {
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   const { productionId, scene, plan, model, world } = input;
+  const styleSource = (overridden: boolean) =>
+    overridden
+      ? { version: world.artDirection.version, source: "generation", transport: "text" }
+      : plan.productionStyleOverride
+        ? {
+            version: world.artDirection.version,
+            source: "production",
+            transport: "text",
+            description: plan.productionStyleOverride,
+          }
+        : { version: world.artDirection.version, source: "world", transport: "text" };
   const provenanceFor = (
     sheetIds: string[],
   ): { canonRevision: number; sheets: Record<string, number>; artDirectionVersion: number } => ({
@@ -293,6 +304,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // below comes from the same bound records the preamble numbers, so the stated order
           // and the sent order are one structure rather than two that can drift (R-2, D2).
           prompt: composePrompt(entry.parts),
+          artDirection: styleSource(entry.prompt.overridden),
           references: framed ? [entry.frame!.file] : boundFiles(entry.bound),
           ...(framed
             ? {
@@ -355,9 +367,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       sheets: world.sheets as Sheet[],
       scene,
       entries: shotsInPass.map((entry) => ({ shot: entry.shot, prompt: entry.prompt })),
-      ...(world.artDirection.description !== undefined
-        ? { artDirection: world.artDirection.description }
-        : {}),
+      artDirection: plan.effectiveStyle,
       carriedSheetIds: new Set(passReferencePlan.bound.map((reference) => reference.sheetId)),
       capability: model.capability,
     });
@@ -405,6 +415,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // be the same request (R-9).
           negatives: passReferencePlan.negatives,
         }),
+        artDirection: styleSource(false),
         references,
         durationSec: passSeconds,
         // A chained pass's frame mode may lock the aspect (issue 389) — the picture decides the
