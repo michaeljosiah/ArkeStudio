@@ -34,7 +34,6 @@ import {
   repairVoiceModels,
   restartVoxa,
   setComfyUiUrl,
-  setupCancel,
   setupRepair,
   setupRetry,
   setupSkip,
@@ -702,12 +701,12 @@ export function SettingsEnginesScreen() {
           <div className="fy-rt__actions">
             {/* Stopping is global — one setup run fetches for every engine — so it is stated
                 once, here, rather than under a heading that names one of them. */}
-            {running && (
-              <button type="button" className="fy-set__link" onClick={() => setupCancel()}>
-                Stop all downloads
-              </button>
-            )}
             <span style={{ flex: 1 }} />
+            {/* Watching a transfer belongs to Downloads, which owns progress; starting one stays
+                where the decision is made (R-82, R-83). */}
+            <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
+              {running ? "Downloads · running" : "Downloads"}
+            </Button>
             <Button variant="secondary" onClick={() => navigate("/settings/local-ai")}>
               Local AI
             </Button>

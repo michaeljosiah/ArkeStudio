@@ -4519,6 +4519,14 @@ export class Coordinator {
         );
         return;
       }
+      case "setup-install": {
+        this.setup?.installClosure(msg.componentId);
+        return;
+      }
+      case "setup-remove": {
+        await this.setup?.remove(msg.componentId).catch(() => {});
+        return;
+      }
       case "comfyui-restart": {
         if (!this.appSettings || !this.opts.comfyui) return;
         // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,

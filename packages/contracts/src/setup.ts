@@ -39,6 +39,12 @@ export const SetupComponentSchema = z
     purpose: z.string().min(1),
     /** The download size as published, for honest arithmetic before anything starts. */
     sizeMb: z.number().int().min(0),
+    /**
+     * Peak disk this component needs where that differs from what it downloads — an archive that
+     * is extracted holds both copies at once. On the wire so the closure's total is the same
+     * figure on the button and in the guard.
+     */
+    installedMb: z.number().int().min(0).optional(),
     state: SetupComponentStateSchema,
     bytesDone: z.number().int().min(0).default(0),
     bytesTotal: z.number().int().min(0).default(0),
@@ -76,9 +82,126 @@ export const SetupComponentSchema = z
      * which is precisely the `statedElsewhere` R-6 deletes.
      */
     provider: ProviderIdSchema.optional(),
+    /**
+     * The components that must be here before this one is attempted (SPEC-033 R-39).
+     *
+     * On the wire because the closure is computed from it on both sides of the boundary: the
+     * button that states what an install costs, and the guard that refuses one this disk cannot
+     * hold, must be reading the same graph or they will eventually quote different figures.
+     */
+    requires: z.array(z.string().min(1)).optional(),
+    /**
+     * What a cancelled or failed install left behind and could not delete (R-45).
+     *
+     * Reported rather than claimed away. *Nothing remains* would be a requirement no
+     * implementation can honour — a scanner holding a `.partial` open is ordinary on Windows —
+     * and one every implementation would claim. Named with its path and its size so it stays
+     * reclaimable, which is what makes the reporting worth anything.
+     */
+    leftovers: z
+      .array(z.object({ path: z.string().min(1), sizeMb: z.number().int().min(0) }).strict())
+      .optional(),
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;
+
+/**
+ * What one activation actually costs (SPEC-033 R-40, R-41).
+ *
+ * SPEC-028 R-5 already requires one-action activation over a complete dependency closure. This
+ * is what the closure is **built from** and how its size is **spoken about**: the figure on the
+ * button is the figure that lands on disk, and the rest of the chain is stated by count rather
+ * than named, because `Install ComfyUI 0.3.48 and its nodes` is the machine's sentence and not
+ * the product's.
+ */
+export interface SetupClosure {
+  /** The component the person asked for. */
+  componentId: string;
+  /** Everything that must land, dependencies first, including the component itself. */
+  componentIds: string[];
+  /** The whole closure's download, never the model's own weights alone (R-40). */
+  downloadMb: number;
+  /** Peak disk, using each component's installed size where it differs from its download. */
+  installedMb: number;
+  /** How many of the closure are not the thing that was asked for — the count R-41 states. */
+  supporting: number;
+}
+
+/** Already here, by either spelling. Nothing settled is fetched again (R-44). */
+export function componentIsSettled(state: SetupComponentState): boolean {
+  return state === "ready" || state === "present";
+}
+
+/**
+ * The components one activation must fetch, dependencies first.
+ *
+ * Declared data throughout — a closure is never inferred from an identifier's prefix or shape,
+ * which is the same class of mistake as `ollama-gemma4-12b` naming its runtime. Anything already
+ * settled is left out of both the list and the arithmetic: two models sharing a component do not
+ * fetch it twice, and the second one's button does not quote a figure it will not spend.
+ */
+export function setupClosure(components: readonly SetupComponent[], componentId: string): SetupClosure {
+  const byId = new Map(components.map((c) => [c.id, c]));
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const walk = (id: string): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    const component = byId.get(id);
+    if (!component) return;
+    for (const dependency of component.requires ?? []) walk(dependency);
+    // Settled components stay out of the closure entirely: they cost nothing and naming them
+    // would put a supporting count on a button that has nothing to support.
+    if (!componentIsSettled(component.state)) ordered.push(id);
+  };
+  walk(componentId);
+  let downloadMb = 0;
+  let installedMb = 0;
+  for (const id of ordered) {
+    const component = byId.get(id)!;
+    downloadMb += component.sizeMb;
+    installedMb += component.installedMb ?? component.sizeMb;
+  }
+  return {
+    componentId,
+    componentIds: ordered,
+    downloadMb,
+    installedMb,
+    supporting: Math.max(0, ordered.length - 1),
+  };
+}
+
+/**
+ * A transfer in flight, as both surfaces state it (R-82).
+ *
+ * **Downloads owns progress**; a capability row renders this same projection rather than
+ * computing its own. Two independently derived figures for one download is exactly the
+ * duplication `statedElsewhere` existed to paper over, and R-6 removed that mechanism — so
+ * there is nothing left to resolve a disagreement between them.
+ */
+export interface TransferProgress {
+  /** 0..100, and 0 where the server never said how big the file is. */
+  percent: number;
+  doneMb: number;
+  totalMb: number;
+  /** Measured, never guessed; null while nothing is moving. */
+  mbPerSecond: number | null;
+  /** Whether bytes are actually moving right now. */
+  active: boolean;
+}
+
+const MB = 1024 * 1024;
+
+export function transferProgress(component: SetupComponent): TransferProgress {
+  const totalMb = Math.round(component.bytesTotal / MB);
+  return {
+    percent: component.bytesTotal > 0 ? Math.min(100, Math.round((component.bytesDone / component.bytesTotal) * 100)) : 0,
+    doneMb: Math.round(component.bytesDone / MB),
+    totalMb,
+    mbPerSecond: component.bytesPerSecond === null ? null : Math.round((component.bytesPerSecond / MB) * 10) / 10,
+    active: component.state === "downloading" || component.state === "installing",
+  };
+}
 
 export const SetupStatusSchema = z
   .object({

@@ -2042,6 +2042,20 @@ export function refreshComfyUi(): void {
   send({ kind: "comfyui-refresh" });
 }
 
+/**
+ * Start a component and everything it declares it needs (SPEC-028 R-5, SPEC-033 R-40).
+ * `setupRetry` starts one; this starts the chain, so the figure on the button is the figure that
+ * lands on disk.
+ */
+export function setupInstall(componentId: string): void {
+  send({ kind: "setup-install", componentId });
+}
+
+/** Give the disk back, and hear what went and what would not (SPEC-033 R-43, R-45). */
+export function setupRemove(componentId: string): void {
+  send({ kind: "setup-remove", componentId });
+}
+
 /** Stop the engine and resolve the selection again — the only thing that helps a bad start. */
 export function restartComfyUi(): void {
   send({ kind: "comfyui-restart" });

@@ -997,6 +997,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * only thing that helps an engine that came up wrong.
    */
   z.object({ kind: z.literal("comfyui-restart") }).strict(),
+  /**
+   * SPEC-028 R-5's one-action activation, over the whole declared closure (SPEC-033 R-40).
+   * Distinct from `setup-retry`, which starts one component and leaves a dependant blocked on a
+   * runtime nobody asked for.
+   */
+  z.object({ kind: z.literal("setup-install"), componentId: z.string().min(1) }).strict(),
+  /** SPEC-033 R-43: give the disk back, and say what went and what would not. */
+  z.object({ kind: z.literal("setup-remove"), componentId: z.string().min(1) }).strict(),
   /** Re-read node classes and re-hash one recipe's pins (§2.5): the "Re-verify" affordance. */
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),

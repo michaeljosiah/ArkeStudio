@@ -2,6 +2,7 @@ import { Route, Routes, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef } from "react";
 import { SettingsLocalAiScreen } from "./screens/settings-local-ai.js";
 import { SettingsEnginesScreen } from "./screens/settings-engines.js";
+import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -173,6 +174,7 @@ export function App() {
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
             <Route path="local-ai" element={<SettingsLocalAiScreen />} />
             <Route path="engines" element={<SettingsEnginesScreen />} />
+            <Route path="downloads" element={<SettingsDownloadsScreen />} />
             {/* Local runtime became two screens. The old address answers, so a link, a bookmark
                 or a remedy written against it lands on the half that answers the same question. */}
             <Route path="local-runtime" element={<Navigate to="/settings/local-ai" replace />} />
