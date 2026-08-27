@@ -1358,7 +1358,7 @@ function resolveBoundaryFrames(
   // caller that cannot supply artifacts is the caller that predates them.
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
-  for (const shot of scene.shots) {
+  for (const [shotIndex, shot] of scene.shots.entries()) {
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -1372,6 +1372,17 @@ function resolveBoundaryFrames(
     }
     if (artifacts.some((candidate) => candidate.supersedes === artifactId)) {
       states.set(shot.id, { stale: `${artifactId} has been superseded` });
+      continue;
+    }
+    const predecessor = shotIndex > 0 ? scene.shots[shotIndex - 1] : undefined;
+    const selectedPredecessor = predecessor
+      ? (selections[predecessor.id]?.acceptedTakeId ?? null)
+      : null;
+    if (
+      artifact.boundaryExtraction !== undefined &&
+      artifact.boundaryExtraction.sourceTakeId !== selectedPredecessor
+    ) {
+      states.set(shot.id, { stale: `${artifactId} was cut from footage no longer selected` });
       continue;
     }
     // A valid frame only travels where a route exists to receive it, and only per-shot — a

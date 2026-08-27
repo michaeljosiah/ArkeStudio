@@ -138,6 +138,33 @@ describe("boundary frames through dispatch (issue 154)", () => {
     const superseded = input([old, replacement], old.id);
     assert.match(superseded.warnings.staleFrames[0]!.detail, /superseded/);
 
+    const predecessor = "tk_01J8E0000000000000000000T1";
+    const staleSource = boundaryArtifact("ar_01J8E0000000000000000000A9", {
+      boundaryExtraction: {
+        sourceTakeId: predecessor,
+        mediaTakeId: predecessor,
+        atSec: null,
+        method: "ffmpeg-frame/1",
+      },
+    });
+    const changedPredecessor = planScene(
+      {
+        world: bundle.meta,
+        productionId: production.meta.id,
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene: { ...base, shots: [shot(1, "first"), shot(2, "second")] },
+        selections: {
+          sh_1: { trimInSec: 0, acceptedTakeId: "tk_01J8E0000000000000000000T2" },
+          sh_2: { trimInSec: 0, startFrameArtifactId: staleSource.id },
+        },
+        model: FRAME_MODEL,
+        artifacts: [staleSource],
+      },
+      "per-shot",
+    );
+    assert.match(changedPredecessor.warnings.staleFrames[0]!.detail, /footage no longer selected/);
+
     assert.throws(
       () => composeDispatches(WORLD_ID, production.meta.id, scene, missing, FRAME_MODEL, bundle),
       /start frame is unusable/,

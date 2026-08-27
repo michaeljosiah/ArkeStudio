@@ -118,6 +118,7 @@ const INTERNAL_PARAMS = new Set([
   "lookKind",
   "lookPrompt",
   "shotPlan",
+  "continuedFrom",
   "taskMode",
   "route",
   "framesField",

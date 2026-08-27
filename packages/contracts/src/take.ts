@@ -137,10 +137,10 @@ export const TakeSchema = z
       .strict()
       .optional(),
     /**
-     * The take this one was produced by extending (SPEC-019 R-52, D34).
+     * The take this one was produced by extending (SPEC-019 R-53, D34).
      *
      * The edge continuation adds to a take graph that had none. It is what makes supersession
-     * computable when the predecessor stops being the selection — and what R-51 reads to refuse
+     * computable when the predecessor stops being the selection — and what R-52 reads to refuse
      * a second hop, since §1.4 settles v1 on a single link.
      */
     continuedFrom: TakeIdSchema.optional(),

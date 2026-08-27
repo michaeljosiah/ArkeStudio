@@ -421,7 +421,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     const shapes: Array<{ label: string; params: Record<string, unknown>; frames: number }> = [
       { label: "bench, 3s chosen", params: { prompt: "harbour", duration: 3, resolution: "704p" }, frames: 73 },
       { label: "bench, 2s chosen", params: { prompt: "harbour", duration: 2 }, frames: 49 },
-      { label: "productions, neutral", params: { prompt: "harbour", durationSec: 5, resolution: "704p" }, frames: 121 },
+      { label: "productions, neutral", params: { prompt: "harbour", durationSec: 5, resolution: "704p", continuedFrom: "tk_01J8F0000000000000000000B2" }, frames: 121 },
       { label: "nothing chosen", params: { prompt: "harbour" }, frames: 121 },
     ];
     for (const shape of shapes) {

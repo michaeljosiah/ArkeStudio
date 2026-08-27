@@ -348,6 +348,119 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     );
     await store.close();
   });
+
+  it("keeps a continuation on no-op accept, then clears and guards it when its predecessor changes", async () => {
+    const { dir, store } = await open();
+    const predecessor = "tk_01J8F0000000000000000000B2";
+    const replacement = "tk_01J8C0000000000000000000C3";
+    const continuation = "tk_01J8D0000000000000000000D4";
+    const continuationPath = join(dir, "productions/saltlight/takes", continuation, "take.json");
+    const immutableBefore = await readFile(continuationPath, "utf8");
+    const productionWithEdge = () => {
+      const current = store.getBundle().productions.find((production) => production.meta.id === "saltlight")!;
+      return {
+        ...current,
+        takes: current.takes.map((take) =>
+          take.id === continuation ? { ...take, continuedFrom: predecessor as never } : take,
+        ),
+      };
+    };
+
+    await acceptTake(store, productionWithEdge(), { takeId: continuation, shotId: "sh_13", by: "user" });
+    await acceptTake(store, productionWithEdge(), { takeId: predecessor, shotId: "sh_12", by: "user" });
+    assert.equal(
+      store.getBundle().productions.find((production) => production.meta.id === "saltlight")!.selections["sh_13"]
+        ?.acceptedTakeId,
+      continuation,
+      "re-accepting the same predecessor invalidates nothing",
+    );
+    const reordered = productionWithEdge();
+    reordered.scenes = reordered.scenes.map((scene) =>
+      scene.shots.some((shot) => shot.id === "sh_13")
+        ? {
+            ...scene,
+            shots: [...scene.shots].sort((a, b) =>
+              a.id === "sh_13" ? -1 : b.id === "sh_13" ? 1 : 0,
+            ),
+          }
+        : scene,
+    );
+    assert.equal(
+      deriveCut(reordered).entries.find((entry) => entry.shot.id === "sh_13")?.takeId,
+      null,
+      "reordering cannot keep a continuation whose predecessor is no longer immediately before it",
+    );
+
+    const multiHop = productionWithEdge();
+    multiHop.takes = multiHop.takes.map((take) =>
+      take.id === predecessor ? { ...take, continuedFrom: replacement as never } : take,
+    );
+    await assert.rejects(
+      () => acceptTake(store, multiHop, { takeId: continuation, shotId: "sh_13", by: "user" }),
+      /itself continued/,
+    );
+    await assert.rejects(
+      () => acceptTake(store, productionWithEdge(), { takeId: continuation, shotId: "sh_14", by: "user" }),
+      /does not cover shot/,
+    );
+
+    await acceptTake(store, productionWithEdge(), { takeId: replacement, shotId: "sh_12", by: "user" });
+    let production = productionWithEdge();
+    assert.equal(production.selections["sh_13"]?.acceptedTakeId, null);
+    assert.equal(
+      deriveCut(production).entries.find((entry) => entry.shot.id === "sh_13")?.takeId,
+      null,
+      "the derived cut cannot keep stale continuation footage",
+    );
+    await assert.rejects(
+      () => acceptTake(store, production, { takeId: continuation, shotId: "sh_13", by: "user" }),
+      /footage no longer selected/,
+    );
+
+    await acceptTake(store, production, { takeId: predecessor, shotId: "sh_12", by: "user" });
+    production = productionWithEdge();
+    await acceptTake(store, production, { takeId: continuation, shotId: "sh_13", by: "user" });
+    assert.equal(
+      store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections["sh_13"]
+        ?.acceptedTakeId,
+      continuation,
+      "restoring the exact predecessor makes the continuation valid again",
+    );
+    assert.equal(await readFile(continuationPath, "utf8"), immutableBefore, "selection changes never edit the take");
+    await store.close();
+  });
+
+  it("does not treat the previous scene's last shot as a continuation predecessor", async () => {
+    const { store } = await open();
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const predecessor = "tk_01J8F0000000000000000000B2";
+    const continuation = "tk_01J8D0000000000000000000D4";
+    const firstScene = production.scenes[0]!;
+    const allShots = production.scenes.flatMap((scene) => scene.shots);
+    const firstShot = allShots.find((shot) => shot.id === "sh_12")!;
+    const secondShot = allShots.find((shot) => shot.id === "sh_13")!;
+    const split = {
+      ...production,
+      scenes: [
+        { ...firstScene, shots: [firstShot] },
+        {
+          ...firstScene,
+          id: "sc_cross",
+          number: firstScene.number + 1,
+          slug: "cross-scene",
+          shots: [secondShot],
+        },
+      ],
+      takes: production.takes.map((take) =>
+        take.id === continuation ? { ...take, continuedFrom: predecessor as never } : take,
+      ),
+    };
+    await assert.rejects(
+      () => acceptTake(store, split, { takeId: continuation, shotId: "sh_13", by: "user" }),
+      /in this scene/,
+    );
+    await store.close();
+  });
 });
 
 describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
@@ -567,6 +680,108 @@ describe("take QC at arrival (#248)", () => {
     ...passJob(landed),
     target: { kind: "shot", id: "sh_12", coversShots: ["sh_12"] },
     params: { ...passJob(landed).params, shotPlan: undefined },
+  });
+
+  it("records the continuation predecessor from the durable job, once and at top level", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const continuedFrom = "tk_01J8F0000000000000000000B2";
+    const [take] = await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(landed),
+        target: { kind: "shot", id: "sh_13", coversShots: ["sh_13"] },
+        params: { ...shotJob(landed).params, continuedFrom },
+      },
+      400000,
+    );
+    assert.equal(take!.continuedFrom, continuedFrom);
+    assert.equal(take!.params["continuedFrom"], undefined, "a dedicated field is not duplicated as a setting");
+    const onDisk = JSON.parse(
+      await readFile(join(dir, "productions", "saltlight", "takes", take!.id, "take.json"), "utf8"),
+    ) as { continuedFrom?: string; params: Record<string, unknown> };
+    assert.equal(onDisk.continuedFrom, continuedFrom);
+    assert.equal(onDisk.params["continuedFrom"], undefined);
+    await store.close();
+
+    const reopened = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });
+    assert.equal(
+      reopened.getBundle().productions.find((production) => production.meta.id === "saltlight")?.takes
+        .find((candidate) => candidate.id === take!.id)?.continuedFrom,
+      continuedFrom,
+    );
+    await reopened.close();
+  });
+
+  it("refuses invalid or non-shot continuation metadata before landed media moves", async () => {
+    const { dir, store } = await open();
+    for (const job of [
+      { continuedFrom: "not-a-take" },
+      { continuedFrom: "tk_01J8F0000000000000000000Z9" },
+      { continuedFrom: "tk_01J8F0000000000000000000B2", capability: "image" as const },
+    ]) {
+      const landed = await landPass(dir);
+      const base = shotJob(landed);
+      await assert.rejects(
+        () =>
+          recordTakesFromJob(
+            store,
+            {
+              ...base,
+              ...(job.capability !== undefined ? { capability: job.capability } : {}),
+              params: { ...base.params, continuedFrom: job.continuedFrom },
+            },
+            400000,
+          ),
+        /continuedFrom/,
+      );
+      assert.equal(await readFile(join(dir, landed), "utf8"), "fake-mp4-bytes-fake-mp4-bytes");
+    }
+
+    const wrongCoverageLanded = await landPass(dir);
+    const wrongCoverage = shotJob(wrongCoverageLanded);
+    await assert.rejects(
+      () =>
+        recordTakesFromJob(
+          store,
+          {
+            ...wrongCoverage,
+            target: { kind: "shot", id: "sh_13", coversShots: ["sh_13", "sh_14"] },
+            params: { ...wrongCoverage.params, continuedFrom: "tk_01J8F0000000000000000000B2" },
+          },
+          400000,
+        ),
+      /one exact video shot/,
+    );
+    assert.equal(
+      await readFile(join(dir, wrongCoverageLanded), "utf8"),
+      "fake-mp4-bytes-fake-mp4-bytes",
+    );
+
+    const continuedPredecessor = "tk_01J8D0000000000000000000D4";
+    await store.ownedWrite(async () => {
+      const path = join(dir, "productions/saltlight/takes", continuedPredecessor, "take.json");
+      const predecessor = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+      predecessor["continuedFrom"] = "tk_01J8F0000000000000000000B2";
+      await writeFile(path, JSON.stringify(predecessor, null, 2), "utf8");
+    });
+    const multiHop = await landPass(dir);
+    const base = shotJob(multiHop);
+    await assert.rejects(
+      () =>
+        recordTakesFromJob(
+          store,
+          {
+            ...base,
+            target: { kind: "shot", id: "sh_14", coversShots: ["sh_14"] },
+            params: { ...base.params, continuedFrom: continuedPredecessor },
+          },
+          400000,
+        ),
+      /itself continued/,
+    );
+    assert.equal(await readFile(join(dir, multiHop), "utf8"), "fake-mp4-bytes-fake-mp4-bytes");
+    await store.close();
   });
 
   it("records source-media QC once on a per-shot take", async () => {

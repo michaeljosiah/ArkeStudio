@@ -229,6 +229,8 @@ export class FalClient implements ProviderClient {
       // never sent to a provider.
       "planId",
       "passIndex",
+      // Ours, not fal's: the immutable predecessor edge recorded on a continued take.
+      "continuedFrom",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.

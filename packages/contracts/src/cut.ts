@@ -210,9 +210,19 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
   const entries: CutEntry[] = [];
   for (const scene of scenes) {
-    for (const shot of scene.shots) {
+    for (const [shotIndex, shot] of scene.shots.entries()) {
       const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
-      const take = takeId !== null ? (takesById.get(takeId) ?? null) : null;
+      const selected = takeId !== null ? (takesById.get(takeId) ?? null) : null;
+      const previousShot = shotIndex > 0 ? scene.shots[shotIndex - 1] : undefined;
+      const predecessorId = previousShot
+        ? (production.selections[previousShot.id]?.acceptedTakeId ?? null)
+        : null;
+      // Scene edits can reorder or insert shots after review. A continuation only remains valid
+      // while the exact take it extended is still selected immediately before it in this scene.
+      const coversShot = selected?.coversShots.includes(shot.id) ?? false;
+      const validContinuation =
+        selected?.continuedFrom === undefined || selected.continuedFrom === predecessorId;
+      const take = coversShot && validContinuation ? selected : null;
       /*
        * The in-point, on the story clock (R-8, #253).
        *
