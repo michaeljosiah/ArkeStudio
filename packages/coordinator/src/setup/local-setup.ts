@@ -322,9 +322,25 @@ export class LocalSetupService {
     await this.sweepMappedPartials();
     await this.detect();
 
-    const outstanding = [...this.components.values()].filter((c) => c.state === "queued");
-    if (outstanding.length === 0) return;
+    // Drained, not snapshotted. A component can be queued *during* a pass — Repair does it,
+    // having already deleted the files first — and a pass working from one list taken at the
+    // start finishes without touching it, stranding a recipe with its weights gone, stuck
+    // queued, and no control on its row. Each round takes what is queued and has not been
+    // attempted yet, so a round may add work for the next and nothing can loop forever.
+    const attempted = new Set<string>();
+    for (;;) {
+      if (this.abort.signal.aborted || this.disposed) break;
+      const round = [...this.components.values()].filter(
+        (c) => c.state === "queued" && !attempted.has(c.id),
+      );
+      if (round.length === 0) break;
+      for (const c of round) attempted.add(c.id);
+      await this.installRound(round);
+    }
+  }
 
+  /** One round of the drain above: guard what it costs, then fetch what still stands. */
+  private async installRound(outstanding: readonly Live[]): Promise<void> {
     // The guard: refuse to start a download this disk cannot hold, with both figures.
     // What it costs on disk, not what it costs to fetch: an extracted component needs room for
     // the archive and the tree at once. Guarding on the download alone let a disk with 5 GB
@@ -337,37 +353,43 @@ export class LocalSetupService {
     // is being written to it; one that cannot be measured blocks nothing, exactly as an
     // unmeasurable disk did before.
     //
-    // The volume key is the path root, which is exactly right where this runs — drive letters
-    // and UNC shares are volumes — and on a POSIX host collapses to `/`, pooling as before. So
-    // a group holds the free space of every destination in it and is guarded by the smallest:
-    // never over-stating room is the whole point of a guard whose alternative is a download
-    // that dies half-way through.
+    // Pooling needs to know which destinations share a disk, and only the path root can say.
+    // On Windows it says it exactly: a drive letter or a UNC share IS a volume, so everything
+    // under one root is summed together, which is what sharing a disk means. On a POSIX host
+    // every path roots at `/` and that says nothing about the filesystem underneath — pooling
+    // there would let a full mapped disk block a download to a roomy one, the very thing this
+    // is meant to stop. So where the platform cannot tell us, each destination answers for
+    // itself: never pooled with a disk it may not be on, and never over-stated for its own.
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
-    const volumes = new Map<string, { dirs: Set<string>; needMb: number; components: Live[] }>();
+    const rootOf = (dir: string): string => parse(resolve(dir)).root;
+    const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
+    const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
     for (const c of outstanding) {
       const dir = this.destinationOf(c.entry);
       if (dir === null) continue; // no mapped folder — install states that, and states it better
-      const key = parse(resolve(dir)).root;
-      const group = volumes.get(key) ?? { dirs: new Set<string>(), needMb: 0, components: [] };
+      const key = volumeKey(dir);
+      const group = volumes.get(key) ?? { root: rootOf(dir), dirs: new Set<string>(), needMb: 0, components: [] };
       group.dirs.add(dir);
       group.needMb += c.entry.installedMb ?? c.sizeMb;
       group.components.push(c);
       volumes.set(key, group);
     }
-    const appVolume = parse(resolve(this.opts.appRoot)).root;
+    const appRootDrive = rootOf(this.opts.appRoot);
     let blockedAny = false;
-    for (const [key, group] of volumes) {
+    for (const group of volumes.values()) {
       const measured: number[] = [];
       for (const dir of group.dirs) {
         const free = await this.diskFreeFor(dir);
         if (free !== null) measured.push(free);
       }
+      // The smallest reading in the group: a pooled total is only honest against the tightest
+      // disk in it. On Windows they are one volume and agree; elsewhere a group holds one dir.
       const freeMb = measured.length === 0 ? null : Math.min(...measured);
       if (freeMb === null || freeMb >= group.needMb + headroom) continue;
       // Name the drive when it is not the one the app lives on: "this disk" reads as the app's
       // disk to everyone, and a refusal about D: phrased that way sends someone to clear space
-      // on the wrong volume.
-      const where = key === appVolume ? "this disk" : key;
+      // on the wrong volume. A host with no drive letters has nothing useful to name.
+      const where = group.root === appRootDrive ? "this disk" : group.root;
       for (const c of group.components) {
         this.set(c.id, {
           state: "blocked",

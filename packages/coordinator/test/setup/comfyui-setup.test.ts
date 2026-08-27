@@ -333,6 +333,96 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was started");
   });
 
+  it("does not let a full mapped disk block what has room elsewhere", async (t) => {
+    // Codex P2 on PR 545. Pooling destinations by path root is right on Windows, where a root
+    // IS a volume, and says nothing on a POSIX host, where every path roots at `/` whatever
+    // disk it sits on — so a full models folder was blocking the app's own downloads there,
+    // which is the exact failure the per-volume guard was written to remove.
+    //
+    // The platform is forced rather than the paths contrived, because that branch cannot
+    // otherwise be reached from Windows and the bug only ever existed on the other side of it.
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+    t.after(() => Object.defineProperty(process, "platform", { value: platform, configurable: true }));
+
+    const appRoot = await tempDir("arke-two-disks-");
+    const modelsDir = await tempDir("arke-two-disks-models-");
+    const events: DomainEvent[] = [];
+    const weights = { ...weightsEntry(), sizeMb: 17_300 };
+    const runtime = { ...treeEntry(), sizeMb: 1, installedMb: 1 };
+    const d = deps({
+      freeMbFor: (dir) => (dir.startsWith(modelsDir) ? 4_000 : 500_000),
+      onTar: async (staged) => {
+        const inner = join(staged, "ComfyUI_windows_portable");
+        await mkdir(join(inner, "ComfyUI"), { recursive: true });
+        await mkdir(join(inner, "python_embeded"), { recursive: true });
+        await writeFile(join(inner, "ComfyUI", "main.py"), "print('comfy')");
+        await writeFile(join(inner, "python_embeded", "python.exe"), "MZ");
+      },
+    });
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: [runtime, weights],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+    svc.retry("comfyui-runtime");
+    svc.retry("comfyui-weights-draft-image");
+    await svc.run();
+
+    const byId = Object.fromEntries(last(events).components.map((c) => [c.id, c]));
+    assert.equal(byId["comfyui-weights-draft-image"]!.state, "blocked", "the full disk refuses");
+    assert.equal(byId["comfyui-runtime"]!.state, "ready", "the roomy one is not held hostage by it");
+  });
+
+  it("collects a component queued while a pass is already running", async () => {
+    // Codex P2 on PR 545. Repair deletes the files and re-queues; if a pass was already in
+    // flight it had taken its list before that, so it finished without touching the component
+    // — leaving a recipe with its weights deleted, stuck queued, and no control on its row.
+    const appRoot = await tempDir("arke-midrun-");
+    const modelsDir = await tempDir("arke-midrun-models-");
+    const target = join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors");
+    await mkdir(join(modelsDir, "checkpoints"), { recursive: true });
+    await writeFile(target, bytes(64, [1, 2, 3]));
+
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const events: DomainEvent[] = [];
+    const d = deps({
+      onTar: async (staged) => {
+        const inner = join(staged, "ComfyUI_windows_portable");
+        await mkdir(join(inner, "ComfyUI"), { recursive: true });
+        await mkdir(join(inner, "python_embeded"), { recursive: true });
+        await writeFile(join(inner, "ComfyUI", "main.py"), "print('comfy')");
+        await writeFile(join(inner, "python_embeded", "python.exe"), "MZ");
+      },
+    });
+    const inner = d.fetchStream.bind(d);
+    d.fetchStream = async (url, signal) => {
+      if (url.includes("portable")) await held; // the pass is in flight until this lets go
+      return inner(url, signal);
+    };
+    const svc = new LocalSetupService(d, (e) => events.push(e), {
+      appRoot,
+      catalogue: [treeEntry(), weightsEntry()],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+
+    svc.retry("comfyui-runtime");
+    const first = svc.run();
+    await new Promise((r) => setTimeout(r, 20)); // let it reach the held download
+    await svc.repair("comfyui-weights-draft-image");
+    await assert.rejects(stat(target), "repair removed the file before anything was re-fetched");
+    const repaired = svc.run(); // joins the pass in flight, exactly as the frame handler does
+    release();
+    await Promise.all([first, repaired]);
+
+    const byId = Object.fromEntries(last(events).components.map((c) => [c.id, c]));
+    assert.equal(byId["comfyui-weights-draft-image"]!.state, "ready", "not stranded in queued");
+    assert.equal((await stat(target)).isFile(), true, "the file it deleted came back");
+  });
+
   it("sweeps its own debris from the mapped folder and walks nothing else", async () => {
     const appRoot = await tempDir("arke-sweep-");
     const modelsDir = await tempDir("arke-sweep-models-");
