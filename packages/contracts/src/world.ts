@@ -3,6 +3,7 @@ import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, Scene
 // The same bound the world's list uses, shared rather than restated: two copies of one
 // constraint is how a list and its copy come to disagree (issue 243's finalization bug).
 import { FailureModesSchema } from "./art-direction.js";
+import { CapabilitySchema } from "./provider.js";
 
 /**
  * The world entity model (master spec §2). Prose lives in Markdown with YAML frontmatter,
@@ -248,6 +249,24 @@ export const ProductionSchema = z
      * schema is a better place to make that impossible than a screen is.
      */
     musicPolicy: z.literal("environmental-only").optional(),
+    /**
+     * Which model this production reaches for, per capability (SPEC-033 §1.12, R-74..R-76).
+     *
+     * A **concrete model reference**, never the word `local` or `cloud`. With two local video
+     * models installed, `local` does not say which seeds the dispatch, and migrating an existing
+     * routing default under that spelling would discard the model id it already had. The
+     * local/cloud presentation is derived from the referenced model's locality, never stored as
+     * a second fact that can disagree with it.
+     *
+     * On the production and not in app settings: production ids are world-scoped rather than
+     * installation-global, so an installation-level store collides across two copies of a world
+     * and loses the choice when the world moves to another machine. It is a production field and
+     * takes the path every production field takes — versioned and gated like the rest.
+     *
+     * It seeds the dispatch picker and does not lock it: the per-dispatch override is unchanged,
+     * and a choice that cannot be honoured is stated at dispatch rather than silently swapped.
+     */
+    models: z.record(CapabilitySchema, z.string().min(1)).optional(),
     /** Added to the world's failure modes at dispatch, never instead of them. */
     failureModes: FailureModesSchema,
     created: IsoDateTimeSchema,

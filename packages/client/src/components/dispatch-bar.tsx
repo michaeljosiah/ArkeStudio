@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useParams } from "react-router";
 import {
   aspectOffered,
   deriveCapabilityAvailability,
@@ -15,7 +16,7 @@ import {
   type ManifestModel,
   type SizeTier,
 } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { setProductionModel, useStore } from "../lib/store.js";
 import { ChevronDown } from "./icons.js";
 import { Button } from "./ui.js";
 
@@ -137,6 +138,22 @@ export function usableModels(
 }
 
 /**
+ * The model this production reaches for, for a capability (SPEC-033 R-74, R-77).
+ *
+ * Read from the production's own record rather than from app settings: production ids are
+ * world-scoped, so an installation-level store would collide across two copies of a world and
+ * lose the choice when the world moved to another machine.
+ */
+export function productionModel(
+  state: ReturnType<typeof useStore>["state"],
+  productionId: string | undefined,
+  capability: Capability,
+): string | undefined {
+  if (productionId === undefined) return undefined;
+  return state?.world?.productions.find((p) => p.meta.id === productionId)?.meta.models?.[capability];
+}
+
+/**
  * Which model a surface will actually use, and whether it is stranded — asked once, here,
  * because every host that answered it for itself eventually disagreed with the bar beside it.
  * A screen that shows one model and dispatches another is the worst failure in this area.
@@ -151,20 +168,22 @@ export function resolveModel(
   state: ReturnType<typeof useStore>["state"],
   capability: "image" | "video",
   chosenId?: string,
+  /**
+   * The production's own choice, where the surface is inside one (R-77). It seeds the picker and
+   * does not lock it: an explicit per-dispatch choice still wins, and a stored reference that
+   * cannot be honoured is *stated* rather than swapped — R-78, and the same shape a stranded
+   * routing default already had, because falling back quietly is how somebody discovers they
+   * spent money three weeks later.
+   */
+  productionModelId?: string,
 ): { model: ManifestModel | null; stranded: ManifestModel | null } {
   const usable = usableModels(state, capability);
   const all = state?.app.manifest?.models ?? [];
-  if (chosenId !== undefined) {
-    const chosen = usable.find((m) => m.id === chosenId);
-    if (chosen) return { model: chosen, stranded: null };
-    const known = all.find((m) => m.id === chosenId) ?? null;
-    return { model: known, stranded: known };
-  }
-  const savedId = state?.app.routing.defaults[capability];
-  if (savedId !== undefined) {
-    const saved = usable.find((m) => m.id === savedId);
-    if (saved) return { model: saved, stranded: null };
-    const known = all.find((m) => m.id === savedId) ?? null;
+  for (const candidateId of [chosenId, productionModelId, state?.app.routing.defaults[capability]]) {
+    if (candidateId === undefined) continue;
+    const usableCandidate = usable.find((m) => m.id === candidateId);
+    if (usableCandidate) return { model: usableCandidate, stranded: null };
+    const known = all.find((m) => m.id === candidateId) ?? null;
     return { model: known, stranded: known };
   }
   return { model: usable[0] ?? null, stranded: null };
@@ -322,7 +341,12 @@ export function DispatchBar({
   const [pickerOpen, setPickerOpen] = useState(false);
   const models = usableModels(state, capability);
   const routedId = state?.app.routing.defaults[capability];
-  const { model, stranded } = resolveModel(state, capability, choice.modelId);
+  // The production, where this bar is inside one. Taken from the address rather than threaded
+  // through every host: `generation-dialog` is rendered from world-scoped surfaces too, and a
+  // prop that half its callers cannot fill is a prop that gets filled wrongly.
+  const { prodId } = useParams<{ prodId?: string }>();
+  const remembered = productionModel(state, prodId, capability);
+  const { model, stranded } = resolveModel(state, capability, choice.modelId, remembered);
   // No model at all — no key, or nothing of this capability in the manifest. The bar stays,
   // because vanishing would take Cancel and the explanation with it and leave a dialog with no
   // way out and no reason given.
@@ -425,7 +449,19 @@ export function DispatchBar({
             </button>
           ))}
           <div className="fy-dispatchbar__pickerfoot">
-            <span>This generation only.</span>
+            {prodId !== undefined && state?.world ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setProductionModel(state.world!.meta.worldId, prodId, capability, remembered === model.id ? null : model.id);
+                  setPickerOpen(false);
+                }}
+              >
+                {remembered === model.id ? "Forget for this production" : "Remember for this production"}
+              </button>
+            ) : (
+              <span>This generation only.</span>
+            )}
             <span>more models · add a key in Settings</span>
           </div>
         </div>
@@ -456,7 +492,10 @@ export function DispatchBar({
           <span>{model.displayName}</span>
           {model.unverified === true && <em>UNVERIFIED</em>}
           {stranded && <em>UNAVAILABLE</em>}
-          {isDefault && !stranded && <strong>DEFAULT</strong>}
+          {/* The production's own choice outranks the installation's default and says so, so the
+              two are never both claimed on one pill. */}
+          {remembered === model.id && !stranded && <strong>THIS PRODUCTION</strong>}
+          {isDefault && remembered !== model.id && !stranded && <strong>DEFAULT</strong>}
           {models.length > 1 && (
             <>
               {/* One interpolation, not a number beside a word: React splits the latter with a

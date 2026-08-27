@@ -1638,6 +1638,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       aspect: z.string().min(1).max(20),
     })
     .strict(),
+  /**
+   * SPEC-033 R-74: which model this production reaches for, per capability. `modelId: null`
+   * clears the choice, which is different from setting one — it puts the production back on
+   * whatever the picker would have opened on anyway.
+   */
+  z
+    .object({
+      kind: z.literal("set-production-model"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      capability: CapabilitySchema,
+      modelId: z.string().min(1).nullable(),
+    })
+    .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
   z
     .object({
