@@ -571,11 +571,18 @@ function ProductionWardrobe({
              and a scene's own choice belongs on the scene. Narrower scope wins at dispatch, so
              a row claiming to be the whole answer while a scene overrides it would be lying. */
           const labels = lookPickerLabels(looks);
-          const perScene = looks.flatMap((look) => {
-            const scope = look.attachedTo;
-            if (scope?.kind !== "scene" || scope.productionId !== production.meta.id) return [];
-            const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
-            return scene ? [{ id: look.id, scene, label: labels.get(look.id) ?? "" }] : [];
+          // Read per scene, not per look, so each scene resolves to the one look the dispatcher
+          // would carry. Walking the looks instead listed every claimant, and an upgraded kit can
+          // hold two on one scene — so the line reported two live appearances for a scene that
+          // dispatches one, on the row whose whole job is saying which. It also reads in scene
+          // order now, which is the order somebody looks for a scene in.
+          const perScene = production.scenes.flatMap((scene) => {
+            const look = lookHoldingScope(kit, {
+              kind: "scene",
+              productionId: production.meta.id,
+              sceneId: scene.id,
+            });
+            return look ? [{ id: look.id, scene, label: labels.get(look.id) ?? "" }] : [];
           });
           return (
             <div className="fy-wardrobe__row" key={sheet.id}>
