@@ -317,10 +317,12 @@ describe("choosing a character's voice", () => {
 });
 
 describe("the narrator in Settings", () => {
-  // Local runtime became master and detail in design turn 75: the narrator lives in the Voice
-  // group, and the group is asked for in the address rather than clicked.
+  // The narrator moved to Appearance with SPEC-033's split. It was in Local runtime's Voice
+  // group and it is the one thing there that was never about a runtime: it is a voice the app
+  // speaks in, and it may be a cloud one — so Local AI is forbidden it and Engines is wrong in
+  // kind. What is left is how the app presents itself.
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
-    const html = render("/settings/local-runtime?group=voice");
+    const html = render("/settings/appearance");
     assert.match(html, /data-testid="narrator-name"/);
     assert.match(html, /George/);
     assert.match(html, /reads on this machine · free/);
@@ -328,12 +330,12 @@ describe("the narrator in Settings", () => {
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
   });
 
-  it("opens on This machine, and reaches the narrator only when Voice is asked for", () => {
-    // The rail is the heading now, so a group nobody asked for is not in the document at all —
-    // which is the whole reason the flat pane's nine sections could be cut.
-    const landing = render("/settings/local-runtime");
-    assert.match(landing, /data-screen="settings-local-runtime"/);
+  it("is not on Local AI, which may not carry a cloud voice at all", () => {
+    const landing = render("/settings/local-ai");
+    assert.match(landing, /data-screen="settings-local-ai"/);
     assert.doesNotMatch(landing, /data-testid="narrator-name"/);
+    // Nor on Engines: an engine is not a provider, and this control picks between them.
+    assert.doesNotMatch(render("/settings/engines?engine=voxa"), /data-testid="narrator-name"/);
   });
 
   it("says plainly when the narrator will be billed", () => {
@@ -343,7 +345,7 @@ describe("the narrator in Settings", () => {
       ...FIXTURE_STATE,
       app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
     };
-    const html = render("/settings/local-runtime?group=voice", chosen);
+    const html = render("/settings/appearance", chosen);
     assert.match(html, /Roger · elevenlabs/);
     assert.match(html, /billed per character/);
     // And there is a way back to the free one.
@@ -373,7 +375,7 @@ describe("remote ComfyUI locality", () => {
         },
       },
     };
-    const html = render("/settings/local-runtime?group=comfyui", state);
+    const html = render("/settings/engines?engine=comfyui", state);
     assert.match(html, /Your URL · never spawned · remote/);
   });
 
@@ -414,7 +416,7 @@ describe("remote ComfyUI locality", () => {
     };
     __setStateForTest(state, { setupStatus: state.app.setup });
     const html = renderToString(
-      <MemoryRouter initialEntries={["/settings/local-runtime?group=comfyui"]}>
+      <MemoryRouter initialEntries={["/settings/engines?engine=comfyui"]}>
         <App />
       </MemoryRouter>,
     );

@@ -74,6 +74,25 @@ export interface CatalogueEntry {
   /** Nothing is attempted until these are ready — a model needs its runtime. */
   requires?: readonly string[];
   /**
+   * The manifest models this component makes available (SPEC-033 R-39).
+   *
+   * Declared here rather than on the manifest row, because this is the file that owns downloads
+   * and already declares what each one needs. A capability row asking whether a model is
+   * installed follows the link the other way; it does not guess from an id's prefix.
+   *
+   * ComfyUI recipe weights declare nothing: their component id is derived from the recipe
+   * catalogue, and a second declaration of the same weights is the drift R-39 forbids.
+   */
+  provides?: readonly string[];
+  /**
+   * The engine this component belongs to (SPEC-033 R-71). Declared rather than read off an id
+   * prefix, for the reason `provides` is: `ollama-gemma4-12b` naming its runtime in its id is
+   * the leak this whole rearrangement exists to stop.
+   *
+   * Absent means no engine requires it. Those keep a place on Engines without organising it.
+   */
+  engine?: "comfyui" | "ollama" | "voxa";
+  /**
    * Peak disk this component needs, where that differs from what it downloads — an archive
    * that is extracted holds both copies at once before the archive is deleted. The free-disk
    * guard measures against this; progress still counts the download, so a bar that reaches
@@ -132,6 +151,7 @@ export function voxaSetupCompleted(
 export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   {
     id: "ollama-runtime",
+    engine: "ollama",
     displayName: "Ollama",
     purpose: "Runs language models here — choose one in Settings · Local runtime",
     sizeMb: 750,
@@ -145,9 +165,11 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
+    engine: "voxa",
     displayName: "Kokoro 82M · voice",
     purpose: "Speaks lines on this machine, in the six preset voices",
     sizeMb: 400,
+    provides: ["kokoro-82m"],
     spec: {
       kind: "files",
       dir: "kokoro-82m",
@@ -166,8 +188,12 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   },
   {
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
+    engine: "voxa",
     displayName: "Whisper base.en · dictation",
     purpose: "Turns your speech into text, without the audio leaving this machine",
+    // The manifest's dictation row keeps `whisper-large-v3` as its id because that string is a
+    // persisted routing key, and this is the component that satisfies it.
+    provides: ["whisper-large-v3"],
     // The small English model, deliberately: enough to dictate an instruction, and a fraction
     // of Large v3's 3.1 GB. A bigger one is a choice for Settings, not a cost at setup.
     sizeMb: 141,
@@ -221,6 +247,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   // bsdtar reads (verified on the supported platform — see systemTar in local-setup.ts).
   {
     id: "comfyui-runtime",
+    engine: "comfyui",
     displayName: "ComfyUI",
     purpose: "Runs image and video recipes — install managed, or explicitly reuse another engine",
     sizeMb: 2034,
@@ -247,29 +274,35 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   // follow the manifest's convention of the weights plus a couple of gigabytes to work in.
   {
     id: "ollama-gemma4-e2b-it-qat",
+    engine: "ollama",
     displayName: "Gemma 4 · E2B (quantised)",
     purpose: "The small Gemma 4 — the one to try first on a modest graphics card",
     sizeMb: 4300,
     optional: true,
     requires: ["ollama-runtime"],
+    provides: ["gemma4-e2b-it-qat"],
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:e2b-it-qat"] },
   },
   {
     id: "ollama-gemma4-12b",
+    engine: "ollama",
     displayName: "Gemma 4 · 12B",
     purpose: "Reads images and holds a 256K context — the one worth having if it fits",
     sizeMb: 7600,
     optional: true,
     requires: ["ollama-runtime"],
+    provides: ["gemma4-12b"],
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:12b"] },
   },
   {
     id: "ollama-gemma4-26b",
+    engine: "ollama",
     displayName: "Gemma 4 · 26B",
     purpose: "The large one, for a machine with the memory to hold it",
     sizeMb: 18000,
     optional: true,
     requires: ["ollama-runtime"],
+    provides: ["gemma4-26b"],
     spec: { kind: "pull", command: "ollama", args: ["pull", "gemma4:26b"] },
   },
 ] as const;

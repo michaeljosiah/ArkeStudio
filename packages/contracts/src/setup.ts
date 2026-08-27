@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EngineIdSchema } from "./local-ai.js";
 
 /**
  * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
@@ -46,6 +47,24 @@ export const SetupComponentSchema = z
     detail: z.string().optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
+    /**
+     * The manifest models this component makes available (SPEC-033 R-39). Declared, so that a
+     * capability row can say whether a model is installed without inferring a chain from an
+     * identifier's prefix — the same class of mistake as `ollama-gemma4-12b` naming its runtime.
+     *
+     * ComfyUI recipe weights are deliberately absent: their component id is already derived from
+     * the recipe catalogue, and a second declaration of the same weights is what drifts.
+     */
+    provides: z.array(z.string().min(1)).optional(),
+    /**
+     * Which engine requires this component (SPEC-033 R-71). Declared, so Engines can state a
+     * component under the engine that needs it rather than in one flat list that mixes a runtime
+     * with a set of weights.
+     *
+     * Absent means no engine requires it — a CLI, a native dependency. Those keep a place on
+     * Engines and are not the organising idea.
+     */
+    engine: EngineIdSchema.optional(),
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;

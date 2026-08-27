@@ -1685,8 +1685,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           <Callout tone="warning" title="Read aloud unavailable">
             {readResult.error}{" "}
             {sheet.voice?.provider === "kokoro" && (
-              <Button variant="ghost" onClick={() => navigate("/settings/local-runtime")}>
-                Local runtime
+              <Button variant="ghost" onClick={() => navigate("/settings/local-ai")}>
+                Local AI
               </Button>
             )}
           </Callout>
