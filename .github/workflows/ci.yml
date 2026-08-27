@@ -1,6 +1,10 @@
 # The gate every pull request must pass, on both the platform we ship (Windows) and the one
 # that catches path and case assumptions (Linux). Lint, types, build and tests — no formatting
 # check yet: 111 files predate the `format` script, and reformatting them is its own decision.
+#
+# Tests run in four shards per platform because the coordinator suite is 89% of the repo's test
+# time and has no hot file to remove — see scripts/ci-test.mjs for the measurements and why the
+# split is by shard rather than by hand-written directory list.
 name: CI
 
 on:
@@ -18,18 +22,24 @@ permissions:
 
 jobs:
   gate:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.os }} · ${{ matrix.shard }}/4
     runs-on: ${{ matrix.os }}
-    # A healthy run is 6–14 minutes. Without a ceiling, a test that leaks a file watcher holds
-    # the runner at "in progress" until GitHub's 6-hour default kills it — which is six billable
-    # hours to learn what a 25-minute ceiling reports the same morning (one leaked WorldStore
-    # cost exactly that on 2026-08-11).
-    timeout-minutes: 25
+    # A leaked file watcher holds a runner at "in progress" until GitHub's six-hour default kills
+    # it — six billable hours to learn what a ceiling reports the same morning (one leaked
+    # WorldStore cost exactly that on 2026-08-11). The ceiling exists for that, not for slowness.
+    #
+    # 15 minutes, not 25: a shard is a quarter of the suite, so this is a wider margin over a
+    # healthy run than the old 25 was over an unsharded one. The old ceiling had stopped
+    # discriminating — Windows runs had drifted to 14.5–18.8 minutes against it, and a busy
+    # runner produced the same red as a hung one (#560).
+    timeout-minutes: 15
     strategy:
-      # One platform failing should still tell us about the other.
+      # One platform failing should still tell us about the other, and one shard failing should
+      # still tell us about the rest of the suite.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4]
     env:
       # The gate never launches Electron — it only reads the package's version and types, so the
       # ~100 MB binary is dead weight here. The packaging workflow fetches its own.
@@ -46,14 +56,22 @@ jobs:
       # from source where it doesn't. Either way it must succeed — the derived index depends on it.
       - run: npm ci
 
+      # Lint, types and build describe the tree, not a slice of it, so they answer once per
+      # platform rather than four times. Shard 1 carries them; the others go straight to tests.
       - name: Lint
+        if: matrix.shard == 1
         run: npm run lint
 
       - name: Typecheck
+        if: matrix.shard == 1
         run: npm run typecheck
 
       - name: Build
+        if: matrix.shard == 1
         run: npm run build
 
+      # Shard 2 also runs every workspace other than the coordinator — 50s of tests all told,
+      # smaller than the cost of splitting them further, and put beside a shard that is not
+      # already carrying lint, types and build.
       - name: Test
-        run: npm test
+        run: node scripts/ci-test.mjs ${{ matrix.shard }}/4
