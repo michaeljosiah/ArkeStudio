@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { cp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ProductionSchema } from "@arke-studio/contracts";
-import { migrateLocalRoutingDefaults, setProductionModel } from "../../src/productions/ops.js";
+import { setProductionModel } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup, tempDir } from "../tmp.js";
@@ -93,34 +93,5 @@ describe("the choice is a model reference on the production's own record (R-74..
       moved.getBundle().productions.find((p) => p.meta.id === production.meta.id)?.meta.models?.video,
       "comfyui-draft-video",
     );
-  });
-});
-
-describe("a local routing default is carried, never cleared into nothing (R-80, row 33)", () => {
-  it("gives each production the concrete model id the default named", async () => {
-    const { dir, store, bundle } = await open();
-    const written = await migrateLocalRoutingDefaults(store, bundle, { llm: "gemma4-12b" });
-    assert.deepEqual(written, bundle.productions.map((p) => p.meta.id));
-    for (const production of bundle.productions) {
-      assert.equal((await onDisk(dir, production.meta.id)).models?.llm, "gemma4-12b");
-    }
-  });
-
-  it("never overwrites a choice the person already made, and a second run writes nothing", async () => {
-    const { dir, store, bundle } = await open();
-    const first = bundle.productions[0]!;
-    await setProductionModel(store, first.meta.id, "llm", "gemma4-26b");
-
-    const fresh = store.getBundle();
-    await migrateLocalRoutingDefaults(store, fresh, { llm: "gemma4-12b" });
-    assert.equal((await onDisk(dir, first.meta.id)).models?.llm, "gemma4-26b", "the migration is not an opinion");
-
-    const again = await migrateLocalRoutingDefaults(store, store.getBundle(), { llm: "gemma4-12b" });
-    assert.deepEqual(again, [], "every production has a choice now, so there is nothing to carry");
-  });
-
-  it("is a no-op where no default is local", async () => {
-    const { store, bundle } = await open();
-    assert.deepEqual(await migrateLocalRoutingDefaults(store, bundle, {}), []);
   });
 });

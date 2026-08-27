@@ -31,7 +31,6 @@ import {
   type Shot,
   type WorldBundle,
   type Capability,
-  ProductionSchema,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -994,7 +993,10 @@ export async function setProductionModel(
   const path = `productions/${productionId}/production.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = JsonFile.parse(raw);
-  const current = ProductionSchema.parse(JSON.parse(raw)).models ?? {};
+  // `doc.value` is the parsed object, and `JsonFile` preserves keys it does not know about.
+  // Re-validating the whole strict schema to read one field would make this the only production
+  // write that refuses because some unrelated part of the file failed to parse.
+  const current = (doc.value["models"] ?? {}) as Record<string, string>;
   const next: Record<string, string> = {};
   for (const [key, value] of Object.entries(current)) if (key !== capability) next[key] = value;
   if (modelId !== null) next[capability] = modelId;
@@ -1006,42 +1008,13 @@ export async function setProductionModel(
     kind: "production-edit",
     source: "form",
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+    // No schema raise, and deliberately. `aspect` (issue 389) is the precedent this follows
+    // exactly: an optional production field written only when somebody asks for it, on a
+    // production they were looking at. Raising the boundary would make every world this build
+    // touches unreadable by the previous release, which is a far larger promise than one
+    // optional key is worth — and it is the reason the eager migration went, because *that*
+    // would have written the field into every production of every world on open.
   });
-}
-
-/**
- * Carry a global local routing default onto the productions that have not made their own choice
- * (SPEC-033 R-80).
- *
- * A local capability default is a real, reachable setting today — `PROVIDER_TABLE[m.provider].local`
- * makes a local model selectable without a key, so `llm → gemma4-12b` puts all writing on this
- * machine — and Cloud AI takes it away. Removing it and leaving it nowhere is the worst of the
- * three available outcomes and the one that happens by default if nobody decides, so it is
- * carried, with its concrete model id rather than the word `local`.
- *
- * Runs when a world opens, and only writes a production that has no choice for that capability:
- * the person's own decision is never overwritten by a migration, and a second run is a no-op.
- * Returns the productions it wrote, so the caller can log what moved rather than claiming it.
- */
-export async function migrateLocalRoutingDefaults(
-  store: WorldStore,
-  bundle: WorldBundle,
-  localDefaults: Partial<Record<Capability, string>>,
-): Promise<string[]> {
-  const entries = Object.entries(localDefaults) as Array<[Capability, string]>;
-  if (entries.length === 0) return [];
-  const written: string[] = [];
-  for (const production of bundle.productions) {
-    const missing = entries.filter(([capability]) => production.meta.models?.[capability] === undefined);
-    if (missing.length === 0) continue;
-    for (const [capability, modelId] of missing) {
-      // One commit per capability rather than one per production: the commit machinery reads
-      // and re-hashes the file each time, and a batched write would have to reimplement that.
-      await setProductionModel(store, production.meta.id, capability, modelId);
-    }
-    written.push(production.meta.id);
-  }
-  return written;
 }
 
 // ---------------------------------------------------------------------------

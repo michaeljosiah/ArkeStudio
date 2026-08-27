@@ -154,6 +154,25 @@ export function productionModel(
 }
 
 /**
+ * Which model this surface will use, with the production's choice already in it.
+ *
+ * The hook rather than the function, everywhere inside a production. `resolveModel` takes the
+ * remembered id as an argument, and an argument a caller can forget is an argument some caller
+ * will: the dispatch dialog priced its cards and sent its request through the plain function
+ * while the bar three lines below it resolved with the production's choice, so the screen named
+ * one model and spent on another — the exact silent substitution R-78 forbids.
+ */
+export function useResolvedModel(
+  state: ReturnType<typeof useStore>["state"],
+  capability: "image" | "video",
+  chosenId?: string,
+): { model: ManifestModel | null; stranded: ManifestModel | null; remembered: string | undefined } {
+  const { prodId } = useParams<{ prodId?: string }>();
+  const remembered = productionModel(state, prodId, capability);
+  return { ...resolveModel(state, capability, chosenId, remembered), remembered };
+}
+
+/**
  * Which model a surface will actually use, and whether it is stranded — asked once, here,
  * because every host that answered it for itself eventually disagreed with the bar beside it.
  * A screen that shows one model and dispatches another is the worst failure in this area.
@@ -344,9 +363,8 @@ export function DispatchBar({
   // The production, where this bar is inside one. Taken from the address rather than threaded
   // through every host: `generation-dialog` is rendered from world-scoped surfaces too, and a
   // prop that half its callers cannot fill is a prop that gets filled wrongly.
-  const { prodId } = useParams<{ prodId?: string }>();
-  const remembered = productionModel(state, prodId, capability);
-  const { model, stranded } = resolveModel(state, capability, choice.modelId, remembered);
+  const { prodId, worldId } = useParams<{ prodId?: string; worldId?: string }>();
+  const { model, stranded, remembered } = useResolvedModel(state, capability, choice.modelId);
   // No model at all — no key, or nothing of this capability in the manifest. The bar stays,
   // because vanishing would take Cancel and the explanation with it and leave a dialog with no
   // way out and no reason given.
@@ -435,7 +453,8 @@ export function DispatchBar({
               <span className="fy-dispatchbar__provider">{PROVIDERS[candidate.provider].displayName}</span>
               <span>{candidate.displayName}</span>
               {candidate.unverified === true && <em>UNVERIFIED</em>}
-              {candidate.id === routedId && <strong>DEFAULT</strong>}
+              {candidate.id === remembered && <strong>THIS PRODUCTION</strong>}
+              {candidate.id === routedId && candidate.id !== remembered && <strong>DEFAULT</strong>}
             </button>
           ))}
           {/* Local recipes that cannot run stay visible, disabled, with the measured reason —
@@ -449,15 +468,17 @@ export function DispatchBar({
             </button>
           ))}
           <div className="fy-dispatchbar__pickerfoot">
-            {prodId !== undefined && state?.world ? (
+            {prodId !== undefined && worldId !== undefined ? (
               <button
                 type="button"
+                className="fy-linkbtn"
+                style={{ font: "400 10.5px var(--font-sans)" }}
                 onClick={() => {
-                  setProductionModel(state.world!.meta.worldId, prodId, capability, remembered === model.id ? null : model.id);
+                  setProductionModel(worldId, prodId, capability, remembered === model.id ? null : model.id);
                   setPickerOpen(false);
                 }}
               >
-                {remembered === model.id ? "Forget for this production" : "Remember for this production"}
+                {remembered === model.id ? "This generation only" : "Remember for this production"}
               </button>
             ) : (
               <span>This generation only.</span>

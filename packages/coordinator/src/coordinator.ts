@@ -113,7 +113,6 @@ import {
   saveScene,
   setProductionAspect,
   setProductionModel,
-  migrateLocalRoutingDefaults,
   setPromptOverride,
 } from "./productions/ops.js";
 import {
@@ -1943,12 +1942,6 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
-    // A local capability default is a real setting today, and Cloud AI takes it away. It is
-    // carried onto the productions that have not made their own choice rather than cleared —
-    // SPEC-033 R-80, with the concrete model id rather than the word `local`. After the
-    // snapshot, because nothing on screen is waiting for it and a world with many productions
-    // would otherwise hold the open behind a write per production.
-    if (store && !wasAlreadyOpen) void this.migrateLocalRouting(store, worldId).catch(() => {});
     // A founding build parked when its world stopped being the open one resumes here — a fold
     // over the record and the journal, never a timer or a live session (SPEC-031 R-32, R-33).
     void this.foundingBuild?.resume(worldId).catch(() => {});
@@ -1983,38 +1976,6 @@ export class Coordinator {
       this.backfillStore = store;
       this.startBackfill(store, this.opts.mediaProbe, abort.signal);
     }
-  }
-
-  /**
-   * Carry the installation's local capability defaults onto this world's productions (R-80).
-   *
-   * Local-only, and by construction rather than by a filter applied late: a cloud default is
-   * still a routing default and Cloud AI still owns it. A production that has already made its
-   * own choice is never overwritten, so a second open writes nothing.
-   *
-   * A world nobody has opened does not inherit, which is the limit D17 names — production ids
-   * are world-scoped, so there is no installation-level store that could reach it. Cloud AI
-   * states the remaining default for exactly that reason, rather than clearing it silently.
-   */
-  private async migrateLocalRouting(store: WorldStore, worldId: string): Promise<void> {
-    // The read model rather than the settings file: it already carries the loaded defaults, and
-    // re-reading the file here would be a second source for one fact.
-    const defaults = this.readModel.getState().app.routing.defaults;
-    const local: Partial<Record<Capability, string>> = {};
-    for (const [capability, modelId] of Object.entries(defaults) as Array<[Capability, string]>) {
-      const model = this.opts.manifest?.models.find((m) => m.id === modelId);
-      if (model && PROVIDERS[model.provider].local) local[capability] = modelId;
-    }
-    if (Object.keys(local).length === 0 || !this.stillOpen(store)) return;
-    const written = await migrateLocalRoutingDefaults(store, store.getBundle(), local);
-    if (written.length === 0) return;
-    await this.appLog?.append({
-      level: "info",
-      event: "routing.migrated-to-productions",
-      worldId,
-      detail: { productions: written, models: local },
-    });
-    await this.refreshWorldSnapshot(worldId);
   }
 
   /**
