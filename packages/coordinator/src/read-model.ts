@@ -236,7 +236,14 @@ export class ReadModel {
       case "routing.changed": {
         this.state = {
           ...this.state,
-          app: { ...this.state.app, routing: { defaults: event.routing, faults: event.faults } },
+          app: {
+            ...this.state.app,
+            routing: {
+              defaults: event.routing,
+              faults: event.faults,
+              ...(event.clearedLocal !== undefined ? { clearedLocal: event.clearedLocal } : {}),
+            },
+          },
         };
         return;
       }
@@ -246,7 +253,11 @@ export class ReadModel {
           app: {
             ...this.state.app,
             models: event.models,
-            routing: { ...this.state.app.routing, faults: event.faults },
+            routing: {
+              ...this.state.app.routing,
+              faults: event.faults,
+              ...(event.clearedLocal !== undefined ? { clearedLocal: event.clearedLocal } : {}),
+            },
           },
         };
         return;

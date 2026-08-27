@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { join } from "node:path";
-import type { ModelManifest } from "@arke-studio/contracts";
+import { writeFile } from "node:fs/promises";
+import type { Capability, ModelManifest } from "@arke-studio/contracts";
 import { AppSettingsFile, routingFaults } from "../../src/app-settings.js";
 import { tempDir } from "../tmp.js";
 
@@ -30,6 +31,15 @@ const MANIFEST: ModelManifest = {
       pricing: { kind: "unmetered" },
     },
     {
+      id: "gpt-5",
+      provider: "openai",
+      capability: "llm",
+      displayName: "GPT-5",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perToken", microUsdPerMillionInput: 1, microUsdPerMillionOutput: 1 },
+    },
+    {
       id: "seedance-2.0",
       provider: "fal",
       capability: "video",
@@ -44,6 +54,19 @@ const MANIFEST: ModelManifest = {
 const LOCAL = new Set(["gemma4-12b"]);
 const isLocal = (modelId: string) => LOCAL.has(modelId);
 
+/**
+ * A local routing default as an installation that predates R-61 has it on disk. `setRoutingDefault`
+ * refuses one now, which is the point — but the file it refuses to write is exactly the file this
+ * migration exists for.
+ */
+async function seedLocalDefault(file: AppSettingsFile, capability: Capability, modelId: string) {
+  const settings = await file.load();
+  await writeFile(
+    (file as unknown as { path: string }).path,
+    JSON.stringify({ ...settings, routing: { ...settings.routing, [capability]: modelId } }, null, 2),
+  );
+}
+
 async function settingsFile() {
   const root = await tempDir("arke-settings-");
   return new AppSettingsFile(join(root, "settings.json"));
@@ -52,7 +75,9 @@ async function settingsFile() {
 describe("a local capability default is moved, never left in force (R-66)", () => {
   it("takes it out of routing and keeps its concrete model id", async () => {
     const file = await settingsFile();
-    await file.setRoutingDefault("llm", "gemma4-12b", MANIFEST);
+    // Written the way an installation that predates R-61 has it on disk: the picker used to
+    // offer a local model, so `setRoutingDefault` used to accept one.
+    await seedLocalDefault(file, "llm", "gemma4-12b");
     await file.setRoutingDefault("video", "seedance-2.0", MANIFEST);
 
     const after = await file.clearLocalRouting(isLocal);
@@ -69,7 +94,7 @@ describe("a local capability default is moved, never left in force (R-66)", () =
     const first = await file.clearLocalRouting(isLocal);
     assert.deepEqual(first.clearedLocalRouting, {});
 
-    await file.setRoutingDefault("llm", "gemma4-12b", MANIFEST);
+    await seedLocalDefault(file, "llm", "gemma4-12b");
     await file.clearLocalRouting(isLocal);
     const twice = await file.clearLocalRouting(isLocal);
     assert.deepEqual(twice.clearedLocalRouting, { llm: "gemma4-12b" });
@@ -82,7 +107,7 @@ describe("a local capability default is moved, never left in force (R-66)", () =
     const root = await tempDir("arke-settings-");
     const path = join(root, "settings.json");
     const file = new AppSettingsFile(path);
-    await file.setRoutingDefault("llm", "gemma4-12b", MANIFEST);
+    await seedLocalDefault(file, "llm", "gemma4-12b");
     await file.clearLocalRouting(isLocal);
 
     const reopened = await new AppSettingsFile(path).load();
@@ -90,15 +115,35 @@ describe("a local capability default is moved, never left in force (R-66)", () =
     assert.equal(reopened.clearedLocalRouting.llm, "gemma4-12b");
   });
 
-  it("is stated by name, with where the choice now lives (R-66's second clause)", async () => {
+  it("is retired the moment a default is set for that capability", async () => {
+    // Otherwise the notice outlives its answer, and sits above a green row insisting the
+    // capability has nowhere to go.
     const file = await settingsFile();
-    await file.setRoutingDefault("llm", "gemma4-12b", MANIFEST);
+    await seedLocalDefault(file, "llm", "gemma4-12b");
     await file.clearLocalRouting(isLocal);
-    const faults = routingFaults(await file.load(), MANIFEST);
-    const cleared = faults.find((f) => f.capability === "llm");
-    assert.ok(cleared, "silence here is the outcome D21 refuses");
-    assert.equal(cleared.modelId, "gemma4-12b");
-    assert.match(cleared.reason, /Gemma 4 12B ran on this machine and was cleared here/);
-    assert.match(cleared.reason, /chosen per production, at dispatch/);
+    const after = await file.setRoutingDefault("llm", "gpt-5", MANIFEST);
+    assert.deepEqual(after, { ok: true });
+    const settings = await file.load();
+    assert.equal(settings.routing.llm, "gpt-5");
+    assert.deepEqual(settings.clearedLocalRouting, {});
+  });
+
+  it("refuses a local model as a routing default, so a cleared one cannot come back (R-61)", async () => {
+    const file = await settingsFile();
+    const refusal = await file.setRoutingDefault("llm", "gemma4-12b", MANIFEST);
+    assert.equal(refusal.ok, false);
+    assert.match(refusal.reason, /runs on this machine/);
+  });
+
+  it("states a local model that survived the move, because that is the outcome D21 refuses", async () => {
+    // The move can fail — a locked settings file — and swallowing it leaves the default in force
+    // at dispatch while Cloud AI can no longer show or change it.
+    const file = await settingsFile();
+    await file.setRoutingDefault("video", "seedance-2.0", MANIFEST);
+    const settings = await file.load();
+    const stuck = routingFaults({ ...settings, routing: { ...settings.routing, llm: "gemma4-12b" } }, MANIFEST);
+    const fault = stuck.find((f) => f.capability === "llm");
+    assert.ok(fault, "silence here is the outcome D21 refuses");
+    assert.match(fault.reason, /still in force at dispatch/);
   });
 });

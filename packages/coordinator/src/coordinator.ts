@@ -2134,7 +2134,16 @@ export class Coordinator {
     // (SPEC-033 R-66, D21). Nothing to do on an installation that never had one.
     if (this.appSettings && manifest) {
       const local = new Set(manifest.models.filter((m) => PROVIDERS[m.provider].local).map((m) => m.id));
-      await this.appSettings.clearLocalRouting((modelId) => local.has(modelId)).catch(() => {});
+      await this.appSettings.clearLocalRouting((modelId) => local.has(modelId)).catch(async (err) => {
+        // Swallowing this produces the one outcome D21 refuses: the default stays in force at
+        // dispatch while Cloud AI can neither show nor change it. `routingFaults` states any
+        // local model still in routing, so the screen says so — this records why.
+        await this.appLog?.append({
+          level: "error",
+          event: "routing.clear-local-failed",
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      });
     }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Read once here so the first session of the run already carries the user's choices —
@@ -2151,7 +2160,13 @@ export class Coordinator {
       providers: this.providerService.list(),
       providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
-        ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
+        ? {
+            routing: {
+              defaults: settings.routing,
+              faults: routingFaults(settings, manifest),
+              clearedLocal: settings.clearedLocalRouting,
+            },
+          }
         : {}),
       ...(settings ? { models: settings.models } : {}),
       ...(settings ? { presets: settings.presets } : {}),
@@ -4337,6 +4352,7 @@ export class Coordinator {
           type: "routing.changed",
           routing: settings.routing,
           faults: routingFaults(settings, this.opts.manifest),
+          clearedLocal: settings.clearedLocalRouting,
         });
         return;
       }

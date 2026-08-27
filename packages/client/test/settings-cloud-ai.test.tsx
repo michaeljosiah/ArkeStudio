@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { resolveModel } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { LOCAL_AI_ROWS } from "../src/screens/settings-local-ai.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -37,6 +41,16 @@ const CLOUD_LLM: ManifestModel = {
   pricing: { kind: "perToken", microUsdPerMillionInput: 1, microUsdPerMillionOutput: 1 },
 };
 
+const LOCAL_VIDEO: ManifestModel = {
+  id: "comfyui-draft-video",
+  provider: "comfyui",
+  capability: "video",
+  displayName: "Draft video",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxDurationSec: 5 },
+  pricing: { kind: "unmetered" },
+};
+
 const CLOUD_VIDEO = FIXTURE_STATE.app.manifest!.models[0]!;
 
 function stateWith(over: Partial<ClientState["app"]> = {}): ClientState {
@@ -62,12 +76,20 @@ function render(path: string, state: ClientState = stateWith()): string {
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
 describe("Cloud AI: cloud-only, absolutely (R-3, R-61, matrix row 38)", () => {
-  it("mounts under its own name, and the old addresses still answer", () => {
-    assert.match(render("/settings/cloud-ai"), /data-screen="settings-cloud-ai"/);
-    // Two addresses that no longer name a screen; neither may become a hole.
+  it("mounts under its own name", () => {
     const app = render("/settings/cloud-ai");
-    assert.match(app, /Cloud AI/);
+    assert.match(app, /data-screen="settings-cloud-ai"/);
+    assert.match(plain(app), /Cloud AI/);
     assert.doesNotMatch(plain(app), /Who does what/);
+  });
+
+  it("sends each old address where its content went, rather than to a hole", async () => {
+    // Asserted on the routes rather than on a render: `<Navigate>` needs a second pass and
+    // `renderToString` makes one. `agents` named the per-agent overrides, and those are on
+    // Harness now — sending it to Cloud AI would land it on the screen defined by not having them.
+    const app = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "App.tsx"), "utf8");
+    assert.match(app, /path="who-does-what" element=\{<Navigate to="\/settings\/cloud-ai" replace \/>\}/);
+    assert.match(app, /path="agents" element=\{<Navigate to="\/settings\/harness" replace \/>\}/);
   });
 
   it("lists no local model, in any state, including disabled", () => {
@@ -120,31 +142,57 @@ describe("Cloud AI: cloud-only, absolutely (R-3, R-61, matrix row 38)", () => {
   });
 });
 
-describe("a local default is cleared, and said (R-66, D21, matrix row 36)", () => {
-  it("names what was taken away and where the choice now lives", () => {
+describe("a local default is carried, and said (R-66, R-80, D21, matrix rows 33, 36)", () => {
+  const cleared = () =>
+    stateWith({ routing: { defaults: {}, faults: [], clearedLocal: { llm: LOCAL_LLM.id } } });
+
+  it("names the model and where the choice now lives, without calling it a fault", () => {
     // The worst of the three available outcomes — in force, invisible, unchangeable — is the one
     // that happens by default if nobody decides, so it is refused explicitly.
-    const text = plain(
-      render(
-        "/settings/cloud-ai",
-        stateWith({
-          routing: {
-            defaults: {},
-            faults: [
-              {
-                capability: "llm",
-                modelId: LOCAL_LLM.id,
-                reason:
-                  "Gemma 4 12B ran on this machine and was cleared here — local models are now chosen per production, at dispatch",
-              },
-            ],
-          },
-        }),
-      ),
-    );
-    assert.match(text, /Gemma 4 12B ran on this machine and was cleared here/);
-    assert.match(text, /chosen per production, at dispatch/);
-    // And it is not still offered in the list it was cleared from.
+    const text = plain(render("/settings/cloud-ai", cleared()));
+    assert.match(text, /Language runs on this machine/);
+    assert.match(text, /Gemma 4 12B · chosen per production, at dispatch/);
+    // Not "has nowhere to go": it has somewhere, and this says where.
+    assert.doesNotMatch(text, /Language has nowhere to go/);
+    // And it is not still offered in the list it was taken out of.
     assert.doesNotMatch(text, /Ollama · Gemma 4 12B/);
+  });
+
+  it("is what a production with no choice of its own still runs on (R-80)", () => {
+    // R-80's first branch: the local-or-cloud choice exists, so the concrete model id is carried
+    // rather than thrown away. Clearing it into nothing would move every production's video to a
+    // paid model on the next dispatch, with nothing said at the place that spends — the dispatch
+    // bar has no stored choice left to state.
+    const state = stateWith({
+      manifest: { ...FIXTURE_STATE.app.manifest!, models: [CLOUD_VIDEO, LOCAL_VIDEO] },
+      comfyui: {
+        engine: {
+          source: "managed",
+          state: "ready",
+          locality: "local",
+          location: "127.0.0.1:8188",
+          version: "0.3.45",
+          instanceId: "managed-1",
+          detail: null,
+          detected: [],
+        },
+        recipes: [
+          {
+            recipeId: LOCAL_VIDEO.id,
+            recipeVersion: 1,
+            displayName: LOCAL_VIDEO.displayName,
+            capability: "video",
+            state: "ready",
+          },
+        ],
+        checkedAt: "2026-08-27T12:00:00.000Z",
+      },
+      routing: { defaults: {}, faults: [], clearedLocal: { video: LOCAL_VIDEO.id } },
+    });
+    __setStateForTest(state);
+    assert.equal(resolveModel(state, "video").model?.id, LOCAL_VIDEO.id, "still where it was running");
+
+    // And a production that has since chosen for itself outranks it.
+    assert.equal(resolveModel(state, "video", undefined, CLOUD_VIDEO.id).model?.id, CLOUD_VIDEO.id);
   });
 });

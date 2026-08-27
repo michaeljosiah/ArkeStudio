@@ -162,7 +162,7 @@ describe("Settings · Providers, one provider at a time", () => {
   });
 });
 
-describe("Who does what, when a routed model is switched off", () => {
+describe("Cloud AI, when a routed model is switched off", () => {
   const STRANDED = {
     ...FIXTURE_STATE.app.routing,
     faults: [

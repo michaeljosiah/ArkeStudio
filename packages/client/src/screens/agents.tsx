@@ -3,7 +3,7 @@ import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
 
 /**
- * The writing agents, behind Advanced on Who does what (design 54b — this was a settings tab
+ * The writing agents, behind Advanced on Harness (design 54b — this was a settings tab
  * of its own until Settings asked "which model does this work" on two tabs in two vocabularies).
  *
  * Six assistants do the writing in this app, and until now which model ran them was nobody's

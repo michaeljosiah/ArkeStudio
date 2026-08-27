@@ -1995,7 +1995,7 @@ function ProviderPane({ id }: { id: ProviderId }) {
             ? configured
               ? `this key does not unlock ${info.displayName}'s capabilities — test it above, or replace it`
               : `add a key above — ${info.displayName}'s models become switchable once it is connected`
-            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Who does what, never re-routed for you"}
+            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Cloud AI, never re-routed for you"}
       </div>
     </div>
   );
@@ -2719,7 +2719,11 @@ export function SettingsCloudAiScreen() {
   const providerState = (id: ProviderId): string => {
     const status = statuses.find((p) => p.id === id);
     if (status?.configured !== true) return "not connected";
-    return status.validation === "valid" ? "connected" : status.validation === "invalid" ? "key rejected" : "untested";
+    if (status.validation === "valid") return "connected";
+    if (status.validation === "invalid") return "key rejected";
+    // `testing` is its own state and reads as one: a key mid-validation is not the same thing as
+    // one nobody has tried, and the four words are the four the provider table actually has.
+    return status.validation === "testing" ? "testing" : "untested";
   };
   return (
     <div data-screen="settings-cloud-ai" className="fy-set">
@@ -2729,6 +2733,15 @@ export function SettingsCloudAiScreen() {
       {routing.faults.map((f) => (
         <Callout key={f.capability} tone="warning" title={`${CAPABILITY_LABEL[f.capability]} has nowhere to go.`}>
           {f.reason}
+        </Callout>
+      ))}
+      {/* Not a fault, and not titled like one: the capability has somewhere to go, and this says
+          where. It retires itself the moment a default is set for that capability, so it cannot
+          end up sitting above a green row insisting otherwise (R-66, R-80). */}
+      {(Object.entries(routing.clearedLocal ?? {}) as Array<[Capability, string]>).map(([capability, modelId]) => (
+        <Callout key={`cleared-${capability}`} tone="neutral" title={`${CAPABILITY_LABEL[capability]} runs on this machine.`}>
+          {(manifest?.models ?? []).find((m) => m.id === modelId)?.displayName ?? modelId} · chosen per production, at
+          dispatch
         </Callout>
       ))}
       {ROUTED_CAPABILITIES.map((capability) => {
@@ -2791,7 +2804,12 @@ export function SettingsCloudAiScreen() {
                 {providerState(selectedModel.provider)} · {modelCapabilityCopy(selectedModel)}
               </span>
             )}
-            {stranded && <span className="fy-set__state">{strandReason}</span>}
+            {stranded && selectedModel && (
+              <span className="fy-set__state">
+                {PROVIDER_TABLE[selectedModel.provider].displayName} · {providerState(selectedModel.provider)} ·{" "}
+                {strandReason}
+              </span>
+            )}
             <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
           </div>
         );

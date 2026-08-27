@@ -181,10 +181,11 @@ export function App() {
             <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
             <Route path="cloud-ai" element={<SettingsCloudAiScreen />} />
-            {/* Two addresses that no longer name a screen. Agents folded into the routing surface
-                in design 54b; that surface became Cloud AI, and the per-agent overrides went to
-                Harness with it — so the older of the two lands where the newer one does. */}
-            <Route path="agents" element={<Navigate to="/settings/cloud-ai" replace />} />
+            {/* Two addresses that no longer name a screen, and they do not land in the same
+                place: `agents` named the per-agent overrides, and those are on Harness now, so
+                sending it to Cloud AI would land it on the one screen defined by not having
+                them. Each goes where its content went. */}
+            <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
             <Route path="who-does-what" element={<Navigate to="/settings/cloud-ai" replace />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />

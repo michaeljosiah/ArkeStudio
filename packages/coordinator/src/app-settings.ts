@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import {
+  PROVIDERS,
   AppSettingsSchema,
   newId,
   type AppSettings,
@@ -80,12 +81,29 @@ export class AppSettingsFile {
     if (model.capability !== capability) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${capability}` };
     }
+    // A routing default is a concrete *cloud* model (SPEC-033 R-61, amending SPEC-008 R-20).
+    // Refused here as well as filtered in the picker, so a local id arriving over the wire
+    // cannot put back the setting the move at start-up just took out.
+    if (PROVIDERS[model.provider].local) {
+      return { ok: false, reason: `${model.displayName} runs on this machine — choose it per production, at dispatch` };
+    }
     return this.mutate<{ ok: true } | { ok: false; reason: string }>((current) => {
       if (current.models.disabled.includes(modelId)) {
         return { value: { ok: false, reason: `${model.displayName} is switched off in Providers` } };
       }
+      // Setting a default for this capability retires the cleared record: it is what the notice
+      // was asking for, and a notice that outlived its answer would sit above a green row
+      // insisting the capability has nowhere to go.
+      const cleared: Record<string, string> = {};
+      for (const [key, value] of Object.entries(current.clearedLocalRouting)) {
+        if (key !== capability) cleared[key] = value;
+      }
       return {
-        settings: { ...current, routing: { ...current.routing, [capability]: modelId } },
+        settings: {
+          ...current,
+          routing: { ...current.routing, [capability]: modelId },
+          clearedLocalRouting: cleared,
+        },
         value: { ok: true },
       };
     });
@@ -293,16 +311,18 @@ export function routingFaults(settings: AppSettings, manifest: ModelManifest): R
       });
     }
   }
-  // What Cloud AI took away, stated by name until the person has seen it (R-66). A fault rather
-  // than a new wire field: it is the same shape — a capability, a concrete model id, and one
-  // clause saying what to do — and it already reaches the screen that must say it.
-  for (const [capability, modelId] of Object.entries(settings.clearedLocalRouting) as Array<[Capability, string]>) {
+  // A local model surviving in `routing` means the move at start-up did not happen — a locked
+  // settings file, most likely. Stated rather than swallowed: it is still in force at dispatch
+  // and Cloud AI can no longer show or change it, which is exactly the outcome D21 refuses.
+  for (const [capability, modelId] of Object.entries(settings.routing) as Array<[Capability, string]>) {
     const model = manifest.models.find((m) => m.id === modelId);
-    faults.push({
-      capability,
-      modelId,
-      reason: `${model?.displayName ?? modelId} ran on this machine and was cleared here — local models are now chosen per production, at dispatch`,
-    });
+    if (model && PROVIDERS[model.provider].local) {
+      faults.push({
+        capability,
+        modelId,
+        reason: `${model.displayName} runs on this machine and could not be moved off this screen — it is still in force at dispatch`,
+      });
+    }
   }
   return faults;
 }
