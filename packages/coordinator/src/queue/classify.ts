@@ -10,9 +10,77 @@ const PROVIDER_FAULT = /(HTTP 401|HTTP 403|credential was rejected|unauthoriz|un
 const OFFLINE = /(fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|network is (down|unreachable)|getaddrinfo)/i;
 const TRANSIENT = /(HTTP 429|rate.?limit|HTTP 5\d\d|timeout|timed out|ECONNRESET|EPIPE|socket hang up|aborted)/i;
 
+/**
+ * Transport codes, which live on `.cause` and never in the message.
+ *
+ * Undici throws a bare `TypeError: fetch failed` and hangs the discriminating code off the cause
+ * chain. Every transport failure therefore met `OFFLINE`'s literal `fetch failed` and stopped
+ * there — `TRANSIENT` never ran for exactly the codes it names. A response-header deadline
+ * reached the user as "offline — jobs stay queued and resume with connectivity", and the lane
+ * was paused on a premise about the network that was not true.
+ *
+ * The split is not whether bytes moved but whether waiting is the remedy. A name that does not
+ * resolve, a refused port, no route to the host: nothing to wait for on our side, so offline, and
+ * the lane holds until connectivity returns. A connection that was made and then broke, or any
+ * clock running out, is transient and earns a backoff instead.
+ *
+ * Deadlines land on the transient side deliberately, the connect deadline included. Once #95
+ * configures Arke's own connect/header/body limits, the expiry of a limit Arke itself chose must
+ * never be reported as the network being down — that is this same bug, one layer up.
+ */
+const TRANSPORT_CLASS = new Map<string, FailureClass>([
+  ["ENOTFOUND", "offline"],
+  ["EAI_AGAIN", "offline"],
+  ["ECONNREFUSED", "offline"],
+  ["ENETUNREACH", "offline"],
+  ["EHOSTUNREACH", "offline"],
+  ["ENETDOWN", "offline"],
+  ["EHOSTDOWN", "offline"],
+  ["ECONNRESET", "transient"],
+  ["EPIPE", "transient"],
+  ["ETIMEDOUT", "transient"],
+  ["UND_ERR_SOCKET", "transient"],
+  ["UND_ERR_CONNECT_TIMEOUT", "transient"],
+  ["UND_ERR_HEADERS_TIMEOUT", "transient"],
+  ["UND_ERR_BODY_TIMEOUT", "transient"],
+  ["UND_ERR_ABORTED", "transient"],
+]);
+
+/** The class of the outermost transport code in the chain, or null when it names none. */
+function transportClass(err: unknown): FailureClass | null {
+  // Outermost first: Undici's own reading of what happened (`UND_ERR_SOCKET`) is more specific
+  // than the syscall errno underneath it. `seen` is what makes a self-referencing cause end.
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [err];
+  while (pending.length > 0) {
+    const node = pending.shift();
+    if (typeof node !== "object" || node === null || seen.has(node)) continue;
+    seen.add(node);
+    const code = (node as { code?: unknown }).code;
+    if (typeof code === "string") {
+      const klass = TRANSPORT_CLASS.get(code);
+      if (klass !== undefined) return klass;
+    }
+    // A host with both A and AAAA records fails as an AggregateError whose members carry the
+    // codes and whose outer error carries none. The local providers hit exactly that whenever
+    // their server is not running, so the commonest chain of all is behind this branch.
+    const members = (node as { errors?: unknown }).errors;
+    if (Array.isArray(members)) pending.push(...members);
+    pending.push((node as { cause?: unknown }).cause);
+  }
+  return null;
+}
+
 export function classifyError(err: unknown): FailureClass {
   const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  // Ahead of the chain, and the only thing that is: a witnessed HTTP status outranks any reading
+  // of the transport, and a rejected credential retried on backoff is a lane that never says why
+  // it is stuck. Nothing reporting one of these carries a transport code to lose.
   if (PROVIDER_FAULT.test(message)) return "provider-fault";
+  // Then the chain, ahead of the message: `fetch failed` is what the message says for every one
+  // of them, so reading it first is reading the one part that cannot tell them apart.
+  const transport = transportClass(err);
+  if (transport !== null) return transport;
   if (OFFLINE.test(message)) return "offline";
   if (TRANSIENT.test(message)) return "transient";
   // Invalid parameters, content policy, unknown model, anything unrecognised: terminal (D5).
