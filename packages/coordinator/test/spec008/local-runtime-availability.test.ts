@@ -5,10 +5,12 @@ import {
   deriveCapabilityAvailability,
   PROVIDERS,
   type CapabilityProbe,
+  type ClientMessage,
   type DomainEvent,
   type ProviderId,
   type ProviderStatus,
 } from "@arke-studio/contracts";
+import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -129,5 +131,94 @@ describe("a runtime with no client says so in the runtime's terms (issue 462)", 
     // Not a key story: these providers have no key, and "invalid" against a credential that
     // does not exist sends whoever reads it looking for a box to paste something into.
     assert.doesNotMatch(status.probes[0]!.reason!, /key|credential|sidecar/i);
+  });
+});
+
+/**
+ * Where the work runs is the resolved engine's answer, and Settings has to hear it (SPEC-033
+ * R-9, R-13). `PROVIDERS.comfyui.local` is `true` whether the engine is the managed child or a
+ * URL on another continent, so a gate reading that flag would evaluate this machine's card for
+ * work running somewhere else — the thing SPEC-028 R-37 forbids in as many words.
+ */
+describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)", () => {
+  const MODEL = {
+    id: "comfyui-draft-image",
+    provider: "comfyui" as const,
+    capability: "image" as const,
+    displayName: "Draft image",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" as const },
+    // A floor this machine plainly misses, so a verdict computed here would be visible.
+    requires: { vramMb: 512 * 1024 },
+  };
+
+  /** A ComfyUI service that is nothing but a locality, which is all the gate asks it for. */
+  function engineAt(locality: "local" | "remote") {
+    return {
+      engineStatus: () => ({
+        source: locality === "remote" ? "user-url" : "managed",
+        state: "ready",
+        locality,
+        location: locality === "remote" ? "https://gpu.example:8188" : "127.0.0.1:8188",
+        version: "0.3.45",
+        instanceId: "engine-1",
+        detail: null,
+        detected: [],
+      }),
+      subscribe: () => () => {},
+      dispose: async () => {},
+    } as unknown as ComfyUiEngineService;
+  }
+
+  async function runtimeAfterDetect(locality: "local" | "remote") {
+    const { root } = await makeTempRoot();
+    const provider = new FsWorldProvider(root, { clock: () => "2026-08-27T12:00:00.000Z" });
+    const events: DomainEvent[] = [];
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      changeLogPath: join(root, "logs", "changes.jsonl"),
+      appVersion: "test",
+      appRoot: root,
+      manifest: { manifestVersion: 1, generated: "2026-08-27", models: [MODEL] },
+      probeRuntime: async () => ({
+        vramMb: 12 * 1024,
+        memMb: 32 * 1024,
+        diskFreeMb: 500 * 1024,
+        accelerators: ["cuda"],
+        platform: "win32",
+      }),
+      comfyui: { service: engineAt(locality) },
+      observeEvent: (event) => events.push(event),
+    });
+    try {
+      await (
+        coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
+      ).handleClientMessage({ kind: "detect-runtimes" });
+      const status = events.filter((e) => e.type === "runtime.status").at(-1);
+      assert.ok(status && status.type === "runtime.status", "detect-runtimes must publish a runtime status");
+      return status.runtime;
+    } finally {
+      await coordinator.stop();
+      await provider.close();
+    }
+  }
+
+  it("a managed engine's models are judged against this machine", async () => {
+    const runtime = await runtimeAfterDetect("local");
+    const model = runtime.models.find((m) => m.modelId === MODEL.id);
+    assert.equal(model?.locality, "local");
+    assert.equal(model?.fit, "insufficient");
+  });
+
+  it("a remote engine's models carry no verdict about this machine", async () => {
+    const runtime = await runtimeAfterDetect("remote");
+    const model = runtime.models.find((m) => m.modelId === MODEL.id);
+    assert.equal(model?.locality, "remote");
+    // Not `unknown` — nobody failed to measure anything. The machine this model runs on was
+    // simply never the subject, and the row states that as *served elsewhere*.
+    assert.equal(model?.fit, undefined);
+    assert.equal(model?.reason, undefined);
   });
 });

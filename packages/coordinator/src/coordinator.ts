@@ -41,6 +41,7 @@ import {
   estimateMicroUsd,
   modelForCapability,
   gateLocalRuntimes,
+  type EngineLocalities,
   PROVIDERS,
   planScene,
   previewLineFor,
@@ -2509,6 +2510,33 @@ export class Coordinator {
     await this.refreshComfyUi();
   }
 
+  /**
+   * Where each local provider's engine actually resolved to (SPEC-033 R-9). Only ComfyUI can
+   * answer anything but `local`: the rest are runtimes this machine hosts, while a ComfyUI
+   * engine may be a URL somebody pasted. `PROVIDERS.comfyui.local` stays `true` either way,
+   * which is exactly why the flag cannot be the source of this.
+   */
+  private engineLocalities(): EngineLocalities {
+    const locality = this.opts.comfyui?.service.engineStatus().locality;
+    return locality === undefined ? {} : { comfyui: locality };
+  }
+
+  /**
+   * Re-gate the manifest's local models against the last measured figures and publish the
+   * result. Separate from the probe because the verdict turns on two things and only one of
+   * them is the machine: changing the selected engine from managed to a remote URL reclassifies
+   * every model that engine serves, and R-13 requires that without a restart or a manual
+   * refresh.
+   */
+  private emitLocalRuntimeStatus(probes: RuntimeProbes): void {
+    if (!this.opts.manifest) return;
+    this.emit({
+      at: new Date().toISOString(),
+      type: "runtime.status",
+      runtime: gateLocalRuntimes(this.opts.manifest, probes, new Date().toISOString(), this.engineLocalities()),
+    });
+  }
+
   /** Publish the combined engine + recipe readiness (SPEC-021 §2.12), whole each time. */
   private async refreshComfyUi(): Promise<void> {
     const service = this.opts.comfyui?.service;
@@ -2516,6 +2544,10 @@ export class Coordinator {
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
     const status = await service.status(probes);
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
+    // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move
+    // together (R-13). Nothing is re-probed — the figures are the ones already measured, and a
+    // machine that was never measured has no verdict to correct.
+    if (probes !== null) this.emitLocalRuntimeStatus(probes);
   }
 
   private retireAndReleaseComfyUi(): Promise<void> {
@@ -8699,11 +8731,7 @@ export class Coordinator {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
           const probes = await this.opts.probeRuntime();
-          this.emit({
-            at: new Date().toISOString(),
-            type: "runtime.status",
-            runtime: gateLocalRuntimes(this.opts.manifest, probes, new Date().toISOString()),
-          });
+          this.emitLocalRuntimeStatus(probes);
         } catch {
           // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
           // the last known figures, and nothing gets disabled by a broken probe.

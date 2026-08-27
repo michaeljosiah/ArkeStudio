@@ -14,6 +14,11 @@ import {
   frameDispatchFor,
   aspectOffered,
   gateLocalRuntimes,
+  LOCAL_FIT_HEADROOM_RATIO,
+  PROVIDERS,
+  type ManifestModel,
+  type ModelManifest,
+  type RuntimeProbes,
   imageOutputFor,
   ModelManifestSchema,
   modelCapabilityCopy,
@@ -604,43 +609,214 @@ describe("the declarations → strategy mapping (R-23, D8, DoD)", () => {
   });
 });
 
-describe("local runtime gating (R-22, D11, D12)", () => {
+/**
+ * The fit gate (SPEC-033 §1.5, §1.7). Every case here is a row of that specification's
+ * adversarial matrix, because the two verdicts it split apart — `insufficient` and
+ * `unsupported` — are exactly the pair a reader cannot check by looking at a screen.
+ */
+describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
   const detectedAt = "2026-08-01T12:00:00.000Z";
+  const AMPLE: RuntimeProbes = {
+    vramMb: 48 * 1024,
+    memMb: 128 * 1024,
+    diskFreeMb: 900 * 1024,
+    accelerators: ["cuda"],
+    platform: "win32",
+  };
+  const probes = (over: Partial<RuntimeProbes> = {}): RuntimeProbes => ({ ...AMPLE, ...over });
 
-  it("disabled names both figures and the cloud alternative", () => {
-    const status = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: 12 * 1024, memMb: 32 * 1024, diskFreeMb: 500 * 1024 },
-      detectedAt,
-    );
-    const llama70b = status.models.find((m) => m.modelId === "llama3.3-70b");
-    assert.equal(llama70b?.state, "disabled");
-    assert.match(llama70b!.reason!, /Needs 41 GB VRAM\. This machine has 12 GB\./);
-    assert.match(llama70b!.reason!, /Cloud llm still works via OpenAI\./);
-    const llama8b = status.models.find((m) => m.modelId === "llama3.1-8b");
-    assert.equal(llama8b?.state, "ready");
+  /** A one-model manifest, so a case tests the gate rather than the shipped catalogue. */
+  const only = (requires: NonNullable<ManifestModel["requires"]>): ModelManifest => ({
+    manifestVersion: 1,
+    generated: "2026-08-01",
+    models: [
+      {
+        id: "probe-model",
+        provider: "ollama",
+        capability: "llm",
+        displayName: "Probe",
+        accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+        limits: {},
+        pricing: { kind: "unmetered" },
+        requires,
+      },
+    ],
   });
 
-  it("a failed probe yields unknown, never disabled (D12)", () => {
-    const status = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: null, memMb: 32 * 1024, diskFreeMb: 500 * 1024 },
-      detectedAt,
-    );
-    const llama70b = status.models.find((m) => m.modelId === "llama3.3-70b");
-    assert.equal(llama70b?.state, "unknown");
-    assert.match(llama70b!.reason!, /could not be measured/);
+  const verdict = (requires: NonNullable<ManifestModel["requires"]>, over: Partial<RuntimeProbes> = {}) =>
+    gateLocalRuntimes(only(requires), probes(over), detectedAt).models[0]!;
+
+  it("a floor met by a whisker runs slowly; the same floor with room runs well (rows 1, 2)", () => {
+    // 12.1 GB against a 12 GB floor: met, and met by 0.8% where the margin is 25%.
+    const tight = verdict({ vramMb: 12 * 1024 }, { vramMb: Math.round(12.1 * 1024) });
+    assert.equal(tight.fit, "runs-slowly");
+    assert.match(tight.reason!, /Needs 12 GB VRAM · this machine has 12\.1 GB/);
+
+    const roomy = verdict({ vramMb: 12 * 1024 }, { vramMb: 24 * 1024 });
+    assert.equal(roomy.fit, "runs-well");
+    assert.match(roomy.reason!, /Needs 12 GB VRAM · this machine has 24 GB/);
+
+    // The margin itself is the boundary, and it is a contract constant so two builds cannot
+    // disagree about one machine (row 45).
+    const atMargin = verdict({ vramMb: 12 * 1024 }, { vramMb: 12 * 1024 * (1 + LOCAL_FIT_HEADROOM_RATIO) });
+    assert.equal(atMargin.fit, "runs-well");
   });
 
-  it("kokoro and whisper gate on memory and disk without any credential", () => {
-    const status = gateLocalRuntimes(
-      SHIPPED_MANIFEST,
-      { vramMb: null, memMb: 2 * 1024, diskFreeMb: 500 * 1024 },
-      detectedAt,
+  it("a measured shortfall is insufficient, never unsupported, and keeps both figures (row 3)", () => {
+    const short = verdict({ vramMb: 12 * 1024 }, { vramMb: 8 * 1024 });
+    assert.equal(short.fit, "insufficient");
+    assert.match(short.reason!, /Needs 12 GB VRAM · this machine has 8 GB/);
+  });
+
+  it("a declared accelerator the machine does not have is unsupported, whatever the VRAM (row 4)", () => {
+    const wrongCard = verdict({ vramMb: 4 * 1024, accelerator: ["cuda"] }, { accelerators: [] });
+    assert.equal(wrongCard.fit, "unsupported");
+    assert.match(wrongCard.reason!, /Needs CUDA · this machine reports none/);
+
+    // Ample VRAM does not rescue it, and a shortfall does not soften it to insufficient:
+    // `unsupported` is the stronger statement, and offering smaller models would be a lie.
+    const roomyAndWrong = verdict({ vramMb: 4 * 1024, accelerator: ["cuda"] }, { accelerators: ["rocm"] });
+    assert.equal(roomyAndWrong.fit, "unsupported");
+    assert.match(roomyAndWrong.reason!, /this machine reports ROCm/);
+
+    // One of several declared accelerators is enough.
+    assert.equal(verdict({ accelerator: ["cuda", "rocm"] }, { accelerators: ["rocm"] }).fit, "runs-well");
+  });
+
+  it("a declared platform the machine is not is unsupported", () => {
+    const mac = verdict({ platform: ["darwin"] }, { platform: "win32" });
+    assert.equal(mac.fit, "unsupported");
+    assert.match(mac.reason!, /Runs on macOS · this machine is Windows/);
+  });
+
+  it("no refusing verdict comes out of an unmeasured probe alone (R-22)", () => {
+    // A probe that never ran cannot refuse. Absent and null both read as unmeasured; only a
+    // measured empty list is a machine that answered "none".
+    assert.equal(verdict({ accelerator: ["cuda"] }, { accelerators: null }).fit, "runs-well");
+    assert.equal(verdict({ platform: ["darwin"] }, { platform: null }).fit, "runs-well");
+  });
+
+  it("a failed probe yields unknown where nothing else refuses (row 5, SPEC-008 D12)", () => {
+    const unknown = verdict({ vramMb: 12 * 1024 }, { vramMb: null });
+    assert.equal(unknown.fit, "unknown");
+    assert.match(unknown.reason!, /VRAM could not be measured on this machine/);
+  });
+
+  it("a measured refusal beats an unmeasured probe (row 6, R-21)", () => {
+    // Without the precedence this reads `unknown`, and an install known to fail is offered.
+    const short = verdict({ vramMb: 12 * 1024, memMb: 32 * 1024 }, { vramMb: null, memMb: 2 * 1024 });
+    assert.equal(short.fit, "insufficient");
+    assert.match(short.reason!, /Needs 32 GB memory · this machine has 2 GB/);
+    assert.match(short.reason!, /VRAM could not be measured/);
+  });
+
+  it("free disk is not a fit input, at any size (row 8, R-17)", () => {
+    // The 40 GB model on a 50 GB volume: the verdict is the same before and after it lands,
+    // because the one floor the model itself moves was taken out of the calculation.
+    const before = verdict({ vramMb: 12 * 1024, diskMb: 40 * 1024 }, { diskFreeMb: 50 * 1024 });
+    const after = verdict({ vramMb: 12 * 1024, diskMb: 40 * 1024 }, { diskFreeMb: 10 * 1024 });
+    assert.equal(before.fit, "runs-well");
+    assert.equal(after.fit, "runs-well");
+    assert.equal(verdict({ diskMb: 40 * 1024 }, { diskFreeMb: 0 }).fit, "runs-well");
+  });
+
+  it("a remote engine's models carry no verdict at all (rows 10, 12, R-15)", () => {
+    const local = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt);
+    const remote = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt, { comfyui: "remote" });
+    const comfy = remote.models.filter((m) => m.provider === "comfyui");
+    assert.ok(comfy.length > 0, "the shipped manifest must carry ComfyUI rows for this to test anything");
+    for (const model of comfy) {
+      assert.equal(model.locality, "remote");
+      assert.equal(model.fit, undefined, `${model.modelId} was judged against this machine's card`);
+      // Never `unknown`: the absence is stated as served elsewhere, and `unknown` would read as
+      // a failed probe about a machine nobody asked about.
+      assert.equal(model.reason, undefined);
+    }
+    // Flipping the engine back restores every verdict, and nothing else changed either way.
+    for (const model of local.models.filter((m) => m.provider === "comfyui")) {
+      assert.equal(model.locality, "local");
+      assert.ok(model.fit !== undefined);
+    }
+    for (const model of remote.models.filter((m) => m.provider !== "comfyui")) {
+      assert.equal(model.locality, "local");
+      assert.ok(model.fit !== undefined);
+    }
+  });
+
+  it("the shipped manifest's own rows still name both figures and the cloud alternative", () => {
+    const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 12 * 1024, memMb: 32 * 1024 }), detectedAt);
+    const llama70b = status.models.find((m) => m.modelId === "llama3.3-70b");
+    assert.equal(llama70b?.fit, "insufficient");
+    assert.match(llama70b!.reason!, /Needs 41 GB VRAM · this machine has 12 GB/);
+    assert.match(llama70b!.cloudAlternative!, /Cloud llm still works via OpenAI\./);
+
+    const kokoro = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ memMb: 2 * 1024 }), detectedAt).models.find(
+      (m) => m.modelId === "kokoro-82m",
     );
-    const kokoro = status.models.find((m) => m.modelId === "kokoro-82m");
-    assert.equal(kokoro?.state, "disabled");
-    assert.match(kokoro!.reason!, /Needs 4 GB memory\. This machine has 2 GB\./);
+    assert.equal(kokoro?.fit, "insufficient");
+    assert.match(kokoro!.reason!, /Needs 3\.9 GB memory · this machine has 2 GB/);
+  });
+});
+
+describe("the recommendation (SPEC-033 R-33..R-38)", () => {
+  const detectedAt = "2026-08-01T12:00:00.000Z";
+  const probes = (over: Partial<RuntimeProbes> = {}): RuntimeProbes => ({
+    vramMb: 48 * 1024,
+    memMb: 128 * 1024,
+    diskFreeMb: 900 * 1024,
+    accelerators: ["cuda"],
+    platform: "win32",
+    ...over,
+  });
+
+  it("the preference order names local models of that capability only (row 20, R-33)", () => {
+    const local = new Map(SHIPPED_MANIFEST.models.filter((m) => PROVIDERS[m.provider].local).map((m) => [m.id, m]));
+    for (const [capability, order] of Object.entries(SHIPPED_MANIFEST.localPreference ?? {})) {
+      for (const id of order ?? []) {
+        const model = local.get(id);
+        assert.ok(model, `${capability} prefers ${id}, which is not a local model`);
+        assert.equal(model.capability, capability, `${id} is preferred for ${capability} but is a ${model.capability} model`);
+      }
+    }
+  });
+
+  it("the first entry that runs well wins, and one that does not is fallen past (row 21)", () => {
+    // 12 GB: Gemma 26B needs 20 GB and Gemma 12B needs 9.6, so the order's first entry is
+    // insufficient here and the recommendation falls to the next rather than inventing one.
+    const modest = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 12 * 1024 }), detectedAt);
+    assert.equal(modest.recommended.llm, "gemma4-12b");
+    // And it is the authored order that decides, not size: 48 GB fits Llama 70B too.
+    const big = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 64 * 1024 }), detectedAt);
+    assert.equal(big.recommended.llm, "gemma4-26b");
+  });
+
+  it("nothing runs well here means no recommendation, stated as an absence (row 22, R-37)", () => {
+    const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 1024, memMb: 1024 }), detectedAt);
+    assert.equal(status.recommended.llm, undefined);
+    assert.equal(status.recommended.image, undefined);
+  });
+
+  it("nothing whose fit is unknown is ever recommended (R-36)", () => {
+    const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: null }), detectedAt);
+    assert.ok(status.models.some((m) => m.fit === "unknown"));
+    for (const model of status.models) {
+      if (model.fit !== "unknown") continue;
+      assert.notEqual(status.recommended[model.capability], model.modelId);
+    }
+  });
+
+  it("a capability with no local model has no recommendation and is not a fault (row 26, R-50)", () => {
+    const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt);
+    assert.equal(status.models.filter((m) => m.capability === "music").length, 0);
+    assert.equal(status.recommended.music, undefined);
+  });
+
+  it("a remote engine's models are filtered out before the verdict is consulted (R-34)", () => {
+    const remote = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt, { comfyui: "remote" });
+    assert.equal(remote.recommended.image, undefined);
+    assert.equal(remote.recommended.video, undefined);
+    // Voice falls past the remote cloned-voice recipe to Kokoro, which this machine does host.
+    assert.equal(remote.recommended["voice-tts"], "kokoro-82m");
   });
 });
 

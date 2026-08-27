@@ -14,8 +14,27 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 16,
-  generated: "2026-08-18",
+  manifestVersion: 17,
+  generated: "2026-08-27",
+  /**
+   * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
+   * the models rather than about any machine: the gate filters this order by what was measured
+   * here, and recommends the first entry that runs well (R-35).
+   *
+   * `music` is absent because no local provider declares it. That is an absence, not a gap to
+   * fill — the row states it and the recommendation for it is simply not there (R-37, R-50).
+   */
+  localPreference: {
+    image: ["comfyui-draft-image"],
+    video: ["comfyui-draft-video"],
+    // A cloned voice speaks in the character's own voice; Kokoro speaks in one of six presets.
+    // Quality order, so the bigger one leads and a machine that cannot hold it falls through.
+    "voice-tts": ["comfyui-cloned-voice", "kokoro-82m"],
+    "voice-stt": ["whisper-large-v3"],
+    // Gemma leads Llama here on what this app actually asks of a writing model: Gemma 4 reads
+    // images and holds a 256K context, and reference images are half the work.
+    llm: ["gemma4-26b", "gemma4-12b", "llama3.3-70b", "llama3.1-8b", "gemma4-e2b-it-qat"],
+  },
   models: [
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({

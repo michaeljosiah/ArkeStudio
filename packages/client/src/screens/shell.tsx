@@ -128,6 +128,7 @@ import {
   isComfyUiWeightsComponent,
   type ComfyUiEngineStatus,
   type LedgerEntry,
+  type LocalRuntimeModel,
   type LocalRuntimeStatus,
   type NarratorSettings,
   type ManifestModel,
@@ -3101,21 +3102,51 @@ function ComfyUiDetail() {
   );
 }
 
+/**
+ * The two passing fit verdicts and the two refusing ones (SPEC-033 R-16). Kept local to this
+ * screen because the screen itself is on its way out — the Local AI rows read the verdict
+ * directly, where the word carries information a boolean cannot.
+ */
+function runsHere(model: LocalRuntimeModel): boolean {
+  return model.locality === "local" && (model.fit === "runs-well" || model.fit === "runs-slowly");
+}
+
+function refusedHere(model: LocalRuntimeModel): boolean {
+  return model.fit === "insufficient" || model.fit === "unsupported";
+}
+
+/** The verdict as a row states it: measured words, never adjectives (R-87). */
+function fitWords(model: LocalRuntimeModel): string {
+  if (model.locality === "remote") return "served elsewhere";
+  switch (model.fit) {
+    case "runs-well":
+      return "runs well";
+    case "runs-slowly":
+      return "runs slowly";
+    case "insufficient":
+      return "not enough here";
+    case "unsupported":
+      return "unsupported";
+    default:
+      return "not measured";
+  }
+}
+
 /** The manifest's local models, gated against what this machine measured (R-22). */
 function LocalModelsDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
   const models = runtime?.models ?? [];
-  const ready = models.filter((m) => m.state === "ready").length;
+  const ready = models.filter(runsHere).length;
   return (
     <>
       <RuntimeHead
         title="Local models"
         caps="FREE · NEVER METERED"
-        tone={models.some((m) => m.state === "disabled") ? "warn" : models.length === 0 ? "idle" : "ok"}
+        tone={models.some(refusedHere) ? "warn" : models.length === 0 ? "idle" : "ok"}
         state={runtime === null ? "not yet measured" : `${ready} of ${models.length} ready`}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       {models.map((m) => (
-        <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", m.state === "disabled" && "fy-set__row--off")}>
+        <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", refusedHere(m) && "fy-set__row--off")}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div className="fy-set__name fy-set__name--wide">
               <div className="fy-set__title">{m.displayName}</div>
@@ -3123,8 +3154,8 @@ function LocalModelsDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) 
                 {PROVIDER_TABLE[m.provider].displayName} · {m.capability}
               </div>
             </div>
-            <RuntimeStatus tone={m.state === "ready" ? "ok" : m.state === "disabled" ? "warn" : "idle"}>
-              {m.state}
+            <RuntimeStatus tone={runsHere(m) ? "ok" : refusedHere(m) ? "warn" : "idle"}>
+              {fitWords(m)}
             </RuntimeStatus>
           </div>
           {/* Kept visible, disabled, with the measured reason — never quietly absent. */}
@@ -3409,8 +3440,8 @@ export function SettingsLocalRuntimeScreen() {
     {
       id: "models",
       label: "Local models",
-      tone: models.some((m) => m.state === "disabled") ? "warn" : models.length === 0 ? "idle" : "ok",
-      count: models.length === 0 ? "—" : `${models.filter((m) => m.state === "ready").length} of ${models.length}`,
+      tone: models.some(refusedHere) ? "warn" : models.length === 0 ? "idle" : "ok",
+      count: models.length === 0 ? "—" : `${models.filter(runsHere).length} of ${models.length}`,
     },
     {
       id: "harness",
