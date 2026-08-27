@@ -825,6 +825,46 @@ describe("SPEC-017 art direction and scoped looks", () => {
     }
     await store.close();
   });
+  /* Worlds written before attaching displaced can already hold two looks claiming one
+     production, and the schema still admits them. Falling back to the first in the array picked
+     the OLDEST, because acceptance appends — so an upgraded world went on dispatching the older
+     appearance until somebody happened to reattach (codex round 1). */
+  it("resolves a legacy same-scope collision by acceptance, not by array order", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const older = {
+      id: "council-coat",
+      file: "looks/council-coat.png",
+      kind: "costume" as const,
+      prompt: "Formal council coat",
+      acceptedAt: "2026-08-01T10:00:00.000Z",
+      attachedTo: { kind: "production" as const, productionId: production.meta.id },
+    };
+    const newer = { ...older, id: "storm-oilskin", file: "looks/storm-oilskin.png", acceptedAt: "2026-08-09T10:00:00.000Z" };
+    const files = (looks: (typeof older)[]) =>
+      planScene(
+        {
+          world: bundle.meta,
+          artDirection: bundle.artDirection,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? { ...maren, looks } : kit)),
+          scene,
+          selections: production.selections,
+          model: VIDEO_MODEL,
+        },
+        "per-shot",
+      ).shots.flatMap((shotPlan) => shotPlan.references.map((reference) => reference.file ?? ""));
+    for (const looks of [[older, newer], [newer, older]]) {
+      const carried = files(looks);
+      assert.ok(carried.some((file) => file.includes("storm-oilskin")), "the later acceptance rides");
+      assert.ok(carried.every((file) => !file.includes("council-coat")), "and the older one does not");
+    }
+    await store.close();
+  });
 });
 
 describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container", () => {

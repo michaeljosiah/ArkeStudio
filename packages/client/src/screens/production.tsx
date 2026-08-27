@@ -38,6 +38,7 @@ import {
   type PlanState,
   worldSheets,
   attachmentFor,
+  type CharacterLook,
   type ProductionBundle,
   type Scene,
   type Sheet,
@@ -460,6 +461,36 @@ export function ProductionLayout() {
  * world's permanent record.
  */
 /**
+ * What choosing this option would take it away from (design 67, codex round 1).
+ *
+ * A look holds one `attachedTo`, so picking one that is already spoken for is a *move*: the
+ * other production silently drops back to its identity package, or a scene loses its override.
+ * The option says where it currently rides, so the move is visible at the point of choice — a
+ * label rather than a confirmation, because the change is one field and reattaching undoes it.
+ *
+ * The look this production already holds says nothing: it is the selected option, and "here" is
+ * not news.
+ */
+export function lookOptionScope(
+  look: CharacterLook,
+  production: ProductionBundle,
+  productions: readonly ProductionBundle[],
+): string | null {
+  const scope = look.attachedTo;
+  if (!scope) return null;
+  if (scope.productionId === production.meta.id) {
+    if (scope.kind === "production") return null;
+    const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
+    return scene ? `Sc ${scene.number}` : null;
+  }
+  const owner = productions.find((candidate) => candidate.meta.id === scope.productionId);
+  if (!owner) return null;
+  if (scope.kind === "production") return `in ${owner.meta.title}`;
+  const scene = owner.scenes.find((candidate) => candidate.id === scope.sceneId);
+  return scene ? `in ${owner.meta.title} Sc ${scene.number}` : `in ${owner.meta.title}`;
+}
+
+/**
  * What each character wears in this production (design 67).
  *
  * A look is attached on the character's own looks page, and until now the production it was
@@ -551,11 +582,15 @@ function ProductionWardrobe({
                   }}
                 >
                   <option value="">Identity package</option>
-                  {looks.map((look) => (
-                    <option key={look.id} value={look.id}>
-                      {lookTileLabel(look.prompt, look.kind)}
-                    </option>
-                  ))}
+                  {looks.map((look) => {
+                    const elsewhere = lookOptionScope(look, production, world.productions);
+                    return (
+                      <option key={look.id} value={look.id}>
+                        {lookTileLabel(look.prompt, look.kind)}
+                        {elsewhere ? ` · ${elsewhere}` : ""}
+                      </option>
+                    );
+                  })}
                 </select>
               </label>
             </div>
@@ -2779,12 +2814,20 @@ function GenerateDrawer({
  * the other fact, and a subject carrying two references is one subject either way.
  */
 export function carriedSubjects(references: readonly CompiledReference[]): string {
-  const subjects = new Map<string, boolean>();
+  // Keyed by sheet, displayed by name. Two sheets can carry one name — creation uniquifies the
+  // slug, never the name — and keying by the name merged them into one entry whose `(look)`
+  // could then belong to the other person entirely. Naming who rides is the whole point here.
+  const subjects = new Map<string, { subject: string; look: boolean }>();
   for (const reference of references) {
-    const look = reference.mode === "scoped-look";
-    subjects.set(reference.subject, (subjects.get(reference.subject) ?? false) || look);
+    const held = subjects.get(reference.sheetId);
+    subjects.set(reference.sheetId, {
+      subject: reference.subject,
+      look: (held?.look ?? false) || reference.mode === "scoped-look",
+    });
   }
-  return [...subjects].map(([subject, look]) => (look ? `${subject} (look)` : subject)).join(", ");
+  return [...subjects.values()]
+    .map((entry) => (entry.look ? `${entry.subject} (look)` : entry.subject))
+    .join(", ");
 }
 
 /**

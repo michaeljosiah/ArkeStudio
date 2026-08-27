@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { CharacterLook, ClientState, CompiledPass, CompiledReference } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { carriedSubjects, passRow } from "../src/screens/production.js";
+import { carriedSubjects, lookOptionScope, passRow } from "../src/screens/production.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -186,6 +186,19 @@ describe("the dispatch dialog's carried subjects", () => {
   it("says nothing at all when nothing rides", () => {
     assert.equal(carriedSubjects([]), "");
   });
+
+  /* Creation uniquifies the slug, never the name, so two sheets can carry one name. Keying by
+     the name merged them into a single entry whose `(look)` could belong to the other person
+     entirely — which defeats the only thing this line exists to say (codex round 1). */
+  it("keeps two sheets that share a name apart, and their looks with them", () => {
+    assert.equal(
+      carriedSubjects([
+        reference({ sheetId: "alex-mor", subject: "Alex", mode: "scoped-look" }),
+        reference({ index: 2, sheetId: "alex-vane", subject: "Alex", mode: "main-photo" }),
+      ]),
+      "Alex (look), Alex",
+    );
+  });
 });
 
 /** The whole line, so what the dialog prints is asserted rather than assembled twice. */
@@ -232,5 +245,69 @@ describe("the dispatch dialog's pass row", () => {
 
   it("leaves the routes that carry no reference exactly as they were", () => {
     assert.equal(passRow(pass({ route: { kind: "text" } as CompiledPass["route"] })), "text route · 5s · $0.10");
+  });
+});
+
+/**
+ * A look holds one `attachedTo`, so picking one that is already spoken for is a move, not reuse
+ * (codex round 1). The option says where it currently rides.
+ */
+describe("what the wardrobe picker says a look would be moved from", () => {
+  const OTHER = {
+    meta: { id: "vessel-cut", title: "Vessel Cut" },
+    scenes: [{ id: "sc_09", number: 9 }],
+  } as unknown as Parameters<typeof lookOptionScope>[1];
+  const here = PRODUCTION;
+  const productions = [here, OTHER] as unknown as Parameters<typeof lookOptionScope>[2];
+
+  it("says nothing of a free look, or of the one this production already holds", () => {
+    assert.equal(lookOptionScope(COAT, here, productions), null);
+    assert.equal(
+      lookOptionScope({ ...COAT, attachedTo: { kind: "production", productionId: here.meta.id } }, here, productions),
+      null,
+      "the selected option does not need telling that it is here",
+    );
+  });
+
+  it("names a scene of this production, so demoting an override is visible", () => {
+    const scene = here.scenes[0]!;
+    assert.equal(
+      lookOptionScope(
+        { ...COAT, attachedTo: { kind: "scene", productionId: here.meta.id, sceneId: scene.id } },
+        here,
+        productions,
+      ),
+      `Sc ${scene.number}`,
+    );
+  });
+
+  it("names another production, and its scene where the look rides one", () => {
+    assert.equal(
+      lookOptionScope({ ...COAT, attachedTo: { kind: "production", productionId: "vessel-cut" } }, here, productions),
+      "in Vessel Cut",
+    );
+    assert.equal(
+      lookOptionScope(
+        { ...COAT, attachedTo: { kind: "scene", productionId: "vessel-cut", sceneId: "sc_09" } },
+        here,
+        productions,
+      ),
+      "in Vessel Cut Sc 9",
+    );
+  });
+
+  it("says nothing rather than naming a production or scene that is gone", () => {
+    assert.equal(
+      lookOptionScope({ ...COAT, attachedTo: { kind: "production", productionId: "deleted" } }, here, productions),
+      null,
+    );
+    assert.equal(
+      lookOptionScope(
+        { ...COAT, attachedTo: { kind: "scene", productionId: here.meta.id, sceneId: "sc_gone" } },
+        here,
+        productions,
+      ),
+      null,
+    );
   });
 });

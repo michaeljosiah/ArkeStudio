@@ -1002,12 +1002,25 @@ export function attachmentFor(
     if (look.attachedTo.productionId !== scope.productionId) return false;
     return look.attachedTo.kind === "production" || look.attachedTo.sceneId === scope.sceneId;
   });
-  // The narrower scope wins (design 67). A look attached to this scene and one attached to the
-  // whole production both match, and `.find` answered by array order — so which of the two rode
-  // a scene depended on the order the attachments happened to be written in, which is not a
-  // decision anybody made. Same-scope collisions cannot arise: attaching displaces.
-  const scopedLook =
-    scopedLooks.find((look) => look.attachedTo?.kind === "scene") ?? scopedLooks[0];
+  /*
+   * Two rules, so this is total rather than order-dependent (design 67).
+   *
+   * The narrower scope wins: a look attached to this scene and one attached to the whole
+   * production both match, and `.find` answered by array order — so which of the two rode a
+   * scene depended on the order the attachments happened to be written in.
+   *
+   * Within a scope, the most recently accepted wins. Attaching displaces now, so a *new*
+   * same-scope collision cannot arise — but worlds written before that rule can already hold
+   * two looks claiming one production, and the schema still admits them. Falling back to the
+   * first in the array picked the OLDEST, because acceptance appends. An upgraded world would
+   * have gone on dispatching the older appearance until somebody happened to reattach.
+   */
+  const rank = (look: (typeof scopedLooks)[number]): string =>
+    `${look.attachedTo?.kind === "scene" ? "1" : "0"}${look.acceptedAt}`;
+  const scopedLook = scopedLooks.reduce<(typeof scopedLooks)[number] | undefined>(
+    (best, look) => (best === undefined || rank(look) > rank(best) ? look : best),
+    undefined,
+  );
   if (role === "primary" && scopedLook) {
     return {
       sheetId: sheet.id,
