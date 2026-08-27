@@ -304,7 +304,7 @@ import { acceptDecided, explainAcceptRefusal, landed } from "./gate/proposals.js
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
-import { titleFrom } from "./world-chat/title.js";
+import { cleanTitle, namingBrief, titleFrom } from "./world-chat/title.js";
 import { describeEntryContext } from "./world-chat/entry-context.js";
 import { budgetFor, currentLookContext } from "./world-chat/context.js";
 import { discoverConversations } from "./world-chat/discover.js";
@@ -358,6 +358,16 @@ import type { WorldStore } from "./world/store.js";
  * strips its dots explicitly); this list is checked against nothing, so it keeps none.
  */
 const IMPORTABLE_IMAGES = ["png", "jpg", "jpeg", "webp"] as const;
+
+/**
+ * How long a conversation's name is worth waiting for.
+ *
+ * A fraction of the art director's own 120s, because this answers a question nobody asked: the
+ * row already reads as the opening sentence, and the only thing at stake is whether it reads
+ * better. One short prompt with no tools is a fast turn or a broken one, so a minute is a
+ * generous ceiling rather than a tight one.
+ */
+const NAMING_TIMEOUT_MS = 60_000;
 
 const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
 
@@ -3035,18 +3045,29 @@ export class Coordinator {
          *
          * It is created before anyone knows what it is about, so it starts as "New conversation";
          * leaving it there would give somebody a list of identical rows. The opening sentence is
-         * what they would have called it anyway.
+         * what they would have called it anyway, so it goes on the row now — synchronously, before
+         * anything is waited on, so the row is never blank and never the placeholder.
+         *
+         * Then the harness is asked for the name a person would have given the same message, and
+         * that replaces the cut sentence when it arrives (`nameConversation`). Ordered this way
+         * on purpose: the generated title is a promotion on top of something that already works,
+         * so a harness that is down, slow or unhelpful costs nothing at all.
          */
         const before = await log.read();
         const isFirst = !before.events.some((e) => e.event.type === "turn.started");
-        if (isFirst) {
-          await service.rename(msg.conversationId, titleFrom(msg.text)).catch(() => {});
+        const cutTitle = isFirst ? titleFrom(msg.text) : null;
+        if (cutTitle !== null) {
+          await service.rename(msg.conversationId, cutTitle).catch(() => {});
         }
 
         const runner = this.worldChatRunner(store, msg.conversationId);
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
         const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds);
+        // Started after the turn it names, so the person's own turn has first claim on the
+        // harness, and awaited last, so naming a row never delays the reply.
+        const naming =
+          cutTitle === null ? null : this.nameConversation(store, msg.conversationId, msg.text, cutTitle);
         // The title may have just changed, and the screen shows the message immediately.
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
@@ -3054,6 +3075,10 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         await this.refreshConversations(store);
         await this.openWorldChat(store, msg.conversationId);
+        if (naming !== null && (await naming)) {
+          await this.refreshConversations(store);
+          await this.openWorldChat(store, msg.conversationId);
+        }
         void service;
         return;
       }
@@ -9312,6 +9337,55 @@ export class Coordinator {
   private async refreshConversations(store: WorldStore): Promise<void> {
     const { summaries } = await discoverConversations(store.dir);
     this.readModel.setConversations(summaries);
+  }
+
+  /**
+   * Ask the harness for the name a person would have given this conversation.
+   *
+   * Runs beside the turn it names and is never in front of it: the cut opening sentence is
+   * already on the row, so this only ever replaces one working title with a better one. Every
+   * way it can go wrong — no harness, no answer, a paragraph where a label was asked for, a
+   * world closed while it was thinking — leaves the cut sentence exactly where it is.
+   *
+   * The one case worth being careful about is a person who names the conversation themselves
+   * while this is being written. Theirs wins: the title is only overwritten if it is still, to
+   * the character, the sentence this call set out to improve.
+   *
+   * @returns whether the row now says something different, so the caller knows to refresh.
+   */
+  private async nameConversation(
+    store: WorldStore,
+    conversationId: ConversationId,
+    text: string,
+    cutTitle: string,
+  ): Promise<boolean> {
+    const adapter = this.opts.adapter;
+    if (!adapter?.readiness().ready) return false;
+    const namer = makeArtDirector(
+      adapter,
+      this.sessionInput,
+      this.opts.appRoot ? join(this.opts.appRoot, ".art") : `${this.opts.changeLogPath}.art`,
+      { agent: "conversation-namer", answerKey: "title", maxChars: 200, timeoutMs: NAMING_TIMEOUT_MS },
+    );
+    const meta = store.getBundle().meta;
+    const answer = await namer(
+      namingBrief(text, {
+        name: meta.name,
+        ...(meta.logline?.trim() ? { logline: meta.logline.trim() } : {}),
+      }),
+    ).catch(() => null);
+    const title = answer === null ? null : cleanTitle(answer);
+    void this.appLog?.append({
+      kind: title === null ? "world-chat.naming-unavailable" : "world-chat.name-generated",
+      worldId: store.worldId,
+    });
+    if (title === null || title === cutTitle) return false;
+    if (!this.stillOpen(store)) return false;
+    const service = new WorldChatService(store.dir);
+    const current = await service.load(conversationId).catch(() => null);
+    if (current === null || current.title !== cutTitle) return false;
+    await service.rename(conversationId, title).catch(() => {});
+    return true;
   }
 
   /**
