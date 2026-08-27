@@ -121,6 +121,30 @@ describe("the production's wardrobe row", () => {
     }
   });
 
+  /* An upgraded kit can hold two looks on one scene, and the dispatcher carries exactly one of
+     them. Walking the looks listed every claimant, so the line reported two live appearances for
+     a scene that dispatches one — on the row whose whole job is saying which (codex round 5). */
+  it("states one look per scene, the same one the dispatcher would carry", () => {
+    const scene = PRODUCTION.scenes[0]!;
+    const scope = { kind: "scene" as const, productionId: PRODUCTION.meta.id, sceneId: scene.id };
+    __setStateForTest(
+      stateWithLooks([
+        { ...COAT, acceptedAt: "2026-08-01T10:00:00Z", attachedTo: scope },
+        { ...OILSKIN, acceptedAt: "2026-08-09T10:00:00Z", attachedTo: scope },
+      ]),
+    );
+    try {
+      const html = renderCast();
+      assert.match(html, new RegExp(`Sc ${scene.number} · Storm oilskin, hood up`), "the later acceptance");
+      assert.ok(
+        !html.includes("Sc 4 · Formal Ebb Council coat"),
+        "and the claimant it displaced is not stated beside it as a second live appearance",
+      );
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   /* An upgraded kit can hold two production-scoped looks. `attachmentFor` carries the most
      recently accepted, so a row marking the first in the array would confirm an appearance the
      dispatcher is not sending — a false confirmation of the one thing it exists to confirm
