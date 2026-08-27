@@ -867,7 +867,11 @@ export function lookAttachmentLabel(
   if (!production) return null;
   if (scope.kind === "production") return production.meta.title;
   const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
-  return scene ? `${production.meta.title} · Sc ${scene.number}` : production.meta.title;
+  // A deleted scene leaves the attachment behind it, and `attachmentFor` wants the exact scene
+  // id — so the look rides nowhere. Falling back to the production's name said the opposite, in
+  // the same words a production-wide attachment uses (codex round 3). A scope whose target is
+  // gone reads as no scope, exactly as a deleted production already did.
+  return scene ? `${production.meta.title} · Sc ${scene.number}` : null;
 }
 
 /**

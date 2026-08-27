@@ -61,6 +61,12 @@ export const CompiledPassRecordSchema = z
           sheetId: z.string().min(1),
           sheetVersion: z.number().int().min(1).nullable(),
           role: z.string().min(1),
+          // Persisted with the rest of the compiled reference (design 67): the durable plan is
+          // the compiled object verbatim, and a field the compiler emits that this record does
+          // not admit is not a smaller record — it is a strict parse that refuses the whole
+          // plan, so no scene carrying a reference could be authorised at all.
+          subject: z.string().min(1),
+          mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation"]),
         })
         .strict(),
     ),

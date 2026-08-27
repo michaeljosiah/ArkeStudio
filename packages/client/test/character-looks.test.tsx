@@ -168,13 +168,16 @@ describe("where a look is in use", () => {
     );
   });
 
-  it("falls back to the production when the scene is gone", () => {
+  /* A deleted scene leaves the attachment behind it, and `attachmentFor` wants the exact scene
+     id — so the look rides nowhere. Naming the production said the opposite, in the very words a
+     production-wide attachment uses (codex round 3). */
+  it("says nothing of a scene that is gone, rather than claiming the whole production", () => {
     assert.equal(
       lookAttachmentLabel(
         { ...look, attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_99" } },
         productions,
       ),
-      "Saltlight",
+      null,
     );
   });
 });

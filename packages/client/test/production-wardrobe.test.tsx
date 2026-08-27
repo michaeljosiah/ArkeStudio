@@ -309,6 +309,15 @@ describe("what the wardrobe picker says a look would be moved from", () => {
       ),
       null,
     );
+    assert.equal(
+      lookOptionScope(
+        { ...COAT, attachedTo: { kind: "scene", productionId: "vessel-cut", sceneId: "sc_gone" } },
+        here,
+        productions,
+      ),
+      null,
+      "another production's deleted scene rides nowhere either — nothing to warn about taking",
+    );
   });
 });
 

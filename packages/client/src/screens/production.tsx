@@ -517,7 +517,8 @@ export function lookOptionScope(
   if (!owner) return null;
   if (scope.kind === "production") return `in ${owner.meta.title}`;
   const scene = owner.scenes.find((candidate) => candidate.id === scope.sceneId);
-  return scene ? `in ${owner.meta.title} Sc ${scene.number}` : `in ${owner.meta.title}`;
+  // A scope whose scene is gone rides nowhere, so there is nothing here to warn about taking.
+  return scene ? `in ${owner.meta.title} Sc ${scene.number}` : null;
 }
 
 /**
