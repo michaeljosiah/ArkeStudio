@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -307,6 +307,41 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal((await stat(modelsDir)).isDirectory(), true, "the folder itself survives");
   });
 
+  it("a repair that cannot remove its file stays failed and does not trust the survivor", async () => {
+    const appRoot = await tempDir("arke-repair-held-");
+    const modelsDir = await tempDir("arke-repair-held-models-");
+    const target = join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors");
+    // A directory at the exact file path makes single-file rm fail consistently on every host.
+    // It stands in for the Windows case this fixes: ComfyUI holds the checkpoint open.
+    await mkdir(target, { recursive: true });
+    const events: DomainEvent[] = [];
+    const d = deps();
+    const svc = new LocalSetupService(d, (event) => events.push(event), {
+      appRoot,
+      catalogue: [weightsEntry()],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+
+    assert.equal(await svc.repair("comfyui-weights-draft-image"), false);
+    let component = last(events).components[0]!;
+    assert.equal(component.state, "failed");
+    assert.equal(component.repairRequired, true);
+    assert.match(component.detail ?? "", /checkpoints[\\/]sd_xl_base_1\.0\.safetensors could not be removed/);
+    assert.match(component.detail ?? "", /close the engine and try Repair again/);
+
+    await svc.detect();
+    component = last(events).components[0]!;
+    assert.equal(component.state, "failed", "detection cannot bless the same survivor as present");
+    assert.equal(d.calls.filter((call) => call.startsWith("fetch")).length, 0, "a failed deletion queues nothing");
+
+    await rm(target, { recursive: true });
+    assert.equal(await svc.repair("comfyui-weights-draft-image"), true, "Repair works once the path can be removed");
+    await svc.run();
+    assert.equal(last(events).components[0]!.state, "ready");
+    assert.equal((await stat(target)).isFile(), true);
+  });
+
   it("guards the weights against the mapped folder's disk, not the app's", async () => {
     const appRoot = await tempDir("arke-guard-");
     const modelsDir = await tempDir("arke-guard-models-");
@@ -423,7 +458,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal((await stat(target)).isFile(), true, "the file it deleted came back");
   });
 
-  it("sweeps its own debris from the mapped folder and walks nothing else", async () => {
+  it("does not infer ownership from a conventional partial name or walk the mapped folder", async () => {
     const appRoot = await tempDir("arke-sweep-");
     const modelsDir = await tempDir("arke-sweep-models-");
     await mkdir(join(modelsDir, "checkpoints"), { recursive: true });
@@ -441,12 +476,59 @@ describe("an external models folder is the user's (§2.4)", () => {
     });
     await svc.run();
 
-    await assert.rejects(stat(ours), "the fragment of our own cancelled fetch is gone");
-    // Both of these prove the same rule from the other side: the sweep visits the paths the
-    // catalogue named and never walks the folder, so a fragment that is not ours survives and
-    // an empty folder of the user's is not pruned out from under them (§2.4).
+    assert.equal((await stat(ours)).isFile(), true, "a catalogue-derived name is not proof that Arke made it");
+    // Both of these prove the same rule from the other side: external cleanup uses only the
+    // unique path created by the active download and never walks the folder (§2.4).
     assert.equal((await stat(theirs)).isFile(), true, "a .partial that is not ours is not ours to delete");
     assert.equal((await stat(join(modelsDir, "loras"))).isDirectory(), true, "an empty folder survives");
+  });
+
+  it("cancellation removes the exact external fragment even when the mapping changes", async () => {
+    const appRoot = await tempDir("arke-cancel-map-");
+    const oldModelsDir = await tempDir("arke-cancel-old-");
+    const newModelsDir = await tempDir("arke-cancel-new-");
+    let modelsDir: string | null = oldModelsDir;
+    const events: DomainEvent[] = [];
+    const d = deps();
+    d.fetchStream = async (_url, signal) => ({
+      ok: true,
+      status: 200,
+      contentLength: 4096,
+      body: (async function* () {
+        yield bytes(512, [1, 2, 3]);
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      })(),
+    });
+    const svc = new LocalSetupService(d, (event) => events.push(event), {
+      appRoot,
+      catalogue: [weightsEntry()],
+      throttleMs: 0,
+      externalDirs: { "comfyui-models": () => modelsDir },
+    });
+
+    svc.retry("comfyui-weights-draft-image");
+    const running = svc.run();
+    const oldDir = join(oldModelsDir, "checkpoints");
+    let partials: string[] = [];
+    for (let attempt = 0; attempt < 100 && partials.length === 0; attempt++) {
+      partials = (await readdir(oldDir).catch(() => [])).filter((name) => name.endsWith(".partial"));
+      if (partials.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(partials.length, 1, "the active fetch owns one unique fragment at its captured path");
+
+    const cancelled = svc.cancel();
+    modelsDir = newModelsDir;
+    await Promise.all([running, cancelled]);
+
+    assert.deepEqual(
+      (await readdir(oldDir)).filter((name) => name.endsWith(".partial")),
+      [],
+      "cleanup uses the old captured path, not the new mapping",
+    );
+    assert.deepEqual(await readdir(newModelsDir), [], "the replacement mapping was never walked or written");
+    assert.equal(last(events).components[0]!.state, "skipped");
+    assert.equal(last(events).components[0]!.detail, "stopped");
+    assert.equal(last(events).running, false, "cancel resolves only after the download has unwound");
   });
 });
 

@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 import type { DomainEvent, SetupComponent, SetupStatus } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
@@ -59,6 +59,14 @@ interface Live extends SetupComponent {
   entry: CatalogueEntry;
 }
 
+interface RepairBlock {
+  root: string;
+  targets: ReadonlyArray<{ path: string; label: string }>;
+  detail: string;
+}
+
+class IncompleteDownloadCleanupError extends Error {}
+
 const DEFAULT_THROTTLE_MS = 400;
 const DEFAULT_HEADROOM_MB = 2000;
 
@@ -86,6 +94,8 @@ export class LocalSetupService {
   private diskFreeMb: number | null = null;
   private running = false;
   private disposed = false;
+  /** A failed repair stays failed while the exact undeleted file survives at the same root. */
+  private readonly repairBlocks = new Map<string, RepairBlock>();
   /** The run in progress, so a second caller awaits it rather than getting a silent no-op. */
   private inFlight: Promise<void> | null = null;
 
@@ -206,9 +216,36 @@ export class LocalSetupService {
   async detect(): Promise<void> {
     for (const [id, c] of this.components) {
       if (c.state === "skipped") continue;
+      const repairBlock = this.repairBlocks.get(id);
+      if (repairBlock !== undefined) {
+        const spec = c.entry.spec;
+        const currentRoot = spec.kind === "files" ? this.filesRoot(spec) : null;
+        if (currentRoot === repairBlock.root) {
+          const survivor = await firstExisting(repairBlock.targets.map((target) => target.path));
+          if (survivor !== null) {
+            this.set(id, { state: "failed", detail: repairBlock.detail, repairRequired: true });
+            continue;
+          }
+        }
+        // The author removed the held file, or selected a different library. The old failure no
+        // longer speaks for the current destination and must not hold it permanently.
+        this.repairBlocks.delete(id);
+        this.set(id, {
+          state: c.entry.optional === true ? "available" : "queued",
+          bytesDone: 0,
+          bytesPerSecond: null,
+          detail: undefined,
+          repairRequired: undefined,
+        });
+      }
       const present = await this.isPresent(c.entry).catch(() => false);
       if (present) {
-        this.set(id, { state: "present", bytesDone: c.bytesTotal, bytesPerSecond: null });
+        this.set(id, {
+          state: "present",
+          bytesDone: c.bytesTotal,
+          bytesPerSecond: null,
+          repairRequired: undefined,
+        });
       } else if (c.state === "present") {
         this.set(id, { state: c.entry.optional === true ? "available" : "queued", bytesDone: 0 });
       }
@@ -228,29 +265,6 @@ export class LocalSetupService {
         if (left.length === 0) await rm(toExtendedLength(path), { recursive: true, force: true }).catch(() => {});
       } else if (e.name.endsWith(".partial")) {
         await rm(toExtendedLength(path), { force: true }).catch(() => {});
-      }
-    }
-  }
-
-  /**
-   * The same debris, in the folder the user mapped. `sweepPartials` walks a tree and removes
-   * any directory it empties, which is right for the app's own models folder and wrong for
-   * someone else's: SPEC-021 §2.4 says a user-owned folder is never walked or recursively
-   * deleted. So the fragments are removed at exactly the paths the catalogue named, one by one
-   * — the per-file rule repair already follows — and nothing beside them is even looked at.
-   *
-   * Without this a cancelled 9.5 GB fetch left its `.partial` in the user's library for good:
-   * the app-root sweep never reaches there, and repair only knows the finished names.
-   */
-  private async sweepMappedPartials(): Promise<void> {
-    for (const { entry } of this.components.values()) {
-      const spec = entry.spec;
-      if (spec.kind !== "files" || spec.externalRoot === undefined) continue;
-      const root = this.filesRoot(spec);
-      if (root === null) continue;
-      for (const f of spec.files) {
-        const partial = `${join(root, spec.dir, f.file)}.partial`;
-        await rm(toExtendedLength(partial), { force: true }).catch(() => {});
       }
     }
   }
@@ -319,7 +333,6 @@ export class LocalSetupService {
     // Nothing is in flight here (one run at a time), so any .partial is the debris of a run
     // that was cancelled or killed. Sweep it: a fragment must never quietly become a file.
     await this.sweepPartials(this.modelsDir());
-    await this.sweepMappedPartials();
     await this.detect();
 
     // Drained, not snapshotted. A component can be queued *during* a pass — Repair does it,
@@ -443,6 +456,12 @@ export class LocalSetupService {
     const spec = entry.spec;
     try {
       if (spec.kind === "files") {
+        const repairBlock = this.repairBlocks.get(entry.id);
+        if (repairBlock !== undefined) {
+          this.set(entry.id, { state: "failed", detail: repairBlock.detail, repairRequired: true });
+          this.publish();
+          return;
+        }
         const filesRoot = this.filesRoot(spec);
         if (filesRoot === null) {
           this.set(entry.id, {
@@ -473,6 +492,7 @@ export class LocalSetupService {
           state: "ready",
           bytesDone: done,
           bytesPerSecond: null,
+          repairRequired: undefined,
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
@@ -605,8 +625,8 @@ export class LocalSetupService {
       this.publish();
       if (pulled.code === 0) await this.componentReady(entry.id);
     } catch (err) {
-      if (this.abort.signal.aborted) {
-        this.set(entry.id, { state: "queued", bytesPerSecond: null, detail: "stopped" });
+      if (this.abort.signal.aborted && !(err instanceof IncompleteDownloadCleanupError)) {
+        this.set(entry.id, { state: "skipped", bytesPerSecond: null, detail: "stopped" });
       } else {
         this.set(entry.id, { state: "failed", detail: err instanceof Error ? err.message : String(err) });
       }
@@ -630,13 +650,18 @@ export class LocalSetupService {
     if (!res.ok) throw new Error(`${spec.file}: the source answered ${res.status}`);
 
     await mkdir(toExtendedLength(dirname(target)), { recursive: true });
-    const partial = `${target}.partial`;
-    const sink = createWriteStream(toExtendedLength(partial));
+    // A unique, exclusively-created name is the ownership proof. In a user-mapped folder, a
+    // conventional `<target>.partial` may belong to somebody else and must never be truncated or
+    // swept. The captured path is cleaned directly, so changing the mapping cannot orphan it.
+    const partial = `${target}.${randomUUID()}.partial`;
+    const sink = await open(toExtendedLength(partial), "wx");
     const started = Date.now();
     let received = 0;
     let head: number[] = [];
     let lastEmit = 0;
     const hash = spec.sha256 ? createHash("sha256") : null;
+    let landed = false;
+    let failure: unknown = null;
 
     try {
       for await (const chunk of res.body) {
@@ -646,7 +671,12 @@ export class LocalSetupService {
         if (head.length < 8) head = [...head, ...Array.from(chunk.subarray(0, 8 - head.length))];
         received += chunk.byteLength;
         hash?.update(chunk);
-        if (!sink.write(chunk)) await new Promise<void>((r) => sink.once("drain", () => r()));
+        let offset = 0;
+        while (offset < chunk.byteLength) {
+          const { bytesWritten } = await sink.write(chunk, offset, chunk.byteLength - offset, null);
+          if (bytesWritten === 0) throw new Error(`${spec.file}: the incomplete download could not be written`);
+          offset += bytesWritten;
+        }
 
         const now = Date.now();
         if (now - lastEmit >= (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS)) {
@@ -659,26 +689,38 @@ export class LocalSetupService {
           this.publish();
         }
       }
-    } finally {
-      await new Promise<void>((resolve) => sink.end(resolve));
+      if (this.abort.signal.aborted) throw new Error("stopped");
+
+      if (spec.magic && !spec.magic.every((b, i) => head[i] === b)) {
+        throw new Error(`${spec.file}: what arrived is not the file we asked for`);
+      }
+      if (res.contentLength !== null && received !== res.contentLength) {
+        throw new Error(`${spec.file}: the download stopped short (${received} of ${res.contentLength} bytes)`);
+      }
+      if (spec.sha256 && hash?.digest("hex") !== spec.sha256) {
+        throw new Error(`${spec.file}: checksum mismatch`);
+      }
+
+      await sink.close();
+      // Only a whole file ever takes the real name — a partial is never mistaken for presence.
+      await rm(toExtendedLength(target), { force: true }).catch(() => {});
+      await rename(toExtendedLength(partial), toExtendedLength(target));
+      landed = true;
+    } catch (err) {
+      failure = err;
     }
 
-    if (spec.magic && !spec.magic.every((b, i) => head[i] === b)) {
-      await rm(toExtendedLength(partial), { force: true }).catch(() => {});
-      throw new Error(`${spec.file}: what arrived is not the file we asked for`);
+    await sink.close().catch(() => {});
+    if (!landed) {
+      try {
+        await rm(toExtendedLength(partial), { force: true });
+      } catch (err) {
+        throw new IncompleteDownloadCleanupError(
+          `${spec.file}: the incomplete download could not be removed (${errorCode(err)})`,
+        );
+      }
+      throw failure;
     }
-    if (res.contentLength !== null && received !== res.contentLength) {
-      await rm(toExtendedLength(partial), { force: true }).catch(() => {});
-      throw new Error(`${spec.file}: the download stopped short (${received} of ${res.contentLength} bytes)`);
-    }
-    if (spec.sha256 && hash?.digest("hex") !== spec.sha256) {
-      await rm(toExtendedLength(partial), { force: true }).catch(() => {});
-      throw new Error(`${spec.file}: checksum mismatch`);
-    }
-
-    // Only a whole file ever takes the real name — a partial is never mistaken for presence.
-    await rm(toExtendedLength(target), { force: true }).catch(() => {});
-    await rename(toExtendedLength(partial), toExtendedLength(target));
     return received;
   }
 
@@ -697,47 +739,96 @@ export class LocalSetupService {
   retry(componentId: string): void {
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present") return;
+    if (this.repairBlocks.has(componentId)) {
+      this.set(componentId, { state: "failed", repairRequired: true });
+      this.publish();
+      return;
+    }
     this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
     this.publish();
     if (!this.running) void this.run();
   }
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
-  async repair(componentId: string): Promise<void> {
+  async repair(componentId: string): Promise<boolean> {
     const c = this.components.get(componentId);
-    if (!c || c.entry.spec.kind !== "files") return;
+    if (!c || c.entry.spec.kind !== "files") return false;
     const spec = c.entry.spec;
+    const root = this.filesRoot(spec);
+    if (root === null) {
+      this.set(componentId, {
+        state: "blocked",
+        detail: "no models folder is mapped for this engine — set one in Settings",
+        repairRequired: undefined,
+      });
+      this.publish();
+      return false;
+    }
+    const targets = spec.files.map((file) => ({ path: join(root, spec.dir, file.file), label: file.file }));
+    const failures = new Map<string, string>();
     if (spec.externalRoot !== undefined) {
       // A user-owned folder is never recursively deleted (SPEC-021 §2.4): repair removes
       // exactly the files this entry names, one by one, and touches nothing beside them.
-      const root = this.filesRoot(spec);
-      if (root !== null) {
-        for (const f of spec.files) {
-          await rm(toExtendedLength(join(root, spec.dir, f.file)), { force: true }).catch(() => {});
-        }
+      for (const target of targets) {
+        await rm(toExtendedLength(target.path), { force: true }).catch((err) => {
+          failures.set(target.path, errorCode(err));
+        });
       }
     } else {
-      await rm(toExtendedLength(join(this.modelsDir(), spec.dir)), { recursive: true, force: true });
+      await rm(toExtendedLength(join(root, spec.dir)), { recursive: true, force: true }).catch((err) => {
+        for (const target of targets) failures.set(target.path, errorCode(err));
+      });
     }
-    this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
+    const survivor = await firstExisting(targets.map((target) => target.path));
+    if (survivor === "unknown") {
+      const target = targets.find((candidate) => failures.has(candidate.path)) ?? targets[0]!;
+      const detail = `${target.label} could not be removed — close the engine and try Repair again (${failures.get(target.path) ?? "could not verify deletion"})`;
+      this.repairBlocks.set(componentId, { root, targets, detail });
+      this.set(componentId, { state: "failed", bytesPerSecond: null, detail, repairRequired: true });
+      this.publish();
+      return false;
+    }
+    if (survivor !== null) {
+      const target = targets.find((candidate) => candidate.path === survivor)!;
+      const detail = `${target.label} could not be removed — close the engine and try Repair again (${failures.get(survivor) ?? "still present"})`;
+      this.repairBlocks.set(componentId, { root, targets, detail });
+      this.set(componentId, {
+        state: "failed",
+        bytesPerSecond: null,
+        detail,
+        repairRequired: true,
+      });
+      this.publish();
+      return false;
+    }
+    this.repairBlocks.delete(componentId);
+    this.set(componentId, {
+      state: "queued",
+      bytesDone: 0,
+      bytesPerSecond: null,
+      detail: undefined,
+      repairRequired: undefined,
+    });
     this.publish();
+    return true;
   }
 
   /** Stop everything in flight. Whatever finished stays; nothing half-written survives. */
-  cancel(): void {
+  async cancel(): Promise<void> {
     this.abort.abort();
     for (const [id, c] of this.components) {
       if (c.state === "downloading" || c.state === "installing" || c.state === "queued") {
         this.set(id, { state: "skipped", bytesPerSecond: null, detail: "stopped" });
       }
     }
-    this.running = false;
     this.publish();
+    await this.inFlight;
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.disposed = true;
     this.abort.abort();
+    await this.inFlight;
   }
 }
 
@@ -747,4 +838,21 @@ function gb(mb: number): string {
 
 function firstLine(text: string): string {
   return text.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+}
+
+async function firstExisting(paths: readonly string[]): Promise<string | "unknown" | null> {
+  for (const path of paths) {
+    try {
+      await stat(toExtendedLength(path));
+      return path;
+    } catch (err) {
+      if (errorCode(err) !== "ENOENT") return "unknown";
+    }
+  }
+  return null;
+}
+
+function errorCode(err: unknown): string {
+  if (typeof err === "object" && err !== null && "code" in err && typeof err.code === "string") return err.code;
+  return "filesystem error";
 }

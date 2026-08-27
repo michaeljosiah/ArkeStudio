@@ -44,6 +44,8 @@ export const SetupComponentSchema = z
     bytesPerSecond: z.number().int().min(0).nullable().default(null),
     /** The reason, whenever the state is one that owes you one. */
     detail: z.string().optional(),
+    /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
+    repairRequired: z.boolean().optional(),
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;

@@ -129,6 +129,27 @@ describe("a recipe's weights hang off the recipe", () => {
     assert.match(here, />Repair<\/button>/);
   });
 
+  it("keeps a failed deletion actionable as Repair rather than an ineffective Retry", () => {
+    const html = render(
+      "/settings/local-runtime?group=comfyui",
+      stateWith(weights({
+        state: "failed",
+        detail: "checkpoints/sd_xl_base_1.0.safetensors could not be removed — close the engine and try Repair again (EBUSY)",
+        repairRequired: true,
+      })),
+    );
+    assert.match(html, /close the engine and try Repair again/);
+    assert.match(html, />Repair<\/button>/);
+    assert.doesNotMatch(html, />Retry<\/button>/);
+
+    const components = render(
+      "/settings/local-runtime?group=components",
+      stateWith(weights({ state: "failed", detail: "the checkpoint is held", repairRequired: true })),
+    );
+    assert.match(components, />Repair<\/button>/, "the Components copy of the row offers the same action");
+    assert.doesNotMatch(components, />Retry<\/button>/);
+  });
+
   it("is restated under Components until it arrives, and not after", () => {
     const outstanding = render("/settings/local-runtime?group=components", stateWith(weights({})));
     assert.match(outstanding, /Local · Draft Image · weights/, "reachable while it has not settled");
