@@ -109,7 +109,7 @@ const SUMMARISE_AFTER_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 8_000;
 
 /**
- * The bible is deliberately absent from BOUNDS: it is never trimmed (SPEC-022).
+ * The Bible is deliberately absent from BOUNDS: it is never trimmed (master §4.5).
  *
  * That is a departure from the rule above, and a considered one. The section is the author's own
  * document, loaded whole because a bible the Studio has only half of is worse than useless — it
@@ -175,7 +175,7 @@ export interface ContextInput {
   messages: readonly WorldChatMessage[];
   tombstones: readonly CandidateTombstone[];
   worldContext?: string;
-  /** The author's bible, whole and untrimmed (SPEC-022). Empty when they have not started one. */
+  /** The author's Bible, whole and untrimmed (master §4.5). Empty when they have not started one. */
   bible?: string;
   /**
    * What this prompt may spend, in characters, from the answering model's own window.
@@ -373,7 +373,7 @@ function renderAttachments(attachments: readonly ContextAttachment[], room?: num
 }
 
 /**
- * The author's bible, whole, with the one paragraph that says what it is (SPEC-022).
+ * The author's Bible, whole, with the one paragraph that says what it is (master §4.5).
  *
  * The framing is not decoration. A long, confident, first-person document about a world, dropped
  * into a prompt unlabelled, reads exactly like settled fact — and the Studio would then answer

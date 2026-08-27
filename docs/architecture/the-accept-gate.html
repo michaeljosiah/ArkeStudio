@@ -699,29 +699,29 @@
       </section>
 
       <section id="disagreements">
-        <h2>Where the plan and the build differ</h2>
+        <h2>Compatibility notes</h2>
         <p>
-          This page was written by reading the code, so it is worth naming where the code and the
-          written plan do not yet agree.
+          Two older shapes remain worth naming because worlds and proposal manifests outlive the
+          build that made them.
         </p>
         <dl class="kv">
           <dt>read-only context</dt>
           <dd>
-            The specification says a proposal folder also holds a read-only <code>_context/</code> —
-            a canon extract and related sheets for the editor to read but not change. Nothing writes
-            one. What exists is <code>_base/</code>, the before-copy used for merging.
-            <span class="pill pill--part">specified, not built</span>
+            Proposal folders hold <code>_base/</code>, the before-copy used for merging. Context
+            outside the proposal's target scope is read through the confined world-query tool; no
+            copied <code>_context/</code> tree exists.
           </dd>
           <dt>restore</dt>
           <dd>
-            <code>restore</code> is one of the sixteen kinds a proposal can be, but putting a version
-            back does not currently stage one — it commits directly, as a deliberate human act. The
-            kind is defined and unused. <span class="pill pill--part">defined, unused</span>
+            <code>restore</code> is a reserved, currently unused proposal kind. Restore actions
+            commit directly as new versions; the deliberate human action is not staged for the same
+            person to accept again.
           </dd>
           <dt>adoption snapshot</dt>
           <dd>
-            The outside-edit snapshot described in the section above.
-            <span class="pill pill--part">specified, not built</span>
+            The outside-edit snapshot described in the section above is built: adoption supplies
+            the last committed bytes to the journalled commit before replacing the live file.
+            <span class="pill pill--yes">built</span>
           </dd>
         </dl>
       </section>

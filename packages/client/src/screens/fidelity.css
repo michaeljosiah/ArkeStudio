@@ -4462,7 +4462,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* The looks composer is a door now, not a form (design 66). */
 .fy-looks-composer__note { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 10px; }
 
-/* The bible (SPEC-022): one document, an outline beside it, and the versions behind it. */
+/* The Bible (master §4.5): one document, an outline beside it, and the versions behind it. */
 .fy-biblegrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 268px;

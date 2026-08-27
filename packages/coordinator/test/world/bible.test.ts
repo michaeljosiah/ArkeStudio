@@ -35,8 +35,8 @@ const OPENING = [
   "Nobody has decided who rings them.",
 ].join("\n");
 
-/** SPEC-022. The bible is ungated, so these tests are the accept gate's replacement. */
-describe("the world bible (SPEC-022)", () => {
+/** Master §4.5. The Bible is ungated, so these tests are the accept gate's replacement. */
+describe("the world Bible (master §4.5)", () => {
   describe("splitting and applying, without a world", () => {
     it("keeps prose written above the first heading", () => {
       // Unlike a sheet, which refuses one. A bible is a blank page somebody types into, and the

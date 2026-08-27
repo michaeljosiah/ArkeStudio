@@ -68,10 +68,9 @@ export interface ProviderClientDeps {
  * its recording is dropped the moment there is a transcript (SPEC-018 R-13), and a job would
  * journal the one thing that must not persist.
  *
- * Higgsfield is the one client that is not an HTTP client (issue #137): it drives the vendor's
- * CLI as a subprocess and still takes `fetch`, because results are URLs and the bytes come
- * over HTTP. Only that download half passes through `captureProviderClient` — the subprocess
- * calls produce no ProviderCallRecord yet.
+ * Higgsfield is the one client driven partly as a subprocess (issue #137): submit, poll and
+ * status calls are captured as ProviderCallRecords with method EXEC, while artifact bytes are
+ * downloaded and captured over HTTP. Both seams pass through captureProviderClient.
  */
 export function createProviderClients(deps: ProviderClientDeps): Partial<Record<ProviderId, ProviderClient>> {
   const { fetch: fetchImpl, capture } = deps;

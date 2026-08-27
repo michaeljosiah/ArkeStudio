@@ -63,7 +63,7 @@ export function foldConversation(
   let saveInFlight = false;
 
   const messages: WorldChatMessage[] = [];
-  /** Landed bible edits, by the studio message that reported them (SPEC-022). */
+  /** Landed Bible edits, by the studio message that reported them (master §4.5). */
   const bibleEdits = new Map<string, BibleEditRecord>();
   /** Tools each turn was refused, by the studio message written despite them (#506). */
   const refusals = new Map<string, readonly string[]>();

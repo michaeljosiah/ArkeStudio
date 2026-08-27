@@ -25,8 +25,9 @@ export const ProposalKindSchema = z.enum([
   "season-edit",
   "episode-edit",
   "extraction",
-    "restore",
-    "art-direction",
+  /** Reserved, currently unused. Restore actions commit directly as new versions. */
+  "restore",
+  "art-direction",
   /** #70: the several changes one conversation turned into, staged together. */
   "worldbuilding",
 ]);

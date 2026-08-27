@@ -9,7 +9,7 @@ import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
- * Turn 97: a hand edit saves where it stands — the bible's model (SPEC-022) applied to scenes.
+ * Turn 97: a hand edit saves where it stands — the Bible's model (master §4.5) applied to scenes.
  * Every save cuts a version with a history snapshot; a save against a moved base is refused,
  * not merged; and v<n> can come back as a new version with nothing between lost.
  */

@@ -669,8 +669,8 @@ export class ComfyUiClient implements ProviderClient {
         : ext === "jpg" || ext === "jpeg" ? "image/jpeg"
         : ext === "mp4" ? "video/mp4"
         : ext === "webm" ? "video/webm"
-        // Audio, because a voice recipe's output node saves a wav (SPEC-022). Naming the type
-        // is not cosmetic: `verifyArtifact` dispatches on it, and an unnamed type falls through
+        // Voice recipes can return WAV, MP3, or FLAC (SPEC-022). Naming the type is not cosmetic:
+        // `verifyArtifact` dispatches on it, and an unnamed type falls through
         // to "a non-empty body is the best check available" — so a truncated download or an
         // error page would have been filed as a take and played as silence, which is the exact
         // failure the Kokoro client's own RIFF check exists to prevent.

@@ -118,7 +118,7 @@ export class FsWorldProvider implements WorldProvider {
     return this.store ? new ProposalManager(this.store) : null;
   }
 
-  /** The open world quietly refreshed itself — no accusation, just newer bytes (SPEC-022). */
+  /** The open world quietly refreshed itself — no accusation, just newer Bible bytes (R-BIBLE-6). */
   onWorldAdopted(cb: (worldId: string) => void): void {
     this.onAdoptedCb = cb;
   }
@@ -282,7 +282,7 @@ export class FsWorldProvider implements WorldProvider {
     }
     // The one document that is the author's rather than the model's, written at v1 with no
     // history behind it — the same state any other first version has. It is deliberately not
-    // a proposal: the bible is ungated everywhere else (SPEC-022), and a world cannot be
+    // a proposal: the Bible is ungated everywhere else (master §4.5), and a world cannot be
     // asked to approve the thinking that produced it.
     if (input.bible) {
       await atomicWriteFile(join(dir, fromPortable(BIBLE_PATH)), initialBible(input.bible, at));

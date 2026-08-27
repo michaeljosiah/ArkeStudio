@@ -30,7 +30,7 @@ import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
  *
  * The card is the editor: the script is typed on it, and everything else the card states is
  * derived — never a stored status. A hand edit saves where it stands (the bible's model,
- * SPEC-022): every save cuts a version, and a save against a scene that moved is refused by
+ * master §4.5): every save cuts a version, and a save against a scene that moved is refused by
  * the coordinator, which this screen learns from the snapshot's version rather than a reply.
  * The docked assistant and per-shot dispatch are later phases (turn 97's dv-next); until they
  * land, Generate frame and Regenerate go where those actions already live.

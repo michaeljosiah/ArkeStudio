@@ -1695,7 +1695,7 @@ export class Coordinator {
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
-    // The bible, hand-edited while the app was open (SPEC-022 R-BIBLE-6). No event and no banner:
+    // The Bible, hand-edited while the app was open (R-BIBLE-6). No event and no banner:
     // the world simply redraws with what they typed. Without this the store holds the new text
     // and the screen holds the old, which is the most confusing of the three possible states.
     this.opts.provider.onWorldAdopted?.((worldId) => {

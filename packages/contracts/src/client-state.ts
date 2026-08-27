@@ -223,7 +223,7 @@ export const WorldBundleSchema = z
     meta: WorldMetaSchema,
     artDirection: ResolvedArtDirectionSchema,
     /**
-     * The author's bible, whole (SPEC-022). Always present as a record; `present: false` when the
+     * The author's Bible, whole (master §4.5). Always present as a record; `present: false` when the
      * world has no `bible.md` yet, which is every world created before it existed. Carried on the
      * bundle rather than fetched, because the screen that edits it and the turn that loads it both
      * want the same text and a world is already sent whole (SPEC-001 D4).
@@ -401,7 +401,7 @@ export const ClientStateSchema = z
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
-        /** Whether the Studio may read a page online when a conversation asks it to (SPEC-022). */
+        /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */

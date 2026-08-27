@@ -78,12 +78,11 @@ exist as operational records; the gate controls authored facts and what the work
 
 ## What you can make
 
-One world, three production families, all starring the same characters in the same places
-under the same rules:
+One world, two production families, all starring the same characters in the same places under the
+same rules. Interactive is a Video kind, not a third family:
 
 - **Story** · novels, novellas, short fiction, screenplays and audio-first scripts, drafted with the canon as editor
-- **Video** · *Microdrama* (short-form episodic drama), films and series with boards and shots dispatched to video models with references attached
-- **Interactive video** · branching narratives where the audience chooses which scene follows, with validated structure and continuity
+- **Video** · *Microdrama* (short-form episodic drama), films, music videos, and interactive branching narratives, with boards and shots dispatched to video models with references attached
 
 Visual assets — concept art, character references, storyboards and promotional material — travel
 with every production as they develop.

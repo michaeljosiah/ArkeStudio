@@ -58,7 +58,7 @@ describe("the enhancer's brief", () => {
   });
 
   /**
-   * The bible is the author's thinking, not canon (SPEC-022). It reaches a prompt the way key art
+   * The Bible is the author's thinking, not canon (master §4.5). It reaches a prompt the way key art
    * lets it (SPEC-031 R-58) — as intent, named as intent — so a rewrite sounds like this world
    * rather than like its genre. What it must never do is arrive wearing canon's word.
    */

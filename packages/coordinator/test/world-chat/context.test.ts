@@ -73,7 +73,7 @@ function baseInput() {
   };
 }
 
-describe("the author's bible in context (SPEC-022)", () => {
+describe("the author's Bible in context (master §4.5)", () => {
   const BIBLE = "## The tides\n\nThe tide is the clock.";
 
   it("carries the whole thing, however long, unlike every other section", () => {

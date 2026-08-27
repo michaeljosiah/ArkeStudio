@@ -14,7 +14,7 @@ import { MarkdownFile, sha256 } from "./text-files.js";
 import type { WorldStore } from "./store.js";
 
 /**
- * Reading and writing the author's bible (SPEC-022).
+ * Reading and writing the author's bible (master §4.5, R-BIBLE-*).
  *
  * Two writers, one path. The author types in the editor; the agent describes edits in its turn
  * result and the coordinator performs them. Both land here, so both version, both snapshot, and
@@ -32,7 +32,7 @@ export async function readBible(dir: string): Promise<WorldBible> {
   try {
     raw = await readFile(toExtendedLength(join(dir, fromPortable(BIBLE_PATH))), "utf8");
   } catch {
-    // Every world made before SPEC-022 is here, and so is every world whose author has not
+    // Every world made before the Bible existed is here, and so is every world whose author has not
     // started one. Mirrors SPEC-002 R-1's treatment of a folder with no world.json: absent is
     // ignored, never reported as corrupt.
     return EMPTY_BIBLE;
@@ -146,7 +146,7 @@ export async function saveBible(
 }
 
 /**
- * Apply a turn's edits (SPEC-022, #70 §8.3).
+ * Apply a turn's edits (master §4.5, #70 §8.3).
  *
  * Returns null when there are no edits, so callers need no special case for the ordinary turn.
  * Throws `BibleEditError` when a heading does not resolve and `BibleStaleError` when the file

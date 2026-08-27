@@ -319,7 +319,7 @@ export interface RoutingLayout {
 /**
  * The same graph always draws the same picture: longest-path layers from the start scene,
  * in-layer order by first authored inbound choice then scene id. No force simulation, no
- * dependency — the graphs this medium allows do not justify either.
+ * dependency — the graphs this Video kind allows do not justify either.
  */
 export function layoutRouting(routing: Routing, scenes: ReadonlyArray<{ id: string }>): RoutingLayout {
   const forward = new Map<string, string[]>();

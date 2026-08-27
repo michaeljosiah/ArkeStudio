@@ -656,7 +656,7 @@ async function readScene(store: WorldStore, productionId: string, sceneFile: str
 /**
  * Write a scene whole — what the storyboard's card edits call (turn 97).
  *
- * The bible's model (SPEC-022) applied to scenes: no proposal, no accept. What replaces the
+ * The Bible's model (master §4.5) applied to scenes: no proposal, no accept. What replaces the
  * gate is the version — the committer cuts one per save with a full `.history/` snapshot, so
  * an edit nobody wanted is one restore away. `baseVersion` is the version the storyboard had
  * loaded; a save against a scene that has since moved is refused, not merged, in words a

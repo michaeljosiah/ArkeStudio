@@ -71,7 +71,7 @@ export interface AcceptedTurn {
   groups: CandidateGroup[];
   tombstones: CandidateTombstone[];
   /**
-   * Bible edits this turn described, still unapplied (SPEC-022).
+   * Bible edits this turn described, still unapplied (master §4.5).
    *
    * Validation stops at the shape. Whether a heading resolves is a fact about the file, and this
    * module deliberately touches no world state — the runner applies them, and a failure there

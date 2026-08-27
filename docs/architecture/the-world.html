@@ -646,16 +646,16 @@ whose melody cannot be carried back across waking…
         <h2>Reference kits: how a face survives</h2>
         <p>
           Each sheet with pictures gets a folder under <code>references/</code> holding its images
-          and one small file listing them. This is the mechanism behind identity travelling: a
-          character carries the same two pictures into every generation that will take them, which
-          is why she keeps her face.
+          and one small file listing them. This is the mechanism behind identity travelling: Arke
+          selects the designated composite and main photo for the slots a generation accepts; a
+          scoped look can take the primary slot, and strict start-frame routes carry no sheet image.
         </p>
         <div class="flow">
           <div class="node node--lead"><strong>The main photo</strong><span>one accepted image — this is what she looks like</span></div>
           <div class="link">→</div>
           <div class="node"><strong>The model sheet</strong><span>one composite: turnaround, expressions, details</span></div>
           <div class="link">→</div>
-          <div class="node"><strong>Every generation</strong><span>both ride along with the shot</span></div>
+          <div class="node"><strong>Reference slots</strong><span>selected deterministically for the route</span></div>
         </div>
         <p>Here is a real kit, trimmed:</p>
         <div class="snip"><span class="c">references/maren-kest/kit.json</span>
@@ -715,9 +715,9 @@ whose melody cannot be carried back across waking…
           <span class="pill pill--part">superseded design</span> The older six-angle turnaround —
           with its rule that body angles wait until the whole head set is locked — is still in the
           file format and still readable; the sample kit above is one of those. But new kits are
-          created with no angle tiles at all, and the character reference screen is built on the
-          main photo and the one compiled sheet instead. The written specification for kits still
-          describes the older design. The code has moved on, and the code is what runs.
+           created with no angle tiles at all, and the character reference screen is built on the
+          main photo and the one compiled sheet instead. SPEC-010 now labels the tile workflow as
+          the legacy compatibility path and points new kits to SPEC-017.
         </p>
         <p>
           Locations work the same way with different furniture: not a face but a set of accepted
