@@ -153,28 +153,37 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
     requires: { vramMb: 512 * 1024 },
   };
 
-  /** A ComfyUI service that is nothing but a locality, which is all the gate asks it for. */
-  function engineAt(locality: "local" | "remote") {
-    return {
-      engineStatus: () => ({
-        source: locality === "remote" ? "user-url" : "managed",
-        state: "ready",
-        locality,
-        location: locality === "remote" ? "https://gpu.example:8188" : "127.0.0.1:8188",
-        version: "0.3.45",
-        instanceId: "engine-1",
-        detail: null,
-        detected: [],
-      }),
+  /**
+   * A ComfyUI service that is nothing but a locality, which is all the gate asks it for. The
+   * locality is mutable because the case that matters is the switch, not either end of it.
+   */
+  function engineStub() {
+    const state = { locality: "local" as "local" | "remote" };
+    const engineStatus = () => ({
+      source: state.locality === "remote" ? "user-url" : "managed",
+      state: "ready",
+      locality: state.locality,
+      location: state.locality === "remote" ? "https://gpu.example:8188" : "127.0.0.1:8188",
+      version: "0.3.45",
+      instanceId: "engine-1",
+      detail: null,
+      detected: [],
+    });
+    const service = {
+      engineStatus,
+      status: async () => ({ engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" }),
+      reverify: async () => {},
       subscribe: () => () => {},
       dispose: async () => {},
     } as unknown as ComfyUiEngineService;
+    return { service, state };
   }
 
-  async function runtimeAfterDetect(locality: "local" | "remote") {
+  async function harness() {
     const { root } = await makeTempRoot();
     const provider = new FsWorldProvider(root, { clock: () => "2026-08-27T12:00:00.000Z" });
     const events: DomainEvent[] = [];
+    const engine = engineStub();
     const coordinator = new Coordinator({
       provider,
       adapter: null,
@@ -189,36 +198,83 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
         accelerators: ["cuda"],
         platform: "win32",
       }),
-      comfyui: { service: engineAt(locality) },
+      comfyui: { service: engine.service },
       observeEvent: (event) => events.push(event),
     });
-    try {
-      await (
+    const send = (message: ClientMessage) =>
+      (
         coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }
-      ).handleClientMessage({ kind: "detect-runtimes" });
-      const status = events.filter((e) => e.type === "runtime.status").at(-1);
-      assert.ok(status && status.type === "runtime.status", "detect-runtimes must publish a runtime status");
-      return status.runtime;
-    } finally {
-      await coordinator.stop();
-      await provider.close();
-    }
+      ).handleClientMessage(message);
+    const statuses = () => events.filter((e) => e.type === "runtime.status");
+    const latest = () => {
+      const last = statuses().at(-1);
+      assert.ok(last && last.type === "runtime.status", "expected a runtime status on the wire");
+      return last.runtime;
+    };
+    return {
+      engine,
+      send,
+      statuses,
+      latest,
+      close: async () => {
+        await coordinator.stop();
+        await provider.close();
+      },
+    };
   }
 
   it("a managed engine's models are judged against this machine", async () => {
-    const runtime = await runtimeAfterDetect("local");
-    const model = runtime.models.find((m) => m.modelId === MODEL.id);
-    assert.equal(model?.locality, "local");
-    assert.equal(model?.fit, "insufficient");
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const model = h.latest().models.find((m) => m.modelId === MODEL.id);
+      assert.equal(model?.locality, "local");
+      assert.equal(model?.fit, "insufficient");
+    } finally {
+      await h.close();
+    }
   });
 
-  it("a remote engine's models carry no verdict about this machine", async () => {
-    const runtime = await runtimeAfterDetect("remote");
-    const model = runtime.models.find((m) => m.modelId === MODEL.id);
-    assert.equal(model?.locality, "remote");
-    // Not `unknown` — nobody failed to measure anything. The machine this model runs on was
-    // simply never the subject, and the row states that as *served elsewhere*.
-    assert.equal(model?.fit, undefined);
-    assert.equal(model?.reason, undefined);
+  it("switching to a remote engine reclassifies without a restart or a re-probe (row 12)", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const measured = h.latest().detectedAt;
+      assert.equal(h.latest().models[0]?.fit, "insufficient");
+
+      h.engine.state.locality = "remote";
+      await h.send({ kind: "comfyui-refresh" });
+
+      const model = h.latest().models.find((m) => m.modelId === MODEL.id);
+      assert.equal(model?.locality, "remote");
+      // Not `unknown` — nobody failed to measure anything. The machine this model runs on was
+      // simply never the subject, and the row states that as *served elsewhere*.
+      assert.equal(model?.fit, undefined);
+      assert.equal(model?.reason, undefined);
+      // Re-gating is not a measurement. A fresh timestamp here would claim a probe that never
+      // ran, and the machine header has to tell *not yet measured* from *measured and failed*.
+      assert.equal(h.latest().detectedAt, measured);
+
+      h.engine.state.locality = "local";
+      await h.send({ kind: "comfyui-refresh" });
+      assert.equal(h.latest().models[0]?.fit, "insufficient");
+    } finally {
+      await h.close();
+    }
+  });
+
+  it("an unchanged answer stays off the wire", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      const before = h.statuses().length;
+      // Every engine publish re-gates, and `runtime.status` is journalled — so an engine that
+      // flaps would otherwise write one identical gate result per transition.
+      await h.send({ kind: "comfyui-refresh" });
+      await h.send({ kind: "comfyui-refresh" });
+      assert.equal(h.statuses().length, before);
+    } finally {
+      await h.close();
+    }
   });
 });

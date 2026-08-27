@@ -689,11 +689,32 @@ describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
     assert.match(mac.reason!, /Runs on macOS · this machine is Windows/);
   });
 
-  it("no refusing verdict comes out of an unmeasured probe alone (R-22)", () => {
+  it("an unmeasured declared requirement refuses nothing and promises nothing (R-22, R-36)", () => {
     // A probe that never ran cannot refuse. Absent and null both read as unmeasured; only a
     // measured empty list is a machine that answered "none".
-    assert.equal(verdict({ accelerator: ["cuda"] }, { accelerators: null }).fit, "runs-well");
-    assert.equal(verdict({ platform: ["darwin"] }, { platform: null }).fit, "runs-well");
+    const noAccelerator = verdict({ accelerator: ["cuda"] }, { accelerators: null });
+    assert.equal(noAccelerator.fit, "unknown");
+    assert.match(noAccelerator.reason!, /the accelerator could not be measured/);
+
+    // And not `runs-well` either. A declared requirement nobody could check is exactly as
+    // unanswered as a floor nobody could measure, and R-35 would otherwise recommend a model on
+    // the strength of a claim about a machine no one made.
+    const noPlatform = verdict({ platform: ["darwin"] }, { platform: null });
+    assert.equal(noPlatform.fit, "unknown");
+    assert.match(noPlatform.reason!, /the platform could not be measured/);
+
+    // A measured shortfall still beats it, the same way it beats an unmeasured floor (R-21).
+    const short = verdict({ vramMb: 32 * 1024, accelerator: ["cuda"] }, { vramMb: 4 * 1024, accelerators: null });
+    assert.equal(short.fit, "insufficient");
+    assert.match(short.reason!, /the accelerator could not be measured/);
+  });
+
+  it("a refusal never states two figures that read the same (R-19)", () => {
+    // Kokoro's floor is 4000 MB, so a laptop reporting 3993 used to refuse with
+    // "Needs 3.9 GB memory · this machine has 3.9 GB" — both figures, and no information.
+    const near = verdict({ memMb: 4000 }, { memMb: 3993 });
+    assert.equal(near.fit, "insufficient");
+    assert.match(near.reason!, /Needs 4000 MB memory · this machine has 3993 MB/);
   });
 
   it("a failed probe yields unknown where nothing else refuses (row 5, SPEC-008 D12)", () => {
@@ -809,6 +830,13 @@ describe("the recommendation (SPEC-033 R-33..R-38)", () => {
     const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes(), detectedAt);
     assert.equal(status.models.filter((m) => m.capability === "music").length, 0);
     assert.equal(status.recommended.music, undefined);
+  });
+
+  it("a preferred id of another capability is skipped, not filed under this one", () => {
+    // The guard belongs beside the data rather than in the test that noticed it: a voice model
+    // recommended as the writing model is the shape of the fault, and it is a one-line skip.
+    const drifted: ModelManifest = { ...SHIPPED_MANIFEST, localPreference: { llm: ["kokoro-82m", "gemma4-12b"] } };
+    assert.equal(gateLocalRuntimes(drifted, probes(), detectedAt).recommended.llm, "gemma4-12b");
   });
 
   it("a remote engine's models are filtered out before the verdict is consulted (R-34)", () => {

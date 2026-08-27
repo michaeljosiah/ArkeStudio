@@ -311,10 +311,10 @@ export const RuntimeProbesSchema = z
     /**
      * What this machine reports it can accelerate with — `["cuda"]`, `["metal"]`, and so on.
      *
-     * Three readings, deliberately: absent means nobody asked, `null` means the probe ran and
-     * failed, and `[]` means it ran and found none. Only the third can refuse a model, because
-     * SPEC-033 R-22 forbids a refusing verdict drawn from an unmeasured probe — and a machine
-     * whose adapter list could not be read is not a machine without a graphics card.
+     * Absent and `null` both mean unmeasured — an older payload never carried the field, and a
+     * probe that failed answers null. `[]` is the only reading that can refuse a model: SPEC-033
+     * R-22 forbids a refusing verdict drawn from an unmeasured probe, and a machine whose
+     * adapter list could not be read is not a machine without a graphics card.
      */
     accelerators: z.array(z.string().min(1)).nullable().optional(),
     /** `process.platform` as the host reports it. Absent or null means it was not stated. */

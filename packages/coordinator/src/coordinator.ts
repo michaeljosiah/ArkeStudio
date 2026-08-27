@@ -690,6 +690,14 @@ export class Coordinator {
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
+  /**
+   * The last hardware measurement, with the moment it was taken. Held rather than read back off
+   * the read model because the re-gate needs the original `detectedAt`: re-gating is not a
+   * measurement, and a fresh timestamp would claim a probe that never ran.
+   */
+  private lastRuntimeDetection: { probes: RuntimeProbes; detectedAt: string } | null = null;
+  /** The last gate result on the wire, so an unchanged re-gate stays off it. */
+  private lastRuntimeStatus = "";
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
@@ -2527,14 +2535,30 @@ export class Coordinator {
    * them is the machine: changing the selected engine from managed to a remote URL reclassifies
    * every model that engine serves, and R-13 requires that without a restart or a manual
    * refresh.
+   *
+   * `detectedAt` is carried, never re-stamped. Re-gating is not a measurement, and a fresh
+   * timestamp would claim a probe that never ran — which is precisely the distinction the
+   * machine header has to draw between *not yet measured* and *measured and failed* (R-58).
+   *
+   * Unchanged answers stay off the wire. This runs on every engine publish — a supervised child
+   * changing state, a manual refresh, a recipe re-verification — and `runtime.status` is
+   * journalled, so an engine that flaps would otherwise write one identical gate result per
+   * transition and re-render Settings behind it. Same guard, same reason, as the local-provider
+   * poll above.
    */
-  private emitLocalRuntimeStatus(probes: RuntimeProbes): void {
-    if (!this.opts.manifest) return;
-    this.emit({
-      at: new Date().toISOString(),
-      type: "runtime.status",
-      runtime: gateLocalRuntimes(this.opts.manifest, probes, new Date().toISOString(), this.engineLocalities()),
-    });
+  private emitLocalRuntimeStatus(): void {
+    const measured = this.lastRuntimeDetection;
+    if (!this.opts.manifest || measured === null) return;
+    const runtime = gateLocalRuntimes(
+      this.opts.manifest,
+      measured.probes,
+      measured.detectedAt,
+      this.engineLocalities(),
+    );
+    const fingerprint = JSON.stringify(runtime);
+    if (fingerprint === this.lastRuntimeStatus) return;
+    this.lastRuntimeStatus = fingerprint;
+    this.emit({ at: new Date().toISOString(), type: "runtime.status", runtime });
   }
 
   /** Publish the combined engine + recipe readiness (SPEC-021 §2.12), whole each time. */
@@ -2545,9 +2569,9 @@ export class Coordinator {
     const status = await service.status(probes);
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
     // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move
-    // together (R-13). Nothing is re-probed — the figures are the ones already measured, and a
-    // machine that was never measured has no verdict to correct.
-    if (probes !== null) this.emitLocalRuntimeStatus(probes);
+    // together (R-13). Nothing is re-probed — a machine that was never measured has no verdict
+    // to correct, and `emitLocalRuntimeStatus` returns without emitting.
+    this.emitLocalRuntimeStatus();
   }
 
   private retireAndReleaseComfyUi(): Promise<void> {
@@ -8731,7 +8755,8 @@ export class Coordinator {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
           const probes = await this.opts.probeRuntime();
-          this.emitLocalRuntimeStatus(probes);
+          this.lastRuntimeDetection = { probes, detectedAt: new Date().toISOString() };
+          this.emitLocalRuntimeStatus();
         } catch {
           // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
           // the last known figures, and nothing gets disabled by a broken probe.

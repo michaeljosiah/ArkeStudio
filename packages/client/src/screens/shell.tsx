@@ -128,6 +128,7 @@ import {
   isComfyUiWeightsComponent,
   type ComfyUiEngineStatus,
   type LedgerEntry,
+  formatGb,
   type LocalRuntimeModel,
   type LocalRuntimeStatus,
   type NarratorSettings,
@@ -2555,7 +2556,9 @@ function RuntimeSection({ label, children }: { label: string; children?: ReactNo
 
 /** What this machine measured, and the way to measure it again. */
 function MachineDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
-  const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : `${Math.round(mb / 1024)} GB`);
+  // One spelling of a gigabyte across the whole product: the gate's. A rail rounding to 6 GB
+  // beside a row saying "needs 6.2 GB" is two answers to one measurement.
+  const gbOrUnknown = (mb: number | null) => (mb === null ? "could not measure" : formatGb(mb));
   const probes: Array<[string, number | null]> = [
     ["VRAM", runtime?.probes.vramMb ?? null],
     ["Memory", runtime?.probes.memMb ?? null],
@@ -3135,38 +3138,51 @@ function fitWords(model: LocalRuntimeModel): string {
 /** The manifest's local models, gated against what this machine measured (R-22). */
 function LocalModelsDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
   const models = runtime?.models ?? [];
-  const ready = models.filter(runsHere).length;
+  // A model served by a remote engine is not a fact about this machine, so it is neither under
+  // the heading that says so nor in that heading's denominator — SPEC-028 R-37, SPEC-033 R-10.
+  const here = models.filter((m) => m.locality === "local");
+  const elsewhere = models.filter((m) => m.locality === "remote");
+  const ready = here.filter(runsHere).length;
+  const row = (m: LocalRuntimeModel) => (
+    <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", refusedHere(m) && "fy-set__row--off")}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="fy-set__name fy-set__name--wide">
+          <div className="fy-set__title">{m.displayName}</div>
+          <div className="fy-set__caps fy-set__caps--tokens">
+            {PROVIDER_TABLE[m.provider].displayName} · {m.capability}
+          </div>
+        </div>
+        <RuntimeStatus tone={runsHere(m) ? "ok" : refusedHere(m) ? "warn" : "idle"}>{fitWords(m)}</RuntimeStatus>
+      </div>
+      {/* Kept visible, disabled, with the measured reason — never quietly absent. The cloud
+          alternative rides beside it: a refusal that names no way through is half a refusal. */}
+      {m.reason && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>
+            {m.reason}
+            {m.cloudAlternative ? ` ${m.cloudAlternative}` : ""}
+          </span>
+        </div>
+      )}
+    </div>
+  );
   return (
     <>
       <RuntimeHead
         title="Local models"
         caps="FREE · NEVER METERED"
-        tone={models.some(refusedHere) ? "warn" : models.length === 0 ? "idle" : "ok"}
-        state={runtime === null ? "not yet measured" : `${ready} of ${models.length} ready`}
+        tone={here.some(refusedHere) ? "warn" : here.length === 0 ? "idle" : "ok"}
+        state={runtime === null ? "not yet measured" : `${ready} of ${here.length} ready`}
       />
       <RuntimeSection label="ON THIS MACHINE" />
-      {models.map((m) => (
-        <div key={m.modelId} className={cx("fy-set__row--stack", "fy-set__row", refusedHere(m) && "fy-set__row--off")}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div className="fy-set__name fy-set__name--wide">
-              <div className="fy-set__title">{m.displayName}</div>
-              <div className="fy-set__caps fy-set__caps--tokens">
-                {PROVIDER_TABLE[m.provider].displayName} · {m.capability}
-              </div>
-            </div>
-            <RuntimeStatus tone={runsHere(m) ? "ok" : refusedHere(m) ? "warn" : "idle"}>
-              {fitWords(m)}
-            </RuntimeStatus>
-          </div>
-          {/* Kept visible, disabled, with the measured reason — never quietly absent. */}
-          {m.reason && (
-            <div className="fy-set__why">
-              <span className="fy-set__dot fy-set__dot--warn" />
-              <span>{m.reason}</span>
-            </div>
-          )}
-        </div>
-      ))}
+      {here.map(row)}
+      {elsewhere.length > 0 && (
+        <>
+          <RuntimeSection label="SERVED ELSEWHERE" />
+          {elsewhere.map(row)}
+        </>
+      )}
       {runtime === null && <div className="fy-set__note">detection runs at start-up · Re-detect is under This machine</div>}
     </>
   );
@@ -3417,7 +3433,7 @@ export function SettingsLocalRuntimeScreen() {
       label: "This machine",
       tone: runtime ? "ok" : "idle",
       // The figure the gating actually turns on, so the rail answers "will this run here?".
-      count: runtime?.probes.vramMb == null ? "—" : `${Math.round(runtime.probes.vramMb / 1024)} GB VRAM`,
+      count: runtime?.probes.vramMb == null ? "—" : `${formatGb(runtime.probes.vramMb)} VRAM`,
     },
     {
       id: "components",

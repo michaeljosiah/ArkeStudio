@@ -35,10 +35,29 @@ export const LOCAL_FIT_HEADROOM_RATIO = 0.25;
  * Gigabytes to one decimal, dropping a bare `.0`. The old spelling rounded to whole gigabytes,
  * which printed a machine holding 12.1 GB against a 12 GB floor as `12 GB` — the one figure that
  * makes `runs-slowly` legible, rendered as though the floor were met exactly.
+ *
+ * Exported so that every surface stating a machine figure states it the same way. Three
+ * roundings of one number on one screen is how a rail saying `6 GB VRAM` ends up beside a row
+ * saying `needs 6.2 GB`.
  */
-function gb(mb: number): string {
+export function formatGb(mb: number): string {
   const rounded = Math.round((mb / 1024) * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} GB`;
+}
+
+/**
+ * A floor and what the machine answered for it, in figures that differ.
+ *
+ * One decimal shrinks the window where two different numbers print the same string; it does not
+ * close it. Kokoro's floor is 4000 MB, so a laptop reporting 3993 refused with
+ * `Needs 3.9 GB memory · this machine has 3.9 GB` — a refusal whose two figures agree, which is
+ * the one thing R-19's *both figures* rule exists to prevent. Where the gigabyte spellings
+ * collide, both drop to megabytes, where they cannot.
+ */
+function figures(need: number, have: number): { need: string; have: string } {
+  const asGb = { need: formatGb(need), have: formatGb(have) };
+  if (asGb.need !== asGb.have) return asGb;
+  return { need: `${need} MB`, have: `${have} MB` };
 }
 
 /** The one cloud alternative worth naming, when the same capability has a cloud model. */
@@ -99,22 +118,27 @@ export interface FitResult {
  */
 export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   const req = model.requires ?? {};
+  /** What was asked for and not answered — a declared requirement counts as much as a floor. */
+  const unmeasured: string[] = [];
 
   // 1 · The declared refusals first. `unsupported` is the stronger statement — no machine of
   //     this kind will work — and stating a VRAM shortfall over it would offer a remedy that
-  //     cannot help. R-22 keeps an unmeasured probe from producing either of them: absent or
-  //     null is *nobody measured*, and only a measured empty list refuses.
+  //     cannot help. R-22 keeps an unmeasured probe from producing either of them: `null` is
+  //     *nobody answered*, and only a measured empty list refuses.
   const platform = probes.platform ?? null;
-  if (req.platform !== undefined && platform !== null && !req.platform.includes(platform)) {
-    return {
-      fit: "unsupported",
-      reason: `Runs on ${orList(req.platform.map(platformLabel))} · this machine is ${platformLabel(platform)}`,
-    };
+  if (req.platform !== undefined) {
+    if (platform === null) unmeasured.push("the platform");
+    else if (!req.platform.includes(platform)) {
+      return {
+        fit: "unsupported",
+        reason: `Runs on ${orList(req.platform.map(platformLabel))} · this machine is ${platformLabel(platform)}`,
+      };
+    }
   }
   const accelerators = probes.accelerators ?? null;
-  if (req.accelerator !== undefined && accelerators !== null) {
-    const met = req.accelerator.some((name) => accelerators.includes(name));
-    if (!met) {
+  if (req.accelerator !== undefined) {
+    if (accelerators === null) unmeasured.push("the accelerator");
+    else if (!req.accelerator.some((name) => accelerators.includes(name))) {
       const has = accelerators.length === 0 ? "none" : orList(accelerators.map(acceleratorLabel));
       return {
         fit: "unsupported",
@@ -127,8 +151,8 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   const floors: Floor[] = [];
   if (req.vramMb !== undefined) floors.push({ need: req.vramMb, have: probes.vramMb, what: "VRAM" });
   if (req.memMb !== undefined) floors.push({ need: req.memMb, have: probes.memMb, what: "memory" });
+  for (const floor of floors) if (floor.have === null) unmeasured.push(floor.what);
 
-  const unmeasured = floors.filter((f) => f.have === null);
   const short = floors.find((f) => f.have !== null && f.have < f.need);
 
   // 3 · A measured refusal beats an unmeasured probe (R-21, D9). Without the precedence, a
@@ -136,24 +160,31 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   //     R-28 then offers an install that is known to fail. The failed probe is noted rather
   //     than allowed to soften the refusal.
   if (short !== undefined) {
-    const note = unmeasured.length === 0 ? "" : ` · ${unmeasured[0]!.what} could not be measured`;
+    const both = figures(short.need, short.have!);
+    const note = unmeasured.length === 0 ? "" : ` · ${unmeasured[0]} could not be measured`;
     return {
       fit: "insufficient",
-      reason: `Needs ${gb(short.need)} ${short.what} · this machine has ${gb(short.have!)}${note}`,
+      reason: `Needs ${both.need} ${short.what} · this machine has ${both.have}${note}`,
     };
   }
+
+  // 4 · Nothing refuses, and something was not measured. That is `unknown` whichever probe
+  //     failed: a declared requirement nobody could check is exactly as unanswered as a floor
+  //     nobody could measure, and calling it `runs-well` would let R-35 recommend a model on a
+  //     claim about a machine no one made (R-36).
   if (unmeasured.length > 0) {
-    return { fit: "unknown", reason: `${unmeasured[0]!.what} could not be measured on this machine` };
+    return { fit: "unknown", reason: `${unmeasured[0]} could not be measured on this machine` };
   }
 
-  // 4 · Every floor is met. The binding one — the one closest to its floor — is what decides
+  // 5 · Every floor is met. The binding one — the one closest to its floor — is what decides
   //     between the two passing verdicts, and it is the figure worth stating either way.
   if (floors.length === 0) return { fit: "runs-well" };
   const binding = floors.reduce((tightest, f) => (f.have! / f.need < tightest.have! / tightest.need ? f : tightest));
   const comfortable = binding.have! >= binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  const both = figures(binding.need, binding.have!);
   return {
     fit: comfortable ? "runs-well" : "runs-slowly",
-    reason: `Needs ${gb(binding.need)} ${binding.what} · this machine has ${gb(binding.have!)}`,
+    reason: `Needs ${both.need} ${binding.what} · this machine has ${both.have}`,
   };
 }
 
@@ -177,6 +208,11 @@ export function recommendLocalModels(
       // Locality is filtered before the verdict (R-34): a model served by a remote engine is
       // not a recommendation about this machine, and it carries no verdict to select on anyway.
       if (!gated || gated.locality !== "local" || gated.fit !== "runs-well") continue;
+      // The order is keyed by capability, so an entry naming a model of another one is a
+      // manifest fault. Skipped here rather than trusted, because the alternative is a voice
+      // model recommended as the writing model — and the check belongs beside the data rather
+      // than in the test that noticed it.
+      if (gated.capability !== capability) continue;
       recommended[capability] = modelId;
       break;
     }

@@ -57,14 +57,7 @@ export {
 } from "./higgsfield-cli.js";
 export { captureProviderClient } from "./capture.js";
 export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
-export {
-  gateLocalRuntimes,
-  recommendLocalModels,
-  fitFor,
-  LOCAL_FIT_HEADROOM_RATIO,
-  type EngineLocalities,
-  type FitResult,
-} from "@arke-studio/contracts";
+export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
   ProviderRequestRejectedError,

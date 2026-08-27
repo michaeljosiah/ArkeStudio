@@ -311,9 +311,9 @@ export const ManifestModelSchema = z
      */
     requires: z
       .object({
-        vramMb: z.number().int().min(0).optional(),
-        memMb: z.number().int().min(0).optional(),
-        diskMb: z.number().int().min(0).optional(),
+        vramMb: z.number().int().min(1).optional(),
+        memMb: z.number().int().min(1).optional(),
+        diskMb: z.number().int().min(1).optional(),
         /** `process.platform` spellings: `win32`, `darwin`, `linux`. */
         platform: z.array(z.string().min(1)).min(1).optional(),
         /** Accelerator names as the probe reports them: `cuda`, `rocm`, `metal`. */
