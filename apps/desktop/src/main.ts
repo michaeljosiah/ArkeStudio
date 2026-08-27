@@ -69,6 +69,7 @@ import {
 } from "./voxa-runtime.js";
 import {
   agentForPurpose,
+  comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
   type ThemePreference,
@@ -667,7 +668,7 @@ async function initialize(): Promise<{ port: number }> {
   const comfyUiWeightEntries: CatalogueEntry[] = COMFYUI_RECIPES.filter(
     (recipe) => recipe.requires.checkpoints.length > 0 && recipe.requires.unavailableReason === undefined,
   ).map((recipe) => ({
-    id: `comfyui-weights-${recipe.id}`,
+    id: comfyUiWeightsComponentId(recipe.id),
     displayName: `${recipe.displayName} · weights`,
     purpose: `Model files for ${recipe.displayName} — landed in the selected engine's mapped models folder`,
     sizeMb: recipe.requires.checkpoints.reduce((sum, c) => sum + c.sizeMb, 0),
