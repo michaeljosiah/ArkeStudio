@@ -208,6 +208,26 @@ Respond with ONLY a JSON object: {"lyrics": "..."}
 - Newlines separate lines of the song. Keep them; they are the meter.`,
   },
   {
+    name: "conversation-namer",
+    description: "Name a conversation from the first thing said in it",
+    // It answers with one line and writes nothing at all, so the file tools are denied outright.
+    needsProposal: false,
+    readOnly: true,
+    brief: `You name a conversation from the first thing somebody said in it.
+
+Respond with ONLY a JSON object: {"title": "..."}
+
+- The title is a label on a row in a list, read at a glance — what the conversation is about,
+  not a summary of it. "Maren's inheritance", "The bells at slack water", "Casting episode two".
+- Six words at most, and fewer is better. Sentence case. No closing full stop, no quotation
+  marks, no emoji, and never a preamble like "Conversation about".
+- Use their words and their spelling of names. Invent no subject they did not raise.
+- You are naming what they wrote, not replying to it. Do not answer the question, continue the
+  idea, or comment on it.
+- If what they wrote names nothing — a greeting, a test, a single word — name it with their own
+  words rather than inventing something for them.`,
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,
