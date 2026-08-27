@@ -29,7 +29,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-engines", samplePath: "/settings/engines" },
   { id: "settings-downloads", samplePath: "/settings/downloads" },
   { id: "settings-harness", samplePath: "/settings/harness" },
-  { id: "settings-who-does-what", samplePath: "/settings/who-does-what" },
+  { id: "settings-cloud-ai", samplePath: "/settings/cloud-ai" },
   { id: "settings-sample-world", samplePath: "/settings/sample-world" },
   { id: "settings-about", samplePath: "/settings/about" },
   { id: "activity", samplePath: "/activity" },

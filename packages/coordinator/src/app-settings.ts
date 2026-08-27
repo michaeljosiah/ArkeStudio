@@ -92,6 +92,27 @@ export class AppSettingsFile {
   }
 
   /**
+   * Take every local capability default out of routing and into the record of what was cleared
+   * (SPEC-033 R-66). Idempotent, and a no-op on an installation that never had one.
+   *
+   * Not a deletion: the cleared entry keeps its concrete model id so Cloud AI can name it, which
+   * is the difference between a setting that moved and one that vanished.
+   */
+  async clearLocalRouting(isLocal: (modelId: string) => boolean): Promise<AppSettings> {
+    return this.mutate<AppSettings>((current) => {
+      const kept: Record<string, string> = {};
+      const cleared: Record<string, string> = { ...current.clearedLocalRouting };
+      for (const [capability, modelId] of Object.entries(current.routing)) {
+        if (isLocal(modelId)) cleared[capability] = modelId;
+        else kept[capability] = modelId;
+      }
+      if (Object.keys(kept).length === Object.keys(current.routing).length) return { value: current };
+      const settings = { ...current, routing: kept, clearedLocalRouting: cleared };
+      return { settings, value: settings };
+    });
+  }
+
+  /**
    * Offer a model, or stop offering it. Switching one off never edits routing: a default left
    * pointing at it becomes a named fault instead, because choosing the replacement is a decision
    * and re-routing on someone's behalf makes it silently.
@@ -271,6 +292,17 @@ export function routingFaults(settings: AppSettings, manifest: ModelManifest): R
         reason: `${model.displayName} is routed here but switched off in Providers — pick another model, or turn it back on`,
       });
     }
+  }
+  // What Cloud AI took away, stated by name until the person has seen it (R-66). A fault rather
+  // than a new wire field: it is the same shape — a capability, a concrete model id, and one
+  // clause saying what to do — and it already reaches the screen that must say it.
+  for (const [capability, modelId] of Object.entries(settings.clearedLocalRouting) as Array<[Capability, string]>) {
+    const model = manifest.models.find((m) => m.id === modelId);
+    faults.push({
+      capability,
+      modelId,
+      reason: `${model?.displayName ?? modelId} ran on this machine and was cleared here — local models are now chosen per production, at dispatch`,
+    });
   }
   return faults;
 }

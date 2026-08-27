@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel } from "@arke-studio/contracts";
-import { SettingsProvidersScreen, SettingsWhoDoesWhatScreen } from "../src/screens/shell.js";
+import { SettingsCloudAiScreen, SettingsProvidersScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -57,10 +57,10 @@ const providers = () =>
     </MemoryRouter>,
   );
 
-const whoDoesWhat = () =>
+const cloudAi = () =>
   renderToString(
     <MemoryRouter>
-      <SettingsWhoDoesWhatScreen />
+      <SettingsCloudAiScreen />
     </MemoryRouter>,
   );
 
@@ -176,21 +176,21 @@ describe("Who does what, when a routed model is switched off", () => {
 
   it("flags the strand at the top and names the repair", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
-    const html = whoDoesWhat();
+    const html = cloudAi();
     assert.ok(html.includes("has nowhere to go"));
     assert.ok(html.includes("turn it back on"));
   });
 
   it("says turned off, not needs a key — the two strands have different repairs", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
-    const html = whoDoesWhat();
+    const html = cloudAi();
     assert.ok(html.includes("turned off in Providers"));
     assert.ok(!html.includes("fal has no key"), "fal has a key; the model is simply off");
   });
 
   it("never re-routes: the switched-off model is still what the row shows", () => {
     __setStateForTest(stateWith({ disabled: ["seedance-2.0"], faults: STRANDED.faults }));
-    const html = whoDoesWhat();
+    const html = cloudAi();
     assert.ok(html.includes("Seedance 2.0"), "shown, flagged, and left exactly where it was");
   });
 });

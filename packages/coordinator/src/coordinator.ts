@@ -2128,6 +2128,14 @@ export class Coordinator {
       if (tool.current().state === "ready") await this.providerService.validate(provider);
     }
     const manifest = this.opts.manifest ?? null;
+    // Cloud AI is cloud-only by construction, so a local capability default cannot keep being
+    // offered there. It is moved out of routing before anything reads it — not deleted: the
+    // record keeps the concrete model id, and Cloud AI names it until the person has seen it
+    // (SPEC-033 R-66, D21). Nothing to do on an installation that never had one.
+    if (this.appSettings && manifest) {
+      const local = new Set(manifest.models.filter((m) => PROVIDERS[m.provider].local).map((m) => m.id));
+      await this.appSettings.clearLocalRouting((modelId) => local.has(modelId)).catch(() => {});
+    }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.

@@ -16,7 +16,7 @@ import {
   SettingsProvidersScreen,
   SettingsSampleWorldScreen,
   SettingsSignInScreen,
-  SettingsWhoDoesWhatScreen,
+  SettingsCloudAiScreen,
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
@@ -180,8 +180,12 @@ export function App() {
             <Route path="local-runtime" element={<Navigate to="/settings/local-ai" replace />} />
             <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
-            <Route path="agents" element={<Navigate to="/settings/who-does-what" replace />} />
-            <Route path="who-does-what" element={<SettingsWhoDoesWhatScreen />} />
+            <Route path="cloud-ai" element={<SettingsCloudAiScreen />} />
+            {/* Two addresses that no longer name a screen. Agents folded into the routing surface
+                in design 54b; that surface became Cloud AI, and the per-agent overrides went to
+                Harness with it — so the older of the two lands where the newer one does. */}
+            <Route path="agents" element={<Navigate to="/settings/cloud-ai" replace />} />
+            <Route path="who-does-what" element={<Navigate to="/settings/cloud-ai" replace />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
           </Route>
