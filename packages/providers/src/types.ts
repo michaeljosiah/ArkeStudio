@@ -21,6 +21,16 @@ export interface SubmitRequest {
   params: Record<string, unknown>;
   /** Ephemeral verified bytes, resolved immediately before submission and never journalled. */
   imageReferences?: PreparedImageReference[];
+  /**
+   * The footage a continuation extends (SPEC-019 R-50), resolved immediately before submission
+   * and never journalled.
+   *
+   * Deliberately not `params`, on exactly the grounds `audioSource` gives: params are written
+   * verbatim into the durable job row, and several megabytes of clip landing there would
+   * outlive the take it produced. The job records WHICH take was extended — `continuedFrom`,
+   * which is durable and small — and the bytes are resolved from that at submit time.
+   */
+  videoSource?: PreparedVideoSource;
   /** A host-read voice reference, resolved immediately before submission and never journalled. */
   voiceReference?: PreparedVoiceReference;
   /**
@@ -46,6 +56,16 @@ export interface SubmitRequest {
 export interface PreparedImageReference {
   name: string;
   contentType: "image/png" | "image/jpeg" | "image/webp";
+  data: Uint8Array;
+}
+
+/**
+ * A clip being extended, and the type it is. Shaped like `PreparedImageReference` rather than
+ * `PreparedAudioSource` because it does travel as a named file input on the wire — the extend
+ * routes all declare a `video_url`, and a data URI needs its type spelled out to be one.
+ */
+export interface PreparedVideoSource {
+  contentType: "video/mp4" | "video/quicktime";
   data: Uint8Array;
 }
 

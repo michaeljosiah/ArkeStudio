@@ -154,6 +154,7 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { recordTakesFromJob } from "./takes/arrival.js";
+import { materialiseForContinuation } from "./productions/continuation.js";
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
@@ -1241,6 +1242,42 @@ export class Coordinator {
               }
               const store = this.opts.provider.openStore?.();
               if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
+              return prepare(store);
+            },
+            readVideoSource: async (job) => {
+              const prepare = async (store: WorldStore) => {
+                const predecessorId = job.params["continuedFrom"];
+                const production = store
+                  .getBundle()
+                  .productions.find((candidate) => candidate.meta.id === job.productionId);
+                const take = production?.takes.find((candidate) => candidate.id === predecessorId);
+                if (!take) {
+                  throw new Error("the take this shot was continuing is no longer in this production");
+                }
+                // A pass segment is a RANGE into media holding several shots (SPEC-013 R-3), so
+                // sending its backing file would extend whatever sits at that file's end — usually
+                // a different shot, and the result reads as a model failure rather than as the
+                // wrong footage being dispatched. Cut it out first, losslessly (R-50, T-32).
+                const { path } = await materialiseForContinuation(
+                  store,
+                  production!.meta.id,
+                  take,
+                  this.opts.ffmpeg ?? null,
+                  new AbortController().signal,
+                );
+                const data = await readFile(toExtendedLength(join(store.dir, fromPortable(path))));
+                return {
+                  contentType: path.toLowerCase().endsWith(".mov")
+                    ? ("video/quicktime" as const)
+                    : ("video/mp4" as const),
+                  data,
+                };
+              };
+              if (this.opts.provider.withWorldStore) {
+                return this.opts.provider.withWorldStore(job.worldId, prepare);
+              }
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== job.worldId) throw new Error("the owning world is unavailable");
               return prepare(store);
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),

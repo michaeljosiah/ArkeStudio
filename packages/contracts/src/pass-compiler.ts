@@ -8,10 +8,18 @@ import {
   START_FRAME_PREAMBLE,
   type BoundaryFramePlan,
   type BoundReference,
+  type ContinuationPlan,
   type ScenePlan,
   type ShotPlanEntry,
 } from "./planning.js";
-import { dispatchDuration, estimateMicroUsd, frameDispatchFor, sceneImageOutput, type ManifestModel } from "./manifest.js";
+import {
+  continueDispatchFor,
+  dispatchDuration,
+  estimateMicroUsd,
+  frameDispatchFor,
+  sceneImageOutput,
+  type ManifestModel,
+} from "./manifest.js";
 import type { Scene } from "./scene.js";
 import type { Sheet } from "./world.js";
 import type { WorldBundle } from "./client-state.js";
@@ -40,7 +48,14 @@ import type { WorldBundle } from "./client-state.js";
 export type CompiledRoute =
   | { kind: "text" }
   | { kind: "reference" }
-  | { kind: "frame"; mode: "first-frame" | "first-and-last-frame"; endpoint: string | null };
+  | { kind: "frame"; mode: "first-frame" | "first-and-last-frame"; endpoint: string | null }
+  /**
+   * The extend route (SPEC-019 R-50, T-31). `predecessorTakeId` is the whole point of the
+   * variant: the footage itself cannot be resolved here — planning is pure and a pass segment
+   * has to be cut before it can be sent (T-32) — so what the compiled object carries is the
+   * exact take the dispatch is authorized against, and the dispatch path resolves the bytes.
+   */
+  | { kind: "continuation"; endpoint: string | null; predecessorTakeId: string };
 
 /** One transmitted reference, in its exact wire position, with its role and frozen version. */
 export interface CompiledReference {
@@ -86,6 +101,8 @@ export interface CompiledPass {
   references: CompiledReference[];
   /** The durable boundary still this pass opens on (issue 154), when one travels. */
   frame?: BoundaryFramePlan;
+  /** The predecessor footage this pass extends (SPEC-019 R-50), when it is a continuation. */
+  continuation?: ContinuationPlan;
   /** The seconds actually asked of the route, when the pass has a length at all. */
   askedSec?: number;
   estimatedMicroUsd: number;
@@ -274,17 +291,29 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       // the first-frame route, references take the edit sibling, and the words below say so.
       const frameRoute = entry.frame !== undefined ? frameDispatchFor(model, 1) : null;
       const framed = entry.frame !== undefined && frameRoute !== null;
-      const route: CompiledRoute = framed
-        ? { kind: "frame", mode: frameRoute!.mode, endpoint: frameRoute!.route }
-        : entry.bound.length > 0
-          ? { kind: "reference" }
-          : { kind: "text" };
+      // The plan already refused every continuation the graph or the model could not honour, so
+      // a resolved one here is one the compiler commits to. Ahead of the frame route because the
+      // plan resolved it that way, and the two must not disagree about which route a shot takes.
+      const continueRoute = entry.continuation !== undefined ? continueDispatchFor(model) : null;
+      const continued = entry.continuation !== undefined && continueRoute !== null;
+      const route: CompiledRoute = continued
+        ? {
+            kind: "continuation",
+            endpoint: continueRoute!.route,
+            predecessorTakeId: entry.continuation!.takeId,
+          }
+        : framed
+          ? { kind: "frame", mode: frameRoute!.mode, endpoint: frameRoute!.route }
+          : entry.bound.length > 0
+            ? { kind: "reference" }
+            : { kind: "text" };
       // A frame mode may lock the aspect (issue 389): the picture decides the shape, and
       // sending a chosen ratio beside it puts a field on the wire the route never declared.
+      // The extend route locks it for the same reason one input up — the footage being extended
+      // already has a shape, and a request that disagrees with it is a request to letterbox.
+      const lockedHere = new Set<string>(continued ? continueRoute!.locked : framed ? frameRoute!.locked : []);
       const size = Object.fromEntries(
-        Object.entries(sizeParams(model, plan)).filter(
-          ([key]) => !(framed && key === "aspect" && frameRoute!.locked.includes("aspect")),
-        ),
+        Object.entries(sizeParams(model, plan)).filter(([key]) => !lockedHere.has(key)),
       );
       // Video is always asked, even for a shot with no authored length: the plan priced the
       // default (DEFAULT_SHOT_SEC, route-rounded), so leaving the wire empty would run the
@@ -312,32 +341,52 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // and the sent order are one structure rather than two that can drift (R-2, D2).
           prompt: composePrompt(entry.parts),
           artDirection: styleSource(entry.prompt.overridden),
-          references: framed ? [entry.frame!.file] : boundFiles(entry.bound),
-          ...(framed
+          // A continued shot sends no images at all: the extend route declares one video field
+          // and nothing else, so an empty list here is the accurate description of the request.
+          references: continued ? [] : framed ? [entry.frame!.file] : boundFiles(entry.bound),
+          ...(continued
             ? {
-                taskMode: frameRoute!.mode,
-                ...(frameRoute!.route !== null ? { route: frameRoute!.route } : {}),
-                // The durable identity of what was sent (issue 154): the take records the frame
-                // it opened on, and the job can be audited against the exact bytes by hash.
-                startFrame: entry.frame!.file,
-                frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
+                taskMode: "continue",
+                ...(continueRoute!.route !== null ? { route: continueRoute!.route } : {}),
+                // The predecessor edge, which is the reason this whole path exists (R-53). It
+                // rides as a param because that is what arrival reads to record the edge on the
+                // take, and it is stripped before the wire exactly as `startFrame` is — the
+                // footage itself travels as the route's video field.
+                //
+                // Deliberately the ONLY continuation field in the bag. Where those bytes live is
+                // derivable from it, because a take is immutable: its media and its segment range
+                // cannot drift between compile and dispatch, so a frozen second copy of them
+                // could only ever agree or be wrong.
+                continuedFrom: entry.continuation!.takeId,
               }
-            : {}),
+            : framed
+              ? {
+                  taskMode: frameRoute!.mode,
+                  ...(frameRoute!.route !== null ? { route: frameRoute!.route } : {}),
+                  // The durable identity of what was sent (issue 154): the take records the frame
+                  // it opened on, and the job can be audited against the exact bytes by hash.
+                  startFrame: entry.frame!.file,
+                  frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
+                }
+              : {}),
           ...(askedSec !== undefined ? { durationSec: askedSec } : {}),
           ...size,
           provenance,
         },
-        references: framed ? [] : compiledReferences(entry.bound, world.sheets),
+        references: continued || framed ? [] : compiledReferences(entry.bound, world.sheets),
         ...(framed ? { frame: entry.frame! } : {}),
+        ...(continued ? { continuation: entry.continuation! } : {}),
         ...(askedSec !== undefined ? { askedSec } : {}),
         estimatedMicroUsd: entry.estimatedMicroUsd,
         dropped: droppedOf(
           entry.budget,
-          framed
+          continued || framed
             ? [...new Set(entry.budget.carried.map((c) => c.sheetId))].map((sheetId) => ({
                 sheetId,
                 role: "primary",
-                reason: "the frame route takes one image — the boundary frame rides instead",
+                reason: continued
+                  ? "the extend route takes one video and no images — the predecessor's footage rides instead"
+                  : "the frame route takes one image — the boundary frame rides instead",
               }))
             : [],
         ),

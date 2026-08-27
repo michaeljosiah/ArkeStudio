@@ -91,6 +91,18 @@ export const ShotSchema = z
       .object({
         openOnPrevious: z.boolean().optional(),
         keepOut: z.string().optional(),
+        /**
+         * This shot extends the predecessor's footage rather than opening on a still cut out of
+         * it (SPEC-019 R-50, T-31). The stronger form of `openOnPrevious` and deliberately its
+         * neighbour: a frame keeps the composition and loses the motion, the momentum and the
+         * audio running underneath, which is the whole reason continuation exists.
+         *
+         * Opt-in per shot, never a default (R-50). Most cuts are cuts — consecutive shots are
+         * usually discontinuous, and extending across one fights the edit rather than serving
+         * it. Declaring it is not the same as getting it: where the predecessor has no accepted
+         * take, or its take was itself continued, the plan names the refusal (R-51, R-52).
+         */
+        continuesPrevious: z.boolean().optional(),
       })
       .strict()
       .optional(),

@@ -15,10 +15,12 @@ import {
 } from "./reference-budget.js";
 import {
   aspectSupport,
+  continueDispatchFor,
   dispatchDuration,
   durationOptions,
   estimateMicroUsd,
   frameDispatchFor,
+  modeUnavailableReason,
   pricedDuration,
   sceneImageOutput,
   type DurationChoice,
@@ -30,6 +32,7 @@ import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js
 import { effectiveFraming } from "./scene.js";
 import type { Scene, Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
+import type { Take } from "./take.js";
 import type { Sheet, WorldMeta } from "./world.js";
 
 /**
@@ -1137,6 +1140,25 @@ export interface DispatchWarnings {
    * invents, which is the failure boundary frames exist to prevent.
    */
   staleFrames: Array<{ shotId: string; number: number; detail: string }>;
+  /**
+   * Shots that will dispatch as an extension of the previous shot's footage (R-50), stated
+   * before commit because it changes what money buys: the same prompt against the same model
+   * takes a different route and produces a different thing.
+   *
+   * `setAside` names what stepped aside, for the reason `framedShots` does. The extend route
+   * takes a video and a prompt and declares no image field, so sheet references cannot ride and
+   * a selected boundary frame is redundant — continuation already carries the motion the frame
+   * was a lossy stand-in for.
+   */
+  continuedShots: Array<{ shotId: string; number: number; fromTakeId: string; setAside: string[] }>;
+  /**
+   * Shots that asked to continue and cannot, each with its reason (R-51, R-52, R-34).
+   *
+   * Named rather than silently downgraded. A shot that asked to extend and generates from
+   * scratch instead is paid-for footage that does not cut against what came before, and the
+   * discovery would otherwise come after the money moved.
+   */
+  continuationUnavailable: Array<{ shotId: string; number: number; reason: string }>;
   sketchCitations: string[];
   droppedReferences: BudgetResult["dropped"];
   staleModelSheets: string[];
@@ -1241,6 +1263,14 @@ export interface ScenePlanInput {
   kits: ReferenceKit[];
   scene: Scene;
   selections: Selections;
+  /**
+   * The production's takes, which is how a continuation finds the footage it extends (R-50).
+   *
+   * Supplied rather than looked up, exactly as `artifacts` is: planning is pure and cannot open
+   * a world. Absent means no shot can resolve a continuation — the honest answer for a caller
+   * that predates the capability, and the reason the flag alone is never enough to dispatch one.
+   */
+  takes?: readonly Take[];
   model: ManifestModel;
   resolution?: string;
   /** Stills: the chosen size tier, which becomes real output dimensions at dispatch. */
@@ -1312,6 +1342,14 @@ export interface ShotDispatchPlan {
    * `bound` is empty and the warnings name what stepped aside.
    */
   frame?: BoundaryFramePlan;
+  /**
+   * Present exactly when this dispatch extends the previous shot's footage (SPEC-019 R-50): the
+   * shot declared it, the model has a continue route, and the predecessor's accepted take is one
+   * a single hop may be built on. The extend route declares no image field at all, so a shot
+   * that carries this carries neither sheet references nor a boundary frame — both step aside
+   * and the warnings name them.
+   */
+  continuation?: ContinuationPlan;
 }
 
 export interface ScenePlan {
@@ -1408,6 +1446,146 @@ function budgetFor(
 export const START_FRAME_PREAMBLE =
   "The attached image is this clip's exact first frame. Continue the motion from it.";
 
+/**
+ * The line a continuation replaces the binding preamble with (SPEC-019 R-50).
+ *
+ * The extend route takes the footage plus a prompt describing how it should be extended, and
+ * declares no image field at all. The words have to place the video in time or the prompt reads
+ * as a description of the whole clip, and what comes back re-stages the opening rather than
+ * carrying on from it — the same failure START_FRAME_PREAMBLE exists to prevent, one input up.
+ */
+export const CONTINUATION_PREAMBLE =
+  "The attached video is the footage immediately before this clip. Continue it from its final frame, holding the motion, framing and light.";
+
+/**
+ * The footage a continuation will actually extend, resolved before anything is priced.
+ *
+ * Deliberately carries the take ids and the filename rather than a composed path: a segment's
+ * media lives with the pass that produced it, and the one place that knows how a world lays its
+ * take directories out is the coordinator. Planning stays pure and says WHAT to extend; the
+ * dispatch path says where that lives.
+ */
+export interface ContinuationPlan {
+  /** The exact predecessor take being extended, frozen here and validated again at arrival. */
+  takeId: string;
+  /** The shot that take covers — what a screen names when it says what is being continued. */
+  fromShotId: string;
+  fromShotNumber: number;
+  /**
+   * The take whose directory actually holds the file, which is not always `takeId`: a pass
+   * segment owns a range into the pass's media and no file of its own (SPEC-013 R-3).
+   */
+  mediaTakeId: string;
+  /** Filename within that take's directory, e.g. "clip.mp4". */
+  media: string;
+  /** The range to cut losslessly out of that file before dispatch (R-50, T-32). */
+  segment?: { inSec: number; outSec: number };
+}
+
+export type ContinuationAvailability =
+  | { available: true; predecessor: Take }
+  | { available: false; reason: string };
+
+/**
+ * May this shot continue its predecessor (R-50, R-51, R-52)?
+ *
+ * Three refusals, all named rather than hidden. There is no predecessor at all. Or there is no
+ * accepted take to depend on — the dependency is on a *specific* take and there is not one yet.
+ * Or the predecessor was itself produced by continuation, which is where §1.4's one-hop decision
+ * stops being an intention: a decision nothing checks is one an implementation walks straight
+ * past, every shot in a scene declaring continuation and a single reselection invalidating the
+ * whole tail.
+ *
+ * Deliberately about the take graph and nothing else. Whether the footage can actually be sent —
+ * media on disk, a route to send it to — is a dispatch question, answered by the callers below,
+ * because the graph answer is the same on a machine with no ffmpeg and no provider key.
+ */
+export function continuationAvailable(input: {
+  shotIndex: number;
+  shots: ReadonlyArray<{ id: string; number: number }>;
+  selections: Selections;
+  takes: readonly Take[];
+}): ContinuationAvailability {
+  const previous = input.shots[input.shotIndex - 1];
+  if (!previous) {
+    return { available: false, reason: "this is the first shot — there is nothing before it to continue" };
+  }
+  const selectedId = input.selections[previous.id]?.acceptedTakeId ?? null;
+  if (!selectedId) {
+    return { available: false, reason: `shot ${previous.number} has no accepted take to continue from` };
+  }
+  const predecessor = input.takes.find((take) => take.id === selectedId);
+  if (!predecessor) {
+    return { available: false, reason: `shot ${previous.number}'s accepted take is no longer available` };
+  }
+  if (predecessor.continuedFrom !== undefined) {
+    return {
+      available: false,
+      reason: `shot ${previous.number}'s take was itself continued — continuation stops at one hop, so this would chain`,
+    };
+  }
+  return { available: true, predecessor };
+}
+
+/**
+ * How each shot's continuation flag resolves against the selections, the takes and the model.
+ *
+ * Only shots that asked appear in the map at all: continuation is opt-in (R-50), so a shot that
+ * never declared it has nothing to be told. A shot that did appears either with the footage it
+ * will extend or with the reason it cannot, which is R-51 and R-52's "named rather than hidden"
+ * in the one place both the dialog and the compiler read.
+ */
+function resolveContinuations(
+  scene: Scene,
+  selections: Selections,
+  model: ManifestModel,
+  takes: readonly Take[] | undefined,
+  mode: "per-shot" | "whole-scene",
+): Map<string, { continuation?: ContinuationPlan; unavailable?: string }> {
+  const states = new Map<string, { continuation?: ContinuationPlan; unavailable?: string }>();
+  // Without the takes nothing can be resolved — the caller that cannot supply them is the caller
+  // that predates continuation, and it gets exactly the dispatch it got before.
+  if (takes === undefined) return states;
+  const route = continueDispatchFor(model);
+  for (const [shotIndex, shot] of scene.shots.entries()) {
+    if (shot.continuity?.continuesPrevious !== true) continue;
+    if (mode !== "per-shot") {
+      states.set(shot.id, {
+        unavailable: "a whole-scene pass covers several shots at once, and extension takes one clip",
+      });
+      continue;
+    }
+    if (route === null) {
+      states.set(shot.id, { unavailable: modeUnavailableReason(model, "continue") ?? "no continue route" });
+      continue;
+    }
+    const availability = continuationAvailable({ shotIndex, shots: scene.shots, selections, takes });
+    if (!availability.available) {
+      states.set(shot.id, { unavailable: availability.reason });
+      continue;
+    }
+    const predecessor = availability.predecessor;
+    const from = scene.shots[shotIndex - 1]!;
+    if (predecessor.media === undefined) {
+      states.set(shot.id, { unavailable: `shot ${from.number}'s accepted take has no footage to extend` });
+      continue;
+    }
+    states.set(shot.id, {
+      continuation: {
+        takeId: predecessor.id,
+        fromShotId: from.id,
+        fromShotNumber: from.number,
+        mediaTakeId: predecessor.segment?.passTakeId ?? predecessor.id,
+        media: predecessor.media,
+        ...(predecessor.segment !== undefined
+          ? { segment: { inSec: predecessor.segment.inSec, outSec: predecessor.segment.outSec } }
+          : {}),
+      },
+    });
+  }
+  return states;
+}
+
 /** How each shot's boundary-frame selection resolves against the world's shelf (issue 154). */
 function resolveBoundaryFrames(
   scene: Scene,
@@ -1469,6 +1647,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
   const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
+  // Resolved beside them, and consulted first where both landed on one shot (R-50): a frame is
+  // issue 154's workaround for models that could not take video, and this model can. Continuing
+  // keeps the motion and the audio the extracted still throws away, so the frame steps aside
+  // rather than the capability it stands in for.
+  const continuations = resolveContinuations(scene, selections, model, input.takes, mode);
 
   // Merged once for the whole plan (#244). Both dispatch shapes are the same clip's constraints,
   // and computing it twice is how the per-shot and whole-scene paths come to disagree about what
@@ -1489,10 +1672,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // A strict start frame displaces the sheet references (issue 154): the first-frame route
     // takes exactly one image, so nothing else may ride, and the budget's carried set is named
     // in the warnings as what stepped aside rather than silently thinned.
-    const frame = boundaryFrames.get(shot.id)?.frame;
+    const continuation = continuations.get(shot.id)?.continuation;
+    const frame = continuation !== undefined ? undefined : boundaryFrames.get(shot.id)?.frame;
     // Bound before the duration is priced (issue #390): what actually travels decides which
     // route the provider takes, and the reference route's ceiling can be shorter.
-    const bound = frame !== undefined ? [] : bindReferences(references, sheets);
+    const bound = frame !== undefined || continuation !== undefined ? [] : bindReferences(references, sheets);
     // The length that will actually be asked for. A route takes one of a fixed few lengths, so
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
@@ -1532,9 +1716,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       model.capability,
     );
     const parts: PromptParts = {
-      // A framed shot states what its one image IS (issue 154); a referenced shot numbers its
-      // assets. Never both — the route carries one or the other.
-      preamble: frame !== undefined ? START_FRAME_PREAMBLE : bindingPreamble(bound),
+      // A framed shot states what its one image IS (issue 154); a continued shot says where in
+      // time its video sits (R-50); a referenced shot numbers its assets. Never more than one —
+      // the route carries a picture, a clip or an array, and no route carries two of them.
+      preamble:
+        continuation !== undefined
+          ? CONTINUATION_PREAMBLE
+          : frame !== undefined
+            ? START_FRAME_PREAMBLE
+            : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -1552,6 +1742,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       budget,
       estimatedMicroUsd: estimate,
       ...(frame !== undefined ? { frame } : {}),
+      ...(continuation !== undefined ? { continuation } : {}),
     };
   });
 
@@ -1684,11 +1875,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // dispatch uses — a first-frame task-mode route — with the legacy accepts flag honoured for
     // the rows that still claim frames without one. Warning on a model that cannot take a frame
     // tells the user to fix something that would change nothing about the dispatch.
+    // A shot that resolved a continuation is excluded for the same reason: it opens on footage
+    // rather than a picture, so "no start frame" is not a gap in it.
     shotsWithoutFrame:
       frameDispatchFor(model, 1) !== null || model.accepts.startFrame
         ? scene.shots
             .filter(
-              (s) => !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
+              (s) =>
+                continuations.get(s.id)?.continuation === undefined &&
+                !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
             )
             .map((s) => ({ shotId: s.id, number: s.number }))
         : [],
@@ -1706,9 +1901,35 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           ]
         : [],
     ),
+    // A continued shot's frame selection is not consulted, so it cannot be stale in any sense
+    // that matters — and leaving it here would be worse than noise: compilation refuses a plan
+    // with any stale frame, so an old selection on a shot now extending footage would block the
+    // whole dispatch over a field this route never reads.
     staleFrames: scene.shots.flatMap((shot) => {
+      if (continuations.get(shot.id)?.continuation !== undefined) return [];
       const stale = boundaryFrames.get(shot.id)?.stale;
       return stale !== undefined ? [{ shotId: shot.id, number: shot.number, detail: stale }] : [];
+    }),
+    continuedShots: shots.flatMap((entry) =>
+      entry.continuation !== undefined
+        ? [
+            {
+              shotId: entry.shot.id,
+              number: entry.shot.number,
+              fromTakeId: entry.continuation.takeId,
+              // Deduplicated on the same grounds as `framedShots`, and carrying the boundary
+              // frame too where one was selected: it stepped aside as surely as a sheet did.
+              setAside: [
+                ...new Set(entry.budget.carried.map((candidate) => candidate.sheetId)),
+                ...(boundaryFrames.get(entry.shot.id)?.frame !== undefined ? ["start frame"] : []),
+              ],
+            },
+          ]
+        : [],
+    ),
+    continuationUnavailable: scene.shots.flatMap((shot) => {
+      const reason = continuations.get(shot.id)?.unavailable;
+      return reason !== undefined ? [{ shotId: shot.id, number: shot.number, reason }] : [];
     }),
     sketchCitations: resolved.cast.filter((c) => c.sheet.status === "sketch").map((c) => c.sheet.name),
     droppedReferences,
