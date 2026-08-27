@@ -771,6 +771,60 @@ describe("SPEC-017 art direction and scoped looks", () => {
     assert.ok(outside.shots.every((shotPlan) => shotPlan.references.every((reference) => !reference.file?.includes("third-verse"))));
     await store.close();
   });
+
+  /* The narrower scope wins (design 67). Both looks match the scene being planned, and the
+     resolver used to answer by array order — so the production's cast row could show one
+     choice while a scene quietly dispatched the other. */
+  it("lets a scene's own look beat the production's, whichever order they were attached in", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const wide = {
+      id: "council-coat",
+      file: "looks/council-coat.png",
+      kind: "costume" as const,
+      prompt: "Formal council coat",
+      acceptedAt: CLOCK(),
+      attachedTo: { kind: "production" as const, productionId: production.meta.id },
+    };
+    const narrow = {
+      id: "third-verse",
+      file: "looks/third-verse.png",
+      kind: "condition-age" as const,
+      prompt: "After the third verse",
+      acceptedAt: CLOCK(),
+      attachedTo: { kind: "scene" as const, productionId: production.meta.id, sceneId: scene.id },
+    };
+    const plan = (looks: (typeof wide | typeof narrow)[]) =>
+      planScene(
+        {
+          world: bundle.meta,
+          artDirection: bundle.artDirection,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits.map((kit) =>
+            kit.sheetId === maren.sheetId ? { ...maren, looks } : kit,
+          ),
+          scene,
+          selections: production.selections,
+          model: VIDEO_MODEL,
+        },
+        "per-shot",
+      );
+    for (const looks of [[wide, narrow], [narrow, wide]]) {
+      const files = plan(looks).shots.flatMap((shotPlan) =>
+        shotPlan.references.map((reference) => reference.file ?? ""),
+      );
+      assert.ok(files.some((file) => file.includes("third-verse")), "the scene's own look rides");
+      assert.ok(
+        files.every((file) => !file.includes("council-coat")),
+        "the production-wide look stands aside inside that scene",
+      );
+    }
+    await store.close();
+  });
 });
 
 describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container", () => {

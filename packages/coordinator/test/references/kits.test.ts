@@ -680,6 +680,60 @@ describe("kit mutations through the one commit primitive", () => {
     await store.close();
   });
 
+  /* One look per scope (design 67). The production's cast row offers one choice per character,
+     and the resolver picks the first look whose scope matches — so two looks claiming the same
+     production is a question with no answer, whichever way the row was driven. */
+  it("displaces the look a production already held, and leaves other scopes alone", async () => {
+    const { store } = await open();
+    await chooseAnchor(store, "maren-kest", {
+      file: "main-photo.png",
+      jobId: "jb_01J8E0000000000000000000J1",
+      sheetVersion: 4,
+      artDirectionVersion: 3,
+      acceptedAt: CLOCK(),
+    });
+    for (const [id, file] of [
+      ["council-coat", "looks/council-coat.png"],
+      ["storm-oilskin", "looks/storm-oilskin.png"],
+    ] as const) {
+      await acceptCharacterLook(store, "maren-kest", {
+        id,
+        file,
+        kind: "costume",
+        prompt: id,
+        takeId: "tk_01J8E0000000000000000000T3",
+        artDirectionVersion: 3,
+      });
+    }
+    const held = async () =>
+      Object.fromEntries(
+        ((await readKit(store, "maren-kest"))!.kit.looks ?? []).map((look) => [look.id, look.attachedTo]),
+      );
+
+    await attachCharacterLook(store, "maren-kest", "council-coat", {
+      kind: "production",
+      productionId: "saltlight",
+    });
+    await attachCharacterLook(store, "maren-kest", "storm-oilskin", {
+      kind: "production",
+      productionId: "saltlight",
+    });
+    let scopes = await held();
+    assert.equal(scopes["storm-oilskin"]?.kind, "production");
+    assert.equal(scopes["council-coat"], undefined, "the incumbent is displaced, not joined");
+
+    // A scene is a different scope, so it never displaces the production-wide choice.
+    await attachCharacterLook(store, "maren-kest", "council-coat", {
+      kind: "scene",
+      productionId: "saltlight",
+      sceneId: "sc_04",
+    });
+    scopes = await held();
+    assert.equal(scopes["council-coat"]?.kind, "scene");
+    assert.equal(scopes["storm-oilskin"]?.kind, "production", "the production keeps its own choice");
+    await store.close();
+  });
+
   it("generates looks only after a main photo and carries it as identity", () => {
     const kit = kitOf([], {
       anchor: "main-photo.png",

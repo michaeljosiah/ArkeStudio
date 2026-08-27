@@ -840,10 +840,34 @@ const LOOK_KIND_LABELS: Record<string, string> = {
  * one leads with the world style, so every caption would open identically. Kept short enough
  * for the pill; the full text stays available as the tile's title.
  */
-function lookTileLabel(prompt: string | undefined, kind: string | undefined): string {
+export function lookTileLabel(prompt: string | undefined, kind: string | undefined): string {
   const text = prompt?.trim();
   if (!text) return LOOK_KIND_LABELS[kind ?? ""] ?? "Exploration";
   return text.length > 48 ? `${text.slice(0, 47).trimEnd()}…` : text;
+}
+
+/**
+ * Where an accepted look is in use, in the fewest words that identify it.
+ *
+ * An attachment is the whole point of a look — it is what makes the look ride as the subject
+ * reference in that production instead of the main photo — and it used to be legible only by
+ * selecting the tile and reading the control that sets it. A state nobody can see reads as a
+ * state nobody set.
+ */
+export function lookAttachmentLabel(
+  look: CharacterLook | undefined,
+  productions: readonly {
+    meta: { id: string; title: string };
+    scenes: readonly { id: string; number: number }[];
+  }[],
+): string | null {
+  const scope = look?.attachedTo;
+  if (!scope) return null;
+  const production = productions.find((candidate) => candidate.meta.id === scope.productionId);
+  if (!production) return null;
+  if (scope.kind === "production") return production.meta.title;
+  const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
+  return scene ? `${production.meta.title} · Sc ${scene.number}` : production.meta.title;
 }
 
 /**
@@ -1035,26 +1059,30 @@ export function CharacterLooksScreen() {
           ) : (
             <>
               <div className="fy-looks-results__grid" ref={resultsRef}>
-                {visible.map((image) => (
-                  /* The cell, not the choice: selecting a look and saving a copy of one are two
-                     controls, and neither may sit inside the other (issue 478). The selected
-                     modifier moves out here with the frame, because it is the cell that spans. */
-                  <div
-                    key={image.key}
-                    className={cx("fy-imghost", selected === image.key && "is-selected")}
-                  >
-                    <button
-                      type="button"
-                      className={selected === image.key ? "is-selected" : ""}
-                      title={image.take?.prompt ?? image.look?.prompt}
-                      onClick={() => setSelected(image.key)}
+                {visible.map((image) => {
+                  const attachment = lookAttachmentLabel(image.look, world.productions);
+                  return (
+                    /* The cell, not the choice: selecting a look and saving a copy of one are two
+                       controls, and neither may sit inside the other (issue 478). The selected
+                       modifier moves out here with the frame, because it is the cell that spans. */
+                    <div
+                      key={image.key}
+                      className={cx("fy-imghost", selected === image.key && "is-selected")}
                     >
-                      <Portrait worldSlug={world.meta.slug} path={image.path} label={image.label} radius={12} />
-                      <span>{image.label}</span>
-                    </button>
-                    <ImageDownload worldSlug={world.meta.slug} path={image.path} name={image.label} />
-                  </div>
-                ))}
+                      <button
+                        type="button"
+                        className={selected === image.key ? "is-selected" : ""}
+                        title={image.take?.prompt ?? image.look?.prompt}
+                        onClick={() => setSelected(image.key)}
+                      >
+                        <Portrait worldSlug={world.meta.slug} path={image.path} label={image.label} radius={12} />
+                        {attachment && <span className="fy-looks-results__inuse">{attachment}</span>}
+                        <span>{image.label}</span>
+                      </button>
+                      <ImageDownload worldSlug={world.meta.slug} path={image.path} name={image.label} />
+                    </div>
+                  );
+                })}
               </div>
               {older > 0 && (
                 <button
@@ -1093,43 +1121,61 @@ export function CharacterLooksScreen() {
             )}
             {selectedLook && (
               <>
-                <Button onClick={() => promoteCharacterLook(world.meta.worldId, sheetId, selectedLook.id)}>
+                {/*
+                  Attachment leads, promotion follows (design 67).
+
+                  These two verbs mean opposite things — attaching scopes a look to one production
+                  and leaves the identity anchor alone, promoting rewrites the anchor for every
+                  production at once — and the screen used to give the rewrite the only styled
+                  button while the scoping sat in a bare select reading "Not attached". A page whose
+                  own copy says looks are "outside the identity package" was teaching the reader
+                  that a look is a candidate portrait. So the scope is the labelled control here,
+                  and the anchor rewrite is the quiet one.
+                */}
+                <label className="fy-looks-attach">
+                  <span>Use in</span>
+                  <select
+                    className="fy-looks-attach__select"
+                    value={
+                      selectedLook.attachedTo?.kind === "production"
+                        ? `production:${selectedLook.attachedTo.productionId}`
+                        : selectedLook.attachedTo?.kind === "scene"
+                          ? `scene:${selectedLook.attachedTo.productionId}:${selectedLook.attachedTo.sceneId}`
+                          : ""
+                    }
+                    onChange={(event) => {
+                      const [scope, productionId, sceneId] = event.target.value.split(":");
+                      attachCharacterLook(
+                        world.meta.worldId,
+                        sheetId,
+                        selectedLook.id,
+                        scope === "production" && productionId
+                          ? { kind: "production", productionId }
+                          : scope === "scene" && productionId && sceneId
+                            ? { kind: "scene", productionId, sceneId }
+                            : null,
+                      );
+                    }}
+                  >
+                    <option value="">Not used</option>
+                    {world.productions.map((production) => (
+                      <optgroup key={production.meta.id} label={production.meta.title}>
+                        <option value={`production:${production.meta.id}`}>Entire production</option>
+                        {production.scenes.map((scene) => (
+                          <option key={scene.id} value={`scene:${production.meta.id}:${scene.id}`}>
+                            Scene {scene.number} · {scene.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                <Button
+                  variant="ghost"
+                  onClick={() => promoteCharacterLook(world.meta.worldId, sheetId, selectedLook.id)}
+                >
                   Use as main photo
                 </Button>
-                <select
-                  value={
-                    selectedLook.attachedTo?.kind === "production"
-                      ? `production:${selectedLook.attachedTo.productionId}`
-                      : selectedLook.attachedTo?.kind === "scene"
-                        ? `scene:${selectedLook.attachedTo.productionId}:${selectedLook.attachedTo.sceneId}`
-                        : ""
-                  }
-                  onChange={(event) => {
-                    const [scope, productionId, sceneId] = event.target.value.split(":");
-                    attachCharacterLook(
-                      world.meta.worldId,
-                      sheetId,
-                      selectedLook.id,
-                      scope === "production" && productionId
-                        ? { kind: "production", productionId }
-                        : scope === "scene" && productionId && sceneId
-                          ? { kind: "scene", productionId, sceneId }
-                          : null,
-                    );
-                  }}
-                >
-                  <option value="">Not attached</option>
-                  {world.productions.map((production) => (
-                    <optgroup key={production.meta.id} label={production.meta.title}>
-                      <option value={`production:${production.meta.id}`}>Entire production</option>
-                      {production.scenes.map((scene) => (
-                        <option key={scene.id} value={`scene:${production.meta.id}:${scene.id}`}>
-                          Scene {scene.number} · {scene.title}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
               </>
             )}
           </footer>

@@ -33,11 +33,15 @@ import {
   legacyVoiceModel,
   supportedDeliveries,
   type CompiledPass,
+  type CompiledReference,
   type Delivery,
   type PlanState,
   worldSheets,
+  attachmentFor,
+  type ProductionBundle,
   type Scene,
   type Sheet,
+  type WorldBundle,
   type ArtifactSidecar,
   MAX_CLIP_LANE,
   type CutEntry,
@@ -80,6 +84,7 @@ import { planForScene } from "../lib/scene-plan.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { SceneReview, SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
@@ -95,6 +100,7 @@ import {
 } from "../lib/clip-drag.js";
 import {
   acceptTake,
+  attachCharacterLook,
   cancelExport,
   compileSceneBoard,
   createSheetFromSentence,
@@ -453,6 +459,113 @@ export function ProductionLayout() {
  * is cheaper than discovering it later, when a one-off barman has quietly become part of the
  * world's permanent record.
  */
+/**
+ * What each character wears in this production (design 67).
+ *
+ * A look is attached on the character's own looks page, and until now the production it was
+ * attached *to* had no idea: `production.tsx` never mentioned character looks, and the dispatch
+ * dialog counts references without naming one. So the one decision that changes what a model
+ * receives for this production was made on a screen belonging to the world, and confirmed
+ * nowhere. This is the return path — the production says who it is sending, and lets the choice
+ * be made where the consequence lives.
+ *
+ * Rows exist only for characters that have accepted looks: a character with no alternatives has
+ * no choice to offer, and a row saying so is noise.
+ */
+function ProductionWardrobe({
+  world,
+  production,
+  characters,
+}: {
+  world: WorldBundle;
+  production: ProductionBundle;
+  characters: Sheet[];
+}) {
+  const rows = characters
+    .map((sheet) => {
+      const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null;
+      const looks = kit?.looks ?? [];
+      return { sheet, kit, looks };
+    })
+    .filter((row) => row.looks.length > 0);
+  if (rows.length === 0) return null;
+  return (
+    <>
+      <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
+        WARDROBE · IN {production.meta.title.toUpperCase()} · {rows.length}
+      </div>
+      <div className="fy-wardrobe">
+        {rows.map(({ sheet, kit, looks }) => {
+          // The file the dispatcher would actually attach, resolved by the same function it
+          // resolves with — not a second opinion about what rides.
+          const riding = attachmentFor(kit, sheet, "primary", { productionId: production.meta.id });
+          const held = looks.find(
+            (look) =>
+              look.attachedTo?.kind === "production" &&
+              look.attachedTo.productionId === production.meta.id,
+          );
+          /* Scene attachments are stated, not offered: this row is the production's altitude,
+             and a scene's own choice belongs on the scene. Narrower scope wins at dispatch, so
+             a row claiming to be the whole answer while a scene overrides it would be lying. */
+          const perScene = looks.flatMap((look) => {
+            const scope = look.attachedTo;
+            if (scope?.kind !== "scene" || scope.productionId !== production.meta.id) return [];
+            const scene = production.scenes.find((candidate) => candidate.id === scope.sceneId);
+            return scene ? [{ id: look.id, scene, label: lookTileLabel(look.prompt, look.kind) }] : [];
+          });
+          return (
+            <div className="fy-wardrobe__row" key={sheet.id}>
+              <div className="fy-wardrobe__thumb">
+                <Portrait
+                  worldSlug={world.meta.slug}
+                  path={riding.file ?? sheetPortraitPath(sheet.id)}
+                  label={sheet.name}
+                  radius={8}
+                />
+              </div>
+              <div className="fy-wardrobe__who">
+                <span className="fy-wardrobe__name">{sheet.name}</span>
+                {perScene.length > 0 && (
+                  <span className="fy-wardrobe__scenes">
+                    {perScene.map((entry) => `Sc ${entry.scene.number} · ${entry.label}`).join("  ")}
+                  </span>
+                )}
+              </div>
+              <label className="fy-wardrobe__pick">
+                <span>Wears</span>
+                <select
+                  value={held?.id ?? ""}
+                  onChange={(event) => {
+                    const chosen = event.target.value;
+                    // One frame either way (issue 384's lesson about concurrent frames): choosing a
+                    // look attaches it and the coordinator displaces the incumbent; choosing the
+                    // identity package detaches the one that is held.
+                    if (chosen === "") {
+                      if (held) attachCharacterLook(world.meta.worldId, sheet.id, held.id, null);
+                      return;
+                    }
+                    attachCharacterLook(world.meta.worldId, sheet.id, chosen, {
+                      kind: "production",
+                      productionId: production.meta.id,
+                    });
+                  }}
+                >
+                  <option value="">Identity package</option>
+                  {looks.map((look) => (
+                    <option key={look.id} value={look.id}>
+                      {lookTileLabel(look.prompt, look.kind)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export function ProductionCastScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -646,6 +759,12 @@ export function ProductionCastScreen() {
           {fromWorld.map((sheet) => card(sheet, false))}
         </div>
       )}
+
+      <ProductionWardrobe
+        world={world}
+        production={production}
+        characters={[...guests, ...fromWorld].filter((sheet) => sheet.type === "character")}
+      />
 
       {owned.length > 0 && (
         <>
@@ -2648,6 +2767,43 @@ function GenerateDrawer({
   );
 }
 
+/**
+ * Who rides, and who rides in a look (design 67).
+ *
+ * `refs ×3` said how many images travel and nothing about what they are — so the one decision a
+ * production makes about a character's appearance reached the model without ever appearing on the
+ * screen that authorises the spend. A look attached on the character's page changed the request
+ * silently, and the only way to find out was to read the take that came back.
+ *
+ * Subjects are named once each; the count beside it still says how many images that is, which is
+ * the other fact, and a subject carrying two references is one subject either way.
+ */
+export function carriedSubjects(references: readonly CompiledReference[]): string {
+  const subjects = new Map<string, boolean>();
+  for (const reference of references) {
+    const look = reference.mode === "scoped-look";
+    subjects.set(reference.subject, (subjects.get(reference.subject) ?? false) || look);
+  }
+  return [...subjects].map(([subject, look]) => (look ? `${subject} (look)` : subject)).join(", ");
+}
+
+/**
+ * One pass, said as the dispatch it is: route, what rides, length, price.
+ *
+ * Module-level and pure, so the line can be read back in a test rather than re-spelled there —
+ * a second copy of this format would be a second answer to what the dispatch is.
+ */
+export function passRow(pass: CompiledPass): string {
+  const route =
+    pass.route.kind === "frame"
+      ? "first-frame route"
+      : pass.route.kind === "reference"
+        ? `reference route · refs ×${pass.references.length} · ${carriedSubjects(pass.references)}`
+        : "text route";
+  const length = pass.askedSec !== undefined ? ` · ${seconds(pass.askedSec)}` : "";
+  return `${route}${length} · ${usd(pass.estimatedMicroUsd)}`;
+}
+
 export function DispatchDialogScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -2712,17 +2868,6 @@ export function DispatchDialogScreen() {
       chained: compile(plans.wholeScene, true),
     };
   }, [world, production, scene, model, plans]);
-  const passRow = (pass: CompiledPass): string => {
-    const route =
-      pass.route.kind === "frame"
-        ? "first-frame route"
-        : pass.route.kind === "reference"
-          ? `reference route · refs ×${pass.references.length}`
-          : "text route";
-    const length = pass.askedSec !== undefined ? ` · ${seconds(pass.askedSec)}` : "";
-    return `${route}${length} · ${usd(pass.estimatedMicroUsd)}`;
-  };
-
   const sceneFile = scene ? sceneFileOf(production, scene) : null;
   const warnings = plans?.perShot.warnings ?? null;
   // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,

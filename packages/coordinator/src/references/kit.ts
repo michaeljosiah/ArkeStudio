@@ -449,6 +449,20 @@ export async function attachCharacterLook(
   if (scope) next.attachedTo = scope;
   else delete next.attachedTo;
   looks[index] = next;
+  // One look per scope (design 67). Two looks claiming the same production is a question the
+  // resolver has no answer to, and the production's cast row offers one choice per character —
+  // so attaching displaces the incumbent rather than joining it.
+  if (scope) {
+    for (let other = 0; other < looks.length; other += 1) {
+      if (other === index) continue;
+      const held = looks[other]!.attachedTo;
+      if (!held || held.productionId !== scope.productionId || held.kind !== scope.kind) continue;
+      if (held.kind === "scene" && scope.kind === "scene" && held.sceneId !== scope.sceneId) continue;
+      const cleared = { ...looks[other]! };
+      delete cleared.attachedTo;
+      looks[other] = cleared;
+    }
+  }
   await writeKit(store, sheetId, { ...kit, looks }, raw);
 }
 

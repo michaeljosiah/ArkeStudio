@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ReviewDecision, Take } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { lookGallery, RECENT_LOOKS } from "../src/screens/character-reference.js";
+import { lookAttachmentLabel, lookGallery, RECENT_LOOKS } from "../src/screens/character-reference.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -129,6 +129,56 @@ describe("the looks read model", () => {
   });
 });
 
+describe("where a look is in use", () => {
+  const productions = [
+    {
+      meta: { id: "saltlight", title: "Saltlight" },
+      scenes: [{ id: "sc_04", number: 4 }],
+    },
+  ];
+  const look = {
+    id: "council-coat",
+    file: "looks/council-coat.png",
+    kind: "costume" as const,
+    prompt: "Formal Ebb Council coat",
+    acceptedAt: "2026-08-01T10:05:30Z",
+  };
+
+  it("names the production, or the production and the scene", () => {
+    assert.equal(
+      lookAttachmentLabel({ ...look, attachedTo: { kind: "production", productionId: "saltlight" } }, productions),
+      "Saltlight",
+    );
+    assert.equal(
+      lookAttachmentLabel(
+        { ...look, attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" } },
+        productions,
+      ),
+      "Saltlight · Sc 4",
+    );
+  });
+
+  it("says nothing for an unattached look, a pending take, or a production since deleted", () => {
+    assert.equal(lookAttachmentLabel(look, productions), null);
+    assert.equal(lookAttachmentLabel(undefined, productions), null);
+    assert.equal(
+      lookAttachmentLabel({ ...look, attachedTo: { kind: "production", productionId: "gone" } }, productions),
+      null,
+      "a stale attachment is not a label naming nothing",
+    );
+  });
+
+  it("falls back to the production when the scene is gone", () => {
+    assert.equal(
+      lookAttachmentLabel(
+        { ...look, attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_99" } },
+        productions,
+      ),
+      "Saltlight",
+    );
+  });
+});
+
 describe("the looks gallery route", () => {
   it("leads with the five newest and keeps the older ones one press away", () => {
     __setStateForTest(stateWith([1, 2, 3, 4, 5, 6, 7, 8].map((n) => lookTake(n))));
@@ -174,5 +224,39 @@ describe("the looks gallery route", () => {
     const html = renderLooks();
     assert.ok(html.includes("Looks never carry by default"));
     assert.ok(!html.includes("fy-looks-results__fresh"), "no notice without something to notice");
+  });
+
+  /* An attachment is what a look is *for*, and it used to be readable only by selecting the
+     tile and opening the control that sets it — so the gallery showed no difference between a
+     look riding a production and one riding nothing. */
+  it("marks an attached tile with where it is used, without selecting it", () => {
+    const world = FIXTURE_STATE.world!;
+    const attached = {
+      ...world,
+      referenceKits: world.referenceKits.map((candidate) =>
+        candidate.sheetId === "maren-kest"
+          ? {
+              ...candidate,
+              looks: [
+                {
+                  id: "council-coat",
+                  file: "looks/council-coat.png",
+                  kind: "costume" as const,
+                  prompt: "Formal Ebb Council coat",
+                  acceptedAt: "2026-08-01T10:05:30Z",
+                  attachedTo: { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" },
+                },
+              ],
+            }
+          : candidate,
+      ),
+    };
+    __setStateForTest({ ...FIXTURE_STATE, world: attached });
+    try {
+      const html = renderLooks();
+      assert.match(html, /fy-looks-results__inuse[^>]*>Saltlight · Sc 4</);
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
   });
 });

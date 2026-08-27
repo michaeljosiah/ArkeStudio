@@ -606,6 +606,14 @@ export interface BoundReference {
   kind: "image";
   /** What this asset is a reference *for*, from its attachment mode (R-4). */
   rolePhrase: string;
+  /**
+   * The attachment that chose this file, kept structured (design 67).
+   *
+   * `rolePhrase` says the same thing in the prompt's words, and a screen wanting to state that a
+   * character rides in a production's own look had to match that prose to find out — a sentence
+   * written for a model, read as an enum. The screens read this instead.
+   */
+  mode: AttachmentDecision["mode"];
   /** For a second reference on a subject already bound: the index that first bound it. */
   sameSubjectAs: number | null;
 }
@@ -674,6 +682,7 @@ export function bindReferences(
       file: decision.file,
       kind: "image",
       rolePhrase: rolePhraseFor(sheet, decision),
+      mode: decision.mode,
       sameSubjectAs: first ? first.index : null,
     });
   }
@@ -988,11 +997,17 @@ export function attachmentFor(
   role: "primary" | "secondary" = "primary",
   scope?: { productionId?: string; sceneId?: string },
 ): AttachmentDecision {
-  const scopedLook = kit?.looks?.find((look) => {
+  const scopedLooks = (kit?.looks ?? []).filter((look) => {
     if (!look.attachedTo || !scope?.productionId) return false;
     if (look.attachedTo.productionId !== scope.productionId) return false;
     return look.attachedTo.kind === "production" || look.attachedTo.sceneId === scope.sceneId;
   });
+  // The narrower scope wins (design 67). A look attached to this scene and one attached to the
+  // whole production both match, and `.find` answered by array order — so which of the two rode
+  // a scene depended on the order the attachments happened to be written in, which is not a
+  // decision anybody made. Same-scope collisions cannot arise: attaching displaces.
+  const scopedLook =
+    scopedLooks.find((look) => look.attachedTo?.kind === "scene") ?? scopedLooks[0];
   if (role === "primary" && scopedLook) {
     return {
       sheetId: sheet.id,
