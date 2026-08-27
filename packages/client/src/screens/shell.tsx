@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
@@ -6,6 +6,7 @@ import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
+import { RuntimeHead, RuntimeSection, RuntimeStatus, TONE_CLASS, sizeMb, type RuntimeTone } from "./settings-parts.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -1560,7 +1561,7 @@ export function SettingsLayout() {
                     ["sign-in", "Sign-in"],
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
-                    ["local-runtime", "Local runtime"],
+                    ["local-ai", "Local AI"],
                     ["harness", "Harness"],
                     ["who-does-what", "Who does what"],
                     ["sample-world", "Sample world"],
@@ -2500,60 +2501,6 @@ function statedElsewhere(componentId: string): "providers" | "voice" | "comfyui"
   return STATED_ELSEWHERE[componentId];
 }
 
-/** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
-type RuntimeTone = "ok" | "warn" | "idle";
-const TONE_CLASS: Record<RuntimeTone, string> = {
-  ok: "fy-set__dot--ok",
-  warn: "fy-set__dot--warn",
-  idle: "",
-};
-
-/** A dot leading the word it qualifies — the pairing every runtime row states its state with. */
-function RuntimeStatus({ tone, children }: { tone: RuntimeTone; children: ReactNode }) {
-  return (
-    <span className="fy-set__status">
-      <span className={cx("fy-set__dot", TONE_CLASS[tone])} />
-      <span className="fy-set__state">{children}</span>
-    </span>
-  );
-}
-
-/**
- * The head every runtime detail opens with: what this is, what it does, and where it stands.
- * The same three-part head 40a gives a provider, because the rail is the heading either way.
- */
-function RuntimeHead({
-  title,
-  caps,
-  tone,
-  state,
-}: {
-  title: string;
-  caps: string;
-  tone: RuntimeTone;
-  state: string;
-}) {
-  return (
-    <div className="fy-rt__head">
-      <span className="fy-rt__title">{title}</span>
-      <span className="fy-rt__caps">{caps}</span>
-      <span style={{ flex: 1 }} />
-      <RuntimeStatus tone={tone}>{state}</RuntimeStatus>
-    </div>
-  );
-}
-
-/** A labelled band inside a detail, with whatever acts on the band as a whole on its right. */
-function RuntimeSection({ label, children }: { label: string; children?: ReactNode }) {
-  return (
-    <div className="fy-rt__sechead">
-      <div className="fy-rt__eyebrow">{label}</div>
-      <span style={{ flex: 1 }} />
-      {children}
-    </div>
-  );
-}
-
 /** What this machine measured, and the way to measure it again. */
 function MachineDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
   // One spelling of a gigabyte across the whole product: the gate's. A rail rounding to 6 GB
@@ -2662,11 +2609,6 @@ function ComponentsDetail({ components, running }: { components: readonly SetupC
       })}
     </>
   );
-}
-
-/** A download size as the catalogue states it. One spelling: the same figure on every row. */
-function sizeMb(mbytes: number): string {
-  return mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`;
 }
 
 /** Failed beats moving beats arrived — the worst thing in the group is what its dot says. */

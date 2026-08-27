@@ -116,6 +116,9 @@ export class LocalSetupService {
         bytesTotal: entry.sizeMb * 1024 * 1024,
         bytesPerSecond: null,
         ...(entry.caveat !== undefined ? { detail: entry.caveat } : {}),
+        // Carried onto the wire so a capability row can ask what a component makes available
+        // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
+        ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),
       });
     }
   }

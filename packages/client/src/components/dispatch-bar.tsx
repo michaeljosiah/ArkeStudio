@@ -175,7 +175,7 @@ export function resolveModel(
  * "unavailable" and are fixed in different places, so saying one when the other is true sends
  * the user to the wrong screen — the same distinction Who does what makes.
  */
-function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
+export function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
   if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in Providers";
   // A stranded local recipe carries its readiness reason — the measured one, never key advice
   // for a provider that takes no key (SPEC-021 R-10).

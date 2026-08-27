@@ -1,5 +1,6 @@
 import { Route, Routes, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef } from "react";
+import { SettingsLocalAiScreen } from "./screens/settings-local-ai.js";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -170,6 +171,9 @@ export function App() {
             <Route path="sign-in" element={<SettingsSignInScreen />} />
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
+            <Route path="local-ai" element={<SettingsLocalAiScreen />} />
+            {/* The machinery Local AI stopped stating. It keeps this address until Engines
+                takes it (issue 568) — R-73 forbids a release where a fact is stated nowhere. */}
             <Route path="local-runtime" element={<SettingsLocalRuntimeScreen />} />
             <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
