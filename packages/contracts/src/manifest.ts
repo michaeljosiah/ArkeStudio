@@ -1076,3 +1076,42 @@ export function frameDispatchFor(model: ManifestModel, frames: 1 | 2): FrameDisp
     locked: spec.locked,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Continuation capability (SPEC-019 R-50, T-31): the same projection, for footage
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a continuation dispatch needs to know, decided in one place.
+ *
+ * The mirror of `FrameDispatch`, and it exists for the same reason: planning, the estimate, the
+ * dialog and the transport must not each read `modes.continue` and reach their own conclusion
+ * about whether footage can be extended or where it lands.
+ */
+export interface ContinueDispatch {
+  /** The provider route, or null when the mode runs on the model's default endpoint. */
+  route: string | null;
+  /** The route's own field name for the footage being extended. */
+  field: "video_url";
+  locked: LockedParameter[];
+}
+
+/**
+ * How this model extends existing footage, or null when it cannot.
+ *
+ * Null is a refusal the caller must honour before submit, exactly as `frameDispatchFor`'s is:
+ * composing a continuation for a model this refuses is asking a text route to read a video field
+ * it never declared.
+ *
+ * `field` is a constant where `framesField` is manifest data, and the difference is evidence
+ * rather than taste. The frames array needed data because the first two routes read disagreed —
+ * seedance says `image_urls`, wan says `reference_image_urls`. Four extend routes from four
+ * vendors were read here — veo 3.1, PixVerse v6, LTX 2.3 and Flux 3 — and all four require a
+ * field named `video_url`. There is no disagreement for data to record, and inventing a manifest
+ * key for one is a curation burden on every future row that buys nothing.
+ */
+export function continueDispatchFor(model: ManifestModel): ContinueDispatch | null {
+  const spec = modeSpec(model, "continue");
+  if (spec === null) return null;
+  return { route: spec.route ?? null, field: "video_url", locked: spec.locked };
+}

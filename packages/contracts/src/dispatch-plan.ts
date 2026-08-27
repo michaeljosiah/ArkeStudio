@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDateTimeSchema, PlanIdSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { IsoDateTimeSchema, PlanIdSchema, SceneIdSchema, SlugSchema, TakeIdSchema, UlidSchema } from "./ids.js";
 import { frameDispatchFor, type ManifestModel } from "./manifest.js";
 import type { CompiledPass } from "./pass-compiler.js";
 
@@ -51,6 +51,17 @@ export const CompiledPassRecordSchema = z
           endpoint: z.string().nullable(),
         })
         .strict(),
+      // The authorization record has to name the exact take the extension was approved against
+      // (SPEC-019 R-50, R-53). Without it a plan replayed after a reselection would re-dispatch
+      // against whatever is selected now, which is a different piece of footage and a different
+      // request from the one the user authorized.
+      z
+        .object({
+          kind: z.literal("continuation"),
+          endpoint: z.string().nullable(),
+          predecessorTakeId: TakeIdSchema,
+        })
+        .strict(),
     ]),
     params: z.record(z.string(), z.unknown()),
     references: z.array(
@@ -82,6 +93,26 @@ export const CompiledPassRecordSchema = z
     ),
     frame: z
       .object({ artifactId: z.string().min(1), file: z.string().min(1), hash: z.string().min(1) })
+      .strict()
+      .optional(),
+    /*
+     * The footage a continuation extends, persisted with the rest of the compiled object for the
+     * reason the whole record is: it IS the compiled pass, and a strict schema that omits a field
+     * the compiler emits does not store a smaller plan — it refuses the plan entirely, and
+     * `listPlans` skips what it cannot read.
+     *
+     * Optional because plans outlive the build that wrote them, exactly as the reference fields
+     * above are.
+     */
+    continuation: z
+      .object({
+        takeId: TakeIdSchema,
+        fromShotId: z.string().min(1),
+        fromShotNumber: z.number().int().min(1),
+        mediaTakeId: TakeIdSchema,
+        media: z.string().min(1),
+        segment: z.object({ inSec: z.number().min(0), outSec: z.number().min(0) }).strict().optional(),
+      })
       .strict()
       .optional(),
     askedSec: z.number().optional(),

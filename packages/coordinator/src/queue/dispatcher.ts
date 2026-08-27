@@ -52,6 +52,12 @@ export interface DispatchVoiceReference {
   data: Uint8Array;
 }
 
+/** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
+export interface DispatchVideoSource {
+  contentType: "video/mp4" | "video/quicktime" | "video/webm";
+  data: Uint8Array;
+}
+
 export interface DispatchClient {
   readonly declarations: ClientDeclarations;
   /** Drop source-bound optional transports while keeping the client reusable. */
@@ -67,6 +73,7 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       voiceReference?: DispatchVoiceReference;
+      videoSource?: DispatchVideoSource;
       idempotencyKey?: string;
       /** The recipe identity frozen at enqueue, so the client can refuse a moved catalogue (R-15). */
       recipe?: RecipeIdentity;
@@ -139,6 +146,15 @@ export interface JobQueueOptions {
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
   readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
+  /**
+   * Resolve the footage a continuation extends into bytes, cutting a pass segment out of its
+   * backing file first where the predecessor is one (SPEC-019 R-50, T-32).
+   *
+   * A seam rather than inline work for the reason the other two are: the dispatcher owns when
+   * paid I/O happens and nothing else, and cutting video needs a world lock and ffmpeg, neither
+   * of which belongs in a queue.
+   */
+  readVideoSource?: (job: Job) => Promise<DispatchVideoSource>;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
@@ -609,6 +625,7 @@ export class JobQueue {
 
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
+    let videoSource: DispatchVideoSource | undefined;
     const referencePaths = job.params["references"];
     if (Array.isArray(referencePaths) && referencePaths.length > 0) {
       if (!referencePaths.every((path): path is string => typeof path === "string")) {
@@ -663,6 +680,26 @@ export class JobQueue {
         return;
       }
     }
+    // The footage a continuation extends, resolved last of the three (SPEC-019 R-50). A failure
+    // here is terminal rather than a lane pause: the predecessor is named on the job and cannot
+    // become resolvable by waiting, and a continuation that silently fell back to generating from
+    // scratch would be the exact "looks implemented" failure this capability was built out of.
+    if (typeof job.params["continuedFrom"] === "string") {
+      if (!this.opts.readVideoSource) {
+        await this.terminalize(job, "failed", "continuation transport is not configured");
+        return;
+      }
+      try {
+        videoSource = await this.opts.readVideoSource(job);
+      } catch (error) {
+        await this.terminalize(
+          job,
+          "failed",
+          error instanceof Error ? error.message : "the footage being extended could not be prepared",
+        );
+        return;
+      }
+    }
     if (!this.stillQueued(job)) return;
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
@@ -689,6 +726,7 @@ export class JobQueue {
           params: job.params,
           ...(imageReferences ? { imageReferences } : {}),
           ...(voiceReference ? { voiceReference } : {}),
+          ...(videoSource ? { videoSource } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
           // What this job IS, frozen before it was journalled (R-15). Carried unconditionally:
           // a client that does not use it ignores it, and one that does can refuse a graph that

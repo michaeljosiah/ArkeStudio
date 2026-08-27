@@ -261,12 +261,19 @@
           and record, but the shot using it has its selection cleared — a visible hole, rather than
           footage the record says no longer applies.
         </p>
+        <p>
+          Turn it on per shot, in the shot sheet, next to the box that opens a shot on the last frame
+          of the one before it. Extending is the stronger of the two: a frame keeps the composition
+          and loses the motion and the audio running underneath. The dispatch dialog says whether it
+          can actually happen — the shot before it needs an accepted take, that take must not itself
+          have been extended, and the model needs a route that takes video. Each of those is named
+          when it refuses, and the sheet references that would otherwise ride along step aside,
+          because the route takes one clip and no pictures.
+        </p>
         <p class="note">
-          <span class="pill pill--part">partly built</span> When a durable job names the take it
-          extended, arrival validates that identity before moving media and records it on the new
-          take. The one-hop and reselection rules then act on a real edge. No shipped model route or
-          provider transport currently creates that continuation job, so footage extension is not
-          yet offered as a live dispatch.
+          <span class="pill pill--yes">built</span> Where the take being extended is a segment of a
+          whole-scene pass, the range is copied out to its own file first, without re-encoding — the
+          backing file holds several shots, and its end is usually a different one.
         </p>
 
         <h4>Reference takes</h4>

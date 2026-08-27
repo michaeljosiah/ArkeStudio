@@ -28,6 +28,21 @@ import type {
 const MAX_INLINE_REFERENCE_BYTES = 8 * 1024 * 1024;
 
 /**
+ * The same ceiling one input up, for the footage a continuation extends (SPEC-019 R-50).
+ *
+ * Higher than the reference limit because the thing being carried is different in kind: a few
+ * seconds of 720p is tens of megabytes where a portrait is hundreds of kilobytes, and holding
+ * video to a limit written for tiles would refuse every real clip. Still a limit, and still
+ * refused early and by name — the failure this prevents is a large body dying halfway through an
+ * enqueue, where the request was neither sent nor cleanly refused.
+ *
+ * A data URI is the same trade the references make and has the same upgrade path: fal publishes
+ * a storage endpoint, and moving to it would lift this ceiling at the cost of a second service
+ * holding bytes we already hold. Worth doing when a real clip exceeds this, not before.
+ */
+const MAX_INLINE_VIDEO_BYTES = 48 * 1024 * 1024;
+
+/**
  * Seconds → the word this route wants for that length, from the manifest rows generated beside
  * the endpoints. Every fal video route takes `duration` as a string out of a fixed list, and the
  * lists disagree: seedance and kling say "5", veo says "5s". We carried `durationSec` as a
@@ -202,6 +217,20 @@ export class FalClient implements ProviderClient {
         image_url: imageUrls[0],
         ...(taskMode === "first-and-last-frame" ? { end_image_url: imageUrls[1] } : {}),
       };
+    } else if (taskMode === "continue") {
+      // The one input this route has, and the reason the mode exists (SPEC-019 R-50). Every
+      // extend route read while curating this — veo 3.1, PixVerse v6, LTX 2.3, Flux 3 — requires
+      // a field spelled exactly `video_url`, so it is a constant here rather than manifest data.
+      const clip = request.videoSource;
+      if (!clip) throw new Error("fal: continue needs the footage being extended");
+      if (clip.data.byteLength > MAX_INLINE_VIDEO_BYTES) {
+        throw new Error(
+          `fal: the clip being extended is ${Math.round(clip.data.byteLength / 1024 / 1024)}MB, over the inline limit`,
+        );
+      }
+      imagePayload = {
+        video_url: `data:${clip.contentType};base64,${Buffer.from(clip.data).toString("base64")}`,
+      };
     } else if (taskMode === "keyframe-sequence") {
       if (imageUrls.length === 0) throw new Error("fal: keyframe-sequence needs at least one frame image");
       // Seedance's reference route says `image_urls`; minimax's and wan's say
@@ -229,7 +258,8 @@ export class FalClient implements ProviderClient {
       // never sent to a provider.
       "planId",
       "passIndex",
-      // Ours, not fal's: the immutable predecessor edge recorded on a continued take.
+      // Ours, not fal's: the immutable predecessor edge recorded on a continued take. The
+      // footage itself already travelled as this route's `video_url`.
       "continuedFrom",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",

@@ -663,6 +663,24 @@ export function ShotSheetScreen() {
     saveScene(worldId, prodId, stem, { ...scene, shots }, scene.version);
   };
 
+  /*
+   * One place that knows when `continuity` collapses to nothing.
+   *
+   * Written inline, each of its controls has to remember the other two, and the one that forgets
+   * deletes an authored field when its own is cleared. That is exactly what happened to `audio`
+   * (review 2026-08-22) — emptying the last text box dropped a `silence` nobody had touched — and
+   * a third key made the odds of repeating it worse rather than better.
+   */
+  const continuitySet = (change: Partial<NonNullable<Shot["continuity"]>>) => {
+    if (!shot) return;
+    const merged: Record<string, unknown> = { ...shot.continuity, ...change };
+    for (const [key, value] of Object.entries(merged)) if (value === undefined) delete merged[key];
+    patch({
+      continuity:
+        Object.keys(merged).length > 0 ? (merged as NonNullable<Shot["continuity"]>) : undefined,
+    });
+  };
+
   const framingSet = (key: keyof ShotFraming, value: string | undefined) => {
     if (!shot) return;
     const framing = { ...shot.framing };
@@ -1049,17 +1067,27 @@ export function ShotSheetScreen() {
                 type="checkbox"
                 disabled={!prev}
                 checked={shot.continuity?.openOnPrevious ?? false}
-                onChange={(e) =>
-                  patch({
-                    continuity:
-                      e.target.checked || shot.continuity?.keepOut
-                        ? { ...shot.continuity, openOnPrevious: e.target.checked || undefined }
-                        : undefined,
-                  })
-                }
+                onChange={(e) => continuitySet({ openOnPrevious: e.target.checked || undefined })}
               />
               <span style={{ font: "400 11.5px var(--font-sans)", flex: 1 }}>
                 {prev ? `Open on the last frame of shot ${shotNo(prev)}` : "First shot — nothing before it"}
+              </span>
+            </label>
+            {/*
+              SPEC-019 R-50. The stronger neighbour of the box above: a frame keeps the
+              composition and loses the motion and the audio under it. Whether the dispatch can
+              honour it depends on the model and on what is accepted, and the dispatch dialog is
+              where that is named — this box records the intent, exactly as the one above does.
+            */}
+            <label className="fy-sheetcam" style={{ cursor: prev ? "pointer" : "default" }}>
+              <input
+                type="checkbox"
+                disabled={!prev}
+                checked={shot.continuity?.continuesPrevious ?? false}
+                onChange={(e) => continuitySet({ continuesPrevious: e.target.checked || undefined })}
+              />
+              <span style={{ font: "400 11.5px var(--font-sans)", flex: 1 }}>
+                {prev ? `Continue the footage of shot ${shotNo(prev)}` : "First shot — nothing to continue"}
               </span>
             </label>
             <div className="fy-sheetcam">
@@ -1071,12 +1099,7 @@ export function ShotSheetScreen() {
                 onBlur={(e) => {
                   const next = e.target.value.trim();
                   if (next === (shot.continuity?.keepOut ?? "")) return;
-                  patch({
-                    continuity:
-                      next !== "" || shot.continuity?.openOnPrevious
-                        ? { ...shot.continuity, keepOut: next === "" ? undefined : next }
-                        : undefined,
-                  });
+                  continuitySet({ keepOut: next === "" ? undefined : next });
                 }}
               />
             </div>

@@ -241,10 +241,35 @@ const CURATED = {
       storyboardPanels: 15,
     },
   },
+  /*
+   * Veo 3.1, and the only family here that can extend footage (SPEC-019 R-50, T-31).
+   *
+   * `extend-video` is a sibling route in exactly the sense T-1 established, so continuation is a
+   * route like every other mode. Its schema was read on 2026-08-27, and it disagrees with the
+   * text route it sits beside in three ways that would each have been wrong to carry across:
+   *
+   *   - `duration` is an open string defaulting to "7s", where the text route enumerates
+   *     4s/6s/8s. We keep asking in the model's own vocabulary from `durations` below rather
+   *     than inventing a seventh second nobody can price.
+   *   - `aspect_ratio` gains an "auto" member and defaults to it, because the footage being
+   *     extended already has a shape. Hence `locked: ["aspect"]` with "auto" as the sentinel —
+   *     the one route shipped here that genuinely wants a value in a locked parameter's place.
+   *   - `video_url` is required. That is the input the whole capability turns on, and four
+   *     extend routes from four vendors spell it the same way, which is why the transport holds
+   *     that name as a constant instead of the manifest holding it as data.
+   */
   "fal-ai/veo3.1": {
     id: "veo-3.1",
     capability: "video",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    modes: {
+      generate: { locked: [] },
+      continue: {
+        route: "fal-ai/veo3.1/extend-video",
+        locked: ["aspect"],
+        sentinels: { aspect: "auto" },
+      },
+    },
     // Veo counts in "4s"/"6s"/"8s" and takes nothing between them.
     limits: {
       maxPromptChars: 20000,
@@ -259,6 +284,14 @@ const CURATED = {
     id: "veo-3.1-fast",
     capability: "video",
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    modes: {
+      generate: { locked: [] },
+      continue: {
+        route: "fal-ai/veo3.1/fast/extend-video",
+        locked: ["aspect"],
+        sentinels: { aspect: "auto" },
+      },
+    },
     limits: {
       maxPromptChars: 20000,
       soundChoice: true,

@@ -20,45 +20,16 @@ import type { FfmpegRunner } from "../takes/export.js";
  * depends on a *specific* predecessor take.
  */
 
-export type ContinuationAvailability =
-  | { available: true; predecessor: Take }
-  | { available: false; reason: string };
-
-/**
- * May this shot continue its predecessor (R-50, R-51)?
+/*
+ * The availability predicate moved to @arke-studio/contracts (issue 461, T-31).
  *
- * Two refusals, both named rather than hidden. There is no predecessor take to depend on — the
- * dependency is on a specific take and there is not one yet. Or the predecessor was itself
- * produced by continuation, which is where §1.4's one-hop decision stops being an intention: a
- * decision nothing checks is one an implementation walks straight past, every shot in a scene
- * declaring continuation and a single reselection invalidating the whole tail.
+ * It answers a question the dispatch planner has to ask before a single pass is compiled, and
+ * planning is a contracts-side pure function. Two copies of "may this shot continue" would be two
+ * places for the one-hop rule to drift — which is the failure R-52 exists to prevent, reproduced
+ * one level up. Re-exported here because this file is still the coordinator's door to
+ * continuation, and its callers should not have to know the predicate emigrated.
  */
-export function continuationAvailable(input: {
-  shotIndex: number;
-  shots: ReadonlyArray<{ id: string; number: number }>;
-  selections: Selections;
-  takes: readonly Take[];
-}): ContinuationAvailability {
-  const previous = input.shots[input.shotIndex - 1];
-  if (!previous) {
-    return { available: false, reason: "this is the first shot — there is nothing before it to continue" };
-  }
-  const selectedId = input.selections[previous.id]?.acceptedTakeId ?? null;
-  if (!selectedId) {
-    return { available: false, reason: `shot ${previous.number} has no accepted take to continue from` };
-  }
-  const predecessor = input.takes.find((take) => take.id === selectedId);
-  if (!predecessor) {
-    return { available: false, reason: `shot ${previous.number}'s accepted take is no longer available` };
-  }
-  if (predecessor.continuedFrom !== undefined) {
-    return {
-      available: false,
-      reason: `shot ${previous.number}'s take was itself continued — continuation stops at one hop, so this would chain`,
-    };
-  }
-  return { available: true, predecessor };
-}
+export { continuationAvailable, type ContinuationAvailability } from "@arke-studio/contracts";
 
 /**
  * The media a continuation actually extends (R-49, D33).
@@ -71,6 +42,13 @@ export function continuationAvailable(input: {
  *
  * So a segment is materialised to its own file first. Never re-encoded, on the same grounds
  * SPEC-013 R-13 gives for frame extraction: a stream copy preserves exactly what was reviewed.
+ *
+ * The media take is resolved rather than assumed (issue 461). This function read `take.media` for
+ * a segment and built a path out of it, which is wrong twice over: arrival writes `media` onto the
+ * pass take alone, so a segment's is `undefined`, and the guard above it therefore refused every
+ * segment before the path could be wrong. Neither showed, because nothing had ever called this —
+ * which is the same way `continuedFrom` came to be read by four guards and written by nothing.
+ * `spine-cut.ts` and `takes/boundary.ts` both look the pass up; this now agrees with them.
  */
 export async function materialiseForContinuation(
   store: WorldStore,
@@ -79,9 +57,16 @@ export async function materialiseForContinuation(
   ffmpeg: FfmpegRunner | null,
   signal: AbortSignal,
 ): Promise<{ path: string; materialised: boolean }> {
-  if (!take.media) throw new Error(`take ${take.id} has no media to continue`);
-  // A segment's media lives with the pass that produced it, not with the segment.
-  const source = `productions/${productionId}/takes/${take.segment?.passTakeId ?? take.id}/${take.media}`;
+  const mediaTakeId = take.segment?.passTakeId ?? take.id;
+  const mediaTake =
+    take.segment === undefined
+      ? take
+      : store
+          .getBundle()
+          .productions.find((candidate) => candidate.meta.id === productionId)
+          ?.takes.find((candidate) => candidate.id === mediaTakeId);
+  if (!mediaTake?.media) throw new Error(`take ${mediaTakeId} has no media to continue`);
+  const source = `productions/${productionId}/takes/${mediaTakeId}/${mediaTake.media}`;
   const range = take.segment;
   if (!range) {
     // A whole take is already its own file; nothing to cut, so nothing to copy.

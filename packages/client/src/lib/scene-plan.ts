@@ -53,6 +53,10 @@ export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-s
     // The world's shelf, so a durable boundary frame resolves here exactly as it will at the
     // coordinator (issue 154).
     artifacts: world.artifacts,
+    // The production's takes, on the same grounds one input up: a continuation resolves against
+    // a specific predecessor take (SPEC-019 R-50), and without them the dialog would price a
+    // plain generation for a shot the coordinator is about to dispatch as an extension.
+    takes: production.takes,
     // The production's delivery aspect (issue 389), on the same same-function claim.
     ...(production.meta.aspect !== undefined ? { aspect: production.meta.aspect } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
