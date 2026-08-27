@@ -112,6 +112,7 @@ export class OpenAiClient implements ProviderClient {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: form,
+          ...(request.signal !== undefined ? { signal: request.signal } : {}),
         });
         status = response.status;
         if (status === 401 || status === 403) {
@@ -137,6 +138,7 @@ export class OpenAiClient implements ProviderClient {
             moderation: "auto",
             ...(size ? { size } : {}),
           }),
+          ...(request.signal !== undefined ? { signal: request.signal } : {}),
         });
         status = response.status;
         body = response.body;
@@ -160,6 +162,7 @@ export class OpenAiClient implements ProviderClient {
       method: "POST",
       headers: this.headers(key),
       body: JSON.stringify({ model: request.model, ...request.params }),
+      ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (status >= 400) throw new Error(`openai: completion failed (HTTP ${status})`);
     const text = (body as { choices?: Array<{ message?: { content?: string } }> } | null)?.choices?.[0]?.message?.content ?? "";

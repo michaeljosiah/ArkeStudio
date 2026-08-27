@@ -1089,7 +1089,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       candidates: z.array(AskCandidateSchema),
     })
     .strict(),
-  /** An entry's computed detail: cited-by and speculative ripples (SPEC-006 §2.5). */
+  /** An entry's computed detail: cited-by, history and speculative ripples (SPEC-006 §2.5). */
   z
     .object({
       ...base,
@@ -1103,6 +1103,25 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
           productions: z.array(z.string()),
         })
         .strict(),
+      /**
+       * This entry's change lines, oldest first — read per entity, not sliced off a global tail
+       * (issue 289). `ClientState.changes` is a recent-activity window, so a bulk write like a
+       * migration pushes older records out of it and an entry's History panel reports nothing
+       * while its records sit intact on disk.
+       *
+       * Bounded, and `historyTruncated` says when the bound bit. An entry with more changes than
+       * one response should carry is a real thing, and a screen showing a window of a history as
+       * though it were the whole of it is the same untruth this issue is about.
+       */
+      history: z.array(ChangeRecordSchema),
+      /** Whether older records for this entry exist beyond the ones carried here. */
+      historyTruncated: z.boolean(),
+      /**
+       * The canon revision this answer describes. Answering reads the change log, so two asked
+       * of the same entry can be in flight at once and the older can come back last; the reader
+       * keeps the answer describing the later revision rather than the one that arrived later.
+       */
+      canonRevision: z.number().int(),
       ripples: z.array(
         z.object({ kind: z.string(), summary: z.string(), targets: z.array(z.string()) }).strict(),
       ),

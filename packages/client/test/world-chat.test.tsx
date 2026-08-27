@@ -394,6 +394,39 @@ describe("attaching a document to a conversation", () => {
   });
 
   /**
+   * A PDF is readable now, and only as far as its words go.
+   *
+   * The chip has to carry that or it is the unreadable case in reverse: somebody attaches a deck
+   * for the pictures in it, sees an ordinary chip, and asks about a chart the Studio never saw.
+   */
+  it("marks a file whose text was extracted as text only", () => {
+    const html = renderConversation({
+      worldChat: {
+        conversationId: CONVERSATION_ID,
+        status: "open",
+        messages: [],
+        hasMore: false,
+        seq: 1,
+        points: [],
+        attachments: [
+          {
+            id: "wca_3",
+            fileName: "treatment.pdf",
+            kind: "document",
+            readability: "extracted-text-available",
+            promoted: false,
+          },
+        ],
+        runStatus: null,
+        runStartedAt: null,
+        retrievalUnavailable: false,
+      } as never,
+    });
+    assert.match(html, /treatment\.pdf · text only/);
+    assert.doesNotMatch(html, /not readable in chat/, "it is readable — just not whole");
+  });
+
+  /**
    * Driven through the real event rather than by setting state, because the refusal has no
    * durable home: nothing was written, so the event is the only thing carrying it and the path
    * from it to the chip is the thing worth testing.

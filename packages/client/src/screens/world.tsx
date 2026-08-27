@@ -3530,9 +3530,19 @@ export function CanonEntryScreen() {
     if (entry) talkAbout(entry.title, { kind: "canon-entry", entryId: entry.id });
   };
 
+  /*
+   * Asked again whenever canon moves, not only when the entry opens.
+   *
+   * The detail is computed server-side and nothing pushes an update for it, so an entry left open
+   * across an accept used to keep showing the cited-by and ripples from before it. Its history now
+   * comes from here too (issue 289), and history going stale on screen would be the more obvious
+   * fault of the two. Every canon commit advances the revision, and the snapshot that carries the
+   * new revision is broadcast after the index has been rebuilt, so this asks once and asks late.
+   */
+  const canonRevision = world?.meta.canonRevision;
   useEffect(() => {
     if (worldId && entry) requestCanonRefs(worldId, entry.id);
-  }, [worldId, entry?.id]);
+  }, [worldId, entry?.id, canonRevision]);
 
   if (!entry) {
     return (
@@ -3542,7 +3552,10 @@ export function CanonEntryScreen() {
     );
   }
   const detail = refs[entry.id];
-  const history = (world?.changes ?? []).filter((c) => c.entity === `canon/${entry.id}`);
+  // Read per entry, not filtered out of the world's recent-change tail (issue 289): a bulk write
+  // fills that tail and the panel would then say an entry has no history while its records sit
+  // intact on disk. Undefined until the detail arrives, so the empty line waits for an answer.
+  const history = detail?.history;
   return (
     <div className="fy-entry" data-screen="canon-entry">
       <div className="fy-entry__main">
@@ -3627,12 +3640,12 @@ export function CanonEntryScreen() {
       <div className="fy-entry__side">
         <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
         <div style={{ marginTop: 4 }}>
-          {history.length === 0 && (
+          {history?.length === 0 && (
             <div className="fy-mono" style={{ padding: "9px 0" }}>
               no recorded changes yet
             </div>
           )}
-          {[...history].reverse().map((c, i) => (
+          {[...(history ?? [])].reverse().map((c, i) => (
             <div key={i} className="fy-historyrow">
               <span className="fy-historyrow__v" style={i === 0 ? { color: "var(--foreground)" } : undefined}>
                 v{String(c.canonRevisionAfter ?? c.toVersion ?? "?")}
@@ -3647,6 +3660,11 @@ export function CanonEntryScreen() {
               </div>
             </div>
           ))}
+          {detail?.historyTruncated === true && (
+            <div className="fy-mono" style={{ padding: "9px 0" }}>
+              older changes not shown
+            </div>
+          )}
         </div>
         {detail && detail.ripples.length > 0 && (
           <div className="fy-draftcard">

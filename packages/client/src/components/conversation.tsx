@@ -161,6 +161,20 @@ export function failureLine(failure: { status: string; detail?: string }): strin
 }
 
 /**
+ * What a chip says about a file, beyond its name.
+ *
+ * Three states and two of them are marked. A file the chat cannot open says so, because a chip
+ * that looks attached while the reply cannot see it is the worst of the three. A PDF or a Word
+ * file says "text only": the words came through and the pictures, tables and layout did not,
+ * which somebody who attached a deck for its images needs to know before they ask about one.
+ */
+export function attachmentChipLabel(attachment: { fileName: string; readability: string }): string {
+  if (attachment.readability === "not-readable") return `${attachment.fileName} · not readable in chat`;
+  if (attachment.readability === "extracted-text-available") return `${attachment.fileName} · text only`;
+  return attachment.fileName;
+}
+
+/**
  * A conversation's title, from the first thing said in it (design turn 95).
  *
  * The wire caps a title at 200 characters, and a frame that breaks its schema is dropped without
@@ -407,7 +421,7 @@ export function ProductionConversation({
    */
   const attachChips = (loaded?.attachments ?? []).map((a) => ({
     id: a.id,
-    file: a.readability === "not-readable" ? `${a.fileName} · not readable in chat` : a.fileName,
+    file: attachmentChipLabel(a),
     kind: a.kind,
   }));
   const attachProps = {

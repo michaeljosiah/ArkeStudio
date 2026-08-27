@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, parse, resolve } from "node:path";
 import type { DomainEvent, SetupComponent, SetupStatus } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catalogue.js";
@@ -153,6 +153,46 @@ export class LocalSetupService {
   }
 
   /**
+   * The folder this component's bytes actually land in — which is not always under the app.
+   * A weight entry naming an external root writes into the folder the user mapped, and that
+   * folder is very often on another drive, because putting a model library somewhere with room
+   * for it is the whole reason the mapping exists. Guarding it against the app's volume
+   * measures the wrong disk in both directions, so the destination is resolved here and the
+   * guard measures what it names.
+   *
+   * Null only where a `files` entry has no mapped folder yet; install blocks that with the
+   * better reason, so the guard leaves it alone.
+   */
+  private destinationOf(entry: CatalogueEntry): string | null {
+    const spec = entry.spec;
+    if (spec.kind === "files") {
+      const root = this.filesRoot(spec);
+      return root === null ? null : join(root, spec.dir);
+    }
+    if (spec.kind === "archive" || spec.kind === "tree") return this.toolDir(spec);
+    // An installer stages under the app's own models folder. A pull lands wherever that runtime
+    // keeps its store, which is not ours to know — the app's volume stays the honest guess.
+    return this.modelsDir();
+  }
+
+  /**
+   * Free space where this path will be written. `statfs` needs somewhere that exists, and a
+   * destination often does not yet — `<appRoot>/models` on a first run, `checkpoints/` under a
+   * freshly mapped folder — so the nearest existing ancestor is measured instead. Same volume,
+   * same answer, and it keeps a not-yet-created folder from reading as unmeasurable.
+   */
+  private async diskFreeFor(dir: string): Promise<number | null> {
+    let at = resolve(dir);
+    for (;;) {
+      const free = await this.deps.diskFreeMb(at).catch(() => null);
+      if (free !== null) return free;
+      const up = dirname(at);
+      if (up === at) return null;
+      at = up;
+    }
+  }
+
+  /**
    * The archive for this machine. A release publishes one per architecture, and picking the
    * wrong one yields a binary that will not start — a worse failure than not fetching at all,
    * because it looks installed.
@@ -188,6 +228,29 @@ export class LocalSetupService {
         if (left.length === 0) await rm(toExtendedLength(path), { recursive: true, force: true }).catch(() => {});
       } else if (e.name.endsWith(".partial")) {
         await rm(toExtendedLength(path), { force: true }).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * The same debris, in the folder the user mapped. `sweepPartials` walks a tree and removes
+   * any directory it empties, which is right for the app's own models folder and wrong for
+   * someone else's: SPEC-021 §2.4 says a user-owned folder is never walked or recursively
+   * deleted. So the fragments are removed at exactly the paths the catalogue named, one by one
+   * — the per-file rule repair already follows — and nothing beside them is even looked at.
+   *
+   * Without this a cancelled 9.5 GB fetch left its `.partial` in the user's library for good:
+   * the app-root sweep never reaches there, and repair only knows the finished names.
+   */
+  private async sweepMappedPartials(): Promise<void> {
+    for (const { entry } of this.components.values()) {
+      const spec = entry.spec;
+      if (spec.kind !== "files" || spec.externalRoot === undefined) continue;
+      const root = this.filesRoot(spec);
+      if (root === null) continue;
+      for (const f of spec.files) {
+        const partial = `${join(root, spec.dir, f.file)}.partial`;
+        await rm(toExtendedLength(partial), { force: true }).catch(() => {});
       }
     }
   }
@@ -256,28 +319,88 @@ export class LocalSetupService {
     // Nothing is in flight here (one run at a time), so any .partial is the debris of a run
     // that was cancelled or killed. Sweep it: a fragment must never quietly become a file.
     await this.sweepPartials(this.modelsDir());
+    await this.sweepMappedPartials();
     await this.detect();
 
-    const outstanding = [...this.components.values()].filter((c) => c.state === "queued");
-    if (outstanding.length === 0) return;
+    // Drained, not snapshotted. A component can be queued *during* a pass — Repair does it,
+    // having already deleted the files first — and a pass working from one list taken at the
+    // start finishes without touching it, stranding a recipe with its weights gone, stuck
+    // queued, and no control on its row. Each round takes what is queued and has not been
+    // attempted yet, so a round may add work for the next and nothing can loop forever.
+    const attempted = new Set<string>();
+    for (;;) {
+      if (this.abort.signal.aborted || this.disposed) break;
+      const round = [...this.components.values()].filter(
+        (c) => c.state === "queued" && !attempted.has(c.id),
+      );
+      if (round.length === 0) break;
+      for (const c of round) attempted.add(c.id);
+      await this.installRound(round);
+    }
+  }
 
+  /** One round of the drain above: guard what it costs, then fetch what still stands. */
+  private async installRound(outstanding: readonly Live[]): Promise<void> {
     // The guard: refuse to start a download this disk cannot hold, with both figures.
     // What it costs on disk, not what it costs to fetch: an extracted component needs room for
     // the archive and the tree at once. Guarding on the download alone let a disk with 5 GB
     // free start a 2 GB download that dies part-way through unpacking — the silent mid-way
     // failure this guard exists to replace with a refusal.
-    const neededMb = outstanding.reduce((sum, c) => sum + (c.entry.installedMb ?? c.sizeMb), 0);
+    //
+    // Per volume, because components no longer all land on one. A mapped models folder is
+    // routinely on another drive, so one pooled figure both cleared a 17 GB weight fetch onto a
+    // full D: and blocked a 141 MB voice model on a roomy C:. Each volume answers only for what
+    // is being written to it; one that cannot be measured blocks nothing, exactly as an
+    // unmeasurable disk did before.
+    //
+    // Pooling needs to know which destinations share a disk, and only the path root can say.
+    // On Windows it says it exactly: a drive letter or a UNC share IS a volume, so everything
+    // under one root is summed together, which is what sharing a disk means. On a POSIX host
+    // every path roots at `/` and that says nothing about the filesystem underneath — pooling
+    // there would let a full mapped disk block a download to a roomy one, the very thing this
+    // is meant to stop. So where the platform cannot tell us, each destination answers for
+    // itself: never pooled with a disk it may not be on, and never over-stated for its own.
     const headroom = this.opts.headroomMb ?? DEFAULT_HEADROOM_MB;
-    if (this.diskFreeMb !== null && this.diskFreeMb < neededMb + headroom) {
-      for (const c of outstanding) {
+    const rootOf = (dir: string): string => parse(resolve(dir)).root;
+    const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
+    const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
+    for (const c of outstanding) {
+      const dir = this.destinationOf(c.entry);
+      if (dir === null) continue; // no mapped folder — install states that, and states it better
+      const key = volumeKey(dir);
+      const group = volumes.get(key) ?? { root: rootOf(dir), dirs: new Set<string>(), needMb: 0, components: [] };
+      group.dirs.add(dir);
+      group.needMb += c.entry.installedMb ?? c.sizeMb;
+      group.components.push(c);
+      volumes.set(key, group);
+    }
+    const appRootDrive = rootOf(this.opts.appRoot);
+    let blockedAny = false;
+    for (const group of volumes.values()) {
+      const measured: number[] = [];
+      for (const dir of group.dirs) {
+        const free = await this.diskFreeFor(dir);
+        if (free !== null) measured.push(free);
+      }
+      // The smallest reading in the group: a pooled total is only honest against the tightest
+      // disk in it. On Windows they are one volume and agree; elsewhere a group holds one dir.
+      const freeMb = measured.length === 0 ? null : Math.min(...measured);
+      if (freeMb === null || freeMb >= group.needMb + headroom) continue;
+      // Name the drive when it is not the one the app lives on: "this disk" reads as the app's
+      // disk to everyone, and a refusal about D: phrased that way sends someone to clear space
+      // on the wrong volume. A host with no drive letters has nothing useful to name.
+      const where = group.root === appRootDrive ? "this disk" : group.root;
+      for (const c of group.components) {
         this.set(c.id, {
           state: "blocked",
-          detail: `needs ${gb(neededMb)} plus room to work; this disk has ${gb(this.diskFreeMb)} free`,
+          detail: `needs ${gb(group.needMb)} plus room to work; ${where} has ${gb(freeMb)} free`,
         });
       }
-      this.publish();
-      return;
+      blockedAny = true;
     }
+    if (blockedAny) this.publish();
+    // A short volume no longer stops the ones with room: only what was blocked is out.
+    if (!outstanding.some((c) => this.components.get(c.id)?.state === "queued")) return;
 
     this.running = true;
     this.publish();

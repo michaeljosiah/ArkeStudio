@@ -574,9 +574,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
-  /** Local-runtime setup: leave one out, try one again, or stop the lot. */
+  /** Local-runtime setup: leave one out, try one again, replace one, or stop the lot. */
   z.object({ kind: z.literal("setup-skip"), componentId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("setup-retry"), componentId: z.string().min(1) }).strict(),
+  /**
+   * Discard what is on disk for one component and fetch it again. Retry trusts what is already
+   * there — presence is completion — so it is no answer to a file that arrived intact and is
+   * the wrong bytes. Repair is the answer to a digest that did not match.
+   */
+  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z

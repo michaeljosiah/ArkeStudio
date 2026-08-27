@@ -1620,6 +1620,68 @@ describe("cancellation (R-14, R-15, D10)", () => {
     assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
+
+  it("aborting a paid remote submit lands cancelled, never a hold or a resubmit (issue 95)", async () => {
+    // The case above is a local runtime, which skips handleSubmitError's hold branch outright. A
+    // paid, non-idempotent remote takes that branch — so now that the OpenAI/fal/Anthropic clients
+    // actually honour the signal, the abort rejection reaches it for the first time. It must not
+    // turn a user cancellation into a needs-reconciliation hold, and above all not into a second
+    // charged attempt (#93). The two settle against each other on a microtask, so drain before
+    // believing the status: the failure this guards is a late transition, not an immediate one.
+    let submitSignal: AbortSignal | undefined;
+    let submits = 0;
+    const fake = new FakeProvider({});
+    fake.submit = async (_key, request) => {
+      submits += 1;
+      submitSignal = (request as { signal?: AbortSignal }).signal;
+      await new Promise<void>((_resolve, reject) => {
+        submitSignal?.addEventListener("abort", () => reject(new Error("submit cancelled")), { once: true });
+      });
+      throw new Error("unreachable");
+    };
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await h.queue.cancel(job.id);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(submitSignal?.aborted, true);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(submits, 1);
+    assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
+    h.queue.dispose();
+  });
+
+  it("a queue-backed submit landing after cancellation is still cancelled remotely (issue 95)", async () => {
+    // The counterpart to the test above, and why the signal is NOT forwarded everywhere. fal's
+    // submit is an enqueue that ignores the abort deliberately: it has to return the request id,
+    // because that id is the only handle for calling accepted remote work off. So the cancel is
+    // delivered on the far side of a submit that completes *after* the user cancelled — the branch
+    // at dispatcher.ts:701. Abort that POST instead and the id is lost with the remote job still
+    // running: a cancelled paid generation that finishes, and charges, unseen.
+    let release: (() => void) | undefined;
+    const fake = new FakeProvider({});
+    const accept = fake.submit.bind(fake);
+    fake.submit = async (key, request) => {
+      // No signal handling, exactly like the fal enqueue.
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return accept(key, request);
+    };
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await until(() => release !== undefined);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(fake.cancelCount, 0, "there is nothing to cancel remotely until the id comes back");
+    release!();
+    await until(() => fake.cancelCount === 1);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    h.queue.dispose();
+  });
 });
 
 describe("cost capture (R-15, SPEC-008 R-17)", () => {

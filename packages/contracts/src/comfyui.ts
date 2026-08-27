@@ -110,6 +110,30 @@ export const JobEngineIdentitySchema = z
 export type JobEngineIdentity = z.infer<typeof JobEngineIdentitySchema>;
 
 // ---------------------------------------------------------------------------
+// The setup component a recipe's weights arrive as
+// ---------------------------------------------------------------------------
+
+/**
+ * A recipe's weight files reach the machine as an ordinary setup component, and its id is the
+ * only thing tying the three halves of that together: the host derives the entry from the
+ * recipe, the coordinator re-verifies the recipe when a component with this prefix lands, and
+ * Settings puts the component's Download on the recipe's own row. That was three spellings of
+ * one string in three packages, so it is spelled here once (SPEC-028, R-10's rule for the Voxa
+ * ids applied to these).
+ */
+export const COMFYUI_WEIGHTS_COMPONENT_PREFIX = "comfyui-weights-";
+
+/** The setup component carrying this recipe's weights, whether or not one is in the catalogue. */
+export function comfyUiWeightsComponentId(recipeId: string): string {
+  return `${COMFYUI_WEIGHTS_COMPONENT_PREFIX}${recipeId}`;
+}
+
+/** Whether a setup component id names some recipe's weights. */
+export function isComfyUiWeightsComponent(componentId: string): boolean {
+  return componentId.startsWith(COMFYUI_WEIGHTS_COMPONENT_PREFIX);
+}
+
+// ---------------------------------------------------------------------------
 // Recipe readiness (§2.12, R-16) — one answer, consumed everywhere
 // ---------------------------------------------------------------------------
 

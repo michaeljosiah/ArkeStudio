@@ -92,6 +92,7 @@ import {
   useSetup,
   setupCancel,
   setupRetry,
+  setupRepair,
   setupSkip,
   useReconcileReport,
   useStore,
@@ -123,6 +124,8 @@ import {
   type HarnessAvailability,
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
+  comfyUiWeightsComponentId,
+  isComfyUiWeightsComponent,
   type ComfyUiEngineStatus,
   type LedgerEntry,
   type LocalRuntimeStatus,
@@ -2485,6 +2488,16 @@ const STATED_ELSEWHERE: Record<string, "providers" | "voice" | "comfyui" | "loca
   "ollama-gemma4-26b": "local-models",
 };
 
+/**
+ * Which group speaks for a component, or undefined for one only Components states. The weight
+ * entries are matched by prefix rather than listed: there is one per shipped recipe, and a
+ * build that adds a recipe would otherwise have to remember to add its id here too.
+ */
+function statedElsewhere(componentId: string): "providers" | "voice" | "comfyui" | "local-models" | undefined {
+  if (isComfyUiWeightsComponent(componentId)) return "comfyui";
+  return STATED_ELSEWHERE[componentId];
+}
+
 /** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
 type RuntimeTone = "ok" | "warn" | "idle";
 const TONE_CLASS: Record<RuntimeTone, string> = {
@@ -2578,7 +2591,6 @@ function MachineDetail({ runtime }: { runtime: LocalRuntimeStatus | null }) {
  * a section every other group's rows had to be read past.
  */
 function ComponentsDetail({ components, running }: { components: readonly SetupComponent[]; running: boolean }) {
-  const size = (mbytes: number) => (mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`);
   const outstanding = components.filter((c) => c.state !== "ready" && c.state !== "present");
   return (
     <>
@@ -2605,13 +2617,13 @@ function ComponentsDetail({ components, running }: { components: readonly SetupC
               <div className="fy-set__name fy-set__name--wide">
                 <div className="fy-set__title">{c.displayName}</div>
                 <div className="fy-set__caps">
-                  {c.purpose} · {size(c.sizeMb)}
+                  {c.purpose} · {sizeMb(c.sizeMb)}
                 </div>
               </div>
               <RuntimeStatus tone={c.state === "failed" ? "warn" : settled ? "ok" : "idle"}>
                 {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
               </RuntimeStatus>
-              {offered && <Button onClick={() => setupRetry(c.id)}>Download · {size(c.sizeMb)}</Button>}
+              {offered && <Button onClick={() => setupRetry(c.id)}>Download · {sizeMb(c.sizeMb)}</Button>}
               {!settled && !offered && c.state !== "skipped" && (
                 <button type="button" className="fy-set__link" onClick={() => setupSkip(c.id)}>
                   Skip
@@ -2640,6 +2652,11 @@ function ComponentsDetail({ components, running }: { components: readonly SetupC
       })}
     </>
   );
+}
+
+/** A download size as the catalogue states it. One spelling: the same figure on every row. */
+function sizeMb(mbytes: number): string {
+  return mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`;
 }
 
 /** Failed beats moving beats arrived — the worst thing in the group is what its dot says. */
@@ -2852,9 +2869,14 @@ function engineTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
 
 /**
  * The ComfyUI engine and its recipes (SPEC-021 §2.2, §2.12, design turn 72). The engine row
- * states its source; detection offers are adopted, never typed; a disabled recipe carries its
- * one measured clause; and the weight rows live under Components, because they are catalogue
- * components like any other.
+ * states its source; detection offers are adopted, never typed; and a disabled recipe carries
+ * its one measured clause.
+ *
+ * A recipe's weights hang off the recipe (SPEC-028 T-25). They are catalogue components like
+ * any other and stayed under Components for that reason, which left the row that says "1 of 1
+ * model files missing" two panes away from the Download for those exact files. The action now
+ * sits on the row that states the lack; Components keeps them until they arrive, as it does for
+ * everything else spoken for elsewhere.
  */
 function ComfyUiDetail() {
   const { state } = useStore();
@@ -2978,35 +3000,91 @@ function ComfyUiDetail() {
           {recipes.length === 0 ? "NONE IN THIS BUILD" : `${ready} OF ${recipes.length} READY`}
         </span>
       </RuntimeSection>
-      {recipes.map((recipe) => (
-        <div
-          key={recipe.recipeId}
-          className={cx("fy-set__row--stack", "fy-set__row", recipe.state === "disabled" && "fy-set__row--off")}
-          data-testid="comfyui-recipe"
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div className="fy-set__name fy-set__name--wide">
-              <div className="fy-set__title">{recipe.displayName}</div>
-              <div className="fy-set__caps fy-set__caps--tokens">
-                {recipe.capability} · v{recipe.recipeVersion}
+      {recipes.map((recipe) => {
+        const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
+        const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
+        const pct =
+          weights && weights.bytesTotal > 0
+            ? Math.min(100, Math.round((weights.bytesDone / weights.bytesTotal) * 100))
+            : 0;
+        // While the weights are moving or stuck, that IS what this recipe is doing, and the dot
+        // has to agree with the word beside it: a running download is not a fault, and a failed
+        // one is not the recipe's own "disabled".
+        const speaksForRecipe =
+          !settled && weights.state !== "available" && weights.state !== "skipped";
+        const tone: RuntimeTone = speaksForRecipe
+          ? weights.state === "failed" || weights.state === "blocked"
+            ? "warn"
+            : "idle"
+          : recipe.state === "ready"
+            ? "ok"
+            : recipe.state === "disabled"
+              ? "warn"
+              : "idle";
+        return (
+          <div
+            key={recipe.recipeId}
+            className={cx("fy-set__row--stack", "fy-set__row", recipe.state === "disabled" && "fy-set__row--off")}
+            data-testid="comfyui-recipe"
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div className="fy-set__name fy-set__name--wide">
+                <div className="fy-set__title">{recipe.displayName}</div>
+                <div className="fy-set__caps fy-set__caps--tokens">
+                  {recipe.capability} · v{recipe.recipeVersion}
+                </div>
               </div>
+              {weights?.state === "available" && (
+                <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
+              )}
+              {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") && (
+                <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
+                  Retry
+                </button>
+              )}
+              {/* For the file that is on disk, intact, and not the bytes the recipe pins — the
+                  one case Retry cannot answer, because presence is completion to it. */}
+              {settled && weights !== undefined && (
+                <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
+                  Repair
+                </button>
+              )}
+              <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
+                Re-verify
+              </button>
+              <RuntimeStatus tone={tone}>
+                {speaksForRecipe
+                  ? weights.state === "downloading"
+                    ? `${pct}%`
+                    : weights.state
+                  : recipe.state}
+              </RuntimeStatus>
             </div>
-            <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
-              Re-verify
-            </button>
-            <RuntimeStatus tone={recipe.state === "ready" ? "ok" : recipe.state === "disabled" ? "warn" : "idle"}>
-              {recipe.state}
-            </RuntimeStatus>
+            {/* The bar only exists while something is actually moving. */}
+            {weights?.state === "downloading" && (
+              <div className="fy-set__bar">
+                <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
+              </div>
+            )}
+            {/* Kept visible, disabled, with the measured reason — never quietly absent (R-10).
+                A stalled weights fetch states its own cause instead: "1 of 1 model files
+                missing" is true but says nothing about the disk that refused it. */}
+            {speaksForRecipe && weights.detail !== undefined ? (
+              <div className="fy-set__why">
+                <span className={cx("fy-set__dot", weights.state === "failed" && "fy-set__dot--warn")} />
+                <span>{weights.detail}</span>
+              </div>
+            ) : (
+              recipe.reason && (
+                <div className="fy-set__why">
+                  <span className={cx("fy-set__dot", recipe.state === "disabled" && "fy-set__dot--warn")} />
+                  <span>{recipe.reason}</span>
+                </div>
+              )
+            )}
           </div>
-          {/* Kept visible, disabled, with the measured reason — never quietly absent (R-10). */}
-          {recipe.reason && (
-            <div className="fy-set__why">
-              <span className={cx("fy-set__dot", recipe.state === "disabled" && "fy-set__dot--warn")} />
-              <span>{recipe.reason}</span>
-            </div>
-          )}
-        </div>
-      ))}
+        );
+      })}
       <div className="fy-rt__actions">
         <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
           Refresh
@@ -3280,7 +3358,7 @@ export function SettingsLocalRuntimeScreen() {
   // component stated nowhere at all.
   const modelsAreListed = (runtime?.models.length ?? 0) > 0;
   const components = (setup?.components ?? []).filter((c) => {
-    const restated = STATED_ELSEWHERE[c.id];
+    const restated = statedElsewhere(c.id);
     if (restated === undefined) return true;
     // Providers owns the credential this tool is for, so its row there is the only one needed —
     // installed or not. The rest are only spoken for once they have arrived.

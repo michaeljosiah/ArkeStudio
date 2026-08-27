@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
 import { frameDispatchFor, PROVIDERS, type ProviderId } from "@arke-studio/contracts";
+import { AnthropicClient } from "../src/clients/anthropic.js";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { FalClient } from "../src/clients/fal.js";
@@ -154,6 +155,125 @@ describe("synchronous speech returns artifacts to the durable queue path", () =>
     assert.equal(signal, controller.signal);
     controller.abort();
     await assert.rejects(submitting, /aborted/);
+  });
+});
+
+describe("queue cancellation reaches the synchronous paid submits (issue 95)", () => {
+  /**
+   * `SubmitRequest.signal` was declared and threaded all the way from the dispatcher, and only
+   * ElevenLabs ever handed it to `fetch` — so cancelling an in-flight OpenAI image submit left the
+   * local wait running to whatever deadline the runtime happened to inherit. The dispatcher-side
+   * test cannot see which client drops it: the abort is fired against a client that never asked to
+   * hear about it, and the queue looks correct while nothing happens. Assert it per path instead.
+   *
+   * These are the *synchronous* paid paths, where submit itself is the long wait and the provider
+   * has no remote job to call off afterwards — their `cancel()` is a documented no-op, so there is
+   * nothing an abort can lose. The queue-backed providers are a different case entirely; see the
+   * fal test below. The local runtimes carry their own deadlines (their `AbortSignal.timeout`).
+   */
+  const paths: Array<{ name: string; submit: (fetchImpl: FetchLike, signal: AbortSignal) => Promise<unknown> }> = [
+    {
+      name: "openai llm",
+      submit: (fetchImpl, signal) =>
+        new OpenAiClient(fetchImpl).submit("k", {
+          model: "gpt-5.2",
+          capability: "llm",
+          signal,
+          params: { messages: [{ role: "user", content: "x" }] },
+        }),
+    },
+    {
+      name: "openai image, no references",
+      submit: (fetchImpl, signal) =>
+        new OpenAiClient(fetchImpl).submit("k", {
+          model: "gpt-image-2",
+          capability: "image",
+          signal,
+          params: { prompt: "a drowned harbour" },
+        }),
+    },
+    {
+      // A separate fetch call site: references go out as multipart to /v1/images/edits, bypassing
+      // jsonRequest entirely, so forwarding on the JSON path proves nothing about this one.
+      name: "openai image, with references",
+      submit: (fetchImpl, signal) =>
+        new OpenAiClient(fetchImpl).submit("k", {
+          model: "gpt-image-2",
+          capability: "image",
+          signal,
+          params: { prompt: "a drowned harbour", references: ["references/maren-kest/main.png"] },
+          imageReferences: [{ name: "main.png", contentType: "image/png", data: new Uint8Array([1, 2, 3]) }],
+        }),
+    },
+    {
+      name: "anthropic",
+      submit: (fetchImpl, signal) =>
+        new AnthropicClient(fetchImpl).submit("k", {
+          model: "claude-opus-5",
+          capability: "llm",
+          signal,
+          params: { messages: [{ role: "user", content: "x" }] },
+        }),
+    },
+  ];
+
+  for (const path of paths) {
+    it(`${path.name}: the abort ends the local wait`, async () => {
+      let seen: AbortSignal | undefined;
+      // Settles only when the signal fires. A client that drops the signal hangs this test rather
+      // than passing it quietly — the failure mode being tested for is silence.
+      const fetchImpl: FetchLike = async (_url, init) => {
+        seen = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          seen?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      };
+      const controller = new AbortController();
+      const submitting = path.submit(fetchImpl, controller.signal);
+      await Promise.resolve();
+      assert.equal(seen, controller.signal, "the client never handed the caller's signal to fetch");
+      controller.abort();
+      await assert.rejects(submitting, /aborted/);
+    });
+  }
+
+  it("fal's queue submission is deliberately left un-abortable", async () => {
+    // The opposite of the rule above, and the reason it is not "forward it everywhere". fal's
+    // submit is an *enqueue*: the POST returns the `request_id` that cancel() needs to call the
+    // work off. Aborting it discards that id while the remote job carries on — the request was
+    // accepted, we simply threw away the handle, and a cancelled paid generation would run to
+    // completion and charge. There is no long local wait here to save; the wait worth aborting is
+    // a synchronous generation, not a sub-second enqueue. The queue cancels this one properly by
+    // letting the id come back (dispatcher.ts:701).
+    let init: RequestInit | undefined;
+    const fetchImpl: FetchLike = async (_url, seen) => {
+      init = seen;
+      return new Response(JSON.stringify({ request_id: "req-2" }), { status: 200 });
+    };
+    const controller = new AbortController();
+    const submitted = await new FalClient(fetchImpl).submit("k", {
+      model: "nano-banana-2",
+      capability: "image",
+      signal: controller.signal,
+      params: { prompt: "x", output: { width: 1024, height: 1024 } },
+    });
+    assert.ok(init !== undefined);
+    assert.ok(!("signal" in init), "aborting the enqueue would discard the id needed to cancel it");
+    // The id the remote cancel is reached through still comes back.
+    assert.equal(submitted.remoteId, "fal-ai/nano-banana-2::req-2");
+  });
+
+  it("omits the field entirely when the caller passed no signal", async () => {
+    // `exactOptionalPropertyTypes` is on and the clients spread-guard the field. An explicit
+    // `signal: undefined` is not the same as an absent one to every fetch implementation.
+    let init: RequestInit | undefined;
+    const fetchImpl: FetchLike = async (_url, seen) => {
+      init = seen;
+      return new Response(JSON.stringify({ request_id: "req-1" }), { status: 200 });
+    };
+    await new FalClient(fetchImpl).submit("k", { model: "nano-banana-2", capability: "image", params: { prompt: "x" } });
+    assert.ok(init !== undefined);
+    assert.ok(!("signal" in init));
   });
 });
 

@@ -15,6 +15,7 @@ import {
   refuseUnreadable,
   WorldChatAttachmentStore,
 } from "../../src/world-chat/attachments.js";
+import { oneParagraphDocx, onePagePdf, pictureOnlyPdf } from "./build-documents.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { tempDir } from "../tmp.js";
@@ -95,12 +96,15 @@ describe("refusing what a conversation could not read", () => {
   });
 
   /**
-   * PDF is a document by extension and unreadable in fact until an extraction step exists, so
-   * the bytes decide rather than the name — in both directions.
+   * PDF and Word are read by taking them apart, and whether there is anything inside one is not
+   * a question the name or the first few bytes can answer. So this gate lets them past and
+   * `ingest` decides — still before anything is written, and still with a sentence.
    */
-  it("refuses a document whose bytes are not text", () => {
-    const pdf = refuseUnreadable("brief.pdf", new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0x01]));
-    assert.match(pdf!, /not readable as text/);
+  it("leaves the formats that are read by extraction to the extractor", () => {
+    assert.equal(refuseUnreadable("brief.pdf", new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0x01])), null);
+    assert.equal(refuseUnreadable("treatment.docx", new Uint8Array([0x50, 0x4b, 0x03, 0x04])), null);
+    // Not a blanket exemption for anything binary: a .doc is a format this does not read.
+    assert.match(refuseUnreadable("treatment.doc", new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]))!, /not a document/);
   });
 
   it("refuses a text file that is secretly binary", () => {
@@ -108,7 +112,7 @@ describe("refusing what a conversation could not read", () => {
   });
 
   it("offers only what it can read in the picker", () => {
-    assert.deepEqual([...CHAT_DOCUMENT_EXTENSIONS].sort(), ["md", "txt"]);
+    assert.deepEqual([...CHAT_DOCUMENT_EXTENSIONS].sort(), ["docx", "md", "pdf", "txt"]);
   });
 });
 
@@ -213,6 +217,60 @@ describe("ingesting an attachment", () => {
     // be a half-built attachment surviving a failure.
     const staging = join(conversationDir(worldPath, conversationId), "attachments", ".incoming");
     assert.deepEqual(await readdir(staging).catch(() => []), []);
+  });
+
+  /**
+   * A PDF or a Word file arrives as an ordinary attachment with its words already out of it.
+   *
+   * Two things are kept, and which is which matters: the original is what gets filed into the
+   * world if the person promotes it, and the extraction is what the conversation reads and
+   * quotes. The hash stays the file's own, so a quotation still names the file it came from.
+   */
+  it("keeps a PDF's words beside the PDF", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    const attachment = await store.ingest(conversationId, {
+      fileName: "treatment.pdf",
+      bytes: onePagePdf("The bells again."),
+    });
+
+    assert.equal(attachment.kind, "document");
+    assert.equal(attachment.readability, "extracted-text-available");
+    assert.equal(await store.readWholeText(attachment), "The bells again.");
+    assert.deepEqual(
+      new Uint8Array(await store.readBytes(attachment)).slice(0, 5),
+      new Uint8Array(onePagePdf("The bells again.")).slice(0, 5),
+      "the file itself is untouched",
+    );
+
+    const dir = attachmentDir(worldPath, conversationId, attachment.id);
+    assert.deepEqual((await readdir(dir)).sort(), [".extracted.txt", "treatment.pdf"]);
+  });
+
+  it("reads a Word file the same way", async () => {
+    const { store, conversationId } = await setup();
+    const attachment = await store.ingest(conversationId, {
+      fileName: "notes.docx",
+      bytes: oneParagraphDocx("She hears it under the harbour."),
+    });
+    assert.equal(attachment.readability, "extracted-text-available");
+    assert.equal(await store.readWholeText(attachment), "She hears it under the harbour.");
+  });
+
+  /**
+   * A file with nothing to read is refused in the same breath as one of the wrong kind.
+   *
+   * This is the case the honesty rule was written for: a scan attaches, looks attached, and the
+   * reply cannot see a word of it, so the person carries on talking as though it had been read.
+   */
+  it("refuses a PDF with no words in it, and files nothing", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    await assert.rejects(
+      () => store.ingest(conversationId, { fileName: "scan.pdf", bytes: pictureOnlyPdf() }),
+      (err: unknown) =>
+        err instanceof AttachmentError && err.reason === "not-text-readable" && /may be a scan/.test(err.message),
+    );
+    const dir = join(conversationDir(worldPath, conversationId), "attachments");
+    assert.deepEqual(await readdir(dir).catch(() => []), [], "not even a staging directory of one");
   });
 
   it("turns a long paste into a document attachment rather than truncating it", async () => {

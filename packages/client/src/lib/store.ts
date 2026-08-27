@@ -6,6 +6,7 @@ import {
   type BenchParams,
   type BibleHelperKind,
   type Capability,
+  type ChangeRecord,
   type ClientMessage,
   type ClientState,
   type DomainEvent,
@@ -94,6 +95,16 @@ export interface CanonRefsState {
     entries: string[];
     productions: string[];
   };
+  /**
+   * The entry's own change lines, oldest first (issue 289). Read per entity by the coordinator
+   * rather than filtered out of `world.changes`, which is a tail of the whole log and so goes
+   * empty for an entry the moment a bulk write fills the window.
+   */
+  history: ChangeRecord[];
+  /** Whether older records exist beyond the ones held here, so the panel can say so. */
+  historyTruncated: boolean;
+  /** The canon revision this answer describes — how a late one is told from a current one. */
+  canonRevision: number;
   ripples: Array<{ kind: string; summary: string; targets: string[] }>;
 }
 
@@ -689,6 +700,10 @@ function handleFrame(json: string): void {
       // Snapshot replay is followed by current permission.pending events. Clear stale prompts
       // first so a request that disappeared while the renderer was away does not survive reload.
       permissions: {},
+      // Keyed by entry id alone, and canon ids restart at CANON-001 in every world: the previous
+      // world's entry would otherwise supply the history, citations and ripples for the
+      // same-numbered entry in the next one, until its own answer arrived to replace them.
+      canonRefs: changedWorld ? {} : current.canonRefs,
       sheetRefs: changedWorld ? {} : current.sheetRefs,
       voiceCandidates: changedWorld ? {} : current.voiceCandidates,
       voiceClips: changedWorld ? {} : current.voiceClips,
@@ -1131,8 +1146,27 @@ function handleFrame(json: string): void {
           candidates: event.candidates,
         },
       };
-    } else if (event.type === "canon.refs") {
-      canonRefs = { ...canonRefs, [event.entryId]: { citedBy: event.citedBy, ripples: event.ripples } };
+    } else if (event.type === "canon.refs" && event.worldId === current.state.world?.meta.worldId) {
+      // Checked against the open world, as sheet.refs is: the answer is computed asynchronously
+      // now that it reads the change log, so one for a world just switched away from can still
+      // land here — and it would land on a live entry sharing its number (PR 540 review).
+      //
+      // Two for the same entry can also be in flight — the entry re-asks when canon moves — and
+      // arrival order is not the order they were computed in. The one describing the later
+      // revision wins, so an answer overtaken in flight cannot put the history back as it was.
+      const held = canonRefs[event.entryId];
+      if (held === undefined || event.canonRevision >= held.canonRevision) {
+        canonRefs = {
+          ...canonRefs,
+          [event.entryId]: {
+            citedBy: event.citedBy,
+            history: event.history,
+            historyTruncated: event.historyTruncated,
+            canonRevision: event.canonRevision,
+            ripples: event.ripples,
+          },
+        };
+      }
     } else if (event.type === "sheet.refs" && event.worldId === current.state.world?.meta.worldId) {
       sheetRefs = {
         ...sheetRefs,
@@ -1591,6 +1625,10 @@ export function setupSkip(componentId: string): void {
 
 export function setupRetry(componentId: string): void {
   send({ kind: "setup-retry", componentId });
+}
+
+export function setupRepair(componentId: string): void {
+  send({ kind: "setup-repair", componentId });
 }
 
 export function setupCancel(): void {
