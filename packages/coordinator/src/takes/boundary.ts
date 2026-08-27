@@ -211,12 +211,13 @@ export async function chainBoundaryFrame(
   production: ProductionBundle,
   input: {
     take: Take;
+    sourceShotId: string;
     followingShotId: string;
     maker: BoundaryFrameMaker | undefined;
     clock: () => string;
   },
 ): Promise<BoundaryChainResult> {
-  const { take, followingShotId, maker, clock } = input;
+  const { take, sourceShotId, followingShotId, maker, clock } = input;
   if (maker === undefined) return { ok: false, reason: "not-configured" };
 
   // The media actually decoded: the pass clip for a segment, the take's own file otherwise.
@@ -269,8 +270,7 @@ export async function chainBoundaryFrame(
     };
 
     const selectionsPath = `productions/${production.meta.id}/selections.json`;
-    await store.gateOp(async () => {
-      await atomicWriteFile(join(store.dir, "artifacts", file), png);
+    const installed = await store.gateOp(async () => {
       let selectionsRaw: string;
       let existed = true;
       try {
@@ -280,6 +280,10 @@ export async function chainBoundaryFrame(
         existed = false;
       }
       const selections = JSON.parse(selectionsRaw) as Record<string, Record<string, unknown>>;
+      // A newer accept may finish while this extraction is in flight. A segment and its backing
+      // pass share mediaTakeId, so fence against the exact accepted source take instead.
+      if (selections[sourceShotId]?.["acceptedTakeId"] !== take.id) return false;
+      await atomicWriteFile(join(store.dir, "artifacts", file), png);
       selections[followingShotId] = {
         trimInSec: 0,
         ...selections[followingShotId],
@@ -307,7 +311,9 @@ export async function chainBoundaryFrame(
         // drop the selection map and the artifact rather than refuse the world by name.
         raiseSchemaVersion: 2,
       });
+      return true;
     });
+    if (!installed) return { ok: false, reason: "a newer accepted take replaced this boundary frame source" };
     return { ok: true, artifactId: sidecar.id, followingShotId };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };

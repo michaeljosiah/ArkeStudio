@@ -1,6 +1,14 @@
 import { readdir, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { TakeSchema, ulid, type Job, type ShotPlanEntry, type Take, type TakeQc } from "@arke-studio/contracts";
+import {
+  TakeIdSchema,
+  TakeSchema,
+  ulid,
+  type Job,
+  type ShotPlanEntry,
+  type Take,
+  type TakeQc,
+} from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -33,6 +41,38 @@ function takeKindFor(job: Job): Take["kind"] {
   if (job.target.kind === "voice-line" || job.target.kind === "voice-preview") return "voice";
   if (job.capability === "image") return "frame";
   return "clip";
+}
+
+/** The exact predecessor frozen by a continuation dispatch, validated before landed media moves. */
+function continuedFromOf(store: WorldStore, job: Job): Take["continuedFrom"] {
+  const raw = job.params["continuedFrom"];
+  if (raw === undefined) return undefined;
+  if (
+    job.capability !== "video" ||
+    job.target.kind !== "shot" ||
+    job.target.id === undefined ||
+    job.target.coversShots?.length !== 1 ||
+    job.target.coversShots[0] !== job.target.id
+  ) {
+    throw new Error("continuedFrom is valid only for one exact video shot");
+  }
+  const parsed = TakeIdSchema.safeParse(raw);
+  if (!parsed.success) throw new Error("continuedFrom must be a take id");
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === job.productionId);
+  const predecessor = production?.takes.find((candidate) => candidate.id === parsed.data);
+  if (predecessor === undefined) throw new Error("continuedFrom must name a take in this production");
+  if (predecessor.continuedFrom !== undefined) {
+    throw new Error("continuedFrom cannot name a take that was itself continued");
+  }
+  const scene = production?.scenes.find((candidate) =>
+    candidate.shots.some((shot) => shot.id === job.target.id),
+  );
+  const targetIndex = scene?.shots.findIndex((shot) => shot.id === job.target.id) ?? -1;
+  const previousShot = targetIndex > 0 ? scene?.shots[targetIndex - 1] : undefined;
+  if (previousShot === undefined || !predecessor.coversShots.includes(previousShot.id)) {
+    throw new Error("continuedFrom must name footage for the immediately previous shot in this scene");
+  }
+  return parsed.data;
 }
 
 export interface TakeArrivalOptions {
@@ -69,7 +109,15 @@ async function takeForJob(store: WorldStore, productionId: string, jobId: string
  * duration, aspect, resolution, sound, seed, voice — describes how to make this again, which is
  * the whole point of keeping it.
  */
-const NOT_A_SETTING = new Set(["prompt", "text", "references", "provenance", "shotPlan", "startFrame"]);
+const NOT_A_SETTING = new Set([
+  "prompt",
+  "text",
+  "references",
+  "provenance",
+  "shotPlan",
+  "startFrame",
+  "continuedFrom",
+]);
 
 function settingsFrom(params: Job["params"]): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
@@ -133,6 +181,7 @@ export async function recordTakesFromJob(
   actualSource: Take["cost"]["actualSource"] = "manifest-derived",
 ): Promise<Take[]> {
   if (job.status !== "succeeded" || job.productionId === undefined) return [];
+  const continuedFrom = continuedFromOf(store, job);
   if (job.target.kind === "voice-line") {
     const existing = await takeForJob(store, job.productionId, job.id);
     if (existing !== null) return [existing];
@@ -207,6 +256,7 @@ export async function recordTakesFromJob(
       ...base,
       coversShots: (job.target.coversShots ?? (job.target.id !== undefined ? [job.target.id] : [])) as Take["coversShots"],
       kind: takeKindFor(job),
+      ...(continuedFrom !== undefined ? { continuedFrom } : {}),
       cost: {
         estimatedMicroUsd: job.estimatedMicroUsd,
         actualMicroUsd,

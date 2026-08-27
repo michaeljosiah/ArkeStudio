@@ -5334,6 +5334,9 @@ export class Coordinator {
               msg.shotId
             ] ?? { acceptedTakeId: msg.takeId as never, trimInSec: 0 },
           });
+          // Publish every selection changed by the atomic commit, including continuations cleared
+          // as superseded, before optional boundary extraction can spend time in ffmpeg.
+          await this.refreshWorldSnapshot(msg.worldId);
           // Continuity's durable half (issue 154): the accept promised the following shot a
           // start frame — cut the actual picture, file it with provenance, and point the
           // selection at it. Total and best-effort: a build without ffmpeg logs why and the
@@ -5341,12 +5344,16 @@ export class Coordinator {
           const fresh = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
           const acceptedTake = fresh?.takes.find((t) => t.id === msg.takeId);
           if (fresh !== undefined && acceptedTake !== undefined) {
-            const ordered = sortScenes(fresh.scenes).flatMap((s) => s.shots);
+            const targetScene = sortScenes(fresh.scenes).find((candidate) =>
+              candidate.shots.some((shot) => shot.id === msg.shotId),
+            );
+            const ordered = targetScene?.shots ?? [];
             const index = ordered.findIndex((s) => s.id === msg.shotId);
             const following = index >= 0 ? ordered[index + 1] : undefined;
             if (following !== undefined) {
               const chained = await chainBoundaryFrame(store, fresh, {
                 take: acceptedTake,
+                sourceShotId: msg.shotId,
                 followingShotId: following.id,
                 maker: this.opts.boundaryFrameMaker,
                 clock: () => new Date().toISOString(),

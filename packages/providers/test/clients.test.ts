@@ -416,6 +416,7 @@ describe("higgsfield drives the CLI (issue #137)", () => {
         prompt: "x",
         references: [],
         provenance: { canonRevision: 1 },
+        continuedFrom: "tk_01J8F0000000000000000000B2",
         output: { width: 1024, height: 1024, aspect: "1:1", resolution: "2k" },
       },
     });
@@ -431,6 +432,7 @@ describe("higgsfield drives the CLI (issue #137)", () => {
     assert.ok(!argv.includes("--output"));
     assert.ok(!argv.includes("--references"));
     assert.ok(!argv.includes("--provenance"));
+    assert.ok(!argv.includes("--continuedFrom"));
     // Machine-readable and unstyled, or the parse eats ANSI escapes.
     assert.ok(argv.includes("--json") && argv.includes("--no-color"));
   });
@@ -572,6 +574,7 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
         references: [],
         referenceRoles: [],
         artDirection: { version: 1 },
+        continuedFrom: "tk_01J8F0000000000000000000B2",
         output: { width: 1024, height: 1280, aspect: "4:5", resolution: "1MP" },
       },
     });
@@ -583,6 +586,7 @@ describe("fal submit/poll round-trip carries the endpoint in the remote id", () 
     assert.ok(!("references" in sent));
     assert.ok(!("referenceRoles" in sent));
     assert.ok(!("artDirection" in sent));
+    assert.ok(!("continuedFrom" in sent));
     const poll = await client.poll("k", submitted.remoteId);
     assert.equal(poll.state, "running");
     assert.match(seen[1]!, /fal-ai\/flux-2-pro\/requests\/req-9\/status/);

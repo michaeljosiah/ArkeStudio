@@ -204,14 +204,14 @@ describe("keyframe sequences (R-46, R-47, T-27, T-28)", () => {
   });
 });
 
-describe("continuation (R-49..R-54, T-29, T-31)", () => {
+describe("continuation helpers (R-49..R-54)", () => {
   const shots = [
     { id: "sh_1", number: 1 },
     { id: "sh_2", number: 2 },
     { id: "sh_3", number: 3 },
   ];
   const take = (id: string, continuedFrom?: string): Take =>
-    ({ id, jobId: "jb_1", coversShots: [], kind: "shot", provider: "fal", model: "m", provenance: { canonRevision: 1, sheets: {} }, references: [], params: {}, cost: { estimatedMicroUsd: 0, actualMicroUsd: null }, dispatchedAt: "2026-08-09T00:00:00.000Z", ...(continuedFrom ? { continuedFrom } : {}) }) as unknown as Take;
+    ({ id, jobId: "jb_1", coversShots: [], kind: "clip", provider: "fal", model: "m", provenance: { canonRevision: 1, sheets: {} }, references: [], params: {}, cost: { estimatedMicroUsd: 0, actualMicroUsd: null }, dispatchedAt: "2026-08-09T00:00:00.000Z", ...(continuedFrom ? { continuedFrom } : {}) }) as unknown as Take;
 
   it("is unavailable on the first shot, and where the predecessor has no accepted take", () => {
     const empty = {} as Selections;

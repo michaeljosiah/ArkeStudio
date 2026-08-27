@@ -43,6 +43,9 @@ export async function acceptTake(
 ): Promise<ReviewDecision> {
   const take = production.takes.find((t) => t.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
+  if (!take.coversShots.includes(input.shotId)) {
+    throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
+  }
   const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
   const reviews = await readOr(store, reviewsPath, "");
@@ -71,6 +74,26 @@ export async function acceptTake(
    */
   const previous = map[input.shotId];
   const takeChanged = previous?.acceptedTakeId !== decision.takeId;
+  const targetScene = sortScenes(production.scenes).find((scene) =>
+    scene.shots.some((shot) => shot.id === input.shotId),
+  );
+  if (targetScene === undefined) throw new Error(`shot ${input.shotId} is not in this production`);
+  const ordered = targetScene.shots;
+  const index = ordered.findIndex((shot) => shot.id === input.shotId);
+  if (take.continuedFrom !== undefined) {
+    const predecessor = index > 0 ? ordered[index - 1] : undefined;
+    const predecessorTake = production.takes.find((candidate) => candidate.id === take.continuedFrom);
+    if (predecessor === undefined || predecessorTake === undefined) {
+      throw new Error("that continuation does not name available predecessor footage in this scene");
+    }
+    if (predecessorTake.continuedFrom !== undefined) {
+      throw new Error("that continuation would extend footage that was itself continued");
+    }
+    const selectedPredecessor = predecessor ? map[predecessor.id]?.acceptedTakeId : null;
+    if (selectedPredecessor !== take.continuedFrom) {
+      throw new Error("that continuation was made from footage no longer selected — restore its predecessor first");
+    }
+  }
   let next: Selections = {
     ...map,
     [input.shotId]: {
@@ -87,15 +110,15 @@ export async function acceptTake(
   // selection makes SPEC-013 R-15 render a labelled gap for free. Nothing is deleted: the take
   // keeps its media, its provenance and its own review decisions, because a reselection is one
   // the user may undo a minute later and paid-for footage should not die for it.
-  for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections: map, takes: production.takes })) {
-    next = { ...next, [shotId]: { trimInSec: 0, ...next[shotId], acceptedTakeId: null } };
+  if (takeChanged) {
+    for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections: map, takes: production.takes })) {
+      next = { ...next, [shotId]: { ...next[shotId], acceptedTakeId: null, trimInSec: 0 } };
+    }
   }
 
   // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
   // pass segment the frame source is the pass, not the segment — a coinciding boundary must
   // not chain the same frame twice.
-  const ordered = sortScenes(production.scenes).flatMap((s) => s.shots);
-  const index = ordered.findIndex((s) => s.id === input.shotId);
   const following = index >= 0 ? ordered[index + 1] : undefined;
   if (following) {
     const frameSourceTakeId = take.segment?.passTakeId ?? take.id;

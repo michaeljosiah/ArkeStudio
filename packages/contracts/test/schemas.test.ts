@@ -382,10 +382,12 @@ describe("takes and reviews", () => {
     dispatchedAt: "2026-07-30T14:01:12Z",
     completedAt: "2026-07-30T14:02:04Z",
     media: "clip.mp4",
+    continuedFrom: newId("tk"),
   };
 
   it("round-trips unchanged", () => {
     assert.deepEqual(TakeSchema.parse(take), take);
+    assert.throws(() => TakeSchema.parse({ ...take, continuedFrom: "not-a-take" }));
   });
 
   it("validates a reference take without a production job or shot", () => {
