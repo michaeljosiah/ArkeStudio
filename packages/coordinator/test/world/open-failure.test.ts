@@ -5,7 +5,6 @@ import { join } from "node:path";
 import type { ClientMessage, DomainEvent, WorldBundle } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import { withoutWorldPaths } from "../../src/redact.js";
 import { makeTempRoot, WORLD_ID } from "./helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -50,8 +49,14 @@ async function harness(root: string) {
   // adopted Bible edit does, and the path that used to wipe an unrelated world's refusal.
   const refresh = (bundle: WorldBundle) =>
     (coordinator as unknown as { readModel: { setWorld(b: WorldBundle): void } }).readModel.setWorld(bundle);
+  const repair = (worldId: string, step: string, run: () => unknown) =>
+    (
+      coordinator as unknown as {
+        repairOnOpen(worldId: string, step: string, run: () => unknown): Promise<void>;
+      }
+    ).repairOnOpen(worldId, step, run);
   const failures = () => events.filter((e): e is OpenFailed => e.type === "world.open-failed");
-  return { provider, events, send, state, fail, refresh, failures };
+  return { provider, events, send, state, fail, refresh, repair, failures };
 }
 
 /**
@@ -105,12 +110,16 @@ describe("a refused world open (issue 571)", () => {
     assert.ok(line, "app.jsonl names the failure");
     assert.equal(line["level"], "error");
     assert.equal(line["worldId"], WORLD_ID);
-    assert.match(String(line["reason"]), /history snapshot conflicts/, "what went wrong survives");
+    assert.equal(line["kind"], "commit-plan", "classified, in this repository's words");
   });
 
-  it("keeps the world's paths out of app.jsonl, and only out of app.jsonl", async () => {
-    // `buildDiagnosticsBundle` ships this file's tail verbatim and promises no path inside a
-    // world. The refusal that motivated all of this names one, and it carries a character's slug.
+  it("keeps the world's own words out of app.jsonl, and only out of app.jsonl", async () => {
+    /*
+     * `buildDiagnosticsBundle` ships this file's tail verbatim and promises no world content. A
+     * refusal's wording is world content more often than not: this one names a character's file,
+     * and `world.json does not parse` carries V8's excerpt of the source — the world's own title.
+     * So the log takes a classification and never the message.
+     */
     const { root, worldDir } = await makeTempRoot();
     await breakWorldOpen(root, worldDir);
     const h = await harness(root);
@@ -120,7 +129,8 @@ describe("a refused world open (issue 571)", () => {
     const log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
     assert.equal(log.includes("bray-half-hitch"), false, "no character slug reaches the log");
     assert.equal(log.includes(".history"), false, "and no world path either");
-    assert.match(log, /<path>: history snapshot conflicts/, "the sentence stands without it");
+    assert.equal(log.includes("history snapshot conflicts"), false, "nor the refusal's own words");
+    assert.match(log, /"kind":"commit-plan"/, "what stands is a name this repository owns");
 
     // The screen and the event are not the bundle, and the person looking at the refusal is the
     // one who needs to know which file it was.
@@ -148,6 +158,7 @@ describe("a refused world open (issue 571)", () => {
     assert.equal(h.failures().length, 0, "nothing announces a failure that did not happen");
     const log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
     assert.match(log, /world.open-recovered/, "it is still worth a line — something did throw");
+    assert.equal(log.includes("in another Arke Studio process"), false, "and that line is not the words either");
   });
 
   it("clears the refusal once the world opens", async () => {
@@ -188,6 +199,33 @@ describe("a refused world open (issue 571)", () => {
     assert.equal(h.state().world?.meta.worldId, WORLD_ID, "and the open world still refreshed");
   });
 
+  it("does not let a post-load repair decide whether the world opened", async () => {
+    /*
+     * The provider has installed the store before any of these run, so a jobs journal that will
+     * not append used to escape into the open-world catch and be reported as a world that would
+     * not open — taking `world.opened`, the founding-build resume and the media pass with it, and
+     * leaving an interrupted conversation still marked running on a world you could click around.
+     */
+    const { root } = await makeTempRoot();
+    const h = await harness(root);
+    await h.send({ kind: "open-world", worldId: WORLD_ID });
+
+    await h.repair(WORLD_ID, "job-finalizations", () => {
+      throw new Error("jobs journal is not writable");
+    });
+
+    assert.equal(h.state().worldOpenFailure, null, "a repair that failed is not a world that did not open");
+    assert.equal(h.state().world?.meta.worldId, WORLD_ID);
+    const log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
+    const line = log
+      .split("\n")
+      .filter((l) => l.trim().length > 0)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((record) => record["event"] === "world.open-repair-failed");
+    assert.ok(line, "and it is still stated — silence is the thing being fixed");
+    assert.equal(line["step"], "job-finalizations", "by which repair, so the next one is findable");
+  });
+
   it("does not close the open world when the id is the thing that was wrong", async () => {
     // The case the old catch was written for, and the reason it cannot simply report no world
     // open: an unknown id is refused before `loadWorld` closes anything, so the world the person
@@ -202,28 +240,5 @@ describe("a refused world open (issue 571)", () => {
 
     assert.equal(h.state().world?.meta.worldId, WORLD_ID, "the open world survives somebody else's typo");
     assert.equal(h.state().worldOpenFailure?.worldId, missing, "and the world that was asked for is answered");
-  });
-});
-
-describe("what a world path leaves behind in the log", () => {
-  it("takes the path and keeps the sentence", () => {
-    assert.equal(
-      withoutWorldPaths(".history/characters/bray-half-hitch/v6.md: history snapshot conflicts"),
-      "<path>: history snapshot conflicts",
-    );
-  });
-
-  it("counts a Windows separator as a separator", () => {
-    // Written with a forward-slash class once, which read as correct and stripped nothing on the
-    // platform this ships on. A token holding no `/` at all is precisely the packaged case.
-    assert.equal(
-      withoutWorldPaths("could not open C:\\worlds\\undersong\\.index\\world.db"),
-      "could not open <path>",
-    );
-  });
-
-  it("leaves a message that names no file alone", () => {
-    const message = "world is open in another Arke Studio process (pid 1234)";
-    assert.equal(withoutWorldPaths(message), message);
   });
 });
