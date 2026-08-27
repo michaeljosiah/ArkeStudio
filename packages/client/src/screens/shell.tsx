@@ -2629,9 +2629,15 @@ function ComponentsDetail({ components, running }: { components: readonly SetupC
                   Skip
                 </button>
               )}
-              {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") && (
+              {(c.state === "skipped" || c.state === "failed" || c.state === "blocked") &&
+                c.repairRequired !== true && (
                 <button type="button" className="fy-set__link" onClick={() => setupRetry(c.id)}>
                   Retry
+                </button>
+              )}
+              {c.repairRequired === true && (
+                <button type="button" className="fy-set__link" onClick={() => setupRepair(c.id)}>
+                  Repair
                 </button>
               )}
             </div>
@@ -3037,14 +3043,15 @@ function ComfyUiDetail() {
               {weights?.state === "available" && (
                 <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
               )}
-              {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") && (
-                <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
-                  Retry
-                </button>
-              )}
+              {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") &&
+                weights.repairRequired !== true && (
+                  <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
+                    Retry
+                  </button>
+                )}
               {/* For the file that is on disk, intact, and not the bytes the recipe pins — the
                   one case Retry cannot answer, because presence is completion to it. */}
-              {settled && weights !== undefined && (
+              {(settled || weights?.repairRequired === true) && weights !== undefined && (
                 <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
                   Repair
                 </button>

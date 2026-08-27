@@ -3611,13 +3611,20 @@ export class Coordinator {
         return;
       }
       case "setup-repair": {
-        // repair() re-queues the component; run() is what actually goes and gets it.
-        await this.setup?.repair(msg.componentId).catch(() => {});
-        await this.setup?.run();
+        // Only a completed deletion queues work. A held file remains a stated repair failure;
+        // running detection there would otherwise bless the same corrupt bytes as present again.
+        const setup = this.setup;
+        if (setup && await setup.repair(msg.componentId)) {
+          await setup.run();
+          // If Repair joined a pass that had already attempted this component, only a fresh pass
+          // can collect the newly queued download. An ordinary completed repair makes this a
+          // cheap presence check.
+          await setup.run();
+        }
         return;
       }
       case "setup-cancel": {
-        this.setup?.cancel();
+        await this.setup?.cancel();
         return;
       }
       case "genesis-discard": {
@@ -4472,9 +4479,14 @@ export class Coordinator {
         return;
       }
       case "repair-voice-models": {
-        await this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro);
-        await this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.whisper);
-        await this.setup?.run();
+        const repaired = await Promise.all([
+          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro),
+          this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.whisper),
+        ]);
+        if (repaired.some(Boolean)) {
+          await this.setup?.run();
+          await this.setup?.run();
+        }
         return;
       }
       case "open-model-folder": {
@@ -9606,7 +9618,7 @@ export class Coordinator {
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
       const transportStopped = this.transport.stop();
-      this.setup?.dispose();
+      const setupStopped = this.setup?.dispose();
       for (const dispose of this.lifecycleDisposers) dispose();
       this.lifecycleDisposers.clear();
       for (const timer of this.lifecycleTimers) clearInterval(timer);
@@ -9624,6 +9636,7 @@ export class Coordinator {
       // set. Update-install handlers are deliberately excluded: one may be awaiting this stop.
       await transportStopped;
       await Promise.allSettled(this.activeMessages);
+      await setupStopped;
       await Promise.all([...this.stagedClips.keys()].map((clipId) => this.dropStagedClip(clipId)));
 
       // Message handlers have now either committed their queue rows or recorded their refusal.
