@@ -28,7 +28,7 @@ export interface WorldProvider {
   installSampleWorld?(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   /**
-   * The open world took newer bytes for an ungated file and needs no decision (SPEC-022).
+   * The open world took newer Bible bytes for an ungated file and needs no decision (R-BIBLE-6).
    *
    * Nothing is wrong, nobody has to reconcile, and the only correct response is to redraw.
    */

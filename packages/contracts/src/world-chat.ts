@@ -1014,7 +1014,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       groups: z.array(CandidateGroupSchema),
       tombstones: z.array(CandidateTombstoneSchema),
       /**
-       * The bible edit this turn landed, if it made one (SPEC-022).
+       * The Bible edit this turn landed, if it made one (master §4.5).
        *
        * Recorded with the reply for the same reason the propositions are: the reply says "I've
        * written that down", and a crash that kept the sentence but lost the record of which
@@ -1258,7 +1258,7 @@ export const WorldChatLoadedSchema = z
      */
     lastFailedRun: WorldChatRunSchema.nullable().default(null),
     /**
-     * Bible edits this conversation made, by the studio message that made them (SPEC-022).
+     * Bible edits this conversation made, by the studio message that made them (master §4.5).
      *
      * A map rather than a field on the message, because the message is the durable record of
      * what was *said* and this is a record of what was *done* to a file outside the conversation.
@@ -1440,7 +1440,7 @@ export const WorldChatTurnResultSchema = z
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
     /**
-     * Edits to the author's bible, applied by the coordinator when the turn lands (SPEC-022).
+     * Edits to the author's Bible, applied by the coordinator when the turn lands (master §4.5).
      *
      * Here rather than on the retrieval tool surface, which is read-only by contract (#70 §9.2)
      * and confines the harness to its scratch directory (§18.3). Both stay true: the model
@@ -1526,7 +1526,7 @@ export const WorldChatTranscriptMessageSchema = z
      */
     refusals: z.array(z.string().max(200)).default([]),
     /**
-     * The bible edit this reply made, if it made one (SPEC-022).
+     * The Bible edit this reply made, if it made one (master §4.5).
      *
      * Beside the message rather than in the understanding rail, and that placement is the point.
      * The rail holds propositions, which are waiting for a yes; this already happened. Putting
@@ -2210,7 +2210,7 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 ### Bible edits
 
-The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, nothing generates from it, and a candidate may never cite it as evidence.
+The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, grounded answers do not come from it, and a candidate may never cite it as evidence. Other generation paths may use it only as non-binding creative intent.
 
 You may edit it, and edits land immediately — there is no accept step. Every edit cuts a version and can be undone, which is why it needs no permission; it is not a licence to tidy. Edit it when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
 

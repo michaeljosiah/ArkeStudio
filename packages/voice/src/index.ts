@@ -342,8 +342,8 @@ export class VoxaClient {
 }
 
 /**
- * The shipped Kokoro presets, used when the sidecar is absent so the picker can still render
- * the local column with its honest one-liner: local means presets, cloud means cloning (D4).
+ * The shipped Kokoro presets: a fixed local catalogue that cannot clone. Other local engines may
+ * declare cloning independently (SPEC-011 D4 as amended by SPEC-022).
  */
 export const KOKORO_PRESETS: LocalVoice[] = [
   { id: "af_bella", label: "Bella", engine: "kokoro", language: "en-US", attributes: ["warm", "low", "even", "female"] },
@@ -354,7 +354,7 @@ export const KOKORO_PRESETS: LocalVoice[] = [
   { id: "bm_george", label: "George", engine: "kokoro", language: "en-GB", attributes: ["low", "gravel", "male", "weathered"] },
 ];
 
-/** Local catalogue as picker candidates: a fixed set, never cloneable (R-6, D4). */
+/** Kokoro catalogue as picker candidates: a fixed set, never cloneable (R-6, D4). */
 export function localCandidates(voices: LocalVoice[]): VoiceCandidate[] {
   return voices.map((v) => ({
     provider: "kokoro",

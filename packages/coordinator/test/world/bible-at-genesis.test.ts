@@ -9,7 +9,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup, tempDir } from "../tmp.js";
 
 /**
- * A world born from a conversation keeps what the conversation was about (SPEC-022).
+ * A world born from a conversation keeps what the conversation was about (master §4.5).
  *
  * Everything else the world door produced had somewhere to live — the cast became sheets, the
  * places became sheets, the open questions became canon. The reasoning that produced all three

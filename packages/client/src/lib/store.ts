@@ -2677,7 +2677,7 @@ export function deleteScene(worldId: string, productionId: string, sceneFile: st
 }
 
 /**
- * Save the bible (SPEC-022). No proposal, no accept — it saves where it stands.
+ * Save the Bible (master §4.5). No proposal, no accept — it saves where it stands.
  *
  * `baseVersion` is the version the editor loaded. Passing it is what makes an ungated file safe
  * to share between three writers: this screen, the Studio mid-conversation, and a text editor

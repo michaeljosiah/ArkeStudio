@@ -38,7 +38,7 @@ interface ScanState {
 
 export interface WorldStoreEvents {
   /**
-   * The store refreshed its own scan without anybody being at fault (SPEC-022).
+   * The store refreshed its own scan without anybody being at fault (R-BIBLE-6).
    *
    * The only thing the watcher does now. There used to be an `onStale` beside it — an accusation
    * that something outside the app had written to a gated file, raised as a banner with a Reload
@@ -319,7 +319,7 @@ export class WorldStore {
     if (kind.track === "sheet") historyPath = `.history/${kind.collection}/${kind.id}/v${version}.md`;
     else if (kind.track === "canon") historyPath = `.history/canon/${kind.id}/v${version}.md`;
     // The bible is ungated, so restore is not a convenience here — it is the undo that stands in
-    // for the accept step every other authored file gets (SPEC-022).
+    // for the accept step every other authored file gets (master §4.5).
     else if (kind.track === "bible") historyPath = `.history/bible/v${version}.md`;
     // Scenes joined the ungated-save club with turn 97: the storyboard writes directly, so the
     // same undo has to stand in for the same absent accept.
@@ -598,7 +598,7 @@ export class WorldStore {
   }
 
   /**
-   * The watcher's only remaining job: notice the bible moved and take the new bytes (SPEC-022).
+   * The watcher's only remaining job: notice the Bible moved and take the new bytes (R-BIBLE-6).
    *
    * `bible.md` is the one authored file the product invites the user to open in a text editor, so
    * a hand-edit to it is the feature working. Everything else the watcher used to do — compare
@@ -616,7 +616,7 @@ export class WorldStore {
   }
 
   /**
-   * Hot-reload the bible instead of accusing anybody of editing it (SPEC-022).
+   * Hot-reload the Bible instead of accusing anybody of editing it (R-BIBLE-6).
    *
    * `bible.md` is the one authored file the product invites the user to open in a text editor, so
    * a hand-edit to it is the feature working, not an anomaly. It is absent from the manifests for

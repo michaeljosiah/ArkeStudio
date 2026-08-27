@@ -49,7 +49,8 @@ The creation primitive creates only:
 R\worlds\<world-slug>\
 |-- world.json                          id, slug, metadata, canonRevision 0, nextCanonId 1
 |-- art-direction\art-direction.json    only when a look is chosen at creation
-`-- changes.jsonl                       one created line
+|-- bible.md                            only when a founding conversation supplies Bible prose
+`-- changes.jsonl                       one world-created line, plus a Bible v1 line when supplied
 ```
 
 The slug is filesystem-safe and collision-suffixed. Creation is not one transaction: the
@@ -57,6 +58,10 @@ directory and `world.json` can exist before the initial change line is appended.
 
 A look chosen at creation is written directly as an accepted v1 record. It does not go through
 a proposal or a world commit, so it has no `W\.history\art-direction\v1.json` behind it.
+
+Bible prose supplied by a founding conversation creates `bible.md` at v1 and logs a second creation
+line with source `genesis`. Opening the new world seeds `.history\bible\v1.md`. A world with no
+supplied prose has no Bible file or Bible history snapshot.
 
 The UI opens the world immediately after creating it, so a normal **Begin in this world** flow
 also creates the lock and derived index files described below.
@@ -80,7 +85,7 @@ Pressing **Begin in this world** has these effects:
 
 | Step | Creates, changes, or removes |
 |---|---|
-| Create and open | Creates `world.json` and `changes.jsonl`, then adds `world.lock` and `.index\...` while open. A look chosen in the conversation also creates `art-direction\art-direction.json`. |
+| Create and open | Creates `world.json` and `changes.jsonl`, then adds `world.lock` and `.index\...` while open. A look chosen in the conversation also creates `art-direction\art-direction.json`; Bible prose creates `bible.md` at v1, appends its own change line, and open seeds `.history\bible\v1.md`. |
 | Carry attachments | Copies each attachment to `W\artifacts\<safe-name>` and creates `W\artifacts\<safe-name>.json`. |
 | Clean up | Removes `R\.genesis\<genesis-id>\` after carried attachments finish. |
 
@@ -104,14 +109,15 @@ the sandbox when it is removed.
 | Create or duplicate sheet | Stages then creates one Markdown file under `characters\`, `locations\`, or `factions\`, plus its v1 history snapshot. |
 | Edit, lock, rename, or assign voice | Replaces the same sheet file and writes its next history snapshot. Rename changes frontmatter only; the id and filename do not move. |
 | Retire sheet or canon | Replaces the existing file with `retired: true`. It is not moved or deleted. |
-| Restore version | Reads a file under `W\.history\` and commits that content as a new live version. Later history remains. |
+| Save or adopt Bible | An editor save or World Chat edit creates or replaces `W\bible.md` without a proposal. A detected hand edit to an existing Bible while the world is open commits the text as the next version. These writes add `W\.history\bible\v<n>.md` and append `changes.jsonl`; a save against a moved base is refused. A Bible first created externally has no prior version to adopt: the next open loads it and seeds its current snapshot rather than inventing a change. |
+| Restore version | Reads a file under `W\.history\` — including a Bible or scene version — and commits that content as a new live version. Later history remains. |
 | Change art direction | Replaces `W\art-direction\art-direction.json`, or creates it when the world was not born with a look. Each accept writes `W\.history\art-direction\v<n>.json`. |
 
 ## Productions, chapters, scenes, and boards
 
 | Operation | Creates, changes, or removes |
 |---|---|
-| Create production | Creates only `W\productions\<production>\production.json`. It does not copy sheets or pre-create scene, chapter, take, audio, or export directories. |
+| Create production | Plain Story or Video creation creates `W\productions\<production>\production.json`. Microdrama creation also creates `season.json` and creates or updates its world-level Series record in the same commit. It does not copy sheets or pre-create scene, chapter, take, audio, or export directories. |
 | Create chapter | Creates `...\chapters\<chapter>.md` and `W\.history\productions\...\chapters\<chapter>\v1.md`. |
 | Save or reorder chapter | Replaces the same chapter file and refreshes its current-version history snapshot. Reordering changes frontmatter; no file moves. |
 | Draft and accept scene | Stages then creates `...\scenes\<nn>-<slug>.json` and its history snapshot. Shots are objects inside this JSON, not separate files. |
@@ -158,8 +164,8 @@ Implemented landing directories include:
 | Record reference take | Copies media to `W\references\<sheet>\takes\tk_<id>\` and creates `take.json`. |
 | Accept reference or change kit | Creates or replaces `W\references\<sheet>\kit.json`. Review-bearing changes also create or replace `W\references\reviews.jsonl`. Superseded media remains. |
 | Upload main-photo candidate | Copies to `W\references\<sheet>\candidates\upload-<id>.<ext>`. Choosing it copies it into an immutable reference take, changes `kit.json`, records a review, then deletes the candidate. |
-| Compile classic grid | Creates or replaces `W\references\<sheet>\model-sheet-v<version>-grid.png`, then creates or replaces that sheet's `kit.json`. |
-| Preview voice | Creates or reuses `W\.cache\voice-previews\<hash>.wav` for local speech or `.mp3` for cloud speech. |
+| Compile classic grid | Legacy angle-tile command path, not offered by the current character-reference screen: creates or replaces `W\references\<sheet>\model-sheet-v<version>-grid.png`, then creates or replaces that sheet's `kit.json`. |
+| Preview voice | Creates or reuses `W\.cache\voice-previews\<hash>.<ext>`. Current model-driven formats include Kokoro WAV, cloud MP3, and ComfyUI cloned-voice FLAC. |
 | Dictate | Returns transcript text and does not persist the captured audio. |
 | Generate world image | Lands `W\incoming\world-image\candidate.png`. Accept copies it to `W\world-art.png` and deletes the candidate; discard deletes only the candidate. |
 
@@ -181,4 +187,4 @@ The current API does not implement:
 Canon Q&A removes its temporary sandbox. Art-direction and extraction helper sandboxes under
 `R\.art\` and `R\.extract\` are not currently swept automatically.
 
-Verified against coordinator, provider and desktop code on 2026-08-05.
+Verified against coordinator, provider and desktop code on 2026-08-27.

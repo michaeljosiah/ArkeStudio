@@ -143,7 +143,7 @@ export const GenesisDraftSchema = z
       .default([]),
     threads: z.array(z.string().min(1).max(300)).max(8).default([]),
     /**
-     * The through-line, in prose, as the conversation settled it (SPEC-022, 2026-08-22).
+     * The through-line, in prose, as the conversation settled it (master §4.5, 2026-08-22).
      *
      * The other fields are the world's furniture — who is in it, where it happens, what is
      * unresolved. None of them hold the reason any of it is worth telling, so a world door that

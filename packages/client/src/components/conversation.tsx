@@ -96,7 +96,7 @@ export function ConversationTranscript({
           {/*
             Outside the bubble, because it is not something the Studio said — it is something it
             did, to a file, already. The rail beside this transcript holds what is waiting for a
-            yes; this is the opposite kind of thing, and it needs to look like it (SPEC-022).
+            yes; this is the opposite kind of thing, and it needs to look like it (master §4.5).
           */}
           {m.bibleEdit && (
             <div className="fy-biblecard">

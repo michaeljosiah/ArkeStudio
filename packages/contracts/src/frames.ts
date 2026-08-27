@@ -50,7 +50,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       artDirection: z.string().trim().min(1).max(2000).optional(),
       /**
-       * The bible the founding conversation wrote, born as v1 with the world (SPEC-022).
+       * The Bible the founding conversation wrote, born as v1 with the world (master §4.5).
        *
        * Absent means no bible, which is the ordinary state of a world begun by typing a name:
        * there was no conversation, so there is nothing of the author's to keep. Editable the
@@ -925,7 +925,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       enabled: z.boolean(),
     })
     .strict(),
-  /** Whether the Studio may read a page online when a conversation asks it to (SPEC-022). */
+  /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
   z
     .object({
       kind: z.literal("set-research-web"),
@@ -1499,7 +1499,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * Turn 97: a hand edit saves where it stands — the bible's model (SPEC-022) applied to
+   * Turn 97: a hand edit saves where it stands — the Bible's model (master §4.5) applied to
    * scenes. Every save cuts a version with a `.history/` snapshot, and `baseVersion` is what
    * the storyboard had loaded: a save against a scene that has since moved is refused, not
    * merged. Assistant and gate writes keep their own paths; this one is the typing hand's.
@@ -1564,7 +1564,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * SPEC-022: the author's bible saves in place, like chapter prose — no proposal, no approval.
+   * R-BIBLE-2: the author's Bible saves in place, like chapter prose — no proposal, no approval.
    *
    * Unlike chapter prose it *does* cut a version on every save, and that is the point: the
    * version and its `.history/` snapshot are what stand in for the accept step, for the author
@@ -1579,7 +1579,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseVersion: z.number().int().min(1).optional(),
     })
     .strict(),
-  /** SPEC-022: undo. v<n> comes back as a new version; nothing between it and now is lost. */
+  /** R-HIST-2: undo. v<n> comes back as a new version; nothing between it and now is lost. */
   z
     .object({
       kind: z.literal("restore-bible"),

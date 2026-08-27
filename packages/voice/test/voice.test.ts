@@ -316,12 +316,12 @@ describe("the sidecar client and its four states (R-4, §2.10)", () => {
     assert.equal(Buffer.from(afterRestart).toString("ascii"), "RIFF");
   });
 
-  it("the local catalogue is presets, uniformly shaped, never cloneable (R-6, D4)", () => {
+  it("the Kokoro catalogue is presets, uniformly shaped, never cloneable (R-6, D4)", () => {
     const candidates = localCandidates(KOKORO_PRESETS);
     assert.ok(candidates.length >= 6);
     for (const c of candidates) {
       assert.equal(c.local, true);
-      assert.equal(c.canClone, false, "local means presets, cloud means cloning");
+      assert.equal(c.canClone, false, "Kokoro presets are never cloneable");
       assert.ok(c.attributes.length > 0, "attributes exist for honest matching");
     }
   });

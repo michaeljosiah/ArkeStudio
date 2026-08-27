@@ -24,7 +24,7 @@ export function enhancerBrief(
   const meta = bundle.meta;
   const cap = model.limits.maxPromptChars;
   /*
-   * The bible is the author's own thinking, and it is deliberately NOT canon (SPEC-022): nothing
+   * The Bible is the author's own thinking, and it is deliberately NOT canon (master §4.5): nothing
    * cites it, and the grounded Q&A pipeline never answers out of it. A prompt is not an answer,
    * though — key art already draws on it for exactly this reason (SPEC-031 R-58), because an
    * image assembled from a logline and two adjectives is an image of a genre rather than of this

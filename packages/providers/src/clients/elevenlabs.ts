@@ -118,7 +118,7 @@ export class ElevenLabsClient implements ProviderClient {
         label: v.name!,
         attributes: Object.values(v.labels ?? {}).map((s) => s.toLowerCase()),
         local: false,
-        canClone: true, // cloning is cloud-only (SPEC-011 R-12); the plan probe gates the button
+        canClone: true, // ElevenLabs supports cloning; each engine declares its own capability
       }));
   }
 

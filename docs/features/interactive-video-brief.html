@@ -66,10 +66,10 @@
       selected route and resume progress live in the player's local store (preview: the app's session
       state; export: <code>localStorage</code> of the self-hosted page), are never written into the world,
       and are never readable by authored content.</div>
-    <div class="rule"><b>Binding.</b> <b>Interactive video is a medium, not a Video mutation.</b>
-      <code>medium: "interactive-video"</code> under SPEC-023's resolve-on-read model; created from the
-      picker's third card; never a migration of a linear season, whose boards and explicit order remain
-      their only structural authority. The branch map draws for this medium alone.</div>
+    <div class="rule"><b>Amended by turn 100.</b> <b>Interactive is a Video kind, not a third medium.</b>
+      Current creation writes <code>medium: "video", kind: "interactive"</code> from the Video kind
+      step. The old <code>interactive-video</code> medium remains readable and resolves to this shape.
+      The branch map draws for the Interactive kind alone.</div>
     <div class="rule"><b>Binding.</b> <b>Findings, never a score.</b> Validation reports named findings
       with evidence; no percentage, no health number, no aggregate grade exists anywhere in the medium.</div>
 
@@ -116,11 +116,11 @@
 
     <h2 id="map">3 · The branch map</h2>
     <p>
-      The structural view for this medium only (design turn 78 third binding; reassigned frame 34e).
+      The structural view for this Video kind only (design turn 78 third binding; reassigned frame 34e).
       Deterministic layered layout, no dependency: longest-path layering from the start scene, stable
       in-layer order by authored choice order then scene id — the same graph always draws the same
       picture, and no force simulation ever jiggles an author's mental map. No external layout library:
-      the graphs this medium allows (hundreds of nodes, not millions) do not justify a licensing surface.
+      the graphs this kind allows (hundreds of nodes, not millions) do not justify a licensing surface.
     </p>
     <ul>
       <li><b>Editing</b>: choices are created by drawing from a scene's out-port to a scene, renamed
@@ -211,7 +211,7 @@
     <h2 id="cleanup">8 · Design cleanup — Scope §11, mapped to implementation</h2>
     <table>
       <tr><th>Screen</th><th>Disposition</th><th>Implementation home</th></tr>
-      <tr><td>34a Game type</td><td>Replace</td><td>Picker's third card is Interactive video (shipped with SPEC-023's create dialog)</td></tr>
+      <tr><td>34a Game type</td><td>Replace</td><td>Interactive is offered in the Video kind step (SPEC-023, turn 100)</td></tr>
       <tr><td>34b Game day one</td><td>Replace</td><td>Interactive-video day one: start scene + first choice card (#401 client issue)</td></tr>
       <tr><td>34c Game story overview</td><td>Reassign</td><td>Branch summary atop the branch map (#401 client issue)</td></tr>
       <tr><td>34d Game dashboard</td><td>Reassign</td><td>Reusables folded into the production dashboard; season board already shipped</td></tr>

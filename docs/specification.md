@@ -32,9 +32,9 @@ Three mechanics carry the product. Everything else is surface.
 2. **Canon that refuses.** The world answers questions only from canon, with per-entry
    citations. When canon is silent it says so, cites the closest entries, and offers to open
    a thread. It never invents behind your back.
-3. **Reference kits that compile.** Locked reference tiles compile into one model sheet that
-   rides along with every generation on every provider, so consistency is structural rather
-   than a function of prompt luck.
+3. **Reference kits that compile.** An accepted main photo anchors a composite model sheet; the
+   available reference slots carry the sheet, photo, both, or a scoped look deterministically, so
+   consistency is structural rather than a function of prompt luck.
 
 ## 0.2 What v1 is
 
@@ -50,7 +50,8 @@ key store and a user-only ACL (§14.2). Nothing leaves the machine except approv
 - Canon: versioned entries, grounded Q&A with citations, refusal-with-receipts, open threads.
 - Reference kits and compiled model sheets.
 - Voice assignment and dialogue generation.
-- Productions in three formats: **story**, **video**, **stills**.
+- Productions created as **Story** or **Video**, with Interactive as a Video kind; legacy Stills
+  productions remain readable.
 - Scene drafting, shot cards, per-shot and whole-scene dispatch, takes, the cut, exports.
 - Provider configuration (FAL, Higgsfield, ElevenLabs, OpenAI, Anthropic, local runtimes).
 - Activity: running jobs, the needs-you queue, the spend ledger.
@@ -58,7 +59,7 @@ key store and a user-only ACL (§14.2). Nothing leaves the machine except approv
 **Out of scope for v1**
 
 - **Arke Kids.** A separate product; removed from this repository.
-- **Games** as a production format. Story, video and stills only.
+- **Games** as a production format. Current creation offers Story and Video only.
 - Any account, subscription, billing or cloud backend. Arke Studio is free and offline-capable.
 - Any dependency on git. See §2.4 — versioning is explicit in the world folder.
 - Automated drift detection (§6.4), semantic canon search (§4.3), realtime conversational
@@ -87,9 +88,9 @@ world files use forward slashes internally.
 | **Canon revision** | A single monotonic counter for the whole world's canon. |
 | **Proposal** | A staged, not-yet-accepted change to any world entity. |
 | **Ripple** | The computed consequences of accepting a proposal. |
-| **Reference kit** | The set of reference tiles for a sheet — turnarounds, poses, expressions. |
-| **Model sheet** | One compiled image, generated from a sheet plus its locked tiles, sent as reference with every generation. |
-| **Production** | A work drawn from the world: a story, a video or a set of stills. |
+| **Reference kit** | A sheet's accepted main photo, composite model sheet, optional looks, and retained legacy tiles. |
+| **Model sheet** | One accepted composite identity image, generated from the sheet and main photo, sent as reference with generation. |
+| **Production** | A work drawn from the world: Story or Video, with backward-readable legacy kinds. |
 | **Shot** | The atomic unit of video work: framing, camera, audio direction, sheet references. |
 | **Take** | One immutable generated result for a shot. Accepted takes assemble the cut. |
 | **Dispatch** | Sending one or more jobs to a provider. |
@@ -586,10 +587,11 @@ that answers "how did this get here".
   live file is modified.
   - **WHEN** the application is killed mid-accept **THEN** either the old file is intact or the
     snapshot exists alongside the new file; no state loses both.
-- **R-HIST-2** The application SHALL offer restoring any historical version as a *new* proposal
-  rather than an in-place rollback.
-  - **WHEN** a user restores Maren v4 while the sheet is at v6 **THEN** a proposal is staged
-    whose content is v4 and whose acceptance produces v7.
+- **R-HIST-2** Restoring a historical version SHALL commit that snapshot as the next live version,
+  never rewrite history, and SHALL NOT stage a proposal solely to reconfirm the same deliberate
+  human action.
+  - **WHEN** a user restores Maren v4 while the sheet is at v6 **THEN** v4's content is committed
+    as v7; versions 5 and 6 remain in history.
 - **R-HIST-3** `changes.jsonl` SHALL be append-only and SHALL never be rewritten or compacted
   by v1.
 
@@ -964,9 +966,10 @@ Canon holds what the world has **decided**. The bible holds what the author **th
 mood, direction, the half-formed — as one Markdown document, `bible.md`, at the world root.
 
 The two are not two copies of one thing, and the ownership rule (§4.1) is not weakened by the
-bible's existence, because the bible owns nothing. Nothing cites it, nothing generates from it,
-and the grounded Q&A pipeline never answers out of it: an answer drawn from a musing would look
-exactly like an answer drawn from canon, which is the failure §4.3 exists to prevent.
+bible's existence, because the bible owns nothing. Nothing cites it as authority, and the grounded
+Q&A pipeline never answers out of it: an answer drawn from a musing would look exactly like an
+answer drawn from canon, which is the failure §4.3 exists to prevent. Founding and key-art
+generation may use it as non-binding creative intent; that use does not make it evidence.
 
 It is **direct authored** (§3.1): no proposal, no accept. Two writers share it — the author, in
 the editor or in any text editor, and World Chat, which describes edits in its turn result for
@@ -990,8 +993,9 @@ unprompted.
   rejects the whole turn, and no reply describing an edit SHALL persist without it.
 - **R-BIBLE-5** The bible SHALL be given to the model whole and never truncated, labelled as
   context rather than canon, and SHALL NOT be citable as candidate evidence.
-- **R-BIBLE-6** Hand-edits to the bible while a world is open SHALL be adopted, not reported as
-  external modification (§2.7) or queued for reconciliation (R-28).
+- **R-BIBLE-6** Hand-edits to an existing bible while a world is open SHALL be adopted, not reported
+  as external modification (§2.7) or queued for reconciliation (R-28). A bible first created
+  externally SHALL be loaded and seeded as v1 on the next open; no prior version exists to adopt.
 
 ---
 
@@ -1040,41 +1044,33 @@ before/after, the computed ripple list, and the accept/discard pair.
 
 This is the consistency machinery, and it is the product's technical differentiator.
 
-## 6.1 Tiles
+## 6.1 The two-image identity record
 
-A sheet's reference kit holds tiles in three groups:
+A new character kit begins with a **main photo**, obtained by generation, upload, or promotion and
+accepted as the identity anchor. Once it exists, one directly generated **character sheet** carries
+turnaround, expressions, details and proportions in a single composite. These two accepted images
+are sufficient to dispatch against the character; no angle tile is required.
 
-- **Head turnaround** — front, left ¾, right ¾, back.
-- **Full-body turnaround** — front, left, right, back. Gated on the head turnaround being
-  locked, because body generations use locked head tiles as reference.
-- **Poses and expressions** — open-ended, added as productions need them.
+Optional looks cover costumes, poses and conditions. They do not ride by default, but may be
+promoted to the main photo or attached to a named production or scene.
 
-Each tile is `pending`, `rendering`, `generated` or `locked`. Locking a tile is what admits it
-to the reference set.
+Existing six-angle kits remain readable and dispatchable without migration. Their tile states,
+head-before-body gate and classic-grid compositor are a compatibility path, not the route new kits
+create.
 
-## 6.2 Compilation
+## 6.2 Style and generation
 
-Locked tiles plus the sheet compile into a **model sheet** — a single image, in one of three
-formats:
-
-| Format | Produced by | Cost |
-|---|---|---|
-| **Pitch board** | Generated (an image model, from a long art-directed prompt) | Metered |
-| **Classic grid** | Composited locally from tiles | Free, instant |
-| **Expression board** | Generated | Metered |
-
-The rendering style defaults to the world's art direction, and an override travels with the
-sheet only — *"the canon doesn't change"*.
-
-The generated formats come back as takes and land on the sheet only on accept.
+The rendering style defaults to the world's art direction, and an override travels with the sheet's
+reference generations only — *"the canon doesn't change"*. Generated main photos, character sheets
+and looks return as immutable reference takes and affect the kit only on acceptance.
 
 ## 6.3 The consistency contract
 
-The compiled model sheet is attached as a reference image to **every** generation that cites
-that sheet, on every provider that accepts references. Where a provider does not accept
-references (the prototype's Halcyon 1.5: *"takes no reference images, the start frame carries
-the look"*), the UI states that plainly at dispatch and the sheet's identity is carried in the
-prompt text instead.
+Reference selection follows the assets and slots available. One slot prefers the accepted character
+sheet; additional capacity may carry the main photo too, while a kit with no accepted sheet carries
+the main photo alone. An attached scoped look may replace the primary reference inside its named
+production or scene. Every drop is named before commit. Where a provider accepts no references, the
+UI states that plainly and identity remains in prompt text.
 
 ## 6.4 Drift
 
@@ -1085,26 +1081,27 @@ take against its model sheet is designed for and deferred.
 **Requirements**
 
 **A locked sheet may have no compilation matching its current version** — lock a sheet at v5 when
-the newest model sheet compiled at v4, and R-REF-1's "attach the current model sheet" and
-R-REF-3's "flag it stale" are in tension. The resolution is that the dispatch **attaches the
-newest available compilation and names the gap**: *"model sheet is v4; Maren is at v5"*, with
-recompiling offered inline. It does not block, because the alternative to a slightly stale
-reference is no reference at all, which is strictly worse for consistency. Where no compilation
-exists at any version, the dispatch is treated exactly as a sketch citation (§10.3).
+the designated model sheet was compiled at v4. The dispatch carries that designated compilation
+and names the gap, with recompiling offered inline. If no compilation exists, an accepted main
+photo rides alone where available; only a kit with neither accepted asset reaches the no-reference
+path.
 
-- **R-REF-1** Every dispatch citing a sheet SHALL attach that sheet's newest compiled model
-  sheet as a reference, where the target model accepts reference images.
+- **R-REF-1** Every dispatch citing a sheet SHALL apply the deterministic slot policy: an applicable
+  scoped look may replace the primary; otherwise the explicitly designated accepted compilation is
+  primary, with the main photo as secondary where capacity allows; without a compilation, the main
+  photo is primary.
   - **WHEN** the model accepts no references **THEN** the dispatch dialog states so before the
     user commits, and the sheet's identity is carried in the prompt.
-  - **AND WHEN** the newest compilation predates the sheet's current version **THEN** it is
+  - **AND WHEN** the designated compilation predates the sheet's current version **THEN** it is
     attached anyway, the version gap is named before commit, and recompiling is offered.
-  - **AND WHEN** no compilation exists at any version **THEN** the dispatch is treated as a
-    sketch citation under R-DISP-8.
-- **R-REF-2** Full-body turnaround generation SHALL be blocked until the head turnaround is
-  fully locked.
-- **R-REF-3** A compiled model sheet SHALL record the sheet version and the tile set it was
-  compiled from, and the UI SHALL flag it as stale when either has advanced.
-- **R-REF-4** The classic-grid format SHALL compile locally with no provider call and no cost.
+  - **AND WHEN** no compilation exists **THEN** an accepted main photo rides alone; only absence of
+    both accepted assets leaves the citation without an image reference.
+- **R-REF-2** New character-sheet and look generation SHALL be blocked until a main photo is
+  accepted. Legacy angle-tile kits retain their head-before-body gate.
+- **R-REF-3** A model sheet SHALL record the sheet version and its source identity record; a
+  legacy grid also records its tile set. The UI SHALL flag it stale when its source advances.
+- **R-REF-4** Existing angle-tile kits MAY compile a classic grid locally with no provider call
+  and no cost; new kits generate one composite character sheet directly.
 - **R-REF-5** Where a dispatch's references exceed the target model's accepted count, selection
   SHALL be deterministic and the dropped references SHALL be named before the user commits.
   - **WHEN** a shot cites four sheets and the model accepts two references **THEN** the two
@@ -1160,9 +1157,10 @@ The voice picker offers sources — ElevenLabs, OpenAI, Local, uploads — and m
 against the sheet's *written* voice description, previewing with the character's own canon
 lines rather than a stock sentence.
 
-**Local is preset-only.** Kokoro pins a fixed catalogue of style vectors; it cannot synthesise
-an arbitrary new voice. Cloning is cloud-only in v1. The picker states this rather than letting
-a user hunt for a clone button under "Local".
+**Clone support is per engine and per implemented workflow.** Kokoro pins a fixed local catalogue
+and cannot clone. The implemented path creates a world-level voice through the local ComfyUI
+recipe. Cloud providers may report native clone capability, but Arke does not yet implement their
+clone operation.
 
 ## 7.3 Generation
 
@@ -1180,8 +1178,9 @@ sheet. Voice takes are auditioned against the cut before landing in it.
   SHALL list the productions affected.
 - **R-VOICE-3** The voice picker SHALL preview candidates using the character's own canon
   dialogue.
-- **R-VOICE-4** Local voices SHALL be presented as a fixed catalogue, and voice cloning SHALL
-  be offered only for providers that support it, disabled with a stated reason elsewhere.
+- **R-VOICE-4** Each voice engine SHALL state whether Arke offers presets, cloning, or both. Voice
+  cloning SHALL be offered only where engine support and an implemented Arke workflow both exist,
+  disabled with a stated reason elsewhere.
 - **R-VOICE-5** The application SHALL start and remain fully usable when the Voxa sidecar fails
   to start, with voice features disabled and a stated reason.
 
@@ -1191,8 +1190,10 @@ sheet. Voice takes are auditioned against the cut before landing in it.
 
 ## 8.1 Formats
 
-Three in v1: **story** (novel, script, serial), **video** (short film, music video, series),
-**stills** (visual album, key art sets). Games are out of scope.
+Current creation offers **Story** and **Video**. Story resolves to the default `book` kind with no
+second step. Video offers Microdrama, Film, Music video, Interactive, and Other; Interactive is a
+Video kind rather than a third medium. Existing Stills and older kind values remain readable, but
+are not offered for new creation. Games are out of scope.
 
 A production is created inside a world and inherits its cast, locations, canon and tone
 automatically. The New-production dialog states this: *"joins The Undersong · shares all 6
@@ -1412,13 +1413,12 @@ boundary and a shot boundary that coincide do not produce a duplicated frame.
 Shots without an accepted frame are called out before dispatch, with the option to generate
 from the brief alone or to go back and pin a frame first.
 
-**Sketch-cited shots get the same treatment.** A sketch has no locked tiles, therefore no
-compiled model sheet, therefore no identity reference rides along — a materially different
-generation, and the exact failure this product exists to prevent. The dispatch dialog names the
-specific sketches the shot cites, states the consequence, and offers to lock them first. It
-does **not** block: generating first looks is how a sketch becomes locked, so blocking would
-close the only path out of sketch-hood. The Cast screen's locked/sketch count is ambient world
-information and is not a substitute for this per-dispatch notice.
+**Sketch-cited shots get the same warning.** A sketch may have a main photo, a compiled sheet, both,
+or no accepted identity image yet; reference selection carries whatever the kit has and slots allow.
+The dispatch dialog names the specific sketches because their authored identity is still
+provisional. It does **not** block: generating a main photo is a path out of sketch-hood. The Cast
+screen's locked/sketch count is ambient world information and is not a substitute for this
+per-dispatch notice.
 
 ## 10.4 Continuity chaining
 
@@ -1812,10 +1812,11 @@ Confinement is therefore layered, with each layer doing what it can actually do,
 risk stated rather than assumed away.
 
 **1 · The world is never the working directory.** An authoring session's cwd is its proposal
-directory, pre-populated with copies of exactly the entities in scope, plus read-only context the
-agent needs. The agent edits those copies. Every relative path it touches lands in the proposal
-by construction, and changed files become the proposal's targets on session end. This is not a
-restriction the agent is asked to respect — it is the only world it is shown.
+directory, pre-populated with copies of exactly the entities in scope. Content outside that scope
+is available only through the read-only world-query tool. The agent edits the scoped copies. Every
+relative path it touches lands in the proposal by construction, and changed files become the
+proposal's targets on session end. This is not a restriction the agent is asked to respect — it is
+the only writable world it is shown.
 
 Materialisation is also where base hashes are captured (§3.3), so the copy and the staleness
 check come from one act.

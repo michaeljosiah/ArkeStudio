@@ -38,43 +38,35 @@ it was supporting, so it goes first.
 | One journalled commit primitive, crash-safe | **True.** `planning → committing → done`, rolling back or forward on recovery (R-15). |
 | Every mutation goes through it | **No, and the exceptions have been miscounted three times.** `ownedWrite()`, `gateOp()`, and `WorldChatStore` writing `.conversations/` through neither — with upwards of forty modules in the coordinator issuing direct filesystem writes. SPEC-002 §2.1 now states the criterion (anything writing inside a world) instead of a list, because the list has been wrong at one, two and three. |
 
-**Three defects surfaced while checking the above**, and both are in the code rather than in any
-spec. They are recorded here because they are evidence for this ADR's thesis — ownership is less
-solid than the lock's existence suggests — and because they want fixing whether or not any of this
-lands.
+**Four defects surfaced while checking the above: one Bible-adoption defect and three ownership-lock
+defects.** They are retained here as the historical evidence that drove the fixes; current code
+resolves all four.
 
 - **Recovery belongs to whoever owns the world, and that resolves a conflict.** R-15 requires a
   journal in `committing` to roll forward unconditionally; R-3a requires a deposed writer's
   in-flight mutation to be refused. Both hold, because they are about different subjects: the fence
   stops the deposed *process*, and the *transaction* is completed by the new owner on open. That
-  only works if recovery happens under ownership, which is the first defect below — so the two
+  only works if recovery happens under ownership, which is the recovery defect below — so the two
   findings are one fix, not two.
 - **Closed-world reconciliation has two bases.** The outside bytes remain the physical base for
   stale-write detection, while the last app-owned bytes supply the outgoing version and history
   snapshot. Canonical history retains those bytes; the derived scan state retains their hash and
   keeps that baseline across close and reopen while an edit is unresolved.
-- **An adopted Bible edit is invisible to the guard written for it.** `applyTurnBibleEdits()`
-  refuses a World Chat turn whose base moved, citing R-27, for precisely the case of an author
-  editing in a text editor while the model thinks. It compares frontmatter *versions*;
-  `adoptBibleIfMoved()` is "a plain rescan" and advances none. So a hand edit lands, the version is
-  unchanged, the check passes, and the turn applies heading-addressed edits to text it never read.
-- **Recovery runs before the lock, and in read-only opens.** `WorldStore.open()` calls
-  `committer.recover()` before `WorldLock.acquire()`, and `readOnly` gates the lock, the external-
-  edit scan and the watcher but **not** recovery. So a second instance opening a world whose owner
-  is mid-commit will roll that journal back or forward underneath it — and a *read-only* open can
-  rename live files, which makes it not read-only.
-- **Lock acquisition is read-then-write.** `acquire()` reads the lock, decides, then calls
-  `write()` → `atomicWriteFile()` → rename. There is no exclusive create anywhere in the world
-  layer. Two processes opening an unlocked world concurrently can both see nothing, both write, and
-  both believe they hold it.
-- **Release deletes whatever lock is there.** `release()` removes `world.lock` on the strength of
-  its own in-memory `held` flag, without checking that the file still names it — with
-  `force: true` and a swallowed error. So a process deposed by the cold-heartbeat reclaim deletes
-  its successor's live lock on the way out, and the world is unlocked while someone is writing it.
+- **Resolved: an adopted Bible edit advances the guard written for it.** `applyTurnBibleEdits()`
+  refuses a World Chat turn whose base moved. `adoptBibleIfMoved()` now commits changed text as the
+  next Bible version before publishing the refreshed scan, so the version comparison observes a
+  hand edit made while the model was thinking.
+- **Resolved: recovery runs under ownership and never from a read-only open.** `WorldStore.open()`
+  acquires the lock before recovery; a read-only open reports an unresolved journal and renames
+  nothing.
+- **Resolved: lock acquisition uses exclusive creation.** `acquire()` claims `world.lock` with
+  `wx`, so concurrent openers cannot both create it.
+- **Resolved: release removes only its own complete lock record.** A deposed process compares the
+  current file with its own token and leaves a successor's lock intact.
 
-Taken together the three make the local lock unreliable in both directions: it can be held twice,
-and it can be released by someone who no longer holds it. This ADR spent several revisions calling
-it "an optimisation that makes conflicts rare", which is more credit than it has earned.
+Taken together, the original three lock defects made the local lock unreliable in both directions. The
+fixes above restore its desktop guarantee; they do not make a pid-based file lock a remote lease,
+which remains the deployment question this ADR addresses.
 
 One thing the earlier draft under-credited: `world.json` already carries `canonRevision`, a
 monotonic world-level counter, and `rollForward()` writes world.json **last**, commenting that

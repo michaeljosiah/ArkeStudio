@@ -7,9 +7,9 @@ import { IsoDateSchema } from "./ids.js";
  * It is deliberately not canon, and the distinction is the whole design. Canon holds what the
  * world has *decided*: numbered entries, gated, ripple-checked, cited by takes and sheets. The
  * bible holds what the author *thinks*: intent, mood, direction, the half-formed. Nothing cites
- * it, nothing generates from it, and the grounded Q&A pipeline never answers out of it — an
- * answer sourced from a musing would look exactly like an answer sourced from canon, which is
- * the one failure SPEC-006 exists to prevent.
+ * it as authority, and the grounded Q&A pipeline never answers out of it — an answer sourced from
+ * a musing would look exactly like an answer sourced from canon, which is the one failure SPEC-006
+ * exists to prevent. Founding and key-art generation may use it as non-binding creative intent.
  *
  * Because nothing cites it, it does not pass the accept gate. It belongs to the master spec's
  * **direct authored** class (§3.1) beside chapter prose: written in place, versioned at every

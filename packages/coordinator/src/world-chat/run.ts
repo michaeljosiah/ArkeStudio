@@ -125,7 +125,7 @@ export interface RunDeps {
    */
   artDirectionLook?: () => CurrentLook;
   /**
-   * The author's bible as it stands right now (SPEC-022).
+   * The author's Bible as it stands right now (master §4.5).
    *
    * Read from disk per turn rather than taken off the cached bundle, for two reasons that both
    * bite: the author may have edited `bible.md` in a text editor since this conversation opened,
@@ -744,7 +744,7 @@ export class WorldChatRunner {
 
     /*
      * The bible is written before the turn is recorded, and a failure here rejects the turn
-     * whole (SPEC-022, §8.3's all-or-nothing rule).
+     * whole (master §4.5, §8.3's all-or-nothing rule).
      *
      * Both orderings lose something and this one loses less. Recording the turn first would let
      * a reply saying "I've added that to your bible" persist beside a bible that never changed —

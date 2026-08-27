@@ -412,7 +412,7 @@ export function ProductionLayout() {
               {!shape?.isEpisodic &&
                 item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
               {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
-              {/* Interactive video's structural authority (epic 401): only this medium routes here. */}
+              {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
               {shape?.isBranching &&
                 item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
               {item("scenes/new", "New scene", undefined, true, false, true)}

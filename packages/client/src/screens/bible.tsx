@@ -11,7 +11,7 @@ import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
 import { ClipPlayButton } from "../components/player.js";
 
 /**
- * The world bible (SPEC-022) — one page, one document, no approval step.
+ * The world Bible (master §4.5) — one page, one document, no approval step.
  *
  * Everything on this screen follows from that last part. Nothing here proposes; the text saves in
  * place. What replaces the accept step is on screen instead: the version, the meter, and a list of
@@ -201,7 +201,7 @@ export function BibleScreen() {
         </h1>
         <div className="fy-mono" style={{ marginTop: 8 }}>
           your thinking about this world, in your words · the Studio reads all of it, every turn ·
-          it is not canon, and nothing generates from it
+          it may guide creative generation, but it is never canon or evidence
         </div>
       </div>
 
