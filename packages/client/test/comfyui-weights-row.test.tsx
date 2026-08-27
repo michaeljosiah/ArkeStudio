@@ -147,17 +147,19 @@ describe("a recipe's weights hang off the recipe", () => {
 
   });
 
-  it("is stated under the engine that needs it, once, whatever state it is in", () => {
+  it("is stated once, on the row that acts on it, in every state", () => {
     // It used to be listed twice — on the recipe row and again under a flat Components group —
     // and `statedElsewhere` suppressed the second copy conditionally, with a rule per
-    // destination. Engines groups by the declared owner instead, so there is nothing to
-    // suppress and nothing to disagree: the component row is there in every state.
+    // destination. The recipe row owns it now, so there is nothing to suppress and no second
+    // Download beside the first: counted, not merely looked for.
     for (const state of ["available", "downloading", "ready", "failed"] as const) {
       const html = render("/settings/engines?engine=comfyui", stateWith(weights({ state })));
-      assert.match(html, /Local · Draft Image · weights/, state);
+      const recipes = html.match(/data-testid="comfyui-recipe"/g) ?? [];
+      assert.equal(recipes.length, 1, state);
+      assert.equal((html.match(/Download · (?:<!-- -->)?6\.5 GB/g) ?? []).length, state === "available" ? 1 : 0, state);
     }
     // And nowhere else. Ollama and Voxa each answer for their own.
     const elsewhere = render("/settings/engines?engine=voxa", stateWith(weights({})));
-    assert.doesNotMatch(elsewhere, /Local · Draft Image · weights/);
+    assert.doesNotMatch(elsewhere, /Local · Draft Image/);
   });
 });

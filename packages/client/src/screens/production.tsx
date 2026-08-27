@@ -78,7 +78,7 @@ import { AppChrome } from "../components/chrome.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
-import { DispatchBar, resolveModel } from "../components/dispatch-bar.js";
+import { DispatchBar, productionModel, useResolvedModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { ClipPlayButton, clock } from "../components/player.js";
@@ -1712,7 +1712,9 @@ export function SceneDetailScreen() {
   const totalSec = scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0);
   const model =
     (state?.app.manifest?.models ?? []).find(
-      (m) => m.id === state?.app.routing.defaults["video"] && m.capability === "video",
+      // The production's own choice first, then the installation's default — the same order
+      // the picker opens on, so a scene row cannot name a model the dispatch will not use.
+      (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]) && m.capability === "video",
     ) ??
     (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
     null;
@@ -2219,7 +2221,9 @@ export function GenerateScreen() {
     null;
   const slug = world?.meta.slug;
   const model =
-    (state?.app.manifest?.models ?? []).find((m) => m.id === state?.app.routing.defaults["video"]) ??
+    (state?.app.manifest?.models ?? []).find(
+      (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]),
+    ) ??
     (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
     null;
 
@@ -2789,7 +2793,7 @@ function GenerateDrawer({
   const { state } = useStore();
   const navigate = useNavigate();
   const capability = production ? productionShape(production.meta).dispatchCapability : "video";
-  const resolved = resolveModel(state, capability);
+  const resolved = useResolvedModel(state, capability);
   const model = resolved.stranded === null ? resolved.model : null;
   // The same function the coordinator executes, on the same inputs (issue 244) — so the number
   // under the button is the number that will be spent, not a summary of one.
@@ -2905,7 +2909,7 @@ export function DispatchDialogScreen() {
   // another. Planning from every manifest row let a switched-off model be enqueued from the mode
   // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
   // because spending on a model the user never chose is worse than not dispatching.
-  const resolved = resolveModel(state, capability, choice.modelId);
+  const resolved = useResolvedModel(state, capability, choice.modelId);
   const model = resolved.stranded === null ? resolved.model : null;
   // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
   // plan derives from the tier. Both travel from here so the dialog and the job agree.

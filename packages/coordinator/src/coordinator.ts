@@ -112,6 +112,7 @@ import {
   saveChapter,
   saveScene,
   setProductionAspect,
+  setProductionModel,
   setPromptOverride,
 } from "./productions/ops.js";
 import {
@@ -2303,6 +2304,23 @@ export class Coordinator {
       if (tool.current().state === "ready") await this.providerService.validate(provider);
     }
     const manifest = this.opts.manifest ?? null;
+    // Cloud AI is cloud-only by construction, so a local capability default cannot keep being
+    // offered there. It is moved out of routing before anything reads it — not deleted: the
+    // record keeps the concrete model id, and Cloud AI names it until the person has seen it
+    // (SPEC-033 R-66, D21). Nothing to do on an installation that never had one.
+    if (this.appSettings && manifest) {
+      const local = new Set(manifest.models.filter((m) => PROVIDERS[m.provider].local).map((m) => m.id));
+      await this.appSettings.clearLocalRouting((modelId) => local.has(modelId)).catch(async (err) => {
+        // Swallowing this produces the one outcome D21 refuses: the default stays in force at
+        // dispatch while Cloud AI can neither show nor change it. `routingFaults` states any
+        // local model still in routing, so the screen says so — this records why.
+        await this.appLog?.append({
+          level: "error",
+          event: "routing.clear-local-failed",
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
@@ -2318,7 +2336,13 @@ export class Coordinator {
       providers: this.providerService.list(),
       providerTools: [...this.providerTools.values()].map((tool) => tool.current()),
       ...(settings && manifest
-        ? { routing: { defaults: settings.routing, faults: routingFaults(settings, manifest) } }
+        ? {
+            routing: {
+              defaults: settings.routing,
+              faults: routingFaults(settings, manifest),
+              clearedLocal: settings.clearedLocalRouting,
+            },
+          }
         : {}),
       ...(settings ? { models: settings.models } : {}),
       ...(settings ? { presets: settings.presets } : {}),
@@ -4520,6 +4544,7 @@ export class Coordinator {
           type: "routing.changed",
           routing: settings.routing,
           faults: routingFaults(settings, this.opts.manifest),
+          clearedLocal: settings.clearedLocalRouting,
         });
         return;
       }
@@ -4708,6 +4733,31 @@ export class Coordinator {
             ? { engineUrl: offered.location, enginePath: null }
             : { enginePath: offered.location, engineUrl: null },
         );
+        return;
+      }
+      case "setup-install": {
+        const setup = this.setup;
+        if (!setup) return;
+        setup.installClosure(msg.componentId);
+        // A run already in flight has an `attempted` set, and a component it has been past this
+        // round is never picked up again by it — so the press would queue the closure and then
+        // do nothing. The repair handler pays the same cost for the same reason: await the pass
+        // that is running, then start one that will collect what was just queued.
+        await setup.run().catch(() => {});
+        await setup.run().catch(() => {});
+        return;
+      }
+      case "setup-remove": {
+        await this.setup?.remove(msg.componentId).catch(() => {});
+        return;
+      }
+      case "comfyui-restart": {
+        if (!this.appSettings || !this.opts.comfyui) return;
+        // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
+        // resolves the selection again and starts the child, whether or not anything changed.
+        const settings = await this.appSettings.load();
+        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+        await this.refreshComfyUi();
         return;
       }
       case "comfyui-refresh": {
@@ -5441,6 +5491,21 @@ export class Coordinator {
             kind: "production-edit.refused",
             reason: err instanceof Error ? err.message : String(err),
             detail: { productionId: msg.productionId, aspect: msg.aspect },
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "set-production-model": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        try {
+          await setProductionModel(store, msg.productionId, msg.capability, msg.modelId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "production-edit.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId, capability: msg.capability, modelId: msg.modelId },
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);

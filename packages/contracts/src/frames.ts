@@ -991,6 +991,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
   /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
+  /**
+   * SPEC-033 R-70: restart the engine. Distinct from refresh, which re-measures the engine that
+   * is running — this stops the supervised child and resolves the selection again, which is the
+   * only thing that helps an engine that came up wrong.
+   */
+  z.object({ kind: z.literal("comfyui-restart") }).strict(),
+  /**
+   * SPEC-028 R-5's one-action activation, over the whole declared closure (SPEC-033 R-40).
+   * Distinct from `setup-retry`, which starts one component and leaves a dependant blocked on a
+   * runtime nobody asked for.
+   */
+  z.object({ kind: z.literal("setup-install"), componentId: z.string().min(1) }).strict(),
+  /** SPEC-033 R-43: give the disk back, and say what went and what would not. */
+  z.object({ kind: z.literal("setup-remove"), componentId: z.string().min(1) }).strict(),
   /** Re-read node classes and re-hash one recipe's pins (§2.5): the "Re-verify" affordance. */
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
@@ -1630,6 +1644,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  /**
+   * SPEC-033 R-74: which model this production reaches for, per capability. `modelId: null`
+   * clears the choice, which is different from setting one — it puts the production back on
+   * whatever the picker would have opened on anyway.
+   */
+  z
+    .object({
+      kind: z.literal("set-production-model"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      capability: CapabilitySchema,
+      modelId: z.string().min(1).nullable(),
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */

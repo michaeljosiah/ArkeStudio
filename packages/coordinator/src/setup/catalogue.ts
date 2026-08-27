@@ -1,7 +1,9 @@
+import type { EngineId, ProviderId } from "@arke-studio/contracts";
+
 /**
  * What setup fetches onto this machine, and where from. The engine ships; the language model
  * it runs does not — that is a choice about quality and disk that belongs to the person whose
- * disk it is, so it is made in Settings · Local runtime rather than assumed here.
+ * disk it is, so it is made in Settings · Local AI rather than assumed here.
  *
  * Sizes are the published figures, used for arithmetic *before* anything starts — the
  * free-disk guard and the totals on screen — so they are stated here rather than discovered
@@ -36,7 +38,7 @@ export type ComponentKind =
   | { kind: "installer"; file: DownloadFile; silentArgs: readonly string[] }
   /**
    * A model pulled by a runtime we do not own, through its own CLI. No catalogue entry ships
-   * one — which model Ollama runs is chosen in Settings · Local runtime, on the disk it costs.
+   * one — which model Ollama runs is chosen in Settings · Local AI, on the disk it costs.
    */
   | { kind: "pull"; command: string; args: readonly string[] }
   /**
@@ -91,7 +93,12 @@ export interface CatalogueEntry {
    *
    * Absent means no engine requires it. Those keep a place on Engines without organising it.
    */
-  engine?: "comfyui" | "ollama" | "voxa";
+  engine?: EngineId;
+  /**
+   * The provider whose tool this is (SPEC-033 R-1). Providers owns the credential the tool
+   * exists for, and therefore owns the tool; Engines does not restate it.
+   */
+  provider?: ProviderId;
   /**
    * Peak disk this component needs, where that differs from what it downloads — an archive
    * that is extracted holds both copies at once before the archive is deleted. The free-disk
@@ -102,7 +109,7 @@ export interface CatalogueEntry {
   /** Shown on the row when the thing that would *use* this is not in the build yet. */
   caveat?: string;
   /**
-   * Offered, not fetched: setup leaves it alone and it waits in Settings · Local runtime until
+   * Offered, not fetched: setup leaves it alone and it waits in Settings · Local AI until
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
@@ -153,7 +160,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-runtime",
     engine: "ollama",
     displayName: "Ollama",
-    purpose: "Runs language models here — choose one in Settings · Local runtime",
+    purpose: "Runs language models here — choose one in Settings · Local AI",
     sizeMb: 750,
     spec: {
       kind: "installer",
@@ -214,6 +221,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
   // discovery looks for all four spellings.
   {
     id: "higgsfield-cli",
+    provider: "higgsfield",
     displayName: "Higgsfield CLI",
     purpose: "Generates images and video through your Higgsfield account — sign in from Providers",
     sizeMb: 7,

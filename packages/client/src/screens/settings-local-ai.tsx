@@ -7,14 +7,18 @@ import {
   comfyUiWeightsComponentId,
   formatGb,
   localModelRowState,
+  setupClosure,
+  transferProgress,
   PROVIDERS as PROVIDER_TABLE,
   type Capability,
   type LocalModelRowState,
   type ManifestModel,
+  type SetupClosure,
+  type SetupComponent,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight } from "../components/icons.js";
-import { detectRuntimes, useSetup, useStore } from "../lib/store.js";
+import { detectRuntimes, setupInstall, setupRemove, setupRepair, useSetup, useStore } from "../lib/store.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
 import { RuntimeSection, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
 
@@ -73,6 +77,12 @@ interface Entry {
   recommended: boolean;
   /** SPEC-028 R-35's answer, where it refuses a model that is otherwise installed (R-31). */
   ineligible: string | undefined;
+  /** The component that provides this model, where one does. Absent means nothing can fetch it. */
+  component: SetupComponent | undefined;
+  /** What one press actually costs — the whole chain, never this model's own weights (R-40). */
+  closure: SetupClosure | undefined;
+  /** The rest of the chain, by display name, for the detail. Empty where there is no rest. */
+  supporting: string[];
 }
 
 export function SettingsLocalAiScreen() {
@@ -134,6 +144,14 @@ export function SettingsLocalAiScreen() {
               ? FIT_LABEL.unknown
               : undefined,
         sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
+        component,
+        closure: component === undefined ? undefined : setupClosure(components, component.id),
+        supporting:
+          component === undefined
+            ? []
+            : setupClosure(components, component.id)
+                .componentIds.filter((id) => id !== component.id)
+                .map((id) => components.find((c) => c.id === id)?.displayName ?? id),
         recommended: runtime?.recommended[model.capability] === model.id,
         // Installed and still unable to run is a different sentence from unsupported, and it is
         // not this screen's to compose: R-30 forbids a second eligibility answer, so the row
@@ -173,12 +191,16 @@ export function SettingsLocalAiScreen() {
                 open={open === entry.model.id}
                 onToggle={() => setOpen(open === entry.model.id ? null : entry.model.id)}
                 onOpenEngines={() => navigate("/settings/engines")}
+                onOpenDownloads={() => navigate("/settings/downloads")}
               />
             ))}
           </div>
         );
       })}
       <div className="fy-set__actions">
+        <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
+          {setup?.running === true ? "Downloads · running" : "Downloads"}
+        </Button>
         <Button variant="secondary" onClick={() => navigate("/settings/engines")}>
           Engines
         </Button>
@@ -275,11 +297,13 @@ function ModelRow({
   open,
   onToggle,
   onOpenEngines,
+  onOpenDownloads,
 }: {
   entry: Entry;
   open: boolean;
   onToggle: () => void;
   onOpenEngines: () => void;
+  onOpenDownloads: () => void;
 }) {
   const { model, state } = entry;
   // `unsupported` is both a headline state and a fit verdict, so a declared refusal would print
@@ -309,7 +333,68 @@ function ModelRow({
             Engines
           </button>
         )}
+        {/*
+         * Starting work stays where the decision is made; watching it belongs to Downloads
+         * (R-83). The figure on the button is the whole closure's, because quoting the model's
+         * own weight while silently fetching an engine beside it makes honest arithmetic
+         * dishonest (R-40).
+         */}
+        {state === "available" && entry.closure !== undefined && (
+          <Button onClick={() => setupInstall(entry.component!.id)}>
+            Install · {sizeMb(entry.closure.downloadMb)}
+          </Button>
+        )}
+        {/* Retry starts the chain, not one link of it. Retrying the model alone re-blocks it on
+            the runtime that failed, with no way to reach that runtime from this row — the same
+            failure the Install button was widened to a closure to avoid. */}
+        {state === "needs-attention" && entry.component !== undefined && (
+          <button
+            type="button"
+            className="fy-set__link"
+            onClick={() =>
+              entry.component!.repairRequired === true
+                ? setupRepair(entry.component!.id)
+                : setupInstall(entry.component!.id)
+            }
+          >
+            {entry.component.repairRequired === true ? "Repair" : "Retry"}
+          </button>
+        )}
+        {/* Remove is offered wherever a size on disk is stated (R-43): a screen that only ever
+            grows is a screen that eventually costs somebody their disk. */}
+        {/* Only where Arke may actually take it away: a component setup fetches unasked comes
+            back on the next launch, and a weight file inside a mapped folder may have been the
+            user's before Arke ever saw it. A Remove that cannot act is worse than none. */}
+        {state === "installed" && entry.component?.removable === true && (
+          <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
+            Remove
+          </button>
+        )}
+        {(state === "downloading" || state === "installing") && (
+          <button type="button" className="fy-set__link" onClick={onOpenDownloads}>
+            Downloads
+          </button>
+        )}
       </div>
+      {/* Stated by count, and only by count (R-41). `Install ComfyUI 0.3.48 and its nodes` is the
+          machine's sentence; the components themselves are behind the detail. */}
+      {state === "available" && (entry.closure?.supporting ?? 0) > 0 && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot" />
+          <span>
+            {entry.closure!.supporting} supporting component{entry.closure!.supporting === 1 ? "" : "s"}
+            {entry.closure!.installedMb > entry.closure!.downloadMb
+              ? ` · ${sizeMb(entry.closure!.installedMb)} on disk`
+              : ""}
+          </span>
+        </div>
+      )}
+      {/* The same projection Downloads computes, never a second one (R-82). */}
+      {entry.component !== undefined && transferProgress(entry.component).active && (
+        <div className="fy-set__bar">
+          <div className="fy-set__barfill" style={{ width: `${transferProgress(entry.component).percent}%` }} />
+        </div>
+      )}
       {/* One clause on the thing refused, carrying its figures (R-88). `insufficient` and
           `unsupported` share the headline word and keep separate reasons, so the reader who has
           stopped on a row still gets the distinction the label costs them (R-27, D12).
@@ -339,6 +424,10 @@ function ModelRow({
             {PROVIDER_TABLE[model.provider].displayName} · {model.id}
             {model.limits.maxContextTokens ? ` · ${Math.round(model.limits.maxContextTokens / 1000)}K context` : ""}
             {model.family ? ` · ${model.family}` : ""}
+            {/* By name, never by id: `ollama-gemma4-12b` carrying its runtime in its own id is
+                the leak this whole rearrangement exists to stop, and printing one on screen
+                would be committing it in the one place a person reads. */}
+            {entry.supporting.length > 0 ? ` · needs ${entry.supporting.join(", ")}` : ""}
           </span>
         </div>
       )}

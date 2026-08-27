@@ -860,6 +860,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("routing.changed"),
       routing: RoutingDefaultsSchema,
       faults: z.array(RoutingFaultSchema),
+      /** Cleared local defaults travel with the change that can retire one (SPEC-033 R-66). */
+      clearedLocal: RoutingDefaultsSchema.optional(),
     })
     .strict(),
   /**
@@ -872,6 +874,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("models.changed"),
       models: ModelAvailabilitySchema,
       faults: z.array(RoutingFaultSchema),
+      clearedLocal: RoutingDefaultsSchema.optional(),
     })
     .strict(),
   /** The enhancer's answer: the rewritten prompt, or null with why not (never silence). */

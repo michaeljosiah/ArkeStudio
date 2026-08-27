@@ -30,6 +30,7 @@ import {
   type StoryOverview,
   type Shot,
   type WorldBundle,
+  type Capability,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -968,6 +969,52 @@ export async function setProductionAspect(
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
   });
   return canonical;
+}
+
+/**
+ * Which model this production reaches for, for one capability (SPEC-033 R-74..R-76).
+ *
+ * The same commit machinery every other production field uses: no new authority, no second
+ * gate, no bypass. This is the one write in SPEC-033 that reaches a world, and it takes the
+ * ordinary path deliberately — the alternative was app settings keyed by production id, and
+ * production ids are world-scoped, so two copies of a world would collide and a world moved to
+ * another machine would lose the choice.
+ *
+ * `null` clears the choice rather than storing an absence: a production with no choice opens
+ * the picker on whatever it would have opened on anyway, which is not the same as one pinned to
+ * that model.
+ */
+export async function setProductionModel(
+  store: WorldStore,
+  productionId: string,
+  capability: Capability,
+  modelId: string | null,
+): Promise<void> {
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  // `doc.value` is the parsed object, and `JsonFile` preserves keys it does not know about.
+  // Re-validating the whole strict schema to read one field would make this the only production
+  // write that refuses because some unrelated part of the file failed to parse.
+  const current = (doc.value["models"] ?? {}) as Record<string, string>;
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(current)) if (key !== capability) next[key] = value;
+  if (modelId !== null) next[capability] = modelId;
+  // Clearing the last entry removes the key rather than leaving `{}` behind — `JSON.stringify`
+  // omits an `undefined` value, and an empty object on disk reads as a choice that was made and
+  // then emptied, which is a different thing from never having made one.
+  doc.set({ models: Object.keys(next).length > 0 ? next : undefined, updated: store.now() });
+  await store.commit({
+    kind: "production-edit",
+    source: "form",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+    // No schema raise, and deliberately. `aspect` (issue 389) is the precedent this follows
+    // exactly: an optional production field written only when somebody asks for it, on a
+    // production they were looking at. Raising the boundary would make every world this build
+    // touches unreadable by the previous release, which is a far larger promise than one
+    // optional key is worth — and it is the reason the eager migration went, because *that*
+    // would have written the field into every production of every world on open.
+  });
 }
 
 // ---------------------------------------------------------------------------

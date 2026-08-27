@@ -2,7 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
-import type { DomainEvent, SetupComponent, SetupStatus } from "@arke-studio/contracts";
+import {
+  componentIsSettled,
+  setupClosure,
+  type DomainEvent,
+  type SetupClosure,
+  type SetupComponent,
+  type SetupStatus,
+} from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catalogue.js";
 
@@ -120,6 +127,13 @@ export class LocalSetupService {
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
         ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),
         ...(entry.engine !== undefined ? { engine: entry.engine } : {}),
+        ...(entry.provider !== undefined ? { provider: entry.provider } : {}),
+        // The declared graph and the peak figure travel too: the button that states what an
+        // install costs and the guard that refuses one this disk cannot hold have to be reading
+        // the same numbers, or they eventually quote different ones (SPEC-033 R-40, R-42).
+        ...(entry.requires !== undefined ? { requires: [...entry.requires] } : {}),
+        ...(entry.installedMb !== undefined ? { installedMb: entry.installedMb } : {}),
+        ...(this.removable(entry) ? { removable: true } : {}),
       });
     }
   }
@@ -560,7 +574,7 @@ export class LocalSetupService {
           if (!now) {
             this.set(entry.id, {
               state: "failed",
-              detail: "Ollama's installer did not finish — run it yourself from Settings · Local runtime",
+              detail: "Ollama's installer did not finish — run it yourself from Settings · Engines",
             });
             this.publish();
             return;
@@ -719,6 +733,11 @@ export class LocalSetupService {
       try {
         await rm(toExtendedLength(partial), { force: true });
       } catch (err) {
+        // Named with its path and its size, on the component, so Downloads can offer to reclaim
+        // it. A message alone says a file survived and gives nobody a way to act on it (R-45).
+        this.set(componentId, {
+          leftovers: [{ path: partial, sizeMb: Math.round(received / (1024 * 1024)) }],
+        });
         throw new IncompleteDownloadCleanupError(
           `${spec.file}: the incomplete download could not be removed (${errorCode(err)})`,
         );
@@ -748,9 +767,167 @@ export class LocalSetupService {
       this.publish();
       return;
     }
-    this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined });
+    this.set(componentId, {
+      state: "queued",
+      bytesDone: 0,
+      bytesPerSecond: null,
+      detail: undefined,
+      leftovers: undefined,
+    });
     this.publish();
     if (!this.running) void this.run();
+  }
+
+  /**
+   * Start a component **and everything it needs** (SPEC-028 R-5, SPEC-033 R-40).
+   *
+   * One press, one closure. `retry` starts one component and leaves a dependant blocked on a
+   * runtime nobody asked for; this queues the whole chain, so the round's own per-volume disk
+   * guard measures the closure's total rather than one component's — which is where R-42 wanted
+   * that figure all along, and why the guard itself needs no change.
+   *
+   * Anything already settled stays settled: two models sharing a component do not fetch it
+   * twice (R-44).
+   */
+  installClosure(componentId: string): SetupClosure {
+    const closure = setupClosure(this.status().components, componentId);
+    for (const id of closure.componentIds) {
+      const c = this.components.get(id);
+      // Anything already on its way is left exactly as it is. Re-queuing a component that is
+      // 60% through its download zeroes its bytes and takes the bar off both surfaces, so the
+      // person who pressed Install on a second model is told the first transfer stopped.
+      if (!c || componentIsSettled(c.state) || c.state === "queued" || c.state === "downloading" || c.state === "installing") {
+        continue;
+      }
+      if (this.repairBlocks.has(id)) {
+        this.set(id, { state: "failed", repairRequired: true });
+        continue;
+      }
+      this.set(id, {
+        state: "queued",
+        bytesDone: 0,
+        bytesPerSecond: null,
+        detail: undefined,
+        leftovers: undefined,
+      });
+    }
+    this.publish();
+    if (!this.running) void this.run();
+    return closure;
+  }
+
+  /**
+   * Whether Arke may take this component away (SPEC-033 R-43).
+   *
+   * Two conditions, and both are about ownership rather than convenience.
+   *
+   * **Optional only.** A non-optional component is fetched again by the next launch, because
+   * setup's state lives in memory and the catalogue rebuilds it on every start. Offering Remove
+   * for one would reclaim 400 MB until the app reopened, which is a control that undoes itself.
+   *
+   * **Nothing in a folder the user mapped.** A recipe's weight entry writes into the ComfyUI
+   * models folder somebody pointed us at, under the canonical names any existing install already
+   * uses — and `install` deliberately treats a file already there as the user's, recognised
+   * rather than re-fetched (SPEC-021 R-8). So a component can be `present` *because they already
+   * had the weights*, and removing it would delete a checkpoint Arke never fetched, from a folder
+   * Arke does not own, with no confirmation and no undo.
+   */
+  private removable(entry: CatalogueEntry): boolean {
+    if (entry.optional !== true) return false;
+    const spec = entry.spec;
+    if (spec.kind === "files") return spec.externalRoot === undefined;
+    return spec.kind === "pull" || spec.kind === "archive" || spec.kind === "tree";
+  }
+
+  /**
+   * Give the disk back (SPEC-033 R-43), and say what went and what would not.
+   *
+   * Refused where another component that is still here declares this one — removing Ollama out
+   * from under an installed Gemma would leave a model that cannot run and a row that says it is
+   * installed (R-44). The refusal names the dependant rather than the rule.
+   *
+   * Deletion is attempted for everything the entry owns, and a survivor is **named with its path
+   * and its size** rather than swallowed: *nothing remains* is a promise no implementation can
+   * keep on a platform where a scanner holds a file open, and every implementation would make it
+   * (R-45, D14).
+   */
+  async remove(componentId: string): Promise<{ freedMb: number; leftovers: NonNullable<SetupComponent["leftovers"]> }> {
+    const c = this.components.get(componentId);
+    if (!c) return { freedMb: 0, leftovers: [] };
+    if (!this.removable(c.entry)) {
+      this.set(componentId, { detail: "Arke did not put this here, so it will not take it away" });
+      this.publish();
+      return { freedMb: 0, leftovers: [] };
+    }
+    // Anything that still needs it, whether or not that thing has finished arriving: a download
+    // in flight is as much a dependant as one that landed.
+    const dependant = [...this.components.values()].find(
+      (other) =>
+        other.id !== componentId &&
+        other.state !== "skipped" &&
+        other.state !== "available" &&
+        (other.entry.requires ?? []).includes(componentId),
+    );
+    if (dependant) {
+      this.set(componentId, { detail: `${dependant.displayName} needs this` });
+      this.publish();
+      return { freedMb: 0, leftovers: [] };
+    }
+    const spec = c.entry.spec;
+    // A pulled model belongs to the runtime that pulled it, and that runtime is the only thing
+    // that can take it back — `rm -rf` on a store we do not own is not a removal, it is damage.
+    if (spec.kind === "pull") {
+      const model = spec.args[spec.args.length - 1] ?? "";
+      const result = await this.deps
+        .run(spec.command, ["rm", model], this.abort.signal)
+        .catch(() => ({ code: 1, output: "" }));
+      const ok = result.code === 0;
+      this.set(componentId, {
+        state: ok ? "available" : c.state,
+        bytesDone: 0,
+        bytesPerSecond: null,
+        leftovers: undefined,
+        detail: ok
+          ? `removed · ${gb(c.entry.sizeMb)} free`
+          : `${spec.command} could not remove ${model}${firstLine(result.output) ? ` — ${firstLine(result.output)}` : ""}`,
+      });
+      this.publish();
+      return { freedMb: ok ? c.entry.sizeMb : 0, leftovers: [] };
+    }
+    // A `files` entry owns exactly the files it declares; an archive or a tree owns the folder
+    // Arke extracted it into, under the app's own root. `installer` never reaches here — the
+    // removable test refuses it, because a third-party installer owns what it put down.
+    const targets: string[] =
+      spec.kind === "files"
+        ? spec.files.map((file) => join(this.filesRoot(spec) ?? this.modelsDir(), spec.dir, file.file))
+        : spec.kind === "archive" || spec.kind === "tree"
+          ? [this.toolDir(spec)]
+          : [];
+    if (targets.length === 0) return { freedMb: 0, leftovers: [] };
+    let freed = 0;
+    const leftovers: NonNullable<SetupComponent["leftovers"]> = [];
+    for (const target of targets) {
+      const size = await directorySize(target);
+      await rm(toExtendedLength(target), { recursive: true, force: true }).catch(() => {});
+      // `stat` failing is not the same as the file being gone — a volume that went away answers
+      // the same way an absent file does, and reporting that as clean is the lie R-45 forbids.
+      const survivor = await firstExisting([target]);
+      if (survivor !== null) leftovers.push({ path: target, sizeMb: Math.round(size / (1024 * 1024)) });
+      else freed += size;
+    }
+    this.set(componentId, {
+      state: "available",
+      bytesDone: 0,
+      bytesPerSecond: null,
+      repairRequired: undefined,
+      detail:
+        leftovers.length === 0
+          ? `removed · ${gb(Math.round(freed / (1024 * 1024)))} free`
+          : `${leftovers.length} could not be removed — reclaim from Downloads`,
+      leftovers: leftovers.length > 0 ? leftovers : undefined,
+    });
+    this.publish();
+    return { freedMb: Math.round(freed / (1024 * 1024)), leftovers };
   }
 
   /** Remove Arke-managed model files so a repair re-download cannot trust corrupt presence. */
@@ -859,4 +1036,16 @@ async function firstExisting(paths: readonly string[]): Promise<string | "unknow
 function errorCode(err: unknown): string {
   if (typeof err === "object" && err !== null && "code" in err && typeof err.code === "string") return err.code;
   return "filesystem error";
+}
+
+/** Bytes under a path, file or directory, or 0 where nothing is readable there. */
+async function directorySize(path: string): Promise<number> {
+  const info = await stat(toExtendedLength(path)).catch(() => null);
+  if (info === null) return 0;
+  if (!info.isDirectory()) return info.size;
+  let total = 0;
+  for (const entry of await readdir(toExtendedLength(path), { withFileTypes: true }).catch(() => [])) {
+    total += await directorySize(join(path, entry.name));
+  }
+  return total;
 }

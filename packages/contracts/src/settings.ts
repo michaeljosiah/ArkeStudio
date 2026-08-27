@@ -191,6 +191,20 @@ const AppSettingsObjectSchema = z
      */
     research: z.object({ web: z.boolean().default(false) }).strict().default({ web: false }),
     routing: RoutingDefaultsSchema.default({}),
+    /**
+     * Local capability defaults that Cloud AI took away (SPEC-033 R-66, D21).
+     *
+     * A local default was a real, reachable setting: `PROVIDERS[x].local` made a local model
+     * selectable without a key, so `llm → gemma4-12b` put all writing on this machine. Cloud AI
+     * is cloud-only by construction, so it cannot keep offering it — and the worst of the three
+     * available outcomes, the one that happens by default if nobody decides, is to leave it in
+     * force but invisible and unchangeable.
+     *
+     * So it is moved here rather than deleted: out of `routing`, where nothing reads it and
+     * nothing dispatches against it, and into a record Cloud AI states by name until the person
+     * has seen it. Where the choice lives now is on the production, at dispatch.
+     */
+    clearedLocalRouting: RoutingDefaultsSchema.default({}),
     models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),

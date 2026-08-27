@@ -335,7 +335,19 @@ export const ClientStateSchema = z
         /** The shipped model manifest, whole: pickers and estimates read it locally (R-15). */
         manifest: ModelManifestSchema.nullable().default(null),
         routing: z
-          .object({ defaults: RoutingDefaultsSchema, faults: z.array(RoutingFaultSchema) })
+          .object({
+            defaults: RoutingDefaultsSchema,
+            faults: z.array(RoutingFaultSchema),
+            /**
+             * Local capability defaults Cloud AI can no longer offer (SPEC-033 R-66, R-80).
+             *
+             * Not a routing default and not a fault. It is what a production with no choice of
+             * its own inherits — R-80's first branch, where the local-or-cloud choice exists and
+             * the concrete model id is carried rather than thrown away. The dispatch picker
+             * consults it; Cloud AI states it until a default is set for that capability.
+             */
+            clearedLocal: RoutingDefaultsSchema.optional(),
+          })
           .strict()
           .default({ defaults: {}, faults: [] }),
         /**

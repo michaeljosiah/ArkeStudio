@@ -1936,6 +1936,21 @@ export function setRoutingDefault(capability: Capability, modelId: string): void
   send({ kind: "set-routing-default", capability, modelId });
 }
 
+/**
+ * Which model this production reaches for, per capability (SPEC-033 R-74). `null` clears it.
+ *
+ * A production field, written through the ordinary gate — not app settings, because production
+ * ids are world-scoped and an installation-level store collides across two copies of a world.
+ */
+export function setProductionModel(
+  worldId: string,
+  productionId: string,
+  capability: Capability,
+  modelId: string | null,
+): void {
+  send({ kind: "set-production-model", worldId, productionId, capability, modelId });
+}
+
 /** Offer a model, or stop offering it. Never edits routing — a stranded default is shown instead. */
 /** Let the Studio read a page online when a conversation asks it to, or stop it. */
 export function setResearchWeb(enabled: boolean): void {
@@ -2025,6 +2040,25 @@ export function useDetectedComfyUi(location: string): void {
 
 export function refreshComfyUi(): void {
   send({ kind: "comfyui-refresh" });
+}
+
+/**
+ * Start a component and everything it declares it needs (SPEC-028 R-5, SPEC-033 R-40).
+ * `setupRetry` starts one; this starts the chain, so the figure on the button is the figure that
+ * lands on disk.
+ */
+export function setupInstall(componentId: string): void {
+  send({ kind: "setup-install", componentId });
+}
+
+/** Give the disk back, and hear what went and what would not (SPEC-033 R-43, R-45). */
+export function setupRemove(componentId: string): void {
+  send({ kind: "setup-remove", componentId });
+}
+
+/** Stop the engine and resolve the selection again — the only thing that helps a bad start. */
+export function restartComfyUi(): void {
+  send({ kind: "comfyui-restart" });
 }
 
 export function verifyComfyUiRecipe(recipeId: string): void {

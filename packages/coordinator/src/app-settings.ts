@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import {
+  PROVIDERS,
   AppSettingsSchema,
   newId,
   type AppSettings,
@@ -80,14 +81,52 @@ export class AppSettingsFile {
     if (model.capability !== capability) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${capability}` };
     }
+    // A routing default is a concrete *cloud* model (SPEC-033 R-61, amending SPEC-008 R-20).
+    // Refused here as well as filtered in the picker, so a local id arriving over the wire
+    // cannot put back the setting the move at start-up just took out.
+    if (PROVIDERS[model.provider].local) {
+      return { ok: false, reason: `${model.displayName} runs on this machine — choose it per production, at dispatch` };
+    }
     return this.mutate<{ ok: true } | { ok: false; reason: string }>((current) => {
       if (current.models.disabled.includes(modelId)) {
         return { value: { ok: false, reason: `${model.displayName} is switched off in Providers` } };
       }
+      // Setting a default for this capability retires the cleared record: it is what the notice
+      // was asking for, and a notice that outlived its answer would sit above a green row
+      // insisting the capability has nowhere to go.
+      const cleared: Record<string, string> = {};
+      for (const [key, value] of Object.entries(current.clearedLocalRouting)) {
+        if (key !== capability) cleared[key] = value;
+      }
       return {
-        settings: { ...current, routing: { ...current.routing, [capability]: modelId } },
+        settings: {
+          ...current,
+          routing: { ...current.routing, [capability]: modelId },
+          clearedLocalRouting: cleared,
+        },
         value: { ok: true },
       };
+    });
+  }
+
+  /**
+   * Take every local capability default out of routing and into the record of what was cleared
+   * (SPEC-033 R-66). Idempotent, and a no-op on an installation that never had one.
+   *
+   * Not a deletion: the cleared entry keeps its concrete model id so Cloud AI can name it, which
+   * is the difference between a setting that moved and one that vanished.
+   */
+  async clearLocalRouting(isLocal: (modelId: string) => boolean): Promise<AppSettings> {
+    return this.mutate<AppSettings>((current) => {
+      const kept: Record<string, string> = {};
+      const cleared: Record<string, string> = { ...current.clearedLocalRouting };
+      for (const [capability, modelId] of Object.entries(current.routing)) {
+        if (isLocal(modelId)) cleared[capability] = modelId;
+        else kept[capability] = modelId;
+      }
+      if (Object.keys(kept).length === Object.keys(current.routing).length) return { value: current };
+      const settings = { ...current, routing: kept, clearedLocalRouting: cleared };
+      return { settings, value: settings };
     });
   }
 
@@ -269,6 +308,19 @@ export function routingFaults(settings: AppSettings, manifest: ModelManifest): R
         capability,
         modelId,
         reason: `${model.displayName} is routed here but switched off in Providers — pick another model, or turn it back on`,
+      });
+    }
+  }
+  // A local model surviving in `routing` means the move at start-up did not happen — a locked
+  // settings file, most likely. Stated rather than swallowed: it is still in force at dispatch
+  // and Cloud AI can no longer show or change it, which is exactly the outcome D21 refuses.
+  for (const [capability, modelId] of Object.entries(settings.routing) as Array<[Capability, string]>) {
+    const model = manifest.models.find((m) => m.id === modelId);
+    if (model && PROVIDERS[model.provider].local) {
+      faults.push({
+        capability,
+        modelId,
+        reason: `${model.displayName} runs on this machine and could not be moved off this screen — it is still in force at dispatch`,
       });
     }
   }
