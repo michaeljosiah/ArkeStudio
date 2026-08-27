@@ -2027,6 +2027,11 @@ export function refreshComfyUi(): void {
   send({ kind: "comfyui-refresh" });
 }
 
+/** Stop the engine and resolve the selection again — the only thing that helps a bad start. */
+export function restartComfyUi(): void {
+  send({ kind: "comfyui-restart" });
+}
+
 export function verifyComfyUiRecipe(recipeId: string): void {
   send({ kind: "comfyui-verify-recipe", recipeId });
 }

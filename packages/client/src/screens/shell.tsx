@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, Callout, Input, StatusDot, Textarea, cx, type StatusDotTone } from "../components/ui.js";
+import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
@@ -109,6 +109,7 @@ import {
   type ProviderId,
   type ProviderCallRecord,
   type ProviderStatus,
+  type SetupComponent,
   type ProviderWorkspace,
   type VendorAuthMethod,
   type VendorIntegration,
@@ -123,24 +124,6 @@ import {
   ulid,
 } from "@arke-studio/contracts";
 
-/** Shell screens: launch, first run, world picker, new world, settings, activity (§2.9). */
-
-const HEALTH_TONE: Record<ComponentHealth["status"], StatusDotTone> = {
-  healthy: "ok",
-  starting: "busy",
-  unhealthy: "danger",
-  unavailable: "muted",
-};
-
-export function HealthDot({ label, health }: { label: string; health: ComponentHealth | undefined }) {
-  const status = health?.status ?? "starting";
-  return (
-    <StatusDot
-      tone={HEALTH_TONE[status]}
-      label={`${label} — ${status}${health?.reason ? ` (${health.reason})` : ""}`}
-    />
-  );
-}
 
 export function ShellChrome() {
   // Every shell screen carries its own chrome (prototype 1a/5a/22a/26a) — no shared bar.
@@ -1618,10 +1601,16 @@ const CAPABILITY_LABEL: Record<Capability, string> = {
  * cannot serve every machine and finding that out at the moment it fails is too late.
  */
 /**
- * Which setup component fetches each tool. The app can install these itself, so "not
- * installed" is a state with an action rather than only an instruction.
+ * Which setup component fetches this provider's tool, from the component's own declaration.
+ *
+ * The app can install these itself, so "not installed" is a state with an action rather than
+ * only an instruction. Read rather than hand-listed: the component names the provider that owns
+ * it, and that one declaration is what keeps Engines from restating the same row with the same
+ * button (SPEC-033 R-1).
  */
-const TOOL_COMPONENT: Partial<Record<ProviderId, string>> = { higgsfield: "higgsfield-cli" };
+function toolComponentFor(components: readonly SetupComponent[], provider: ProviderId): string | undefined {
+  return components.find((c) => c.provider === provider)?.id;
+}
 
 /** A personal account has no name; saying so beats printing a UUID at somebody. */
 function workspaceLabel(workspace: ProviderWorkspace): string {
@@ -1694,7 +1683,8 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
   const { state } = useStore();
   const setup = useSetup();
   const [copied, setCopied] = useState(false);
-  const component = setup?.components.find((c) => c.id === TOOL_COMPONENT[id]);
+  const componentId = toolComponentFor(setup?.components ?? [], id);
+  const component = setup?.components.find((c) => c.id === componentId);
   const fetching = component?.state === "downloading" || component?.state === "installing" || component?.state === "queued";
   const arrived = component?.state === "ready" || component?.state === "present";
   // The download finishing is not the row changing: discovery is what decides where the tool
@@ -1741,7 +1731,7 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
               type="button"
               className="fy-set__link"
               disabled={fetching}
-              onClick={() => setupRetry(TOOL_COMPONENT[id]!)}
+              onClick={() => componentId !== undefined && setupRetry(componentId)}
             >
               {fetching ? "installing…" : `Install${component ? ` · ${component.sizeMb} MB` : ""}`}
             </button>
@@ -2430,7 +2420,6 @@ export function SettingsAppearanceScreen() {
        * it may be a cloud one — so Local AI is forbidden it (R-2) and Engines is wrong in kind,
        * because an engine is not a provider (R-72). What is left is how the app presents itself.
        */}
-      <div className="fy-set__eyebrow">NARRATOR</div>
       {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
           a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
           local voice unless somebody chooses otherwise, because "read aloud" is a passive press and

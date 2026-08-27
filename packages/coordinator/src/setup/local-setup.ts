@@ -120,6 +120,7 @@ export class LocalSetupService {
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
         ...(entry.provides !== undefined ? { provides: [...entry.provides] } : {}),
         ...(entry.engine !== undefined ? { engine: entry.engine } : {}),
+        ...(entry.provider !== undefined ? { provider: entry.provider } : {}),
       });
     }
   }
@@ -560,7 +561,7 @@ export class LocalSetupService {
           if (!now) {
             this.set(entry.id, {
               state: "failed",
-              detail: "Ollama's installer did not finish — run it yourself from Settings · Local runtime",
+              detail: "Ollama's installer did not finish — run it yourself from Settings · Engines",
             });
             this.publish();
             return;

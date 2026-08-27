@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { EngineIdSchema } from "./local-ai.js";
+import { ProviderIdSchema } from "./provider.js";
 
 /**
  * Local runtimes fetched during setup: the writing runtime (Ollama and one model) and the two
@@ -65,6 +66,16 @@ export const SetupComponentSchema = z
      * Engines and are not the organising idea.
      */
     engine: EngineIdSchema.optional(),
+    /**
+     * The provider whose tool this is (SPEC-033 R-1). Providers owns the credential a tool
+     * exists for, so it owns the tool: the Higgsfield CLI is only useful to somebody with a
+     * Higgsfield account, and its install button belongs beside the sign-in.
+     *
+     * Declared for the same reason `engine` is. Every fact belongs to exactly one surface, and
+     * the alternative to declaring the owner is a hand-written list of what to hide where —
+     * which is precisely the `statedElsewhere` R-6 deletes.
+     */
+    provider: ProviderIdSchema.optional(),
   })
   .strict();
 export type SetupComponent = z.infer<typeof SetupComponentSchema>;

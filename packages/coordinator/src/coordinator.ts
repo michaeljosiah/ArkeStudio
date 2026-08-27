@@ -4518,6 +4518,15 @@ export class Coordinator {
         );
         return;
       }
+      case "comfyui-restart": {
+        if (!this.appSettings || !this.opts.comfyui) return;
+        // Re-applying the settings *is* the restart: `applySettingsOnce` stops supervision,
+        // resolves the selection again and starts the child, whether or not anything changed.
+        const settings = await this.appSettings.load();
+        await this.opts.comfyui.service.applySettings(settings.comfyui).catch(() => {});
+        await this.refreshComfyUi();
+        return;
+      }
       case "comfyui-refresh": {
         if (!this.appSettings || !this.opts.comfyui) return;
         // Settings already applied when they changed. Refresh measures the active engine in

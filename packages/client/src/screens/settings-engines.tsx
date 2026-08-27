@@ -11,8 +11,8 @@ import {
   type VoiceRuntimeStatus,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
-import { HealthDot } from "./shell.js";
 import {
+  HealthDot,
   RuntimeHead,
   RuntimeSection,
   RuntimeStatus,
@@ -30,6 +30,7 @@ import {
   clearVoxaExecutable,
   openModelFolder,
   refreshComfyUi,
+  restartComfyUi,
   repairVoiceModels,
   restartVoxa,
   setComfyUiUrl,
@@ -53,9 +54,9 @@ import {
  * them would be the wrong kindness — so the detail is unabridged: version, state, port, model
  * directory, executable, logs, restart, re-verify, repair.
  *
- * It absorbs Components. A component is a thing that must be on this machine, which is an
- * engine\'s own concern, and it is stated under the engine that requires that link being
- * declared rather than read off an id prefix.
+ * It absorbs Components. A component is a thing that must be on this machine — an engine's own
+ * concern — so it is stated under the engine that requires it, and the link is declared on the
+ * component rather than read off an id prefix.
  *
  * **`statedElsewhere` is deleted, not moved.** It suppressed a component from the Components
  * group when one of four other groups already stated it — hand-written deduplication, with a
@@ -81,16 +82,9 @@ function componentsTone(components: readonly SetupComponent[]): RuntimeTone {
  * where the detail lives (prototype 22a), and since turn 75 it is a group of its own rather than
  * a section every other group's rows had to be read past.
  */
-export function ComponentRows({ components, running }: { components: readonly SetupComponent[]; running: boolean }) {
+function ComponentRows({ components }: { components: readonly SetupComponent[] }) {
   return (
     <>
-      {running && (
-        <div className="fy-rt__actions" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="fy-set__link" onClick={() => setupCancel()}>
-            Stop all
-          </button>
-        </div>
-      )}
       {components.map((c) => {
         const settled = c.state === "ready" || c.state === "present";
         const offered = c.state === "available";
@@ -162,12 +156,10 @@ function VoxaDetail({
   voiceRuntime,
   health,
   components,
-  running,
 }: {
   voiceRuntime: VoiceRuntimeStatus | null;
   health: ComponentHealth | undefined;
   components: readonly SetupComponent[];
-  running: boolean;
 }) {
   const voiceTest = useVoiceRuntimeTest();
   const playback = usePlayback();
@@ -196,8 +188,8 @@ function VoxaDetail({
   return (
     <>
       <RuntimeHead
-        title="Voxa"
-        caps="VOICE"
+        title={ENGINE_LABEL.voxa}
+        caps={ENGINE_CAPABILITIES.voxa.toUpperCase()}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
@@ -208,6 +200,9 @@ function VoxaDetail({
             {sourceLabel}
             {voiceRuntime?.version ? ` ${voiceRuntime.version}` : ""} ·{" "}
             {voiceRuntime?.architecture ?? voiceRuntime?.expectedArchitecture ?? "unknown architecture"}
+            {/* A basename, never a path: renderer state may not carry an absolute one, and the
+                host already publishes exactly the safe half (SPEC-028 R-4). */}
+            {voiceRuntime?.executableName ? ` · ${voiceRuntime.executableName}` : ""}
           </span>
           <button type="button" className="fy-set__link" onClick={() => chooseVoxaExecutable()}>
             Change
@@ -272,7 +267,7 @@ function VoxaDetail({
       {/* Kokoro and whisper.cpp are Voxa's own weights, so they are stated here rather than in
           a flat catalogue two panes away from the engine that reads them (R-71). */}
       <RuntimeSection label="COMPONENTS" />
-      <ComponentRows components={components} running={running} />
+      <ComponentRows components={components} />
       {voiceTest && (
         <div className="fy-set__note">
           {voiceTest.detail}
@@ -303,7 +298,7 @@ function VoxaDetail({
 
 
 /** Ready is ok; starting has not failed yet; every other state owes a reason, so it warns. */
-function engineTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
+function comfyUiTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
   if (engine === null) return "idle";
   if (engine.state === "ready") return "ok";
   return engine.state === "starting" ? "idle" : "warn";
@@ -320,13 +315,7 @@ function engineTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
  * sits on the row that states the lack; Components keeps them until they arrive, as it does for
  * everything else spoken for elsewhere.
  */
-function ComfyUiDetail({
-  components,
-  running,
-}: {
-  components: readonly SetupComponent[];
-  running: boolean;
-}) {
+function ComfyUiDetail() {
   const { state } = useStore();
   const setup = useSetup();
   const comfyui = state?.app.comfyui ?? null;
@@ -351,8 +340,8 @@ function ComfyUiDetail({
     <div data-testid="comfyui-engine">
       <RuntimeHead
         title="ComfyUI"
-        caps="IMAGE · VIDEO"
-        tone={engineTone(engine)}
+        caps={ENGINE_CAPABILITIES.comfyui.toUpperCase()}
+        tone={comfyUiTone(engine)}
         state={engine?.state ?? "unknown"}
       />
       <div className="fy-rt__keyline">
@@ -535,29 +524,43 @@ function ComfyUiDetail({
         );
       })}
       <div className="fy-rt__actions">
+        <button type="button" className="fy-set__link" onClick={() => restartComfyUi()}>
+          Restart
+        </button>
         <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
           Refresh
         </button>
       </div>
-      {/* The engine and its weights, stated under the engine that needs them. The recipe rows
-          above keep their own Download and Repair — SPEC-028 T-25 put those on the row that
-          states the lack, and R-83 carries that forward unchanged. */}
-      <RuntimeSection label="COMPONENTS" />
-      <ComponentRows components={components} running={running} />
+      {/*
+       * No COMPONENTS band here, and deliberately.
+       *
+       * Every ComfyUI component is already on this pane, on the control that acts on it: the
+       * engine itself in the ENGINE line above with its own Download, and each recipe's weights
+       * on the recipe row, where SPEC-028 T-25 put them because that is the row that states the
+       * lack. Listing them a second time would put two Downloads for one fetch on one screen —
+       * the duplication R-6 exists to end, rebuilt inside the work that deletes it.
+       */}
     </div>
   );
 }
 
 
-/** The engine a component belongs to, or `null` for one no engine requires (R-71). */
+/**
+ * The components one engine requires, or — for `null` — the ones nobody does.
+ *
+ * A component naming a provider is that provider's, and Providers states it beside the
+ * credential it exists for (R-1). This is an assignment read off the component's own
+ * declaration, not a list of what to hide where: the second of those is `statedElsewhere`, and
+ * R-6 deletes it.
+ */
 function componentsFor(all: readonly SetupComponent[], engine: EngineId | null): SetupComponent[] {
-  return all.filter((c) => (c.engine ?? null) === engine);
+  return all.filter((c) => (c.engine ?? null) === engine && (engine !== null || c.provider === undefined));
 }
 
-/** Nothing outstanding is `ok`; anything moving is idle; a failure warns. */
-function engineRowTone(state: string | undefined, components: readonly SetupComponent[]): RuntimeTone {
-  if (state === "ready" || state === "healthy") return componentsTone(components);
-  if (state === undefined || state === "starting" || state === "unconfigured") return "idle";
+/** Ready is ok; not yet asked is idle; anything else owes a reason, so it warns. */
+function processTone(state: string | undefined): RuntimeTone {
+  if (state === "ready" || state === "healthy" || state === "valid") return "ok";
+  if (state === undefined || state === "starting" || state === "unconfigured" || state === "untested") return "idle";
   return "warn";
 }
 
@@ -568,30 +571,36 @@ function engineRowTone(state: string | undefined, components: readonly SetupComp
  * answered when it was last asked. Stating less than that would be an apology; inventing a
  * version string we never read would be worse.
  */
-function OllamaDetail({ components, running }: { components: readonly SetupComponent[]; running: boolean }) {
+function OllamaDetail({ components }: { components: readonly SetupComponent[] }) {
   const { state } = useStore();
   const provider = (state?.app.providers ?? []).find((p) => p.id === "ollama");
   const answered = provider?.probes.some((probe) => probe.available) === true;
+  const refusal = provider?.probes.find((probe) => !probe.available)?.reason;
   return (
     <>
       <RuntimeHead
         title={ENGINE_LABEL.ollama}
         caps={ENGINE_CAPABILITIES.ollama.toUpperCase()}
-        tone={answered ? "ok" : provider?.validation === "untested" ? "idle" : "warn"}
+        tone={processTone(provider?.validation)}
         state={answered ? "answering" : (provider?.validation ?? "not asked")}
       />
-      <div className="fy-set__why">
-        <span className={cx("fy-set__dot", answered ? "fy-set__dot--ok" : "fy-set__dot--warn")} />
-        <span>{provider?.probes.find((probe) => !probe.available)?.reason ?? "http://127.0.0.1:11434"}</span>
-      </div>
+      {/* Only where the probe gave one. A fallback line under a warning dot, beside a head that
+          says `untested` under an idle one, is two dots of different colours about one engine
+          three inches apart — and the fallback was a URL nothing reads. */}
+      {refusal !== undefined && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>{refusal}</span>
+        </div>
+      )}
       <RuntimeSection label="COMPONENTS" />
-      <ComponentRows components={components} running={running} />
+      <ComponentRows components={components} />
     </>
   );
 }
 
 /** A component no engine requires. It keeps a place; it does not organise the screen (R-71). */
-function OtherComponentsDetail({ components, running }: { components: readonly SetupComponent[]; running: boolean }) {
+function OtherComponentsDetail({ components }: { components: readonly SetupComponent[] }) {
   return (
     <>
       <RuntimeHead
@@ -601,7 +610,7 @@ function OtherComponentsDetail({ components, running }: { components: readonly S
         state={components.length === 0 ? "none" : `${components.length} in the catalogue`}
       />
       <RuntimeSection label="ON THIS MACHINE" />
-      <ComponentRows components={components} running={running} />
+      <ComponentRows components={components} />
     </>
   );
 }
@@ -623,38 +632,41 @@ export function SettingsEnginesScreen() {
   const comfyui = state?.app.comfyui ?? null;
   const voiceRuntime = state?.app.voiceRuntime ?? null;
 
-  const rows: Array<{ id: EngineId | "other"; label: string; caps: string; tone: RuntimeTone; count: string }> = [
+  const ollamaComponents = componentsFor(all, "ollama");
+  const voxaComponents = componentsFor(all, "voxa");
+  const unowned = componentsFor(all, null);
+  const ollama = (state?.app.providers ?? []).find((p) => p.id === "ollama");
+
+  const rows: Array<{ id: EngineId | "other"; label: string; tone: RuntimeTone; count: string }> = [
     {
       id: "comfyui",
       label: ENGINE_LABEL.comfyui,
-      caps: ENGINE_CAPABILITIES.comfyui,
-      tone: engineTone(comfyui?.engine ?? null),
-      // The locality is the count's job here: it is the fact this screen exists to state.
-      count: comfyui?.engine.locality === "remote" ? "remote" : (comfyui?.engine.state ?? "—"),
+      tone: comfyUiTone(comfyui?.engine ?? null),
+      // Every row states its locality, not only the one that turns out to be remote: R-69 makes
+      // this the screen whose subject is the destination, and a row that states it sometimes is
+      // a row nobody can read the absence of. The state is what the dot says.
+      count: comfyui === null ? "—" : comfyui.engine.locality === "remote" ? "remote" : "this machine",
     },
     {
       id: "ollama",
       label: ENGINE_LABEL.ollama,
-      caps: ENGINE_CAPABILITIES.ollama,
-      tone: engineRowTone(
-        (state?.app.providers ?? []).find((p) => p.id === "ollama")?.validation === "valid" ? "ready" : undefined,
-        componentsFor(all, "ollama"),
-      ),
+      // The same derivation the pane uses. Anything that is not `valid` reading as merely
+      // unmeasured made a stopped Ollama show a neutral dot on the rail — the half you scan to
+      // find what is broken — beside a pane that warned about it in red.
+      tone: processTone(ollama?.validation),
       count: "this machine",
     },
     {
       id: "voxa",
       label: ENGINE_LABEL.voxa,
-      caps: ENGINE_CAPABILITIES.voxa,
-      tone: engineRowTone(voiceRuntime?.processState, componentsFor(all, "voxa")),
+      tone: processTone(voiceRuntime?.processState),
       count: "this machine",
     },
     {
       id: "other",
       label: "Other components",
-      caps: "no engine",
-      tone: componentsTone(componentsFor(all, null)),
-      count: `${componentsFor(all, null).length}`,
+      tone: componentsTone(unowned),
+      count: unowned.length === 0 ? "none" : `${unowned.length}`,
     },
   ];
 
@@ -681,18 +693,20 @@ export function SettingsEnginesScreen() {
           ))}
         </div>
         <div className="fy-rt__pane">
-          {current === "comfyui" && <ComfyUiDetail components={componentsFor(all, "comfyui")} running={running} />}
-          {current === "ollama" && <OllamaDetail components={componentsFor(all, "ollama")} running={running} />}
+          {current === "comfyui" && <ComfyUiDetail />}
+          {current === "ollama" && <OllamaDetail components={ollamaComponents} />}
           {current === "voxa" && (
-            <VoxaDetail
-              voiceRuntime={voiceRuntime}
-              health={state?.app.health.voice}
-              components={componentsFor(all, "voxa")}
-              running={running}
-            />
+            <VoxaDetail voiceRuntime={voiceRuntime} health={state?.app.health.voice} components={voxaComponents} />
           )}
-          {current === "other" && <OtherComponentsDetail components={componentsFor(all, null)} running={running} />}
+          {current === "other" && <OtherComponentsDetail components={unowned} />}
           <div className="fy-rt__actions">
+            {/* Stopping is global — one setup run fetches for every engine — so it is stated
+                once, here, rather than under a heading that names one of them. */}
+            {running && (
+              <button type="button" className="fy-set__link" onClick={() => setupCancel()}>
+                Stop all downloads
+              </button>
+            )}
             <span style={{ flex: 1 }} />
             <Button variant="secondary" onClick={() => navigate("/settings/local-ai")}>
               Local AI

@@ -991,6 +991,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
   /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
+  /**
+   * SPEC-033 R-70: restart the engine. Distinct from refresh, which re-measures the engine that
+   * is running — this stops the supervised child and resolves the selection again, which is the
+   * only thing that helps an engine that came up wrong.
+   */
+  z.object({ kind: z.literal("comfyui-restart") }).strict(),
   /** Re-read node classes and re-hash one recipe's pins (§2.5): the "Re-verify" affordance. */
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),

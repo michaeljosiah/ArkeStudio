@@ -42,7 +42,9 @@ const COMPONENTS: SetupComponent[] = [
   component({ id: "ollama-gemma4-12b", engine: "ollama", displayName: "Gemma 4 · 12B", state: "available" }),
   component({ id: "tts-kokoro-82m", engine: "voxa", displayName: "Kokoro 82M · voice" }),
   component({ id: "stt-whisper-base-en", engine: "voxa", displayName: "Whisper base.en · dictation" }),
-  component({ id: "higgsfield-cli", displayName: "Higgsfield CLI", state: "available" }),
+  // Declared exactly as the catalogue declares it: Providers owns the credential the tool is
+  // for, so Providers owns the tool, and Engines reads that rather than a list of what to hide.
+  component({ id: "higgsfield-cli", provider: "higgsfield", displayName: "Higgsfield CLI", state: "available" }),
 ];
 
 function stateWith(over: Partial<ClientState["app"]> = {}): ClientState {
@@ -104,14 +106,9 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
   });
 
   it("states each engine's components under that engine and nowhere else", () => {
-    const comfy = plain(render("/settings/engines?engine=comfyui"));
-    assert.match(comfy, /ComfyUI runtime/);
-    assert.doesNotMatch(comfy, /Kokoro 82M · voice/);
-    assert.doesNotMatch(comfy, /Gemma 4 · 12B/);
-
     const ollama = plain(render("/settings/engines?engine=ollama"));
     assert.match(ollama, /Gemma 4 · 12B/);
-    assert.doesNotMatch(ollama, /ComfyUI runtime/);
+    assert.doesNotMatch(ollama, /Kokoro 82M · voice/);
 
     const voxa = plain(render("/settings/engines?engine=voxa"));
     assert.match(voxa, /Kokoro 82M · voice/);
@@ -119,9 +116,27 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     assert.doesNotMatch(voxa, /Gemma 4 · 12B/);
   });
 
-  it("keeps a place for a component no engine requires, without organising by it (R-71)", () => {
+  it("does not restate a ComfyUI component the pane already acts on", () => {
+    // The engine is in the ENGINE line with its own Download, and each recipe's weights are on
+    // the recipe row where SPEC-028 T-25 put them. A COMPONENTS band beneath would put two
+    // Downloads for one fetch on one screen — the duplication R-6 exists to end, rebuilt inside
+    // the work that deletes it.
+    const comfy = plain(render("/settings/engines?engine=comfyui"));
+    assert.doesNotMatch(comfy, /COMPONENTS/);
+  });
+
+  it("leaves a provider's tool to Providers, which owns the credential it is for (R-1)", () => {
+    // Not a suppression list: the component names the provider that owns it, and Engines reads
+    // that declaration the same way it reads `engine`.
+    for (const engine of ["comfyui", "ollama", "voxa", "other"]) {
+      assert.doesNotMatch(plain(render(`/settings/engines?engine=${engine}`)), /Higgsfield CLI/, engine);
+    }
+    assert.match(plain(render("/settings/providers")), /Higgsfield/);
+  });
+
+  it("keeps a place for a component nobody requires, without organising by it (R-71)", () => {
     const other = plain(render("/settings/engines?engine=other"));
-    assert.match(other, /Higgsfield CLI/);
+    assert.match(other, /Other components\s+NO ENGINE\s+none/, "the place exists even when empty");
     // And it is not the first thing the rail offers — the engines are.
     const rail = plain(render("/settings/engines"));
     assert.ok(rail.indexOf("ComfyUI") < rail.indexOf("Other components"));

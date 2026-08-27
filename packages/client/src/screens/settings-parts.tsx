@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { cx } from "../components/ui.js";
+import type { ComponentHealth } from "@arke-studio/contracts";
+import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 
 /**
  * The pieces the runtime-facing settings screens are drawn from. They were private to shell.tsx
@@ -65,4 +66,25 @@ export function RuntimeSection({ label, children }: { label: string; children?: 
 /** A download size as the catalogue states it. One spelling: the same figure on every row. */
 export function sizeMb(mbytes: number): string {
   return mbytes >= 1024 ? `${(mbytes / 1024).toFixed(1)} GB` : `${mbytes} MB`;
+}
+
+/**
+ * A supervised component's health, as a dot with the reason in its label. Here rather than in
+ * shell.tsx because every runtime pane ends with one.
+ */
+const HEALTH_TONE: Record<ComponentHealth["status"], StatusDotTone> = {
+  healthy: "ok",
+  starting: "busy",
+  unhealthy: "danger",
+  unavailable: "muted",
+};
+
+export function HealthDot({ label, health }: { label: string; health: ComponentHealth | undefined }) {
+  const status = health?.status ?? "starting";
+  return (
+    <StatusDot
+      tone={HEALTH_TONE[status]}
+      label={`${label} — ${status}${health?.reason ? ` (${health.reason})` : ""}`}
+    />
+  );
 }
