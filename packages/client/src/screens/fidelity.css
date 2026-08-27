@@ -3941,8 +3941,39 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-looks-results > footer > span,
 .fy-looks-results > footer > .fy-looks-results__fresh { margin-right: auto; }
 .fy-looks-results > footer select { height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); padding: 0 10px; font: 500 10px var(--font-sans); }
+/* Where a look is used is the point of a look, so it is the labelled, weighted control and the
+   anchor rewrite beside it is the ghost. The label sits on the control rather than above it —
+   the footer is one 58px row, and a stacked caption would be the tallest thing in it. */
+.fy-looks-attach { display: inline-flex; align-items: center; gap: 8px; }
+.fy-looks-attach > span { font: 500 10px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+.fy-looks-results > footer select.fy-looks-attach__select { border-color: var(--foreground); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 600; }
+/* Read on the tile, not only inside the control that sets it. Top-left, opposite the download
+   button, on the same plate the caption pill uses so it stays legible over any photograph. */
+.fy-looks-results__grid button:not(.fy-imgdl) > span.fy-looks-results__inuse {
+  top: 10px; bottom: auto; left: 10px;
+  background: color-mix(in srgb, var(--foreground) 88%, transparent);
+  color: var(--background);
+}
+
+/* ---- the production's wardrobe (design 67) ------------------------------
+   Rows, not cards: the cast grids above already answer "who is in this", and
+   this answers "how do they look in it" — a shorter question that reads down
+   a column faster than it reads across a grid. */
+.fy-wardrobe { padding: 8px 90px 6px; display: grid; gap: 2px; }
+.fy-wardrobe__row { display: flex; align-items: center; gap: 14px; padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.fy-wardrobe__thumb { position: relative; flex: 0 0 auto; width: 42px; height: 42px; border-radius: 8px; overflow: hidden; background: var(--muted); }
+.fy-wardrobe__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fy-wardrobe__name { font: 500 13px var(--font-sans); color: var(--foreground); }
+/* Scene attachments are stated here and set elsewhere, so they read as a note rather than
+   as a second control competing with the picker. */
+.fy-wardrobe__scenes { font: 400 10px var(--font-mono); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-wardrobe__pick { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.fy-wardrobe__pick > span { font: 500 10px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+.fy-wardrobe__pick select { height: 32px; max-width: 230px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); padding: 0 10px; font: 500 11px var(--font-sans); }
 
 @media (max-width: 900px) {
+  .fy-wardrobe { padding-inline: 22px; }
+  .fy-wardrobe__row { flex-wrap: wrap; }
   .fy-character-head { padding-inline: 22px; flex-wrap: wrap; }
   .fy-reference-grid,
   .fy-looks-grid { padding-inline: 22px; grid-template-columns: 1fr; height: auto; }

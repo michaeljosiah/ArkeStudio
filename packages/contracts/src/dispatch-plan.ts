@@ -61,6 +61,22 @@ export const CompiledPassRecordSchema = z
           sheetId: z.string().min(1),
           sheetVersion: z.number().int().min(1).nullable(),
           role: z.string().min(1),
+          /*
+           * Persisted with the rest of the compiled reference (design 67), and optional because
+           * plans outlive the build that wrote them.
+           *
+           * The record is strict, so a field the compiler emits that this schema does not admit
+           * is not a smaller record — it refuses the whole plan. Required, it refuses the other
+           * direction too: every aggregate an older build wrote carrying a reference would fail
+           * to parse, and `listPlans` skips what it cannot read. An unfinished chain would stop
+           * being recovered, and `createDispatchPlan` dedupes on a requestId it finds through
+           * that same listing — so a retry would author a second plan and spend again.
+           *
+           * Nothing reads either field back off a persisted plan; they are here so the record
+           * stays the compiled object verbatim.
+           */
+          subject: z.string().min(1).optional(),
+          mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation"]).optional(),
         })
         .strict(),
     ),

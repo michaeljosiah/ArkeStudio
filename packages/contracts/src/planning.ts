@@ -606,6 +606,14 @@ export interface BoundReference {
   kind: "image";
   /** What this asset is a reference *for*, from its attachment mode (R-4). */
   rolePhrase: string;
+  /**
+   * The attachment that chose this file, kept structured (design 67).
+   *
+   * `rolePhrase` says the same thing in the prompt's words, and a screen wanting to state that a
+   * character rides in a production's own look had to match that prose to find out — a sentence
+   * written for a model, read as an enum. The screens read this instead.
+   */
+  mode: AttachmentDecision["mode"];
   /** For a second reference on a subject already bound: the index that first bound it. */
   sameSubjectAs: number | null;
 }
@@ -674,6 +682,7 @@ export function bindReferences(
       file: decision.file,
       kind: "image",
       rolePhrase: rolePhraseFor(sheet, decision),
+      mode: decision.mode,
       sameSubjectAs: first ? first.index : null,
     });
   }
@@ -982,17 +991,71 @@ export function passStructure(input: {
   return `One continuous clip: ${input.askedSec}s${frame}, ${input.shotCount} shots. Cut between shots only at the boundaries given below, in that order.`;
 }
 
+/**
+ * The look holding one exact scope, by the rule collisions are resolved with (codex round 4).
+ *
+ * A world written before attaching displaced can hold two looks claiming one production, and
+ * "the first in the array" is a different answer from "the most recently accepted" — so the
+ * production's cast row marked one look active while the dispatcher carried the other, which is
+ * a false confirmation of the very thing that row exists to confirm. One rule, exported, so the
+ * screen and the resolver cannot drift.
+ */
+export function lookHoldingScope(
+  kit: ReferenceKit | null,
+  scope: NonNullable<NonNullable<ReferenceKit["looks"]>[number]["attachedTo"]>,
+): NonNullable<ReferenceKit["looks"]>[number] | undefined {
+  return (kit?.looks ?? [])
+    .filter((look) => {
+      const held = look.attachedTo;
+      if (!held || held.kind !== scope.kind || held.productionId !== scope.productionId) return false;
+      return held.kind !== "scene" || scope.kind !== "scene" || held.sceneId === scope.sceneId;
+    })
+    .reduce<NonNullable<ReferenceKit["looks"]>[number] | undefined>(
+      (best, look) => (best === undefined || acceptedAt(look) > acceptedAt(best) ? look : best),
+      undefined,
+    );
+}
+
+/**
+ * Acceptance as an instant, never as a string. `IsoDateTimeSchema` admits an offset and optional
+ * fractional seconds, and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above
+ * `2026-08-01T23:00:00Z` while being the earlier moment, and `…:00.500Z` sorts below `…:00Z`.
+ * Both spellings occur here — the store's clock writes milliseconds, older records do not.
+ */
+function acceptedAt(look: NonNullable<ReferenceKit["looks"]>[number]): number {
+  return Date.parse(look.acceptedAt);
+}
+
 export function attachmentFor(
   kit: ReferenceKit | null,
   sheet: Sheet,
   role: "primary" | "secondary" = "primary",
   scope?: { productionId?: string; sceneId?: string },
 ): AttachmentDecision {
-  const scopedLook = kit?.looks?.find((look) => {
+  const scopedLooks = (kit?.looks ?? []).filter((look) => {
     if (!look.attachedTo || !scope?.productionId) return false;
     if (look.attachedTo.productionId !== scope.productionId) return false;
     return look.attachedTo.kind === "production" || look.attachedTo.sceneId === scope.sceneId;
   });
+  /*
+   * Two rules, so this is total rather than order-dependent (design 67).
+   *
+   * The narrower scope wins: a look attached to this scene and one attached to the whole
+   * production both match, and `.find` answered by array order — so which of the two rode a
+   * scene depended on the order the attachments happened to be written in.
+   *
+   * Within a scope, the most recently accepted wins. Attaching displaces now, so a *new*
+   * same-scope collision cannot arise — but worlds written before that rule can already hold
+   * two looks claiming one production, and the schema still admits them. Falling back to the
+   * first in the array picked the OLDEST, because acceptance appends. An upgraded world would
+   * have gone on dispatching the older appearance until somebody happened to reattach.
+   */
+  const narrower = (look: (typeof scopedLooks)[number]): boolean => look.attachedTo?.kind === "scene";
+  const scopedLook = scopedLooks.reduce<(typeof scopedLooks)[number] | undefined>((best, look) => {
+    if (best === undefined) return look;
+    if (narrower(look) !== narrower(best)) return narrower(look) ? look : best;
+    return acceptedAt(look) > acceptedAt(best) ? look : best;
+  }, undefined);
   if (role === "primary" && scopedLook) {
     return {
       sheetId: sheet.id,

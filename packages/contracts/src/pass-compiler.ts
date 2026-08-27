@@ -7,6 +7,7 @@ import {
   passStructure,
   START_FRAME_PREAMBLE,
   type BoundaryFramePlan,
+  type BoundReference,
   type ScenePlan,
   type ShotPlanEntry,
 } from "./planning.js";
@@ -51,6 +52,10 @@ export interface CompiledReference {
   sheetVersion: number | null;
   /** What this asset is a reference for, in the words the prompt uses (R-4). */
   role: string;
+  /** The subject's display name, so a screen names a person rather than a slug. */
+  subject: string;
+  /** The attachment that chose this file — what a screen reads to state a look is riding. */
+  mode: BoundReference["mode"];
 }
 
 /** An input that did not ride, with its named reason — never a silent drop (issue 398). */
@@ -177,6 +182,8 @@ function compiledReferences(
     sheetId: reference.sheetId,
     sheetVersion: sheets.find((sheet) => sheet.id === reference.sheetId)?.version ?? null,
     role: reference.rolePhrase,
+    subject: reference.subject,
+    mode: reference.mode,
   }));
 }
 

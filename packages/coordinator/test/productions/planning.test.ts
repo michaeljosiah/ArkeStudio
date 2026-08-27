@@ -771,6 +771,100 @@ describe("SPEC-017 art direction and scoped looks", () => {
     assert.ok(outside.shots.every((shotPlan) => shotPlan.references.every((reference) => !reference.file?.includes("third-verse"))));
     await store.close();
   });
+
+  /* The narrower scope wins (design 67). Both looks match the scene being planned, and the
+     resolver used to answer by array order — so the production's cast row could show one
+     choice while a scene quietly dispatched the other. */
+  it("lets a scene's own look beat the production's, whichever order they were attached in", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const wide = {
+      id: "council-coat",
+      file: "looks/council-coat.png",
+      kind: "costume" as const,
+      prompt: "Formal council coat",
+      acceptedAt: CLOCK(),
+      attachedTo: { kind: "production" as const, productionId: production.meta.id },
+    };
+    const narrow = {
+      id: "third-verse",
+      file: "looks/third-verse.png",
+      kind: "condition-age" as const,
+      prompt: "After the third verse",
+      acceptedAt: CLOCK(),
+      attachedTo: { kind: "scene" as const, productionId: production.meta.id, sceneId: scene.id },
+    };
+    const plan = (looks: (typeof wide | typeof narrow)[]) =>
+      planScene(
+        {
+          world: bundle.meta,
+          artDirection: bundle.artDirection,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits.map((kit) =>
+            kit.sheetId === maren.sheetId ? { ...maren, looks } : kit,
+          ),
+          scene,
+          selections: production.selections,
+          model: VIDEO_MODEL,
+        },
+        "per-shot",
+      );
+    for (const looks of [[wide, narrow], [narrow, wide]]) {
+      const files = plan(looks).shots.flatMap((shotPlan) =>
+        shotPlan.references.map((reference) => reference.file ?? ""),
+      );
+      assert.ok(files.some((file) => file.includes("third-verse")), "the scene's own look rides");
+      assert.ok(
+        files.every((file) => !file.includes("council-coat")),
+        "the production-wide look stands aside inside that scene",
+      );
+    }
+    await store.close();
+  });
+  /* Worlds written before attaching displaced can already hold two looks claiming one
+     production, and the schema still admits them. Falling back to the first in the array picked
+     the OLDEST, because acceptance appends — so an upgraded world went on dispatching the older
+     appearance until somebody happened to reattach (codex round 1). */
+  it("resolves a legacy same-scope collision by acceptance, not by array order", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = production.scenes[0]!;
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const older = {
+      id: "council-coat",
+      file: "looks/council-coat.png",
+      kind: "costume" as const,
+      prompt: "Formal council coat",
+      acceptedAt: "2026-08-01T10:00:00.000Z",
+      attachedTo: { kind: "production" as const, productionId: production.meta.id },
+    };
+    const newer = { ...older, id: "storm-oilskin", file: "looks/storm-oilskin.png", acceptedAt: "2026-08-09T10:00:00.000Z" };
+    const files = (looks: (typeof older)[]) =>
+      planScene(
+        {
+          world: bundle.meta,
+          artDirection: bundle.artDirection,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? { ...maren, looks } : kit)),
+          scene,
+          selections: production.selections,
+          model: VIDEO_MODEL,
+        },
+        "per-shot",
+      ).shots.flatMap((shotPlan) => shotPlan.references.map((reference) => reference.file ?? ""));
+    for (const looks of [[older, newer], [newer, older]]) {
+      const carried = files(looks);
+      assert.ok(carried.some((file) => file.includes("storm-oilskin")), "the later acceptance rides");
+      assert.ok(carried.every((file) => !file.includes("council-coat")), "and the older one does not");
+    }
+    await store.close();
+  });
 });
 
 describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container", () => {

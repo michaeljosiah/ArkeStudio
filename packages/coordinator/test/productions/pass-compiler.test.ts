@@ -329,4 +329,60 @@ describe("the pass compiler (issue 398)", () => {
       "what the new model cannot carry is named, not assumed",
     );
   });
+
+  /* The dispatch dialog states who rides and who rides in a look (design 67). It reads the
+     compiled reference, so the compiled reference has to carry the attachment structurally —
+     the role phrase says the same thing in the prompt's words, and a screen matching that prose
+     would be reading a sentence written for a model as if it were an enum. */
+  it("carries the subject's name and its attachment mode onto every compiled reference", async () => {
+    const { store, bundle } = await open();
+    void store;
+    const production = bundle.productions[0]!;
+    const scene: Scene = { ...production.scenes[0]!, shots: [shot(1, 6, "@maren-kest at the rail")] };
+    const compile = (kits: typeof bundle.referenceKits) =>
+      compilePasses({
+        productionId: production.meta.id,
+        scene,
+        plan: planScene(
+          {
+            world: bundle.meta,
+            productionId: production.meta.id,
+            sheets: bundle.sheets,
+            kits,
+            scene,
+            selections: {},
+            model: WAN_LIKE,
+          },
+          "per-shot",
+        ),
+        model: WAN_LIKE,
+        world: bundle,
+      });
+
+    const plain = compile(bundle.referenceKits)[0]!.references.find((r) => r.sheetId === "maren-kest")!;
+    assert.equal(plain.subject, "Maren Kest", "a name, never a slug");
+    assert.notEqual(plain.mode, "scoped-look");
+
+    const withLook = bundle.referenceKits.map((kit) =>
+      kit.sheetId === "maren-kest"
+        ? {
+            ...kit,
+            looks: [
+              {
+                id: "council-coat",
+                file: "looks/council-coat.png",
+                kind: "costume" as const,
+                prompt: "Formal council coat",
+                acceptedAt: CLOCK(),
+                attachedTo: { kind: "production" as const, productionId: production.meta.id },
+              },
+            ],
+          }
+        : kit,
+    );
+    const carried = compile(withLook)[0]!.references.find((r) => r.sheetId === "maren-kest")!;
+    assert.equal(carried.mode, "scoped-look", "the production's own look is legible without parsing prose");
+    assert.equal(carried.subject, "Maren Kest");
+    assert.ok(carried.file.includes("council-coat"), "and it is the look that actually travels");
+  });
 });
