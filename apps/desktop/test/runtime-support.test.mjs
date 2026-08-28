@@ -5,7 +5,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  assertNoticeMatchesLicence,
   assertPeArchitecture,
+  citedGplVersions,
+  gplVersionOf,
   manifestFor,
   peArchitecture,
   swapStagedDirectory,
@@ -56,6 +59,54 @@ describe("runtime preparation primitives", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * The check that would have caught a source notice drifting away from the licence beside it.
+ *
+ * ffmpeg shipped GPLv3 text next to a notice citing GPLv2 §3(b) for two releases, because the
+ * two files were written at different times and nothing ever read them together. The staged
+ * pair is compared at package time; these are the comparison's own edge cases.
+ */
+describe("a source notice against the licence it ships beside", () => {
+  const GPL3 = "                    GNU GENERAL PUBLIC LICENSE\n                       Version 3, 29 June 2007\n\n Copyright (C) 2007 Free Software Foundation, Inc.";
+  const GPL2 = "\t\t    GNU GENERAL PUBLIC LICENSE\n\t\t       Version 2, June 1991\n\n Copyright (C) 1989, 1991 Free Software Foundation, Inc.";
+
+  it("reads the version off the licence's own heading", () => {
+    assert.equal(gplVersionOf(GPL3), "3");
+    assert.equal(gplVersionOf(GPL2), "2");
+    assert.equal(gplVersionOf("Permission is hereby granted, free of charge"), null, "an MIT text is not a GPL");
+  });
+
+  it("collects every GPL version a notice claims to be written under", () => {
+    assert.deepEqual([...citedGplVersions("given under section 6(d) of the GNU General Public License version 3.")], ["3"]);
+    assert.deepEqual(
+      [...citedGplVersions("under the General Public License version 2 and the General Public License, version 3")].sort(),
+      ["2", "3"],
+      "a notice citing two versions is reported as citing both, not resolved to one",
+    );
+    assert.equal(citedGplVersions("a notice that never says which licence it is under").size, 0);
+  });
+
+  it("passes a notice written under the licence beside it", () => {
+    const notice = "These directions are given under section 6(d) of the GNU General Public License version 3.";
+    assert.doesNotThrow(() => assertNoticeMatchesLicence(GPL3, notice, "ffmpeg"));
+  });
+
+  it("refuses the pairing that actually shipped, and names both versions", () => {
+    const notice = "This offer is made under section 3(b) of the GNU General Public License version 2.";
+    assert.throws(() => assertNoticeMatchesLicence(GPL3, notice, "ffmpeg"), /cites GPL version 2 .*is GPL version 3/);
+  });
+
+  it("refuses a notice that names no licence version at all", () => {
+    assert.throws(() => assertNoticeMatchesLicence(GPL3, "Source on request.", "ffmpeg"), /does not say which GPL version/);
+  });
+
+  it("refuses to judge a licence text it cannot identify", () => {
+    // Silence here would be the worst answer: an unrecognised licence means the pairing is
+    // unchecked, which is the state that let the mismatch ship in the first place.
+    assert.throws(() => assertNoticeMatchesLicence("Apache License, Version 2.0", "under the GNU General Public License version 3", "ffmpeg"), /not a recognised GPL/);
   });
 });
 

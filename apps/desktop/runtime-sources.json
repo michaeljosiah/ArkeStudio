@@ -64,6 +64,7 @@
   },
   "ffmpeg": {
     "_note": "GPL shared build: libx264 is GPL-only, and the export presets are written around -crf, which an LGPL build silently ignores. Invoked as a separate executable, never linked -- the same arrangement espeak-ng and Voxa make.",
+    "_licence_note": "GPL-3.0-or-later, not v2. BtbN configures with --enable-gpl AND --enable-version3, and the version3 half is load-bearing: gmp and libaribb24 are LGPLv3, libvmaf is Apache-2.0, and FFmpeg's own LICENSE.md says either one requires the upgrade. The archive ships COPYING.GPLv3 as its LICENSE.txt to match. This was recorded as GPLv2 for two releases while GPLv3 text shipped beside it.",
     "_release_note": "Must be a MONTH-END autobuild, and the test beside this file enforces it (#581). BtbN prunes on two windows (util/prunetags.sh): KEEP_LATEST=14 keeps the fourteen newest builds, KEEP_MONTHLY=24 keeps the newest build of each of the last 24 months. A mid-month daily therefore 404s within a fortnight -- autobuild-2026-08-13-17-03 was pinned on the day it was built and the whole release was gone two weeks later, which is what took the packaging step down. The last build of a finished month lives about two years, so bumping means taking the latest tag whose date is the final day of a completed month, not the newest build available.",
     "release": "autobuild-2026-07-31-14-10",
     "version": "n8.1.2-34-g9b6c8969e0",
@@ -77,6 +78,8 @@
     },
     "commit": "9b6c8969e0",
     "sourceUrl": "https://codeload.github.com/FFmpeg/FFmpeg/tar.gz/9b6c8969e0",
-    "sourceSha256": "DEA36E6B40D66C3825939B59906C0D6186ECE23F7F8961D0F2A9A0E904BF41A3"
+    "sourceSha256": "DEA36E6B40D66C3825939B59906C0D6186ECE23F7F8961D0F2A9A0E904BF41A3",
+    "_corresponding_source_note": "Where the rest of the Corresponding Source lives, for GPLv3 section 6(d). The release tag is also a git tag, and the tree at it IS the build: every scripts.d/ entry names its component's upstream repository and exact revision, so libx264 and the other GPL libraries compiled into avcodec can each be fetched from it. Must carry the same tag as `release`, which the test beside this file checks.",
+    "correspondingSourceUrl": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-07-31-14-10"
   }
 }

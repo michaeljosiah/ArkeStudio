@@ -65,6 +65,44 @@ export function verifyManifest(root) {
 }
 
 /**
+ * Which GPL a licence file is, read off its own heading.
+ *
+ * Returns "2" or "3", or null for a text that is not a GPL. Deliberately anchored to the two
+ * heading lines the FSF ships rather than to any mention of a version, so that a licence quoting
+ * another one inside its preamble cannot be misread.
+ */
+export function gplVersionOf(text) {
+  if (/GNU GENERAL PUBLIC LICENSE\s+Version 3, 29 June 2007/i.test(text)) return "3";
+  if (/GNU GENERAL PUBLIC LICENSE\s+Version 2, June 1991/i.test(text)) return "2";
+  return null;
+}
+
+/** Every GPL version a notice claims to be written under, as strings. */
+export function citedGplVersions(text) {
+  return new Set([...text.matchAll(/General Public License,?\s+version\s+(\d+)/gi)].map((match) => match[1]));
+}
+
+/**
+ * A source notice must be written under the licence that ships beside it.
+ *
+ * These drifted apart and stayed that way through two releases: BtbN builds ffmpeg with
+ * --enable-version3, so GPLv3 text shipped in the folder, while the generated notice went on
+ * citing GPLv2 section 3(b) -- a section v3 does not have. Nothing read both files, so nothing
+ * noticed. This does, at the same moment the rest of the obligations are checked.
+ */
+export function assertNoticeMatchesLicence(licenceText, noticeText, label) {
+  const shipped = gplVersionOf(licenceText);
+  if (!shipped) throw new Error(`${label}: the licence text shipped beside the notice is not a recognised GPL`);
+  const cited = citedGplVersions(noticeText);
+  if (cited.size === 0) throw new Error(`${label}: the notice does not say which GPL version it is written under`);
+  for (const version of cited) {
+    if (version !== shipped) {
+      throw new Error(`${label}: the notice cites GPL version ${version} but the licence beside it is GPL version ${shipped}`);
+    }
+  }
+}
+
+/**
  * Replace a staged runtime directory with a freshly prepared one, in that order.
  *
  * The prepare scripts used to clear build-resources at module top level, before the first

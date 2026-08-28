@@ -4,7 +4,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
-import { assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
+import { assertNoticeMatchesLicence, assertPeArchitecture, verifyManifest } from "./runtime-support.mjs";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -121,6 +121,29 @@ if (process.argv.includes("--require-runtimes")) {
     }
     if (!existsSync(join(opencode2, "LICENSE.opencode2.txt"))) {
       failures.push("opencode2 is staged but its licence text is absent");
+    }
+  }
+}
+
+/*
+ * ffmpeg's source notice, checked against the licence it ships next to.
+ *
+ * Outside the per-arch loop for the reason opencode2 is: ffmpeg stages flat. The two files went
+ * out of step for two releases -- GPLv3 text in the folder, a notice citing GPLv2 section 3(b)
+ * beside it -- because each was written once and nothing ever read them together.
+ */
+if (process.argv.includes("--require-runtimes")) {
+  const ffmpeg = join(buildResources, "ffmpeg");
+  const licence = join(ffmpeg, "LICENSE.ffmpeg.txt");
+  const notice = join(ffmpeg, "WRITTEN-OFFER.ffmpeg.txt");
+  if (!existsSync(join(ffmpeg, "ffmpeg.exe"))) failures.push("ffmpeg runtime is required but ffmpeg.exe is absent — run prepare:runtimes");
+  else if (!existsSync(licence) || !existsSync(notice)) {
+    failures.push("ffmpeg is staged but its licence text or corresponding-source notice is absent");
+  } else {
+    try {
+      assertNoticeMatchesLicence(readFileSync(licence, "utf8"), readFileSync(notice, "utf8"), "ffmpeg");
+    } catch (error) {
+      failures.push(String(error.message ?? error));
     }
   }
 }

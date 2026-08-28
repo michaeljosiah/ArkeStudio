@@ -53,6 +53,16 @@ describe("the pinned ffmpeg build", () => {
     }
   });
 
+  it("points its corresponding-source directions at the same release", () => {
+    // WRITTEN-OFFER.ffmpeg.txt gives GPLv3 §6(d) directions to this tree, and §6(d) wants them
+    // to lead to the source for *these* binaries. A tag left behind by a pin bump would send
+    // people to a different build's components while looking perfectly well-formed.
+    assert.ok(
+      metadata.ffmpeg.correspondingSourceUrl.endsWith(`/${metadata.ffmpeg.release}`),
+      `the corresponding-source URL does not name ${metadata.ffmpeg.release}`,
+    );
+  });
+
   it("is a GPL shared build for the architecture it claims", () => {
     // libx264 is GPL-only and the export presets are -crf values an LGPL build ignores, so the
     // flavour in the filename is a functional requirement, not a preference.

@@ -109,34 +109,60 @@ function pruneForeignRuntimes(root) {
 }
 
 /**
- * The GPLv2 section 3(b) offer, valid three years from the build that carries it.
+ * Where to get the Corresponding Source, under GPLv3 section 6(d).
  *
- * Written out with the build's own version and commit in it, so a copy found on a disk years
- * from now names exactly which binaries it answers for rather than pointing at whatever the
+ * Written out with the build's own version, release and commit in it, so a copy found on a disk
+ * years from now names exactly which binaries it answers for rather than pointing at whatever the
  * project happens to ship by then.
+ *
+ * Two things about this file were wrong for two releases. It cited GPL **v2** section 3(b) while
+ * GPLv3 text shipped in the folder beside it -- BtbN builds with --enable-version3 as well as
+ * --enable-gpl, which puts the binaries under v3. And 3(b)'s successor, v3 section 6(b), is not
+ * the applicable clause anyway: 6(a) and 6(b) both begin "convey the object code in, or embodied
+ * in, a physical product", and Arke is a download. 6(d) is the clause for conveying from a
+ * network server, and it asks for directions to the source rather than a promise of it -- source
+ * that may sit on a third party's server so long as those directions are kept next to the object
+ * code.
+ *
+ * So this is directions first. The build tree at the release tag IS the build: every scripts.d/
+ * entry names its component's upstream repository and exact revision, libx264's included. An
+ * earlier round of this file said that revision "cannot be read off the release" and offered a
+ * promise in its place; it can, and the tag makes it durable.
+ *
+ * The offer stays underneath, because 6(d) makes availability Arke's obligation "for as long as
+ * needed to satisfy these requirements" regardless of whose server holds the source -- and #581
+ * is a fresh demonstration that BtbN deletes things.
  */
 function writtenOffer(ffmpeg) {
   return [
-    "WRITTEN OFFER FOR CORRESPONDING SOURCE CODE",
+    "CORRESPONDING SOURCE FOR THE FFMPEG BINARIES IN THIS COPY",
     "",
-    `This copy of Arke Studio includes ffmpeg ${ffmpeg.version} (build ${ffmpeg.release}), a GPL`,
-    "build which contains GPL-licensed components including libx264. ffmpeg is invoked as a",
-    "separate subprocess and is never linked into Arke Studio itself.",
+    `This copy of Arke Studio includes ffmpeg ${ffmpeg.version} (build ${ffmpeg.release}),`,
+    "configured with --enable-gpl and --enable-version3. Those options put these binaries under",
+    "the GNU General Public License version 3 or later; the licence text is beside this file as",
+    "LICENSE.ffmpeg.txt. GPL-licensed components including libx264 are compiled into them.",
+    "ffmpeg is invoked as a separate subprocess and is never linked into Arke Studio itself.",
     "",
-    `The complete corresponding source for FFmpeg is included beside this file as`,
+    "FFmpeg's own source, at the revision these binaries report, is included beside this file as",
     `SOURCE-ffmpeg-${ffmpeg.commit}.tar.gz.`,
     "",
-    "For any other GPL-licensed component of these binaries -- including libx264 and the exact",
-    "build scripts, configuration and patches used to produce them -- the copyright holder hereby",
-    "offers, valid for three years from the date this copy was distributed, to give any third",
-    "party a complete machine-readable copy of the corresponding source code, for no more than",
-    "the cost of physically performing source distribution.",
+    "The rest of the Corresponding Source -- the GPL-licensed libraries compiled into these",
+    "binaries, and the scripts, configuration and patches used to build them -- is published at:",
+    "",
+    `  ${ffmpeg.correspondingSourceUrl}`,
+    "",
+    "That tree is the build. Each entry under scripts.d/ names its component's upstream",
+    "repository and the exact revision used, so every component can be obtained from it.",
+    "",
+    "Should that source stop being available there, the copyright holder offers, valid for at",
+    "least three years from the date this copy was distributed, to give anyone in possession of",
+    "this copy a complete machine-readable copy of the Corresponding Source at no charge.",
     "",
     "To request it, open an issue at:",
     "  https://github.com/michaeljosiah/ArkeStudio/issues",
     "",
-    "This offer is made under section 3(b) of the GNU General Public License version 2, and",
-    "extends to anyone in possession of this copy, whether or not they obtained it directly.",
+    "These directions are given under section 6(d) of the GNU General Public License version 3,",
+    "and extend to anyone in possession of this copy, whether or not they obtained it directly.",
     "",
   ].join(String.fromCharCode(13, 10));
 }
@@ -374,10 +400,12 @@ cpSync(join(ffmpegRoot, "LICENSE.txt"), join(ffmpegStage, "LICENSE.ffmpeg.txt"))
  * FFmpeg's own source ships beside the binary, pinned to the commit the build reports. That is
  * not the whole obligation: this is a GPL build, so libx264 is compiled *into* avcodec rather
  * than sitting beside it as a separate file, and Arke redistributes x264's code whether or not
- * it can point at a file containing it (Codex round 1). The revision BtbN built cannot be read
- * off the release, and shipping some other x264 tarball would look like compliance without being
- * it -- so everything the archive does not cover is carried by a written offer under GPLv2
- * section 3(b), which is a real obligation with a real duration rather than a formality.
+ * it can point at a file containing it (Codex round 1). Shipping some other x264 tarball would
+ * look like compliance without being it, so the second part is directions rather than a file --
+ * see writtenOffer, which names the tagged build tree where BtbN pins every component's exact
+ * revision. An earlier round here held that revision to be unreadable off the release; it is
+ * `SCRIPT_COMMIT` in scripts.d/50-x264.sh, and the release tag is a git tag, so the tree that
+ * produced these binaries stays reachable for as long as the release does.
  */
 await download(
   metadata.ffmpeg.sourceUrl,
