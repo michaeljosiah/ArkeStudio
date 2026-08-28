@@ -1475,7 +1475,7 @@ export function NewWorldScreen() {
 // ---- Settings --------------------------------------------------------------
 
 export function SettingsLayout() {
-  const { state } = useStore();
+  const { connection, state } = useStore();
   const navigate = useNavigate();
   const firstWorld = state?.worlds[0] ?? null;
   return (
@@ -1534,6 +1534,16 @@ export function SettingsLayout() {
                 <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
               </div>
               <div className="fy-settings__pane">
+                {/* Every pane in here draws from the coordinator's snapshot, and with no snapshot
+                    they draw the same thing they draw when a provider has nothing to offer: `—`
+                    in the capability rows, `not measured` in the machine header. A dev
+                    coordinator that died at import produces exactly that screen, which reads as
+                    a data bug in whatever you last changed (issue 599). Say which one it is. */}
+                {connection !== "open" && (
+                  <Callout tone="warning" title="Waiting for the coordinator">
+                    Rows stay blank until it connects.
+                  </Callout>
+                )}
                 <Outlet />
               </div>
             </div>
