@@ -10,6 +10,7 @@ import {
   type ChildLedger,
   type DescendantInfo,
   type ProcessInfo,
+  type ProcessProbe,
 } from "./child-ledger.js";
 import { leashChildToParent } from "./job-leash.js";
 
@@ -123,6 +124,12 @@ const DESCENDANT_START_TOLERANCE_MS = 5_000;
 export interface SupervisorDeps {
   /** When present, spawns are recorded and exits released so a later sweep can reap. */
   ledger?: ChildLedger;
+  /**
+   * Test seams for the win32 CIM calls, mirroring ChildLedgerDeps. The retry paths below are
+   * only provable by making these fail on demand, which the real process table will not do.
+   */
+  listDescendants?: (rootPid: number) => Promise<DescendantInfo[]>;
+  probe?: ProcessProbe;
 }
 
 export class ChildSupervisor extends EventEmitter {
@@ -385,12 +392,23 @@ export class ChildSupervisor extends EventEmitter {
     if (process.platform !== "win32") return;
     const pid = child.pid;
     if (pid === undefined) return;
-    let found: DescendantInfo[];
-    try {
-      found = await listDescendants(pid);
-    } catch {
-      return; // no snapshot; taskkill /T on the live wrapper remains the cover
+    // The enumeration gets three tries. One WMI hiccup here used to cost the snapshot for
+    // the child's whole lifetime: stop/restart could still taskkill /T the live wrapper, but
+    // a wrapper that later died on its own left grandchildren no record could reach — not
+    // even the next run's sweep, because the record is only written below. Off the status
+    // path, so the backoff delays nobody; stop() resolves the sleep early and the child
+    // check aborts the loop.
+    let found: DescendantInfo[] | null = null;
+    for (let attempt = 0; attempt < 3 && found === null; attempt += 1) {
+      if (attempt > 0) await this.sleep(500 * attempt);
+      if (this.child !== child) return; // stopped or restarted while waiting
+      try {
+        found = await (this.deps.listDescendants ?? listDescendants)(pid);
+      } catch {
+        /* the process table would not answer; the retry covers the transient case */
+      }
     }
+    if (found === null) return; // no snapshot; taskkill /T on the live wrapper remains the cover
     if (this.child !== child) return; // stopped or restarted while enumerating
     this.descendants = found;
     for (const d of found) {
@@ -425,12 +443,21 @@ export class ChildSupervisor extends EventEmitter {
       else void this.deps.ledger?.release(d.pid).catch(() => {});
     }
     if (survivors.length === 0) return;
-    let probed: Map<number, ProcessInfo>;
-    try {
-      probed = await platformProbe(survivors.map((d) => d.pid));
-    } catch {
-      return; // cannot verify identity — kill nothing, keep the records for the sweep
+    // Identity comes before any kill, and the probe gets one retry: nothing else in-process
+    // ever re-attempts it, and the exit backstop reads the descendant list this method has
+    // already cleared, so a single transient probe failure used to strand the survivors for
+    // the next startup's sweep. Only one retry, because this path is awaited inside stop()
+    // — every extra attempt is shutdown latency for the case where WMI is genuinely down.
+    let probed: Map<number, ProcessInfo> | null = null;
+    for (let attempt = 0; attempt < 2 && probed === null; attempt += 1) {
+      if (attempt > 0) await this.sleep(250);
+      try {
+        probed = await (this.deps.probe ?? platformProbe)(survivors.map((d) => d.pid));
+      } catch {
+        /* unreadable process table; retried once, then the records stay for the sweep */
+      }
     }
+    if (probed === null) return; // cannot verify identity — kill nothing, keep the records
     for (const d of survivors) {
       const live = probed.get(d.pid);
       const isOurs =
