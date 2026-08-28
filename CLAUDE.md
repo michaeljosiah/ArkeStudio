@@ -51,8 +51,14 @@ npm run typecheck   # tsc --noEmit per workspace
 npm test            # node --test per workspace
 ```
 
-CI runs lint, typecheck, build, then test, on **both** windows-latest and ubuntu-latest. A healthy
-run is 6–14 minutes against a 25-minute ceiling.
+CI runs lint, typecheck, build, then test, on **both** windows-latest and ubuntu-latest, in four
+shards per platform. A healthy shard is 2m34s–12m14s on Windows and under 3m30s on Linux, against
+a 30-minute ceiling. A step that prints nothing for ten minutes is killed as hung — that, not the
+ceiling, is what catches a leaked watcher, so a red check means something failed rather than that
+the runner was busy. The two numbers are coupled: the guard only reports first while pre-Test work
+plus the Test step plus ten minutes fits inside the ceiling, so move them together. Each run prints
+the longest silence it actually saw, which is how you tell whether ten minutes still holds — and
+measure over days, not hours, or you will sample a quiet afternoon and set the number too tight.
 
 - **`tsx` does not typecheck.** A green `npm test` proves nothing about types. Run `typecheck`
   after your last test edit, not before.

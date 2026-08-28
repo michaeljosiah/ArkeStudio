@@ -8,7 +8,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "dev": "tsx src/dev.ts",
+    "dev": "tsx src/dev-preflight.ts && tsx src/dev.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test \"test/**/*.test.ts\""
   },

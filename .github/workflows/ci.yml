@@ -26,13 +26,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     # A leaked file watcher holds a runner at "in progress" until GitHub's six-hour default kills
     # it — six billable hours to learn what a ceiling reports the same morning (one leaked
-    # WorldStore cost exactly that on 2026-08-11). The ceiling exists for that, not for slowness.
+    # WorldStore cost exactly that on 2026-08-11).
     #
-    # 15 minutes, not 25: a shard is a quarter of the suite, so this is a wider margin over a
-    # healthy run than the old 25 was over an unsharded one. The old ceiling had stopped
-    # discriminating — Windows runs had drifted to 14.5–18.8 minutes against it, and a busy
-    # runner produced the same red as a hung one (#560).
-    timeout-minutes: 15
+    # That job now belongs to the silence guard in scripts/ci-test.mjs, which kills a step that
+    # has printed nothing for ten minutes. A hang and a slow run are indistinguishable to a
+    # clock but not to the test runner, which prints a line per test right up until it stops —
+    # so the guard measures the thing that actually differs, and a busy runner cannot trip it.
+    #
+    # What is left for the ceiling is the one case silence misses: a suite that never ends and
+    # never stops talking. That job does not need a tight number, and tightness was the whole
+    # problem — measured over every green sharded run since #563 (432 jobs, 54 runs, to
+    # 2026-08-28), windows-latest shards run 2m34s–12m14s (median 4m59s) and ubuntu-latest
+    # 0m52s–3m30s (median 1m50s), so the 15 this replaces had already drifted to 1.2×: the same
+    # margin at which the 25 before it stopped discriminating and turned a docs-only PR red
+    # (#560). Sample the last few hours instead of the last few days and you will measure 8m44s
+    # and conclude something comfortable, which is how it drifted the first time.
+    #
+    # 30 minutes is what the guard needs, not a round number. It only reports before the ceiling
+    # while everything ahead of it fits: worst pre-Test work (4m37s on shard 1, which carries
+    # lint, types and build) + worst Test step (10m50s) + the guard's ten minutes + up to 10s of
+    # interval = 25m37s. Past that the ceiling quietly takes hang detection back and everything
+    # above stops being true, with nothing to say so — so move the two together. It is also 2.4×
+    # the worst shard, which is the older question and no longer the binding one.
+    #
+    # And the guard is more precise than the ceiling, not faster: on a shard that hangs at the
+    # very end it reports later than a tight ceiling would have. Precision is the point.
+    timeout-minutes: 30
     strategy:
       # One platform failing should still tell us about the other, and one shard failing should
       # still tell us about the rest of the suite.

@@ -14,8 +14,11 @@
 //
 // Every other workspace together is 50s, so they ride on one shard whole rather than being split
 // into pieces smaller than their own start-up cost.
+//
+// The other half of the job is telling a hung shard from a slow one. That is why the child's
+// output is relayed here rather than inherited — see SILENCE_LIMIT_MS.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +27,32 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** The workspace whose suite is large enough to be worth splitting. */
 const SHARDED = "@arke-studio/coordinator";
+
+/**
+ * How long a step may print nothing before it is called hung rather than slow.
+ *
+ * Measured on CI, 2026-08-28, over sixteen shards of two green runs: the longest a healthy shard
+ * went without printing was **183s**, on windows-latest; every ubuntu shard stayed under 6s.
+ * That 183s is not runner noise — it is one test in apps/desktop building the installer bundle,
+ * which does minutes of work before it can print its first result. A test like that sets the
+ * floor here, and nothing stops another one being written.
+ *
+ * Ten minutes is 3.3× that, and generous on purpose. A limit that fires on a slow runner
+ * recreates the exact failure this replaces — a red check that means "busy", which teaches
+ * everyone to re-run and look away. Being late to a genuine hang costs a few minutes of runner
+ * time; being early costs the credibility of every red check on the repo.
+ *
+ * The summary prints the longest silence each run actually saw, which is how this number stays
+ * honest rather than drifting the way the job ceiling did. Worth its own line already: the two
+ * runs it has seen reported 26s and then 183s.
+ */
+const SILENCE_LIMIT_MS = 10 * 60_000;
+
+/** The largest gap between two bytes of output across every step this shard ran. */
+let longestSilence = 0;
+
+/** The step the silence guard gave up on, if one stopped printing. */
+let hungStep = null;
 
 const shardArg = process.argv[2] ?? "1/1";
 const [index, total] = shardArg.split("/").map(Number);
@@ -67,13 +96,115 @@ if (!all.some((w) => w.name === SHARDED)) {
 
 const others = all.filter((w) => w.name !== SHARDED);
 
-/** Run one command, streaming its output, and report whether it passed. */
-function run(label, command, args, cwd) {
+/**
+ * Kill a child and everything below it, reporting what stopped it or null.
+ *
+ * Everything below it, not just it. There is always something between us and the process that is
+ * actually stuck: on Windows `shell: true` puts cmd.exe in the way, and on Linux `npm test` runs
+ * the real test runner as a grandchild with inherited stdio. Kill only the child and the
+ * grandchild lives on holding the pipe — and `close` needs both an exit and a closed pipe, so the
+ * wait in `run` would never end and the job would burn to the ceiling anyway.
+ */
+function killTree(pid) {
+  if (process.platform === "win32") {
+    // taskkill reports failure in its exit code, not by failing to spawn, and 128 covers both
+    // "already gone" and "could not be terminated" — so keep its stderr and pass its own words
+    // along rather than trying to tell those two apart from a number.
+    const done = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      encoding: "utf8",
+    });
+    if (done.error) return `taskkill would not run: ${done.error.message}`;
+    return done.status === 0 ? null : `taskkill said: ${(done.stderr ?? "").trim().split("\n")[0]}`;
+  }
+  try {
+    // A negative pid is the process group, which `detached` below made this child the leader of.
+    process.kill(-pid, "SIGKILL");
+    return null;
+  } catch (err) {
+    // Already gone is the ordinary case, not a problem worth a line in the log.
+    return err.code === "ESRCH" ? null : `kill: ${err.message}`;
+  }
+}
+
+/**
+ * Run one command, relaying its output, and report whether it passed.
+ *
+ * Relayed rather than inherited so the gaps in it can be watched. A leaked file watcher and a
+ * busy runner take the same amount of wall clock to look alarming, which is why the job ceiling
+ * could not tell them apart (#560) — but they look nothing alike to the test runner, which keeps
+ * printing a line per test right up until the moment it stops. So the hang is caught on silence,
+ * and the ceiling is left as a backstop for the one case silence misses: a suite that never ends
+ * and never stops talking.
+ */
+async function run(label, command, args, cwd) {
   console.log(`\n=== ${label}`);
-  const result = spawnSync(command, args, { cwd, stdio: "inherit", shell: process.platform === "win32" });
-  // A signal death has no exit code; treat anything that is not a clean 0 as a failure.
-  const ok = result.status === 0;
-  if (!ok) console.log(`=== ${label} FAILED (status ${result.status}, signal ${result.signal ?? "none"})`);
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    // Windows needs a shell to reach `npm.cmd`; POSIX needs its own process group instead, so the
+    // kill above can take the grandchildren with it. Neither platform gets both.
+    shell: process.platform === "win32",
+    detached: process.platform !== "win32",
+  });
+
+  let lastOutputAt = Date.now();
+  let lastLine = "";
+  let escapeHatch = null;
+  const relay = (out) => (chunk) => {
+    const now = Date.now();
+    // Reported in the summary. The limit above was measured once and the suite keeps growing;
+    // this is the line that says how much of it is left, without anyone having to measure again.
+    longestSilence = Math.max(longestSilence, now - lastOutputAt);
+    lastOutputAt = now;
+    const lines = chunk.toString().split("\n").filter((line) => line.trim() !== "");
+    if (lines.length > 0) lastLine = lines[lines.length - 1];
+    out.write(chunk);
+  };
+  child.stdout.on("data", relay(process.stdout));
+  child.stderr.on("data", relay(process.stderr));
+
+  const watch = setInterval(() => {
+    const silentFor = Date.now() - lastOutputAt;
+    if (silentFor < SILENCE_LIMIT_MS) return;
+    clearInterval(watch);
+    hungStep = label;
+    longestSilence = Math.max(longestSilence, silentFor);
+    console.log(`\n=== ${label} HUNG: nothing printed for ${Math.round(silentFor / 1000)}s`);
+    // A hint, not an identification. Test files run concurrently, so this is the last test that
+    // FINISHED, which by construction is not the one that is stuck — but it narrows the search
+    // to a moment. A step that hung before printing anything at all says so, rather than
+    // trailing off after the colon.
+    console.log(`=== last line was: ${lastLine === "" ? "(it never printed anything)" : lastLine.trim()}`);
+    console.log(`=== A suite that has stopped printing has stopped working — the usual cause is`);
+    console.log(`=== a file watcher or a database handle left open somewhere in this shard.`);
+    // Killing it closes the pipes being read here, which ends the wait below and leaves by the
+    // ordinary route — so the summary still prints and there is one way out of this script
+    // rather than two.
+    const stuck = child.pid === undefined ? "there was no pid to kill" : killTree(child.pid);
+    if (stuck !== null) console.log(`=== ${stuck}`);
+    // And a way out even if it did not work. A guard that waits forever for a kill that never
+    // landed is one more path to the ceiling, which is the thing being replaced. Ten seconds is
+    // long past when a SIGKILL or a taskkill /F has either worked or failed for good.
+    escapeHatch = setTimeout(() => {
+      console.log(`=== ${label}: the kill did not take, leaving without it`);
+      process.exit(1);
+    }, 10_000);
+  }, 10_000);
+
+  const { status, signal } = await new Promise((resolve) => {
+    child.on("error", (err) => resolve({ status: null, signal: err.message }));
+    child.on("close", (code, sig) => resolve({ status: code, signal: sig }));
+  });
+  clearInterval(watch);
+  if (escapeHatch !== null) clearTimeout(escapeHatch);
+  // The tail counts too: a suite whose last test passed and then took a minute to shut down was
+  // silent for that minute, and a number that quietly omitted it would understate the trend.
+  longestSilence = Math.max(longestSilence, Date.now() - lastOutputAt);
+  // A signal death has no exit code; treat anything that is not a clean 0 as a failure — and a
+  // step the guard killed counts as failed whatever status the kill happened to leave behind.
+  const ok = status === 0 && hungStep !== label;
+  if (!ok) console.log(`=== ${label} FAILED (status ${status}, signal ${signal ?? "none"})`);
   return ok;
 }
 
@@ -83,12 +214,12 @@ const failures = [];
 // stays quoted so node expands it identically on both platforms rather than the shell doing it
 // on one of them.
 const coordinator = all.find((w) => w.name === SHARDED);
-if (!run(
+if (!(await run(
   `${SHARDED} shard ${index}/${total}`,
   "node",
   ["--import", "tsx", "--test", `--test-shard=${index}/${total}`, "test/**/*.test.ts"],
   coordinator.dir,
-)) {
+))) {
   failures.push(`${SHARDED} shard ${index}/${total}`);
 }
 
@@ -96,14 +227,26 @@ if (!run(
 // lint, types and build in CI — piling the other workspaces there too would make shard 1 the long
 // pole and waste the parallelism. With a single shard it has nowhere else to go.
 const othersShard = Math.min(2, total);
-if (index === othersShard) {
+let othersRan = 0;
+// A hang is terminal. Whatever leaked is still leaking, and the next workspace would only spend
+// another eight minutes finding that out.
+if (index === othersShard && hungStep === null) {
   for (const workspace of others) {
-    if (!run(workspace.name, "npm", ["test"], workspace.dir)) failures.push(workspace.name);
+    if (!(await run(workspace.name, "npm", ["test"], workspace.dir))) failures.push(workspace.name);
+    if (hungStep !== null) break;
+    othersRan += 1;
   }
 }
 
 console.log(`\n=== shard ${index}/${total} summary`);
-console.log(`ran: ${SHARDED} shard ${index}/${total}${index === othersShard ? `, plus ${others.length} other workspaces` : ""}`);
+// Counted rather than assumed: a shard that stopped early must not claim the workspaces it never
+// reached, or its summary becomes one more line that reads like a healthy run.
+console.log(`ran: ${SHARDED} shard ${index}/${total}${othersRan > 0 ? `, plus ${othersRan} other workspaces` : ""}`);
+console.log(
+  `quietest moment: ${Math.round(longestSilence / 1000)}s without output, against a limit of ${SILENCE_LIMIT_MS / 1000}s`,
+);
+
+if (hungStep !== null) console.log(`stopped early: ${hungStep} was killed for going quiet`);
 
 if (failures.length > 0) {
   console.log(`FAILED: ${failures.join(", ")}`);
