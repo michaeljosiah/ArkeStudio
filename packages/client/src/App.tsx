@@ -15,7 +15,7 @@ import {
   SettingsProvidersScreen,
   SettingsSampleWorldScreen,
   SettingsSignInScreen,
-  SettingsCloudAiScreen,
+  SettingsGeneralScreen,
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
@@ -180,13 +180,16 @@ export function App() {
             <Route path="engines" element={<Navigate to="/settings/providers" replace />} />
             <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
-            <Route path="cloud-ai" element={<SettingsCloudAiScreen />} />
+            <Route path="general" element={<SettingsGeneralScreen />} />
+            {/* Cloud AI became General when a default stopped having to be a cloud model
+                (SPEC-034 R-14). The old address answers. */}
+            <Route path="cloud-ai" element={<Navigate to="/settings/general" replace />} />
             {/* Two addresses that no longer name a screen, and they do not land in the same
                 place: `agents` named the per-agent overrides, and those are on Harness now, so
                 sending it to Cloud AI would land it on the one screen defined by not having
                 them. Each goes where its content went. */}
             <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
-            <Route path="who-does-what" element={<Navigate to="/settings/cloud-ai" replace />} />
+            <Route path="who-does-what" element={<Navigate to="/settings/general" replace />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />

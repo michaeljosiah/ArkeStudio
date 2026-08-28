@@ -192,21 +192,14 @@ export function resolveModel(
   const usable = usableModels(state, capability);
   const all = state?.app.manifest?.models ?? [];
   /*
-   * Four sources, in the order they outrank each other.
+   * Three sources, in the order they outrank each other.
    *
-   * `clearedLocal` sits between the production's own choice and the installation's default
-   * because that is exactly where it used to be: it *was* the routing default until Cloud AI
-   * stopped being able to offer it. R-80's first branch carries the concrete model id rather
-   * than throwing it away, so a production that never chose keeps running where it was running
-   * — and the moment somebody chooses at dispatch, their choice is stored on the production and
-   * outranks it.
+   * `clearedLocal` used to sit between the production's own choice and the installation's
+   * default, because that is where it had been: a local default until Cloud AI stopped being
+   * able to offer one. SPEC-034 R-15 lets General offer it again, so R-18 puts the parked entry
+   * back into `routing` on load and the fourth source is the same as the fourth's replacement.
    */
-  const candidates = [
-    chosenId,
-    productionModelId,
-    state?.app.routing.clearedLocal?.[capability],
-    state?.app.routing.defaults[capability],
-  ];
+  const candidates = [chosenId, productionModelId, state?.app.routing.defaults[capability]];
   for (const candidateId of candidates) {
     if (candidateId === undefined) continue;
     const usableCandidate = usable.find((m) => m.id === candidateId);

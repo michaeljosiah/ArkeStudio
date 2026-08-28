@@ -2414,7 +2414,6 @@ export class Coordinator {
             routing: {
               defaults: settings.routing,
               faults: routingFaults(settings, manifest),
-              clearedLocal: settings.clearedLocalRouting,
             },
           }
         : {}),
@@ -4643,7 +4642,6 @@ export class Coordinator {
           type: "routing.changed",
           routing: settings.routing,
           faults: routingFaults(settings, this.opts.manifest),
-          clearedLocal: settings.clearedLocalRouting,
         });
         return;
       }

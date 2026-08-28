@@ -27,6 +27,7 @@ import {
   processTone,
 } from "./engine-panes.js";
 import { EngineModelGroups, MachineRow } from "./local-models.js";
+import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -147,6 +148,7 @@ import {
   activationFor,
   comfyUiWeightsRecipeId,
   type EngineId,
+  modelEligible,
 } from "@arke-studio/contracts";
 
 
@@ -1544,7 +1546,7 @@ export function SettingsLayout() {
                 {(
                   [
                     ["providers", "Providers"],
-                    ["cloud-ai", "Cloud AI"],
+                    ["general", "General"],
                     ["harness", "Harness"],
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
@@ -2867,41 +2869,41 @@ function HarnessPane({
 }
 
 /**
- * The capabilities a cloud default routes, in the order Local AI states them (R-47, R-89). The
- * same words on both screens, in the same sequence, because the symmetry is what makes the split
- * legible rather than arbitrary.
+ * The capabilities a default routes, in the order the capability table states them (R-47, R-89).
  *
- * Not every capability Local AI draws: `voice-stt` and `voice-clone` have no routing default, and
- * a row here means a model somebody picks. The order is the rows' order, filtered.
+ * Not every row it draws: `voice-stt` and `voice-clone` have no routing default, and a row here
+ * means a model somebody picks. `llm` left with SPEC-034 R-17 — it wrote a setting nothing read,
+ * and the model that does the writing is chosen on Harness.
  */
 const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row) =>
-  row.capabilities.filter((c) => c === "image" || c === "video" || c === "voice-tts" || c === "music" || c === "llm"),
+  row.capabilities.filter((c) => c === "image" || c === "video" || c === "voice-tts" || c === "music"),
 );
 
 /**
- * Settings · Cloud AI (SPEC-033 §1.10). Which remote model runs each capability.
+ * Settings · General (SPEC-034 R-14). Which model runs each capability by default.
  *
- * It was called *Who does what*, which describes routing architecture rather than a decision
- * anybody wants to make. And it listed every model in the manifest, local included — a local
- * model was selectable without a key, so `llm → gemma4-12b` put all writing on this machine.
+ * It was Cloud AI, and before that *Who does what*. What changes with the rename is the thing the
+ * rename was blocked on: **a default may name a local model** (R-15). SPEC-033 R-61 filtered them
+ * out because the screen it replaced let one be chosen with nothing to run it — `llm →
+ * gemma4-12b` put all writing on this machine — but the defect was never *a local model
+ * appeared*, it was *a model that could not run was selectable*, and fit verdicts with SPEC-028
+ * R-35's eligibility refuse that directly now. R-15a wires that answer into the routing write, so
+ * the option below being unselectable is the courtesy and the refusal is the guarantee.
  *
- * **Cloud-only, absolutely** (R-3, R-61). No local model appears here in any state, including
- * disabled. That local default is not simply removed: it is moved out of routing at startup and
- * named here until the person has seen it, because a setting still in force and no longer
- * visible or changeable is the worst of the three outcomes and the one that happens by default.
+ * **A default is not a routing switch** (R-16). Where a piece of work runs stays a production's
+ * decision at dispatch (SPEC-033 R-74), and that decision outranks the default it started from.
  *
  * Providers keeps its job unchanged. This screen **references** a provider and never configures
  * one: the remedy for an unconnected provider is a route to Providers, never a key field here.
  */
-export function SettingsCloudAiScreen() {
+export function SettingsGeneralScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
-  const configured = new Set((state?.app.providers ?? []).filter((p) => p.configured).map((p) => p.id));
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
-  const disabled = new Set(state?.app.models.disabled ?? []);
   const drift = state?.app.drift ?? [];
   const statuses = state?.app.providers ?? [];
+  const eligibility = eligibilityInputs(state);
   /** Stored, tested, or neither — the three things Providers actually knows (SPEC-028 R-33). */
   const providerState = (id: ProviderId): string => {
     const status = statuses.find((p) => p.id === id);
@@ -2912,9 +2914,20 @@ export function SettingsCloudAiScreen() {
     // one nobody has tried, and the four words are the four the provider table actually has.
     return status.validation === "testing" ? "testing" : "untested";
   };
+  /**
+   * Where a model actually runs (R-16a), from the resolved engine rather than the provider flag.
+   * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
+   * their video drafts here while it renders on a box down the hall.
+   */
+  const runsOn = (model: ManifestModel): string => {
+    if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
+    const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
+    const locality = gated?.locality ?? state?.app.comfyui?.engine.locality ?? "local";
+    return locality === "remote" ? "another machine" : "this machine";
+  };
   return (
-    <div data-screen="settings-cloud-ai" className="fy-set">
-      <div className="fy-set__eyebrow">CLOUD AI</div>
+    <div data-screen="settings-general" className="fy-set">
+      <div className="fy-set__eyebrow">DEFAULTS</div>
       {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
           rather than a footnote because the next dispatch of that capability has nowhere to go. */}
       {routing.faults.map((f) => (
@@ -2922,38 +2935,15 @@ export function SettingsCloudAiScreen() {
           {f.reason}
         </Callout>
       ))}
-      {/* Not a fault, and not titled like one: the capability has somewhere to go, and this says
-          where. It retires itself the moment a default is set for that capability, so it cannot
-          end up sitting above a green row insisting otherwise (R-66, R-80). */}
-      {(Object.entries(routing.clearedLocal ?? {}) as Array<[Capability, string]>).map(([capability, modelId]) => (
-        <Callout key={`cleared-${capability}`} tone="neutral" title={`${CAPABILITY_LABEL[capability]} runs on this machine.`}>
-          {(manifest?.models ?? []).find((m) => m.id === modelId)?.displayName ?? modelId} · chosen per production, at
-          dispatch
-        </Callout>
-      ))}
       {ROUTED_CAPABILITIES.map((capability) => {
-        // Cloud-only by construction, never by a filter applied late: a local model is not
-        // listed here in any state, which is what makes the boundary checkable by enumerating
-        // what rendered rather than by reading the code (R-3, R-61).
-        const options = (manifest?.models ?? []).filter(
-          (m) => m.capability === capability && PROVIDER_TABLE[m.provider].local === false,
-        );
+        // Both halves, in one list (R-15). The picker is where R-61's filter used to be, and what
+        // stands in its place is eligibility — the same answer the routing write consults, so an
+        // option the screen greys out is one the write would refuse anyway (R-15a).
+        const options = (manifest?.models ?? []).filter((m) => m.capability === capability);
         const selected = routing.defaults[capability];
         const selectedModel = options.find((m) => m.id === selected);
-        // A model whose provider has no key cannot run, and neither can one switched off in
-        // Providers. Both stay listed, so the option is known to exist, and stay unselectable, so
-        // a dispatch cannot be routed into a dead end and fail after the estimate was accepted.
-        // No local exemption left to make: every option here takes a credential, so a model is
-        // usable when its provider is connected and nobody has switched it off.
-        const usable = (m: (typeof options)[number]) => !disabled.has(m.id) && configured.has(m.provider);
+        const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
-        // Two ways to be stranded, and they need different repairs: find a key, or turn it back on.
-        const strandReason =
-          selectedModel === undefined
-            ? ""
-            : disabled.has(selectedModel.id)
-              ? "turned off in Providers"
-              : `routed here, but ${PROVIDER_TABLE[selectedModel.provider].displayName} has no key`;
         return (
           <div key={capability} className="fy-set__row">
             <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
@@ -2973,40 +2963,40 @@ export function SettingsCloudAiScreen() {
                     {PROVIDER_TABLE[m.provider].displayName} · {m.displayName}
                     {/* Not on the selected one: the collapsed select is read beside the state
                         text, which already says why, and twice on one row reads as two problems. */}
-                    {usable(m) || m.id === selected
-                      ? ""
-                      : disabled.has(m.id)
-                        ? " — turned off in Providers"
-                        : ` — needs a ${PROVIDER_TABLE[m.provider].displayName} key`}
+                    {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
             </select>
             {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
-            {/* A model names its provider and that provider's connection state — the
-                stored-versus-tested distinction SPEC-028 R-33 requires, displayed rather than
-                re-derived (R-63). The remedy is the route at the foot, never a key field here. */}
+            {/* A model names its provider and where that provider's work runs — the connection
+                state SPEC-028 R-33 requires for a keyed one, the resolved engine's locality for a
+                local one (R-16a). Displayed rather than re-derived (R-63). */}
             {selectedModel && !stranded && (
               <span className="fy-set__state">
-                {PROVIDER_TABLE[selectedModel.provider].displayName} ·{" "}
-                {providerState(selectedModel.provider)} · {modelCapabilityCopy(selectedModel)}
+                {PROVIDER_TABLE[selectedModel.provider].displayName} · {runsOn(selectedModel)} ·{" "}
+                {modelCapabilityCopy(selectedModel)}
               </span>
             )}
             {stranded && selectedModel && (
               <span className="fy-set__state">
-                {PROVIDER_TABLE[selectedModel.provider].displayName} · {providerState(selectedModel.provider)} ·{" "}
-                {strandReason}
+                {PROVIDER_TABLE[selectedModel.provider].displayName} · {strandReason(state, selectedModel)}
               </span>
             )}
             <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
           </div>
         );
       })}
-      <div className="fy-set__note">
-        defaults for new work · any production can override per dispatch
-        {manifest ? ` · manifest v${manifest.manifestVersion}` : ""}
+      {/* Its label and the route, with no picker and no sentence (R-17): the absence of a control
+          is what says the choice is not made here. */}
+      <div className="fy-set__row">
+        <span className="fy-set__routelabel">{CAPABILITY_LABEL.llm}</span>
+        <button type="button" className="fy-set__link" onClick={() => navigate("/settings/harness")}>
+          on Harness
+        </button>
+        <span style={{ flex: 1 }} />
       </div>
       {/* The way out, at the foot (40d): every repair this screen can suggest — turn a model back
-          on, or find a key for one — is made on the Providers tab. */}
+          on, find a key for one, start an engine — is made on the Providers tab. */}
       <div className="fy-set__actions">
         <Button variant="secondary" onClick={() => navigate("/settings/providers")}>
           Open Providers

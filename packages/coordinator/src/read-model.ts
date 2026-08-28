@@ -264,7 +264,6 @@ export class ReadModel {
             routing: {
               defaults: event.routing,
               faults: event.faults,
-              ...(event.clearedLocal !== undefined ? { clearedLocal: event.clearedLocal } : {}),
             },
           },
         };
@@ -279,7 +278,6 @@ export class ReadModel {
             routing: {
               ...this.state.app.routing,
               faults: event.faults,
-              ...(event.clearedLocal !== undefined ? { clearedLocal: event.clearedLocal } : {}),
             },
           },
         };
