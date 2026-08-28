@@ -401,6 +401,25 @@ describe("the compatibility probe is the API floor (D14)", () => {
     ]);
   });
 
+  /*
+   * #631. Every base here was written without a trailing slash, so nothing exercised the shape a
+   * person actually saves: the URL field's placeholder reads `http://127.0.0.1:8188` and the
+   * value stored from it may well end in `/`. Joined unchanged that asks for `//system_stats`,
+   * which ComfyUI answers 404 to while serving `/system_stats` a 200 — so a healthy engine read
+   * as "the engine did not answer" and every local recipe stayed disabled behind it.
+   */
+  it("a base with a trailing slash does not become a double slash", async () => {
+    const { fetch, calls } = engineFake([
+      { match: /system_stats/, status: 200, body: { system: { comfyui_version: "0.33.1" } } },
+    ]);
+    const probes = await new ComfyUiClient(fetch, () => "http://127.0.0.1:8188/", OK_PREFLIGHT).validateKey("");
+    assert.ok(
+      probes.every((probe) => probe.available),
+      "a reachable engine behind a trailing-slash URL is still reachable",
+    );
+    assert.equal(calls[0]!.url, "http://127.0.0.1:8188/system_stats");
+  });
+
   it("compares versions numerically, not lexically", () => {
     assert.equal(meetsVersionFloor("0.33.1"), true); // "0.33" < "0.3.45" lexically — the trap
     assert.equal(meetsVersionFloor("0.3.45"), true);

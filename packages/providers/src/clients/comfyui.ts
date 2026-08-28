@@ -261,12 +261,29 @@ export class ComfyUiClient implements ProviderClient {
     this.closeSocket();
   }
 
+  /**
+   * The engine origin, with any trailing slash taken off (#631).
+   *
+   * Every request below joins `${base}/path`, and the base is whatever a person typed into
+   * Settings — `http://127.0.0.1:8188/` is the form the field's own placeholder suggests. Joined
+   * unchanged that yields `//system_stats`, which ComfyUI answers 404 to while serving
+   * `/system_stats` a 200. The engine was healthy and every local recipe sat disabled behind
+   * "the engine did not answer", which is the one thing that had not happened.
+   *
+   * `coordinator/comfyui/engine.ts` has always stripped it for the probe it owns. This is the
+   * same rule on the client's side of the boundary, applied once so the eleven joins below
+   * cannot disagree about it.
+   */
+  private static origin(base: string): string {
+    return base.replace(/\/+$/, "");
+  }
+
   private require(): string {
     const base = this.baseUrl();
     if (base === null) {
       throw new Error("comfyui: no engine is running — point Settings at an install, or download the managed one");
     }
-    return base;
+    return ComfyUiClient.origin(base);
   }
 
   /**
@@ -275,7 +292,10 @@ export class ComfyUiClient implements ProviderClient {
    */
   async validateKey(): Promise<CapabilityProbe[]> {
     const capabilities = ["image", "video", "voice-tts"] as const;
-    const base = this.baseUrl();
+    // Not `require()`: this one answers rather than throws when nothing is configured, so it
+    // reads the base itself — and therefore has to normalise it itself.
+    const raw = this.baseUrl();
+    const base = raw === null ? null : ComfyUiClient.origin(raw);
     if (base === null) {
       return capabilities.map((capability) => ({
         capability,
