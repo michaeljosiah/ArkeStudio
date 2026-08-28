@@ -1963,6 +1963,56 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-radio__dot { width: 13px; height: 13px; border-radius: 99px; border: 1.5px solid var(--neutral-300); flex: none; }
 .fy-radio--on .fy-radio__dot { border: 4px solid var(--foreground); }
 .fy-radio__sub { font: 400 11px/1.55 var(--font-mono); color: var(--neutral-400); margin-top: 7px; }
+/*
+ * The door's three cards (turn 113). Bands are pinned by the design master's rule: print
+ * 344x258 inside a 5px paper edge, eyebrow 13, name 27, examples 40 fixed so three cards of
+ * unequal copy stay one row, affordance 17.
+ *
+ * The rotation lives on .fy-door__print and NEVER on .fy-door: the card runs fy-fade-up, and
+ * that keyframe ends on `transform: none`, which would straighten a tilted card the instant its
+ * entrance finished.
+ */
+.fy-door {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  padding: 14px 14px 20px;
+  transition: var(--transition-control);
+  animation: fy-fade-up 0.5s var(--ease-out) both;
+}
+.fy-door:hover { border-color: var(--neutral-400); }
+.fy-door:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.fy-door__print {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 344 / 258;
+  background: var(--card);
+  padding: 5px;
+  border-radius: 11px;
+  box-shadow: var(--shadow-md);
+}
+.fy-door__print img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 7px; }
+.fy-door__pad { display: block; padding: 0 6px; }
+.fy-door__pad > * { display: block; }
+.fy-door .fy-mono { margin-top: 24px; }
+.fy-door__name { font: 650 21px var(--font-sans); letter-spacing: -0.02em; margin-top: 8px; }
+/* Fixed, not min: a third card with a longer line would otherwise stand taller than its two
+   neighbours and the row would stop reading as one set. */
+.fy-door__body {
+  height: 40px;
+  font: 400 13px/1.55 var(--font-sans);
+  color: var(--muted-foreground);
+  margin-top: 8px;
+}
+.fy-door__go { font: 400 12px var(--font-sans); color: var(--neutral-400); margin-top: 24px; }
 .fy-notecard {
   display: flex;
   align-items: center;

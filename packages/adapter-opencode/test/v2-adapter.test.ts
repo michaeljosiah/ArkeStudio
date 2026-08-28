@@ -11,12 +11,20 @@ import { credentialEnvPatch } from "../src/config.js";
 import { sameDirectory } from "../src/v2/http.js";
 import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src/discovery.js";
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
+import { until } from "./wait.js";
+
+// 30s: the stub answers over loopback in-process, but a starved shard stalls the event loop
+// for seconds at a time — the settle tier from the coordinator's supervisor.test.ts note.
+const SETTLE_MS = 30_000;
 
 /** Wait until `predicate` has seen enough events, or fail loudly with what arrived. */
 async function collect(
   adapter: OpenCodeV2Adapter,
   isDone: (events: HarnessEvent[]) => boolean,
-  timeoutMs = 5_000,
+  // The deadline starts at call time, and several tests create the collect promise before
+  // gating on 30s waits — a smaller default here would fire mid-gate and abort the stream
+  // while those budgets were still legitimately running.
+  timeoutMs = SETTLE_MS,
 ): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
   const abort = new AbortController();
@@ -33,14 +41,6 @@ async function collect(
   return events;
 }
 
-async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) assert.fail("timed out waiting for condition");
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-
 /**
  * Wait until the pump's connect-time resync has run (its permission GET is the last leg).
  * The stub pre-populates REST state before streaming frames, so on a slow runner the resync
@@ -48,8 +48,10 @@ async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
  * adapter behavior, but a test scripting "deltas then completion" must start after it.
  */
 async function untilResynced(stub: StubOpenCodeV2, mark: number): Promise<void> {
-  await until(() =>
-    stub.requests.slice(mark).some((r) => r.method === "GET" && r.path.endsWith("/permission")),
+  await until(
+    () => stub.requests.slice(mark).some((r) => r.method === "GET" && r.path.endsWith("/permission")),
+    "the connect-time resync to finish (its permission GET is the last leg)",
+    SETTLE_MS,
   );
 }
 
@@ -237,7 +239,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const seen = stub.requests.filter(isPrompt).length;
       await adapter.dispatchAsync({ sessionId: ref.sessionId, parts: [{ type: "text", text: "one" }] });
       await adapter.dispatchAsync({ sessionId: ref.sessionId, parts: [{ type: "text", text: "two" }] });
-      await until(() => stub.requests.filter(isPrompt).length >= seen + 2);
+      await until(() => stub.requests.filter(isPrompt).length >= seen + 2, "both scripted prompts to reach the stub", SETTLE_MS);
       const prompts = stub.requests.filter(isPrompt).slice(-2);
       const ids = prompts.map((p) => (p.body as { id?: string }).id);
       assert.ok(ids.every((id) => id?.startsWith("msg_arke_")), `wire ids in the msg_ namespace: ${ids.join(", ")}`);
@@ -257,7 +259,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
         adapter,
         (events) => events.some((e) => e.type === "message.completed"),
       );
-      await until(() => stub.streamCount > 0);
+      await until(() => stub.streamCount > 0, "the stub to open an event stream", SETTLE_MS);
       await untilResynced(stub, mark);
       stub.emitTurn(ref.sessionId, "It printed arke-spike.");
       const events = await eventsPromise;
@@ -295,7 +297,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
         adapter,
         (events) => events.some((e) => e.type === "permission.requested"),
       );
-      await until(() => stub.streamCount > 0);
+      await until(() => stub.streamCount > 0, "the stub to open an event stream", SETTLE_MS);
       await untilResynced(stub, mark);
       stub.emitHeldToolCall(ref.sessionId, "per_stub_1", "echo arke-spike");
       const events = await eventsPromise;
@@ -408,7 +410,7 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
       const ref = await adapter.createSession({ purpose: "authoring", agent: "scene-writer" });
       const mark = stub.requests.length;
       const eventsPromise = collect(adapter, (events) => events.some((e) => e.type === "message.completed"));
-      await until(() => stub.streamCount > 0);
+      await until(() => stub.streamCount > 0, "the stub to open an event stream", SETTLE_MS);
       await untilResynced(stub, mark);
       stub.failNextMessageFetch = true;
       stub.emitTurn(ref.sessionId, "Salvaged from the stream.");

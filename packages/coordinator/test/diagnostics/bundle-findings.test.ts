@@ -42,6 +42,7 @@ function sources(over: Partial<DiagnosticsSources> = {}): DiagnosticsSources {
     models: { disabled: [] },
     spend: null,
     ledger: [],
+    ledgerUnavailable: false,
     drift: [],
     builds: [],
     update: IDLE_UPDATE_STATE,

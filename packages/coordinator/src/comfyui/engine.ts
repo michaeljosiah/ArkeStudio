@@ -34,6 +34,10 @@ export interface ComfyUiRecipeFacts {
   capability: "image" | "video" | "voice-tts";
   version: number;
   minVramMb: number;
+  /** The busy check's floor — free VRAM, a different question from the card-size floor above. */
+  minFreeVramMb: number;
+  /** The measured system-memory floor, where the recipe states one — offloading spends RAM. */
+  minMemMb?: number;
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
@@ -1036,6 +1040,30 @@ export class ComfyUiEngineService {
       );
     }
     /*
+     * 6b · System memory, where the recipe measured a floor. The manifest gate only steers
+     * setup: weights that already exist in a mapped models folder reach this walk without ever
+     * meeting fitFor, so a 16 GB machine would enqueue the workload that measured 32 GB — and
+     * memory is not VRAM's problem: /free reclaims nothing here, so there is no busy tier.
+     */
+    if (recipe.minMemMb !== undefined) {
+      const mem = engine.locality === "remote" ? null : (probes?.memMb ?? null);
+      if (mem === null) {
+        return {
+          ...base,
+          state: "unknown",
+          reason: `Memory could not be measured. The ${gb(recipe.minMemMb)} floor was not checked.`,
+          reasonKind: "memory",
+        };
+      }
+      if (mem < recipe.minMemMb) {
+        return disabled(
+          "memory",
+          `Needs ${gb(recipe.minMemMb)} memory. This machine has ${gb(mem)}. Cloud ${recipe.capability} still works.`,
+          `Cloud ${recipe.capability} still works.`,
+        );
+      }
+    }
+    /*
      * 7 · The card is big enough. Could it be free enough?
      *
      * A card clears the floor and the recipe still cannot run, because a browser or another AI
@@ -1053,15 +1081,28 @@ export class ComfyUiEngineService {
      * a machine that would have worked costs the feature. The sentence is also a different one
      * from the too-small case above — that card will never be big enough, this one is busy —
      * even though both disable, because both mean pressing Generate buys a wait, not a take.
+     *
+     * The floor here is the recipe's FREE-VRAM figure, not the card-size floor above. Reusing
+     * one number for both refused the configuration H3 was verified on: a streaming recipe's
+     * card floor can equal the whole card while the free requirement is a fraction of it.
      */
     const free =
       engine.locality === "remote" || !this.deps.freeVramMb
         ? null
         : await this.deps.freeVramMb().catch(() => null);
-    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
+    /*
+     * The allowance is capped below the recipe's own free floor: a floor at or under the reclaim
+     * assumption (H3's 4 GB against the 4 GB allowance) would otherwise make this inequality
+     * unsatisfiable for any nonnegative reading — a slammed card advertised ready, and Generate
+     * bought the dependency verification walk before dispatch refused. Half the floor is the
+     * largest assumption that still leaves the busy sentence sayable.
+     */
+    const assumedReclaimMb =
+      RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb ? RECLAIMABLE_VRAM_MB : Math.floor(recipe.minFreeVramMb / 2);
+    if (free !== null && free + assumedReclaimMb < recipe.minFreeVramMb) {
       return disabled(
         "vram-busy",
-        `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
+        `Needs ${gb(recipe.minFreeVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
     }

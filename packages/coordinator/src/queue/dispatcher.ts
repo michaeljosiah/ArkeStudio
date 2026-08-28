@@ -131,7 +131,14 @@ export interface JobQueueOptions {
   clients: Record<string, DispatchClient>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
-  /** The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger. */
+  /**
+   * The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger.
+   * The reads MUST reject when the ledger exists but cannot be read, never answer empty —
+   * "empty" here means "never billed", and the queue would append a duplicate entry for work
+   * that was. The queue treats a rejection as unknown: it parks the ledger-gated reconciliation
+   * and appends nothing, leaving entries missing rather than doubled, because a missing entry
+   * is completed idempotently by the next start-up and a duplicate is permanent.
+   */
   ledger: {
     readJobIds(): Promise<ReadonlySet<string>>;
     has(jobId: string): Promise<boolean>;
@@ -1085,9 +1092,19 @@ export class JobQueue {
     const terminal: Job = { ...job, status: outcome, error, updatedAt: this.clock() };
     await this.transition(terminal);
     if (this.disposed) return;
-    await this.appendLedgerOnce(terminal, costMicroUsd);
+    // An append that landed this pass is proof enough; asking the file again could only be
+    // wrong. A lock arriving in that window (a scanner opening the file we just wrote) used to
+    // answer "no entry" and fail a finalization whose spend record was durably in place —
+    // settled, so no later start-up replayed it, and the user got a needs-you row for work that
+    // had wholly succeeded. Only when nothing was appended is presence still an open question,
+    // and there `catch → false` is the honest read: unknown means the follow-on waits.
+    const ledgered = await this.appendLedgerOnce(terminal, costMicroUsd);
     if (this.disposed) return;
-    if (terminal.finalization?.status === "pending" && !(await this.opts.ledger.has(terminal.id))) {
+    if (
+      terminal.finalization?.status === "pending" &&
+      !ledgered &&
+      !(await this.opts.ledger.has(terminal.id).catch(() => false))
+    ) {
       await this.failFinalization(terminal);
       return;
     }
@@ -1113,6 +1130,9 @@ export class JobQueue {
     } catch {
       // A failed ledger write is the ⑦ crash window: the terminal row is already durable, and
       // the next start-up completes the missing entry idempotently (R-16). Never crash a pump.
+      // A failed ledger READ lands here too, and deliberately skips the append: with presence
+      // unknowable, appending risks the permanent duplicate while skipping risks only the
+      // missing entry that ⑦ recovery already completes.
       if (startupJobIds && (await this.opts.ledger.has(job.id).catch(() => false))) {
         startupJobIds.add(job.id);
         return true;
@@ -1224,7 +1244,16 @@ export class JobQueue {
   async start(): Promise<ReconcileAction[]> {
     const history = await this.journal.readHistory();
     const folded = foldJobHistory(history);
-    const ledgerJobIds = new Set(await this.opts.ledger.readJobIds());
+    // `null` when the ledger exists but could not be read. Not an empty set: an empty snapshot
+    // says every terminal job in history was never billed, and the ⑦ completion pass below
+    // would append a second entry for each — permanent duplicates in an append-only file,
+    // doubling every spend total and reading exactly like the double-charge bug (R-16, D11).
+    // Unknown parks the ledger-gated work instead; entries stay missing until a start-up that
+    // can read the file completes them, the same idempotent recovery a ⑦ crash relies on.
+    // Job recovery itself proceeds — none of it consults the ledger, and R-18 still holds.
+    const ledgerJobIds = await this.opts.ledger
+      .readJobIds()
+      .then((ids) => new Set(ids), () => null);
     const missingLedger: Job[] = [];
     for (const { job } of folded) this.jobs.set(job.id, job);
     const report: ReconcileAction[] = [];
@@ -1260,16 +1289,26 @@ export class JobQueue {
 
     for (const { job, prior } of folded) {
       if (TERMINAL.has(job.status)) {
-        // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
-        if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
-        if (
-          job.status === "succeeded" &&
-          ledgerJobIds.has(job.id) &&
-          this.needsReplayableFinalization(job) &&
-          this.finalizationUnsettled(job)
-        ) {
+        // Only what the ledger can answer parks. The append and the replay both turn on
+        // "was this billed", so an unreadable snapshot withholds them; the fail verdict below
+        // never asked, and parking it stranded the job as an undeletable, uncancellable
+        // "preparing result" row for the rest of the session (Codex round 1).
+        if (ledgerJobIds !== null) {
+          // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
+          if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
+        }
+        // A replayable follow-on's verdict turns on the ledger — entry present replays it,
+        // entry absent fails it — so an unreadable snapshot withholds that one. Every other
+        // pending follow-on is failed either way, which is why withholding it bought nothing.
+        const replayable =
+          job.status === "succeeded" && this.needsReplayableFinalization(job) && this.finalizationUnsettled(job);
+        if (replayable && ledgerJobIds?.has(job.id) === true) {
           await this.retryFinalization(job.id);
-        } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
+        } else if (
+          job.status === "succeeded" &&
+          job.finalization?.status === "pending" &&
+          !(replayable && ledgerJobIds === null)
+        ) {
           // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
           // preparation honestly instead of duplicating takes or mutating domain state.
           await this.failFinalization(job);
@@ -1346,9 +1385,13 @@ export class JobQueue {
       }
     }
 
-    for (const job of missingLedger) {
-      if (await this.appendLedgerOnce(job, undefined, ledgerJobIds)) {
-        report.push({ jobId: job.id, action: "ledger-completed" });
+    // missingLedger is only ever populated from a readable snapshot; the guard restates that
+    // for the types and keeps the completion pass structurally unreachable while parked.
+    if (ledgerJobIds !== null) {
+      for (const job of missingLedger) {
+        if (await this.appendLedgerOnce(job, undefined, ledgerJobIds)) {
+          report.push({ jobId: job.id, action: "ledger-completed" });
+        }
       }
     }
 
@@ -1557,6 +1600,15 @@ export class JobQueue {
     }
   }
 
+  /**
+   * The world-open sweep (SPEC-014): replay every finalization this world is still owed.
+   *
+   * Ledger-gated like start-up's replay, and for the same reason — this is the one automatic
+   * path that reaches a *pending* row, so without the gate a job whose verdict start-up
+   * deliberately withheld got replayed the moment its world opened, running the follow-on
+   * ahead of a spend record nobody could confirm (Codex round 1). The park has to hold until
+   * a start-up that can read the file, not until the first world open.
+   */
   async retryFinalizationsForWorld(worldId: string): Promise<void> {
     const jobs = [...this.jobs.values()].filter(
       (job) =>
@@ -1565,7 +1617,12 @@ export class JobQueue {
         this.needsReplayableFinalization(job) &&
         this.finalizationUnsettled(job),
     );
-    for (const job of jobs) await this.retryFinalization(job.id);
+    if (jobs.length === 0) return;
+    // One probe for the sweep, not one per job: the answer cannot change mid-pass in a way
+    // that would make a withheld replay safe.
+    const billed = await this.opts.ledger.readJobIds().catch(() => null);
+    if (billed === null) return;
+    for (const job of jobs) if (billed.has(job.id)) await this.retryFinalization(job.id);
   }
 
   /**

@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tempDir } from "./tmp.js";
+import { until } from "./wait.js";
 import {
   ChildLedger,
   ownerStamp,
@@ -35,15 +36,6 @@ function processGone(pid: number): boolean {
   } catch {
     return true;
   }
-}
-
-async function eventually(check: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(check(), "condition not met in time");
 }
 
 const nodeImage = basename(process.execPath).toLowerCase();
@@ -114,7 +106,9 @@ describe("ChildLedger", () => {
       const report = await ledger.reapStale();
       assert.equal(report.reaped.length, 1, `expected a reap, got ${JSON.stringify(report)}`);
       assert.equal(report.reaped[0]!.pid, orphan.pid);
-      await eventually(() => processGone(orphan.pid!));
+      // 30s: process death behind a taskkill spawn — the settle tier from supervisor.test.ts's
+      // budget note; polling returns the moment the orphan is gone.
+      await until(() => processGone(orphan.pid!), "the reaped orphan to be gone", 30_000);
       assert.deepEqual(await readChildren(path), []);
     } finally {
       orphan.kill("SIGKILL");

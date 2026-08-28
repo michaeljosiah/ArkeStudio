@@ -11,6 +11,7 @@ import {
   type JobQueueOptions,
 } from "../../src/queue/dispatcher.js";
 import { FakeProvider, jpegBytes, pngBytes, truncatedPngBytes, webpBytes } from "./fake-provider.js";
+import { until } from "../wait.js";
 
 /**
  * The exactly-once suite (SPEC-009 §3.2): kills are simulated by disposing the running queue
@@ -28,6 +29,8 @@ interface Harness {
   ledger: {
     entries: LedgerEntry[];
     onAppend: ((e: LedgerEntry) => void) | null;
+    /** Set to make both reads reject — the file exists but cannot be read (EACCES, a lock). */
+    failReads: Error | null;
     readJobIdsCount: number;
     hasCount: number;
   };
@@ -73,7 +76,7 @@ function build(
   },
 ): Harness {
   const events: DomainEvent[] = [];
-  const ledger: Harness["ledger"] = { entries: [], onAppend: null, readJobIdsCount: 0, hasCount: 0 };
+  const ledger: Harness["ledger"] = { entries: [], onAppend: null, failReads: null, readJobIdsCount: 0, hasCount: 0 };
   const faults: Harness["faults"] = [];
   const queue = new JobQueue({
     journalPath,
@@ -83,10 +86,12 @@ function build(
     ledger: {
       readJobIds: async () => {
         ledger.readJobIdsCount += 1;
+        if (ledger.failReads) throw ledger.failReads;
         return new Set(ledger.entries.map((entry) => entry.jobId));
       },
       has: async (jobId) => {
         ledger.hasCount += 1;
+        if (ledger.failReads) throw ledger.failReads;
         return ledger.entries.some((e) => e.jobId === jobId);
       },
       append: async (entry) => {
@@ -142,13 +147,9 @@ const INPUT: EnqueueInput = {
   estimatedMicroUsd: 130000,
 };
 
-async function until(cond: () => boolean, ms = 10000): Promise<void> {
-  const start = Date.now();
-  while (!cond()) {
-    if (Date.now() - start > ms) throw new Error("condition not reached in time");
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
+// 30s everywhere below: the folds are in-process, but a starved shard stalls the event loop
+// for seconds at a time — the settle tier from supervisor.test.ts's budget note.
+const FOLD_MS = 30_000;
 
 function foldedJob(h: Harness, id: string): Job | undefined {
   return h.queue.listJobs().find((j) => j.id === id);
@@ -220,6 +221,249 @@ describe("startup reconciliation scaling", () => {
   });
 });
 
+/**
+ * The seam contract: an unreadable ledger rejects rather than answering empty (R-16). Folded
+ * into [], the startup snapshot said every job in history was never billed, and the ⑦
+ * completion pass appended a second entry for each — permanent duplicates in an append-only
+ * file. The queue's fail-safe is to park the ledger-gated work: entries stay missing (the
+ * recoverable state ⑦ already handles) rather than doubled, and finalization verdicts wait
+ * for a start-up that can actually read the file.
+ */
+function terminalRow(suffix: string, extra: Partial<Job> = {}): Job {
+  return {
+    ...INPUT,
+    id: `jb_01J8E000000000000000000${suffix}`,
+    idempotencyKey: `01J8E100000000000000000${suffix}`,
+    status: "succeeded",
+    providerJobId: `remote-${suffix}`,
+    attempt: 1,
+    error: null,
+    createdAt: "2026-08-04T12:00:00.000Z",
+    updatedAt: "2026-08-04T12:01:00.000Z",
+    ...extra,
+  };
+}
+
+function entryFor(job: Job): LedgerEntry {
+  return {
+    ts: job.updatedAt,
+    worldId: job.worldId,
+    productionId: job.productionId!,
+    jobId: job.id,
+    provider: job.provider,
+    model: job.model,
+    outcome: "succeeded",
+    estimatedMicroUsd: job.estimatedMicroUsd,
+    actualMicroUsd: job.estimatedMicroUsd,
+    actualSource: "manifest-derived",
+  };
+}
+
+describe("an unreadable ledger parks reconciliation instead of answering 'never billed'", () => {
+  it("appends no duplicate for a job that was billed, and no completion for one that was not", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    h.queue.dispose();
+    const billed = terminalRow("DB1");
+    const unbilled = terminalRow("DB2");
+    await appendFile(h.journalPath, `${JSON.stringify(billed)}\n${JSON.stringify(unbilled)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(billed));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    const report = await h2.queue.start();
+    assert.equal(h2.ledger.entries.length, 1, "nothing appended while billed-or-not is unknowable");
+    assert.equal(report.some((a) => a.action === "ledger-completed"), false);
+    assert.equal(fake.submitCount, 0, "parking the ledger never re-dispatches terminal work");
+    h2.queue.dispose();
+
+    // The restart that can read the file completes exactly the one genuinely missing entry.
+    const h3 = h2.revive();
+    const recovered = await h3.queue.start();
+    assert.deepEqual(
+      recovered.filter((a) => a.action === "ledger-completed").map((a) => a.jobId),
+      [unbilled.id],
+    );
+    assert.equal(h3.ledger.entries.length, 2);
+    assert.equal(h3.ledger.entries.filter((e) => e.jobId === billed.id).length, 1, "still exactly one (R-16)");
+    h3.queue.dispose();
+  });
+
+  it("a live terminalization skips the append rather than risking a duplicate, and ⑦ completes it later", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    h.ledger.failReads = new Error("EACCES: permission denied, read");
+    const job = await h.queue.enqueue(INPUT);
+    await until(
+      () => h.events.some((e) => e.type === "job.ready" && e.job.id === job.id),
+      "the job to reach ready with the ledger unreadable",
+    );
+    assert.equal(foldedJob(h, job.id)?.status, "succeeded", "the job itself is unaffected");
+    assert.equal(h.ledger.entries.length, 0, "presence unknowable → no append");
+    h.queue.dispose();
+
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((a) => a.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(h2.ledger.entries.length, 1);
+    assert.equal(fake.submitCount, 1, "recovery never resubmitted");
+    h2.queue.dispose();
+  });
+
+  it("a live follow-on fails its finalization honestly rather than running ahead of the spend record", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.ledger.failReads = new Error("EACCES: permission denied, read");
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/recover" },
+      landing: { dir: "references/maren-kest/incoming" },
+    });
+    await until(
+      () => foldedJob(h, job.id)?.finalization?.status === "failed",
+      "the finalization to fail rather than run ahead of the spend record",
+    );
+    assert.equal(foldedJob(h, job.id)?.status, "succeeded");
+    assert.equal(finalizations, 0, "no follow-on ran ahead of an unconfirmed entry");
+    assert.equal(h.ledger.entries.length, 0);
+    h.queue.dispose();
+
+    // The readable restart completes the missing entry; the failed finalization keeps its
+    // user-facing retry rather than replaying by itself.
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((a) => a.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(h2.ledger.entries.length, 1);
+    assert.equal(foldedJob(h2, job.id)?.finalization?.status, "failed");
+    await h2.queue.retryFinalization(job.id);
+    assert.equal(finalizations, 1, "the explicit retry now runs, with the entry in place");
+    assert.equal(h2.ledger.entries.length, 1, "and appends nothing further");
+    h2.queue.dispose();
+  });
+
+  it("neither replays nor fails a pending finalization on a guess; the readable restart decides", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal = terminalRow("DF1", {
+      target: { kind: "voice-preview", id: "maren-kest/elevenlabs/v1" },
+      landedFiles: [".cache/voice-previews/lf1.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "pending", "no verdict on a guess");
+    assert.equal(finalizations, 0);
+    assert.equal(h2.ledger.entries.length, 1, "and no duplicate entry either");
+    h2.queue.dispose();
+
+    const h3 = h2.revive();
+    await h3.queue.start();
+    assert.equal(foldedJob(h3, terminal.id)?.finalization?.status, "complete", "the readable restart replays it");
+    assert.equal(finalizations, 1);
+    assert.equal(h3.ledger.entries.length, 1);
+    h3.queue.dispose();
+  });
+
+  it("a world open does not replay what the park withheld — only a readable start-up releases it", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal = terminalRow("DW1", {
+      target: { kind: "voice-preview", id: "maren-kest/elevenlabs/v2" },
+      landedFiles: [".cache/voice-previews/dw1.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    // The world open that used to walk straight past the park (Codex round 1).
+    await h2.queue.retryFinalizationsForWorld(INPUT.worldId);
+    assert.equal(finalizations, 0, "the follow-on did not run ahead of a spend record nobody could confirm");
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "pending");
+
+    // Readable again, without a restart: the same world open now releases it.
+    h2.ledger.failReads = null;
+    await h2.queue.retryFinalizationsForWorld(INPUT.worldId);
+    assert.equal(finalizations, 1);
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(h2.ledger.entries.length, 1);
+    h2.queue.dispose();
+  });
+
+  it("still fails a non-replayable pending follow-on, whose verdict never needed the ledger", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    // A shot: a follow-on target outside the replayable set, so start-up's verdict is "fail"
+    // whether or not the entry landed. Parking it left an undeletable "preparing result" row.
+    const terminal = terminalRow("DN1", {
+      target: { kind: "shot", id: "sh_14" },
+      landedFiles: ["incoming/DN1.mp4"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    assert.equal(
+      foldedJob(h2, terminal.id)?.finalization?.status,
+      "failed",
+      "the ledger-free verdict still runs, so the row settles instead of stranding",
+    );
+    assert.equal(finalizations, 0, "failing it replays nothing");
+    assert.equal(h2.ledger.entries.length, 1, "and appends nothing on a guess");
+    h2.queue.dispose();
+  });
+
+  it("does not fail a finalization whose entry it just appended, when the next read is locked out", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    // The scanner opens the file in the window between the append landing and the check —
+    // asking again could only be wrong, and its wrong answer used to settle the row as failed.
+    h.ledger.onAppend = () => {
+      h.ledger.failReads = new Error("EBUSY: resource busy or locked");
+    };
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/window" },
+      landing: { dir: "references/maren-kest/incoming" },
+    });
+    await until(
+      () => foldedJob(h, job.id)?.finalization?.status === "complete",
+      "the finalization to complete on the append the check could not re-read",
+    );
+    assert.equal(finalizations, 1, "the follow-on ran: its spend record had durably landed");
+    assert.equal(h.ledger.entries.length, 1);
+    h.queue.dispose();
+  });
+});
+
 describe("the happy path writes exactly one ledger entry and lands artifacts atomically", () => {
   it("queued → submitting → running → succeeded, with landing", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
@@ -227,7 +471,7 @@ describe("the happy path writes exactly one ledger entry and lands artifacts ato
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "productions/saltlight/takes/tk_x" } });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 1);
     assert.deepEqual(foldedJob(h, job.id)?.landedFiles, ["productions/saltlight/takes/tk_x/frame.png"]);
     const landed = await readFile(join(h.worldDir, "productions/saltlight/takes/tk_x/frame.png"));
@@ -303,7 +547,7 @@ describe("ephemeral provider image references", () => {
       params: { prompt: "preserve identity", references: ["references/maren-kest/main.png"] },
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(resolutions, 1);
     assert.equal(fake.submitCount, 1);
     assert.equal(fake.pollCount, 0, "synchronous image output lands directly");
@@ -331,7 +575,7 @@ describe("ephemeral provider image references", () => {
       capability: "image",
       params: { references: ["../outside.png"] },
     });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 0);
     assert.equal(foldedJob(h, job.id)?.attempt, 0);
     assert.match(foldedJob(h, job.id)?.error ?? "", /invalid/);
@@ -347,7 +591,7 @@ describe("ephemeral provider image references", () => {
       capability: "image",
       params: { references: ["references/maren-kest/main.png"] },
     });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 0);
     assert.equal(foldedJob(h, job.id)?.attempt, 0);
     assert.match(foldedJob(h, job.id)?.error ?? "", /not every image reference/);
@@ -418,10 +662,14 @@ describe("ephemeral provider voice references", () => {
       voiceUploadConfirmedFor: "remote-1",
       landing: { dir: "productions/saltlight/audio" },
     });
-    await until(() => {
-      const current = foldedJob(h, job.id);
-      return current?.status === "succeeded" || current?.status === "failed";
-    });
+    await until(
+      () => {
+        const current = foldedJob(h, job.id);
+        return current?.status === "succeeded" || current?.status === "failed";
+      },
+      "the job to fold to a terminal status",
+      FOLD_MS,
+    );
     assert.equal(foldedJob(h, job.id)?.status, "succeeded", foldedJob(h, job.id)?.error ?? undefined);
     assert.equal(foldedJob(h, job.id)?.voiceUploadConfirmedFor, "remote-1");
     assert.equal(fake.submitCount, 1);
@@ -458,7 +706,7 @@ describe("ephemeral provider voice references", () => {
       voiceReference: true,
       landing: { dir: ".sessions/sess/media/take" },
     });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.deepEqual(fake.submittedVoiceReference?.data, secret);
     const journal = await readFile(h.journalPath, "utf8");
     assert.match(journal, /harbour-glass/);
@@ -488,7 +736,7 @@ describe("ephemeral provider voice references", () => {
       params: { voiceId: "v1", text: "The harbour remembers." },
       landing: { dir: "productions/saltlight/audio" },
     });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     const journal = await readFile(h.journalPath, "utf8");
     assert.doesNotMatch(journal, /"status":"running"/);
     assert.equal(elevenlabs.pollCount, 0);
@@ -519,7 +767,7 @@ describe("ephemeral provider voice references", () => {
       params: { voiceId: "v1", text: "The harbour remembers." },
       landing: { dir: "productions/saltlight/audio" },
     });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     h.queue.dispose();
     await h.queue.drain();
     assert.equal(h.ledger.entries.length, 0);
@@ -556,7 +804,11 @@ describe("ephemeral provider voice references", () => {
       params: { voiceId: "v1", text: "The harbour remembers." },
       landing: { dir: "productions/saltlight/audio" },
     });
-    await until(() => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true);
+    await until(
+      () => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true,
+      "the job to record the world-lease wait",
+      FOLD_MS,
+    );
     assert.equal(elevenlabs.submitCount, 1);
     h.queue.dispose();
     await h.queue.drain();
@@ -564,7 +816,7 @@ describe("ephemeral provider voice references", () => {
     const h2 = build(h.journalPath, h.worldDir, { elevenlabs }, {});
     const report = await h2.queue.start();
     assert.equal(report.find((entry) => entry.jobId === job.id)?.detail, "resumed durable inline artifacts");
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     assert.equal(elevenlabs.submitCount, 1, "the paid request was not repeated");
     assert.equal(elevenlabs.pollCount, 0, "a synthetic id was never polled");
     assert.ok(await readFile(join(h2.worldDir, foldedJob(h2, job.id)!.landedFiles![0]!)));
@@ -588,7 +840,7 @@ describe("ephemeral provider voice references", () => {
       params: { text: "x", voiceId: "unsafe", audioFormat: "flac" },
       voiceReference: true,
     });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 0);
     assert.equal(foldedJob(h, job.id)?.attempt, 0);
     h.queue.dispose();
@@ -633,7 +885,7 @@ describe("reference finalization after provider success", () => {
       target: { kind: "character-sheet", id: "maren-kest/finalize" },
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
-    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed", "the finalization to fold to failed", FOLD_MS);
     assert.equal(
       h.events.some((event) => event.type === "job.ready"),
       false,
@@ -686,7 +938,7 @@ describe("reference finalization after provider success", () => {
       target: { kind: "character-sheet", id: "maren-kest/permanent" },
       landing: { dir: "references/maren-kest/incoming", name: "sheet.png" },
     });
-    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed", "the finalization to fold to failed", FOLD_MS);
     assert.equal(finalizations, 1);
 
     // A cause that cannot resolve itself must not re-run every time the world opens…
@@ -1026,11 +1278,15 @@ describe("provider completion while the owning world is unavailable", () => {
       target: { kind: "character-sheet", id: "maren-kest/g1" },
       landing: { dir: "references/maren-kest/incoming", name: "character-sheet.png" },
     });
-    await until(() => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true);
+    await until(
+      () => foldedJob(h, job.id)?.error?.includes("waiting for the owning world") === true,
+      "the job to record the world-lease wait",
+      FOLD_MS,
+    );
     assert.equal(fake.submitCount, 1);
     assert.equal(foldedJob(h, job.id)?.status, "running");
     available = true;
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 1, "destination recovery never resubmits paid provider work");
     assert.ok(await readFile(join(h.worldDir, "references/maren-kest/incoming/character-sheet.png")));
     h.queue.dispose();
@@ -1044,7 +1300,7 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     await h.queue.start();
     fake.onSubmitAccepted = () => h.queue.dispose(); // the kill: accepted remotely, never recorded
     const job = await h.queue.enqueue(INPUT);
-    await until(() => fake.submitCount === 1);
+    await until(() => fake.submitCount === 1, "the submission to reach the provider", FOLD_MS);
     await h.queue.drain();
 
     const raw = await readFile(h.journalPath, "utf8");
@@ -1058,7 +1314,7 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
       report.map((r) => [r.jobId, r.action]),
       [[job.id, "adopted"]],
     );
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 1, "no second submission — the whole point");
     assert.equal(h2.ledger.entries.length, 1, "exactly one ledger entry");
     h2.queue.dispose();
@@ -1070,7 +1326,7 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     await h.queue.start();
     fake.submitHangs = true; // the request left; no answer ever came back
     const job = await h.queue.enqueue(INPUT);
-    await until(() => fake.submitCount === 1);
+    await until(() => fake.submitCount === 1, "the submission to reach the provider", FOLD_MS);
     h.queue.dispose(); // killed while the journal reads submitting and the provider has nothing
     await h.queue.drain();
 
@@ -1085,7 +1341,7 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
       "resubmitted",
       "lookup said provably absent",
     );
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 2, "one hung request, one real resubmission after reconciliation");
     assert.equal(h2.ledger.entries.length, 1);
     h2.queue.dispose();
@@ -1097,7 +1353,7 @@ describe("kill at every step (§3.2) — strategy A: lookup by idempotency key",
     await h.queue.start();
     fake.onSubmitAccepted = () => h.queue.dispose();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => fake.submitCount === 1);
+    await until(() => fake.submitCount === 1, "the submission to reach the provider", FOLD_MS);
     await h.queue.drain();
     fake.onSubmitAccepted = null;
     fake.lookupError = new Error("fetch failed during lookup");
@@ -1115,7 +1371,7 @@ describe("kill mid-submit — strategy B: list recent", () => {
     await h.queue.start();
     fake.onSubmitAccepted = () => h.queue.dispose();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => fake.submitCount === 1);
+    await until(() => fake.submitCount === 1, "the submission to reach the provider", FOLD_MS);
     await h.queue.drain();
     fake.onSubmitAccepted = null;
     return { h, job };
@@ -1127,7 +1383,7 @@ describe("kill mid-submit — strategy B: list recent", () => {
     const h2 = h.revive();
     const report = await h2.queue.start();
     assert.equal(report.find((r) => r.jobId === job.id)?.action, "adopted");
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 1);
     h2.queue.dispose();
   });
@@ -1163,7 +1419,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     await h.queue.start();
     fake.onSubmitAccepted = () => h.queue.dispose();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => fake.submitCount === 1);
+    await until(() => fake.submitCount === 1, "the submission to reach the provider", FOLD_MS);
     await h.queue.drain();
     fake.onSubmitAccepted = null;
 
@@ -1178,7 +1434,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
 
     // The user accepts the risk: exactly one more submission.
     await h2.queue.resolveHeld(job.id, "resubmit");
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 2);
     assert.equal(h2.ledger.entries.length, 1);
     h2.queue.dispose();
@@ -1188,10 +1444,10 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     await r.queue.start();
     fake3.submitError = new Error("fetch failed after receipt");
     const job3 = await r.queue.enqueue(INPUT);
-    await until(() => foldedJob(r, job3.id)?.status === "needs-reconciliation");
+    await until(() => foldedJob(r, job3.id)?.status === "needs-reconciliation", "the third job to fold to needs-reconciliation", FOLD_MS);
     fake3.submitError = null;
     await Promise.all([r.queue.resolveHeld(job3.id, "resubmit"), r.queue.resolveHeld(job3.id, "resubmit")]);
-    await until(() => foldedJob(r, job3.id)?.status === "succeeded");
+    await until(() => foldedJob(r, job3.id)?.status === "succeeded", "the reconciled job to fold to succeeded", FOLD_MS);
     assert.equal(fake3.submitCount, 2, "concurrent decisions authorize only one additional call");
     r.queue.dispose();
 
@@ -1201,7 +1457,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     await g.queue.start();
     fake2.onSubmitAccepted = () => g.queue.dispose();
     const job2 = await g.queue.enqueue(INPUT);
-    await until(() => fake2.submitCount === 1);
+    await until(() => fake2.submitCount === 1, "the second provider to receive the submission", FOLD_MS);
     await g.queue.drain();
     fake2.onSubmitAccepted = null;
     const g2 = g.revive();
@@ -1227,7 +1483,7 @@ describe("kill during download and after terminal (§3.2)", () => {
       h.queue.dispose(); // the kill lands inside step ⑥
     };
     const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "takes/tk_y" } });
-    await until(() => fetched);
+    await until(() => fetched, "the artifact fetch to start", FOLD_MS);
     await h.queue.drain();
 
     // Nothing partial is visible in the world (R-12).
@@ -1238,7 +1494,7 @@ describe("kill during download and after terminal (§3.2)", () => {
     const h2 = h.revive();
     const report = await h2.queue.start();
     assert.equal(report.find((r) => r.jobId === job.id)?.action, "resumed-polling");
-    await until(() => foldedJob(h2, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h2, job.id)?.status === "succeeded", "the rebuilt queue to fold the job to succeeded", FOLD_MS);
     const landed = await readFile(join(h.worldDir, "takes/tk_y/frame.png"));
     assert.equal(landed.length, pngBytes().length);
     assert.equal(h2.ledger.entries.length, 1);
@@ -1253,7 +1509,7 @@ describe("kill during download and after terminal (§3.2)", () => {
       throw new Error("killed before the ledger write");
     };
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     h.queue.dispose();
     await h.queue.drain();
     assert.equal(h.ledger.entries.length, 0, "the crash landed between ⑦'s two writes");
@@ -1295,8 +1551,8 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
       model: "flux-pro-1.1",
     });
 
-    await until(() => h.queue.queueStatus("bad").paused);
-    await until(() => foldedJob(h, other.id)?.status === "succeeded");
+    await until(() => h.queue.queueStatus("bad").paused, "the failing provider's queue to pause", FOLD_MS);
+    await until(() => foldedJob(h, other.id)?.status === "succeeded", "the healthy provider's job to fold to succeeded", FOLD_MS);
     assert.equal(bad.submitCount, 1, "one spend against the failure, not forty (R-8)");
     assert.equal(h.faults.length, 1, "the user is told once");
     assert.match(h.faults[0]!.message, /401/);
@@ -1312,7 +1568,7 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
     // The key is fixed; resumption is the user's explicit confirmation (D7).
     bad.submitError = null;
     h.queue.resume("bad");
-    await until(() => jobs.every((j) => foldedJob(h, j.id)?.status === "succeeded"), 10_000);
+    await until(() => jobs.every((j) => foldedJob(h, j.id)?.status === "succeeded"), "every job in the wave to fold to succeeded", FOLD_MS);
     assert.equal(h.ledger.entries.filter((e) => e.provider === "bad").length, 40);
     h.queue.dispose();
   });
@@ -1326,7 +1582,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 1);
     assert.equal(foldedJob(h, job.id)?.attempt, 1);
     assert.doesNotMatch(foldedJob(h, job.id)?.error ?? "", /outcome was not witnessed/);
@@ -1339,7 +1595,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 1, "five retries would be five charges for one refusal");
     assert.match(foldedJob(h, job.id)!.error!, /content policy/);
     assert.equal(h.ledger.entries.length, 1, "failures write ledger entries too (D7)");
@@ -1352,7 +1608,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.equal(fake.submitCount, 1);
     h.queue.dispose();
   });
@@ -1364,7 +1620,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 3);
     assert.equal(foldedJob(h, job.id)?.attempt, 3);
     assert.deepEqual(new Set(fake.submittedKeys).size, 1, "every safe retry carries the same persisted key");
@@ -1381,6 +1637,8 @@ describe("rate and concurrency (R-10, D8)", () => {
     const b = await h.queue.enqueue({ ...INPUT, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
     await until(
       () => foldedJob(h, a.id)?.status === "succeeded" && foldedJob(h, b.id)?.status === "succeeded",
+      "both worlds' jobs to fold to succeeded",
+      FOLD_MS,
     );
     assert.equal(fake.maxObservedConcurrent, 1, "one key, one limit, regardless of worlds (D8)");
     h.queue.dispose();
@@ -1402,6 +1660,8 @@ describe("rate and concurrency (R-10, D8)", () => {
     const second = await h.queue.enqueue({ ...input, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
     await until(
       () => foldedJob(h, first.id)?.status === "succeeded" && foldedJob(h, second.id)?.status === "succeeded",
+      "both Kokoro jobs to fold to succeeded",
+      FOLD_MS,
     );
     assert.equal(kokoro.maxObservedConcurrent, 1);
     h.queue.dispose();
@@ -1413,7 +1673,7 @@ describe("rate and concurrency (R-10, D8)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
-    await until(() => h.queue.queueStatus("fake").paused);
+    await until(() => h.queue.queueStatus("fake").paused, "the provider's queue to pause", FOLD_MS);
     const second = await h.queue.enqueue(INPUT);
     const third = await h.queue.enqueue(INPUT);
     assert.equal(h.queue.queuePosition(first.id), 0, "the paused head went back to the front");
@@ -1430,7 +1690,7 @@ describe("offline holds rather than fails (R-17, D13)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation");
+    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation", "the job to fold to needs-reconciliation", FOLD_MS);
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.equal(fake.submitCount, 1, "offline auto-resume cannot repeat a paid non-idempotent call");
     assert.equal(foldedJob(h, job.id)?.attempt, 1);
@@ -1483,7 +1743,7 @@ describe("offline holds rather than fails (R-17, D13)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(fake.submitCount, 3);
     assert.equal(foldedJob(h, job.id)?.attempt, 3);
     assert.equal(new Set(fake.submittedKeys).size, 1);
@@ -1498,7 +1758,7 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "takes/tk_z" } });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.match(foldedJob(h, job.id)!.error!, /truncated/);
     const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
     assert.ok(!entries.some((e) => String(e).includes("frame.png")));
@@ -1527,7 +1787,7 @@ describe("artifact verification (R-12, R-13, D12)", () => {
         capability: "image",
         landing: { dir: "references/maren-kest/incoming", name: "character-sheet-g1.png" },
       });
-      await until(() => foldedJob(h, job.id)?.status === "succeeded");
+      await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
       const relative = `references/maren-kest/incoming/character-sheet-g1.${sample.extension}`;
       assert.deepEqual(foldedJob(h, job.id)?.landedFiles, [relative]);
       assert.deepEqual(new Uint8Array(await readFile(join(h.worldDir, relative))), sample.data);
@@ -1541,7 +1801,7 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "takes/tk_mismatch" } });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.match(foldedJob(h, job.id)!.error!, /not a PNG/);
     const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
     assert.ok(!entries.some((entry) => String(entry).includes("frame.png")));
@@ -1566,7 +1826,7 @@ describe("artifact verification (R-12, R-13, D12)", () => {
       target: { kind: "voice-line", id: "sh_12" },
       landing: { dir: "productions/saltlight/audio" },
     });
-    await until(() => foldedJob(h, job.id)?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
     assert.match(foldedJob(h, job.id)?.error ?? "", /MP3 is truncated/);
     const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
     assert.equal(
@@ -1584,7 +1844,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "running");
+    await until(() => foldedJob(h, job.id)?.status === "running", "the job to fold to running", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
     assert.equal(fake.cancelCount, 1);
@@ -1613,7 +1873,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
       params: { voiceId: "af_bella", text: "the harbour remembers" },
       estimatedMicroUsd: 0,
     });
-    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await until(() => foldedJob(h, job.id)?.status === "submitting", "the job to fold to submitting", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
@@ -1642,13 +1902,14 @@ describe("cancellation (R-14, R-15, D10)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "submitting");
+    await until(() => foldedJob(h, job.id)?.status === "submitting", "the job to fold to submitting", FOLD_MS);
     await h.queue.cancel(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // cancel() resolves with the job terminal; only the racing submit-rejection's ledger
+    // append can still be in flight, so that is the condition to wait on — not a sleep.
+    await until(() => h.ledger.entries.at(-1)?.outcome === "cancelled", "the cancellation to reach the ledger", FOLD_MS);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
     assert.equal(submits, 1);
-    assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
 
@@ -1672,13 +1933,13 @@ describe("cancellation (R-14, R-15, D10)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "submitting");
-    await until(() => release !== undefined);
+    await until(() => foldedJob(h, job.id)?.status === "submitting", "the job to fold to submitting", FOLD_MS);
+    await until(() => release !== undefined, "the provider to hold the in-flight submission", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
     assert.equal(fake.cancelCount, 0, "there is nothing to cancel remotely until the id comes back");
     release!();
-    await until(() => fake.cancelCount === 1);
+    await until(() => fake.cancelCount === 1, "the cancellation to reach the provider", FOLD_MS);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
     h.queue.dispose();
   });
@@ -1691,7 +1952,7 @@ describe("cost capture (R-15, SPEC-008 R-17)", () => {
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, 128400);
     assert.equal(h.ledger.entries[0]!.actualSource, "provider-reported");
     h.queue.dispose();
@@ -1708,7 +1969,7 @@ describe("cost capture (R-15, SPEC-008 R-17)", () => {
       model: "llama3.1-8b",
       estimatedMicroUsd: 0,
     });
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     assert.equal(h.ledger.entries[0]!.actualMicroUsd, 0);
     assert.equal(h.ledger.entries[0]!.actualSource, "local-zero");
     h.queue.dispose();
@@ -1721,7 +1982,7 @@ describe("no credential holds the lane rather than failing the work", () => {
     const h = await makeHarness({ fake }, { getKey: async () => null });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => h.queue.queueStatus("fake").paused);
+    await until(() => h.queue.queueStatus("fake").paused, "the provider's queue to pause", FOLD_MS);
     assert.match(h.queue.queueStatus("fake").reason!, /no credential/);
     assert.equal(foldedJob(h, job.id)?.status, "queued");
     assert.equal(fake.submitCount, 0);
@@ -1735,7 +1996,7 @@ describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () =
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "succeeded");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
     const spentBefore = h.ledger.entries.length;
 
     await h.queue.delete(job.id);
@@ -1766,7 +2027,7 @@ describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () =
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, job.id)?.status === "running");
+    await until(() => foldedJob(h, job.id)?.status === "running", "the job to fold to running", FOLD_MS);
 
     await h.queue.delete(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "running", "the job is untouched");
@@ -1797,7 +2058,7 @@ describe("deleting a finished job from Activity's history (SPEC-014 R-13)", () =
       capability: "image",
       landing: { dir: "references/kestrel/candidates" },
     });
-    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed", "the finalization to fold to failed", FOLD_MS);
 
     await h.queue.delete(job.id);
     assert.ok(foldedJob(h, job.id), "a failed finalization is a needs-you item with a retry on it");

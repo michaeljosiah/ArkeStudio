@@ -11,6 +11,7 @@ import {
   comfyUiRecipeIdentity,
   recipeDependencyDigest,
   recipeNodeClasses,
+  h3FramesForSeconds,
   recipeTemplateDigest,
   SDXL_BUCKETS,
   substituteRecipeParams,
@@ -151,10 +152,77 @@ describe("the recipe catalogue projects into the manifest like any other model",
   });
 
   it("the image and video recipes still need no custom node (D11 holds where it was written)", () => {
-    for (const id of ["comfyui-draft-image", "comfyui-draft-video"]) {
+    for (const id of ["comfyui-draft-image", "comfyui-draft-video", "comfyui-h3-video"]) {
       const recipe = comfyUiRecipeById(id)!;
       assert.equal(recipe.requires.customNodes.length, 0, id);
       assert.ok(recipe.requires.checkpoints.length > 0, id);
+    }
+  });
+
+  it("the h3 row's lengths round-trip as numbers on the model's own 17k+5 grid", () => {
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
+    // One length — the measured one. 10s and 15s wait for a measurement of their own: the
+    // 124-frame run finished with 933 MB of RAM to spare, and a 362-frame decode holds roughly
+    // three times the image sequence under the same declared floor.
+    assert.deepEqual(durationOptions(row), [5]);
+    assert.equal(dispatchDuration(row, 10).kind, "over-cap");
+    for (const seconds of durationOptions(row)) {
+      const choice = dispatchDuration(row, seconds);
+      assert.equal(choice.kind, "asked");
+      if (choice.kind === "asked") {
+        assert.equal(typeof choice.wire, "number");
+        const frames = h3FramesForSeconds(choice.wire as number);
+        assert.notEqual(frames, null, `${seconds}s`);
+        assert.equal((frames! - 5) % 17, 0, `${frames} frames is 17k+5`);
+      }
+    }
+    assert.equal(dispatchDuration(row, 20).kind, "over-cap");
+  });
+
+  it("h3 states two vram floors, and the row carries every machine floor the run measured", () => {
+    const h3 = comfyUiRecipeById("comfyui-h3-video")!;
+    // Card size and free-right-now are different questions: requiring the 10 GB card floor FREE
+    // would refuse the exact configuration the recipe was verified on (~4.1 GB free, streaming).
+    assert.equal(h3.hardware.minVramMb, 10000);
+    assert.equal(h3.hardware.minFreeVramMb, 4000);
+    assert.match(h3.hardware.floorSource, /measured through ComfyUI/);
+    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === h3.id)!;
+    // System RAM was the resource the verified run nearly exhausted, so the floor lives on the
+    // recipe (readiness enforces it — weights in a mapped folder never meet fitFor) and
+    // projects into the row for setup's gate: one number, two enforcement points.
+    assert.equal(h3.hardware.minMemMb, 30720);
+    assert.equal(row.requires?.memMb, h3.hardware.minMemMb);
+    // The authored runs-well boundary: between the minimum and this, offered but not recommended.
+    assert.equal(row.requires?.recommendedVramMb, 24000);
+    // int8_convrot and NVFP4 AWQ are CUDA quantisations, and the node-catalogue probe cannot
+    // see that — the loader classes exist on every backend. Declared, so a big AMD card is
+    // refused before the 42 GB download rather than at model load.
+    assert.deepEqual(row.requires?.accelerator, ["cuda"]);
+  });
+
+  it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
+    const recipe = comfyUiRecipeById("comfyui-h3-video")!;
+    const classes = recipeNodeClasses(recipe);
+    for (const wanted of [
+      "UNETLoader",
+      "LoraLoaderModelOnly",
+      "MiniMaxH3SigmaShift",
+      "MiniMaxH3ImageToVideo",
+      "ConditioningZeroOut",
+      "KSampler",
+      "VAEDecode",
+      "VAEDecodeAudio",
+      "CreateVideo",
+      "SaveVideo",
+    ]) {
+      assert.ok(classes.includes(wanted), wanted);
+    }
+    // The frames the FL2VA node could take stay unbound in v1 (R-2): no param reaches them.
+    for (const spec of Object.values(recipe.params)) {
+      for (const [, inputKey] of spec.bind) {
+        assert.notEqual(inputKey, "first_frame");
+        assert.notEqual(inputKey, "last_frame");
+      }
     }
   });
 
@@ -410,6 +478,39 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["7"]!.inputs["width"], 704);
     assert.equal(posted.prompt["7"]!.inputs["height"], 1280);
     assert.equal(posted.prompt["10"]!.inputs["fps"], 24);
+  });
+
+  it("h3 video: seconds become the 17k+5 frame count, the aspect picks the verified dimensions", async () => {
+    const { fetch, calls } = engineFake([
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-h3", number: 4, node_errors: {} } },
+    ]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    await client.submit("", {
+      model: "comfyui-h3-video",
+      capability: "video",
+      params: { prompt: "harbour at dawn, gulls crying", durationSec: 5, aspect: "9:16" },
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["7"]!.inputs["length"], 124);
+    assert.equal(posted.prompt["7"]!.inputs["width"], 480);
+    assert.equal(posted.prompt["7"]!.inputs["height"], 864);
+    // The prompt reaches the FL2VA node itself — it is the conditioning assembly, not CLIPTextEncode.
+    assert.equal(posted.prompt["7"]!.inputs["prompt"], "harbour at dawn, gulls crying");
+    assert.equal(posted.prompt["12"]!.inputs["fps"], 24);
+  });
+
+  it("a length h3 does not offer refuses with h3's own menu, not wan's", async () => {
+    const { fetch } = engineFake([{ match: /\/prompt$/, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-h3-video",
+        capability: "video",
+        params: { prompt: "x", duration: 3 },
+      }),
+      /cannot be asked for 3s — it offers 5s/,
+    );
   });
 
   it("accepts the params the real dispatch surfaces build, not only the neutral shape", async () => {

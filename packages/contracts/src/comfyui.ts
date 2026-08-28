@@ -174,6 +174,8 @@ export const RecipeReasonKindSchema = z.enum([
   "vram",
   /** The card clears the floor and is too busy right now. */
   "vram-busy",
+  /** System memory is under the recipe's measured floor — the resource offloading spends. */
+  "memory",
 ]);
 export type RecipeReasonKind = z.infer<typeof RecipeReasonKindSchema>;
 

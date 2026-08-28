@@ -535,121 +535,6 @@ export const FAL_MODELS: readonly ManifestModel[] = [
     }
   },
   {
-    "id": "ltx-2.5-pro",
-    "provider": "fal",
-    "capability": "video",
-    "displayName": "LTX 2.5 Pro",
-    "accepts": {
-      "referenceImages": 0,
-      "startFrame": false,
-      "endFrame": false
-    },
-    "limits": {
-      "maxPromptChars": 5000,
-      "soundChoice": true,
-      "durationAuto": true,
-      "maxDurationSec": 10,
-      "durationWire": "number",
-      "durations": {
-        "6": "6",
-        "8": "8",
-        "10": "10"
-      },
-      "resolutions": [
-        "1080p",
-        "720p"
-      ],
-      "aspects": [
-        "16:9",
-        "9:16"
-      ]
-    },
-    "pricing": {
-      "kind": "perSecond",
-      "microUsdPerSecond": 170000,
-      "byResolution": {
-        "720p": 120000,
-        "1080p": 170000
-      }
-    },
-    "family": "ltx",
-    "modes": {
-      "generate": {
-        "locked": []
-      },
-      "first-frame": {
-        "route": "lightricks/ltx-2.5/image-to-video/pro",
-        "locked": []
-      },
-      "first-and-last-frame": {
-        "route": "lightricks/ltx-2.5/image-to-video/pro",
-        "locked": []
-      }
-    }
-  },
-  {
-    "id": "ltx-2.5-fast",
-    "provider": "fal",
-    "capability": "video",
-    "displayName": "LTX 2.5 Fast",
-    "accepts": {
-      "referenceImages": 0,
-      "startFrame": false,
-      "endFrame": false
-    },
-    "limits": {
-      "maxPromptChars": 5000,
-      "soundChoice": true,
-      "durationAuto": true,
-      "maxDurationSec": 20,
-      "durationWire": "number",
-      "durations": {
-        "6": "6",
-        "8": "8",
-        "10": "10",
-        "12": "12",
-        "14": "14",
-        "16": "16",
-        "18": "18",
-        "20": "20"
-      },
-      "resolutions": [
-        "1080p",
-        "720p",
-        "1440p",
-        "2160p"
-      ],
-      "aspects": [
-        "16:9",
-        "9:16"
-      ]
-    },
-    "pricing": {
-      "kind": "perSecond",
-      "microUsdPerSecond": 130000,
-      "byResolution": {
-        "720p": 90000,
-        "1080p": 130000,
-        "1440p": 190000,
-        "2160p": 300000
-      }
-    },
-    "family": "ltx",
-    "modes": {
-      "generate": {
-        "locked": []
-      },
-      "first-frame": {
-        "route": "lightricks/ltx-2.5/image-to-video/fast",
-        "locked": []
-      },
-      "first-and-last-frame": {
-        "route": "lightricks/ltx-2.5/image-to-video/fast",
-        "locked": []
-      }
-    }
-  },
-  {
     "id": "wan-2.7",
     "provider": "fal",
     "capability": "video",
@@ -841,8 +726,6 @@ export const FAL_ENDPOINTS: Record<string, string> = {
   "veo-3.1": "fal-ai/veo3.1",
   "veo-3.1-fast": "fal-ai/veo3.1/fast",
   "minimax-h3": "minimax/h3/text-to-video",
-  "ltx-2.5-pro": "lightricks/ltx-2.5/text-to-video/pro",
-  "ltx-2.5-fast": "lightricks/ltx-2.5/text-to-video/fast",
   "wan-2.7": "fal-ai/wan/v2.7/text-to-video",
   "kling-3-pro": "fal-ai/kling-video/v3/pro/text-to-video",
   "kling-3-standard": "fal-ai/kling-video/v3/standard/text-to-video",

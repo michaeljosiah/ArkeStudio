@@ -59,6 +59,7 @@ function sources(over: Partial<DiagnosticsSources> = {}): DiagnosticsSources {
     models: { disabled: [] },
     spend: null,
     ledger: [],
+    ledgerUnavailable: false,
     drift: [],
     builds: [],
     update: IDLE_UPDATE_STATE,
@@ -758,7 +759,9 @@ describe("derivation discipline (R-11, R-14, R-35)", () => {
     assert.ok(!("vendorAuth" in projected));
     assert.ok(!("presets" in projected));
     assert.ok(!("agents" in projected));
-    assert.equal(Object.keys(projected).length, 21);
+    // The ledger's availability rides beside its entries (R-21) — a source note, not a source.
+    assert.ok("ledgerUnavailable" in projected);
+    assert.equal(Object.keys(projected).length, 22);
   });
 });
 

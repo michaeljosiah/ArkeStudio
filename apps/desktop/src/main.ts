@@ -602,6 +602,8 @@ async function initialize(): Promise<{ port: number }> {
       capability: recipe.capability,
       version: recipe.recipeVersion,
       minVramMb: recipe.hardware.minVramMb,
+      minFreeVramMb: recipe.hardware.minFreeVramMb,
+      ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
       recommendedVramMb: recipe.hardware.recommendedVramMb,
       checkpoints: recipe.requires.checkpoints,
       customNodes: recipe.requires.customNodes,
