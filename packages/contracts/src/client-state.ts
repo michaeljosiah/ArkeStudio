@@ -321,7 +321,9 @@ export const ClientStateSchema = z
          * (SPEC-032 R-21). Folding that failure into an empty array made an unreadable ledger
          * indistinguishable from a quiet one, and the spend correlation reported a clean
          * fortnight off a lie. Defaulted so payloads from before the field still parse — and a
-         * missing field reads as available.
+         * missing field reads as available. Deliberately latched for the session: entries
+         * appended later land beside the flag, but cannot restore the history the failed read
+         * lost, so only a successful re-read could honestly clear it and none exists yet.
          */
         ledgerUnavailable: z.boolean().default(false),
         /** Provider configuration as Settings renders it — never key material (SPEC-008 R-6). */

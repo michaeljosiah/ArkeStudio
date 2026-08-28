@@ -205,7 +205,7 @@ export class ReadModel {
    * Seed the ledger read at start-up — and whether that read failed, which is a published fact
    * (SPEC-032 R-21): folded into an empty array, an unreadable ledger reads as a clean one.
    */
-  seedLedger(ledger: ClientState["app"]["ledger"], unavailable = false): void {
+  seedLedger(ledger: ClientState["app"]["ledger"], unavailable: boolean): void {
     this.state = { ...this.state, app: { ...this.state.app, ledger, ledgerUnavailable: unavailable } };
   }
 

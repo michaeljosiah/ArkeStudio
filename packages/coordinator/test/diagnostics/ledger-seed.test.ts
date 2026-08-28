@@ -83,16 +83,7 @@ describe("the ledger seed carries availability (SPEC-032 R-21, row 15a)", () => 
 
   it("a readable seed lands its entries with availability intact", async () => {
     const { root } = await makeTempRoot();
-    const entry = {
-      ts: "2026-08-28T11:00:00.000Z",
-      worldId: ulid(),
-      jobId: `jb_${ulid()}`,
-      provider: "fal",
-      model: "veo-3",
-      outcome: "succeeded",
-      estimatedMicroUsd: 250_000,
-      actualMicroUsd: 250_000,
-    };
+    const entry = sampleEntry();
     await writeFile(join(root, "ledger.jsonl"), JSON.stringify(entry) + "\n", "utf8");
     const { coordinator, close } = await startedAt(root);
     try {
@@ -104,4 +95,38 @@ describe("the ledger seed carries availability (SPEC-032 R-21, row 15a)", () => 
       await close();
     }
   });
+
+  it("a crash-torn final line is skipped, never fatal — the app boots and the complete entries land", async () => {
+    // The seed runs before LedgerFile's tail repair, so a strict parse here was a launch
+    // failure on the most likely real unreadable ledger: the one a crash mid-append leaves.
+    const { root } = await makeTempRoot();
+    const entry = sampleEntry();
+    await writeFile(
+      join(root, "ledger.jsonl"),
+      `${JSON.stringify(entry)}\n{"ts":"2026-08-28T11:`,
+      "utf8",
+    );
+    const { coordinator, close } = await startedAt(root);
+    try {
+      const app = coordinator.getState().app;
+      assert.equal(app.ledgerUnavailable, false, "a torn line is not a failed file read");
+      assert.equal(app.ledger.length, 1);
+      assert.equal(app.ledger[0]!.jobId, entry.jobId);
+    } finally {
+      await close();
+    }
+  });
 });
+
+function sampleEntry() {
+  return {
+    ts: "2026-08-28T11:00:00.000Z",
+    worldId: ulid(),
+    jobId: `jb_${ulid()}`,
+    provider: "fal",
+    model: "veo-3",
+    outcome: "succeeded",
+    estimatedMicroUsd: 250_000,
+    actualMicroUsd: 250_000,
+  };
+}
