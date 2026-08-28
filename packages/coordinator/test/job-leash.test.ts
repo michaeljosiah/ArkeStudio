@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { helperBudgetMs, leashChildToParent, statedFailure } from "../src/job-leash.js";
+import { until } from "./wait.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const HOST = join(here, "fixtures", "leash-host.ts");
@@ -25,15 +26,6 @@ function processGone(pid: number): boolean {
   } catch {
     return true;
   }
-}
-
-async function eventually(check: () => boolean, timeoutMs = 10_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(check(), "condition not met in time");
 }
 
 describe("job leash", () => {
@@ -75,7 +67,9 @@ describe("job leash", () => {
         assert.ok(!processGone(pid), "the leashed child starts out alive");
         // TerminateProcess: the host runs no exit hooks, exactly like Stop-Process on the app.
         host.kill("SIGKILL");
-        await eventually(() => processGone(pid));
+        // 30s: the kernel reap is fast, but a starved shard stalls the observer — settle tier
+        // per supervisor.test.ts's budget note.
+        await until(() => processGone(pid), "the kernel to reap the leashed child", 30_000);
       } finally {
         // A live host holds the runner's event loop open, so it has to die on every path out
         // of here — including the one where it never leashed and the await above threw. That
