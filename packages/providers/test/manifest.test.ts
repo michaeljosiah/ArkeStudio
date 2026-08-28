@@ -74,11 +74,10 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
-    // ltx takes no references — and still says "frames", because its image-to-video sibling
-    // genuinely takes a first frame (issue 154): the copy reads the same task-mode authority the
-    // dispatch does, not the legacy accepts flags.
-    assert.equal(modelCapabilityCopy(model("ltx-2.5-pro")), "no refs · frames · 10s");
-    // The accepting side, on video: references from the edit sibling, frames from the modes.
+    // The copy reads the same task-mode authority the dispatch does, not the legacy accepts
+    // flags. The no-refs-yet-frames case that proved it left with the ltx rows (dropped
+    // 2026-08-28); the accepting side still exercises both authorities at once.
+    // On video: references from the edit sibling, frames from the modes.
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · frames · 15s");
     // A row with neither modes nor accepts flags promises nothing about frames.
     assert.equal(modelCapabilityCopy(model("veo-3.1")), "no refs · 8s");
@@ -138,7 +137,8 @@ describe("the shipped manifest (R-9, §3.2)", () => {
       }
     }
     // The families the catalogue curates today, pinned by name so a sync that drops one is loud.
-    for (const id of ["seedance-2.0", "seedance-2.0-fast", "minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+    // (The ltx rows left this list deliberately, 2026-08-28.)
+    for (const id of ["seedance-2.0", "seedance-2.0-fast", "minimax-h3", "wan-2.7"]) {
       assert.ok(frameDispatchFor(model(id), 1) !== null, `${id} takes a first frame`);
     }
     for (const id of ["veo-3.1", "veo-3.1-fast", "kling-3-pro", "kling-3-standard"]) {
@@ -930,29 +930,28 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
   });
 
   it("keys every rate to the word the picker sends, across the price list's own spellings", () => {
-    // The ltx fast route is billed for "4K" and dispatched with "2160p". A rate keyed on the
-    // prose word is a lookup that misses in silence, falling back to the base rate.
-    const fast = byId("ltx-2.5-fast");
-    if (fast.pricing.kind === "perSecond") {
-      assert.equal(fast.pricing.byResolution?.["2160p"], 300000);
-      assert.equal(fast.pricing.byResolution?.["4k"], undefined);
-    }
-    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
-      const model = byId(id);
+    // The failure this guards: ltx's fast route was billed for "4K" and dispatched with "2160p",
+    // and a rate keyed on the prose word is a lookup that misses in silence, falling back to the
+    // base rate. That row left the catalogue (2026-08-28), so the guarantee runs over every
+    // per-second fal row rather than a named list — a returning spelling mismatch fails here by
+    // id the day a sync reintroduces one.
+    for (const model of SHIPPED_MANIFEST.models.filter(
+      (m) => m.provider === "fal" && m.pricing.kind === "perSecond",
+    )) {
       if (model.pricing.kind !== "perSecond") continue;
       for (const key of Object.keys(model.pricing.byResolution ?? {})) {
         assert.ok(
           (model.limits.resolutions ?? []).includes(key),
-          `${id}: the rate for "${key}" names a resolution the row offers`,
+          `${model.id}: the rate for "${key}" names a resolution the row offers`,
         );
       }
     }
   });
 
   it("declares the wire type of a length, because these routes count in numbers", () => {
-    // seedance and kling take duration as a string out of a list; minimax, ltx and wan declare
-    // an integer or a number enum, and "6" is not a member of [6, 8, 10].
-    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+    // seedance and kling take duration as a string out of a list; minimax and wan declare
+    // an integer, and "6" is not a member of [6, 8, 10].
+    for (const id of ["minimax-h3", "wan-2.7"]) {
       assert.equal(byId(id).limits.durationWire, "number", `${id} sends a numeric duration`);
     }
     assert.equal(byId("seedance-2.0").limits.durationWire, undefined, "seedance keeps its strings");
@@ -1013,8 +1012,6 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("minimax-h3").limits.referencesField, "reference_image_urls");
     assert.equal(byId("wan-2.7").limits.referencesField, "reference_image_urls");
     assert.equal(byId("seedance-2.0").limits.referencesField, "image_urls");
-    // ltx ships no reference route at all, so it has no array to mis-name.
-    assert.equal(byId("ltx-2.5-pro").limits.referencesField, undefined);
   });
 
   it("carries references as references, not as a sequence of keyframes", () => {
@@ -1055,7 +1052,6 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
 
   it("offers a prompt counter only where the route publishes a cap", () => {
     assert.equal(byId("minimax-h3").limits.maxPromptChars, 50000);
-    assert.equal(byId("ltx-2.5-pro").limits.maxPromptChars, 5000);
     // wan 2.7 declares no maxLength: "the provider does not say" is not "unlimited".
     assert.equal(byId("wan-2.7").limits.maxPromptChars, undefined);
   });

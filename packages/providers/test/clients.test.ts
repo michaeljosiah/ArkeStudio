@@ -1010,7 +1010,7 @@ describe("fal frame task modes (issue 305 §3; SPEC-019 T-1)", () => {
     const families = SHIPPED_MANIFEST.models.filter(
       (m) => m.capability === "video" && m.provider === "fal" && (m.limits.aspects?.length ?? 0) > 0,
     );
-    assert.ok(families.length >= 6, "seedance ×2, veo ×2, minimax, ltx ×2, wan, kling ×2 curate shapes");
+    assert.ok(families.length >= 6, "seedance ×3, veo ×2, minimax, wan, kling ×2 curate shapes");
     for (const row of families) {
       let sent: Record<string, unknown> = {};
       const client = new FalClient(async (_u, init) => {
@@ -1034,7 +1034,7 @@ describe("fal frame task modes (issue 305 §3; SPEC-019 T-1)", () => {
     const families = SHIPPED_MANIFEST.models.filter(
       (m) => m.capability === "video" && m.provider === "fal" && m.modes?.["first-frame"] !== undefined,
     );
-    assert.ok(families.length >= 4, "seedance ×2, minimax, ltx ×2, wan are curated today");
+    assert.ok(families.length >= 4, "seedance ×3, minimax, wan are curated today");
     for (const row of families) {
       let url = "";
       let sent: Record<string, unknown> = {};
