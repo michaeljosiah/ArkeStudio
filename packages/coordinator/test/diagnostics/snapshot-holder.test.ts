@@ -165,6 +165,35 @@ describe("the snapshot holder (R-33, R-34)", () => {
     holder.dispose();
   });
 
+  it("refreshed() resolves with the next derivation — the bundle's freshness gate", async () => {
+    let clockCalls = 0;
+    const clocks = ["2026-08-28T12:00:00.000Z", "2026-08-28T13:00:00.000Z", "2026-08-28T13:00:00.000Z"];
+    const holder = new DiagnosticsSnapshotHolder({
+      sources: () => sources({ runtime: null }),
+      tails: () => ({ appLog: [] }),
+      boundary: { scrub: (text) => text },
+      onSnapshot: () => {},
+      clock: () => clocks[Math.min(clockCalls++, clocks.length - 1)]!,
+    });
+    holder.schedule();
+    await tick();
+    assert.equal(holder.currentSnapshot().derivedAt, "2026-08-28T12:00:00.000Z");
+    // An hour of quiet later, the bundle asks: the answer is a fresh instant, not the cache.
+    const fresh = await holder.refreshed();
+    assert.equal(fresh.derivedAt, "2026-08-28T13:00:00.000Z");
+    holder.dispose();
+  });
+
+  it("dispose settles a caller awaiting a derivation that will never fire", async () => {
+    const { holder } = holderWith(() => sources());
+    holder.schedule();
+    await tick();
+    const pending = holder.refreshed();
+    holder.dispose();
+    const settled = await pending;
+    assert.ok(settled.findings !== undefined, "the awaiting caller gets the last snapshot, not a hang");
+  });
+
   it("dispose cancels a pending derivation and stops broadcasting", async () => {
     const { holder, broadcasts, reads } = holderWith(() => sources());
     holder.schedule();

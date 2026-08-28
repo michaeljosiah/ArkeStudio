@@ -25,6 +25,8 @@ export class DiagnosticsSnapshotHolder {
   private scheduled: NodeJS.Immediate | null = null;
   private disposed = false;
   private forceBroadcast = false;
+  /** Callers awaiting the next derivation (the bundle's freshness gate). */
+  private settlers: Array<(snapshot: DiagnosticsSnapshot) => void> = [];
 
   constructor(
     private readonly deps: {
@@ -60,13 +62,29 @@ export class DiagnosticsSnapshotHolder {
 
   /**
    * The latest derived snapshot. Maintained eagerly from the first `schedule()`, so callers on
-   * request paths (the support bundle, a fresh connection's replay) read rather than compute;
-   * deriving here is only the cold-start fallback before the first tick has fired — and that
-   * one is not broadcast, because the caller is about to deliver it itself and no client holds
-   * an older one to correct.
+   * request paths (a fresh connection's replay) read rather than compute; deriving here is
+   * only the cold-start fallback before the first tick has fired — and that one is not
+   * broadcast, because the caller is about to deliver it itself and no client holds an older
+   * one to correct.
    */
   currentSnapshot(): DiagnosticsSnapshot {
     return this.current ?? this.deriveNow(false);
+  }
+
+  /**
+   * Resolves with the NEXT derivation — the support bundle's freshness gate. A bundle pulled
+   * after a quiet stretch must not answer for the instant something last changed: staleness
+   * marks are computed at derivation, so the cached snapshot's are as old as the quiet. The
+   * derivation still runs on its own immediate, off the asking frame handler's path (R-34);
+   * the handler merely awaits it, as it awaits the log read beside it.
+   */
+  refreshed(): Promise<DiagnosticsSnapshot> {
+    if (this.disposed) return Promise.resolve(this.currentSnapshot());
+    return new Promise((resolve) => {
+      this.settlers.push(resolve);
+      this.forceBroadcast = true;
+      this.schedule();
+    });
   }
 
   private deriveNow(broadcast: boolean): DiagnosticsSnapshot {
@@ -86,6 +104,7 @@ export class DiagnosticsSnapshotHolder {
     this.forceBroadcast = false;
     this.current = snapshot;
     if (broadcast && changed && !this.disposed) this.deps.onSnapshot(snapshot);
+    for (const settle of this.settlers.splice(0)) settle(snapshot);
     return snapshot;
   }
 
@@ -95,5 +114,8 @@ export class DiagnosticsSnapshotHolder {
       clearImmediate(this.scheduled);
       this.scheduled = null;
     }
+    // Nothing may hang shutdown on a derivation that will never fire; the last snapshot (or a
+    // cold pure derive) is the honest answer to a caller already in flight.
+    for (const settle of this.settlers.splice(0)) settle(this.current ?? this.deriveNow(false));
   }
 }

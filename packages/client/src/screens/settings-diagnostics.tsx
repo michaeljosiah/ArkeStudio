@@ -72,6 +72,18 @@ function dotClass(severity: FindingSeverity): string {
   return "";
 }
 
+/**
+ * Where a remedy's control lives, target carried under the registry's own query key — one
+ * construction for the primary remedy and the stale re-measure alike, so neither can drop the
+ * half that selects the right row. Exported for the test that pins exactly that.
+ */
+export function controlHref(remedy: NonNullable<Finding["remedy"]>): string {
+  const control = CONTROL_REGISTRY[remedy.control];
+  return "targetParam" in control && remedy.target !== undefined
+    ? `${control.route}${control.route.includes("?") ? "&" : "?"}${control.targetParam}=${encodeURIComponent(remedy.target)}`
+    : control.route;
+}
+
 /** The remedy as the registry states it: the control's label, with its place beside it. */
 function Remedy({ finding, snapshot }: { finding: Finding; snapshot: DiagnosticsSnapshot }) {
   const navigate = useNavigate();
@@ -80,11 +92,7 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
     return absence === null ? null : <span className="fy-diag__place">{absence}</span>;
   }
   const control = CONTROL_REGISTRY[finding.remedy.control];
-  const target = finding.remedy.target;
-  const to =
-    "targetParam" in control && target !== undefined
-      ? `${control.route}${control.route.includes("?") ? "&" : "?"}${control.targetParam}=${encodeURIComponent(target)}`
-      : control.route;
+  const to = controlHref(finding.remedy);
   return (
     <>
       <span className="fy-diag__place">{control.place}</span>
@@ -117,7 +125,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
         <div className="fy-set__why">
           <span className="fy-set__dot" style={{ width: 5, height: 5 }} />
           <span className="fy-diag__meta">measured {ageOf(oldestStaleAt(finding), now)}</span>
-          {stale.remeasure !== null && <StaleRemeasure control={stale.remeasure.control} />}
+          {stale.remeasure !== null && <StaleRemeasure remedy={stale.remeasure} />}
         </div>
       )}
       {explains.length > 0 && (
@@ -138,11 +146,11 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
   );
 }
 
-function StaleRemeasure({ control }: { control: keyof typeof CONTROL_REGISTRY }) {
+function StaleRemeasure({ remedy }: { remedy: NonNullable<Finding["remedy"]> }) {
   const navigate = useNavigate();
-  const entry = CONTROL_REGISTRY[control];
+  const entry = CONTROL_REGISTRY[remedy.control];
   return (
-    <button type="button" className="fy-set__link" onClick={() => navigate(entry.route)}>
+    <button type="button" className="fy-set__link" onClick={() => navigate(controlHref(remedy))}>
       {entry.label}
     </button>
   );

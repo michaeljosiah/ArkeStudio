@@ -10,6 +10,7 @@ import {
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
+import { controlHref } from "../src/screens/settings-diagnostics.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -202,6 +203,18 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(text, /measured \d+ (min|h) ago/);
     assert.match(text, /Refresh/);
     assert.doesNotMatch(text, /engine-state/, "internal fact ids stay off the screen");
+  });
+
+  it("a remedy's href carries its target under the registry's query key — stale re-measures included", () => {
+    assert.equal(
+      controlHref({ control: "component-retry", target: "tts-kokoro-82m" }),
+      "/settings/engines?component=tts-kokoro-82m",
+    );
+    assert.equal(
+      controlHref({ control: "provider-key", target: "fal" }),
+      "/settings/providers?provider=fal",
+    );
+    assert.equal(controlHref({ control: "comfyui-restart" }), "/settings/engines?engine=comfyui");
   });
 
   it("every checked rule kind has a product word — a new rule must name itself here too (R-10)", () => {

@@ -1768,7 +1768,11 @@ export class Coordinator {
       parsed.type !== "voice.runtime-test" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
-      parsed.type !== "vendor-auth.status"
+      parsed.type !== "vendor-auth.status" &&
+      // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
+      // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
+      // Journalling the event would have durably recorded both on every generate.
+      parsed.type !== "diagnostics.ready"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
@@ -2449,13 +2453,15 @@ export class Coordinator {
    * material, no world content. Exposed for the About screen and support flows.
    */
   async diagnostics(): Promise<Record<string, unknown>> {
-    // The findings ride the one bundle (SPEC-032 R-38); the holder maintains them eagerly, so
-    // this read computes nothing on the frame handler's path (R-34).
+    // The findings ride the one bundle (SPEC-032 R-38) — freshly derived, because a bundle
+    // pulled after a quiet stretch must not carry staleness marks computed for an older
+    // instant. The derivation runs on its own immediate, off this handler's path (R-34); the
+    // await is the same shape as the log read inside the builder.
     return buildDiagnosticsBundle(
       this.getState(),
       this.appLog,
       this.secrets,
-      this.diagnosticsSnapshot?.currentSnapshot() ?? null,
+      (await this.diagnosticsSnapshot?.refreshed()) ?? null,
     );
   }
 

@@ -347,6 +347,14 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
     assert.equal(scrubAbsolutePaths("reading /data/users/alice/models/file.bin failed"), "reading [path] failed");
     assert.equal(scrubAbsolutePaths("mounted at /srv2/models/weights.safetensors now"), "mounted at [path] now");
     assert.equal(scrubAbsolutePaths("GET /api/foo answered 404"), "GET /api/foo answered 404");
+    // Extensionless executables and directories, three or more segments deep, are paths too.
+    assert.equal(scrubAbsolutePaths("error at /nix/store/2m7abc-foo/bin/foo"), "error at [path]");
+    assert.equal(scrubAbsolutePaths("cwd was /opt2/arke/models today"), "cwd was [path] today");
+    // The product's own two-segment routes stay prose.
+    assert.equal(
+      scrubAbsolutePaths("route /settings/engines?engine=comfyui opened"),
+      "route /settings/engines?engine=comfyui opened",
+    );
     // A spaced segment under a listed root is swallowed whole, filename included.
     assert.equal(scrubAbsolutePaths("copied /Volumes/AI Models/file.bin over"), "copied [path] over");
     assert.equal(

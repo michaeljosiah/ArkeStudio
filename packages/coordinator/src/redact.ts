@@ -74,12 +74,17 @@ const ABSOLUTE_PATH = new RegExp(
     // character before a genuine POSIX path is a space, a bracket or the start of the string,
     // never a hostname's last letter or a scheme's colon.
     String.raw`(?<![\w:/.-])/(?:Users|home|root|var|tmp|etc|opt|usr|private|mnt|media|srv|data|Applications|Library|Volumes|snap|run)/` + PATH_TAIL,
-    // Any other absolute POSIX path, recognised by its shape rather than its root: at least one
-    // directory segment and a final segment carrying a dot-extension. Hash routes and API paths
-    // have no extension, so `/settings/engines` and `GET /api/foo` stay prose; a spaced filename
-    // under an unlisted root is the one residual this heuristic accepts, because the second line
-    // is exactly that — a heuristic under the enumeration that carries the real guarantee (D9).
+    // Any other absolute POSIX path, recognised by its shape rather than its root. Two shapes:
+    // a final segment carrying a dot-extension after at least one directory (`/x/file.bin`), or
+    // an extensionless run at least three segments deep (`/nix/store/…/bin/foo` — executable
+    // and directory paths in Error.message carry no extension). The product's own routes are
+    // two segments (`/settings/engines`) and stay prose, as does `GET /api/foo`; a deeper
+    // slash-run in prose is eaten, which leans the safe way for a diagnostics record. A spaced
+    // filename under an unlisted root is the one residual this heuristic accepts, because the
+    // second line is exactly that — a heuristic under the enumeration that carries the real
+    // guarantee (D9).
     String.raw`(?<![\w:/.-])/(?:[^\s"'<>|/]+/)+[^\s"'<>|/.]+(?:\.[^\s"'<>|/.]+)+`,
+    String.raw`(?<![\w:/.-])/(?:[^\s"'<>|/]+/){2,}[^\s"'<>|/]+`,
   ].join("|"),
   "g",
 );
