@@ -56,14 +56,23 @@ export class SecretRegistry {
  *    anchored to those roots so hash-route strings like `/settings/engines` and URL paths do
  *    not read as filesystem locations.
  */
+// The tail of a Windows path may contain spaces — `Program Files`, a two-word account name —
+// and stopping at the first one would leak exactly the half the rule exists to remove. A space
+// is consumed only when the token after it leads to another separator, so the match swallows
+// `Michael Josiah\` and leaves `C:\Users\x is missing` as prose.
+const WINDOWS_TAIL = String.raw`(?:[^\s"'<>|]|[ ](?=[^\s\\/"'<>|]*[\\/]))+`;
+
 const ABSOLUTE_PATH = new RegExp(
   [
-    String.raw`\b[A-Za-z]:[\\/][^\s"'<>|]+`,
-    String.raw`\\\\[^\s"'<>|]+`,
+    String.raw`\b[A-Za-z]:[\\/]` + WINDOWS_TAIL,
+    String.raw`\\\\` + WINDOWS_TAIL,
+    // A file: URL is unambiguously a filesystem location, however many slashes it carries —
+    // and it is what Node ESM errors and stack traces spell paths as.
+    String.raw`\bfile:\/+[^\s"'<>|]+`,
     // The lookbehind keeps a URL's `/home/…` segment from reading as a filesystem root: the
     // character before a genuine POSIX path is a space, a bracket or the start of the string,
     // never a hostname's last letter or a scheme's colon.
-    String.raw`(?<![\w:/.-])/(?:Users|home|root|var|tmp|etc|opt|usr|private|mnt|media|srv)/[^\s"'<>|]+`,
+    String.raw`(?<![\w:/.-])/(?:Users|home|root|var|tmp|etc|opt|usr|private|mnt|media|srv|Applications|Library|Volumes|snap|run)/[^\s"'<>|]+`,
   ].join("|"),
   "g",
 );
@@ -73,6 +82,21 @@ export const PATH_REDACTED = "[path]";
 /** Replace every absolute filesystem path in `text` with the marker (SPEC-032 R-28). */
 export function scrubAbsolutePaths(text: string): string {
   return text.replace(ABSOLUTE_PATH, PATH_REDACTED);
+}
+
+/**
+ * The one redaction boundary diagnostics text crosses (SPEC-032 R-13, R-28, R-29): registered
+ * secrets first — the path scrub must never split a secret before the registry sees it — then
+ * the path rule. Spelled once and imported by the coordinator and the property test alike, so
+ * the test can never pass against a composition the product does not ship.
+ *
+ * What it cannot catch: world content in free text. The registry knows secrets and the regex
+ * knows paths; a subsystem reason that QUOTED a world name would pass both, which is why log
+ * call sites keep world content out of message strings in the first place (SPEC-016 R-15's
+ * discipline) and the property test plants world names in structured fields, not prose.
+ */
+export function diagnosticsBoundary(registry: SecretRegistry): { scrub(text: string): string } {
+  return { scrub: (text) => scrubAbsolutePaths(registry.scrub(text)) };
 }
 
 /** Deep-copy `value` with secrets scrubbed and credential-shaped fields masked. */

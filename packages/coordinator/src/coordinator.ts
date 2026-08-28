@@ -293,7 +293,7 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
-import { scrubAbsolutePaths, SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
@@ -1500,9 +1500,9 @@ export class Coordinator {
       sources: () => diagnosticsSources(this.getState().app),
       tails: () => ({ appLog: this.diagnosticsLogTail }),
       // Subsystem reasons are built from subprocess output and Error.message, which routinely
-      // embed secrets a provider echoed back and the install's own absolute paths — so carried
-      // text passes the same secret scrub the logs do, then the path rule (SPEC-032 D7, R-28).
-      boundary: { scrub: (text) => scrubAbsolutePaths(this.secrets.scrub(text)) },
+      // embed secrets a provider echoed back and the install's own absolute paths — the one
+      // composition redact.ts exports, so the property test exercises what ships (D7, R-28).
+      boundary: diagnosticsBoundary(this.secrets),
       // Deliberately not this.emit: the snapshot is derived FROM the read model, so folding it
       // back in would re-trigger its own derivation, and journalling it would record to disk a
       // projection of state the change log already carries.

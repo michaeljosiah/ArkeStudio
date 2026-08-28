@@ -6,8 +6,11 @@ import {
   type ClientState,
   type DiagnosticsSources,
 } from "@arke-studio/contracts";
+import { join } from "node:path";
+import { AppLog } from "../../src/app-log.js";
 import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
-import { SecretRegistry, scrubAbsolutePaths } from "../../src/redact.js";
+import { SecretRegistry, diagnosticsBoundary, scrubAbsolutePaths } from "../../src/redact.js";
+import { tempDir } from "../tmp.js";
 
 /**
  * SPEC-032 §1.8, §2.6 (#556): what a diagnostics record may never carry — a secret, an
@@ -153,10 +156,8 @@ function generatedTail(random: () => number): Array<Record<string, unknown>> {
   }));
 }
 
-/** The same composition the coordinator wires: secrets first, then the path rule (R-28, R-29). */
-function boundary(registry: SecretRegistry) {
-  return { scrub: (text: string) => scrubAbsolutePaths(registry.scrub(text)) };
-}
+/** THE composition the coordinator wires — imported, so this test exercises what ships. */
+const boundary = diagnosticsBoundary;
 
 function assertCarriesNone(serialised: string, seed: number, artifact: string): void {
   const label = (what: string) => `${what} leaked into ${artifact} (seed ${seed})`;
@@ -243,6 +244,27 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
     }
   });
 
+  it("row 25: a poisoned log tail is the bundle's one leak channel, and the scrub holds it", async () => {
+    // The other bundle case plants poison in fields the enumeration drops, which a builder with
+    // no scrubbing at all would also pass. This one routes it through `recentLog` — the one
+    // enumerated field carrying free text — via a real AppLog: write-time redaction removes the
+    // secret it knows, and the PATH survives to the tail, so the bundle-level path rule is the
+    // only thing standing between it and the export.
+    const dir = await tempDir("arke-nevercarry-");
+    const registry = new SecretRegistry();
+    registry.register(SECRET);
+    const log = new AppLog(join(dir, "app.jsonl"), registry);
+    for (const record of generatedTail(prng(SEED_BASE + 2000))) await log.append(record);
+    await log.append({ kind: "world.open-failed", message: `could not read ${WINDOWS_PATH}` });
+    await log.drain();
+    const state = { app: generatedSources(prng(SEED_BASE + 2000)), worlds: [], world: null } as unknown as ClientState;
+    const bundle = await buildDiagnosticsBundle(state, log, registry);
+    assertCarriesNone(JSON.stringify(bundle), SEED_BASE + 2000, "the bundle's log tail");
+    // The tail itself is present — the channel was exercised, not emptied.
+    assert.ok((bundle["recentLog"] as string[]).length >= 4);
+    assert.match((bundle["recentLog"] as string[]).join("\n"), /\[path\]/);
+  });
+
   it("row 26: a field outside the enumeration never reaches the export, whatever it carries", async () => {
     const registry = new SecretRegistry();
     const random = prng(SEED_BASE);
@@ -293,5 +315,19 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
     );
     assert.equal(scrubAbsolutePaths(`read ${POSIX_PATH}`), "read [path]");
     assert.equal(scrubAbsolutePaths(`share ${UNC_PATH} offline`), "share [path] offline");
+    // A spaced segment is the account name the rule exists for; the remainder must not leak.
+    assert.equal(
+      scrubAbsolutePaths("spawn C:\\Program Files\\Arke\\arke.exe failed"),
+      "spawn [path] failed",
+    );
+    assert.equal(
+      scrubAbsolutePaths("wrote C:\\Users\\Michael Josiah\\AppData\\arke.log today"),
+      "wrote [path] today",
+    );
+    // Trailing prose after a path is prose, not path.
+    assert.equal(scrubAbsolutePaths("C:\\weights\\x.bin is missing"), "[path] is missing");
+    // file: URLs are filesystem locations however many slashes they carry.
+    assert.equal(scrubAbsolutePaths("import file:///C:/apps/arke/main.mjs died"), "import [path] died");
+    assert.equal(scrubAbsolutePaths("at file:/Users/mjosi/x.txt line 3"), "at [path] line 3");
   });
 });
