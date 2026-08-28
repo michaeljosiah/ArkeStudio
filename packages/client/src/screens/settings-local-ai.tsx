@@ -190,9 +190,14 @@ export function SettingsLocalAiScreen() {
         // Switched off is stated at any row state, not only when installed: being turned down is
         // a decision and the other three are conditions, and R-32 forbids letting a decision
         // read as an absence.
+        //
+        // Never for a model served elsewhere. `strandReason` answers about *this* machine's
+        // engine, and until R-10 that was unreachable here because the row state short-circuited
+        // on locality; now that it does not, the guard has to be said. Switched off still is: a
+        // decision travels with the model wherever it runs.
         ineligible: disabled.has(model.id)
           ? "turned off in Providers"
-          : rowState === "installed" && !usableIds.has(model.id)
+          : locality === "local" && rowState === "installed" && !usableIds.has(model.id)
             ? strandReason(state, model)
             : undefined,
       };

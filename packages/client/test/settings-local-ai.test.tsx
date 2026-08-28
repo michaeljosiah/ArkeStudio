@@ -10,7 +10,6 @@ import {
   FitVerdictSchema,
   localModelRowState,
   PROVIDERS,
-  ROW_STATE_LABEL,
   type ActivationState,
   type ClientState,
   type FitVerdict,
@@ -332,8 +331,57 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
     const text = plain(renderRow(stateWith({ runtime: remote }), "Video"));
     assert.match(text, /Draft video\s+served elsewhere/);
     // No verdict about this machine, and nothing that says the work happens on it.
-    assert.doesNotMatch(text, /Draft video\s+served elsewhere\s+Engines\s+Needs/);
+    assert.doesNotMatch(text, /runs well|runs slowly|not enough here|not measured/);
     assert.doesNotMatch(text, /on this machine/i);
+    // Nor the local engine's own refusal. Until SPEC-034 R-10 the row state short-circuited on
+    // locality and this arm was unreachable; now it is an ordinary state and only the guard
+    // keeps `the local engine is not ready` off a row another machine serves.
+    assert.doesNotMatch(text, /local engine/i);
+    assert.match(text, /Draft video\s+served elsewhere · 13\.7 GB\s+Engines/);
+    // Nothing this machine could act on: what is installed where the work runs is that engine's
+    // business, and an Install here would fetch weights this machine will not run. `Downloads`
+    // is deliberately not in the list — the pane's own footer carries one, and a negative that
+    // matches the footer would pass whatever the row did.
+    assert.doesNotMatch(text, /Install ·|Remove|Repair|Retry/);
+  });
+
+  it("keeps this machine's engine out of a remote row's refusal (SPEC-034 R-10)", () => {
+    // The weights happen to be on this machine, so the row reaches `installed` — a state that
+    // was unreachable for a remote model until R-10 stopped the projection short-circuiting on
+    // locality. `strandReason` answers about *this* machine's engine, and only the guard keeps
+    // `the local engine is not ready` off a row another machine serves.
+    const remote = runtime({
+      models: runtime().models.map((m) =>
+        m.provider === "comfyui"
+          ? { modelId: m.modelId, provider: m.provider, displayName: m.displayName, capability: m.capability, locality: "remote" as const }
+          : m,
+      ),
+    });
+    const held = stateWith({ runtime: remote });
+    const text = plain(
+      renderRow(
+        stateWith({
+          runtime: remote,
+          setup: {
+            ...held.app.setup!,
+            components: held.app.setup!.components.map((c) =>
+              c.id === comfyUiWeightsComponentId(DRAFT_VIDEO.id)
+                ? { ...c, state: "present" as const, removable: true }
+                : c,
+            ),
+          },
+        }),
+        "Video",
+      ),
+    );
+    assert.match(text, /Draft video\s+served elsewhere/);
+    assert.doesNotMatch(text, /local engine/i);
+    // Removable, and still not this machine's to remove: the weights it holds are not what the
+    // work runs on.
+    assert.doesNotMatch(text, /Install ·|Remove|Repair|Retry/);
+    // And not counted as installed here. `N OF M INSTALLED` means on this machine, and a remote
+    // engine reporting `ready` would otherwise credit this one with a model it does not hold.
+    assert.match(text, /0 OF 1 INSTALLED/);
   });
 });
 
@@ -438,15 +486,6 @@ describe("the row state is a projection, never a new vocabulary (R-26)", () => {
     }
   });
 
-  it("says nothing about locality, which is the engine's to state (SPEC-034 R-10)", () => {
-    // `served-elsewhere` left the vocabulary. A remote model reaches this projection with no
-    // verdict — R-15 gives it none — and comes back with its transfer's state, exactly as a
-    // local unmeasured one does. Where the work runs is said by the engine, twice and no more.
-    assert.ok(!(ROW_STATE_LABEL as Record<string, string>)["served-elsewhere"]);
-    for (const activation of ACTIVATIONS) {
-      assert.equal(localModelRowState(undefined, activation), expected(undefined, activation));
-    }
-  });
 
   it("a refusing fit is Unsupported whatever the transfer is doing (row 14, row 16)", () => {
     // The case the old vocabulary could not form: downloading onto hardware that will not run it.
