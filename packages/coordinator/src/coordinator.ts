@@ -6,6 +6,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
+  diagnosticsSources,
   CHARACTER_REFERENCE_ARTIFACT_TARGETS,
   REFERENCE_FINALIZATION_TARGETS,
   UlidSchema,
@@ -91,6 +92,7 @@ import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
 import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
+import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
   compileBoard,
   composeDispatches,
@@ -733,6 +735,11 @@ export class Coordinator {
   private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
   private readonly lifecycleDisposers = new Set<() => void>();
+  /**
+   * The findings snapshot (SPEC-032 §1.9). Nullable only because services constructed above it
+   * emit during construction; every hook guards, and it exists before the constructor returns.
+   */
+  private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
@@ -1408,15 +1415,23 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
-      getInitialEvents: () =>
-        [...this.pendingPermissions].map(([permissionId, permission]) => ({
+      getInitialEvents: () => {
+        const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
           at: new Date().toISOString(),
           type: "permission.pending" as const,
           permissionId,
           actionClass: permission.actionClass,
           description: describeActionClass(permission.actionClass),
           rememberable: permission.rememberable,
-        })),
+        }));
+        // The findings are transient state like held permissions: a client that reloads would
+        // otherwise be blind until the next source change (SPEC-032 R-33's "on demand").
+        const findings = this.diagnosticsSnapshot?.currentSnapshot();
+        if (findings !== undefined) {
+          replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
+        }
+        return replayed;
+      },
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1452,6 +1467,30 @@ export class Coordinator {
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
     });
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
+    this.diagnosticsSnapshot = new DiagnosticsSnapshotHolder({
+      sources: () => diagnosticsSources(this.getState().app),
+      // #555 supplies the bounded operational-log read; until then the tail is empty and no
+      // rule consumes it.
+      tails: () => ({ appLog: [] }),
+      // Subsystem reasons are built from subprocess output and Error.message, which routinely
+      // embed secrets a provider echoed back — the same boundary the logs pass (SPEC-032 D7).
+      boundary: { scrub: (text) => this.secrets.scrub(text) },
+      // Deliberately not this.emit: the snapshot is derived FROM the read model, so folding it
+      // back in would re-trigger its own derivation, and journalling it would record to disk a
+      // projection of state the change log already carries.
+      onSnapshot: (snapshot) =>
+        this.transport.broadcast(
+          DomainEventSchema.parse({
+            at: new Date().toISOString(),
+            type: "diagnostics.snapshot",
+            snapshot,
+          }),
+        ),
+    });
+    this.lifecycleDisposers.add(() => this.diagnosticsSnapshot?.dispose());
+    // The first derivation, so request paths read an existing snapshot rather than computing
+    // one inside a frame handler (R-34).
+    this.diagnosticsSnapshot.schedule();
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.
@@ -1694,6 +1733,9 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: parsed });
     }
     this.transport.broadcast(parsed);
+    // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
+    // re-derive when something changed, coalesced to one derivation per tick, never a timer.
+    this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {

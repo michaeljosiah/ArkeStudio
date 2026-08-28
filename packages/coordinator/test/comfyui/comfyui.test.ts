@@ -977,6 +977,8 @@ describe("pre-flight names the file and both digests (§2.5, R-9)", () => {
     assert.deepEqual(await service.preflight("blocked-recipe"), {
       ok: false,
       reason: "immutable model artifacts are unavailable",
+      // The walk declares which step refused (SPEC-032 R-20): a catalogue refusal, not a file's.
+      reasonKind: "catalogue",
     });
   });
 });

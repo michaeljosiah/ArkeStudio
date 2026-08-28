@@ -52,6 +52,19 @@ export const SetupComponentSchema = z
     bytesPerSecond: z.number().int().min(0).nullable().default(null),
     /** The reason, whenever the state is one that owes you one. */
     detail: z.string().optional(),
+    /**
+     * Which guard blocked it (SPEC-032 R-20.3, R-20.4). The detail sentence carries the figures
+     * for a person; a correlation that needs to know *disk* from *waiting on a dependency* must
+     * not parse the sentence to find out, so the guard says which it was. Optional: only a
+     * `blocked` component carries one.
+     */
+    blockedBy: z.enum(["disk", "dependency", "models-folder", "architecture"]).optional(),
+    /**
+     * The volume the disk guard measured, as a root like `D:` — the one filesystem
+     * identification a diagnostics record may carry (SPEC-032 R-28), because a disk finding
+     * has to name the drive.
+     */
+    blockedVolumeRoot: z.string().min(1).optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
     /**
@@ -218,6 +231,11 @@ export const SetupStatusSchema = z
     running: z.boolean(),
     /** Free disk at the last check — the guard's evidence, shown rather than assumed. */
     diskFreeMb: z.number().int().min(0).nullable(),
+    /**
+     * When that check ran (SPEC-032 R-7, R-16): a figure measured at start-up must not read as
+     * a statement about the drive right now. Defaulted null for payloads that predate it.
+     */
+    diskCheckedAt: z.string().min(1).nullable().default(null),
   })
   .strict();
 export type SetupStatus = z.infer<typeof SetupStatusSchema>;

@@ -144,6 +144,7 @@ function stateWith(over: Partial<ClientState["app"]> = {}): ClientState {
       setup: {
         running: false,
         diskFreeMb: 480_000,
+      diskCheckedAt: null,
         components: [
           component({ id: "tts-kokoro-82m", state: "ready", provides: [KOKORO.id] }),
           component({ id: "ollama-gemma4-12b", state: "available", sizeMb: 7600, provides: [GEMMA.id] }),

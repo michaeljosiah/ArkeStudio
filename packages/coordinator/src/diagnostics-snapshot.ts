@@ -1,0 +1,78 @@
+import {
+  deriveDiagnostics,
+  diagnosticsEqual,
+  type DiagnosticsSnapshot,
+  type DiagnosticsSources,
+  type DiagnosticsTails,
+  type RedactionBoundary,
+} from "@arke-studio/contracts";
+
+/**
+ * The one holder of the current diagnostics snapshot (SPEC-032 §1.9).
+ *
+ * Derivation is re-run when any source changes and never on a timer (R-33): the coordinator
+ * pokes `schedule()` from its one event path, and everything that lands in a tick coalesces
+ * into a single derivation on the next immediate — which is also what keeps it off every path
+ * a user action awaits (R-34). The previous snapshot stays here because R-11 makes `firstSeen`
+ * an input: the derivation is pure, and this class is the caller that owns the bookkeeping.
+ *
+ * A fresh derivation is broadcast only when it states something different. Sources change far
+ * more often than findings do, and re-sending an identical set on every job progress event
+ * would be noise the client then has to diff anyway.
+ */
+export class DiagnosticsSnapshotHolder {
+  private current: DiagnosticsSnapshot | null = null;
+  private scheduled: NodeJS.Immediate | null = null;
+  private disposed = false;
+
+  constructor(
+    private readonly deps: {
+      sources: () => DiagnosticsSources;
+      /** Bounded log tails (R-18). #555 supplies the real read; until then an empty tail. */
+      tails: () => DiagnosticsTails;
+      boundary: RedactionBoundary;
+      onSnapshot: (snapshot: DiagnosticsSnapshot) => void;
+      clock?: () => string;
+    },
+  ) {}
+
+  /** Coalesce however many source changes arrive this tick into at most one derivation (R-33). */
+  schedule(): void {
+    if (this.disposed || this.scheduled !== null) return;
+    this.scheduled = setImmediate(() => {
+      this.scheduled = null;
+      this.deriveNow();
+    });
+  }
+
+  /**
+   * The latest derived snapshot. Maintained eagerly from the first `schedule()`, so callers on
+   * request paths (the support bundle, a fresh connection's replay) read rather than compute;
+   * deriving here is only the cold-start fallback before the first tick has fired.
+   */
+  currentSnapshot(): DiagnosticsSnapshot {
+    return this.current ?? this.deriveNow();
+  }
+
+  private deriveNow(): DiagnosticsSnapshot {
+    const snapshot = deriveDiagnostics({
+      sources: this.deps.sources(),
+      tails: this.deps.tails(),
+      previous: this.current,
+      now: (this.deps.clock ?? (() => new Date().toISOString()))(),
+      boundary: this.deps.boundary,
+    });
+    const changed = !diagnosticsEqual(this.current, snapshot);
+    this.current = snapshot;
+    if (changed && !this.disposed) this.deps.onSnapshot(snapshot);
+    return snapshot;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    if (this.scheduled !== null) {
+      clearImmediate(this.scheduled);
+      this.scheduled = null;
+    }
+  }
+}

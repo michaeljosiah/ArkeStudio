@@ -114,6 +114,7 @@ describe("screen inventory", () => {
         setup: {
           running: true,
           diskFreeMb: 100_000,
+      diskCheckedAt: null,
           components: [
             {
               id: "voxa-kokoro",

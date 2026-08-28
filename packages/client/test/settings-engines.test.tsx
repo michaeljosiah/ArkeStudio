@@ -52,7 +52,8 @@ function stateWith(over: Partial<ClientState["app"]> = {}): ClientState {
     ...FIXTURE_STATE,
     app: {
       ...FIXTURE_STATE.app,
-      setup: { running: false, diskFreeMb: 400_000, components: COMPONENTS },
+      setup: { running: false, diskFreeMb: 400_000,
+      diskCheckedAt: null, components: COMPONENTS },
       comfyui: {
         engine: {
           source: "managed",

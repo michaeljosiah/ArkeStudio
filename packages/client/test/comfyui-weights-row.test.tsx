@@ -67,7 +67,8 @@ function stateWith(component: SetupComponent, recipeReason?: string): ClientStat
         ],
         checkedAt: "2026-08-26T12:00:00.000Z",
       },
-      setup: { running: false, diskFreeMb: 100_000, components: [component] },
+      setup: { running: false, diskFreeMb: 100_000,
+      diskCheckedAt: null, components: [component] },
     },
   };
 }
