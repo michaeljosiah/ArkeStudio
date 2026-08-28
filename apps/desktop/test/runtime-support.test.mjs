@@ -11,6 +11,7 @@ import {
   gplVersionOf,
   manifestFor,
   peArchitecture,
+  pruneEmptyDirectories,
   swapStagedDirectory,
   verifyManifest,
 } from "../scripts/runtime-support.mjs";
@@ -218,6 +219,43 @@ describe("swapping a staged runtime into place", () => {
       swapStagedDirectory(fresh, stage, attic);
       assert.equal(await readFile(join(stage, "ffmpeg.exe"), "utf8"), "new", "the wreckage is not what got staged");
       assert.equal(existsSync(landing), false, "and the landing spot is left empty");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("tidies the attic root without touching another run's survivor", async () => {
+    // Both architectures and both prepare scripts keep survivors under one root, so the tidy-up
+    // at the end of a run cannot be a delete of that root (Codex round 2). An x64 stage saved by
+    // a run that died an hour ago has to still be there after an arm64 run, or after the
+    // prepare:opencode2 that follows in `package`.
+    const { root } = await scene();
+    const attic = join(root, ".runtime-previous");
+    try {
+      await mkdir(join(attic, "voxa", "x64"), { recursive: true });
+      await writeFile(join(attic, "voxa", "x64", "voxa.exe"), "an interrupted x64 run's only copy");
+      await mkdir(join(attic, "voxa", "arm64"), { recursive: true });
+      await mkdir(join(attic, "ffmpeg"), { recursive: true });
+      pruneEmptyDirectories(attic);
+      assert.equal(
+        await readFile(join(attic, "voxa", "x64", "voxa.exe"), "utf8"),
+        "an interrupted x64 run's only copy",
+      );
+      assert.equal(existsSync(join(attic, "voxa", "arm64")), false, "the empty ones do go");
+      assert.equal(existsSync(join(attic, "ffmpeg")), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the attic root once nothing is left in it", async () => {
+    const { root } = await scene();
+    const attic = join(root, ".runtime-previous");
+    try {
+      await mkdir(join(attic, "voxa", "x64"), { recursive: true });
+      pruneEmptyDirectories(attic);
+      assert.equal(existsSync(attic), false);
+      assert.doesNotThrow(() => pruneEmptyDirectories(attic), "and an absent root is not an error");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

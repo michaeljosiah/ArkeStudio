@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertPeArchitecture, assertSha256, manifestFor, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
+import { assertPeArchitecture, assertSha256, manifestFor, pruneEmptyDirectories, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -102,6 +102,9 @@ writeFileSync(
 
 const attic = join(desktopRoot, ".runtime-previous");
 swapStagedDirectory(stage, staged, join(attic, "opencode2"));
-rmSync(attic, { recursive: true, force: true });
+// Empty directories only. prepare-runtimes keeps its survivors under this same root, and this
+// script runs straight after it in `package` -- a parent-wide delete here would throw away a
+// stage saved by a run that died moments earlier (Codex round 2).
+pruneEmptyDirectories(attic);
 
 console.log(`[prepare-opencode2] staged verified opencode2 ${metadata.opencode2.version} (${arch})`);

@@ -10,9 +10,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertPeArchitecture, assertSha256, manifestFor, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
+import { assertPeArchitecture, assertSha256, manifestFor, pruneEmptyDirectories, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -423,13 +423,17 @@ writeManifest(ffmpegStage, "ffmpeg", { version: metadata.ffmpeg.version, sourceR
  * harmless, but there is no reason to create one.
  */
 const attic = join(desktopRoot, ".runtime-previous");
-for (const [component, fresh, destination] of [
-  ["voxa", voxaStage, join(staged, "voxa", arch)],
-  ["espeak-ng", espeakStage, join(staged, "espeak-ng", arch)],
-  ["ffmpeg", ffmpegStage, join(staged, "ffmpeg")],
+for (const [fresh, destination] of [
+  [voxaStage, join(staged, "voxa", arch)],
+  [espeakStage, join(staged, "espeak-ng", arch)],
+  [ffmpegStage, join(staged, "ffmpeg")],
 ]) {
-  swapStagedDirectory(fresh, destination, join(attic, component));
+  // The attic mirrors the stage, architecture and all. Keyed by component alone, an x64 run that
+  // died mid-swap left its survivor exactly where a later arm64 run would adopt it as its own
+  // displaced copy and delete it on success -- losing the recoverable stage this whole
+  // arrangement exists to keep (Codex round 2).
+  swapStagedDirectory(fresh, destination, join(attic, relative(staged, destination)));
 }
-rmSync(attic, { recursive: true, force: true });
+pruneEmptyDirectories(attic);
 
 console.log(`[prepare-runtimes] staged verified ${arch} Voxa, espeak-ng and ffmpeg runtimes`);

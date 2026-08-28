@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 export const SUPPORTED_ARCHES = new Set(["x64", "arm64"]);
@@ -102,6 +102,33 @@ export function assertNoticeMatchesLicence(licenceText, noticeText, label) {
   }
 }
 
+/*
+ * Windows keeps a directory locked for a moment after something inside it has been run, and a
+ * rename of it fails with EPERM -- a code that names nothing about the real reason. This bit a
+ * real prepare run: prepare-opencode2 executes the staged opencode2.exe for its --version probe
+ * seconds before the swap moves that directory, and the same rename succeeded by hand a minute
+ * later. Antivirus reading a 100MB binary produces it too.
+ *
+ * Retried rather than reported, because a prepare that dies on a lock which clears by itself is
+ * exactly the intermittent packaging failure this change exists to remove. EXDEV is deliberately
+ * not in the list: it is a fact about the two paths, not a transient, and the caller acts on it.
+ */
+const TRANSIENT_LOCK_CODES = new Set(["EPERM", "EBUSY", "EACCES", "ENOTEMPTY"]);
+
+function renameWithRetry(from, to) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      if (attempt >= 20 || !TRANSIENT_LOCK_CODES.has(error.code)) throw error;
+      // Sync, because everything around it is: the scripts stage in order and have nothing to
+      // get on with while they wait.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
+  }
+}
+
 /**
  * Replace a staged runtime directory with a freshly prepared one, in that order.
  *
@@ -136,7 +163,7 @@ export function swapStagedDirectory(fresh, stage, attic) {
   const landing = `${attic}.incoming`;
   rmSync(landing, { recursive: true, force: true });
   try {
-    renameSync(fresh, landing);
+    renameWithRetry(fresh, landing);
   } catch (error) {
     if (error.code !== "EXDEV") throw error;
     cpSync(fresh, landing, { recursive: true });
@@ -154,20 +181,41 @@ export function swapStagedDirectory(fresh, stage, attic) {
   let displaced = existsSync(stage);
   if (displaced) {
     rmSync(attic, { recursive: true, force: true });
-    renameSync(stage, attic);
+    renameWithRetry(stage, attic);
   } else {
     displaced = existsSync(attic);
   }
 
   try {
-    renameSync(landing, stage);
+    renameWithRetry(landing, stage);
   } catch (error) {
     // The displaced copy is now the only one there is; put it back rather than leave neither.
     if (displaced) {
       rmSync(stage, { recursive: true, force: true });
-      renameSync(attic, stage);
+      renameWithRetry(attic, stage);
     }
     throw error;
   }
   rmSync(attic, { recursive: true, force: true });
+}
+
+/**
+ * Clear the empty directories a completed swap leaves behind, and nothing else.
+ *
+ * The prepare scripts used to sweep the whole attic root when they finished. Attics are shared
+ * across runs -- both architectures and both scripts write beneath the same root -- so that
+ * sweep took an interrupted run's survivor with it: prepare an arm64 build, or merely run
+ * prepare:opencode2, and an x64 stage saved by a run that died an hour ago was gone (Codex round
+ * 2). rmdir refuses a directory that still holds something, which is exactly the test wanted.
+ */
+export function pruneEmptyDirectories(root) {
+  if (!existsSync(root)) return;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (entry.isDirectory()) pruneEmptyDirectories(join(root, entry.name));
+  }
+  try {
+    rmdirSync(root);
+  } catch {
+    // Something is still in there, and the only things kept here are survivors. Leave it.
+  }
 }
