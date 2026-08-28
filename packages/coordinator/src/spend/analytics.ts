@@ -23,13 +23,25 @@ export function rollingSpend(entries: LedgerEntry[], settings: SpendSettings, no
   );
 }
 
-/** The status the client renders; alerts and never blocks (R-19, D10). */
-export function evaluateSpend(entries: LedgerEntry[], settings: SpendSettings, now: Date): SpendStatus {
+/**
+ * The status the client renders; alerts and never blocks (R-19, D10). The caller states the
+ * fate of the read that produced `entries` — required, not defaulted, because a forgotten flag
+ * is the exact swallowed failure the field exists to publish: a threshold evaluated over
+ * nothing reading as a quiet window (SPEC-032 R-21). Over an unreadable ledger the zero and
+ * the un-fired alert still ride the status; the flag is what stops them being presented.
+ */
+export function evaluateSpend(
+  entries: LedgerEntry[],
+  settings: SpendSettings,
+  now: Date,
+  ledgerUnavailable: boolean,
+): SpendStatus {
   const rollingMicroUsd = rollingSpend(entries, settings, now);
   return {
     settings,
     rollingMicroUsd,
     alerted: settings.thresholdMicroUsd > 0 && rollingMicroUsd >= settings.thresholdMicroUsd,
+    ledgerUnavailable,
   };
 }
 

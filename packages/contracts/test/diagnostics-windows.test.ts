@@ -306,6 +306,25 @@ describe("spend above the previous period (R-20.10)", () => {
     );
   });
 
+  it("row 15a: the spend status states its own read's fate in the source rows — never a confident block beside an unavailable input", () => {
+    const spend = (ledgerUnavailable: boolean) => ({
+      settings: { thresholdMicroUsd: 50_000_000, periodDays: 7 },
+      rollingMicroUsd: 0,
+      alerted: false,
+      ledgerUnavailable,
+    });
+    const failed = deriveWithTail([], { ledgerUnavailable: true, spend: spend(true) });
+    assert.equal(failed.sources.find((s) => s.name === "app.spend")?.state, "unavailable");
+    // The two reads are separate: the seeded list stays latched to the boot read while a
+    // later evaluation that read the file records `read` — each row states its own read
+    // (SPEC-008 R-19), and a status that is simply absent stays absence (row 15).
+    const recovered = deriveWithTail([], { ledgerUnavailable: true, spend: spend(false) });
+    assert.equal(recovered.sources.find((s) => s.name === "app.spend")?.state, "read");
+    assert.equal(recovered.sources.find((s) => s.name === "app.ledger")?.state, "unavailable");
+    const absent = deriveWithTail([], { ledgerUnavailable: true });
+    assert.equal(absent.sources.find((s) => s.name === "app.spend")?.state, "absent");
+  });
+
   it("a quiet previous week with real history still compares — a rise from zero is a rise", () => {
     const snapshot = deriveWithTail([], {
       ledger: [entry(20, "veo-3", 500_000), entry(2, "veo-3", SPEND_RISE_FLOOR_MICRO_USD)],

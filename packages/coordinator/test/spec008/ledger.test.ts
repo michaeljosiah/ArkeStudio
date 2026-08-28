@@ -89,6 +89,17 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
     await appendFile(path, JSON.stringify(entry({ outcome: "failed" })) + "\n", "utf8");
     assert.equal((await new LedgerFile(path).readAll()).length, 2);
   });
+
+  it("the checked read separates a file nobody wrote from one that exists and cannot be read", async () => {
+    const dir = await tempDir("arke-ledger-");
+    // ENOENT: nothing recorded yet — absence, not failure (SPEC-032 R-19).
+    const absent = await new LedgerFile(join(dir, "ledger.jsonl")).readAllChecked();
+    assert.deepEqual(absent, { entries: [], unavailable: false });
+    // EISDIR: a path that exists and is not readable as a file — as in the seed's test,
+    // because EACCES has no portable fixture.
+    const unreadable = await new LedgerFile(dir).readAllChecked();
+    assert.deepEqual(unreadable, { entries: [], unavailable: true });
+  });
 });
 
 describe("the strict reader — unreadable is not empty (SPEC-009 R-16)", () => {
@@ -157,14 +168,16 @@ describe("the rolling spend threshold (R-19, D10, §3.2)", () => {
       // Outside the window — must not count.
       entry({ worldId: WORLD_A, ts: "2026-07-01T10:00:00Z", actualMicroUsd: 500_000_000, actualSource: "provider-reported" }),
     ];
-    const status = evaluateSpend(entries, { thresholdMicroUsd: 50_000_000, periodDays: 7 }, now);
+    const status = evaluateSpend(entries, { thresholdMicroUsd: 50_000_000, periodDays: 7 }, now, false);
     assert.equal(status.rollingMicroUsd, 55_000_000, "both worlds count; the stale entry does not");
     assert.equal(status.alerted, true);
+    assert.equal(status.ledgerUnavailable, false, "the status carries its read's fate (SPEC-032 R-21)");
 
     const perWorldWouldMiss = evaluateSpend(
       entries.filter((e) => e.worldId === WORLD_A),
       { thresholdMicroUsd: 50_000_000, periodDays: 7 },
       now,
+      false,
     );
     assert.equal(perWorldWouldMiss.alerted, false, "a per-world evaluation would have missed it — hence global");
   });
@@ -172,8 +185,8 @@ describe("the rolling spend threshold (R-19, D10, §3.2)", () => {
   it("uses the estimate when no actual was recorded, and a zero threshold disables", () => {
     const now = new Date("2026-08-01T12:00:00Z");
     const entries = [entry({ ts: "2026-08-01T10:00:00Z", actualMicroUsd: null, estimatedMicroUsd: 700_000 })];
-    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 500_000, periodDays: 7 }, now).alerted, true);
-    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 0, periodDays: 7 }, now).alerted, false);
+    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 500_000, periodDays: 7 }, now, false).alerted, true);
+    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 0, periodDays: 7 }, now, false).alerted, false);
   });
 });
 

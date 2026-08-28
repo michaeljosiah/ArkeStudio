@@ -1225,10 +1225,13 @@ const STATE_RULES: readonly Rule[] = [
  * Every source R-17 names, with whether it was read or is legitimately absent (R-19) — the
  * whole list, not the subset this release's rules happen to consult, so a rule added later
  * changes no row and a reader can see the closed set. `unavailable` is reachable for the log
- * tail and for the ledger, whose availability the read model publishes beside its entries
- * (R-21). The jobs list is file-seeded too but does not carry availability yet, so its row can
- * only say `read`; the remaining state fields are in memory, where a null one is a fact that
- * was never taken — absence, not a failed read (R-14's distinction).
+ * tail, for the ledger, whose availability the read model publishes beside its entries (R-21),
+ * and for the spend status, which states when the ledger read behind its own evaluation failed
+ * (SPEC-008 R-19) — without that consult, the bundle carried a confident spend block marked
+ * `read` beside the very row saying its input could not be read. The jobs list is file-seeded
+ * too but does not carry availability yet, so its row can only say `read`; the remaining state
+ * fields are in memory, where a null one is a fact that was never taken — absence, not a
+ * failed read (R-14's distinction).
  */
 function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
   const named: Array<{ name: string; state: DiagnosticsSourceState }> = [
@@ -1248,7 +1251,10 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.manifest", state: sources.manifest === null ? "absent" : "read" },
     { name: "app.routing", state: "read" },
     { name: "app.models", state: "read" },
-    { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
+    {
+      name: "app.spend",
+      state: sources.spend === null ? "absent" : sources.spend.ledgerUnavailable ? "unavailable" : "read",
+    },
     { name: "app.ledger", state: sources.ledgerUnavailable ? "unavailable" : "read" },
     { name: "app.drift", state: "read" },
     { name: "app.builds", state: "read" },

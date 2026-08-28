@@ -63,15 +63,31 @@ export class LedgerFile {
    * Every valid entry; malformed interior lines are skipped, never fatal (tolerant reader).
    * The whole read is tolerant too — a file that cannot be read, or whose torn tail cannot be
    * repaired, answers as empty. Only for callers whose answer decorates something else (a
-   * take's actual cost, a spend chart): for them a blank figure is honest degradation.
-   * Anything that would *append* on the strength of an absence must use `readAllStrict`.
+   * take's actual cost): for them a blank figure is honest degradation. Anything that would
+   * *append* on the strength of an absence must use `readAllStrict`; anything that publishes
+   * a figure the user reads as a total must use `readAllChecked`, which degrades and says so.
    */
   async readAll(): Promise<LedgerEntry[]> {
+    return (await this.readAllChecked()).entries;
+  }
+
+  /**
+   * The third answer between those two, for the spend evaluation (SPEC-032 R-21): it degrades
+   * rather than throwing, and states the degradation rather than dressing an unreadable ledger
+   * as a quiet window. A spend chart was named above as a caller that can blank honestly, and
+   * it is the one that cannot: a rolling zero and an un-fired alert are a claim about the
+   * money, not a blank. ENOENT is a ledger nobody has written yet — absence, not failure
+   * (SPEC-032 R-19's distinction); anything else is a record that exists and is not read.
+   */
+  async readAllChecked(): Promise<{ entries: LedgerEntry[]; unavailable: boolean }> {
+    await this.queue.enqueue(() => this.repairTail());
+    let raw: string;
     try {
-      return await this.read();
-    } catch {
-      return [];
+      raw = await readFile(this.path, "utf8");
+    } catch (err) {
+      return { entries: [], unavailable: (err as NodeJS.ErrnoException).code !== "ENOENT" };
     }
+    return { entries: this.parseLines(raw), unavailable: false };
   }
 
   /**

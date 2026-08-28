@@ -2428,7 +2428,7 @@ export class Coordinator {
     this.skillFamily = routedVideo?.family;
     this.skillModelId = routedVideo?.id;
     this.refreshAgents(settings?.agents ?? {});
-    const entries = this.ledger ? await this.ledger.readAll() : [];
+    const { entries, unavailable: ledgerUnavailable } = await this.spendLedgerRead();
     this.readModel.seedAppConfig({
       manifest,
       providers: this.providerService.list(),
@@ -2444,14 +2444,18 @@ export class Coordinator {
         : {}),
       ...(settings ? { models: settings.models } : {}),
       ...(settings ? { presets: settings.presets } : {}),
-      ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
+      ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date(), ledgerUnavailable) } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
       ...(settings ? { narrator: settings.narrator } : {}),
-      ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
+      // Not against a failed read: drift derived from nothing is an empty list wearing the
+      // shape of "nothing drifted". Omitted, the read model keeps its seeded [] — same state,
+      // but nothing pretends it was derived (SPEC-032 R-21); the spend panel's ledger caveat
+      // is what tells the reader the record is unreadable.
+      ...(manifest && !ledgerUnavailable ? { drift: detectDrift(entries, manifest) } : {}),
       ...(this.opts.harnessInfo ? { harnessInfo: this.opts.harnessInfo } : {}),
     });
   }
@@ -3016,6 +3020,20 @@ export class Coordinator {
   }
 
   /**
+   * The ledger read behind a spend evaluation, with the fate of that read (SPEC-008 R-19;
+   * SPEC-032 R-21). `readAll` folds a failed read into an empty array — right for a per-job
+   * lookup, and the reason the threshold was once evaluated against zero and published
+   * `rollingMicroUsd: 0, alerted: false` beside a diagnostics bundle saying the same ledger
+   * could not be read. The no-file fallback is the published list, whose own read fate the
+   * seed already recorded as `app.ledgerUnavailable`.
+   */
+  private async spendLedgerRead(): Promise<{ entries: LedgerEntry[]; unavailable: boolean }> {
+    if (this.ledger) return this.ledger.readAllChecked();
+    const app = this.getState().app;
+    return { entries: app.ledger, unavailable: app.ledgerUnavailable };
+  }
+
+  /**
    * Record a terminal job outcome (SPEC-008 R-16): append to the ledger, mirror to the app
    * index via the event fold, re-evaluate the rolling threshold (R-19) and drift (R-13).
    * SPEC-009's dispatcher calls this; fixtures and tests call it directly.
@@ -3025,8 +3043,8 @@ export class Coordinator {
     this.emit({ at: new Date().toISOString(), type: "ledger.appended", entry });
     const settings = this.appSettings ? await this.appSettings.load() : null;
     if (!settings) return;
-    const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
-    const spend = evaluateSpend(entries, settings.spend, new Date());
+    const { entries, unavailable } = await this.spendLedgerRead();
+    const spend = evaluateSpend(entries, settings.spend, new Date(), unavailable);
     const wasAlerted = this.getState().app.spend?.alerted ?? false;
     this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
     if (spend.alerted && !wasAlerted) {
@@ -3036,7 +3054,10 @@ export class Coordinator {
         settings: settings.spend,
       });
     }
-    if (this.opts.manifest) {
+    // Never against a failed read: drift derived from nothing is [], and emitting that would
+    // clear reports computed from real samples — a transient I/O failure downgrading a true
+    // manifest warning to silence. The reports stand until a read that worked says otherwise.
+    if (this.opts.manifest && !unavailable) {
       const drift = detectDrift(entries, this.opts.manifest);
       if (JSON.stringify(drift) !== JSON.stringify(this.getState().app.drift)) {
         this.emit({ at: new Date().toISOString(), type: "manifest.drift", reports: drift });
@@ -4733,11 +4754,11 @@ export class Coordinator {
       case "set-spend-threshold": {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays);
-        const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
+        const { entries, unavailable } = await this.spendLedgerRead();
         this.emit({
           at: new Date().toISOString(),
           type: "spend.status",
-          spend: evaluateSpend(entries, settings.spend, new Date()),
+          spend: evaluateSpend(entries, settings.spend, new Date(), unavailable),
         });
         return;
       }

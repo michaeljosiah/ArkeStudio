@@ -290,6 +290,15 @@ export const SpendStatusSchema = z
     rollingMicroUsd: z.number().int().min(0),
     /** True while the rolling spend sits at or over a non-zero threshold. */
     alerted: z.boolean(),
+    /**
+     * True when the ledger read behind this evaluation failed (R-19; SPEC-032 R-21). The
+     * figure and the alert above are then computed over nothing — a rolling zero and an
+     * un-fired alert that must not be presented as a quiet window. Carried on the status
+     * itself, not looked up beside it, because the evaluation re-reads the file: the seeded
+     * `app.ledgerUnavailable` is latched to the boot read, and the two can honestly differ.
+     * Defaulted so payloads from before the field still parse — as a read that worked.
+     */
+    ledgerUnavailable: z.boolean().default(false),
   })
   .strict();
 export type SpendStatus = z.infer<typeof SpendStatusSchema>;

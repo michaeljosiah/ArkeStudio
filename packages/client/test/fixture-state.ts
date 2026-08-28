@@ -119,6 +119,7 @@ const state: ClientState = {
       settings: { thresholdMicroUsd: 50_000_000, periodDays: 7 },
       rollingMicroUsd: 128400,
       alerted: false,
+      ledgerUnavailable: false,
     },
     backgroundNotifications: "issues-only",
     research: { web: false },

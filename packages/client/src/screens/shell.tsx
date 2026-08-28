@@ -3382,11 +3382,19 @@ export function ActivityScreen() {
               <div className="fy-spendtotal">
                 {formatMicroUsd(spend.totalMicroUsd)}{" "}
                 <span className="fy-mono">
-                  {spend.mixed
-                    ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
-                    : spend.derivedEntries > 0
-                      ? "derived from the manifest"
-                      : "provider-reported"}
+                  {/* The source-quality slot, and a failed read is the loudest source fact
+                      there is: this figure sums only what survived it, a lower bound wearing
+                      the shape of a total. The same fact Settings · Diagnostics states, in the
+                      same words, so the two surfaces cannot disagree (SPEC-032 R-13). Keyed on
+                      the published list's own read — latched to the seed — where the alert row
+                      below states the fate of the evaluation's fresh read. */}
+                  {state?.app.ledgerUnavailable
+                    ? "ledger could not be read"
+                    : spend.mixed
+                      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+                      : spend.derivedEntries > 0
+                        ? "derived from the manifest"
+                        : "provider-reported"}
                 </span>
               </div>
               {spend.byProvider
@@ -3412,9 +3420,15 @@ export function ActivityScreen() {
               )}
               <div className="fy-notecard" style={{ background: "var(--background)" }}>
                 <span className={`fy-dot fy-dot--${state?.app.spend?.alerted ? "warn" : "sketch"}`} />
-                {state?.app.spend?.alerted && state.app.spend
-                  ? `Over the threshold: ${formatMicroUsd(state.app.spend.rollingMicroUsd)} against ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked.`
-                  : `Alert at ${formatMicroUsd(state?.app.spend?.settings.thresholdMicroUsd ?? 0)} / ${spend.periodDays}d${(state?.app.spend?.settings.thresholdMicroUsd ?? 0) === 0 ? " · off" : ""}`}
+                {/* `not evaluated` outranks the quiet branch: the status was computed over a
+                    read that failed, so its un-fired alert is not an all-clear (SPEC-008
+                    R-19). A zero threshold stays `off` — an alert that is off asks nothing of
+                    the ledger. The sketch dot already is the unknown band's neutral (111a). */}
+                {state?.app.spend?.ledgerUnavailable && state.app.spend.settings.thresholdMicroUsd > 0
+                  ? `Alert at ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)} / ${spend.periodDays}d · not evaluated`
+                  : state?.app.spend?.alerted && state.app.spend
+                    ? `Over the threshold: ${formatMicroUsd(state.app.spend.rollingMicroUsd)} against ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked.`
+                    : `Alert at ${formatMicroUsd(state?.app.spend?.settings.thresholdMicroUsd ?? 0)} / ${spend.periodDays}d${(state?.app.spend?.settings.thresholdMicroUsd ?? 0) === 0 ? " · off" : ""}`}
                 {/* Opens the control in place. It used to send you to Settings, which is where the
                     threshold lived; 26a puts the threshold on this screen, so it is here now. */}
                 <button
