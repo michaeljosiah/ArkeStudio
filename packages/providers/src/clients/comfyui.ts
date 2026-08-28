@@ -468,7 +468,9 @@ export class ComfyUiClient implements ProviderClient {
    * would buy a cold start on every line.
    */
   private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
-    const need = recipe.hardware.minVramMb;
+    // The free-VRAM floor, not the card-size floor: a streaming recipe (H3) legitimately needs
+    // the whole card to exist and only a fraction of it free at dispatch.
+    const need = recipe.hardware.minFreeVramMb;
     if (this.engineLocality() === "remote" || !this.freeVramMb || need <= 0) return;
     const first = await this.freeVramMb().catch(() => null);
     // Unknown stays unknown and dispatches (SPEC-021 D15): a card this build cannot measure is

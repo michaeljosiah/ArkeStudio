@@ -104,6 +104,8 @@ interface Floor {
   need: number;
   have: number | null;
   what: string;
+  /** The authored runs-well boundary, where one is declared; the generic margin otherwise. */
+  well?: number;
 }
 
 export interface FitResult {
@@ -149,7 +151,14 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
 
   // 2 · The measured floors. Free disk is deliberately not among them (R-17).
   const floors: Floor[] = [];
-  if (req.vramMb !== undefined) floors.push({ need: req.vramMb, have: probes.vramMb, what: "VRAM" });
+  if (req.vramMb !== undefined) {
+    floors.push({
+      need: req.vramMb,
+      have: probes.vramMb,
+      what: "VRAM",
+      ...(req.recommendedVramMb !== undefined ? { well: req.recommendedVramMb } : {}),
+    });
+  }
   if (req.memMb !== undefined) floors.push({ need: req.memMb, have: probes.memMb, what: "memory" });
   for (const floor of floors) if (floor.have === null) unmeasured.push(floor.what);
 
@@ -180,7 +189,9 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   //     between the two passing verdicts, and it is the figure worth stating either way.
   if (floors.length === 0) return { fit: "runs-well" };
   const binding = floors.reduce((tightest, f) => (f.have! / f.need < tightest.have! / tightest.need ? f : tightest));
-  const comfortable = binding.have! >= binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  // An authored boundary beats the generic margin: the author measured where comfortable begins,
+  // and 25% over a floor built for offloading is not it.
+  const comfortable = binding.have! >= (binding.well ?? binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO));
   const both = figures(binding.need, binding.have!);
   return {
     fit: comfortable ? "runs-well" : "runs-slowly",

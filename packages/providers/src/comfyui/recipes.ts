@@ -86,7 +86,16 @@ export interface ComfyUiRecipe {
     unavailableReason?: string;
   };
   hardware: {
+    /** The card-size floor: total VRAM the machine must have, or the recipe is disabled. */
     minVramMb: number;
+    /**
+     * The free-VRAM floor: what readiness's busy check and the pre-dispatch room check compare
+     * against. Two floors because they answer two questions — "is the card big enough" against
+     * "is enough of it free right now" — and reusing one figure for both rejected the exact
+     * configuration H3 was verified on: a 10 GB card streaming a 20 GB transformer needs the
+     * whole card to exist and about 4 GB of it free, not 10 GB free.
+     */
+    minFreeVramMb: number;
     recommendedVramMb: number;
     /** Where the floor came from, so nobody mistakes a transcription for a measurement (§1.4). */
     floorSource: string;
@@ -155,6 +164,8 @@ const DRAFT_IMAGE: ComfyUiRecipe = {
   },
   hardware: {
     minVramMb: 6000,
+    // The pre-split value: SDXL genuinely wants its floor free, so the two figures agree here.
+    minFreeVramMb: 6000,
     recommendedVramMb: 8000,
     floorSource: "transcribed from the model publisher's stated requirement; not yet measured on Arke reference hardware",
   },
@@ -244,6 +255,8 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
   },
   hardware: {
     minVramMb: 8000,
+    // The pre-split value: the 5B model resides on the card whole, so the two figures agree.
+    minFreeVramMb: 8000,
     recommendedVramMb: 12000,
     floorSource: "transcribed from the engine vendor's stated 8 GB requirement for this model; not yet measured on Arke reference hardware",
   },
@@ -379,11 +392,15 @@ const H3_VIDEO: ComfyUiRecipe = {
     customNodes: [],
   },
   hardware: {
-    // The gate reads TOTAL VRAM (SPEC-022 §2.6's lesson), and 10 GB is what was actually proven:
-    // the run below completed with ~6 GB of the card already held by other applications, streaming
-    // the 20 GB transformer through dynamic VRAM loading. Community reports put 8 GB cards through
-    // reduced runs, but nothing below 10 GB was measured here, so nothing below 10 GB is claimed.
+    // The card-size gate reads TOTAL VRAM (SPEC-022 §2.6's lesson), and 10 GB is what was
+    // actually proven: the run below completed streaming the 20 GB transformer through dynamic
+    // VRAM loading. Community reports put 8 GB cards through reduced runs, but nothing below
+    // 10 GB was measured here, so nothing below 10 GB is claimed.
     minVramMb: 10000,
+    // Measured, not derived from the card floor: the verified run dispatched with ~4.1 GB free
+    // (~6 GB of the card held by other applications) and completed. Requiring the card floor
+    // FREE would have refused the only configuration this recipe has ever been proven on.
+    minFreeVramMb: 4000,
     recommendedVramMb: 24000,
     floorSource:
       "measured through ComfyUI on Arke reference hardware 2026-08-28: RTX 3080 10 GB, ~6 GB already in use by " +
@@ -543,6 +560,9 @@ const CLONED_VOICE: ComfyUiRecipe = {
     // engine hosting it costs more, and the machine it runs on already had 3.36 GB of its card
     // spoken for. The gate reads TOTAL VRAM, so the headroom has to live in the floor.
     minVramMb: 8000,
+    // The measurement above was of a busy card failing: this model wants its floor genuinely
+    // free, which is exactly what that run did not have.
+    minFreeVramMb: 8000,
     recommendedVramMb: 12000,
     floorSource:
       "measured through ComfyUI on Arke reference hardware 2026-08-19: RTX 3080, 3.36 GB already in use by other applications, peak 9.35 GB and still climbing when the run was killed. A lower bound, not a peak — the true peak could not be measured on a card that could not hold it",
@@ -809,7 +829,19 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       aspects: Object.keys(H3_DIMENSIONS),
     },
     pricing: { kind: "unmetered" },
-    requires: { vramMb: H3_VIDEO.hardware.minVramMb, diskMb: 42371 },
+    requires: {
+      vramMb: H3_VIDEO.hardware.minVramMb,
+      // The authored runs-well boundary (SPEC-033 R-35): between the 10 GB minimum and this,
+      // H3 is offered but never recommended — the generic 25% margin would have recommended a
+      // 42 GB install and heavily offloaded generation on a 12.5 GB card.
+      recommendedVramMb: H3_VIDEO.hardware.recommendedVramMb,
+      // System RAM is part of the measured floor: the verified run bottomed at 933 MB free of
+      // 32 GB while streaming the transformer. 30720 rather than 32768 because a nominal-32 GB
+      // machine reports slightly under (the reference machine says 32676), and the floor is
+      // meant to admit exactly the class of machine the measurement was made on.
+      memMb: 30720,
+      diskMb: 42371,
+    },
   },
 ];
 

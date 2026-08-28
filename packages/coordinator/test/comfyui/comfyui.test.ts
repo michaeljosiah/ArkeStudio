@@ -326,6 +326,7 @@ const FACTS: ComfyUiRecipeFacts[] = [
     capability: "image",
     version: 1,
     minVramMb: 6000,
+    minFreeVramMb: 6000,
     recommendedVramMb: 8000,
     checkpoints: [
       {

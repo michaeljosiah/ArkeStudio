@@ -175,6 +175,22 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(dispatchDuration(row, 20).kind, "over-cap");
   });
 
+  it("h3 states two vram floors, and the row carries every machine floor the run measured", () => {
+    const h3 = comfyUiRecipeById("comfyui-h3-video")!;
+    // Card size and free-right-now are different questions: requiring the 10 GB card floor FREE
+    // would refuse the exact configuration the recipe was verified on (~4.1 GB free, streaming).
+    assert.equal(h3.hardware.minVramMb, 10000);
+    assert.equal(h3.hardware.minFreeVramMb, 4000);
+    assert.match(h3.hardware.floorSource, /measured through ComfyUI/);
+    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === h3.id)!;
+    // System RAM was the resource the verified run nearly exhausted, so the row declares it —
+    // fitFor checks memory only where memMb is present, and a 16 GB machine offered a 42 GB
+    // download it cannot run is the failure that field exists to prevent.
+    assert.equal(row.requires?.memMb, 30720);
+    // The authored runs-well boundary: between the minimum and this, offered but not recommended.
+    assert.equal(row.requires?.recommendedVramMb, 24000);
+  });
+
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
     const recipe = comfyUiRecipeById("comfyui-h3-video")!;
     const classes = recipeNodeClasses(recipe);

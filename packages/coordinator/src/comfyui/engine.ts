@@ -34,6 +34,8 @@ export interface ComfyUiRecipeFacts {
   capability: "image" | "video" | "voice-tts";
   version: number;
   minVramMb: number;
+  /** The busy check's floor — free VRAM, a different question from the card-size floor above. */
+  minFreeVramMb: number;
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
@@ -1053,15 +1055,19 @@ export class ComfyUiEngineService {
      * a machine that would have worked costs the feature. The sentence is also a different one
      * from the too-small case above — that card will never be big enough, this one is busy —
      * even though both disable, because both mean pressing Generate buys a wait, not a take.
+     *
+     * The floor here is the recipe's FREE-VRAM figure, not the card-size floor above. Reusing
+     * one number for both refused the configuration H3 was verified on: a streaming recipe's
+     * card floor can equal the whole card while the free requirement is a fraction of it.
      */
     const free =
       engine.locality === "remote" || !this.deps.freeVramMb
         ? null
         : await this.deps.freeVramMb().catch(() => null);
-    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
+    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb) {
       return disabled(
         "vram-busy",
-        `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
+        `Needs ${gb(recipe.minFreeVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
     }

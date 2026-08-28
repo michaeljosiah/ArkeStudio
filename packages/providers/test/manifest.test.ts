@@ -662,6 +662,18 @@ describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
     assert.equal(atMargin.fit, "runs-well");
   });
 
+  it("an authored recommended floor overrides the generic margin for runs-well", () => {
+    // H3's shape: a 10 GB minimum built for offloading, a 24 GB authored recommendation. The
+    // generic 25% margin would call 12.5 GB comfortable and steer that machine into a 42 GB
+    // install and heavily offloaded generation the recipe itself does not recommend.
+    const between = verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 16 * 1024 });
+    assert.equal(between.fit, "runs-slowly");
+    const comfortable = verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 24 * 1024 });
+    assert.equal(comfortable.fit, "runs-well");
+    // Below the minimum is still insufficient — the authored boundary moves runs-well, not the floor.
+    assert.equal(verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 8 * 1024 }).fit, "insufficient");
+  });
+
   it("a measured shortfall is insufficient, never unsupported, and keeps both figures (row 3)", () => {
     const short = verdict({ vramMb: 12 * 1024 }, { vramMb: 8 * 1024 });
     assert.equal(short.fit, "insufficient");
@@ -809,6 +821,16 @@ describe("the recommendation (SPEC-033 R-33..R-38)", () => {
     // And it is the authored order that decides, not size: 48 GB fits Llama 70B too.
     const big = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 64 * 1024 }), detectedAt);
     assert.equal(big.recommended.llm, "gemma4-26b");
+  });
+
+  it("h3 leads the video order only on machines its author would recommend it for", () => {
+    // 16 GB clears H3's 10 GB minimum with the generic margin to spare, and is still under the
+    // authored 24 GB boundary — offered, runs-slowly, and the recommendation falls through to
+    // the Wan draft rather than steering the machine into heavy offloading.
+    const modest = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 16 * 1024 }), detectedAt);
+    assert.equal(modest.recommended.video, "comfyui-draft-video");
+    const big = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 24 * 1024 }), detectedAt);
+    assert.equal(big.recommended.video, "comfyui-h3-video");
   });
 
   it("nothing runs well here means no recommendation, stated as an absence (row 22, R-37)", () => {
