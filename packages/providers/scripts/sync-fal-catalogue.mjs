@@ -341,62 +341,14 @@ const CURATED = {
       aspects: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
     },
   },
-  // ---- LTX 2.5 ----------------------------------------------------------
-  // No reference-to-video sibling in this family, so no keyframe sequence: two frames is the
-  // most it can be asked for, and the composer says so rather than offering a third.
-  "lightricks/ltx-2.5/text-to-video/pro": {
-    id: "ltx-2.5-pro",
-    // fal titles this route "Ltx 2.5 Text to Video Fast" — the same string it gives the fast
-    // route. Two rows with one name is a picker nobody can choose from.
-    displayName: "LTX 2.5 Pro",
-    capability: "video",
-    family: "ltx",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    defaultResolution: "1080p",
-    modes: {
-      generate: { locked: [] },
-      // Unlike minimax and wan, ltx's image route DOES take an aspect_ratio, so nothing locks.
-      "first-frame": { route: "lightricks/ltx-2.5/image-to-video/pro", locked: [] },
-      "first-and-last-frame": { route: "lightricks/ltx-2.5/image-to-video/pro", locked: [] },
-    },
-    limits: {
-      maxPromptChars: 5000,
-      soundChoice: true,
-      durationAuto: true,
-      maxDurationSec: 10,
-      durationWire: "number",
-      durations: { 6: "6", 8: "8", 10: "10" },
-      resolutions: ["1080p", "720p"],
-      aspects: ["16:9", "9:16"],
-    },
-  },
-  "lightricks/ltx-2.5/text-to-video/fast": {
-    id: "ltx-2.5-fast",
-    displayName: "LTX 2.5 Fast",
-    capability: "video",
-    family: "ltx",
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-    defaultResolution: "1080p",
-    // The price list bills "4K"; the schema dispatches "2160p". One tier, two spellings — and
-    // without the bridge the 4K rate is dropped and 2160p is estimated at the 1080p rate.
-    priceAliases: { "4k": "2160p" },
-    modes: {
-      generate: { locked: [] },
-      "first-frame": { route: "lightricks/ltx-2.5/image-to-video/fast", locked: [] },
-      "first-and-last-frame": { route: "lightricks/ltx-2.5/image-to-video/fast", locked: [] },
-    },
-    limits: {
-      maxPromptChars: 5000,
-      soundChoice: true,
-      durationAuto: true,
-      maxDurationSec: 20,
-      durationWire: "number",
-      durations: { 6: "6", 8: "8", 10: "10", 12: "12", 14: "14", 16: "16", 18: "18", 20: "20" },
-      // The schema spells 4K as "2160p"; the tier map is what turns a chosen 4K into that word.
-      resolutions: ["1080p", "720p", "1440p", "2160p"],
-      aspects: ["16:9", "9:16"],
-    },
-  },
+  // ---- LTX --------------------------------------------------------------
+  // Dropped 2026-08-28: the 2.5 rows (`lightricks/ltx-2.5/text-to-video/{pro,fast}`) came out of
+  // the catalogue when local H3 took the fast-and-cheap video slot, and Lightricks has a
+  // successor release the studio will curate instead once it is worth having. Two things worth
+  // keeping from that curation when it returns: fal titled both 2.5 routes with one display
+  // string (rows need their own names to be pickable), and the fast route was billed for "4K"
+  // while dispatching "2160p" — `priceAliases` below exists for exactly that bridge and has no
+  // live subject until an LTX row is back.
   // ---- wan 2.7 ----------------------------------------------------------
   "fal-ai/wan/v2.7/text-to-video": {
     id: "wan-2.7",
