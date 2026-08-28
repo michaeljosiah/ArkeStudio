@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 export const SUPPORTED_ARCHES = new Set(["x64", "arm64"]);
 
@@ -62,4 +62,50 @@ export function verifyManifest(root) {
   const listed = (manifest.files ?? []).map((file) => file.path).sort((a, b) => a.localeCompare(b));
   if (JSON.stringify(actual) !== JSON.stringify(listed)) throw new Error("runtime manifest does not list every staged file");
   return manifest;
+}
+
+/**
+ * Replace a staged runtime directory with a freshly prepared one, in that order.
+ *
+ * The prepare scripts used to clear build-resources at module top level, before the first
+ * download ran. When the pinned ffmpeg release was deleted upstream (#581) the clear still
+ * happened and the download then 404'd, so a machine that had a perfectly good staged ffmpeg was
+ * left with none -- the retry strictly worse off than the first attempt, and recoverable only by
+ * copying binaries back out of an older win-unpacked. A failed prepare should cost a build, not
+ * the checkout, so nothing here is removed until its replacement is verified and in place.
+ *
+ * The old copy moves aside whole rather than being deleted in front of the new one: a directory
+ * rename either happens or does not, where a recursive delete can stop halfway on a locked file
+ * and leave a half-emptied stage that electron-builder would package without complaint. `attic`
+ * is where it waits, and must sit on the same volume as `stage` for that rename to be the cheap
+ * kind.
+ */
+export function swapStagedDirectory(fresh, stage, attic) {
+  if (!existsSync(fresh)) throw new Error(`${fresh} was never prepared, so ${stage} was left as it was`);
+  mkdirSync(dirname(stage), { recursive: true });
+  rmSync(attic, { recursive: true, force: true });
+  const displaced = existsSync(stage);
+  if (displaced) {
+    mkdirSync(dirname(attic), { recursive: true });
+    renameSync(stage, attic);
+  }
+  try {
+    moveDirectory(fresh, stage);
+  } catch (error) {
+    // The displaced copy is now the only one there is; put it back rather than leave neither.
+    if (displaced) renameSync(attic, stage);
+    throw error;
+  }
+  rmSync(attic, { recursive: true, force: true });
+}
+
+function moveDirectory(from, to) {
+  try {
+    renameSync(from, to);
+  } catch (error) {
+    // --work may point at another volume, where rename is EXDEV rather than a metadata update.
+    if (error.code !== "EXDEV") throw error;
+    cpSync(from, to, { recursive: true });
+    rmSync(from, { recursive: true, force: true });
+  }
 }

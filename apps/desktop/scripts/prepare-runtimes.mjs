@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertPeArchitecture, assertSha256, manifestFor, SUPPORTED_ARCHES } from "./runtime-support.mjs";
+import { assertPeArchitecture, assertSha256, manifestFor, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -31,18 +31,21 @@ if (process.platform !== "win32") throw new Error("Windows runtime preparation m
 
 const work = resolve(value("--work") ?? join(repoRoot, ".runtime-work", arch));
 const staged = join(desktopRoot, "build-resources");
-const voxaStage = join(staged, "voxa", arch);
-const espeakStage = join(staged, "espeak-ng", arch);
 /*
+ * Everything is built inside the work directory and swapped into build-resources at the very end
+ * (#581). This script used to clear the staged directories right here, before the first download
+ * ran, so the day the pinned ffmpeg release was deleted upstream the clear still happened and the
+ * download then 404'd -- taking a working staged copy with it and leaving the retry worse off
+ * than the first attempt. See swapStagedDirectory.
+ *
  * ffmpeg stages flat rather than per-architecture, because main.ts looks for
  * `resources/ffmpeg/ffmpeg.exe` and electron-builder copies this directory wholesale. One
- * architecture is prepared per invocation, so the directory is cleared and rewritten each time.
+ * architecture is prepared per invocation, so the directory is replaced wholesale each time.
  */
-const ffmpegStage = join(staged, "ffmpeg");
+const voxaStage = join(work, "stage", "voxa");
+const espeakStage = join(work, "stage", "espeak-ng");
+const ffmpegStage = join(work, "stage", "ffmpeg");
 rmSync(work, { recursive: true, force: true });
-rmSync(ffmpegStage, { recursive: true, force: true });
-rmSync(voxaStage, { recursive: true, force: true });
-rmSync(espeakStage, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 mkdirSync(ffmpegStage, { recursive: true });
 mkdirSync(voxaStage, { recursive: true });
@@ -384,5 +387,21 @@ await download(
 );
 writeFileSync(join(ffmpegStage, "WRITTEN-OFFER.ffmpeg.txt"), writtenOffer(metadata.ffmpeg));
 writeManifest(ffmpegStage, "ffmpeg", { version: metadata.ffmpeg.version, sourceRevision: metadata.ffmpeg.release });
+
+/*
+ * All three components are downloaded, checksummed, architecture-checked and manifested; only
+ * now does build-resources change. Held to the end rather than swapped as each finishes, so that
+ * a failure in the third leaves the other two exactly as they were -- a mixed-vintage stage is
+ * harmless, but there is no reason to create one.
+ */
+const attic = join(desktopRoot, ".runtime-previous");
+for (const [component, fresh, destination] of [
+  ["voxa", voxaStage, join(staged, "voxa", arch)],
+  ["espeak-ng", espeakStage, join(staged, "espeak-ng", arch)],
+  ["ffmpeg", ffmpegStage, join(staged, "ffmpeg")],
+]) {
+  swapStagedDirectory(fresh, destination, join(attic, component));
+}
+rmSync(attic, { recursive: true, force: true });
 
 console.log(`[prepare-runtimes] staged verified ${arch} Voxa, espeak-ng and ffmpeg runtimes`);

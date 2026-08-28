@@ -15,6 +15,9 @@ release/
 release-*/
 apps/desktop/build-resources/
 .runtime-work/
+# Where a runtime prepare parks the previous staged copy while the new one moves in. Empty
+# except during that swap, and only left behind if the swap itself died mid-move.
+apps/desktop/.runtime-previous/
 *.tsbuildinfo
 
 # Git worktrees checked out inside the repo. Committing one would commit a nested checkout —
