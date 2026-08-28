@@ -66,14 +66,6 @@ export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
   CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
 ) as Record<Capability, string>;
 
-/** The row a model is drawn under: its capability's, unless another row claims it by id. */
-export function rowForModel(model: { id: string; capability: Capability }): CapabilityRow {
-  return (
-    CAPABILITY_ROWS.find((row) => row.claims?.includes(model.id) === true) ??
-    CAPABILITY_ROWS.find((row) => row.capabilities.includes(model.capability))!
-  );
-}
-
 /** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
 export type RuntimeTone = "ok" | "warn" | "idle";
 
