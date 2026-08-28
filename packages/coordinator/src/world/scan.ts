@@ -23,7 +23,6 @@ import {
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
-  SceneSchema,
   SeasonSchema,
   SeriesSchema,
   sortScenes,
@@ -55,6 +54,7 @@ import { projectReview } from "../gate/review.js";
 import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
+import { readSceneRecord } from "../productions/scene-record.js";
 
 /**
  * The world scan (SPEC-002 R-2, §2.12): parse and validate every entity, collecting per-file
@@ -67,12 +67,16 @@ import { readChanges } from "./change-writer.js";
  * The newest world schema this build understands (SPEC-023 R-23, issue #403). Version 2 marks
  * a world that may contain durable conversations (`.conversations`, #70 §4.1) or the new-model
  * production entities (`medium`/`kind`, `series/`, `season.json`, `episodes/`, scene scripts).
+ * Version 3 marks a world that may contain graph-backed scenes (SPEC-029 R-9, issue 583) —
+ * scene files carrying `flow` and no `shots[]`.
  * Worlds are born at 1 and raised lazily by the first write that needs the boundary, so a
  * world that never uses those features stays openable by older builds; a build older than the
- * boundary refuses a version-2 world by name instead of silently dropping strict-parse
- * failures or exporting private conversation state.
+ * boundary refuses a version-3 world by name instead of silently dropping strict-parse
+ * failures or exporting private conversation state. That refusal is the whole point of the
+ * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
+ * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 2;
+export const SUPPORTED_SCHEMA_VERSION = 3;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -245,8 +249,17 @@ async function read(path: string): Promise<string> {
   return readFile(toExtendedLength(path), "utf8");
 }
 
-/** Read world.json alone — the openability gate (R-1, R-25). */
-export async function readWorldMeta(dir: string): Promise<WorldMeta> {
+/**
+ * Read world.json alone — the openability gate (R-1, R-25).
+ *
+ * `supports` is the newest schema this reader accepts. It exists so an older build's refusal can
+ * be proven against a world that really is newer, rather than against a number raised by hand
+ * (SPEC-029 T-6); every caller in the app leaves it alone.
+ */
+export async function readWorldMeta(
+  dir: string,
+  { supports = SUPPORTED_SCHEMA_VERSION }: { supports?: number } = {},
+): Promise<WorldMeta> {
   let raw: string;
   try {
     raw = await read(join(dir, "world.json"));
@@ -260,9 +273,9 @@ export async function readWorldMeta(dir: string): Promise<WorldMeta> {
     throw new WorldOpenError(`world.json does not parse: ${String(err)}`, "unreadable");
   }
   const schemaVersion = (parsed as { schemaVersion?: unknown }).schemaVersion;
-  if (typeof schemaVersion === "number" && schemaVersion > SUPPORTED_SCHEMA_VERSION) {
+  if (typeof schemaVersion === "number" && schemaVersion > supports) {
     throw new WorldOpenError(
-      `this world was written by a newer Arke Studio (schema ${schemaVersion}; this build supports ${SUPPORTED_SCHEMA_VERSION}). Update the app — the world has not been modified.`,
+      `this world was written by a newer Arke Studio (schema ${schemaVersion}; this build supports ${supports}). Update the app — the world has not been modified.`,
       "schema-newer",
     );
   }
@@ -281,8 +294,11 @@ export async function readWorldMeta(dir: string): Promise<WorldMeta> {
  */
 const CANDIDATE_BACKED_TAKE_KINDS: ReadonlySet<string> = new Set(["main-photo", "location-view"]);
 
-export async function scanWorld(dir: string): Promise<ScanResult> {
-  const meta = await readWorldMeta(dir);
+export async function scanWorld(dir: string, opts: { supports?: number } = {}): Promise<ScanResult> {
+  // The boundary first, and nothing before it (R-9): a build that refuses this world must not
+  // have read one scene file by the time it says so, or the refusal is a report about strict
+  // shapes it does not understand rather than about the version that fences them.
+  const meta = await readWorldMeta(dir, opts);
   const problems: WorldProblem[] = [];
   const manifest: Record<string, string> = {};
   /*
@@ -463,10 +479,15 @@ export async function scanWorld(dir: string): Promise<ScanResult> {
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
     // break by id — never by filename. The actual on-disk stem is captured beside each scene so
     // no consumer ever reconstructs a path from number and slug.
+    //
+    // Read through the R-1 union and handed on as the legacy shape (SPEC-029 §3.3 step 2): both
+    // scene shapes parse, and a graph scene's ordered shots are derived here so that consumers,
+    // who move onto `linearizeSceneFlow` in step 3, keep reading exactly what they always read.
+    // Nothing derived is written back — `flow` stays the only order authority on disk (R-14).
     const sceneEntries: Array<{ file: string; scene: Scene }> = [];
     const sceneFiles: Record<string, string> = {};
     for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => SceneSchema.parse(JSON.parse(raw)));
+      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => readSceneRecord(raw).scene);
       if (!scene) continue;
       const stem = file.slice(0, -".json".length);
       if (sceneFiles[scene.id] !== undefined) {

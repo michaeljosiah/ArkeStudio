@@ -6,9 +6,18 @@ import {
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   deriveArtDirectionDescription,
+  isGraphScene,
+  migrateLegacyScene,
   newId,
+  SceneRecordSchema,
   WorldMetaSchema,
+  type SceneRecord,
 } from "@arke-studio/contracts";
+import {
+  carriesSceneFlow,
+  graphSceneFor,
+  GRAPH_SCENE_SCHEMA_VERSION,
+} from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -230,8 +239,34 @@ export function changesAnything(path: string, live: string, proposed: string): b
       if (track === "canon") for (const key of ["introducedAt", "settledAt", "amendedAt"]) keys.delete(key);
       return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
     }
+    /*
+     * A scene is compared as the graph scene each side means (SPEC-029 §3.3 step 2).
+     *
+     * Two shapes reach this question now, and the honest comparison is not between the files as
+     * written but between what each one says once it is a graph: the live scene as it stands or
+     * as it would deterministically migrate, and the proposal as itself if it carries a flow, or
+     * as the record accepting it would land if it does not.
+     *
+     * Both halves matter, and both were got wrong before landing here. A legacy amendment — all
+     * Arke and the storyboard can still author — over a scene that is already graph-backed must
+     * come out equal when it says what the world already says, or it reads as a change forever
+     * and can never be settled: the trap the note above records for sheets. And a proposal that
+     * carries a flow must be compared with its flow, or a beat, an edge or a node identity that
+     * nothing else could have expressed vanishes into the projection and the proposal is retired
+     * as a no-op — reviewed, approved, and silently thrown away.
+     */
+    if (track === "scene") {
+      const liveRecord = SceneRecordSchema.parse(JSON.parse(live));
+      const proposedRecord = SceneRecordSchema.parse(JSON.parse(proposed));
+      const before = isGraphScene(liveRecord) ? liveRecord : migrateLegacyScene(liveRecord);
+      const after = isGraphScene(proposedRecord)
+        ? proposedRecord
+        : graphSceneFor(liveRecord, proposedRecord);
+      const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+      keys.delete("version");
+      return [...keys].some((k) => JSON.stringify(asFields(before)[k]) !== JSON.stringify(asFields(after)[k]));
+    }
     if (
-      track === "scene" ||
       track === "story" ||
       track === "routing" ||
       track === "season" ||
@@ -261,6 +296,9 @@ export function changesAnything(path: string, live: string, proposed: string): b
   }
   return true;
 }
+
+const asFields = (record: SceneRecord): Record<string, unknown> =>
+  record as unknown as Record<string, unknown>;
 
 /** The revision stamp a canon entry's content carries — what addresses its history snapshot. */
 function canonStamp(data: Record<string, unknown>): number {
@@ -524,10 +562,30 @@ export class Committer {
     const allocatedCanonIds: string[] = [];
     const worldUpdates: Record<string, unknown> = { updated: at };
     if (touchesCanon) worldUpdates["canonRevision"] = revisionTo;
-    if (input.raiseSchemaVersion !== undefined) {
+    /*
+     * A commit that lands a graph-backed scene fences the world (SPEC-029 R-9), whoever asked
+     * for it and whether or not they thought about it.
+     *
+     * Derived from the bytes rather than taken from the caller, because the boundary is not an
+     * intention — it is a fact about what is now on disk. A build that knows only `shots[]`
+     * reads a `flow` scene as a parse failure and opens the world one scene short of itself, so
+     * every route by which such a file can appear has to fence it: the migration writer, an
+     * accepted proposal, a restore, and the two that would never have thought to — adopting a
+     * hand-written graph scene through closed-world reconciliation, and landing a board on a
+     * scene that is already one. One rule at the funnel every write passes through beats five
+     * callers each remembering.
+     */
+    const landsGraphScene = files.some(
+      (f) => classify(f.path).track === "scene" && f.newContent != null && carriesSceneFlow(f.newContent),
+    );
+    const raiseSchemaVersion = Math.max(
+      input.raiseSchemaVersion ?? 0,
+      landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
+    );
+    if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;
-      if (input.raiseSchemaVersion > current) {
-        worldUpdates["schemaVersion"] = input.raiseSchemaVersion;
+      if (raiseSchemaVersion > current) {
+        worldUpdates["schemaVersion"] = raiseSchemaVersion;
         // The audit trail names the boundary crossing: older builds refuse this world from
         // here on, and the log is where "since when?" gets answered.
         changes.push({
@@ -536,7 +594,7 @@ export class Committer {
           entity: "world",
           fieldsChanged: ["schemaVersion"],
           fromVersion: current,
-          toVersion: input.raiseSchemaVersion,
+          toVersion: raiseSchemaVersion,
           source: input.source,
         });
       }

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
+import { restoredSceneContent } from "../productions/scene-record.js";
 import { atomicWriteFile } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { readChanges } from "./change-writer.js";
@@ -333,6 +334,24 @@ export class WorldStore {
     const snapshot = await this.readEntity(historyPath);
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
     const live = await this.readEntity(portablePath);
+    /*
+     * A restored scene comes back graph-backed (SPEC-029 R-15) — see `restoredSceneContent`,
+     * which decides what those bytes are and refuses a snapshot it cannot stand behind. Undo is
+     * the one operation that has to be trusted absolutely, so a snapshot that cannot be read, or
+     * whose graph is not one path, is named rather than written back on the strength of not
+     * having been understood. The boundary is raised inside the commit, from the bytes, and
+     * never lowered.
+     */
+    let content = snapshot;
+    if (kind.track === "scene") {
+      try {
+        content = restoredSceneContent(snapshot);
+      } catch (err) {
+        throw new CommitPlanError(
+          `${historyPath} cannot be restored: ${err instanceof Error ? err.message.slice(0, 300) : "unreadable"}`,
+        );
+      }
+    }
     return this.commit({
       kind: "restore",
       source,
@@ -340,7 +359,7 @@ export class WorldStore {
         {
           path: portablePath,
           action: live === null ? "create" : "replace",
-          content: snapshot,
+          content,
           baseHash: live === null ? null : sha256(live),
         },
       ],

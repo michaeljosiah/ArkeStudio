@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SceneSchema } from "@arke-studio/contracts";
+import { projectSceneRecord, SceneRecordSchema } from "@arke-studio/contracts";
 import { restoreScene, saveScene, SceneStaleError } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -25,8 +25,19 @@ async function open() {
   return { dir, store };
 }
 
+/**
+ * The file as the app reads it: the R-1 union, projected to the legacy shape (SPEC-029).
+ *
+ * Every save below now lands a graph scene, so reading with the legacy schema alone would fail
+ * on the shape rather than on anything these tests are about. What they are about — the version,
+ * the snapshot, the pinned identity, the cleared field — is the authored content, and the
+ * projection is where that content is the same either side of the migration.
+ */
 async function readSceneFile(dir: string) {
-  return SceneSchema.parse(JSON.parse(await readFile(join(dir, ...PATH.split("/")), "utf8")));
+  const raw = JSON.parse(await readFile(join(dir, ...PATH.split("/")), "utf8")) as unknown;
+  const projection = projectSceneRecord(SceneRecordSchema.parse(raw));
+  if (projection.kind !== "scene") throw new Error(projection.findings.map((f) => f.message).join(" "));
+  return projection.scene;
 }
 
 describe("scene direct save (turn 97)", () => {

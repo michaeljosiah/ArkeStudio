@@ -5,7 +5,6 @@ import {
   estimateMicroUsd,
   planStoryboard,
   sceneImageOutput,
-  SceneSchema,
   storyboardUsable,
   type Job,
   type ManifestModel,
@@ -15,6 +14,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { readSceneRecord } from "./scene-record.js";
 import { JsonFile, sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -32,6 +32,11 @@ import type { EnqueueInput } from "../queue/dispatcher.js";
  * job only carries the scene id — so the bundle is what resolves one to the other. Returns null
  * rather than throwing: a scene deleted while its board was drawing is an ordinary race, not a
  * fault, and landing quietly does nothing.
+ *
+ * Read through the R-1 union and used as the legacy shape (SPEC-029). Both writes below go on
+ * through `JsonFile.set` with `preserveVersion`, so they leave whichever shape they found in
+ * place: drawing a board is production output, and R-10 is explicit that it neither migrates a
+ * scene nor raises the world.
  */
 async function readSceneById(
   store: WorldStore,
@@ -47,7 +52,7 @@ async function readSceneById(
   const path = `productions/${productionId}/scenes/${stem}.json`;
   try {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-    return { scene: SceneSchema.parse(JSON.parse(raw)), raw, path };
+    return { scene: readSceneRecord(raw).scene, raw, path };
   } catch {
     return null;
   }

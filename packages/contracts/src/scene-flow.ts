@@ -14,10 +14,11 @@ import { SceneBaseShape, SceneSchema, ShotSchema, type Scene, type Shot } from "
  * exactly once (R-6). The data shape is extensible; the accepted shape is not — a future node
  * or edge kind needs its own specification and schema boundary before it may parse (R-4).
  *
- * This module is rollout step 1 (§3.3): contracts, pure validation and linearisation, and the
- * deterministic legacy projection. Nothing here writes — the schema-3 boundary, the lazy
- * migration writer, and the consumer sweep land behind it, and until they do `SceneSchema`
- * keeps its historical legacy meaning and the scan keeps reading it.
+ * Rollout steps 1 and 2 (§3.3) live here: the shapes, pure validation and linearisation, the
+ * deterministic legacy projection, and — since the scan now reads the union — the two functions
+ * the schema-3 writer and the legacy-shaped read path are made of. Nothing in this file touches
+ * a disk. The consumer sweep is step 3; until it lands, `projectSceneRecord` is what a consumer
+ * still reading `scene.shots` is handed, and it is derived read-side state, never stored.
  */
 
 // ---------------------------------------------------------------------------
@@ -109,8 +110,9 @@ export function isGraphScene(scene: SceneRecord): scene is GraphScene {
  * The two-arm read union (R-1). Presence of the structural key picks the arm; carrying both or
  * neither fails parse with the conflicting or missing keys named, because a file that says
  * `A → B` in one field and `[B, A]` in the other has two sequence authorities and history could
- * never explain which one the creator changed (§2.1). Not wired into the scan yet — that swap
- * is rollout step 3, after the migration writer exists.
+ * never explain which one the creator changed (§2.1). This is what the scan parses scene files
+ * with — it had to become the read the same step the migration writer landed, or the first
+ * authored write would have produced a file the build that wrote it could no longer read.
  */
 export const SceneRecordSchema = z.unknown().transform((value, ctx): SceneRecord => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -210,6 +212,20 @@ export function resolveLegacySceneFlow(scene: LegacyScene): SceneFlow {
     edges,
     storyboardGroups: [],
   };
+}
+
+/**
+ * The record the first authored write to a legacy scene lands (R-11, R-12).
+ *
+ * The projection above plus dropping the array it was read from — migration is that function
+ * and a commit, and nothing else. Every other field keeps its identity and its place, so what
+ * this returns differs from what went in by exactly one key. `storyboardGroups` is empty
+ * because migration authors no beats; people do (R-12). Deterministic and total: the same scene
+ * in gives byte-identical `flow` out, and every legacy scene has exactly one graph form.
+ */
+export function migrateLegacyScene(scene: LegacyScene): GraphScene {
+  const { shots: _shots, ...base } = scene;
+  return { ...base, flow: resolveLegacySceneFlow(scene) };
 }
 
 // ---------------------------------------------------------------------------
@@ -628,4 +644,30 @@ export function linearizeSceneFlow(scene: SceneRecord): SceneSequence {
     exitNodeId: scene.flow.exitNodeId,
     shots,
   };
+}
+
+/** A scene in the legacy shape, or the reasons it could not be read as one. */
+export type SceneProjection =
+  | { kind: "scene"; scene: LegacyScene }
+  | { kind: "invalid"; findings: SceneFlowFinding[] };
+
+/**
+ * Either arm as the legacy shape — the read path's scaffolding for rollout step 2 (§3.3).
+ *
+ * The scan reads the union; every consumer still reads `scene.shots`. This is the one place
+ * those two facts are reconciled, and it is a *derivation*, not a second stored authority: it is
+ * computed at scan, never written back, and a graph scene's `flow` remains the only thing on
+ * disk that says what follows what (R-14). Step 3 moves the consumers onto `linearizeSceneFlow`
+ * and deletes this function; nothing new should be built on it.
+ *
+ * A malformed graph projects to nothing at all rather than to a guessed array (R-7, R-59) — the
+ * caller reports the findings as the per-file problem they are and leaves the rest of the world
+ * open (R-60).
+ */
+export function projectSceneRecord(record: SceneRecord): SceneProjection {
+  if (!isGraphScene(record)) return { kind: "scene", scene: record };
+  const sequence = linearizeSceneFlow(record);
+  if (sequence.kind === "invalid") return { kind: "invalid", findings: sequence.findings };
+  const { flow: _flow, ...base } = record;
+  return { kind: "scene", scene: { ...base, shots: sequence.shots.map((pair) => pair.shot) } };
 }
