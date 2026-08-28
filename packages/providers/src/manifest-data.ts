@@ -14,8 +14,8 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 17,
-  generated: "2026-08-27",
+  manifestVersion: 18,
+  generated: "2026-08-28",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -26,7 +26,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
    */
   localPreference: {
     image: ["comfyui-draft-image"],
-    video: ["comfyui-draft-video"],
+    // Quality order, the voice-tts pattern applied to video: H3 generates the better take (with
+    // its own audio) and needs the bigger card, so it leads and a machine under its floor falls
+    // through to the Wan draft.
+    video: ["comfyui-h3-video", "comfyui-draft-video"],
     // A cloned voice speaks in the character's own voice; Kokoro speaks in one of six presets.
     // Quality order, so the bigger one leads and a machine that cannot hold it falls through.
     "voice-tts": ["comfyui-cloned-voice", "kokoro-82m"],

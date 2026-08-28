@@ -223,6 +223,17 @@ export class AppIndex {
 
   // ---- jobs and ledger, rebuilt from the append-only logs (R-5) -----------
 
+  /**
+   * Known hazard, deliberately unguarded: `readChanges` folds a log that exists but cannot be
+   * read (EACCES, a transient lock) into [], so a bad moment here DELETEs both tables and
+   * re-inserts nothing until the next launch's rebuild. That is acceptable today only because
+   * nothing in production reads these two tables — spendByProvider/spendByWeek have no callers
+   * outside tests, and every live spend surface computes from LedgerFile directly. Whoever
+   * first wires these aggregations to a screen must give this read the ENOENT-vs-unreadable
+   * split its siblings already have (LedgerFile.readAllStrict, SPEC-032 R-21) — throwing here
+   * reaches the caller's existing degrade-to-no-index path (SPEC-003 R-4), which is the right
+   * failure: absent beats silently zero.
+   */
   async rebuildFromLogs(jobsPath: string, ledgerPath: string): Promise<void> {
     const jobLines = await readChanges(jobsPath);
     const ledgerLines = await readChanges(ledgerPath);

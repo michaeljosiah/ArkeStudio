@@ -104,6 +104,8 @@ interface Floor {
   need: number;
   have: number | null;
   what: string;
+  /** The authored runs-well boundary, where one is declared; the generic margin otherwise. */
+  well?: number;
 }
 
 export interface FitResult {
@@ -149,7 +151,24 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
 
   // 2 · The measured floors. Free disk is deliberately not among them (R-17).
   const floors: Floor[] = [];
-  if (req.vramMb !== undefined) floors.push({ need: req.vramMb, have: probes.vramMb, what: "VRAM" });
+  if (req.vramMb !== undefined) {
+    // The card the floor is about: with an accelerator declared and per-adapter figures
+    // measured, the biggest card of a REQUIRED family answers. The machine-wide maximum can
+    // belong to a vendor the row cannot use — a 24 GB Radeon beside an 8 GB GeForce passed a
+    // 10 GB CUDA floor on the Radeon's figure and offered a 42 GB download the GeForce
+    // could not run.
+    const byFamily = probes.vramMbByAccelerator ?? null;
+    const familyFigures =
+      req.accelerator !== undefined && byFamily !== null
+        ? req.accelerator.filter((name) => byFamily[name] !== undefined).map((name) => byFamily[name]!)
+        : [];
+    floors.push({
+      need: req.vramMb,
+      have: familyFigures.length > 0 ? Math.max(...familyFigures) : probes.vramMb,
+      what: "VRAM",
+      ...(req.recommendedVramMb !== undefined ? { well: req.recommendedVramMb } : {}),
+    });
+  }
   if (req.memMb !== undefined) floors.push({ need: req.memMb, have: probes.memMb, what: "memory" });
   for (const floor of floors) if (floor.have === null) unmeasured.push(floor.what);
 
@@ -179,8 +198,14 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   // 5 · Every floor is met. The binding one — the one closest to its floor — is what decides
   //     between the two passing verdicts, and it is the figure worth stating either way.
   if (floors.length === 0) return { fit: "runs-well" };
-  const binding = floors.reduce((tightest, f) => (f.have! / f.need < tightest.have! / tightest.need ? f : tightest));
-  const comfortable = binding.have! >= binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  // An authored boundary beats the generic margin: the author measured where comfortable begins,
+  // and 25% over a floor built for offloading is not it. Comfort is judged per floor and ALL
+  // floors must clear their own boundary — selecting one floor by nearness to its minimum let a
+  // 20 GB card ride memory's comfortable margin straight past the authored 24 GB VRAM boundary.
+  // The stated floor is the least comfortable one, because that is the one deciding the verdict.
+  const wellAt = (f: Floor): number => f.well ?? f.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  const binding = floors.reduce((tightest, f) => (f.have! / wellAt(f) < tightest.have! / wellAt(tightest) ? f : tightest));
+  const comfortable = floors.every((f) => f.have! >= wellAt(f));
   const both = figures(binding.need, binding.have!);
   return {
     fit: comfortable ? "runs-well" : "runs-slowly",

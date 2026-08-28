@@ -74,11 +74,10 @@ describe("the shipped manifest (R-9, §3.2)", () => {
   });
 
   it("capability copy matches the manifest for accepting and refusing models (R-10)", () => {
-    // ltx takes no references — and still says "frames", because its image-to-video sibling
-    // genuinely takes a first frame (issue 154): the copy reads the same task-mode authority the
-    // dispatch does, not the legacy accepts flags.
-    assert.equal(modelCapabilityCopy(model("ltx-2.5-pro")), "no refs · frames · 10s");
-    // The accepting side, on video: references from the edit sibling, frames from the modes.
+    // The copy reads the same task-mode authority the dispatch does, not the legacy accepts
+    // flags. The no-refs-yet-frames case that proved it left with the ltx rows (dropped
+    // 2026-08-28); the accepting side still exercises both authorities at once.
+    // On video: references from the edit sibling, frames from the modes.
     assert.equal(modelCapabilityCopy(model("seedance-2.0")), "refs ×9 · frames · 15s");
     // A row with neither modes nor accepts flags promises nothing about frames.
     assert.equal(modelCapabilityCopy(model("veo-3.1")), "no refs · 8s");
@@ -138,7 +137,8 @@ describe("the shipped manifest (R-9, §3.2)", () => {
       }
     }
     // The families the catalogue curates today, pinned by name so a sync that drops one is loud.
-    for (const id of ["seedance-2.0", "seedance-2.0-fast", "minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+    // (The ltx rows left this list deliberately, 2026-08-28.)
+    for (const id of ["seedance-2.0", "seedance-2.0-fast", "minimax-h3", "wan-2.7"]) {
       assert.ok(frameDispatchFor(model(id), 1) !== null, `${id} takes a first frame`);
     }
     for (const id of ["veo-3.1", "veo-3.1-fast", "kling-3-pro", "kling-3-standard"]) {
@@ -662,10 +662,52 @@ describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
     assert.equal(atMargin.fit, "runs-well");
   });
 
+  it("an authored recommended floor overrides the generic margin for runs-well", () => {
+    // H3's shape: a 10 GB minimum built for offloading, a 24 GB authored recommendation. The
+    // generic 25% margin would call 12.5 GB comfortable and steer that machine into a 42 GB
+    // install and heavily offloaded generation the recipe itself does not recommend.
+    const between = verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 16 * 1024 });
+    assert.equal(between.fit, "runs-slowly");
+    const comfortable = verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 24 * 1024 });
+    assert.equal(comfortable.fit, "runs-well");
+    // Below the minimum is still insufficient — the authored boundary moves runs-well, not the floor.
+    assert.equal(verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 8 * 1024 }).fit, "insufficient");
+  });
+
+  it("every floor must clear its own comfort boundary — one comfortable floor cannot carry another", () => {
+    // H3's real shape: 20 GB card, 48 GB RAM. Memory sits nearer its minimum than VRAM does, so
+    // a verdict decided by the floor nearest ITS MINIMUM rode memory's comfortable 25% margin
+    // straight past the authored 24 GB VRAM boundary and recommended the 42 GB install anyway.
+    const requires = { vramMb: 10000, recommendedVramMb: 24000, memMb: 30720 };
+    const carried = verdict(requires, { vramMb: 20 * 1024, memMb: 48 * 1024 });
+    assert.equal(carried.fit, "runs-slowly");
+    // The stated figure is the floor that decided — VRAM against its authored boundary.
+    assert.match(carried.reason!, /VRAM/);
+    // Clear both boundaries and the verdict is earned.
+    assert.equal(verdict(requires, { vramMb: 24 * 1024, memMb: 48 * 1024 }).fit, "runs-well");
+  });
+
   it("a measured shortfall is insufficient, never unsupported, and keeps both figures (row 3)", () => {
     const short = verdict({ vramMb: 12 * 1024 }, { vramMb: 8 * 1024 });
     assert.equal(short.fit, "insufficient");
     assert.match(short.reason!, /Needs 12 GB VRAM · this machine has 8 GB/);
+  });
+
+  it("the VRAM floor reads the required family's own card, not the machine-wide maximum", () => {
+    // The two-vendor machine: a 24 GB Radeon beside an 8 GB GeForce. The flat probe reports the
+    // Radeon's figure and the accelerator union reports CUDA, and marrying them passed a 10 GB
+    // CUDA floor on a card the quantisations cannot run on — setup then offered the download.
+    const requires = { vramMb: 10000, accelerator: ["cuda"] };
+    const twoVendor = {
+      vramMb: 24 * 1024,
+      accelerators: ["cuda", "rocm", "directml"],
+      vramMbByAccelerator: { cuda: 8 * 1024, rocm: 24 * 1024 },
+    };
+    assert.equal(verdict(requires, twoVendor).fit, "insufficient");
+    assert.match(verdict(requires, twoVendor).reason!, /this machine has 8 GB/);
+    // Without the per-family read the flat figure stands alone — the old reading, kept for
+    // probes that cannot separate adapters rather than refused on a measurement nobody made.
+    assert.notEqual(verdict(requires, { vramMb: 24 * 1024, accelerators: ["cuda", "rocm"] }).fit, "insufficient");
   });
 
   it("a declared accelerator the machine does not have is unsupported, whatever the VRAM (row 4)", () => {
@@ -811,6 +853,16 @@ describe("the recommendation (SPEC-033 R-33..R-38)", () => {
     assert.equal(big.recommended.llm, "gemma4-26b");
   });
 
+  it("h3 leads the video order only on machines its author would recommend it for", () => {
+    // 16 GB clears H3's 10 GB minimum with the generic margin to spare, and is still under the
+    // authored 24 GB boundary — offered, runs-slowly, and the recommendation falls through to
+    // the Wan draft rather than steering the machine into heavy offloading.
+    const modest = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 16 * 1024 }), detectedAt);
+    assert.equal(modest.recommended.video, "comfyui-draft-video");
+    const big = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 24 * 1024 }), detectedAt);
+    assert.equal(big.recommended.video, "comfyui-h3-video");
+  });
+
   it("nothing runs well here means no recommendation, stated as an absence (row 22, R-37)", () => {
     const status = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 1024, memMb: 1024 }), detectedAt);
     assert.equal(status.recommended.llm, undefined);
@@ -930,29 +982,28 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
   });
 
   it("keys every rate to the word the picker sends, across the price list's own spellings", () => {
-    // The ltx fast route is billed for "4K" and dispatched with "2160p". A rate keyed on the
-    // prose word is a lookup that misses in silence, falling back to the base rate.
-    const fast = byId("ltx-2.5-fast");
-    if (fast.pricing.kind === "perSecond") {
-      assert.equal(fast.pricing.byResolution?.["2160p"], 300000);
-      assert.equal(fast.pricing.byResolution?.["4k"], undefined);
-    }
-    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
-      const model = byId(id);
+    // The failure this guards: ltx's fast route was billed for "4K" and dispatched with "2160p",
+    // and a rate keyed on the prose word is a lookup that misses in silence, falling back to the
+    // base rate. That row left the catalogue (2026-08-28), so the guarantee runs over every
+    // per-second fal row rather than a named list — a returning spelling mismatch fails here by
+    // id the day a sync reintroduces one.
+    for (const model of SHIPPED_MANIFEST.models.filter(
+      (m) => m.provider === "fal" && m.pricing.kind === "perSecond",
+    )) {
       if (model.pricing.kind !== "perSecond") continue;
       for (const key of Object.keys(model.pricing.byResolution ?? {})) {
         assert.ok(
           (model.limits.resolutions ?? []).includes(key),
-          `${id}: the rate for "${key}" names a resolution the row offers`,
+          `${model.id}: the rate for "${key}" names a resolution the row offers`,
         );
       }
     }
   });
 
   it("declares the wire type of a length, because these routes count in numbers", () => {
-    // seedance and kling take duration as a string out of a list; minimax, ltx and wan declare
-    // an integer or a number enum, and "6" is not a member of [6, 8, 10].
-    for (const id of ["minimax-h3", "ltx-2.5-pro", "ltx-2.5-fast", "wan-2.7"]) {
+    // seedance and kling take duration as a string out of a list; minimax and wan declare
+    // an integer, and "6" is not a member of [6, 8, 10].
+    for (const id of ["minimax-h3", "wan-2.7"]) {
       assert.equal(byId(id).limits.durationWire, "number", `${id} sends a numeric duration`);
     }
     assert.equal(byId("seedance-2.0").limits.durationWire, undefined, "seedance keeps its strings");
@@ -1013,8 +1064,6 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("minimax-h3").limits.referencesField, "reference_image_urls");
     assert.equal(byId("wan-2.7").limits.referencesField, "reference_image_urls");
     assert.equal(byId("seedance-2.0").limits.referencesField, "image_urls");
-    // ltx ships no reference route at all, so it has no array to mis-name.
-    assert.equal(byId("ltx-2.5-pro").limits.referencesField, undefined);
   });
 
   it("carries references as references, not as a sequence of keyframes", () => {
@@ -1055,7 +1104,6 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
 
   it("offers a prompt counter only where the route publishes a cap", () => {
     assert.equal(byId("minimax-h3").limits.maxPromptChars, 50000);
-    assert.equal(byId("ltx-2.5-pro").limits.maxPromptChars, 5000);
     // wan 2.7 declares no maxLength: "the provider does not say" is not "unlimited".
     assert.equal(byId("wan-2.7").limits.maxPromptChars, undefined);
   });

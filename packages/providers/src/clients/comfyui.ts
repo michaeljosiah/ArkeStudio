@@ -5,9 +5,7 @@ import {
   comfyUiRecipeIdentity,
   SDXL_BUCKETS,
   substituteRecipeParams,
-  WAN_DIMENSIONS,
-  WAN_FRAMES_BY_SECONDS,
-  wanFramesForSeconds,
+  VIDEO_DERIVATIONS,
   type ComfyUiRecipe,
   type RecipeParamValues,
 } from "../comfyui/recipes.js";
@@ -376,9 +374,14 @@ export class ComfyUiClient implements ProviderClient {
       return values;
     }
     // Video: seconds arrive as the manifest row's own wire numbers (durationWire "number"),
-    // and the engine's frame count is derived — 4k+1, the latent's own arithmetic.
+    // and the engine's frame count is derived per recipe — Wan's 4k+1 against H3's 17k+5, each
+    // latent's own arithmetic, looked up rather than hardcoded now that there are two.
+    const derivation = VIDEO_DERIVATIONS[recipe.id];
+    if (derivation === undefined) {
+      throw new Error(`comfyui: ${recipe.displayName} has no video derivation tables`);
+    }
     const rawAspect = params["aspect"] ?? params["aspect_ratio"];
-    const aspect = typeof rawAspect === "string" && rawAspect in WAN_DIMENSIONS ? rawAspect : "16:9";
+    const aspect = typeof rawAspect === "string" && rawAspect in derivation.dimensions ? rawAspect : "16:9";
     // Either vocabulary: `durationSec` from the production planner, `duration` from the bench,
     // which has already snapped the request through dispatchDuration. Reading only one of them
     // would leave the other silently defaulting — the estimate and the take would record the
@@ -389,12 +392,12 @@ export class ComfyUiClient implements ProviderClient {
       throw new Error(`comfyui: ${recipe.displayName} was asked for a length that is not a number`);
     }
     const asked = rawSeconds === undefined ? 5 : seconds;
-    const frames = wanFramesForSeconds(asked);
+    const frames = derivation.framesBySeconds[String(asked)] ?? null;
     if (frames === null) {
-      const offered = Object.keys(WAN_FRAMES_BY_SECONDS).join(", ");
+      const offered = Object.keys(derivation.framesBySeconds).join(", ");
       throw new Error(`comfyui: ${recipe.displayName} cannot be asked for ${asked}s — it offers ${offered}s`);
     }
-    const size = WAN_DIMENSIONS[aspect]!;
+    const size = derivation.dimensions[aspect]!;
     values["durationSec"] = asked;
     values["aspect"] = aspect;
     values["length"] = frames;
@@ -465,7 +468,9 @@ export class ComfyUiClient implements ProviderClient {
    * would buy a cold start on every line.
    */
   private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
-    const need = recipe.hardware.minVramMb;
+    // The free-VRAM floor, not the card-size floor: a streaming recipe (H3) legitimately needs
+    // the whole card to exist and only a fraction of it free at dispatch.
+    const need = recipe.hardware.minFreeVramMb;
     if (this.engineLocality() === "remote" || !this.freeVramMb || need <= 0) return;
     const first = await this.freeVramMb().catch(() => null);
     // Unknown stays unknown and dispatches (SPEC-021 D15): a card this build cannot measure is

@@ -49,6 +49,7 @@ function sources(over: Partial<DiagnosticsSources> = {}): DiagnosticsSources {
     models: { disabled: [] },
     spend: null,
     ledger: [],
+    ledgerUnavailable: false,
     drift: [],
     builds: [],
     update: IDLE_UPDATE_STATE,
@@ -274,6 +275,66 @@ describe("spend above the previous period (R-20.10)", () => {
     });
     assert.equal(snapshot.findings.some((f) => f.kind === "spend-above-previous"), false);
     assert.equal(snapshot.findings.some((f) => f.kind === "correlation-unavailable"), false);
+    assert.equal(snapshot.sources.find((s) => s.name === "app.ledger")?.state, "read");
+  });
+
+  it("row 15a: a ledger that exists and could not be read makes the correlation unknown, naming the missing input; other rules still run", () => {
+    // Row 13's rising fortnight rides along deliberately: whatever entries survived the failed
+    // read cannot be trusted, so the unknown outranks the comparison they would have produced —
+    // and a clean bill off an unreadable file was exactly the false result this rule closed.
+    const snapshot = deriveWithTail([], {
+      ledgerUnavailable: true,
+      ledger: [entry(10, "veo-3", 2_000_000), entry(3, "veo-3", 6_000_000)],
+      queues: [{ provider: "fal", paused: true, pauseKind: "credential", reason: "no credential", held: 1 }],
+    });
+    const unknown = snapshot.findings.find((f) => f.kind === "correlation-unavailable");
+    assert.ok(unknown);
+    assert.equal(unknown.severity, "unknown");
+    assert.equal(unknown.occurrence, "spend-above-previous");
+    assert.equal(unknown.facts.find((f) => f.name === "missing-input")?.value, "app.ledger");
+    assert.equal(snapshot.findings.some((f) => f.kind === "spend-above-previous"), false);
+    assert.ok(snapshot.findings.some((f) => f.kind === "queue-paused-credential"), "others unaffected");
+    assert.equal(snapshot.sources.find((s) => s.name === "app.ledger")?.state, "unavailable");
+  });
+
+  it("row 15a: both windowed inputs unreadable are two unknowns, separately addressable (R-1)", () => {
+    const snapshot = deriveWithTail("unavailable", { ledgerUnavailable: true });
+    const unknowns = snapshot.findings.filter((f) => f.kind === "correlation-unavailable");
+    assert.deepEqual(
+      new Set(unknowns.map((f) => f.occurrence)),
+      new Set(["provider-repeated-faults", "spend-above-previous"]),
+    );
+  });
+
+  it("row 15a: the values derived from the ledger state their own read's fate — never a confident block beside an unavailable input", () => {
+    const spend = (ledgerUnavailable: boolean) => ({
+      settings: { thresholdMicroUsd: 50_000_000, periodDays: 7 },
+      rollingMicroUsd: 0,
+      alerted: false,
+      ledgerUnavailable,
+    });
+    const stateOf = (s: ReturnType<typeof deriveWithTail>, name: string) =>
+      s.sources.find((row) => row.name === name)?.state;
+
+    const failed = deriveWithTail([], { ledgerUnavailable: true, spend: spend(true) });
+    assert.equal(stateOf(failed, "app.spend"), "unavailable");
+    // Drift is derived beside spend from the same read, and is not derived at all when that
+    // read fails — so its empty list is not presented as one that was computed.
+    assert.equal(stateOf(failed, "app.drift"), "unavailable");
+
+    // The two reads are separate: the seeded list stays latched to the boot read while a
+    // later evaluation that read the file records `read` — each row states its own read
+    // (SPEC-008 R-19), and a status that is simply absent stays absence (row 15).
+    const recovered = deriveWithTail([], { ledgerUnavailable: true, spend: spend(false) });
+    assert.equal(stateOf(recovered, "app.spend"), "read");
+    assert.equal(stateOf(recovered, "app.drift"), "read", "a later read that worked did derive it");
+    assert.equal(stateOf(recovered, "app.ledger"), "unavailable");
+
+    // No status yet: the seeded flag is the only answer there is, and drift follows it.
+    const absent = deriveWithTail([], { ledgerUnavailable: true });
+    assert.equal(stateOf(absent, "app.spend"), "absent");
+    assert.equal(stateOf(absent, "app.drift"), "unavailable");
+    assert.equal(stateOf(deriveWithTail([]), "app.drift"), "read", "row 15 stays silent");
   });
 
   it("a quiet previous week with real history still compares — a rise from zero is a rise", () => {

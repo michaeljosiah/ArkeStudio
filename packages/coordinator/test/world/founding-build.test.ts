@@ -16,6 +16,7 @@ import {
   type QueueStatus,
 } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
+import { until } from "../wait.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FoundingBuildService, type FoundingBuildPorts } from "../../src/world/founding-build.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -251,20 +252,16 @@ function lastPlan(h: Harness): BuildReview {
   return found.plan;
 }
 
-async function waitFor(check: () => boolean, ms = 45000): Promise<void> {
-  const start = Date.now();
-  while (!check()) {
-    if (Date.now() - start > ms) throw new Error("timed out waiting");
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
+// 45s predates supervisor.test.ts's budget tiers and already exceeds the settle tier — a
+// founding build folds hundreds of in-process steps, so the larger number stays.
+const BUILD_MS = 45_000;
 
 describe("the founding build (SPEC-031)", () => {
   it("one press makes the whole world: files, sheets, anchors, key art — nothing left to decide", async (t) => {
     const h = await makeHarness(t);
     await makeSandbox(h.root, "gen-full");
     await h.service.begin("gen-full", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const store = h.provider.openStore();
     assert.ok(store, "the run ends with the world open (R-24)");
@@ -308,7 +305,7 @@ describe("the founding build (SPEC-031)", () => {
     h.queue.failWhen = (input) =>
       input.target.kind === "main-photo-candidate" && input.target.id?.startsWith("maren-kest/") === true;
     await h.service.begin("gen-fail", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const state = h.lastState()!;
     const item = (key: string) => state.items.find((candidate) => candidate.key === key);
@@ -330,7 +327,7 @@ describe("the founding build (SPEC-031)", () => {
     const h = await makeHarness(t);
     await makeSandbox(h.root, "gen-crash");
     await h.service.begin("gen-crash", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
     const worldId = h.worldId();
     const store = h.provider.openStore()!;
     const bundle = store.getBundle();
@@ -365,7 +362,7 @@ describe("the founding build (SPEC-031)", () => {
     });
     void fresh;
     await h2.service.resume(worldId);
-    await waitFor(() => h2.lastState()?.status === "completed");
+    await until(() => h2.lastState()?.status === "completed", "the resumed build to complete", BUILD_MS);
     const after = (await readKit(h.provider.openStore()!, maren.id))?.kit?.mainPhoto;
     assert.equal(after?.sourceTakeId, before.sourceTakeId, "no duplicate anchor (row 1)");
     const jobCount = [...h.queue.jobs.values()].filter(
@@ -379,7 +376,7 @@ describe("the founding build (SPEC-031)", () => {
     await makeSandbox(h.root, "gen-twice");
     const requestId = ulid();
     await Promise.all([h.service.begin("gen-twice", requestId), h.service.begin("gen-twice", requestId)]);
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
     await h.service.begin("gen-twice", ulid());
     const worlds = await h.provider.listWorlds();
     assert.equal(worlds.length, 1, "one world, however many presses");
@@ -389,7 +386,7 @@ describe("the founding build (SPEC-031)", () => {
     const h = await makeHarness(t, { manifest: null });
     await makeSandbox(h.root, "gen-text");
     await h.service.begin("gen-text", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const state = h.lastState()!;
     assert.equal(state.status, "completed");
@@ -405,7 +402,7 @@ describe("the founding build (SPEC-031)", () => {
     const h = await makeHarness(t, { manifest: null });
     await makeSandbox(h.root, "gen-later");
     await h.service.begin("gen-later", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     // A provider appears; one press runs everything outstanding (R-11).
     const h2 = await makeHarness(t, {
@@ -436,7 +433,7 @@ describe("the founding build (SPEC-031)", () => {
     const h = await makeHarness(t, { manifest: null });
     await makeSandbox(h.root, "gen-rerun-crash");
     await h.service.begin("gen-rerun-crash", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
     const worldId = h.worldId();
 
     const h2 = await makeHarness(t, {
@@ -469,10 +466,14 @@ describe("the founding build (SPEC-031)", () => {
       jobById: (jobId) => h.queue.jobs.get(jobId),
     });
     await h3.service.resume(worldId);
-    await waitFor(() => {
-      const state = h3.lastState();
-      return state?.items.find((item) => item.key === "main-photo:maren-kest")?.state === "landed";
-    });
+    await until(
+      () => {
+        const state = h3.lastState();
+        return state?.items.find((item) => item.key === "main-photo:maren-kest")?.state === "landed";
+      },
+      "the resumed main photo to land",
+      BUILD_MS,
+    );
     const jobCount = [...h.queue.jobs.values()].filter(
       (job) => job.target.kind === "main-photo-candidate" && job.target.id?.startsWith("maren-kest/") === true,
     ).length;
@@ -511,7 +512,7 @@ describe("the founding build (SPEC-031)", () => {
       JSON.stringify({ name: "The Warden", line: "Keeps the harbour gate" }),
     );
     await h.service.begin("gen-keyart", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const keyArtJob = [...h.queue.jobs.values()].find((job) => job.target.kind === "world-image")!;
     const references = keyArtJob.params["references"] as string[];
@@ -544,7 +545,7 @@ describe("the founding build (SPEC-031)", () => {
     await makeSandbox(h.root, "gen-noanchors");
     h.queue.failWhen = (input) => input.target.kind === "main-photo-candidate";
     await h.service.begin("gen-noanchors", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const state = h.lastState()!;
     assert.equal(state.items.find((item) => item.key === "key-art:world")?.state, "landed", "fewer references is a weaker picture, not a refused one");
@@ -562,7 +563,7 @@ describe("the founding build (SPEC-031)", () => {
     // The author's words at Begin arrive as the look override, whitespace and all — the
     // carry test normalizes rather than failing on a trailing space (review round 3).
     await h.service.begin("gen-preview", ulid(), "salt-bleached watercolour, cold light off the water ");
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const store = h.provider.openStore()!;
     const record = JSON.parse(await readFile(join(store.dir, "art-direction", "art-direction.json"), "utf8")) as {
@@ -584,7 +585,7 @@ describe("the founding build (SPEC-031)", () => {
     await writePreview(sandbox, "neon brutalism, hard flash, wet asphalt");
     addPreviewReceipt(h, "gen-stale-look", "neon brutalism, hard flash, wet asphalt");
     await h.service.begin("gen-stale-look", ulid());
-    await waitFor(() => h.lastState()?.status === "completed");
+    await until(() => h.lastState()?.status === "completed", "the founding build to complete", BUILD_MS);
 
     const store = h.provider.openStore()!;
     const record = JSON.parse(await readFile(join(store.dir, "art-direction", "art-direction.json"), "utf8")) as {
@@ -679,9 +680,17 @@ describe("the founding build (SPEC-031)", () => {
     h.queue.holdWhen = (input) => input.target.kind === "main-photo-candidate";
     await h.service.begin("gen-stop", ulid());
     // Stop with an image genuinely in flight (row 26), not merely a working line showing.
-    await waitFor(() => [...h.queue.jobs.values()].some((job) => job.status === "running"));
+    await until(
+      () => [...h.queue.jobs.values()].some((job) => job.status === "running"),
+      "a build job to be running",
+      BUILD_MS,
+    );
     await h.service.stop(h.worldId());
-    await waitFor(() => h.lastState()?.status === "stopped" && (h.lastState()?.working.length ?? 0) === 0);
+    await until(
+      () => h.lastState()?.status === "stopped" && (h.lastState()?.working.length ?? 0) === 0,
+      "the stopped build to drain its working set",
+      BUILD_MS,
+    );
 
     assert.ok(h.queue.cancelled.length > 0, "cancellation was requested for the in-flight job");
     const state = h.lastState()!;

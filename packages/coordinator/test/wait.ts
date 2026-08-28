@@ -25,3 +25,58 @@ export async function until(condition: () => boolean, what: string, ms = 10_000)
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+/**
+ * The same contract for a condition that must itself be awaited — a file read, an HTTP probe.
+ * A separate function rather than a wider type on until(): handed an async condition there by
+ * mistake, the loop would see a Promise, which is always truthy, and report success without
+ * ever awaiting the answer.
+ *
+ * The deadline is a raced timer rather than a check between attempts, so the budget holds
+ * even when one invocation never settles — a probe with no timeout of its own would otherwise
+ * hang the file until CI's silence guard killed the shard, nameless. A rejection counts as
+ * "not yet", because refusal is the natural state of a thing still coming up; the last
+ * rejection rides the timeout message, so a predicate that is simply broken still names
+ * itself. The poll is coarser than until()'s because each check does real I/O — against
+ * budgets of tens of seconds, 100ms of detection latency is nothing.
+ */
+export async function untilAsync(
+  condition: () => Promise<boolean>,
+  what: string,
+  ms = 10_000,
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  let expired = false;
+  let lastError: unknown;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      expired = true;
+      const failure = lastError instanceof Error ? lastError.message : lastError;
+      reject(
+        new Error(
+          `timed out after ${ms}ms waiting for: ${what}${failure === undefined ? "" : ` (last error: ${String(failure)})`}`,
+        ),
+      );
+    }, ms);
+  });
+  // The poll itself always resolves, so an attempt abandoned by the deadline can never
+  // surface later as an unhandled rejection; the expired flag stops it re-invoking the
+  // condition once the race has been lost.
+  const poll = (async () => {
+    while (!expired) {
+      try {
+        if (await condition()) return;
+      } catch (err) {
+        lastError = err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  })();
+  try {
+    await Promise.race([deadline, poll]);
+  } finally {
+    // Left pending, a 30-60s deadline timer would hold the process open that long after
+    // every green wait.
+    clearTimeout(timer);
+  }
+}

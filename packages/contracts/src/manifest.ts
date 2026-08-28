@@ -312,6 +312,15 @@ export const ManifestModelSchema = z
     requires: z
       .object({
         vramMb: z.number().int().min(1).optional(),
+        /**
+         * The authored comfortable floor, where the model's own author states one above the
+         * generic margin. `fitFor` uses it as the runs-well boundary for the VRAM floor in
+         * place of the 25% headroom: a machine between `vramMb` and this figure is
+         * `runs-slowly` — available, never recommended (SPEC-033 R-35). Written for H3, whose
+         * 10 GB minimum streams a 20 GB transformer through offloading: 12.5 GB clears the
+         * generic margin and is still hardware the recipe itself does not recommend.
+         */
+        recommendedVramMb: z.number().int().min(1).optional(),
         memMb: z.number().int().min(1).optional(),
         diskMb: z.number().int().min(1).optional(),
         /** `process.platform` spellings: `win32`, `darwin`, `linux`. */

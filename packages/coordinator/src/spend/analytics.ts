@@ -13,6 +13,16 @@ import {
  * divergence. Pure functions — the ledger is the input, never a database handle.
  */
 
+/**
+ * A ledger read and what became of it — `LedgerFile.readAllChecked`'s return, threaded whole
+ * into the derivations that publish figures (see `SpendStatus.ledgerUnavailable`). One
+ * parameter rather than two, so entries can never be paired with another read's fate.
+ */
+export interface LedgerRead {
+  entries: LedgerEntry[];
+  unavailable: boolean;
+}
+
 /** Spend inside the rolling window: actual where recorded, estimate otherwise. */
 export function rollingSpend(entries: LedgerEntry[], settings: SpendSettings, now: Date): number {
   const cutoff = now.getTime() - settings.periodDays * 24 * 60 * 60 * 1000;
@@ -23,13 +33,19 @@ export function rollingSpend(entries: LedgerEntry[], settings: SpendSettings, no
   );
 }
 
-/** The status the client renders; alerts and never blocks (R-19, D10). */
-export function evaluateSpend(entries: LedgerEntry[], settings: SpendSettings, now: Date): SpendStatus {
-  const rollingMicroUsd = rollingSpend(entries, settings, now);
+/**
+ * The status the client renders; alerts and never blocks (R-19, D10). It takes the read, not
+ * a list, so the fate of that read rides the status it produced (SPEC-032 R-21): over an
+ * unreadable ledger the zero and the un-fired alert are still computed, and the flag is what
+ * stops them being presented as a quiet window.
+ */
+export function evaluateSpend(read: LedgerRead, settings: SpendSettings, now: Date): SpendStatus {
+  const rollingMicroUsd = rollingSpend(read.entries, settings, now);
   return {
     settings,
     rollingMicroUsd,
     alerted: settings.thresholdMicroUsd > 0 && rollingMicroUsd >= settings.thresholdMicroUsd,
+    ledgerUnavailable: read.unavailable,
   };
 }
 
@@ -40,10 +56,17 @@ export const DRIFT_MIN_SAMPLES = 3;
 /**
  * Manifest drift (R-13): only provider-reported actuals count — a manifest-derived actual
  * diverging from a manifest-derived estimate would only measure our own arithmetic.
+ *
+ * Takes the read for the same reason `evaluateSpend` does, and answers `null` — not `[]` —
+ * when it failed. An empty list here wears the shape of "nothing drifted", and publishing it
+ * would clear reports computed from real samples: a transient I/O failure downgrading a true
+ * manifest warning to silence. The rule lives here rather than at each call site because the
+ * call sites accrete, and one that forgot the guard would do exactly that.
  */
-export function detectDrift(entries: LedgerEntry[], manifest: ModelManifest): ManifestDrift[] {
+export function detectDrift(read: LedgerRead, manifest: ModelManifest): ManifestDrift[] | null {
+  if (read.unavailable) return null;
   const byModel = new Map<string, number[]>();
-  for (const e of entries) {
+  for (const e of read.entries) {
     if (e.actualSource !== "provider-reported" || e.actualMicroUsd === null) continue;
     if (e.estimatedMicroUsd <= 0) continue;
     const perMille = Math.round((Math.abs(e.actualMicroUsd - e.estimatedMicroUsd) * 1000) / e.estimatedMicroUsd);

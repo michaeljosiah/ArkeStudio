@@ -15,7 +15,11 @@ import { ChildSupervisor, type SupervisorStatusEvent } from "../src/supervisor.j
 const here = dirname(fileURLToPath(import.meta.url));
 const CHILD = join(here, "fixtures", "child.mjs");
 
-function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 15_000): Promise<void> {
+// 40s default: above every spec's 10s ready budget, because this wait's clock starts at
+// start() while the ready budget starts after the spawn settles — and the updateEnv paths
+// put a stop and a respawn inside the same wait. Sized for a starved shard, like the budgets
+// in supervisor.test.ts; a genuinely expired ready budget reports as "(at failed)".
+function waitForStatus(sup: ChildSupervisor, wanted: string, timeoutMs = 40_000): Promise<void> {
   return new Promise((resolve, reject) => {
     if (sup.status === wanted) return resolve();
     const timer = setTimeout(
