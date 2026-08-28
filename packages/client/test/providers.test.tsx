@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import type { ClientState, ManifestModel } from "@arke-studio/contracts";
-import { SettingsCloudAiScreen, SettingsProvidersScreen } from "../src/screens/shell.js";
+import { SettingsGeneralScreen, SettingsProvidersScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -60,7 +60,7 @@ const providers = () =>
 const cloudAi = () =>
   renderToString(
     <MemoryRouter>
-      <SettingsCloudAiScreen />
+      <SettingsGeneralScreen />
     </MemoryRouter>,
   );
 

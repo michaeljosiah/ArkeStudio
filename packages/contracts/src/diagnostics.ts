@@ -20,7 +20,8 @@ import type { ClientState } from "./client-state.js";
 
 /**
  * Five, not four (D5). `unmeasured` exists because hardware detection does not run until someone
- * opens Settings · Local AI — so in most sessions every hardware fact is missing, and reporting
+ * opens an engine pane in Settings · Providers — so in most sessions every hardware fact is
+ * missing, and reporting
  * that as `unknown` would say *we tried and failed* when the truth is *nobody asked*.
  */
 export const FindingSeveritySchema = z.enum([
@@ -57,43 +58,50 @@ export const FINDING_SEVERITY_RANK: Record<FindingSeverity, number> = {
  * key the view appends a remedy's target under so the screen opens on the right row.
  */
 export const CONTROL_REGISTRY = {
-  /** Stops the supervised child and resolves the selection again (Settings · Engines). */
+  /** Stops the supervised child and resolves the selection again (Settings · Providers). */
   "comfyui-restart": {
     label: "Restart",
-    place: "Settings · Engines · ComfyUI",
-    route: "/settings/engines?engine=comfyui",
+    place: "Settings · Providers · ComfyUI",
+    route: "/settings/providers?provider=comfyui",
   },
   /** Re-reads node classes and dependency identity on demand — the Settings refresh. */
   "comfyui-refresh": {
     label: "Refresh",
-    place: "Settings · Engines · ComfyUI",
-    route: "/settings/engines?engine=comfyui",
+    place: "Settings · Providers · ComfyUI",
+    route: "/settings/providers?provider=comfyui",
   },
   /** The explicit filesystem mapping a URL engine's file checks resolve against (SPEC-021 D13). */
   "comfyui-map-models-folder": {
     label: "Map a folder",
-    place: "Settings · Engines · ComfyUI",
-    route: "/settings/engines?engine=comfyui",
+    place: "Settings · Providers · ComfyUI",
+    route: "/settings/providers?provider=comfyui",
   },
-  /** One component's fetch, from the row that states the lack (SPEC-028 T-25). */
+  /**
+   * One component's fetch, from the row that states the lack (SPEC-028 T-25).
+   *
+   * The three component remedies carry **only** the component, and Providers resolves the pane
+   * from the component's own declaration (SPEC-034 R-24). One entry serves components belonging
+   * to ComfyUI, Ollama and Voxa, so a `route` naming one engine would open the wrong pane for
+   * the other two — and the single `targetParam` is already spent on the component id.
+   */
   "component-download": {
     label: "Download",
-    place: "Settings · Engines",
-    route: "/settings/engines",
+    place: "Settings · Providers",
+    route: "/settings/providers",
     targetParam: "component",
   },
   /** For the file that is on disk, intact, and not the bytes the recipe pins (SPEC-028). */
   "component-repair": {
     label: "Repair",
-    place: "Settings · Engines",
-    route: "/settings/engines",
+    place: "Settings · Providers",
+    route: "/settings/providers",
     targetParam: "component",
   },
   /** Re-attempts a blocked or failed component — and re-runs the disk guard on the way. */
   "component-retry": {
     label: "Retry",
-    place: "Settings · Engines",
-    route: "/settings/engines",
+    place: "Settings · Providers",
+    route: "/settings/providers",
     targetParam: "component",
   },
   /** The provider's key row: save, replace, test (SPEC-008 §2.4). */
@@ -128,11 +136,19 @@ export const CONTROL_REGISTRY = {
     place: "Activity · Needs you",
     route: "/activity",
   },
-  /** Runs hardware detection on demand — the control `unmeasured` names (§2.2, SPEC-033 R-58). */
+  /**
+   * Runs hardware detection on demand — the control `unmeasured` names (§2.2, SPEC-033 R-58).
+   *
+   * The row it names appears in every engine pane that asks a fit question, so the route names a
+   * concrete one rather than landing on whichever pane happens to open (SPEC-034 R-13, R-24).
+   * Ollama, not ComfyUI: a ComfyUI resolved to a URL has no fit question and draws no such row,
+   * and `hardware-unmeasured` fires exactly when nothing has probed — so that pairing could send
+   * a reader to the one pane with no Measure button on it.
+   */
   "runtime-detect": {
     label: "Measure",
-    place: "Settings · Local AI",
-    route: "/settings/local-ai",
+    place: "Settings · Providers · Ollama",
+    route: "/settings/providers?provider=ollama",
   },
 } as const satisfies Record<
   string,

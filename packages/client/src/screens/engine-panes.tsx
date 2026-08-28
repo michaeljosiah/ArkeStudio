@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
 import {
-  ENGINE_CAPABILITIES,
+  FIT_LABEL,
   ENGINE_LABEL,
   comfyUiWeightsComponentId,
-  comfyUiWeightsRecipeId,
   transferProgress,
   type ComfyUiEngineStatus,
   type EngineId,
@@ -16,9 +14,9 @@ import { Button, cx } from "../components/ui.js";
 import {
   HealthDot,
   RuntimeHead,
+  engineCapabilityWords,
   RuntimeSection,
   RuntimeStatus,
-  TONE_CLASS,
   sizeMb,
   type RuntimeTone,
 } from "./settings-parts.js";
@@ -47,13 +45,14 @@ import {
   useVoiceRuntimeTest,
   verifyComfyUiRecipe,
 } from "../lib/store.js";
-
 /**
- * Settings · Engines (SPEC-033 §1.11). The machinery, deliberately and completely.
+ * The engine panes of Settings · Providers (SPEC-034 R-5). The machinery, deliberately and
+ * completely.
  *
- * Most people never open this screen. The ones who do are troubleshooting, and abridging it for
- * them would be the wrong kindness — so the detail is unabridged: version, state, port, model
- * directory, executable, logs, restart, re-verify, repair.
+ * Most people never open one. The ones who do are troubleshooting, and abridging it for them
+ * would be the wrong kindness — so the detail is unabridged, and R-5 moves it into a provider
+ * pane without taking anything out: version, state, port, model directory, executable, logs,
+ * restart, re-verify, repair.
  *
  * It absorbs Components. A component is a thing that must be on this machine — an engine's own
  * concern — so it is stated under the engine that requires it, and the link is declared on the
@@ -64,26 +63,23 @@ import {
  * rule per destination, for groups that overlapped by construction. It was correct code solving
  * a problem that should not exist. Once every fact belongs to exactly one surface there is
  * nothing to suppress; if something still needs suppressing, the split is wrong somewhere and
- * that is the finding (R-6).
+ * that is the finding (SPEC-033 R-6).
  *
- * OpenCode is not here (R-5, R-72). It governs agent execution rather than generation, the
- * authoring harness was stated twice — a tab and a group inside Local runtime — and this ends
- * that by removing the group, never the tab.
+ * OpenCode is not here (SPEC-033 R-5, R-72). It governs agent execution rather than generation,
+ * and the authoring harness keeps its own tab.
  */
 /** Failed beats moving beats arrived — the worst thing in the group is what its dot says. */
-function componentsTone(components: readonly SetupComponent[]): RuntimeTone {
+export function componentsTone(components: readonly SetupComponent[]): RuntimeTone {
   if (components.some((c) => c.state === "failed" || c.state === "blocked")) return "warn";
   if (components.some((c) => c.state !== "ready" && c.state !== "present")) return "idle";
   return "ok";
 }
-
-
 /**
  * The catalogue: what has arrived and what has not. Setup shows a bar and nothing else; this is
  * where the detail lives (prototype 22a), and since turn 75 it is a group of its own rather than
  * a section every other group's rows had to be read past.
  */
-function ComponentRows({ components }: { components: readonly SetupComponent[] }) {
+export function ComponentRows({ components }: { components: readonly SetupComponent[] }) {
   return (
     <>
       {components.map((c) => {
@@ -139,22 +135,19 @@ function ComponentRows({ components }: { components: readonly SetupComponent[] }
     </>
   );
 }
-
-
 const VOICE_ENGINES = ["kokoro", "whisper", "phonemizer"] as const;
 const VOICE_ENGINE_LABEL: Record<(typeof VOICE_ENGINES)[number], string> = {
   kokoro: "Kokoro voice",
   whisper: "Whisper dictation",
   phonemizer: "espeak-ng phonemizer",
 };
-
 /**
  * The local voice runtime, the narrator it reads with, and the engines it supervises. Seven loose
  * links used to sit under this in one wrapped row; each one now hangs off the thing it acts on —
  * the path is changed on the field that shows the path — and only the three that act on the
  * runtime as a whole are left at the foot (turn 75).
  */
-function VoxaDetail({
+export function VoxaDetail({
   voiceRuntime,
   health,
   components,
@@ -191,12 +184,12 @@ function VoxaDetail({
     <>
       <RuntimeHead
         title={ENGINE_LABEL.voxa}
-        caps={ENGINE_CAPABILITIES.voxa.toUpperCase()}
+        caps={engineCapabilityWords("voxa").toUpperCase()}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
       <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">RUNTIME</div>
+        <div className="fy-rt__eyebrow">ENGINE</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>
             {sourceLabel}
@@ -231,7 +224,6 @@ function VoxaDetail({
           <span>{voiceRuntime.configurationWarning}</span>
         </div>
       )}
-
       <RuntimeSection label="ENGINES">
         <span className="fy-rt__count">
           {ready} OF {VOICE_ENGINES.length} READY
@@ -249,7 +241,6 @@ function VoxaDetail({
           </div>
         );
       })}
-
       <div className="fy-rt__actions">
         <Button onClick={() => testLocalVoice()} disabled={voiceTest?.status === "testing"}>
           {voiceTest?.status === "testing" ? "Testing…" : "Test voice"}
@@ -297,15 +288,12 @@ function VoxaDetail({
     </>
   );
 }
-
-
 /** Ready is ok; starting has not failed yet; every other state owes a reason, so it warns. */
-function comfyUiTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
+export function comfyUiTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
   if (engine === null) return "idle";
   if (engine.state === "ready") return "ok";
   return engine.state === "starting" ? "idle" : "warn";
 }
-
 /**
  * The ComfyUI engine and its recipes (SPEC-021 §2.2, §2.12, design turn 72). The engine row
  * states its source; detection offers are adopted, never typed; and a disabled recipe carries
@@ -317,7 +305,7 @@ function comfyUiTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
  * sits on the row that states the lack; Components keeps them until they arrive, as it does for
  * everything else spoken for elsewhere.
  */
-function ComfyUiDetail() {
+export function ComfyUiDetail() {
   const { state } = useStore();
   const setup = useSetup();
   const comfyui = state?.app.comfyui ?? null;
@@ -331,9 +319,11 @@ function ComfyUiDetail() {
         : engine?.source === "managed"
           ? "Arke-managed"
           : "Not installed";
-  const sourceWithLocality = engine?.source === "user-url" && engine.locality === "remote"
-    ? `${sourceLabel} · remote`
-    : sourceLabel;
+  // The exception, in the product's words. `remote` was ours; `another machine` is what the
+  // reader is being told, and this line is one of exactly two places it is said (SPEC-034 R-9) —
+  // the other is `elsewhere` in the rail, which says *that* it is rather than where.
+  const sourceWithLocality =
+    engine?.locality === "remote" ? `another machine · ${sourceLabel}` : sourceLabel;
   const recipes = comfyui?.recipes ?? [];
   const ready = recipes.filter((r) => r.state === "ready").length;
   const managedRuntime = setup?.components.find((component) => component.id === "comfyui-runtime");
@@ -342,7 +332,7 @@ function ComfyUiDetail() {
     <div data-testid="comfyui-engine">
       <RuntimeHead
         title="ComfyUI"
-        caps={ENGINE_CAPABILITIES.comfyui.toUpperCase()}
+        caps={engineCapabilityWords("comfyui").toUpperCase()}
         tone={comfyUiTone(engine)}
         state={engine?.state ?? "unknown"}
       />
@@ -433,7 +423,6 @@ function ComfyUiDetail() {
           Use the engine's own
         </button>
       </RuntimeSection>
-
       <RuntimeSection label="RECIPES">
         <span className="fy-rt__count">
           {recipes.length === 0 ? "NONE IN THIS BUILD" : `${ready} OF ${recipes.length} READY`}
@@ -441,6 +430,13 @@ function ComfyUiDetail() {
       </RuntimeSection>
       {recipes.map((recipe) => {
         const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
+        const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === recipe.recipeId);
+        const refused = gated?.fit === "insufficient" || gated?.fit === "unsupported";
+        // One of the five outcomes prints, and it is the same one a model row prints (R-20,
+        // R-21). A refusal is the headline with its figures on the line beneath; `runs well` and
+        // `unknown` change no decision.
+        const verdict = gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined;
+        const recommended = state?.app.runtime?.recommended[recipe.capability] === recipe.recipeId;
         const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
         // The shared projection, not a second derivation: Downloads owns progress, and a row
         // that computes its own figure is how two surfaces come to disagree about one transfer
@@ -463,7 +459,13 @@ function ComfyUiDetail() {
         return (
           <div
             key={recipe.recipeId}
-            className={cx("fy-set__row--stack", "fy-set__row", recipe.state === "disabled" && "fy-set__row--off")}
+            className={cx(
+              "fy-set__row--stack",
+              "fy-set__row",
+              // A declared refusal recedes; a measured shortfall does not, because a smaller
+              // model or a bigger card answers it (SPEC-033 D8, SPEC-034 R-23).
+              (recipe.state === "disabled" || gated?.fit === "unsupported") && "fy-set__row--off",
+            )}
             data-testid="comfyui-recipe"
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -492,12 +494,23 @@ function ComfyUiDetail() {
               <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
                 Re-verify
               </button>
-              <RuntimeStatus tone={tone}>
-                {speaksForRecipe
-                  ? weights.state === "downloading"
-                    ? `${pct}%`
-                    : weights.state
-                  : recipe.state}
+              {recommended && <span className="fy-prov__unverified">recommended</span>}
+              {/* A dot only where it warns (R-22): a refusal, or a transfer that failed. `ready`
+                  says what a green dot would have said, and grey stood for the rest. */}
+              <RuntimeStatus tone={refused ? "warn" : tone === "warn" ? "warn" : undefined}>
+                {[
+                  refused ? "unsupported" : undefined,
+                  verdict,
+                  refused
+                    ? undefined
+                    : speaksForRecipe
+                      ? weights.state === "downloading"
+                        ? `${pct}%`
+                        : weights.state
+                      : recipe.state,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </RuntimeStatus>
             </div>
             {/* The bar only exists while something is actually moving. */}
@@ -513,6 +526,11 @@ function ComfyUiDetail() {
               <div className="fy-set__why">
                 <span className={cx("fy-set__dot", weights.state === "failed" && "fy-set__dot--warn")} />
                 <span>{weights.detail}</span>
+              </div>
+            ) : refused && gated?.reason !== undefined ? (
+              <div className="fy-set__why">
+                <span className="fy-set__dot fy-set__dot--warn" />
+                <span>{gated.reason}</span>
               </div>
             ) : (
               recipe.reason && (
@@ -545,8 +563,6 @@ function ComfyUiDetail() {
     </div>
   );
 }
-
-
 /**
  * The components one engine requires, or — for `null` — the ones nobody does.
  *
@@ -555,17 +571,15 @@ function ComfyUiDetail() {
  * declaration, not a list of what to hide where: the second of those is `statedElsewhere`, and
  * R-6 deletes it.
  */
-function componentsFor(all: readonly SetupComponent[], engine: EngineId | null): SetupComponent[] {
+export function componentsFor(all: readonly SetupComponent[], engine: EngineId | null): SetupComponent[] {
   return all.filter((c) => (c.engine ?? null) === engine && (engine !== null || c.provider === undefined));
 }
-
 /** Ready is ok; not yet asked is idle; anything else owes a reason, so it warns. */
-function processTone(state: string | undefined): RuntimeTone {
+export function processTone(state: string | undefined): RuntimeTone {
   if (state === "ready" || state === "healthy" || state === "valid") return "ok";
   if (state === undefined || state === "starting" || state === "unconfigured" || state === "untested") return "idle";
   return "warn";
 }
-
 /**
  * Ollama, as much of it as the product actually knows. It has no supervisor of its own — the
  * installer hands it to the operating system and it answers on its own port — so what there is
@@ -573,7 +587,7 @@ function processTone(state: string | undefined): RuntimeTone {
  * answered when it was last asked. Stating less than that would be an apology; inventing a
  * version string we never read would be worse.
  */
-function OllamaDetail({ components }: { components: readonly SetupComponent[] }) {
+export function OllamaDetail({ components }: { components: readonly SetupComponent[] }) {
   const { state } = useStore();
   const provider = (state?.app.providers ?? []).find((p) => p.id === "ollama");
   const answered = provider?.probes.some((probe) => probe.available) === true;
@@ -582,7 +596,7 @@ function OllamaDetail({ components }: { components: readonly SetupComponent[] })
     <>
       <RuntimeHead
         title={ENGINE_LABEL.ollama}
-        caps={ENGINE_CAPABILITIES.ollama.toUpperCase()}
+        caps={engineCapabilityWords("ollama").toUpperCase()}
         tone={processTone(provider?.validation)}
         state={answered ? "answering" : (provider?.validation ?? "not asked")}
       />
@@ -600,9 +614,8 @@ function OllamaDetail({ components }: { components: readonly SetupComponent[] })
     </>
   );
 }
-
 /** A component no engine requires. It keeps a place; it does not organise the screen (R-71). */
-function OtherComponentsDetail({ components }: { components: readonly SetupComponent[] }) {
+export function OtherComponentsDetail({ components }: { components: readonly SetupComponent[] }) {
   return (
     <>
       <RuntimeHead
@@ -614,125 +627,5 @@ function OtherComponentsDetail({ components }: { components: readonly SetupCompo
       <RuntimeSection label="ON THIS MACHINE" />
       <ComponentRows components={components} />
     </>
-  );
-}
-
-/**
- * The rail: one row per engine, then the components no engine requires.
- *
- * An engine's row states what it is used for in the same five capability words the two
- * capability screens share, and its locality — this is the one screen whose subject is the
- * destination, and a non-loopback URL is named as remote there (R-69, SPEC-028 R-37).
- */
-export function SettingsEnginesScreen() {
-  const { state } = useStore();
-  const setup = useSetup();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const all = setup?.components ?? [];
-  const running = setup?.running === true;
-  const comfyui = state?.app.comfyui ?? null;
-  const voiceRuntime = state?.app.voiceRuntime ?? null;
-
-  const ollamaComponents = componentsFor(all, "ollama");
-  const voxaComponents = componentsFor(all, "voxa");
-  const unowned = componentsFor(all, null);
-  const ollama = (state?.app.providers ?? []).find((p) => p.id === "ollama");
-
-  const rows: Array<{ id: EngineId | "other"; label: string; tone: RuntimeTone; count: string }> = [
-    {
-      id: "comfyui",
-      label: ENGINE_LABEL.comfyui,
-      tone: comfyUiTone(comfyui?.engine ?? null),
-      // Every row states its locality, not only the one that turns out to be remote: R-69 makes
-      // this the screen whose subject is the destination, and a row that states it sometimes is
-      // a row nobody can read the absence of. The state is what the dot says.
-      count: comfyui === null ? "—" : comfyui.engine.locality === "remote" ? "remote" : "this machine",
-    },
-    {
-      id: "ollama",
-      label: ENGINE_LABEL.ollama,
-      // The same derivation the pane uses. Anything that is not `valid` reading as merely
-      // unmeasured made a stopped Ollama show a neutral dot on the rail — the half you scan to
-      // find what is broken — beside a pane that warned about it in red.
-      tone: processTone(ollama?.validation),
-      count: "this machine",
-    },
-    {
-      id: "voxa",
-      label: ENGINE_LABEL.voxa,
-      tone: processTone(voiceRuntime?.processState),
-      count: "this machine",
-    },
-    {
-      id: "other",
-      label: "Other components",
-      tone: componentsTone(unowned),
-      count: unowned.length === 0 ? "none" : `${unowned.length}`,
-    },
-  ];
-
-  const asked = searchParams.get("engine");
-  // A diagnostics remedy addresses a component (SPEC-032 R-24's targetParam): resolve it to the
-  // engine whose pane states it, from the component's own declaration — recipe weights carry no
-  // engine field because their id is already derived from the catalogue, so they resolve by it.
-  const askedComponent = searchParams.get("component");
-  const askedEntry = askedComponent === null ? null : (all.find((c) => c.id === askedComponent) ?? null);
-  // A provider-owned component is not on this screen at all (SPEC-033 R-1) — never resolve it
-  // to the 'other' pane, where there is no matching row; the remedies for those route to
-  // Providers, and this guard is only the backstop for a hand-typed URL.
-  const owning =
-    askedComponent === null || askedEntry?.provider !== undefined
-      ? null
-      : (askedEntry?.engine ??
-        (comfyUiWeightsRecipeId(askedComponent) !== null ? "comfyui" : "other"));
-  const current = rows.some((r) => r.id === asked)
-    ? (asked as EngineId | "other")
-    : owning !== null && rows.some((r) => r.id === owning)
-      ? owning
-      : rows[0]!.id;
-  return (
-    <div data-screen="settings-engines" className="fy-set fy-set--runtime">
-      <div className="fy-rt">
-        <div className="fy-rt__rail" role="tablist" aria-label="Engines">
-          {rows.map((r) => (
-            <button
-              type="button"
-              key={r.id}
-              role="tab"
-              aria-selected={r.id === current}
-              className={cx("fy-rt__railitem", r.id === current && "is-current")}
-              onClick={() => setSearchParams({ engine: r.id }, { replace: true })}
-            >
-              <span className={cx("fy-set__dot", TONE_CLASS[r.tone])} />
-              <span>{r.label}</span>
-              <span style={{ flex: 1 }} />
-              <span className="fy-rt__count">{r.count}</span>
-            </button>
-          ))}
-        </div>
-        <div className="fy-rt__pane">
-          {current === "comfyui" && <ComfyUiDetail />}
-          {current === "ollama" && <OllamaDetail components={ollamaComponents} />}
-          {current === "voxa" && (
-            <VoxaDetail voiceRuntime={voiceRuntime} health={state?.app.health.voice} components={voxaComponents} />
-          )}
-          {current === "other" && <OtherComponentsDetail components={unowned} />}
-          <div className="fy-rt__actions">
-            {/* Stopping is global — one setup run fetches for every engine — so it is stated
-                once, here, rather than under a heading that names one of them. */}
-            <span style={{ flex: 1 }} />
-            {/* Watching a transfer belongs to Downloads, which owns progress; starting one stays
-                where the decision is made (R-82, R-83). */}
-            <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
-              {running ? "Downloads · running" : "Downloads"}
-            </Button>
-            <Button variant="secondary" onClick={() => navigate("/settings/local-ai")}>
-              Local AI
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }

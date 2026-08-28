@@ -356,7 +356,6 @@ export const ClientStateSchema = z
              * the concrete model id is carried rather than thrown away. The dispatch picker
              * consults it; Cloud AI states it until a default is set for that capability.
              */
-            clearedLocal: RoutingDefaultsSchema.optional(),
           })
           .strict()
           .default({ defaults: {}, faults: [] }),

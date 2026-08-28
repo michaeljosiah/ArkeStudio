@@ -2441,8 +2441,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * viewport fraction of its own.
  */
 .fy-settings {
-  width: 80%;
-  height: 80%;
+  width: 90%;
+  height: 90%;
   max-width: calc(100% - 32px);
   max-height: calc(100% - 32px);
   display: flex;
@@ -2951,7 +2951,12 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   padding-left: 22px;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
+/* The keyed pane keeps its inner scroller: its head and key row stay put while the model list
+   moves under them, which is worth more than scrolling the pane as a whole. An engine pane has no
+   single tall child to hand that to, so it scrolls itself. */
+.fy-prov__pane:has(> .fy-prov__models) { overflow-y: hidden; }
 .fy-prov__head,
 .fy-rt__head { display: flex; align-items: center; gap: 10px; padding-bottom: 13px; }
 .fy-prov__title,

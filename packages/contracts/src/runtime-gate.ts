@@ -1,6 +1,7 @@
 import type { Capability } from "./provider.js";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
-import { PROVIDERS, type ProviderId } from "./provider.js";
+import { PROVIDERS, deriveCapabilityAvailability, type ProviderId, type ProviderStatus } from "./provider.js";
+import type { RecipeReadiness } from "./comfyui.js";
 import type {
   FitVerdict,
   LocalRuntimeModel,
@@ -287,4 +288,71 @@ export function gateLocalRuntimes(
     });
   }
   return { probes, detectedAt, models, recommended: recommendLocalModels(manifest, models) };
+}
+
+/**
+ * Whether a model can be dispatched right now (SPEC-028 R-35), as one function.
+ *
+ * It lived in the dispatch bar, which was fine while the only caller was a picker. SPEC-034 R-15a
+ * gives it a second: General may name a local default, and the routing write has to refuse an
+ * ineligible one — a picker that merely disables the option is a courtesy, not a guarantee, and
+ * an id arriving over the wire would otherwise store a default nothing can honour. Two callers
+ * deriving this separately is how a screen and a write come to disagree about one model, so
+ * neither derives it.
+ *
+ * Fit is an input, not a rival: a refusing verdict is the gate's, and this reads it rather than
+ * recomputing one. A model can fail this while fitting the machine perfectly — an engine that
+ * never started is not a fit question — and can fit nothing while being perfectly installed.
+ */
+export interface EligibilityInputs {
+  /** Provider connection state, for the capabilities a credential actually unlocks. */
+  readonly providers: readonly ProviderStatus[];
+  /** Model ids somebody switched off in Providers. */
+  readonly disabled: readonly string[];
+  /** ComfyUI's own recipe answers, keyed by recipe id — which is the model id. */
+  readonly recipes: readonly RecipeReadiness[];
+  /** Where the resolved ComfyUI engine runs, which changes what an unknown recipe means. */
+  readonly comfyUiLocality: "local" | "remote" | undefined;
+  /**
+   * The gate's rows, for the fit verdict. Absent where nothing has probed, which R-28 offers
+   * rather than withholds — an unmeasured machine is not a refusing one.
+   */
+  readonly gated?: readonly { readonly modelId: string; readonly fit?: FitVerdict }[];
+}
+
+export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): boolean {
+  if (inputs.disabled.includes(model.id)) return false;
+  const unlocked = new Set(
+    deriveCapabilityAvailability([...inputs.providers]).find((a) => a.capability === model.capability)?.via ?? [],
+  );
+  const local = PROVIDERS[model.provider].local === true;
+  if (!unlocked.has(model.provider) && !local) return false;
+  // A machine that cannot run it cannot be told to. Only a *measured* refusal counts: `unknown`
+  // is offered rather than withheld (SPEC-033 R-28), and `runs-slowly` is a warning, not a bar.
+  const fit = inputs.gated?.find((row) => row.modelId === model.id)?.fit;
+  if (fit === "insufficient" || fit === "unsupported") return false;
+  // A local engine that answered and failed refuses everything it hosts. This is the case
+  // SPEC-034 R-15a names — a Kokoro runtime that never started must not become a default — and
+  // it is invisible to the credential check above, because a local provider takes no credential.
+  // `untested` is not a refusal: nothing has asked yet, and R-28's instinct applies to engines
+  // as much as to hardware.
+  if (local) {
+    const status = inputs.providers.find((p) => p.id === model.provider);
+    if (status?.validation === "invalid" || (status?.fault ?? null) !== null) return false;
+  }
+  // A local recipe below readiness is not usable — it stays visible in the picker as a disabled
+  // row with its measured reason, and coordinator admission refuses it regardless (SPEC-021
+  // R-16). Unknown image/video hardware still runs (D15); cloned voice stays off until this
+  // build has proven the full use can complete.
+  if (model.provider === "comfyui") {
+    const readiness = inputs.recipes.find((recipe) => recipe.recipeId === model.id) ?? null;
+    if (
+      readiness === null ||
+      readiness.state === "disabled" ||
+      (model.capability === "voice-tts" && readiness.state === "unknown" && inputs.comfyUiLocality === "local")
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

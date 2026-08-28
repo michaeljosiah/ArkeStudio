@@ -40,6 +40,7 @@ import {
   designatedCompilation,
   comfyUiRecoveryDecision,
   estimateMicroUsd,
+  modelEligible,
   modelForCapability,
   gateLocalRuntimes,
   type EngineLocalities,
@@ -2410,23 +2411,6 @@ export class Coordinator {
       if (tool.current().state === "ready") await this.providerService.validate(provider);
     }
     const manifest = this.opts.manifest ?? null;
-    // Cloud AI is cloud-only by construction, so a local capability default cannot keep being
-    // offered there. It is moved out of routing before anything reads it — not deleted: the
-    // record keeps the concrete model id, and Cloud AI names it until the person has seen it
-    // (SPEC-033 R-66, D21). Nothing to do on an installation that never had one.
-    if (this.appSettings && manifest) {
-      const local = new Set(manifest.models.filter((m) => PROVIDERS[m.provider].local).map((m) => m.id));
-      await this.appSettings.clearLocalRouting((modelId) => local.has(modelId)).catch(async (err) => {
-        // Swallowing this produces the one outcome D21 refuses: the default stays in force at
-        // dispatch while Cloud AI can neither show nor change it. `routingFaults` states any
-        // local model still in routing, so the screen says so — this records why.
-        await this.appLog?.append({
-          level: "error",
-          event: "routing.clear-local-failed",
-          reason: err instanceof Error ? err.message : String(err),
-        });
-      });
-    }
     const settings = this.appSettings ? await this.appSettings.load() : null;
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
@@ -2451,7 +2435,6 @@ export class Coordinator {
             routing: {
               defaults: settings.routing,
               faults: routingFaults(settings, manifest),
-              clearedLocal: settings.clearedLocalRouting,
             },
           }
         : {}),
@@ -4704,10 +4687,23 @@ export class Coordinator {
       }
       case "set-routing-default": {
         if (!this.appSettings || !this.opts.manifest) return;
+        // SPEC-034 R-15a: eligibility is supplied, never re-derived beside the write. The same
+        // `modelEligible` the picker filters with, from the same state the read model publishes —
+        // so a default that could not run cannot be stored, whatever put the message on the wire.
+        const state = this.readModel.getState().app;
+        const chosen = this.opts.manifest.models.find((m) => m.id === msg.modelId);
         const result = await this.appSettings.setRoutingDefault(
           msg.capability,
           msg.modelId,
           this.opts.manifest,
+          chosen !== undefined &&
+            modelEligible(chosen, {
+              providers: state.providers,
+              disabled: state.models.disabled,
+              recipes: state.comfyui?.recipes ?? [],
+              comfyUiLocality: state.comfyui?.engine.locality,
+              gated: state.runtime?.models ?? [],
+            }),
         );
         if (!result.ok) {
           void this.appLog?.append({
@@ -4728,7 +4724,6 @@ export class Coordinator {
           type: "routing.changed",
           routing: settings.routing,
           faults: routingFaults(settings, this.opts.manifest),
-          clearedLocal: settings.clearedLocalRouting,
         });
         return;
       }

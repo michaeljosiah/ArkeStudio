@@ -3,7 +3,7 @@ import type { EngineId, ProviderId } from "@arke-studio/contracts";
 /**
  * What setup fetches onto this machine, and where from. The engine ships; the language model
  * it runs does not — that is a choice about quality and disk that belongs to the person whose
- * disk it is, so it is made in Settings · Local AI rather than assumed here.
+ * disk it is, so it is made in Settings · Providers rather than assumed here.
  *
  * Sizes are the published figures, used for arithmetic *before* anything starts — the
  * free-disk guard and the totals on screen — so they are stated here rather than discovered
@@ -38,7 +38,7 @@ export type ComponentKind =
   | { kind: "installer"; file: DownloadFile; silentArgs: readonly string[] }
   /**
    * A model pulled by a runtime we do not own, through its own CLI. No catalogue entry ships
-   * one — which model Ollama runs is chosen in Settings · Local AI, on the disk it costs.
+   * one — which model Ollama runs is chosen in Settings · Providers, on the disk it costs.
    */
   | { kind: "pull"; command: string; args: readonly string[] }
   /**
@@ -109,7 +109,7 @@ export interface CatalogueEntry {
   /** Shown on the row when the thing that would *use* this is not in the build yet. */
   caveat?: string;
   /**
-   * Offered, not fetched: setup leaves it alone and it waits in Settings · Local AI until
+   * Offered, not fetched: setup leaves it alone and it waits in Settings · Providers until
    * someone asks for it. Big models belong here — the disk is the user's to spend.
    */
   optional?: boolean;
@@ -160,7 +160,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-runtime",
     engine: "ollama",
     displayName: "Ollama",
-    purpose: "Runs language models here — choose one in Settings · Local AI",
+    purpose: "Runs language models here — choose one in Settings · Providers",
     sizeMb: 750,
     spec: {
       kind: "installer",

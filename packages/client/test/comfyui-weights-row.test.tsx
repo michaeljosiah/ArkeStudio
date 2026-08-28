@@ -85,7 +85,7 @@ function render(path: string, state: ClientState): string {
 describe("a recipe's weights hang off the recipe", () => {
   it("offers the download, at its size, on the row that says the files are missing", () => {
     const html = render(
-      "/settings/engines?engine=comfyui",
+      "/settings/providers?provider=comfyui",
       stateWith(weights({}), "1 of 1 model files missing from the models folder"),
     );
     assert.match(html, /data-testid="comfyui-recipe"/);
@@ -96,14 +96,15 @@ describe("a recipe's weights hang off the recipe", () => {
 
   it("reports the fetch as the recipe's own state while it runs", () => {
     const html = render(
-      "/settings/engines?engine=comfyui",
+      "/settings/providers?provider=comfyui",
       stateWith(weights({ state: "downloading", bytesDone: Math.round(6617 * 1024 * 1024 * 0.42) })),
     );
     assert.match(html, /42%/);
     assert.match(html, /fy-set__barfill/);
-    // The dot has to agree with the word beside it: a download in progress is not a fault,
-    // even though the recipe it belongs to is still disabled underneath.
-    assert.match(html, /<span class="fy-set__dot"><\/span><span class="fy-set__state">42%/);
+    // The dot used to have to agree with the word beside it — a download in progress is not a
+    // fault, even though the recipe it belongs to is still disabled underneath. Under SPEC-034
+    // R-22 there is no dot to disagree: one is drawn only where something warns.
+    assert.match(html, /<span class="fy-set__status"><span class="fy-set__state">42%/);
     // Nothing to press while it is already moving.
     assert.doesNotMatch(html, DOWNLOAD_AT_SIZE);
   });
@@ -112,7 +113,7 @@ describe("a recipe's weights hang off the recipe", () => {
     // "1 of 1 model files missing" is true and useless here: it says nothing about the disk
     // that refused the download, which is the only thing the person can act on.
     const html = render(
-      "/settings/engines?engine=comfyui",
+      "/settings/providers?provider=comfyui",
       stateWith(
         weights({ state: "blocked", detail: "needs 6.5 GB plus room to work; D:\\ has 3.9 GB free" }),
         "1 of 1 model files missing from the models folder",
@@ -126,16 +127,16 @@ describe("a recipe's weights hang off the recipe", () => {
   it("offers Repair once the files are on disk, and only then", () => {
     // The case Retry cannot answer: presence IS completion to it, so a checkpoint that arrived
     // whole and hashes to the wrong thing would be re-verified forever and never replaced.
-    const missing = render("/settings/engines?engine=comfyui", stateWith(weights({})));
+    const missing = render("/settings/providers?provider=comfyui", stateWith(weights({})));
     assert.doesNotMatch(missing, />Repair<\/button>/, "nothing on disk to replace yet");
 
-    const here = render("/settings/engines?engine=comfyui", stateWith(weights({ state: "ready" })));
+    const here = render("/settings/providers?provider=comfyui", stateWith(weights({ state: "ready" })));
     assert.match(here, />Repair<\/button>/);
   });
 
   it("keeps a failed deletion actionable as Repair rather than an ineffective Retry", () => {
     const html = render(
-      "/settings/engines?engine=comfyui",
+      "/settings/providers?provider=comfyui",
       stateWith(weights({
         state: "failed",
         detail: "checkpoints/sd_xl_base_1.0.safetensors could not be removed — close the engine and try Repair again (EBUSY)",
@@ -154,13 +155,13 @@ describe("a recipe's weights hang off the recipe", () => {
     // destination. The recipe row owns it now, so there is nothing to suppress and no second
     // Download beside the first: counted, not merely looked for.
     for (const state of ["available", "downloading", "ready", "failed"] as const) {
-      const html = render("/settings/engines?engine=comfyui", stateWith(weights({ state })));
+      const html = render("/settings/providers?provider=comfyui", stateWith(weights({ state })));
       const recipes = html.match(/data-testid="comfyui-recipe"/g) ?? [];
       assert.equal(recipes.length, 1, state);
       assert.equal((html.match(/Download · (?:<!-- -->)?6\.5 GB/g) ?? []).length, state === "available" ? 1 : 0, state);
     }
     // And nowhere else. Ollama and Voxa each answer for their own.
-    const elsewhere = render("/settings/engines?engine=voxa", stateWith(weights({})));
+    const elsewhere = render("/settings/providers?provider=voxa", stateWith(weights({})));
     assert.doesNotMatch(elsewhere, /Local · Draft Image/);
   });
 });

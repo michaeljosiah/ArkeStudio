@@ -1,7 +1,5 @@
 import { Route, Routes, useLocation, useNavigate } from "react-router";
 import { useEffect, useRef } from "react";
-import { SettingsLocalAiScreen } from "./screens/settings-local-ai.js";
-import { SettingsEnginesScreen } from "./screens/settings-engines.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import {
@@ -17,7 +15,7 @@ import {
   SettingsProvidersScreen,
   SettingsSampleWorldScreen,
   SettingsSignInScreen,
-  SettingsCloudAiScreen,
+  SettingsGeneralScreen,
   ShellChrome,
   WorldPickerScreen,
 } from "./screens/shell.js";
@@ -173,21 +171,25 @@ export function App() {
             <Route path="sign-in" element={<SettingsSignInScreen />} />
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />
-            <Route path="local-ai" element={<SettingsLocalAiScreen />} />
-            <Route path="engines" element={<SettingsEnginesScreen />} />
             <Route path="downloads" element={<SettingsDownloadsScreen />} />
-            {/* Local runtime became two screens. The old address answers, so a link, a bookmark
-                or a remedy written against it lands on the half that answers the same question. */}
-            <Route path="local-runtime" element={<Navigate to="/settings/local-ai" replace />} />
+            {/* Local runtime became two screens, and then those two became one pane of Providers
+                (SPEC-034 R-5). Every address on the way answers, so a link, a bookmark or a
+                remedy written against any of them lands where its content went. */}
+            <Route path="local-runtime" element={<Navigate to="/settings/providers" replace />} />
+            <Route path="local-ai" element={<Navigate to="/settings/providers" replace />} />
+            <Route path="engines" element={<Navigate to="/settings/providers" replace />} />
             <Route path="harness" element={<SettingsHarnessScreen />} />
             {/* Settings › Agents folded into Who does what (design 54b); the old address keeps working. */}
-            <Route path="cloud-ai" element={<SettingsCloudAiScreen />} />
+            <Route path="general" element={<SettingsGeneralScreen />} />
+            {/* Cloud AI became General when a default stopped having to be a cloud model
+                (SPEC-034 R-14). The old address answers. */}
+            <Route path="cloud-ai" element={<Navigate to="/settings/general" replace />} />
             {/* Two addresses that no longer name a screen, and they do not land in the same
                 place: `agents` named the per-agent overrides, and those are on Harness now, so
                 sending it to Cloud AI would land it on the one screen defined by not having
                 them. Each goes where its content went. */}
             <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
-            <Route path="who-does-what" element={<Navigate to="/settings/cloud-ai" replace />} />
+            <Route path="who-does-what" element={<Navigate to="/settings/general" replace />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
             <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />

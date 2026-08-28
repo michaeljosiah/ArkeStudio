@@ -137,10 +137,10 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
     const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
 
-    assert.deepEqual(await settings.setRoutingDefault("video", "seedance-2.0", manifest), { ok: true });
-    const unknown = await settings.setRoutingDefault("video", "sora-9000", manifest);
+    assert.deepEqual(await settings.setRoutingDefault("video", "seedance-2.0", manifest, true), { ok: true });
+    const unknown = await settings.setRoutingDefault("video", "sora-9000", manifest, true);
     assert.ok(!unknown.ok && /not in the model manifest/.test(unknown.reason));
-    const mismatched = await settings.setRoutingDefault("video", "flux-pro-1.1", manifest);
+    const mismatched = await settings.setRoutingDefault("video", "flux-pro-1.1", manifest, true);
     assert.ok(!mismatched.ok && /image model, not video/.test(mismatched.reason));
 
     const loaded = await settings.load();
@@ -150,7 +150,7 @@ describe("routing defaults resolve to concrete models (R-20, R-21 posture, D1)",
   it("a default whose model left the manifest surfaces as a named routing fault (§2.7)", async () => {
     const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
-    await settings.setRoutingDefault("video", "seedance-2.0", manifest);
+    await settings.setRoutingDefault("video", "seedance-2.0", manifest, true);
     const shrunk: ModelManifest = {
       ...manifest,
       models: manifest.models.filter((m) => m.id !== "seedance-2.0"),
@@ -191,7 +191,7 @@ describe("which models this studio offers (SPEC-008 §2.7)", () => {
   it("switching off a routed model strands the default rather than re-routing it", async () => {
     const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
-    await settings.setRoutingDefault("video", "seedance-2.0", manifest);
+    await settings.setRoutingDefault("video", "seedance-2.0", manifest, true);
     await settings.setModelEnabled("seedance-2.0", false);
 
     const loaded = await settings.load();
@@ -206,7 +206,7 @@ describe("which models this studio offers (SPEC-008 §2.7)", () => {
     const dir = await tempDir("arke-settings-");
     const settings = new AppSettingsFile(join(dir, "settings.json"));
     await settings.setModelEnabled("seedance-2.0", false);
-    const refused = await settings.setRoutingDefault("video", "seedance-2.0", manifest);
+    const refused = await settings.setRoutingDefault("video", "seedance-2.0", manifest, true);
     assert.ok(!refused.ok && /switched off in Providers/.test(refused.reason));
     assert.equal((await settings.load()).routing["video"], undefined);
   });
