@@ -97,6 +97,13 @@ export interface ComfyUiRecipe {
      */
     minFreeVramMb: number;
     recommendedVramMb: number;
+    /**
+     * The system-memory floor, where one was measured. Offloading spends RAM, so for a
+     * streaming recipe this is as binding as the card — and readiness enforces it, because the
+     * manifest gate only steers setup: weights that already exist (a mapped models folder)
+     * reach dispatch without ever meeting `fitFor`.
+     */
+    minMemMb?: number;
     /** Where the floor came from, so nobody mistakes a transcription for a measurement (§1.4). */
     floorSource: string;
   };
@@ -263,8 +270,14 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
 };
 
 
-/** 24 fps; an H3 latent length sits on the model's 17k+5 frame grid, so the offered seconds map to exactly these. */
-export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 243, "15": 362 };
+/**
+ * 24 fps; an H3 latent length sits on the model's 17k+5 frame grid. One entry, deliberately:
+ * 124 frames is the only length the floor below was measured at, and it finished with 933 MB of
+ * RAM to spare — a 362-frame decode holds roughly three times the image sequence, so offering
+ * 10s and 15s under the same floor promises lengths nobody has run. They return with a
+ * measurement (243 and 362 are the grid values waiting for one).
+ */
+export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124 };
 
 /**
  * Local · H3 Video — MiniMax H3 FL2VA (open-sourced 2026-08-03) with Alibaba-lineage 8-step turbo
@@ -301,9 +314,9 @@ const H3_VIDEO: ComfyUiRecipe = {
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
-    durationSec: { kind: "number-enum", values: [5, 10, 15], bind: [] },
+    durationSec: { kind: "number-enum", values: [5], bind: [] },
     aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
-    length: { kind: "int", internal: true, required: true, min: 5, max: 362, bind: [["7", "length"]] },
+    length: { kind: "int", internal: true, required: true, min: 5, max: 124, bind: [["7", "length"]] },
     width: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "width"]] },
     height: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "height"]] },
   },
@@ -402,6 +415,10 @@ const H3_VIDEO: ComfyUiRecipe = {
     // FREE would have refused the only configuration this recipe has ever been proven on.
     minFreeVramMb: 4000,
     recommendedVramMb: 24000,
+    // System RAM is what offloading spends: the verified run bottomed at 933 MB free of 32 GB.
+    // 30720 rather than 32768 because a nominal-32 GB machine reports slightly under (the
+    // reference machine says 32676), and the floor must admit the machine class it was measured on.
+    minMemMb: 30720,
     floorSource:
       "measured through ComfyUI on Arke reference hardware 2026-08-28: RTX 3080 10 GB, ~6 GB already in use by " +
       "other applications, 864×480×124 frames at 8 steps completed in 14m53s with peak card usage 9699 MB and " +
@@ -820,10 +837,11 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxPromptChars: 2000,
-      maxDurationSec: 15,
+      // One length, the measured one — see H3_FRAMES_BY_SECONDS for why 10s and 15s wait.
+      maxDurationSec: 5,
       // Seconds → seconds, exactly as the wan row: the wire word is the number itself and the
       // client derives the 17k+5 frame count from it (h3FramesForSeconds).
-      durations: { "5": "5", "10": "10", "15": "15" },
+      durations: { "5": "5" },
       durationWire: "number",
       resolutions: ["480p"],
       aspects: Object.keys(H3_DIMENSIONS),
@@ -835,11 +853,9 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       // H3 is offered but never recommended — the generic 25% margin would have recommended a
       // 42 GB install and heavily offloaded generation on a 12.5 GB card.
       recommendedVramMb: H3_VIDEO.hardware.recommendedVramMb,
-      // System RAM is part of the measured floor: the verified run bottomed at 933 MB free of
-      // 32 GB while streaming the transformer. 30720 rather than 32768 because a nominal-32 GB
-      // machine reports slightly under (the reference machine says 32676), and the floor is
-      // meant to admit exactly the class of machine the measurement was made on.
-      memMb: 30720,
+      // The measured system-memory floor, stated once on the recipe (the why lives there) and
+      // projected here so setup's gate and readiness's rung read the same number.
+      memMb: H3_VIDEO.hardware.minMemMb,
       diskMb: 42371,
       // The chosen files are CUDA quantisations — int8_convrot wants cu130 kernels and the text
       // encoder is NVFP4 AWQ; the engine's own non-CUDA backends report those capabilities

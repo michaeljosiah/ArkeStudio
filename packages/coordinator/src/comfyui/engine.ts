@@ -36,6 +36,8 @@ export interface ComfyUiRecipeFacts {
   minVramMb: number;
   /** The busy check's floor — free VRAM, a different question from the card-size floor above. */
   minFreeVramMb: number;
+  /** The measured system-memory floor, where the recipe states one — offloading spends RAM. */
+  minMemMb?: number;
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
@@ -1036,6 +1038,30 @@ export class ComfyUiEngineService {
         `Needs ${gb(recipe.minVramMb)} VRAM. This machine has ${gb(vram)}. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
+    }
+    /*
+     * 6b · System memory, where the recipe measured a floor. The manifest gate only steers
+     * setup: weights that already exist in a mapped models folder reach this walk without ever
+     * meeting fitFor, so a 16 GB machine would enqueue the workload that measured 32 GB — and
+     * memory is not VRAM's problem: /free reclaims nothing here, so there is no busy tier.
+     */
+    if (recipe.minMemMb !== undefined) {
+      const mem = engine.locality === "remote" ? null : (probes?.memMb ?? null);
+      if (mem === null) {
+        return {
+          ...base,
+          state: "unknown",
+          reason: `Memory could not be measured. The ${gb(recipe.minMemMb)} floor was not checked.`,
+          reasonKind: "memory",
+        };
+      }
+      if (mem < recipe.minMemMb) {
+        return disabled(
+          "memory",
+          `Needs ${gb(recipe.minMemMb)} memory. This machine has ${gb(mem)}. Cloud ${recipe.capability} still works.`,
+          `Cloud ${recipe.capability} still works.`,
+        );
+      }
     }
     /*
      * 7 · The card is big enough. Could it be free enough?

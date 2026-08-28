@@ -693,6 +693,23 @@ describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
     assert.match(short.reason!, /Needs 12 GB VRAM · this machine has 8 GB/);
   });
 
+  it("the VRAM floor reads the required family's own card, not the machine-wide maximum", () => {
+    // The two-vendor machine: a 24 GB Radeon beside an 8 GB GeForce. The flat probe reports the
+    // Radeon's figure and the accelerator union reports CUDA, and marrying them passed a 10 GB
+    // CUDA floor on a card the quantisations cannot run on — setup then offered the download.
+    const requires = { vramMb: 10000, accelerator: ["cuda"] };
+    const twoVendor = {
+      vramMb: 24 * 1024,
+      accelerators: ["cuda", "rocm", "directml"],
+      vramMbByAccelerator: { cuda: 8 * 1024, rocm: 24 * 1024 },
+    };
+    assert.equal(verdict(requires, twoVendor).fit, "insufficient");
+    assert.match(verdict(requires, twoVendor).reason!, /this machine has 8 GB/);
+    // Without the per-family read the flat figure stands alone — the old reading, kept for
+    // probes that cannot separate adapters rather than refused on a measurement nobody made.
+    assert.notEqual(verdict(requires, { vramMb: 24 * 1024, accelerators: ["cuda", "rocm"] }).fit, "insufficient");
+  });
+
   it("a declared accelerator the machine does not have is unsupported, whatever the VRAM (row 4)", () => {
     const wrongCard = verdict({ vramMb: 4 * 1024, accelerator: ["cuda"] }, { accelerators: [] });
     assert.equal(wrongCard.fit, "unsupported");

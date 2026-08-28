@@ -1151,6 +1151,35 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.equal((await streaming(4100)).startsWith("ready|"), true);
   });
 
+  it("a declared memory floor is a readiness rung, because mapped weights never meet the setup gate", async () => {
+    // The manifest gate only steers setup: weights already sitting in a mapped models folder
+    // reach dispatch admission through this walk alone, and the H3 workload that measured 32 GB
+    // would exhaust a 16 GB machine. Memory is not VRAM's problem — /free reclaims nothing —
+    // so there is no busy tier, just the floor and the same cloud alternative.
+    const withMemFloor = async (memMb: number | null): Promise<string> => {
+      const world = fakeWorld();
+      world.urls.set("http://127.0.0.1:8188", {});
+      world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+      world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+      const service = new ComfyUiEngineService({
+        ...engineDeps(world, "C:/app"),
+        recipes: [{ ...FACTS[0]!, minMemMb: 30720 }],
+        freeVramMb: async () => 9000,
+      });
+      await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
+      const status = await service.status({ vramMb: 10240, memMb, diskFreeMb: 1000 });
+      return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
+    };
+    const short = await withMemFloor(16000);
+    assert.equal(short.startsWith("disabled|"), true);
+    assert.match(short, /Needs 30 GB memory\. This machine has 16 GB/);
+    assert.equal((await withMemFloor(32000)).startsWith("ready|"), true);
+    // Unmeasured memory is unknown-and-dispatchable (D15), the same doctrine as the card.
+    const unmeasured = await withMemFloor(null);
+    assert.equal(unmeasured.startsWith("unknown|"), true);
+    assert.match(unmeasured, /Memory could not be measured/);
+  });
+
   it("a card that cannot be asked how much is free is not refused for it", async () => {
     // D15 again: unknown stays unknown. A build with no way to ask must not disable local work
     // on every machine, so a null free reading falls back to the total the probe did measure.

@@ -332,6 +332,14 @@ export const RuntimeProbesSchema = z
      * adapter list could not be read is not a machine without a graphics card.
      */
     accelerators: z.array(z.string().min(1)).nullable().optional(),
+    /**
+     * Dedicated VRAM per accelerator family, where the adapter read could tell the cards apart.
+     * The flat `vramMb` above is the machine-wide maximum, and on a two-vendor machine that
+     * figure can belong to a card a row's declared accelerator cannot use — a 24 GB Radeon
+     * beside an 8 GB GeForce read as 24 GB of CUDA without this. Absent or null means the probe
+     * could not separate adapters, and the flat figure stands alone.
+     */
+    vramMbByAccelerator: z.record(z.string().min(1), z.number().int().min(0)).nullable().optional(),
     /** `process.platform` as the host reports it. Absent or null means it was not stated. */
     platform: z.string().min(1).nullable().optional(),
   })

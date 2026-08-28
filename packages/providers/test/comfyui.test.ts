@@ -161,7 +161,11 @@ describe("the recipe catalogue projects into the manifest like any other model",
 
   it("the h3 row's lengths round-trip as numbers on the model's own 17k+5 grid", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
-    assert.deepEqual(durationOptions(row), [5, 10, 15]);
+    // One length — the measured one. 10s and 15s wait for a measurement of their own: the
+    // 124-frame run finished with 933 MB of RAM to spare, and a 362-frame decode holds roughly
+    // three times the image sequence under the same declared floor.
+    assert.deepEqual(durationOptions(row), [5]);
+    assert.equal(dispatchDuration(row, 10).kind, "over-cap");
     for (const seconds of durationOptions(row)) {
       const choice = dispatchDuration(row, seconds);
       assert.equal(choice.kind, "asked");
@@ -183,10 +187,11 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(h3.hardware.minFreeVramMb, 4000);
     assert.match(h3.hardware.floorSource, /measured through ComfyUI/);
     const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === h3.id)!;
-    // System RAM was the resource the verified run nearly exhausted, so the row declares it —
-    // fitFor checks memory only where memMb is present, and a 16 GB machine offered a 42 GB
-    // download it cannot run is the failure that field exists to prevent.
-    assert.equal(row.requires?.memMb, 30720);
+    // System RAM was the resource the verified run nearly exhausted, so the floor lives on the
+    // recipe (readiness enforces it — weights in a mapped folder never meet fitFor) and
+    // projects into the row for setup's gate: one number, two enforcement points.
+    assert.equal(h3.hardware.minMemMb, 30720);
+    assert.equal(row.requires?.memMb, h3.hardware.minMemMb);
     // The authored runs-well boundary: between the minimum and this, offered but not recommended.
     assert.equal(row.requires?.recommendedVramMb, 24000);
     // int8_convrot and NVFP4 AWQ are CUDA quantisations, and the node-catalogue probe cannot
@@ -504,7 +509,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
         capability: "video",
         params: { prompt: "x", duration: 3 },
       }),
-      /cannot be asked for 3s — it offers 5, 10, 15s/,
+      /cannot be asked for 3s — it offers 5s/,
     );
   });
 

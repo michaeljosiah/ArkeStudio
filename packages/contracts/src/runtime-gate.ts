@@ -152,9 +152,19 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   // 2 · The measured floors. Free disk is deliberately not among them (R-17).
   const floors: Floor[] = [];
   if (req.vramMb !== undefined) {
+    // The card the floor is about: with an accelerator declared and per-adapter figures
+    // measured, the biggest card of a REQUIRED family answers. The machine-wide maximum can
+    // belong to a vendor the row cannot use — a 24 GB Radeon beside an 8 GB GeForce passed a
+    // 10 GB CUDA floor on the Radeon's figure and offered a 42 GB download the GeForce
+    // could not run.
+    const byFamily = probes.vramMbByAccelerator ?? null;
+    const familyFigures =
+      req.accelerator !== undefined && byFamily !== null
+        ? req.accelerator.filter((name) => byFamily[name] !== undefined).map((name) => byFamily[name]!)
+        : [];
     floors.push({
       need: req.vramMb,
-      have: probes.vramMb,
+      have: familyFigures.length > 0 ? Math.max(...familyFigures) : probes.vramMb,
       what: "VRAM",
       ...(req.recommendedVramMb !== undefined ? { well: req.recommendedVramMb } : {}),
     });
