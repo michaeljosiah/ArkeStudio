@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertPeArchitecture, assertSha256, manifestFor, SUPPORTED_ARCHES } from "./runtime-support.mjs";
+import { assertPeArchitecture, assertSha256, manifestFor, pruneEmptyDirectories, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
@@ -33,9 +33,12 @@ const source = metadata.opencode2?.[arch];
 if (!source) throw new Error(`no pinned opencode2 build for ${arch}`);
 
 const work = resolve(value("--work") ?? join(repoRoot, ".runtime-work", `opencode2-${arch}`));
-const stage = join(desktopRoot, "build-resources", "opencode2");
+const staged = join(desktopRoot, "build-resources", "opencode2");
+// Built in the work directory and swapped into build-resources once verified, for the reason
+// prepare-runtimes gives: clearing the stage in front of a download that then fails costs the
+// working copy as well as the build (#581).
+const stage = join(work, "stage");
 rmSync(work, { recursive: true, force: true });
-rmSync(stage, { recursive: true, force: true });
 mkdirSync(work, { recursive: true });
 mkdirSync(stage, { recursive: true });
 
@@ -96,5 +99,12 @@ writeFileSync(
     2,
   )}\n`,
 );
+
+const attic = join(desktopRoot, ".runtime-previous");
+swapStagedDirectory(stage, staged, join(attic, "opencode2"));
+// Empty directories only. prepare-runtimes keeps its survivors under this same root, and this
+// script runs straight after it in `package` -- a parent-wide delete here would throw away a
+// stage saved by a run that died moments earlier (Codex round 2).
+pruneEmptyDirectories(attic);
 
 console.log(`[prepare-opencode2] staged verified opencode2 ${metadata.opencode2.version} (${arch})`);
