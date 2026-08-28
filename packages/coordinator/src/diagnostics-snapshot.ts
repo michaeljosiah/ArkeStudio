@@ -24,6 +24,7 @@ export class DiagnosticsSnapshotHolder {
   private current: DiagnosticsSnapshot | null = null;
   private scheduled: NodeJS.Immediate | null = null;
   private disposed = false;
+  private forceBroadcast = false;
 
   constructor(
     private readonly deps: {
@@ -43,6 +44,18 @@ export class DiagnosticsSnapshotHolder {
       this.scheduled = null;
       this.deriveNow(true);
     });
+  }
+
+  /**
+   * R-33's on-demand half, for the view opening after a quiet stretch: derive and broadcast
+   * even when nothing material changed, because the derivation instant and any staleness marks
+   * are themselves what the asker came for. Still coalesced — a refresh joining a pending
+   * schedule is one derivation, force carried.
+   */
+  refresh(): void {
+    if (this.disposed) return;
+    this.forceBroadcast = true;
+    this.schedule();
   }
 
   /**
@@ -69,7 +82,8 @@ export class DiagnosticsSnapshotHolder {
       now: (this.deps.clock ?? (() => new Date().toISOString()))(),
       boundary: this.deps.boundary,
     });
-    const changed = !diagnosticsEqual(this.current, snapshot);
+    const changed = !diagnosticsEqual(this.current, snapshot) || this.forceBroadcast;
+    this.forceBroadcast = false;
     this.current = snapshot;
     if (broadcast && changed && !this.disposed) this.deps.onSnapshot(snapshot);
     return snapshot;

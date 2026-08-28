@@ -134,6 +134,26 @@ describe("the snapshot holder (R-33, R-34)", () => {
     holder.dispose();
   });
 
+  it("refresh() broadcasts even an unchanged snapshot — the on-demand asker came for the instant (R-33)", async () => {
+    const { holder, broadcasts } = holderWith(() => sources({ runtime: null }));
+    holder.schedule();
+    await tick();
+    assert.equal(broadcasts.length, 1);
+    holder.schedule();
+    await tick();
+    assert.equal(broadcasts.length, 1, "unchanged, unforced: not re-sent");
+    holder.refresh();
+    await tick();
+    assert.equal(broadcasts.length, 2, "unchanged but asked for: sent");
+    // And still coalesced: a refresh joining a pending schedule is one derivation.
+    holder.refresh();
+    holder.schedule();
+    holder.refresh();
+    await tick();
+    assert.equal(broadcasts.length, 3);
+    holder.dispose();
+  });
+
   it("currentSnapshot() reads the maintained snapshot rather than re-deriving", async () => {
     const { holder, reads } = holderWith(() => sources());
     holder.schedule();

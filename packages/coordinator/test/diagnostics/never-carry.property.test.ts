@@ -342,5 +342,16 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
     // file: URLs are filesystem locations however many slashes they carry.
     assert.equal(scrubAbsolutePaths("import file:///C:/apps/arke/main.mjs died"), "import [path] died");
     assert.equal(scrubAbsolutePaths("at file:/Users/mjosi/x.txt line 3"), "at [path] line 3");
+    // A POSIX path outside the root list is recognised by its shape: directory segments and a
+    // dot-extension. Routes and API paths have neither, and stay prose.
+    assert.equal(scrubAbsolutePaths("reading /data/users/alice/models/file.bin failed"), "reading [path] failed");
+    assert.equal(scrubAbsolutePaths("mounted at /srv2/models/weights.safetensors now"), "mounted at [path] now");
+    assert.equal(scrubAbsolutePaths("GET /api/foo answered 404"), "GET /api/foo answered 404");
+    // A spaced segment under a listed root is swallowed whole, filename included.
+    assert.equal(scrubAbsolutePaths("copied /Volumes/AI Models/file.bin over"), "copied [path] over");
+    assert.equal(
+      scrubAbsolutePaths("wrote C:\\Models\\My Model.safetensors today"),
+      "wrote [path] today",
+    );
   });
 });

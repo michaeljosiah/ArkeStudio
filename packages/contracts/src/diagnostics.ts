@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
+import { PROVIDERS, type ProviderId } from "./provider.js";
 import type { ClientState } from "./client-state.js";
 
 /**
@@ -79,22 +80,32 @@ export const CONTROL_REGISTRY = {
     label: "Download",
     place: "Settings · Engines",
     route: "/settings/engines",
+    targetParam: "component",
   },
   /** For the file that is on disk, intact, and not the bytes the recipe pins (SPEC-028). */
   "component-repair": {
     label: "Repair",
     place: "Settings · Engines",
     route: "/settings/engines",
+    targetParam: "component",
   },
   /** Re-attempts a blocked or failed component — and re-runs the disk guard on the way. */
   "component-retry": {
     label: "Retry",
     place: "Settings · Engines",
     route: "/settings/engines",
+    targetParam: "component",
   },
   /** The provider's key row: save, replace, test (SPEC-008 §2.4). */
   "provider-key": {
     label: "Key",
+    place: "Settings · Providers",
+    route: "/settings/providers",
+    targetParam: "provider",
+  },
+  /** The sign-in for a provider whose credential lives in a tool we drive, never in a key row. */
+  "provider-sign-in": {
+    label: "Sign in",
     place: "Settings · Providers",
     route: "/settings/providers",
     targetParam: "provider",
@@ -892,7 +903,8 @@ const providerRepeatedFaults: Rule = {
         },
       ];
     }
-    const cutoff = Date.parse(ctx.now) - PROVIDER_FAULT_WINDOW_MS;
+    const nowMs = Date.parse(ctx.now);
+    const cutoff = nowMs - PROVIDER_FAULT_WINDOW_MS;
     const byProvider = new Map<string, { count: number; last?: string }>();
     for (const record of ctx.tails.appLog) {
       if (record["kind"] !== "provider.fault") continue;
@@ -901,8 +913,10 @@ const providerRepeatedFaults: Rule = {
       if (typeof provider !== "string" || provider.length === 0 || typeof at !== "string") continue;
       const instant = Date.parse(at);
       // The window is measured backwards from the derivation instant (matrix row 11): a fault
-      // sixteen minutes old does not count however many neighbours it has.
-      if (!Number.isFinite(instant) || instant < cutoff) continue;
+      // sixteen minutes old does not count however many neighbours it has — and a record dated
+      // AFTER the instant (a clock corrected backwards) is not in the window either, or it
+      // would count until the clock caught up with it.
+      if (!Number.isFinite(instant) || instant < cutoff || instant > nowMs) continue;
       const entry = byProvider.get(provider) ?? { count: 0 };
       entry.count += 1;
       const message = record["message"];
@@ -928,13 +942,25 @@ const providerRepeatedFaults: Rule = {
           last !== undefined
             ? carriedCause(ctx.boundary, last)
             : { statement: `${count} provider faults inside the window` },
-        remedy: { control: "provider-key", target: provider },
+        // A provider.fault record is credential-or-billing class by construction (the queue's
+        // classifier admits 401/403/402/quota/billing and nothing else) — but the control that
+        // answers it depends on where the credential lives: a key row for one we store, the
+        // sign-in for a tool-held one, and nothing for a keyless runtime (R-25).
+        remedy: providerCredentialRemedy(provider),
         consequences: [],
       });
     }
     return findings;
   },
 };
+
+/** The control that answers a credential-class fault, by where the credential lives. */
+function providerCredentialRemedy(provider: string): FindingRemedy | null {
+  const kind = (PROVIDERS as Partial<Record<ProviderId, { credential: string }>>)[provider as ProviderId]?.credential;
+  if (kind === "in-app") return { control: "provider-key", target: provider };
+  if (kind === "external") return { control: "provider-sign-in", target: provider };
+  return null;
+}
 
 /**
  * The ledger as the spend correlation may see it (R-30): when, what model, what it cost.
@@ -975,7 +1001,9 @@ const spendAbovePrevious: Rule = {
     const laterByModel = new Map<string, number>();
     const earlierByModel = new Map<string, number>();
     for (const entry of entries) {
-      if (!Number.isFinite(entry.ts)) continue;
+      // A future-dated entry (a clock corrected backwards) belongs to no window: counting it
+      // into the trailing period would report a rise the fortnight never had.
+      if (!Number.isFinite(entry.ts) || entry.ts > now) continue;
       if (entry.ts >= laterStart) {
         later += entry.microUsd;
         laterByModel.set(entry.model, (laterByModel.get(entry.model) ?? 0) + entry.microUsd);

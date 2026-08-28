@@ -56,7 +56,9 @@ function sources(over: Partial<DiagnosticsSources> = {}): DiagnosticsSources {
   };
 }
 
-function fault(provider: string, minutesAgo: number, message = "HTTP 500 from the gateway") {
+// A provider.fault record is credential-or-billing class by construction — the queue's
+// classifier admits 401/403/402/quota/billing and nothing else — so the fixture speaks 401.
+function fault(provider: string, minutesAgo: number, message = "FAL rejected the key (HTTP 401)") {
   return {
     at: new Date(NOW_MS - minutesAgo * 60_000).toISOString(),
     kind: "provider.fault",
@@ -86,7 +88,7 @@ describe("repeated provider faults (R-20.9)", () => {
     assert.equal(findings[0]!.facts.find((f) => f.name === "fault-count")?.value, 3);
     assert.equal(findings[0]!.facts.find((f) => f.name === "window-minutes")?.value, 15);
     // The cause is the latest fault's own words, never one finding per fault.
-    assert.equal(findings[0]!.cause.statement, "HTTP 500 from the gateway");
+    assert.equal(findings[0]!.cause.statement, "FAL rejected the key (HTTP 401)");
     assert.deepEqual(findings[0]!.remedy, { control: "provider-key", target: "fal" });
   });
 
@@ -138,6 +140,28 @@ describe("repeated provider faults (R-20.9)", () => {
     assert.ok(
       deriveWithTail(tail).findings.some((f) => f.kind === "provider-repeated-faults"),
     );
+  });
+
+  it("a record dated after the derivation instant is outside the window — a corrected clock cannot inflate the count", () => {
+    const snapshot = deriveWithTail([
+      fault("fal", 1),
+      fault("fal", 2),
+      fault("fal", -30), // half an hour in the future
+    ]);
+    assert.equal(snapshot.findings.some((f) => f.kind === "provider-repeated-faults"), false);
+  });
+
+  it("the remedy follows where the credential lives: key row, sign-in, or nothing (R-25)", () => {
+    const three = (provider: string) => [fault(provider, 1), fault(provider, 2), fault(provider, 3)];
+    const stored = deriveWithTail(three("fal")).findings.find((f) => f.kind === "provider-repeated-faults")!;
+    assert.deepEqual(stored.remedy, { control: "provider-key", target: "fal" });
+    // Higgsfield's credential lives in a tool we drive; its providers-pane control is Sign in.
+    const external = deriveWithTail(three("higgsfield")).findings.find((f) => f.kind === "provider-repeated-faults")!;
+    assert.deepEqual(external.remedy, { control: "provider-sign-in", target: "higgsfield" });
+    // A keyless runtime has no credential control at all; the finding says so rather than
+    // pointing at a key row that does not exist.
+    const keyless = deriveWithTail(three("ollama")).findings.find((f) => f.kind === "provider-repeated-faults")!;
+    assert.equal(keyless.remedy, null);
   });
 });
 
@@ -217,6 +241,17 @@ describe("spend above the previous period (R-20.10)", () => {
     assert.ok(finding);
     // flux-pro precedes veo-3 in the manifest, whatever the ledger order was.
     assert.equal(finding.facts.find((f) => f.name === "largest-share")?.value, "flux-pro, veo-3");
+  });
+
+  it("a future-dated ledger entry belongs to no window — a corrected clock cannot report a rise", () => {
+    const snapshot = deriveWithTail([], {
+      ledger: [
+        entry(10, "veo-3", 2_000_000),
+        entry(3, "veo-3", 500_000),
+        entry(-2, "veo-3", 50_000_000), // two days in the future
+      ],
+    });
+    assert.equal(snapshot.findings.some((f) => f.kind === "spend-above-previous"), false);
   });
 
   it("row 15: a four-day-old install has no previous period — no finding, and no unknown either (R-21)", () => {

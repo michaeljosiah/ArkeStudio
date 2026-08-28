@@ -1658,6 +1658,11 @@ export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSn
   return useStore().diagnostics;
 }
 
+/** Ask for a fresh derivation — R-33's on-demand half, sent when the Diagnostics view opens. */
+export function refreshDiagnostics(): void {
+  send({ kind: "refresh-diagnostics" });
+}
+
 export function genesisChat(genesisId: string, text: string): void {
   send({ kind: "genesis-chat", genesisId, text });
 }

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import {
   CONTROL_REGISTRY,
@@ -10,7 +11,7 @@ import {
   type FindingSeverity,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
-import { useDiagnostics } from "../lib/store.js";
+import { refreshDiagnostics, useDiagnostics } from "../lib/store.js";
 
 /**
  * Settings · Diagnostics (SPEC-032 §1.10, design turn 111): the one surface that shows the
@@ -150,6 +151,12 @@ function StaleRemeasure({ control }: { control: keyof typeof CONTROL_REGISTRY })
 export function SettingsDiagnosticsScreen() {
   const snapshot = useDiagnostics();
   const now = Date.now();
+  // Opening the screen is the demand (R-33): a quiet session's staleness marks and derivation
+  // instant are computed at derivation, so the cached snapshot answers for the moment something
+  // last changed, not for now.
+  useEffect(() => {
+    refreshDiagnostics();
+  }, []);
   if (snapshot === null) {
     return (
       <div data-screen="settings-diagnostics" className="fy-set">

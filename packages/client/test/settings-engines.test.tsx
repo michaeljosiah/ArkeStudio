@@ -106,6 +106,19 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     for (const label of Object.values(ENGINE_LABEL)) assert.match(text, new RegExp(label), label);
   });
 
+  it("a ?component= deep link opens the pane of the engine that owns it (SPEC-032 R-24)", () => {
+    // A voice model's Retry must land on Voxa's pane, not the default ComfyUI one.
+    const voxa = plain(render("/settings/engines?component=tts-kokoro-82m"));
+    assert.match(voxa, /Kokoro 82M · voice/);
+    assert.doesNotMatch(voxa, /RECIPES/);
+    // Recipe weights carry no engine field; they resolve through their catalogue-derived id.
+    const weights = plain(render("/settings/engines?component=comfyui-weights-draft-video"));
+    assert.match(weights, /RECIPES/);
+    // An explicit engine choice still outranks the component's owner.
+    const explicit = plain(render("/settings/engines?engine=ollama&component=tts-kokoro-82m"));
+    assert.match(explicit, /Gemma 4 · 12B/);
+  });
+
   it("states each engine's components under that engine and nowhere else", () => {
     const ollama = plain(render("/settings/engines?engine=ollama"));
     assert.match(ollama, /Gemma 4 · 12B/);

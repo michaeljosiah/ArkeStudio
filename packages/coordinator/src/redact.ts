@@ -56,23 +56,30 @@ export class SecretRegistry {
  *    anchored to those roots so hash-route strings like `/settings/engines` and URL paths do
  *    not read as filesystem locations.
  */
-// The tail of a Windows path may contain spaces — `Program Files`, a two-word account name —
+// A path's tail may contain spaces — `Program Files`, a two-word account name, `AI Models` —
 // and stopping at the first one would leak exactly the half the rule exists to remove. A space
-// is consumed only when the token after it leads to another separator, so the match swallows
-// `Michael Josiah\` and leaves `C:\Users\x is missing` as prose.
-const WINDOWS_TAIL = String.raw`(?:[^\s"'<>|]|[ ](?=[^\s\\/"'<>|]*[\\/]))+`;
+// is consumed only when the token after it leads onward: to another separator, or to a
+// dot-extension at a word boundary (a spaced filename like `My Model.safetensors`). Prose after
+// a path survives, because `is missing` leads to neither.
+const PATH_TAIL = String.raw`(?:[^\s"'<>|]|[ ](?=[^\s\\/"'<>|]*(?:[\\/]|\.[A-Za-z0-9]{1,12}(?=[\s"'<>|.,;)]|$))))+`;
 
 const ABSOLUTE_PATH = new RegExp(
   [
-    String.raw`\b[A-Za-z]:[\\/]` + WINDOWS_TAIL,
-    String.raw`\\\\` + WINDOWS_TAIL,
+    String.raw`\b[A-Za-z]:[\\/]` + PATH_TAIL,
+    String.raw`\\\\` + PATH_TAIL,
     // A file: URL is unambiguously a filesystem location, however many slashes it carries —
     // and it is what Node ESM errors and stack traces spell paths as.
     String.raw`\bfile:\/+[^\s"'<>|]+`,
     // The lookbehind keeps a URL's `/home/…` segment from reading as a filesystem root: the
     // character before a genuine POSIX path is a space, a bracket or the start of the string,
     // never a hostname's last letter or a scheme's colon.
-    String.raw`(?<![\w:/.-])/(?:Users|home|root|var|tmp|etc|opt|usr|private|mnt|media|srv|Applications|Library|Volumes|snap|run)/[^\s"'<>|]+`,
+    String.raw`(?<![\w:/.-])/(?:Users|home|root|var|tmp|etc|opt|usr|private|mnt|media|srv|data|Applications|Library|Volumes|snap|run)/` + PATH_TAIL,
+    // Any other absolute POSIX path, recognised by its shape rather than its root: at least one
+    // directory segment and a final segment carrying a dot-extension. Hash routes and API paths
+    // have no extension, so `/settings/engines` and `GET /api/foo` stay prose; a spaced filename
+    // under an unlisted root is the one residual this heuristic accepts, because the second line
+    // is exactly that — a heuristic under the enumeration that carries the real guarantee (D9).
+    String.raw`(?<![\w:/.-])/(?:[^\s"'<>|/]+/)+[^\s"'<>|/.]+(?:\.[^\s"'<>|/.]+)+`,
   ].join("|"),
   "g",
 );

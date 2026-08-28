@@ -6742,6 +6742,12 @@ export class Coordinator {
         this.opts.updates?.acknowledge();
         return;
       }
+      case "refresh-diagnostics": {
+        // Schedules only; the derivation runs on the next immediate, off this handler's path
+        // (R-34), and reaches the asker as the ordinary broadcast.
+        this.diagnosticsSnapshot?.refresh();
+        return;
+      }
       case "generate-diagnostics": {
         const bundle = await this.diagnostics();
         this.emit({
