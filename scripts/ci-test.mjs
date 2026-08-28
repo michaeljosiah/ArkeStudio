@@ -31,10 +31,9 @@ const SHARDED = "@arke-studio/coordinator";
 /**
  * How long a step may print nothing before it is called hung rather than slow.
  *
- * Measured 2026-08-28, the four shards run locally at CI's file concurrency: the longest a
- * healthy shard went without printing was **13.2s**, and the 99th percentile gap was under 8s.
- * The same shards' Test steps run 2.3–7.4× slower on a windows-latest runner, which puts the
- * worst gap CI should ever see at about 98s. Eight minutes is roughly five times that.
+ * Measured on CI, 2026-08-28, over all eight shards of one green run: the longest a healthy shard
+ * went without printing was **26s** on windows-latest (9s, 23s, 24s, 26s) and 5s on
+ * ubuntu-latest. Eight minutes is eighteen times the worst of those.
  *
  * Generous on purpose. A limit that fires on a slow runner recreates the exact failure this
  * replaces — a red check that means "busy", which teaches everyone to re-run and look away.
@@ -95,20 +94,26 @@ if (!all.some((w) => w.name === SHARDED)) {
 const others = all.filter((w) => w.name !== SHARDED);
 
 /**
- * Kill a child and everything below it. The test runner forks a process per file, and on
- * Windows `shell: true` puts cmd.exe between us and node — neither passes a signal down, so
- * `child.kill()` would leave the thing that is actually stuck still running and still holding
- * the pipe we are about to stop reading.
+ * Kill a child and everything below it, reporting what stopped it or null.
+ *
+ * Everything below it, not just it. There is always something between us and the process that is
+ * actually stuck: on Windows `shell: true` puts cmd.exe in the way, and on Linux `npm test` runs
+ * the real test runner as a grandchild with inherited stdio. Kill only the child and the
+ * grandchild lives on holding the pipe — and `close` needs both an exit and a closed pipe, so the
+ * wait in `run` would never end and the job would burn to the ceiling anyway.
  */
 function killTree(pid) {
   if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-  } else {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
+    const done = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    return done.error ? `taskkill: ${done.error.message}` : null;
+  }
+  try {
+    // A negative pid is the process group, which `detached` below made this child the leader of.
+    process.kill(-pid, "SIGKILL");
+    return null;
+  } catch (err) {
+    // Already gone is the ordinary case, not a problem worth a line in the log.
+    return err.code === "ESRCH" ? null : `kill: ${err.message}`;
   }
 }
 
@@ -124,13 +129,21 @@ function killTree(pid) {
  */
 async function run(label, command, args, cwd) {
   console.log(`\n=== ${label}`);
-  const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    // Windows needs a shell to reach `npm.cmd`; POSIX needs its own process group instead, so the
+    // kill above can take the grandchildren with it. Neither platform gets both.
+    shell: process.platform === "win32",
+    detached: process.platform !== "win32",
+  });
 
   let lastOutputAt = Date.now();
   let lastLine = "";
+  let escapeHatch = null;
   const relay = (out) => (chunk) => {
     const now = Date.now();
-    // Reported in the summary. The limit below was measured once and the suite keeps growing;
+    // Reported in the summary. The limit above was measured once and the suite keeps growing;
     // this is the line that says how much of it is left, without anyone having to measure again.
     longestSilence = Math.max(longestSilence, now - lastOutputAt);
     lastOutputAt = now;
@@ -148,14 +161,23 @@ async function run(label, command, args, cwd) {
     hungStep = label;
     longestSilence = Math.max(longestSilence, silentFor);
     console.log(`\n=== ${label} HUNG: nothing printed for ${Math.round(silentFor / 1000)}s`);
-    console.log(`=== last line was: ${lastLine.trim()}`);
+    // Naming it is the point: on a leak it is the test that leaked. A step that hung before
+    // printing anything at all says so, rather than trailing off after the colon.
+    console.log(`=== last line was: ${lastLine === "" ? "(it never printed anything)" : lastLine.trim()}`);
     console.log(`=== A suite that has stopped printing has stopped working — the usual cause is`);
     console.log(`=== a file watcher or a database handle left open by the test above.`);
     // Killing it closes the pipes being read here, which ends the wait below and leaves by the
-    // ordinary route. Deliberately not process.exit: stdout to a pipe is asynchronous on Linux,
-    // so exiting on the line after a console.log can drop the very report that explains the
-    // failure — and an unexplained failure is the thing this guard exists to stop producing.
-    if (child.pid !== undefined) killTree(child.pid);
+    // ordinary route — so the summary still prints and there is one way out of this script
+    // rather than two.
+    const stuck = child.pid === undefined ? "no pid to kill" : killTree(child.pid);
+    if (stuck !== null) console.log(`=== the kill reported: ${stuck}`);
+    // And a way out even if it did not work. A guard that waits forever for a kill that never
+    // landed is one more path to the ceiling, which is the thing being replaced. Ten seconds is
+    // long past when a SIGKILL or a taskkill /F has either worked or failed for good.
+    escapeHatch = setTimeout(() => {
+      console.log(`=== ${label}: the kill did not take, leaving without it`);
+      process.exit(1);
+    }, 10_000);
   }, 10_000);
 
   const { status, signal } = await new Promise((resolve) => {
@@ -163,6 +185,10 @@ async function run(label, command, args, cwd) {
     child.on("close", (code, sig) => resolve({ status: code, signal: sig }));
   });
   clearInterval(watch);
+  if (escapeHatch !== null) clearTimeout(escapeHatch);
+  // The tail counts too: a suite whose last test passed and then took a minute to shut down was
+  // silent for that minute, and a number that quietly omitted it would understate the trend.
+  longestSilence = Math.max(longestSilence, Date.now() - lastOutputAt);
   // A signal death has no exit code; treat anything that is not a clean 0 as a failure — and a
   // step the guard killed counts as failed whatever status the kill happened to leave behind.
   const ok = status === 0 && hungStep !== label;
@@ -190,12 +216,12 @@ if (!(await run(
 // pole and waste the parallelism. With a single shard it has nowhere else to go.
 const othersShard = Math.min(2, total);
 let othersRan = 0;
-if (index === othersShard) {
+// A hang is terminal. Whatever leaked is still leaking, and the next workspace would only spend
+// another eight minutes finding that out.
+if (index === othersShard && hungStep === null) {
   for (const workspace of others) {
-    // A hang is terminal. Whatever leaked is still leaking, and the next workspace would only
-    // spend another eight minutes finding that out.
-    if (hungStep !== null) break;
     if (!(await run(workspace.name, "npm", ["test"], workspace.dir))) failures.push(workspace.name);
+    if (hungStep !== null) break;
     othersRan += 1;
   }
 }
@@ -205,7 +231,7 @@ console.log(`\n=== shard ${index}/${total} summary`);
 // reached, or its summary becomes one more line that reads like a healthy run.
 console.log(`ran: ${SHARDED} shard ${index}/${total}${othersRan > 0 ? `, plus ${othersRan} other workspaces` : ""}`);
 console.log(
-  `quietest moment: ${Math.round(longestSilence / 1000)}s without output, against a limit of ${SILENCE_LIMIT_MS / 60_000} minutes`,
+  `quietest moment: ${Math.round(longestSilence / 1000)}s without output, against a limit of ${SILENCE_LIMIT_MS / 1000}s`,
 );
 
 if (hungStep !== null) console.log(`stopped early: ${hungStep} was killed for going quiet`);

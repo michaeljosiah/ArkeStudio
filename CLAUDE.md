@@ -55,7 +55,9 @@ CI runs lint, typecheck, build, then test, on **both** windows-latest and ubuntu
 shards per platform. A healthy shard is 2m34s–8m44s on Windows and under 3m15s on Linux, against a
 20-minute ceiling. A step that prints nothing for eight minutes is killed as hung — that, not the
 ceiling, is what catches a leaked watcher, so a red check means something failed rather than that
-the runner was busy.
+the runner was busy. The two numbers are coupled: the guard only fires first while a Test step
+stays under about eleven minutes, so raise them together. Each run prints the longest silence it
+actually saw, which is how you tell whether eight minutes still holds.
 
 - **`tsx` does not typecheck.** A green `npm test` proves nothing about types. Run `typecheck`
   after your last test edit, not before.

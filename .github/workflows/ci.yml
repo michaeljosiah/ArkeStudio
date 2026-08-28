@@ -36,9 +36,17 @@ jobs:
     # What is left for the ceiling is the one case silence misses: a suite that never ends and
     # never stops talking. 20 minutes, measured 2026-08-28 over 88 jobs from 11 green runs:
     # windows-latest shards run 2m34s–8m44s (median 4m50s), ubuntu-latest 0m52s–3m14s (median
-    # 1m37s). That is 2.3× headroom over the worst Windows shard. The number it replaces had
+    # 1m39s). That is 2.3× headroom over the worst Windows shard. The number it replaces had
     # drifted to 1.7× as the suite grew, and the 25 before that to 1.3× — at which point a busy
     # runner produced the same red as a hung one, and a docs-only PR went red for it (#560).
+    #
+    # The two numbers are coupled, and the coupling is easy to break silently. The guard reports
+    # at "however far the Test step got" plus eight minutes, so it only fires first while the
+    # Test step stays under about eleven of these twenty. Today's worst is 7m40s. Past that the
+    # ceiling quietly takes hang detection back and everything above stops being true, with no
+    # signal that it happened — so raise the two together, or lower the guard. Note also that
+    # the guard is more precise than the ceiling, not faster: on a shard that hangs at the very
+    # end it reports later than the 15 minutes it replaced. Precision is the point.
     timeout-minutes: 20
     strategy:
       # One platform failing should still tell us about the other, and one shard failing should

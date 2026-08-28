@@ -113,8 +113,8 @@ function loadedWorkspaces(root: string, start: string): Array<{ dir: string; nam
   const reached: Array<{ dir: string; names: string[] }> = [];
   const seen = new Set<string>();
   const queue = [start];
-  while (queue.length > 0) {
-    const name = queue.shift() as string;
+  let name: string | undefined;
+  while ((name = queue.shift()) !== undefined) {
     if (seen.has(name)) continue;
     seen.add(name);
     const dir = byName.get(name);
