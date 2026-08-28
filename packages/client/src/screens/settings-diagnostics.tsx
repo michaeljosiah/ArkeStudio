@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router";
 import {
   CONTROL_REGISTRY,
-  FINDING_SEVERITY_RANK,
   consequencesOf,
+  findingRef,
   primaryFindings,
   remedyAbsenceStatement,
   type DiagnosticsSnapshot,
@@ -58,6 +58,13 @@ function ageOf(iso: string, now: number): string {
   return `${Math.round(ms / (60 * 60 * 1000))} h ago`;
 }
 
+/** The oldest stale fact's instant — several can stale at different times; the age shown is the worst. */
+function oldestStaleAt(finding: Finding): string {
+  const stale = new Set(finding.stale?.facts ?? []);
+  const instants = finding.facts.filter((f) => stale.has(f.name)).map((f) => f.measuredAt);
+  return instants.sort()[0] ?? finding.firstSeen;
+}
+
 function dotClass(severity: FindingSeverity): string {
   if (severity === "blocking") return "fy-diag__dot--bad";
   if (severity === "degraded") return "fy-set__dot--warn";
@@ -96,9 +103,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
         <span className={cx("fy-set__dot", dotClass(finding.severity))} />
         <span className="fy-diag__title">{finding.title}</span>
         <span style={{ flex: 1 }} />
-        {finding.firstSeen !== snapshot.derivedAt && (
-          <span className="fy-diag__meta">since {timeOf(finding.firstSeen)}</span>
-        )}
+        <span className="fy-diag__meta">since {timeOf(finding.firstSeen)}</span>
         <Remedy finding={finding} snapshot={snapshot} />
       </div>
       <div className="fy-set__why">
@@ -110,10 +115,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
       {stale !== undefined && (
         <div className="fy-set__why">
           <span className="fy-set__dot" style={{ width: 5, height: 5 }} />
-          <span className="fy-diag__meta">
-            {stale.facts.join(", ")} measured{" "}
-            {ageOf(finding.facts.find((f) => stale.facts.includes(f.name))?.measuredAt ?? finding.firstSeen, now)}
-          </span>
+          <span className="fy-diag__meta">measured {ageOf(oldestStaleAt(finding), now)}</span>
           {stale.remeasure !== null && <StaleRemeasure control={stale.remeasure.control} />}
         </div>
       )}
@@ -123,8 +125,8 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
             ▾ EXPLAINS {explains.length}
           </div>
           {explains.map((consequence) => (
-            <div key={consequence.occurrence} className="fy-diag__sub" data-testid="diag-consequence">
-              <span className="fy-set__dot fy-set__dot--warn" style={{ width: 5, height: 5 }} />
+            <div key={findingRef(consequence)} className="fy-diag__sub" data-testid="diag-consequence">
+              <span className={cx("fy-set__dot", dotClass(consequence.severity))} style={{ width: 5, height: 5 }} />
               <span>{consequence.title}</span>
               <span className="fy-diag__meta">{consequence.cause.statement}</span>
             </div>
@@ -171,7 +173,7 @@ export function SettingsDiagnosticsScreen() {
         <div className="fy-rt__eyebrow">DIAGNOSTICS</div>
         <span style={{ flex: 1 }} />
         <span className="fy-diag__meta">
-          {snapshot.checked.length} checks · as of {timeOf(snapshot.derivedAt)}
+          {bands.length === 0 ? `as of ${timeOf(snapshot.derivedAt)}` : `${snapshot.checked.length} checks · as of ${timeOf(snapshot.derivedAt)}`}
         </span>
       </div>
       {bands.length === 0 ? (
@@ -182,10 +184,9 @@ export function SettingsDiagnosticsScreen() {
           </div>
         </div>
       ) : (
-        // The snapshot arrives sorted; the bands only make the order visible (R-36).
-        [...bands]
-          .sort((a, b) => FINDING_SEVERITY_RANK[a.severity] - FINDING_SEVERITY_RANK[b.severity])
-          .map((band) => (
+        // BANDS is declared in severity-rank order and filter preserves it (R-36); the test
+        // pins the rendered order, so a reordered declaration fails red rather than quietly.
+        bands.map((band) => (
             <div key={band.severity}>
               <div className="fy-diag__band">
                 <span

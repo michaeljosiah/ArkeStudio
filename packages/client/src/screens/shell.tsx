@@ -1986,7 +1986,7 @@ function ProviderPane({ id }: { id: ProviderId }) {
 
 export function SettingsProvidersScreen() {
   const { state } = useStore();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
   const disabledModels = new Set(state?.app.models.disabled ?? []);
   const manifestModels = state?.app.manifest?.models ?? [];
@@ -1996,12 +1996,13 @@ export function SettingsProvidersScreen() {
   const firstConnected = KEYED_PROVIDERS.find((p) =>
     providerStatus.some((s) => s.id === p.id && s.configured),
   );
-  const [selected, setSelected] = useState<ProviderId | null>(null);
-  // A diagnostics remedy addresses one provider's key row (SPEC-032 R-24): the registry
-  // promises the query opens the right pane, and this is the half that keeps the promise.
+  // The query is the selection, like every sibling rail (Engines, Local AI): a diagnostics
+  // remedy addresses one provider's key row through it (SPEC-032 R-24), and a tab click
+  // rewrites it rather than shadowing it with component state the URL then lies about.
   const asked = searchParams.get("provider");
   const askedId = KEYED_PROVIDERS.find((p) => p.id === asked)?.id ?? null;
-  const current = selected ?? askedId ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
+  const current = askedId ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
+  const setSelected = (id: ProviderId) => setSearchParams({ provider: id }, { replace: true });
   return (
     <div data-screen="settings-providers" className="fy-set fy-set--providers">
       <div className="fy-prov">

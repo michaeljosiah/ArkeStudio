@@ -103,7 +103,11 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(html, /data-screen="settings-diagnostics"/);
     const text = plain(html);
     assert.match(text, /Diagnostics/);
-    assert.match(text, /\d+ checks · as of/);
+    // The empty state's header carries only the instant (turn 111b); the count sits in the body.
+    assert.match(text, /as of /);
+    assert.match(text, /\d+ checks/);
+    // A populated snapshot carries both in the header.
+    assert.match(plain(render(badDay())), /\d+ checks · as of /);
   });
 
   it("severity bands render in the fixed order, only where occupied", () => {
@@ -155,6 +159,69 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(text, /engine/);
     assert.match(text, /spend/);
     assert.match(text, /provider faults/);
+  });
+
+  it("a primary finding with no control states R-25's sentence; a suppressed consequence states nothing", () => {
+    // An unreadable log makes the fault correlation unknown with no remedy — the reachable
+    // primary null-remedy case.
+    const snapshot = deriveDiagnostics({
+      sources: diagnosticsSources({ ...FIXTURE_STATE.app, runtime: SOUND_RUNTIME }),
+      tails: { appLog: "unavailable" },
+      previous: null,
+      now: NOW,
+    });
+    const text = plain(render(snapshot));
+    assert.match(text, /No control resolves this\./);
+    const nested = render(badDay()).match(/data-testid="diag-consequence"/g) ?? [];
+    assert.ok(nested.length > 0);
+    // The consequence sub-rows never carry the absence sentence — one occurrence at most, and
+    // it belongs to the unknown finding, not to them.
+    assert.equal((plain(render(badDay())).match(/No control resolves this\./g) ?? []).length, 0);
+  });
+
+  it("a stale fact renders as an age with the re-measure control — never a list of fact ids (R-16, turn 69)", () => {
+    const snapshot = derived({
+      runtime: SOUND_RUNTIME,
+      comfyui: {
+        engine: {
+          source: "managed",
+          state: "failed",
+          locality: "local",
+          location: null,
+          version: null,
+          instanceId: "stale-engine-01",
+          detail: "the child exited with code 1",
+          detected: [],
+        },
+        recipes: [],
+        // Forty minutes before NOW: past the fifteen-minute bound.
+        checkedAt: "2026-08-28T11:20:00.000Z",
+      },
+    });
+    const text = plain(render(snapshot));
+    assert.match(text, /measured \d+ (min|h) ago/);
+    assert.match(text, /Refresh/);
+    assert.doesNotMatch(text, /engine-state/, "internal fact ids stay off the screen");
+  });
+
+  it("every checked rule kind has a product word — a new rule must name itself here too (R-10)", () => {
+    const CHECKED = derived({ runtime: SOUND_RUNTIME }).checked;
+    const html = render(derived({ runtime: SOUND_RUNTIME }));
+    const text = plain(html);
+    for (const kind of CHECKED) {
+      assert.doesNotMatch(text, new RegExp(kind), `raw kind id ${kind} leaked to the screen`);
+    }
+  });
+
+  it("the provider-key deep link opens the named provider's pane (R-24's targetParam promise)", () => {
+    __setStateForTest(FIXTURE_STATE, { diagnostics: null });
+    const html = renderToString(
+      <MemoryRouter initialEntries={["/settings/providers?provider=elevenlabs"]}>
+        <App />
+      </MemoryRouter>,
+    );
+    const selected = /aria-selected="true"[^>]*>([\s\S]*?)<\/button>/.exec(html)?.[1] ?? "";
+    assert.match(selected, /ElevenLabs/);
   });
 
   it("before the first snapshot arrives, the pane states that rather than claiming a result", () => {

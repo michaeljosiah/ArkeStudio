@@ -162,6 +162,42 @@ describe("readable without the application (R-39, row 43)", () => {
     assert.deepEqual(engine["consequences"], ["comfyui-recipe-disabled:draft-video"]);
   });
 
+  it("row 43: a stale fact's re-measure control is resolved in words too, never an identifier alone", async () => {
+    const snapshot = deriveDiagnostics({
+      sources: sources({
+        comfyui: {
+          engine: {
+            source: "managed",
+            state: "failed",
+            locality: "local",
+            location: null,
+            version: null,
+            instanceId: "bundle-engine-01",
+            detail: "the child exited with code 1",
+            detected: [],
+          },
+          recipes: [],
+          // Forty minutes old: past R-16's fifteen-minute bound.
+          checkedAt: "2026-08-28T11:20:00.000Z",
+        },
+      }),
+      tails: { appLog: [] },
+      previous: null,
+      now: NOW,
+      boundary: diagnosticsBoundary(new SecretRegistry()),
+    });
+    const bundle = await buildDiagnosticsBundle(stateFor(sources()), null, new SecretRegistry(), snapshot);
+    const { findings } = bundle["findings"] as { findings: Array<Record<string, unknown>> };
+    const engine = findings.find((f) => f["kind"] === "comfyui-engine-unavailable")!;
+    const stale = engine["stale"] as { remeasure: Record<string, unknown> };
+    assert.ok(stale, "the forty-minute-old checkedAt is past the bound");
+    assert.deepEqual(stale.remeasure, {
+      control: "comfyui-refresh",
+      label: "Refresh",
+      place: "Settings · Engines · ComfyUI",
+    });
+  });
+
   it("row 23 in the export: the ledger's world identifier does not ride the spend finding into the bundle", async () => {
     const bundle = await buildDiagnosticsBundle(stateFor(sources()), null, new SecretRegistry(), derivedSnapshot());
     const text = JSON.stringify(bundle["findings"]);

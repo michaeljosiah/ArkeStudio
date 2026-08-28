@@ -249,6 +249,10 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
         boundary: boundary(registry),
       });
       const bundle = await buildDiagnosticsBundle(state, null, registry, snapshot);
+      // Not vacuous: the findings must actually be riding, or this case shrinks back to the
+      // halves the moment the fourth argument is dropped.
+      const carried = bundle["findings"] as { findings: unknown[] };
+      assert.ok(carried.findings.length > 0, `the poisoned findings ride the bundle (seed ${seed})`);
       assertCarriesNone(JSON.stringify(bundle), seed, "the bundle");
     }
   });

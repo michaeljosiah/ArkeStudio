@@ -79,11 +79,33 @@ function exportedFindings(snapshot: DiagnosticsSnapshot) {
       cause: finding.cause,
       facts: finding.facts,
       ...(finding.note !== undefined ? { note: finding.note } : {}),
-      ...(finding.stale !== undefined ? { stale: finding.stale } : {}),
+      // The re-measure control resolves like every other remedy: a bare identifier is exactly
+      // the illegibility R-39 forbids, and staleness is the common case in a support bundle —
+      // it is pulled long after the facts were measured.
+      ...(finding.stale !== undefined
+        ? {
+            stale: {
+              facts: finding.stale.facts,
+              remeasure:
+                finding.stale.remeasure === null ? null : resolvedControl(finding.stale.remeasure),
+            },
+          }
+        : {}),
       consequences: finding.consequences,
       firstSeen: finding.firstSeen,
       remedy: exportedRemedy(snapshot, finding),
     })),
+  };
+}
+
+/** A control with its words (R-39): the id for a machine, the label and place for a reader. */
+function resolvedControl(remedy: NonNullable<Finding["remedy"]>) {
+  const control = CONTROL_REGISTRY[remedy.control];
+  return {
+    control: remedy.control,
+    label: control.label,
+    place: control.place,
+    ...(remedy.target !== undefined ? { target: remedy.target } : {}),
   };
 }
 
@@ -93,15 +115,7 @@ function exportedFindings(snapshot: DiagnosticsSnapshot) {
  * cause's and the edge pointing at it says so.
  */
 function exportedRemedy(snapshot: DiagnosticsSnapshot, finding: Finding) {
-  if (finding.remedy !== null) {
-    const control = CONTROL_REGISTRY[finding.remedy.control];
-    return {
-      control: finding.remedy.control,
-      label: control.label,
-      place: control.place,
-      ...(finding.remedy.target !== undefined ? { target: finding.remedy.target } : {}),
-    };
-  }
+  if (finding.remedy !== null) return resolvedControl(finding.remedy);
   const absence = remedyAbsenceStatement(snapshot, finding);
   return absence === null ? null : { absent: absence };
 }
