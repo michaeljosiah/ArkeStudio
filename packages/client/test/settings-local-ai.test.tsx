@@ -10,6 +10,7 @@ import {
   FitVerdictSchema,
   localModelRowState,
   PROVIDERS,
+  ROW_STATE_LABEL,
   type ActivationState,
   type ClientState,
   type FitVerdict,
@@ -420,21 +421,30 @@ describe("the row state is a projection, never a new vocabulary (R-26)", () => {
   const FITS: Array<FitVerdict | undefined> = [...FitVerdictSchema.options, undefined];
   const ACTIVATIONS: ActivationState[] = [...ActivationStateSchema.options];
 
+  // The table transcribed from the specification, not from the implementation. Membership in
+  // the return type is guaranteed by TypeScript and proves nothing; the mapping is the claim.
+  const expected = (fit: FitVerdict | undefined, activation: ActivationState): string => {
+    if (fit === "insufficient" || fit === "unsupported") return "unsupported";
+    if (activation === "ready") return "installed";
+    if (activation === "not-installed") return "available";
+    return activation;
+  };
+
   it("is R-26's table exactly, over every combination of the two vocabularies", () => {
-    // The table transcribed from the specification, not from the implementation. Membership in
-    // the return type is guaranteed by TypeScript and proves nothing; the mapping is the claim.
-    const expected = (fit: FitVerdict | undefined, activation: ActivationState): string => {
-      if (fit === "insufficient" || fit === "unsupported") return "unsupported";
-      if (activation === "ready") return "installed";
-      if (activation === "not-installed") return "available";
-      return activation;
-    };
     for (const fit of FITS) {
       for (const activation of ACTIVATIONS) {
-        assert.equal(localModelRowState("local", fit, activation), expected(fit, activation), `${fit} × ${activation}`);
-        // Remote wins over everything: a model served elsewhere has no verdict to show (R-15).
-        assert.equal(localModelRowState("remote", fit, activation), "served-elsewhere");
+        assert.equal(localModelRowState(fit, activation), expected(fit, activation), `${fit} × ${activation}`);
       }
+    }
+  });
+
+  it("says nothing about locality, which is the engine's to state (SPEC-034 R-10)", () => {
+    // `served-elsewhere` left the vocabulary. A remote model reaches this projection with no
+    // verdict — R-15 gives it none — and comes back with its transfer's state, exactly as a
+    // local unmeasured one does. Where the work runs is said by the engine, twice and no more.
+    assert.ok(!(ROW_STATE_LABEL as Record<string, string>)["served-elsewhere"]);
+    for (const activation of ACTIVATIONS) {
+      assert.equal(localModelRowState(undefined, activation), expected(undefined, activation));
     }
   });
 
@@ -442,14 +452,14 @@ describe("the row state is a projection, never a new vocabulary (R-26)", () => {
     // The case the old vocabulary could not form: downloading onto hardware that will not run it.
     for (const fit of ["insufficient", "unsupported"] as FitVerdict[]) {
       for (const activation of ACTIVATIONS) {
-        assert.equal(localModelRowState("local", fit, activation), "unsupported");
+        assert.equal(localModelRowState(fit, activation), "unsupported");
       }
     }
   });
 
   it("an unmeasured machine is offered, never withheld (R-28)", () => {
-    assert.equal(localModelRowState("local", "unknown", "ready"), "installed");
-    assert.equal(localModelRowState("local", "unknown", "not-installed"), "available");
+    assert.equal(localModelRowState("unknown", "ready"), "installed");
+    assert.equal(localModelRowState("unknown", "not-installed"), "available");
   });
 });
 

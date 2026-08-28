@@ -2,7 +2,7 @@ import { z } from "zod";
 import { comfyUiWeightsComponentId, type ComfyUiEngineState } from "./comfyui.js";
 import type { ProviderId } from "./provider.js";
 import type { SetupComponent, SetupComponentState } from "./setup.js";
-import type { FitVerdict, Locality } from "./settings.js";
+import type { FitVerdict } from "./settings.js";
 
 /**
  * What Local AI shows on a model row (SPEC-033 §1.6). Three axes meet here and none of them is
@@ -54,9 +54,14 @@ export const ENGINE_LABEL: Record<EngineId, string> = {
   voxa: "Voxa",
 };
 
-/** The closed set of headline states R-26's table produces. Nothing else may reach a row. */
+/**
+ * The closed set of headline states R-26's table produces. Nothing else may reach a row.
+ *
+ * `served-elsewhere` left in SPEC-034 R-10. Locality is the engine's fact, and the engine states
+ * it in exactly two places — `elsewhere` in the Providers rail, the address in its pane. Carried
+ * on the row as well it was the same fact a third time, once per model the engine serves.
+ */
 export type LocalModelRowState =
-  | "served-elsewhere"
   | "unsupported"
   | "installed"
   | "available"
@@ -75,12 +80,14 @@ export type LocalModelRowState =
  * distinction (D12). R-27 is what carries it, on the row itself.
  */
 export function localModelRowState(
-  locality: Locality,
-  /** Absent exactly when the model is served elsewhere — a remote model has no verdict (R-15). */
+  /**
+   * Absent where nothing has measured this machine yet, and absent for a model served by a
+   * remote engine, which has no verdict to carry (R-15). Neither absence refuses the model:
+   * R-28 offers an unmeasured one rather than withholding it.
+   */
   fit: FitVerdict | undefined,
   activation: ActivationState,
 ): LocalModelRowState {
-  if (locality === "remote") return "served-elsewhere";
   if (fit === "insufficient" || fit === "unsupported") return "unsupported";
   // `runs-well`, `runs-slowly` and `unknown` all behave the same here: a machine that has not
   // been measured is offered rather than withheld (R-28), and the header says it was not.
@@ -91,7 +98,6 @@ export function localModelRowState(
 
 /** What a row prints for each state. Labels and states only — no adjectives, no reassurance. */
 export const ROW_STATE_LABEL: Record<LocalModelRowState, string> = {
-  "served-elsewhere": "served elsewhere",
   unsupported: "unsupported",
   installed: "installed",
   available: "available",

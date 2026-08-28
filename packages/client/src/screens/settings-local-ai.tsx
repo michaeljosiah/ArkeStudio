@@ -10,6 +10,7 @@ import {
   setupClosure,
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
+  type Locality,
   type LocalModelRowState,
   type ManifestModel,
   type SetupClosure,
@@ -66,7 +67,6 @@ export const LOCAL_AI_ROWS = CAPABILITY_ROWS.filter((row) => row.cloudOnly !== t
 
 /** What each headline state does to a row's dot. Only a refusal warns. */
 const STATE_TONE: Record<LocalModelRowState, RuntimeTone> = {
-  "served-elsewhere": "idle",
   unsupported: "warn",
   installed: "ok",
   available: "idle",
@@ -79,6 +79,11 @@ const STATE_TONE: Record<LocalModelRowState, RuntimeTone> = {
 interface Entry {
   model: ManifestModel;
   state: LocalModelRowState;
+  /**
+   * Which machine actually runs it (R-9). No longer folded into the row state, and this screen
+   * has no engine pane to state it in yet, so the row states it here until issue 623 lands one.
+   */
+  locality: Locality;
   /** The verdict's own figures — the refusal, or the floor a passing verdict cleared. */
   reason: string | undefined;
   fitLabel: string | undefined;
@@ -150,13 +155,14 @@ export function SettingsLocalAiScreen() {
         components,
         ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
       });
-      const rowState = localModelRowState(locality, gated?.fit, activation);
+      const rowState = localModelRowState(gated?.fit, activation);
       const component = components.find(
         (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
       );
       return {
         model,
         state: rowState,
+        locality,
         reason: gated?.reason,
         // Before the probe returns there is no verdict, and R-28 offers the model anyway — so
         // the row says the machine has not been measured rather than leaving the line a word
@@ -196,7 +202,7 @@ export function SettingsLocalAiScreen() {
   const rows = LOCAL_AI_ROWS.map((row) => ({ row, entries: entriesFor(row) }));
   const asked = searchParams.get("capability");
   const current = rows.find(({ row }) => rowSlug(row) === asked) ?? rows[0]!;
-  const currentInstalled = current.entries.filter((e) => e.state === "installed").length;
+  const currentInstalled = current.entries.filter((e) => e.locality === "local" && e.state === "installed").length;
 
   return (
     <div data-screen="settings-local-ai" className="fy-set fy-set--runtime">
@@ -204,7 +210,7 @@ export function SettingsLocalAiScreen() {
       <div className="fy-rt">
         <div className="fy-rt__rail" role="tablist" aria-label="Local AI">
           {rows.map(({ row, entries }) => {
-            const installed = entries.filter((e) => e.state === "installed").length;
+            const installed = entries.filter((e) => e.locality === "local" && e.state === "installed").length;
             return (
               <button
                 type="button"
@@ -365,13 +371,18 @@ function ModelRow({
   onOpenDownloads: () => void;
 }) {
   const { model, state } = entry;
+  const elsewhere = entry.locality === "remote";
   // `unsupported` is both a headline state and a fit verdict, so a declared refusal would print
   // the word twice and say nothing the second time. What distinguishes the two verdicts under
   // that one label is the reason beneath, which R-27 puts there.
-  const parts = [ROW_STATE_LABEL[state], entry.fitLabel, entry.sizeMbytes && sizeMb(entry.sizeMbytes)];
+  const parts = [
+    elsewhere ? "served elsewhere" : ROW_STATE_LABEL[state],
+    entry.fitLabel,
+    entry.sizeMbytes && sizeMb(entry.sizeMbytes),
+  ];
   const line = parts.filter((part, at) => Boolean(part) && parts.indexOf(part) === at).join(" · ");
   return (
-    <div className={cx("fy-set__row", "fy-set__row--stack", state === "unsupported" && "fy-set__row--off")}>
+    <div className={cx("fy-set__row", "fy-set__row--stack", !elsewhere && state === "unsupported" && "fy-set__row--off")}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button
           type="button"
@@ -386,8 +397,8 @@ function ModelRow({
           <div className="fy-set__title">{model.displayName}</div>
         </div>
         {entry.recommended && <span className="fy-prov__unverified">recommended</span>}
-        <RuntimeStatus tone={STATE_TONE[state]}>{line}</RuntimeStatus>
-        {state === "served-elsewhere" && (
+        <RuntimeStatus tone={elsewhere ? "idle" : STATE_TONE[state]}>{line}</RuntimeStatus>
+        {elsewhere && (
           <button type="button" className="fy-set__link" onClick={onOpenEngines}>
             Engines
           </button>
@@ -398,7 +409,7 @@ function ModelRow({
          * own weight while silently fetching an engine beside it makes honest arithmetic
          * dishonest (R-40).
          */}
-        {state === "available" && entry.closure !== undefined && (
+        {!elsewhere && state === "available" && entry.closure !== undefined && (
           <Button onClick={() => setupInstall(entry.component!.id)}>
             Install · {sizeMb(entry.closure.downloadMb)}
           </Button>
@@ -406,7 +417,7 @@ function ModelRow({
         {/* Retry starts the chain, not one link of it. Retrying the model alone re-blocks it on
             the runtime that failed, with no way to reach that runtime from this row — the same
             failure the Install button was widened to a closure to avoid. */}
-        {state === "needs-attention" && entry.component !== undefined && (
+        {!elsewhere && state === "needs-attention" && entry.component !== undefined && (
           <button
             type="button"
             className="fy-set__link"
@@ -424,12 +435,12 @@ function ModelRow({
         {/* Only where Arke may actually take it away: a component setup fetches unasked comes
             back on the next launch, and a weight file inside a mapped folder may have been the
             user's before Arke ever saw it. A Remove that cannot act is worse than none. */}
-        {state === "installed" && entry.component?.removable === true && (
+        {!elsewhere && state === "installed" && entry.component?.removable === true && (
           <button type="button" className="fy-set__link" onClick={() => setupRemove(entry.component!.id)}>
             Remove
           </button>
         )}
-        {(state === "downloading" || state === "installing") && (
+        {!elsewhere && (state === "downloading" || state === "installing") && (
           <button type="button" className="fy-set__link" onClick={onOpenDownloads}>
             Downloads
           </button>
@@ -437,7 +448,7 @@ function ModelRow({
       </div>
       {/* Stated by count, and only by count (R-41). `Install ComfyUI 0.3.48 and its nodes` is the
           machine's sentence; the components themselves are behind the detail. */}
-      {state === "available" && (entry.closure?.supporting ?? 0) > 0 && (
+      {!elsewhere && state === "available" && (entry.closure?.supporting ?? 0) > 0 && (
         <div className="fy-set__why">
           <span className="fy-set__dot" />
           <span>
@@ -463,7 +474,7 @@ function ModelRow({
           for that capability — which are already the other entries in this very row. */}
       {entry.reason && (
         <div className="fy-set__why">
-          <span className={cx("fy-set__dot", state === "unsupported" && "fy-set__dot--warn")} />
+          <span className={cx("fy-set__dot", !elsewhere && state === "unsupported" && "fy-set__dot--warn")} />
           <span>{entry.reason}</span>
         </div>
       )}
