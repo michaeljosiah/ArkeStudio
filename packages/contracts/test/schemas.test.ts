@@ -1056,6 +1056,16 @@ describe("domain events and frames", () => {
     assert.doesNotThrow(() => ClientStateSchema.parse(state));
     // A payload from before the ledger availability field reads as available (SPEC-032 R-21).
     assert.equal(ClientStateSchema.parse(state).app.ledgerUnavailable, false);
+    // Same doctrine one level down: a spend status from before it carried its read's fate
+    // reads as an evaluation whose read worked (SPEC-008 R-19).
+    const spent = ClientStateSchema.parse({
+      ...state,
+      app: {
+        ...state.app,
+        spend: { settings: { thresholdMicroUsd: 0, periodDays: 7 }, rollingMicroUsd: 0, alerted: false },
+      },
+    });
+    assert.equal(spent.app.spend?.ledgerUnavailable, false);
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "snapshot", seq: 1, state }));
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "event", seq: 2, event }));
     assert.doesNotThrow(() =>

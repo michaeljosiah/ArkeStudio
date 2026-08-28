@@ -294,7 +294,7 @@ import {
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
 import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
-import { detectDrift, evaluateSpend } from "./spend/analytics.js";
+import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
   openThread,
@@ -303,6 +303,7 @@ import {
   stageThreadSettlement,
 } from "./canon/authoring.js";
 import { ChangeLog } from "./change-log.js";
+import { readNdjson } from "./ndjson.js";
 import {
   AuthoringService,
   describeActionClass,
@@ -1151,6 +1152,13 @@ export class Coordinator {
    * on. Off is the default here too, so forgetting a path fails the same silent way.
    */
   private researchWeb = false;
+  /**
+   * Whether the threshold was over on the last evaluation that actually read the ledger — the
+   * latch behind "alert once per crossing" (R-19). Deliberately not `app.spend.alerted`, which
+   * an unreadable read publishes as false: the latch would clear on an outage and the next
+   * good read would re-fire the same crossing, an alert for an episode that never ended.
+   */
+  private spendAlerted = false;
   private appearanceWrite = Promise.resolve();
   private voiceModelsChanged = false;
   private started = false;
@@ -2428,7 +2436,12 @@ export class Coordinator {
     this.skillFamily = routedVideo?.family;
     this.skillModelId = routedVideo?.id;
     this.refreshAgents(settings?.agents ?? {});
-    const entries = this.ledger ? await this.ledger.readAll() : [];
+    const ledgerRead = await this.spendLedgerRead();
+    const drift = manifest ? detectDrift(ledgerRead, manifest) : null;
+    // The alert latch starts where the boot read leaves it, so an installation that was
+    // already over the threshold does not announce the crossing again on every launch.
+    const seededSpend = settings ? evaluateSpend(ledgerRead, settings.spend, new Date()) : null;
+    if (seededSpend && !seededSpend.ledgerUnavailable) this.spendAlerted = seededSpend.alerted;
     this.readModel.seedAppConfig({
       manifest,
       providers: this.providerService.list(),
@@ -2444,14 +2457,17 @@ export class Coordinator {
         : {}),
       ...(settings ? { models: settings.models } : {}),
       ...(settings ? { presets: settings.presets } : {}),
-      ...(settings ? { spend: evaluateSpend(entries, settings.spend, new Date()) } : {}),
+      ...(seededSpend ? { spend: seededSpend } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
       ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
       ...(settings ? { narrator: settings.narrator } : {}),
-      ...(manifest ? { drift: detectDrift(entries, manifest) } : {}),
+      // `null` is a read that failed, and it is left out rather than seeded: the read model
+      // keeps its [] — same state, but nothing pretends it was derived (SPEC-032 R-21). The
+      // spend panel's ledger caveat is what tells the reader the record is unreadable.
+      ...(drift ? { drift } : {}),
       ...(this.opts.harnessInfo ? { harnessInfo: this.opts.harnessInfo } : {}),
     });
   }
@@ -3016,32 +3032,71 @@ export class Coordinator {
   }
 
   /**
+   * The ledger read behind a spend evaluation, with the fate of that read (see
+   * `SpendStatus.ledgerUnavailable`). The no-file fallback is the published list, whose own
+   * read fate the seed already recorded as `app.ledgerUnavailable`.
+   */
+  private async spendLedgerRead(): Promise<LedgerRead> {
+    if (this.ledger) return this.ledger.readAllChecked();
+    const app = this.getState().app;
+    return { entries: app.ledger, unavailable: app.ledgerUnavailable };
+  }
+
+  /**
    * Record a terminal job outcome (SPEC-008 R-16): append to the ledger, mirror to the app
    * index via the event fold, re-evaluate the rolling threshold (R-19) and drift (R-13).
    * SPEC-009's dispatcher calls this; fixtures and tests call it directly.
    */
   async recordLedger(entry: LedgerEntry): Promise<void> {
-    if (this.ledger) await this.ledger.append(entry);
-    this.emit({ at: new Date().toISOString(), type: "ledger.appended", entry });
-    const settings = this.appSettings ? await this.appSettings.load() : null;
-    if (!settings) return;
-    const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
-    const spend = evaluateSpend(entries, settings.spend, new Date());
-    const wasAlerted = this.getState().app.spend?.alerted ?? false;
-    this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
-    if (spend.alerted && !wasAlerted) {
+    // A failed append no longer takes the rest of this method with it. It used to throw before
+    // the mirror and before the re-evaluation, and SPEC-009's dispatcher catches it to keep the
+    // pump alive — so a ledger that went unreadable mid-session published nothing at all, and
+    // Activity kept showing the boot figure with no caveat. That is the swallowed failure R-21
+    // exists to end, and the re-evaluation below is where it becomes visible. Still rethrown
+    // at the end: what the caller sees is unchanged.
+    let appendError: unknown = null;
+    if (this.ledger) {
+      try {
+        await this.ledger.append(entry);
+      } catch (err) {
+        appendError = err;
+      }
+    }
+    // Not emitted when the append failed: the entry is not in the record, and a mirror saying
+    // otherwise would disagree with the file the next restart reads.
+    if (appendError === null) {
+      this.emit({ at: new Date().toISOString(), type: "ledger.appended", entry });
+    } else {
       void this.appLog?.append({
-        kind: "spend.alert",
-        rollingMicroUsd: spend.rollingMicroUsd,
-        settings: settings.spend,
+        level: "error",
+        event: "ledger.append-failed",
+        reason: appendError instanceof Error ? appendError.message : String(appendError),
       });
     }
-    if (this.opts.manifest) {
-      const drift = detectDrift(entries, this.opts.manifest);
-      if (JSON.stringify(drift) !== JSON.stringify(this.getState().app.drift)) {
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    if (settings) {
+      const read = await this.spendLedgerRead();
+      const spend = evaluateSpend(read, settings.spend, new Date());
+      const wasAlerted = this.spendAlerted;
+      this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
+      // The latch moves only on an evaluation that read the ledger, so an outage neither
+      // fires the alert nor clears it — the crossing it was already in survives.
+      if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
+      if (spend.alerted && !wasAlerted) {
+        void this.appLog?.append({
+          kind: "spend.alert",
+          rollingMicroUsd: spend.rollingMicroUsd,
+          settings: settings.spend,
+        });
+      }
+      // `null` is a read that failed: the reports stand until a read that worked says
+      // otherwise, rather than being cleared by an I/O failure (R-13).
+      const drift = this.opts.manifest ? detectDrift(read, this.opts.manifest) : null;
+      if (drift && JSON.stringify(drift) !== JSON.stringify(this.getState().app.drift)) {
         this.emit({ at: new Date().toISOString(), type: "manifest.drift", reports: drift });
       }
     }
+    if (appendError !== null) throw appendError;
   }
 
   /**
@@ -4733,12 +4788,11 @@ export class Coordinator {
       case "set-spend-threshold": {
         if (!this.appSettings) return;
         const settings = await this.appSettings.setSpend(msg.thresholdMicroUsd, msg.periodDays);
-        const entries = this.ledger ? await this.ledger.readAll() : this.getState().app.ledger;
-        this.emit({
-          at: new Date().toISOString(),
-          type: "spend.status",
-          spend: evaluateSpend(entries, settings.spend, new Date()),
-        });
+        const spend = evaluateSpend(await this.spendLedgerRead(), settings.spend, new Date());
+        // A new threshold is a new crossing: the latch follows the figure this evaluation
+        // actually measured, so lowering the threshold onto existing spend still alerts.
+        if (!spend.ledgerUnavailable) this.spendAlerted = spend.alerted;
+        this.emit({ at: new Date().toISOString(), type: "spend.status", spend });
         return;
       }
       case "set-background-notifications": {
@@ -10122,37 +10176,3 @@ export class Coordinator {
   }
 }
 
-/**
- * The NDJSON seed reader, stating when the file exists and could not be read. A missing file is
- * an empty seed — nothing has been recorded yet — but an EACCES or a transient I/O failure
- * folded into the same empty array published a ledger that read as clean (SPEC-032 R-21): the
- * spend correlation compared two windows of nothing and found nothing wrong. Every call site
- * decides what `unavailable` means for its source rather than a wrapper dropping it silently.
- *
- * Lines that do not parse are skipped, never fatal — the ledger's tolerant-reader doctrine
- * (SPEC-008 §3.2). A crash mid-append leaves a torn final line, and this read runs at start-up
- * before `LedgerFile`'s repair, so a strict parse here turned that crash artifact into an app
- * that would not boot.
- */
-async function readNdjson<T>(
-  path: string,
-  parse: (x: unknown) => T,
-): Promise<{ entries: T[]; unavailable: boolean }> {
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (err) {
-    return { entries: [], unavailable: (err as NodeJS.ErrnoException).code !== "ENOENT" };
-  }
-  const entries: T[] = [];
-  for (const line of raw.split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      entries.push(parse(JSON.parse(t)));
-    } catch {
-      /* torn or foreign line — skipped */
-    }
-  }
-  return { entries, unavailable: false };
-}

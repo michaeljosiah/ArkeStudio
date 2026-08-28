@@ -1225,11 +1225,26 @@ const STATE_RULES: readonly Rule[] = [
  * Every source R-17 names, with whether it was read or is legitimately absent (R-19) — the
  * whole list, not the subset this release's rules happen to consult, so a rule added later
  * changes no row and a reader can see the closed set. `unavailable` is reachable for the log
- * tail and for the ledger, whose availability the read model publishes beside its entries
- * (R-21). The jobs list is file-seeded too but does not carry availability yet, so its row can
- * only say `read`; the remaining state fields are in memory, where a null one is a fact that
- * was never taken — absence, not a failed read (R-14's distinction).
+ * tail, for the ledger, whose availability the read model publishes beside its entries (R-21),
+ * and for the two values derived from that ledger — the spend status, which states when the
+ * read behind its own evaluation failed (SPEC-008 R-19), and drift, which is not derived at
+ * all when it did. Without those, the bundle carried a confident spend block and an empty
+ * drift list marked `read` beside the very row saying their input could not be read. The jobs
+ * list is file-seeded too but does not carry availability yet, so its row can only say `read`;
+ * the remaining state fields are in memory, where a null one is a fact that was never taken —
+ * absence, not a failed read (R-14's distinction).
  */
+/**
+ * The state of a value derived from the ledger read. The spend status carries the fate of the
+ * evaluation's own read and is therefore the freshest answer; before any evaluation has run —
+ * or on an installation with no settings to evaluate against — the seeded list's latched flag
+ * is what there is.
+ */
+function ledgerDerivedState(sources: DiagnosticsSources): DiagnosticsSourceState {
+  const failed = sources.spend === null ? sources.ledgerUnavailable : sources.spend.ledgerUnavailable;
+  return failed ? "unavailable" : "read";
+}
+
 function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
   const named: Array<{ name: string; state: DiagnosticsSourceState }> = [
     { name: "app.version", state: "read" },
@@ -1248,9 +1263,16 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.manifest", state: sources.manifest === null ? "absent" : "read" },
     { name: "app.routing", state: "read" },
     { name: "app.models", state: "read" },
-    { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
+    {
+      name: "app.spend",
+      state: sources.spend === null ? "absent" : sources.spend.ledgerUnavailable ? "unavailable" : "read",
+    },
     { name: "app.ledger", state: sources.ledgerUnavailable ? "unavailable" : "read" },
-    { name: "app.drift", state: "read" },
+    // Drift is derived from the ledger beside spend, from the same read, and is not derived at
+    // all when that read fails — so its row states that read's fate rather than `read` over a
+    // list that was never computed. The freshest fate is the spend status's own; the seeded
+    // list's latched flag answers before any evaluation has run.
+    { name: "app.drift", state: ledgerDerivedState(sources) },
     { name: "app.builds", state: "read" },
     { name: "app.update", state: "read" },
     { name: "log.app", state: tails.appLog === "unavailable" ? "unavailable" : "read" },

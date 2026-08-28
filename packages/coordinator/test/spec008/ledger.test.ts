@@ -10,6 +10,9 @@ import { LedgerFile } from "../../src/spend/ledger.js";
 const WORLD_A = "01J8F3K2QW9VZX4N7M0RTYB6HC";
 const WORLD_B = "01J8F3K2QW9VZX4N7M0RTYB6HD";
 
+/** A read that worked — what `readAllChecked` returns for a file it could read. */
+const read = (entries: LedgerEntry[]) => ({ entries, unavailable: false });
+
 function entry(overrides: Partial<LedgerEntry>): LedgerEntry {
   return {
     ts: "2026-08-01T10:00:00Z",
@@ -89,6 +92,45 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
     await appendFile(path, JSON.stringify(entry({ outcome: "failed" })) + "\n", "utf8");
     assert.equal((await new LedgerFile(path).readAll()).length, 2);
   });
+
+  it("the checked read separates a file nobody wrote from one that exists and cannot be read", async () => {
+    const dir = await tempDir("arke-ledger-");
+    // ENOENT: nothing recorded yet — absence, not failure (SPEC-032 R-19).
+    const absent = await new LedgerFile(join(dir, "ledger.jsonl")).readAllChecked();
+    assert.deepEqual(absent, { entries: [], unavailable: false });
+    // ENOTDIR is absence too, and this is why it must be: a parent component that is a file
+    // means no ledger was ever written, and Windows reports that same shape as ENOENT. Reading
+    // it as a failure made the two CI platforms publish different states for one install.
+    const file = join(dir, "not-a-directory");
+    await writeFile(file, "", "utf8");
+    const throughFile = await new LedgerFile(join(file, "ledger.jsonl")).readAllChecked();
+    assert.deepEqual(throughFile, { entries: [], unavailable: false });
+    // EISDIR: a path that exists and is not readable as a file — as in the seed's test,
+    // because EACCES has no portable fixture.
+    const unreadable = await new LedgerFile(dir).readAllChecked();
+    assert.deepEqual(unreadable, { entries: [], unavailable: true });
+  });
+
+  /*
+   * The repair is a write, and a write can fail on its own — a torn tail in a directory a
+   * backup or scanner has pinned. Unguarded, that rejection escaped the checked read and took
+   * coordinator start-up with it: the app would not boot on exactly the degraded install this
+   * read exists to describe. The torn line the repair would have removed is skipped by the
+   * tolerant parse anyway, so the read still states the truth.
+   */
+  it("a repair that cannot write still yields a read, never a rejection", async () => {
+    const dir = await tempDir("arke-ledger-");
+    const path = join(dir, "ledger.jsonl");
+    const good = JSON.stringify(entry({}));
+    await writeFile(path, good + "\n" + good.slice(0, 40), "utf8");
+    const ledger = new LedgerFile(path);
+    // Stand in for the unwritable directory: the repair's rename cannot land.
+    (ledger as unknown as { repairTail(): Promise<void> }).repairTail = () =>
+      Promise.reject(Object.assign(new Error("EPERM"), { code: "EPERM" }));
+    const checked = await ledger.readAllChecked();
+    assert.equal(checked.unavailable, false, "the file was read; only its repair failed");
+    assert.equal(checked.entries.length, 1, "the torn tail is skipped by the tolerant parse");
+  });
 });
 
 describe("the strict reader — unreadable is not empty (SPEC-009 R-16)", () => {
@@ -157,12 +199,13 @@ describe("the rolling spend threshold (R-19, D10, §3.2)", () => {
       // Outside the window — must not count.
       entry({ worldId: WORLD_A, ts: "2026-07-01T10:00:00Z", actualMicroUsd: 500_000_000, actualSource: "provider-reported" }),
     ];
-    const status = evaluateSpend(entries, { thresholdMicroUsd: 50_000_000, periodDays: 7 }, now);
+    const status = evaluateSpend(read(entries), { thresholdMicroUsd: 50_000_000, periodDays: 7 }, now);
     assert.equal(status.rollingMicroUsd, 55_000_000, "both worlds count; the stale entry does not");
     assert.equal(status.alerted, true);
+    assert.equal(status.ledgerUnavailable, false, "the status carries its read's fate (SPEC-032 R-21)");
 
     const perWorldWouldMiss = evaluateSpend(
-      entries.filter((e) => e.worldId === WORLD_A),
+      read(entries.filter((e) => e.worldId === WORLD_A)),
       { thresholdMicroUsd: 50_000_000, periodDays: 7 },
       now,
     );
@@ -172,8 +215,21 @@ describe("the rolling spend threshold (R-19, D10, §3.2)", () => {
   it("uses the estimate when no actual was recorded, and a zero threshold disables", () => {
     const now = new Date("2026-08-01T12:00:00Z");
     const entries = [entry({ ts: "2026-08-01T10:00:00Z", actualMicroUsd: null, estimatedMicroUsd: 700_000 })];
-    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 500_000, periodDays: 7 }, now).alerted, true);
-    assert.equal(evaluateSpend(entries, { thresholdMicroUsd: 0, periodDays: 7 }, now).alerted, false);
+    assert.equal(evaluateSpend(read(entries), { thresholdMicroUsd: 500_000, periodDays: 7 }, now).alerted, true);
+    assert.equal(evaluateSpend(read(entries), { thresholdMicroUsd: 0, periodDays: 7 }, now).alerted, false);
+  });
+
+  /*
+   * The derivations take the read, not a list, so a failed read cannot be paired with another
+   * read's entries. Over a failed read the figure is still computed — and the flag is what
+   * stops it being presented as a quiet window (SPEC-032 R-21).
+   */
+  it("a failed read publishes its fate, and drift answers null rather than an empty list", () => {
+    const now = new Date("2026-08-01T12:00:00Z");
+    const settings = { thresholdMicroUsd: 500_000, periodDays: 7 };
+    const status = evaluateSpend({ entries: [], unavailable: true }, settings, now);
+    assert.equal(status.ledgerUnavailable, true);
+    assert.equal(status.alerted, false, "an alert cannot fire off a read that failed");
   });
 });
 
@@ -203,7 +259,8 @@ describe("manifest drift (R-13, §2.11)", () => {
         actualSource: "provider-reported",
       }),
     );
-    const reports = detectDrift(off, manifest);
+    const reports = detectDrift(read(off), manifest);
+    assert.ok(reports);
     assert.equal(reports.length, 1);
     assert.equal(reports[0]!.modelId, "seedance-2.0");
     assert.equal(reports[0]!.samples, 4);
@@ -214,13 +271,28 @@ describe("manifest drift (R-13, §2.11)", () => {
     const derived = Array.from({ length: 5 }, () =>
       entry({ estimatedMicroUsd: 100000, actualMicroUsd: 200000, actualSource: "manifest-derived" }),
     );
-    assert.equal(detectDrift(derived, manifest).length, 0);
+    assert.equal(detectDrift(read(derived), manifest)?.length, 0);
   });
 
   it("two samples are noise, not drift", () => {
     const twice = Array.from({ length: 2 }, () =>
       entry({ estimatedMicroUsd: 100000, actualMicroUsd: 200000, actualSource: "provider-reported" }),
     );
-    assert.equal(detectDrift(twice, manifest).length, 0);
+    assert.equal(detectDrift(read(twice), manifest)?.length, 0);
+  });
+
+  /*
+   * `null`, not `[]`: an empty list wears the shape of "nothing drifted", and publishing it
+   * over a failed read would clear reports computed from real samples — a transient I/O
+   * failure downgrading a true manifest warning to silence. The rule lives in detectDrift
+   * rather than at each call site, because the call sites accrete.
+   */
+  it("a failed read is not a manifest that stopped drifting", () => {
+    const off = Array.from({ length: 4 }, () =>
+      entry({ estimatedMicroUsd: 100000, actualMicroUsd: 130000, actualSource: "provider-reported" }),
+    );
+    assert.equal(detectDrift({ entries: off, unavailable: true }, manifest), null);
+    assert.equal(detectDrift({ entries: [], unavailable: true }, manifest), null);
+    assert.ok(detectDrift(read(off), manifest), "the same entries from a read that worked still drift");
   });
 });
