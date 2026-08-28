@@ -186,10 +186,11 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     assert.ok(withOrphan.indexOf("ComfyUI") < withOrphan.indexOf("Other components"));
   });
 
-  it("names Voxa as an engine (R-72, decision 8)", () => {
+  it("names Voxa as an engine, in the words every surface shares (R-72, R-62)", () => {
     // It hosts Kokoro and whisper.cpp — one engine, two providers — and before this it was only
-    // ever visible as the contents of a group called Voice.
-    assert.match(plain(render("/settings/providers?provider=voxa")), /Voxa\s+VOICE/);
+    // ever visible as the contents of a group called Voice. `VOICE` was that group's word and no
+    // other screen's, so the head derives from the providers it hosts instead.
+    assert.match(plain(render("/settings/providers?provider=voxa")), /Voxa\s+SPEECH-TO-TEXT, TEXT-TO-SPEECH/);
   });
 
   it("does not state the authoring harness (R-5, R-72, matrix row 46)", () => {

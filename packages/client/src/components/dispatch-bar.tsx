@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useParams } from "react-router";
 import {
   aspectOffered,
-  deriveCapabilityAvailability,
   estimateCharacterImageMicroUsd,
   estimateImageMicroUsd,
   formatMicroUsd,
@@ -15,6 +14,8 @@ import {
   type Capability,
   type ManifestModel,
   type SizeTier,
+  modelEligible,
+  type EligibilityInputs,
 } from "@arke-studio/contracts";
 import { setProductionModel, useStore } from "../lib/store.js";
 import { ChevronDown } from "./icons.js";
@@ -112,29 +113,21 @@ export function usableModels(
 ): ManifestModel[] {
   const manifest = state?.app.manifest;
   if (!manifest) return [];
-  const disabled = new Set(state?.app.models.disabled ?? []);
-  const unlocked = new Set(
-    deriveCapabilityAvailability(state?.app.providers ?? []).find((a) => a.capability === capability)?.via ?? [],
-  );
-  return manifest.models.filter((model) => {
-    if (model.capability !== capability || disabled.has(model.id)) return false;
-    if (!unlocked.has(model.provider) && PROVIDERS[model.provider].local !== true) return false;
-    // A local recipe below readiness is not usable — it stays visible in the picker as a
-    // disabled row with its measured reason (disabledRecipes), and coordinator admission
-    // refuses it regardless (SPEC-021 R-16). Unknown image/video hardware still runs (D15);
-    // cloned voice stays off until this build has proven the full use can complete.
-    if (model.provider === "comfyui") {
-      const readiness = recipeReadinessFor(state, model.id);
-      if (
-        readiness === null ||
-        readiness.state === "disabled" ||
-        (capability === "voice-tts" &&
-          readiness.state === "unknown" &&
-          state?.app.comfyui?.engine.locality === "local")
-      ) return false;
-    }
-    return true;
-  });
+  // The answer itself is `modelEligible`'s, in contracts, because the routing write consults the
+  // same one (SPEC-034 R-15a). A picker deriving it separately from the write that stores what
+  // the picker chose is how the two come to disagree about one model.
+  const inputs = eligibilityInputs(state);
+  return manifest.models.filter((model) => model.capability === capability && modelEligible(model, inputs));
+}
+
+/** The app state `modelEligible` reads, gathered once. */
+export function eligibilityInputs(state: ReturnType<typeof useStore>["state"]): EligibilityInputs {
+  return {
+    providers: state?.app.providers ?? [],
+    disabled: state?.app.models.disabled ?? [],
+    recipes: state?.app.comfyui?.recipes ?? [],
+    comfyUiLocality: state?.app.comfyui?.engine.locality,
+  };
 }
 
 /**

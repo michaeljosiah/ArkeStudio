@@ -1,6 +1,7 @@
 import type { Capability } from "./provider.js";
 import type { ManifestModel, ModelManifest } from "./manifest.js";
-import { PROVIDERS, type ProviderId } from "./provider.js";
+import { PROVIDERS, deriveCapabilityAvailability, type ProviderId, type ProviderStatus } from "./provider.js";
+import type { RecipeReadiness } from "./comfyui.js";
 import type {
   FitVerdict,
   LocalRuntimeModel,
@@ -262,4 +263,51 @@ export function gateLocalRuntimes(
     });
   }
   return { probes, detectedAt, models, recommended: recommendLocalModels(manifest, models) };
+}
+
+/**
+ * Whether a model can be dispatched right now (SPEC-028 R-35), as one function.
+ *
+ * It lived in the dispatch bar, which was fine while the only caller was a picker. SPEC-034 R-15a
+ * gives it a second: General may name a local default, and the routing write has to refuse an
+ * ineligible one — a picker that merely disables the option is a courtesy, not a guarantee, and
+ * an id arriving over the wire would otherwise store a default nothing can honour. Two callers
+ * deriving this separately is how a screen and a write come to disagree about one model, so
+ * neither derives it.
+ *
+ * Fit is an input, not a rival: a refusing verdict is the gate's, read from `runtime`. This
+ * answers *can it run now*, which a model can fail while fitting this machine perfectly.
+ */
+export interface EligibilityInputs {
+  /** Provider connection state, for the capabilities a credential actually unlocks. */
+  readonly providers: readonly ProviderStatus[];
+  /** Model ids somebody switched off in Providers. */
+  readonly disabled: readonly string[];
+  /** ComfyUI's own recipe answers, keyed by recipe id — which is the model id. */
+  readonly recipes: readonly RecipeReadiness[];
+  /** Where the resolved ComfyUI engine runs, which changes what an unknown recipe means. */
+  readonly comfyUiLocality: "local" | "remote" | undefined;
+}
+
+export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): boolean {
+  if (inputs.disabled.includes(model.id)) return false;
+  const unlocked = new Set(
+    deriveCapabilityAvailability([...inputs.providers]).find((a) => a.capability === model.capability)?.via ?? [],
+  );
+  if (!unlocked.has(model.provider) && PROVIDERS[model.provider].local !== true) return false;
+  // A local recipe below readiness is not usable — it stays visible in the picker as a disabled
+  // row with its measured reason, and coordinator admission refuses it regardless (SPEC-021
+  // R-16). Unknown image/video hardware still runs (D15); cloned voice stays off until this
+  // build has proven the full use can complete.
+  if (model.provider === "comfyui") {
+    const readiness = inputs.recipes.find((recipe) => recipe.recipeId === model.id) ?? null;
+    if (
+      readiness === null ||
+      readiness.state === "disabled" ||
+      (model.capability === "voice-tts" && readiness.state === "unknown" && inputs.comfyUiLocality === "local")
+    ) {
+      return false;
+    }
+  }
+  return true;
 }

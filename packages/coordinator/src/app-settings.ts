@@ -28,6 +28,32 @@ interface SettingsMutation<T> {
  * change, not on read — a routing write is validated against the manifest then; a model that
  * later leaves the manifest surfaces as a fault in Settings, not a failure at dispatch.
  */
+/**
+ * Put back what SPEC-033 R-66 parked, and delete what nothing can replace (SPEC-034 R-18).
+ *
+ * R-66 moved local capability defaults out of `routing` because Cloud AI was cloud-only and
+ * could neither show nor change them — the worst of the three outcomes being a setting still in
+ * force and invisible. R-15 makes them reachable on the screen that sets them, so the condition
+ * is discharged and the move is undone. The record kept the concrete model id precisely so it
+ * could be read back, which is what this does: each entry returns as the default the person
+ * originally chose, and an entry already in `routing` wins, being the later decision.
+ *
+ * Every `llm` entry goes instead, parked or active. R-17 removes its picker, so restoring one
+ * would put back a setting nothing reads and nothing can replace — and `routingFaults` iterates
+ * every persisted entry, so it could then raise a fault General offers no control to answer. The
+ * active one is the likelier of the two: `setRoutingDefault` accepted `llm` before this, so an
+ * ordinary installation holds `routing.llm` without ever having had a local default parked.
+ */
+function migrateClearedLocalRouting(settings: AppSettings): AppSettings {
+  const routing: Record<string, string> = { ...settings.clearedLocalRouting, ...settings.routing };
+  delete routing["llm"];
+  const unchanged =
+    Object.keys(settings.clearedLocalRouting).length === 0 &&
+    Object.keys(routing).length === Object.keys(settings.routing).length;
+  if (unchanged) return settings;
+  return { ...settings, routing: routing as AppSettings["routing"], clearedLocalRouting: {} };
+}
+
 export class AppSettingsFile {
   constructor(private readonly path: string) {}
 
@@ -54,7 +80,7 @@ export class AppSettingsFile {
         },
       );
     }
-    return parsed.data;
+    return migrateClearedLocalRouting(parsed.data);
   }
 
   private async persist(settings: AppSettings): Promise<void> {
@@ -70,65 +96,45 @@ export class AppSettingsFile {
     });
   }
 
-  /** Set a routing default (R-20): refused unless the model exists and matches the capability. */
+  /**
+   * Set a routing default (SPEC-008 R-20): refused unless the model exists, matches the
+   * capability, and can actually run.
+   *
+   * A default is a concrete model, local or cloud — SPEC-034 R-15 removes the cloud-only filter
+   * SPEC-033 R-61 imposed. What replaces it is R-15a: **eligibility, supplied**. The filter was
+   * adequate while every option was a cloud model whose only failure mode was a missing key; a
+   * local one can fail on a runtime that never started, which this function cannot see and
+   * `routingFaults` cannot see either. So the caller hands in SPEC-028 R-35's answer rather than
+   * either of us guessing at it, and a picker that merely disables the option stays a courtesy
+   * rather than the guarantee.
+   */
   async setRoutingDefault(
     capability: Capability,
     modelId: string,
     manifest: ModelManifest,
+    /** Whether the model can run right now. Absent means nobody asked, which is a refusal. */
+    eligible: boolean,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
     const model = manifest.models.find((m) => m.id === modelId);
     if (!model) return { ok: false, reason: `"${modelId}" is not in the model manifest` };
     if (model.capability !== capability) {
       return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${capability}` };
     }
-    // A routing default is a concrete *cloud* model (SPEC-033 R-61, amending SPEC-008 R-20).
-    // Refused here as well as filtered in the picker, so a local id arriving over the wire
-    // cannot put back the setting the move at start-up just took out.
-    if (PROVIDERS[model.provider].local) {
-      return { ok: false, reason: `${model.displayName} runs on this machine — choose it per production, at dispatch` };
+    if (!eligible) {
+      return { ok: false, reason: `${model.displayName} cannot run right now — it cannot be the default` };
     }
     return this.mutate<{ ok: true } | { ok: false; reason: string }>((current) => {
       if (current.models.disabled.includes(modelId)) {
         return { value: { ok: false, reason: `${model.displayName} is switched off in Providers` } };
       }
-      // Setting a default for this capability retires the cleared record: it is what the notice
-      // was asking for, and a notice that outlived its answer would sit above a green row
-      // insisting the capability has nowhere to go.
-      const cleared: Record<string, string> = {};
-      for (const [key, value] of Object.entries(current.clearedLocalRouting)) {
-        if (key !== capability) cleared[key] = value;
-      }
       return {
-        settings: {
-          ...current,
-          routing: { ...current.routing, [capability]: modelId },
-          clearedLocalRouting: cleared,
-        },
+        settings: { ...current, routing: { ...current.routing, [capability]: modelId } },
         value: { ok: true },
       };
     });
   }
 
-  /**
-   * Take every local capability default out of routing and into the record of what was cleared
-   * (SPEC-033 R-66). Idempotent, and a no-op on an installation that never had one.
-   *
-   * Not a deletion: the cleared entry keeps its concrete model id so Cloud AI can name it, which
-   * is the difference between a setting that moved and one that vanished.
-   */
-  async clearLocalRouting(isLocal: (modelId: string) => boolean): Promise<AppSettings> {
-    return this.mutate<AppSettings>((current) => {
-      const kept: Record<string, string> = {};
-      const cleared: Record<string, string> = { ...current.clearedLocalRouting };
-      for (const [capability, modelId] of Object.entries(current.routing)) {
-        if (isLocal(modelId)) cleared[capability] = modelId;
-        else kept[capability] = modelId;
-      }
-      if (Object.keys(kept).length === Object.keys(current.routing).length) return { value: current };
-      const settings = { ...current, routing: kept, clearedLocalRouting: cleared };
-      return { settings, value: settings };
-    });
-  }
+
 
   /**
    * Offer a model, or stop offering it. Switching one off never edits routing: a default left

@@ -1,5 +1,12 @@
 import type { ReactNode } from "react";
-import { CLONED_VOICE_MODEL, type Capability, type ComponentHealth } from "@arke-studio/contracts";
+import {
+  CLONED_VOICE_MODEL,
+  ENGINE_PROVIDERS,
+  PROVIDERS,
+  type Capability,
+  type ComponentHealth,
+  type EngineId,
+} from "@arke-studio/contracts";
 import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 
 /**
@@ -65,6 +72,21 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
 export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
   CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
 ) as Record<Capability, string>;
+
+/**
+ * What an engine is used for, in the capability words every surface shares (SPEC-033 R-62, R-89).
+ *
+ * Derived from the providers it hosts rather than written beside them: a hand-kept string is how
+ * one engine comes to be described in words no other screen uses, which is the drift R-62 exists
+ * to prevent. `ENGINE_CAPABILITIES` in contracts kept its own spelling — `voice`, `images, video,
+ * voice` — and none of those three is a word this vocabulary has.
+ */
+export function engineCapabilityWords(engine: EngineId): string {
+  const capabilities = [...new Set(ENGINE_PROVIDERS[engine].flatMap((p) => PROVIDERS[p].capabilities))];
+  // In the rows' order, so two engines sharing a capability name it in the same place.
+  const ordered = CAPABILITY_ROWS.flatMap((row) => row.capabilities).filter((c) => capabilities.includes(c));
+  return [...new Set(ordered.map((c) => CAPABILITY_LABEL[c]))].join(", ");
+}
 
 /** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
 export type RuntimeTone = "ok" | "warn" | "idle";

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ENGINE_CAPABILITIES,
   FIT_LABEL,
   ENGINE_LABEL,
   comfyUiWeightsComponentId,
@@ -15,6 +14,7 @@ import { Button, cx } from "../components/ui.js";
 import {
   HealthDot,
   RuntimeHead,
+  engineCapabilityWords,
   RuntimeSection,
   RuntimeStatus,
   sizeMb,
@@ -184,12 +184,12 @@ export function VoxaDetail({
     <>
       <RuntimeHead
         title={ENGINE_LABEL.voxa}
-        caps={ENGINE_CAPABILITIES.voxa.toUpperCase()}
+        caps={engineCapabilityWords("voxa").toUpperCase()}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
       <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">RUNTIME</div>
+        <div className="fy-rt__eyebrow">ENGINE</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>
             {sourceLabel}
@@ -332,7 +332,7 @@ export function ComfyUiDetail() {
     <div data-testid="comfyui-engine">
       <RuntimeHead
         title="ComfyUI"
-        caps={ENGINE_CAPABILITIES.comfyui.toUpperCase()}
+        caps={engineCapabilityWords("comfyui").toUpperCase()}
         tone={comfyUiTone(engine)}
         state={engine?.state ?? "unknown"}
       />
@@ -594,7 +594,7 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
     <>
       <RuntimeHead
         title={ENGINE_LABEL.ollama}
-        caps={ENGINE_CAPABILITIES.ollama.toUpperCase()}
+        caps={engineCapabilityWords("ollama").toUpperCase()}
         tone={processTone(provider?.validation)}
         state={answered ? "answering" : (provider?.validation ?? "not asked")}
       />
