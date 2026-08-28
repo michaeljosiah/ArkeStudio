@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  isGraphScene,
+  linearizeSceneFlow,
   newId,
-  SceneSchema,
+  SceneRecordSchema,
   StoryOverviewSchema,
   type CandidateId,
   type ConversationId,
@@ -362,9 +364,13 @@ describe("production-scoped threads (issue 400)", () => {
       join(w.dir, "productions", "saltlight", "scenes", "04-the-verse-rises.json"),
       "utf8",
     );
-    const scene = SceneSchema.parse(JSON.parse(raw));
+    // Accepting a proposal is an authored write, so the scene lands graph-backed (SPEC-029 R-11).
+    const scene = SceneRecordSchema.parse(JSON.parse(raw));
+    assert.ok(isGraphScene(scene), "an accepted scene target lands as the graph shape");
     assert.equal(scene.script?.blocks.length, 2, "the blocks landed inside the scene file");
-    assert.equal(scene.shots.length > 0, true, "the shots the scene already had are untouched");
+    const sequence = linearizeSceneFlow(scene);
+    assert.ok(sequence.kind === "linear");
+    assert.equal(sequence.shots.length > 0, true, "the shots the scene already had are untouched");
   });
 
   it("an episode candidate creates a stem-stable episode file through the episode-edit kind", async () => {

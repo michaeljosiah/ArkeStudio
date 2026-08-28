@@ -8,14 +8,17 @@ import {
   type AudioPolicy,
   CHARACTER_ROLE_MAX,
   EpisodeSchema,
+  isGraphScene,
   newId,
   ProposalSchema,
   RipplePreviewSchema,
-  SceneSchema,
+  SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
+  validateSceneFlow,
   RoutingSchema,
   StoryOverviewSchema,
+  type Scene,
   type Proposal,
   type ProposalConflict,
   type ProposalOpenChoice,
@@ -30,6 +33,12 @@ import { appendChanges } from "../world/change-writer.js";
 import { changesAnything, classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
+import {
+  GRAPH_SCENE_SCHEMA_VERSION,
+  graphSceneContent,
+  parseSceneRecord,
+  sceneFrom,
+} from "../productions/scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import {
   draftStagingPath,
@@ -49,7 +58,13 @@ import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "
  * stops existing the moment it is accepted — the drafting agent edits its proposal target with
  * raw file tools, and this is the only fence between those edits and the commit. (An earlier
  * note here feared stranding a legacy shape the scanner tolerates; the scanner tolerates
- * nothing SceneSchema refuses, so there is no such shape.)
+ * nothing this refuses, so there is no such shape.)
+ *
+ * Scenes are checked against the R-1 union, which is what the scanner now reads (SPEC-029): a
+ * target authored in either shape is legible here, and one carrying both structural fields — or
+ * neither — is refused by name rather than becoming a scene with two ideas of its own order.
+ * What is accepted is a different question from what is written: accept migrates a legacy scene
+ * target on its way into the commit, below.
  */
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
@@ -57,8 +72,22 @@ const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], {
   season: SeasonSchema,
   episode: EpisodeSchema,
   series: SeriesSchema,
-  scene: SceneSchema,
+  scene: SceneRecordSchema,
 };
+
+/**
+ * A scene target whose graph is not one path, said in the validator's own words (SPEC-029).
+ *
+ * Null for anything that is not a graph-backed scene: a legacy target has no flow to be wrong,
+ * and the shape check above has already spoken for everything else.
+ */
+function sceneFlowProblem(path: string, content: string): string | null {
+  if (classify(path).track !== "scene") return null;
+  const record = parseSceneRecord(content);
+  if (!isGraphScene(record)) return null;
+  const findings = validateSceneFlow(record.flow);
+  return findings.length === 0 ? null : `the scene flow is not one path: ${findings.map((f) => f.message).join(" ")}`;
+}
 
 /** The refusal names the record in a person's words, not the commit track's. */
 const JSON_TRACK_LABELS: Partial<Record<ReturnType<typeof classify>["track"], string>> = {
@@ -680,10 +709,14 @@ export class ProposalManager {
 
       // Build the plan; a proposal identical to the live world is a no-op, reported (R-3).
       const files: CommitFileInput[] = [];
+      // What each target replaces, kept from this pass: the scene migration below needs the
+      // graph a target is landing on, and reading the file a second time would let it move.
+      const liveByPath = new Map<string, string | null>();
       for (const target of proposal.targets) {
         const proposed = await this.readProposalFile(proposalId, target.path);
         if (proposed === null) throw new Error(`${target.path} missing from proposal ${proposalId}`);
         const live = await this.readLive(target.path);
+        liveByPath.set(target.path, live);
         if (live !== null && !changesAnything(target.path, live, proposed)) continue; // unchanged target
         files.push({
           path: target.path,
@@ -741,30 +774,57 @@ export class ProposalManager {
 
       // Any accepted new-model entity crosses the schema boundary (SPEC-023 R-23): a season,
       // episode, series or routing record landing in a version-1 world must fence it, or an
-      // older build opens the world and silently drops what was just accepted. Scenes cross it
-      // too when their accepted content carries the new fields (script, explicit order).
+      // older build opens the world and silently drops what was just accepted.
       const crossesBoundary = files.some((file) => {
         const track = classify(file.path).track;
-        if (track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story") {
-          return true;
-        }
-        if (track === "scene" && file.content !== undefined) {
-          try {
-            const scene = JSON.parse(file.content) as Record<string, unknown>;
-            return scene["script"] !== undefined || scene["order"] !== undefined;
-          } catch {
-            return false;
-          }
-        }
-        return false;
+        return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story";
       });
+      /*
+       * An accepted scene lands graph-backed, and the world crosses schema 3 with it
+       * (SPEC-029 R-11): an accepted proposal is an authored write, and every authored write
+       * produces the one shape (§3.3). The migration happens here rather than at staging so
+       * what a person reviewed, what the record checks above read, and what the drafting agent
+       * may still repair all stay in the shape they were written in; what changes is the bytes
+       * the one commit lands. A target already graph-backed keeps its own graph — node ids and
+       * authored groups survive an amendment that only rewrites payloads.
+       *
+       * It also subsumes the old scene arm of the check above: schema 3 is past 2, so a scene
+       * carrying `script` or an explicit `order` is fenced by the newer boundary anyway.
+       *
+       * The refusal here is about the file being landed on, not the one proposed: the checks
+       * above read the target, and a live scene whose own graph is malformed is one no write may
+       * be built over (R-59). It is reported like any other record problem, because a thrown
+       * error out of accept is a card that cannot be accepted and does not say why.
+       */
+      let sceneAccepted = false;
+      const refusals: Array<{ path: string; message: string }> = [];
+      for (const file of files) {
+        if (classify(file.path).track !== "scene" || file.content === undefined) continue;
+        sceneAccepted = true;
+        const live = liveByPath.get(file.path);
+        const current = live !== undefined && live !== null ? parseSceneRecord(live) : null;
+        try {
+          file.content = graphSceneContent(current, sceneFrom(parseSceneRecord(file.content)));
+        } catch (err) {
+          refusals.push({
+            path: file.path,
+            message: `the scene on disk cannot be written over: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          });
+        }
+      }
+      if (refusals.length > 0) return { status: "invalid", problems: refusals };
+      const raiseSchemaVersion = sceneAccepted
+        ? GRAPH_SCENE_SCHEMA_VERSION
+        : crossesBoundary
+          ? 2
+          : undefined;
       // Exactly one commit (R-11); versions derive inside the primitive (R-12, D7).
       const result = await this.store.commitUnserialised({
         kind: proposal.kind,
         source: proposal.source,
         proposalId: proposal.id,
         files,
-        ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
+        ...(raiseSchemaVersion !== undefined ? { raiseSchemaVersion } : {}),
       });
       await this.retire(proposalId, result.commitId);
       return { status: "accepted", result };
@@ -839,6 +899,14 @@ export class ProposalManager {
           });
           continue;
         }
+        // A graph target's topology, refused here for the same reason its shape is (SPEC-029
+        // R-58..R-61): a scene whose flow is not one path is one no consumer may order, so it
+        // must not reach the commit that would make it the world's.
+        const malformed = sceneFlowProblem(file.path, file.content);
+        if (malformed) {
+          problems.push({ path: file.path, message: malformed });
+          continue;
+        }
         const collision = this.collidingShotIds(file.path, file.content);
         if (collision) problems.push({ path: file.path, message: collision });
         continue;
@@ -871,13 +939,15 @@ export class ProposalManager {
     const match = /^productions\/([^/]+)\/scenes\/([^/]+)\.json$/.exec(path);
     if (!match) return null;
     const [, productionId, stem] = match;
-    let scene: { id?: unknown; shots?: Array<{ id?: unknown }> };
+    // Through the union's projection (SPEC-029): a target may be authored in either shape, and
+    // an id collision is about the shots the scene holds, not about which field holds them.
+    let scene: Scene;
     try {
-      scene = JSON.parse(content) as typeof scene;
+      scene = sceneFrom(parseSceneRecord(content));
     } catch {
       return null; // the schema check above already said so
     }
-    const mine = (scene.shots ?? []).map((s) => String(s.id)).filter((id) => id !== "undefined");
+    const mine = scene.shots.map((s) => String(s.id)).filter((id) => id !== "undefined");
     if (mine.length === 0) return null;
     const production = this.store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return null;

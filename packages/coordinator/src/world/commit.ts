@@ -7,6 +7,8 @@ import {
   BIBLE_PATH,
   deriveArtDirectionDescription,
   newId,
+  projectSceneRecord,
+  SceneRecordSchema,
   WorldMetaSchema,
 } from "@arke-studio/contracts";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
@@ -230,8 +232,24 @@ export function changesAnything(path: string, live: string, proposed: string): b
       if (track === "canon") for (const key of ["introducedAt", "settledAt", "amendedAt"]) keys.delete(key);
       return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
     }
+    /*
+     * A scene is compared through its legacy projection (SPEC-029 §3.3 step 2).
+     *
+     * Arke's amendments and the storyboard's edits are still authored in the legacy shape, and
+     * the file they are proposed against may already be graph-backed. Key by key, `flow` and
+     * `shots` never match, so a proposal that says exactly what the world already says would read
+     * as a change forever — and accept uses this question to tell "the world moved" from "the
+     * world already agrees", which is precisely the trap the note above records for sheets.
+     */
+    if (track === "scene") {
+      const before = sceneFields(live);
+      const after = sceneFields(proposed);
+      if (before === null || after === null) return true;
+      const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+      keys.delete("version");
+      return [...keys].some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    }
     if (
-      track === "scene" ||
       track === "story" ||
       track === "routing" ||
       track === "season" ||
@@ -260,6 +278,16 @@ export function changesAnything(path: string, live: string, proposed: string): b
     /* unreadable either side — fall through to the bytes, which already differ */
   }
   return true;
+}
+
+/**
+ * One scene file's fields in the one shape both arms can be compared in, or null when it is not
+ * a readable scene at all — which leaves the caller comparing bytes, as it does for anything
+ * else it cannot parse.
+ */
+function sceneFields(raw: string): Record<string, unknown> | null {
+  const projection = projectSceneRecord(SceneRecordSchema.parse(JSON.parse(raw)));
+  return projection.kind === "invalid" ? null : (projection.scene as unknown as Record<string, unknown>);
 }
 
 /** The revision stamp a canon entry's content carries — what addresses its history snapshot. */

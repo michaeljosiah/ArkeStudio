@@ -9,6 +9,8 @@ import {
   GraphSceneSchema,
   isGraphScene,
   linearizeSceneFlow,
+  migrateLegacyScene,
+  projectSceneRecord,
   resolveLegacySceneFlow,
   SceneRecordSchema,
   SceneSchema,
@@ -41,11 +43,8 @@ const legacy = (shots: number[]): Scene =>
     shots: shots.map(shot),
   });
 
-/** A valid graph scene built the same way migration will build one: by the legacy projection. */
-const graph = (shots: number[]): GraphScene => {
-  const { shots: _shots, ...base } = legacy(shots);
-  return GraphSceneSchema.parse({ ...base, flow: resolveLegacySceneFlow(legacy(shots)) });
-};
+/** A valid graph scene built the way the writer builds one — through the migration itself. */
+const graph = (shots: number[]): GraphScene => GraphSceneSchema.parse(migrateLegacyScene(legacy(shots)));
 
 const kinds = (findings: SceneFlowFinding[]) => findings.map((finding) => finding.kind);
 
@@ -492,6 +491,77 @@ describe("the legacy projection is the future migration, byte for byte (R-10, R-
   });
 });
 
+describe("the writer's record and the reader's projection (R-11, R-12; rollout step 2)", () => {
+  it("migration is the projection plus dropping the array it came from", () => {
+    const scene = legacy([1, 2, 3]);
+    const migrated = migrateLegacyScene(scene);
+    assert.ok(!("shots" in migrated), "a graph scene has no shots[] beside its flow (R-1)");
+    assert.deepEqual(migrated.flow, resolveLegacySceneFlow(scene), "and the flow is the projection, unchanged");
+    const { shots: _shots, ...base } = scene;
+    const { flow: _flow, ...carried } = migrated;
+    assert.deepEqual(carried, base, "every other field keeps its identity, owner, and value");
+    assert.deepEqual(GraphSceneSchema.parse(migrated), migrated, "and the result is strictly a graph scene");
+  });
+
+  it("is byte-identical however many times it is repeated (R-12)", () => {
+    const scene = legacy([7, 8]);
+    const once = JSON.stringify(migrateLegacyScene(scene));
+    assert.equal(once, JSON.stringify(migrateLegacyScene(scene)));
+    // And migrating what a migration produced, by way of its own projection, lands the same file.
+    const projected = projectSceneRecord(migrateLegacyScene(scene));
+    assert.ok(projected.kind === "scene");
+    assert.equal(JSON.stringify(migrateLegacyScene(projected.scene)), once);
+  });
+
+  it("migrates an empty scene into Entry straight to Exit, and back again", () => {
+    const migrated = migrateLegacyScene(legacy([]));
+    assert.deepEqual(validateSceneFlow(migrated.flow), []);
+    const projected = projectSceneRecord(migrated);
+    assert.ok(projected.kind === "scene");
+    assert.deepEqual(projected.scene.shots, []);
+  });
+
+  it("projects a graph scene back to the shape every consumer still reads", () => {
+    const scene = graph([4, 5, 6]);
+    const projected = projectSceneRecord(scene);
+    assert.ok(projected.kind === "scene");
+    assert.ok(!("flow" in projected.scene), "the projection is the legacy shape, not both at once");
+    assert.deepEqual(
+      projected.scene.shots.map((shot) => shot.id),
+      ["sh_4", "sh_5", "sh_6"],
+      "in canonical order, whatever order the nodes were stored in",
+    );
+    assert.deepEqual(projected.scene, legacy([4, 5, 6]), "and is the legacy scene it was migrated from");
+  });
+
+  it("hands a legacy scene straight back, without copying or reordering anything", () => {
+    const scene = legacy([1, 2]);
+    const projected = projectSceneRecord(scene);
+    assert.ok(projected.kind === "scene");
+    assert.equal(projected.scene, scene, "there is nothing to project");
+  });
+
+  it("projects a malformed graph to nothing at all, with the findings named (R-7, R-60)", () => {
+    const scene = graph([1, 2]);
+    scene.flow.edges[1]!.to.nodeId = "sfn_ghost";
+    const projected = projectSceneRecord(scene);
+    assert.ok(projected.kind === "invalid", "a broken graph never becomes a guessed array");
+    assert.deepEqual(kinds(projected.findings), ["dangling-endpoint"]);
+  });
+
+  it("does not care what order the nodes and edges were stored in (R-18)", () => {
+    const scene = graph([1, 2, 3]);
+    scene.flow.nodes.reverse();
+    scene.flow.edges.reverse();
+    const projected = projectSceneRecord(scene);
+    assert.ok(projected.kind === "scene");
+    assert.deepEqual(
+      projected.scene.shots.map((shot) => shot.id),
+      ["sh_1", "sh_2", "sh_3"],
+    );
+  });
+});
+
 describe("legacy fixtures linearise exactly as their arrays (T-4's read half)", () => {
   it("every scene fixture on disk agrees with itself through every read path", async () => {
     const worlds = fileURLToPath(new URL("../../../fixtures/worlds/", import.meta.url));
@@ -521,11 +591,10 @@ describe("legacy fixtures linearise exactly as their arrays (T-4's read half)", 
         `${file} must linearise exactly as its shots[]`,
       );
 
-      // The projection this fixture would migrate into is valid, strict, and walks identically.
+      // The record this fixture would migrate into is valid, strict, and walks identically.
       const flow = resolveLegacySceneFlow(scene);
       assert.deepEqual(validateSceneFlow(flow), [], `${file} projects to a valid linear graph`);
-      const { shots: _shots, ...base } = scene;
-      const migrated = GraphSceneSchema.parse({ ...base, flow });
+      const migrated = GraphSceneSchema.parse(migrateLegacyScene(scene));
       const graphSequence = linearizeSceneFlow(migrated);
       assert.ok(graphSequence.kind === "linear");
       assert.deepEqual(
