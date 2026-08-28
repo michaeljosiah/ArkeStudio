@@ -78,8 +78,9 @@ export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
  *
  * Derived from the providers it hosts rather than written beside them: a hand-kept string is how
  * one engine comes to be described in words no other screen uses, which is the drift R-62 exists
- * to prevent. `ENGINE_CAPABILITIES` in contracts kept its own spelling — `voice`, `images, video,
- * voice` — and none of those three is a word this vocabulary has.
+ * to prevent. The engine table in contracts kept its own spelling — `voice`, `images, video,
+ * voice` — and none of those three is a word this vocabulary has, so it is gone rather than
+ * left for the next caller to find.
  */
 export function engineCapabilityWords(engine: EngineId): string {
   const capabilities = [...new Set(ENGINE_PROVIDERS[engine].flatMap((p) => PROVIDERS[p].capabilities))];

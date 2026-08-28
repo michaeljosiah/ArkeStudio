@@ -41,13 +41,6 @@ export type ActivationState = z.infer<typeof ActivationStateSchema>;
 export const EngineIdSchema = z.enum(["comfyui", "ollama", "voxa"]);
 export type EngineId = z.infer<typeof EngineIdSchema>;
 
-/** What each engine is used for, in the same five capability words the two screens share. */
-export const ENGINE_CAPABILITIES: Record<EngineId, string> = {
-  comfyui: "images, video, voice",
-  ollama: "language",
-  voxa: "voice",
-};
-
 export const ENGINE_LABEL: Record<EngineId, string> = {
   comfyui: "ComfyUI",
   ollama: "Ollama",

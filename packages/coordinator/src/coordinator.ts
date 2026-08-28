@@ -4621,6 +4621,7 @@ export class Coordinator {
               disabled: state.models.disabled,
               recipes: state.comfyui?.recipes ?? [],
               comfyUiLocality: state.comfyui?.engine.locality,
+              gated: state.runtime?.models ?? [],
             }),
         );
         if (!result.ok) {

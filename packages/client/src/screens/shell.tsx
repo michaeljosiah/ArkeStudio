@@ -144,6 +144,7 @@ import {
   supportsVoiceUse,
   ulid,
   ENGINE_LABEL,
+  engineOfProvider,
   ENGINE_PROVIDERS,
   activationFor,
   comfyUiWeightsRecipeId,
@@ -2017,7 +2018,7 @@ function ProviderPane({ id }: { id: ProviderId }) {
             ? configured
               ? `this key does not unlock ${info.displayName}'s capabilities — test it above, or replace it`
               : `add a key above — ${info.displayName}'s models become switchable once it is connected`
-            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in Cloud AI, never re-routed for you"}
+            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in General, never re-routed for you"}
       </div>
     </div>
   );
@@ -2919,10 +2920,24 @@ export function SettingsGeneralScreen() {
    * `PROVIDERS.comfyui.local` is `true` for every recipe, so reading the flag would tell someone
    * their video drafts here while it renders on a box down the hall.
    */
+  /**
+   * What to call the thing a default comes from, which is not the same word on both halves.
+   *
+   * A keyed service is its own source and names itself. A local model's is the **engine**, which
+   * is what frame 112d draws and what Providers' rail is keyed on: `Voxa · this machine` rather
+   * than `Kokoro · this machine`, because the reader who wants to act on it goes to Voxa's pane.
+   */
+  const sourceOf = (model: ManifestModel): string => {
+    const engine = engineOfProvider(model.provider);
+    return engine === undefined ? PROVIDER_TABLE[model.provider].displayName : ENGINE_LABEL[engine];
+  };
+
   const runsOn = (model: ManifestModel): string => {
     if (!PROVIDER_TABLE[model.provider].local) return providerState(model.provider);
     const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === model.id);
-    const locality = gated?.locality ?? state?.app.comfyui?.engine.locality ?? "local";
+    const locality =
+      gated?.locality ??
+      (model.provider === "comfyui" ? (state?.app.comfyui?.engine.locality ?? "local") : "local");
     return locality === "remote" ? "another machine" : "this machine";
   };
   return (
@@ -2973,13 +2988,13 @@ export function SettingsGeneralScreen() {
                 local one (R-16a). Displayed rather than re-derived (R-63). */}
             {selectedModel && !stranded && (
               <span className="fy-set__state">
-                {PROVIDER_TABLE[selectedModel.provider].displayName} · {runsOn(selectedModel)} ·{" "}
+                {sourceOf(selectedModel)} · {runsOn(selectedModel)} ·{" "}
                 {modelCapabilityCopy(selectedModel)}
               </span>
             )}
             {stranded && selectedModel && (
               <span className="fy-set__state">
-                {PROVIDER_TABLE[selectedModel.provider].displayName} · {strandReason(state, selectedModel)}
+                {sourceOf(selectedModel)} · {strandReason(state, selectedModel)}
               </span>
             )}
             <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
@@ -2994,13 +3009,6 @@ export function SettingsGeneralScreen() {
           on Harness
         </button>
         <span style={{ flex: 1 }} />
-      </div>
-      {/* The way out, at the foot (40d): every repair this screen can suggest — turn a model back
-          on, find a key for one, start an engine — is made on the Providers tab. */}
-      <div className="fy-set__actions">
-        <Button variant="secondary" onClick={() => navigate("/settings/providers")}>
-          Open Providers
-        </Button>
       </div>
 
       {drift.length > 0 && (

@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import {
-  PROVIDERS,
   AppSettingsSchema,
   newId,
   type AppSettings,
@@ -317,19 +316,16 @@ export function routingFaults(settings: AppSettings, manifest: ModelManifest): R
       });
     }
   }
-  // A local model surviving in `routing` means the move at start-up did not happen — a locked
-  // settings file, most likely. Stated rather than swallowed: it is still in force at dispatch
-  // and Cloud AI can no longer show or change it, which is exactly the outcome D21 refuses.
-  for (const [capability, modelId] of Object.entries(settings.routing) as Array<[Capability, string]>) {
-    const model = manifest.models.find((m) => m.id === modelId);
-    if (model && PROVIDERS[model.provider].local) {
-      faults.push({
-        capability,
-        modelId,
-        reason: `${model.displayName} runs on this machine and could not be moved off this screen — it is still in force at dispatch`,
-      });
-    }
-  }
+  // A local model in `routing` used to be a fault in itself: SPEC-033 R-61 kept them off the
+  // screen, so one surviving here meant R-66's move had failed and the setting was in force,
+  // invisible and unchangeable. SPEC-034 R-15 makes it an ordinary default — General lists both
+  // halves — so the loop that flagged it went, and with it a warning that would otherwise have
+  // fired on this feature's own success path, above the row that had just accepted the choice.
+  //
+  // What a local default can still be is *stranded*, and that is the same two faults above: its
+  // model left the manifest, or somebody switched it off. A runtime that never started is
+  // neither, and is not visible from here — which is why R-15a puts the eligibility guard on the
+  // write rather than expecting this function to grow one.
   return faults;
 }
 

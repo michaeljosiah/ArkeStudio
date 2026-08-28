@@ -275,8 +275,9 @@ export function gateLocalRuntimes(
  * deriving this separately is how a screen and a write come to disagree about one model, so
  * neither derives it.
  *
- * Fit is an input, not a rival: a refusing verdict is the gate's, read from `runtime`. This
- * answers *can it run now*, which a model can fail while fitting this machine perfectly.
+ * Fit is an input, not a rival: a refusing verdict is the gate's, and this reads it rather than
+ * recomputing one. A model can fail this while fitting the machine perfectly — an engine that
+ * never started is not a fit question — and can fit nothing while being perfectly installed.
  */
 export interface EligibilityInputs {
   /** Provider connection state, for the capabilities a credential actually unlocks. */
@@ -287,6 +288,11 @@ export interface EligibilityInputs {
   readonly recipes: readonly RecipeReadiness[];
   /** Where the resolved ComfyUI engine runs, which changes what an unknown recipe means. */
   readonly comfyUiLocality: "local" | "remote" | undefined;
+  /**
+   * The gate's rows, for the fit verdict. Absent where nothing has probed, which R-28 offers
+   * rather than withholds — an unmeasured machine is not a refusing one.
+   */
+  readonly gated?: readonly { readonly modelId: string; readonly fit?: FitVerdict }[];
 }
 
 export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): boolean {
@@ -294,7 +300,21 @@ export function modelEligible(model: ManifestModel, inputs: EligibilityInputs): 
   const unlocked = new Set(
     deriveCapabilityAvailability([...inputs.providers]).find((a) => a.capability === model.capability)?.via ?? [],
   );
-  if (!unlocked.has(model.provider) && PROVIDERS[model.provider].local !== true) return false;
+  const local = PROVIDERS[model.provider].local === true;
+  if (!unlocked.has(model.provider) && !local) return false;
+  // A machine that cannot run it cannot be told to. Only a *measured* refusal counts: `unknown`
+  // is offered rather than withheld (SPEC-033 R-28), and `runs-slowly` is a warning, not a bar.
+  const fit = inputs.gated?.find((row) => row.modelId === model.id)?.fit;
+  if (fit === "insufficient" || fit === "unsupported") return false;
+  // A local engine that answered and failed refuses everything it hosts. This is the case
+  // SPEC-034 R-15a names — a Kokoro runtime that never started must not become a default — and
+  // it is invisible to the credential check above, because a local provider takes no credential.
+  // `untested` is not a refusal: nothing has asked yet, and R-28's instinct applies to engines
+  // as much as to hardware.
+  if (local) {
+    const status = inputs.providers.find((p) => p.id === model.provider);
+    if (status?.validation === "invalid" || (status?.fault ?? null) !== null) return false;
+  }
   // A local recipe below readiness is not usable — it stays visible in the picker as a disabled
   // row with its measured reason, and coordinator admission refuses it regardless (SPEC-021
   // R-16). Unknown image/video hardware still runs (D15); cloned voice stays off until this

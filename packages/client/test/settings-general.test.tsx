@@ -12,16 +12,16 @@ import { CAPABILITY_ROWS } from "../src/screens/settings-parts.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Settings · Cloud AI (SPEC-033 §1.10). Which remote model runs each capability.
+ * Settings · General (SPEC-034 §1.6). Which model runs each capability by default.
  *
- * Two boundaries are load-bearing and both are checkable by enumerating what rendered: no local
- * model appears here in any state, and every capability word is the word Local AI uses. The
- * second is what makes the split read as two halves of one question rather than as an arbitrary
- * line — which is why the duplication across the two screens is deliberate.
+ * It was Cloud AI, and its defining rule was that no local model appeared here in any state.
+ * That rule is what changes: SPEC-034 R-15 lists both halves, because the defect R-61 answered
+ * was never *a local model appeared* — it was *a model that could not run was selectable*, and
+ * eligibility refuses that directly, in the picker and again in the write.
  *
- * The two screens draw different subsets of one table. Cloud AI omits the capabilities with no
- * cloud routing default; Local AI omits the ones with no local engine. What they share is the
- * vocabulary, not the row list.
+ * The rows are still a subset of the shared capability table: `voice-stt` and `voice-clone` have
+ * no routing default, and `llm` left with R-17 because it wrote a setting nothing read. What
+ * every surface shares is the vocabulary, not the row list.
  */
 
 const LOCAL_LLM: ManifestModel = {
@@ -185,7 +185,7 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     let at = 0;
     for (const row of routed) {
       const found = text.indexOf(row.label, at);
-      assert.notEqual(found, -1, `${row.label} is missing from Cloud AI`);
+      assert.notEqual(found, -1, `${row.label} is missing from General`);
       at = found;
     }
     // The retired vocabulary: ours rather than a creator's.
@@ -214,8 +214,10 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
       ),
     );
     assert.match(text, new RegExp(`${PROVIDERS[CLOUD_VIDEO.provider].displayName} · connected`));
-    // The remedy is a route to Providers, never a key field on this screen.
-    assert.match(text, /Open Providers/);
+    // The remedy is Providers, and it is reached from the rail rather than from a button at the
+    // foot: SPEC-034 R-4 removes that button because there is no longer anywhere else to route
+    // to, and frame 112d draws none.
+    assert.doesNotMatch(text, /Open Providers/);
     assert.doesNotMatch(text, /sk-/);
   });
 

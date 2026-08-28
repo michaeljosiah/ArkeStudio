@@ -142,3 +142,32 @@ describe("the routing write refuses what cannot run (SPEC-034 R-15a)", () => {
     assert.equal(off.ok, false);
   });
 });
+
+describe("a local default is an ordinary default, not a fault (SPEC-034 R-15)", () => {
+  it("raises nothing for a local model in routing", async () => {
+    // SPEC-033 R-61 kept them off the screen, so one surviving in `routing` meant R-66's move had
+    // failed and the setting was in force, invisible and unchangeable — a fault worth stating.
+    // R-15 makes it an ordinary choice, and the fault that flagged it would otherwise have fired
+    // on this feature's own success path, above the row that had just accepted it.
+    const file = await settingsFile();
+    await file.setRoutingDefault("video", "comfyui-draft-video", MANIFEST, true);
+    assert.deepEqual(routingFaults(await file.load(), MANIFEST), []);
+  });
+
+  it("raises nothing after the migration restores one", async () => {
+    const file = await settingsFile();
+    await seed(file, { clearedLocalRouting: { video: "comfyui-draft-video" }, routing: {} });
+    assert.deepEqual(routingFaults(await file.load(), MANIFEST), []);
+  });
+
+  it("still strands one that was switched off, or that left the manifest", async () => {
+    // The two ways a default can go bad are unchanged. A runtime that never started is neither,
+    // and is not visible from here — which is why R-15a guards the write instead.
+    const file = await settingsFile();
+    await file.setRoutingDefault("video", "comfyui-draft-video", MANIFEST, true);
+    await file.setModelEnabled("comfyui-draft-video", false);
+    const faults = routingFaults(await file.load(), MANIFEST);
+    assert.equal(faults.length, 1);
+    assert.match(faults[0]!.reason, /switched off in Providers/);
+  });
+});

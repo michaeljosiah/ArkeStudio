@@ -4,8 +4,10 @@ import {
   ENGINE_PROVIDERS,
   EngineIdSchema,
   engineOfProvider,
+  modelEligible,
   PROVIDERS,
   type EngineId,
+  type ManifestModel,
   type ProviderId,
 } from "../src/index.js";
 
@@ -69,5 +71,48 @@ describe("which engine hosts which provider (SPEC-034 R-7)", () => {
         assert.equal(engineOfProvider(provider), engine as EngineId);
       }
     }
+  });
+});
+
+describe("eligibility refuses what cannot run now (SPEC-034 R-15a)", () => {
+  const KOKORO: ManifestModel = {
+    id: "kokoro-82m",
+    provider: "kokoro",
+    capability: "voice-tts",
+    displayName: "Kokoro 82M",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" },
+  };
+  const base = { providers: [], disabled: [], recipes: [], comfyUiLocality: undefined } as const;
+
+  it("admits a local model whose engine has not been asked yet (R-28)", () => {
+    // `untested` is not a refusal: nothing has asked, and an unmeasured machine is offered
+    // rather than withheld.
+    assert.equal(modelEligible(KOKORO, base), true);
+  });
+
+  it("refuses one whose engine answered and failed", () => {
+    // The case R-15a names. A local provider takes no credential, so the check above cannot see
+    // this — and `routingFaults` reads settings and the manifest, so it cannot see it either.
+    const down = [{ id: "kokoro" as const, configured: false, validation: "invalid" as const, probes: [], fault: null }];
+    assert.equal(modelEligible(KOKORO, { ...base, providers: down }), false);
+  });
+
+  it("refuses one this machine measurably cannot run", () => {
+    for (const fit of ["insufficient", "unsupported"] as const) {
+      assert.equal(modelEligible(KOKORO, { ...base, gated: [{ modelId: KOKORO.id, fit }] }), false, fit);
+    }
+  });
+
+  it("admits one that merely runs slowly, or that nothing has measured", () => {
+    // `runs slowly` is a warning, not a bar, and `unknown` is R-28's whole point.
+    for (const fit of ["runs-well", "runs-slowly", "unknown"] as const) {
+      assert.equal(modelEligible(KOKORO, { ...base, gated: [{ modelId: KOKORO.id, fit }] }), true, fit);
+    }
+  });
+
+  it("refuses a switched-off model whatever else is true", () => {
+    assert.equal(modelEligible(KOKORO, { ...base, disabled: [KOKORO.id] }), false);
   });
 });

@@ -127,6 +127,7 @@ export function eligibilityInputs(state: ReturnType<typeof useStore>["state"]): 
     disabled: state?.app.models.disabled ?? [],
     recipes: state?.app.comfyui?.recipes ?? [],
     comfyUiLocality: state?.app.comfyui?.engine.locality,
+    gated: state?.app.runtime?.models ?? [],
   };
 }
 
