@@ -5014,49 +5014,34 @@ export function NewProductionScreen() {
    * uses it, so nothing typed is ever stranded behind a Back.
    */
   return (
-    <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
-      <ProductionDialogBackdrop world={world} />
+    /*
+     * A page, and dressed like every other page in the world (the eyebrow/title/lede hero, the
+     * page background). It briefly wore the creation DIALOG's treatment — the world's key art
+     * blurred behind a panel — which on a full page read as a grey band that stopped partway
+     * down instead of a backdrop. The blurred art belongs to step two, which is still a dialog.
+     */
+    <div data-screen="new-production">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">Create something new</div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          What should this world become next?
+        </h1>
+        {/* Wide enough to hold the sentence on one line: broken over two it reads as a paragraph
+            of instructions rather than the one aside it is. */}
+        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 640 }}>
+          Choose a card that feels closest. The format can become more specific afterwards.
+        </p>
+      </div>
       <div
         style={{
-          position: "relative",
-          margin: "auto",
           display: "grid",
-          justifyItems: "center",
-          gap: 0,
+          gridTemplateColumns: "repeat(3, minmax(0, 372px))",
+          justifyContent: "center",
+          gap: 30,
+          // The rhythm .fy-prodcards uses between a hero and the row under it.
+          padding: "40px 24px 0",
         }}
       >
-        <div className="fy-mono" style={{ letterSpacing: "0.16em" }}>
-          CREATE SOMETHING NEW
-        </div>
-        <div
-          style={{
-            font: "650 40px/1.15 var(--font-sans)",
-            letterSpacing: "-0.025em",
-            marginTop: 15,
-            textAlign: "center",
-          }}
-        >
-          What should this world become next?
-        </div>
-        <div
-          style={{
-            font: "400 14px/1.6 var(--font-sans)",
-            color: "var(--muted-foreground)",
-            marginTop: 13,
-            textAlign: "center",
-          }}
-        >
-          Choose a card that feels closest. The format can become more specific afterwards.
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 372px))",
-            justifyContent: "center",
-            gap: 30,
-            marginTop: 44,
-          }}
-        >
           {DOOR_CHOICES.map((d, i) => (
             <button
               key={d.id}
@@ -5098,14 +5083,16 @@ export function NewProductionScreen() {
             </button>
           ))}
         </div>
-        {failure && (
-          <div style={{ marginTop: 24, width: "100%", maxWidth: 560 }}>
-            <Callout tone="danger" title="Not created">
-              {failure}
-            </Callout>
-          </div>
-        )}
-      </div>
+      {failure && (
+        <div style={{ margin: "24px auto 0", width: "100%", maxWidth: 560 }}>
+          <Callout tone="danger" title="Not created">
+            {failure}
+          </Callout>
+        </div>
+      )}
+      {/* The row is the last thing on the page, so it needs the bottom the hero gives the top —
+          .fy-prodcards carries its own 46px and this row is built from scratch. */}
+      <div style={{ height: 46 }} />
     </div>
   );
 }

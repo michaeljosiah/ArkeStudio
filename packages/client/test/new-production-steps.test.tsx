@@ -75,9 +75,19 @@ describe("the door is three pictures and nothing else (design turn 113)", () => 
     assert.doesNotMatch(html, /src="\/doors/, "never a leading slash");
   });
 
-  it("the world stands behind the decision, blurred back", () => {
+  /**
+   * The door is a page, so it is dressed like one: the world's hero, the page background. It
+   * briefly wore the creation dialog's treatment — the key art blurred behind a panel — which
+   * on a full page reads as a grey band that stops partway down rather than as a backdrop.
+   * That treatment still belongs to step two, which is still a dialog.
+   */
+  it("is dressed like every other page in the world, not like a dialog", () => {
     const html = render(NEW);
-    assert.match(html, /blur\(7px\) saturate\(\.8\)/, "the key art is the backdrop, not a repeated line of text");
+    assert.doesNotMatch(html, /blur\(7px\) saturate\(\.8\)/, "no dialog backdrop on a page");
+    assert.doesNotMatch(html, /fy-dialogwrap/, "and no dialog wrapper");
+    assert.match(html, /fy-hero__title/, "the same hero every other screen opens with");
+    assert.match(html, /fy-hero__eyebrow/);
+    assert.match(html, /fy-hero__lede/);
   });
 });
 
