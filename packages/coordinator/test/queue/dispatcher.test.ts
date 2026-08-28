@@ -1657,11 +1657,12 @@ describe("cancellation (R-14, R-15, D10)", () => {
     const job = await h.queue.enqueue(INPUT);
     await until(() => foldedJob(h, job.id)?.status === "submitting", "the job to fold to submitting", FOLD_MS);
     await h.queue.cancel(job.id);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // cancel() resolves with the job terminal; only the racing submit-rejection's ledger
+    // append can still be in flight, so that is the condition to wait on — not a sleep.
+    await until(() => h.ledger.entries.at(-1)?.outcome === "cancelled", "the cancellation to reach the ledger", FOLD_MS);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
     assert.equal(submits, 1);
-    assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
 

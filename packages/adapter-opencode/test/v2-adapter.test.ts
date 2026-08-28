@@ -13,11 +13,18 @@ import { meetsV2Gate, discoverOpenCode2, discoverPreferredHarness } from "../src
 import { StubOpenCodeV2, STUB_V2_PASSWORD } from "./helpers/stub-server-v2.js";
 import { until } from "./wait.js";
 
+// 30s: the stub answers over loopback in-process, but a starved shard stalls the event loop
+// for seconds at a time — the settle tier from the coordinator's supervisor.test.ts note.
+const SETTLE_MS = 30_000;
+
 /** Wait until `predicate` has seen enough events, or fail loudly with what arrived. */
 async function collect(
   adapter: OpenCodeV2Adapter,
   isDone: (events: HarnessEvent[]) => boolean,
-  timeoutMs = 5_000,
+  // The deadline starts at call time, and several tests create the collect promise before
+  // gating on 30s waits — a smaller default here would fire mid-gate and abort the stream
+  // while those budgets were still legitimately running.
+  timeoutMs = SETTLE_MS,
 ): Promise<HarnessEvent[]> {
   const events: HarnessEvent[] = [];
   const abort = new AbortController();
@@ -33,10 +40,6 @@ async function collect(
   }
   return events;
 }
-
-// 30s: the stub answers over loopback in-process, but a starved shard stalls the event loop
-// for seconds at a time — the settle tier from the coordinator's supervisor.test.ts note.
-const SETTLE_MS = 30_000;
 
 /**
  * Wait until the pump's connect-time resync has run (its permission GET is the last leg).
