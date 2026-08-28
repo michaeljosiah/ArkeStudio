@@ -250,6 +250,148 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
 };
 
 
+/** 24 fps; an H3 latent length sits on the model's 17k+5 frame grid, so the offered seconds map to exactly these. */
+export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 243, "15": 362 };
+
+/**
+ * Local · H3 Video — MiniMax H3 FL2VA (open-sourced 2026-08-03) with Alibaba-lineage 8-step turbo
+ * distillation, on core nodes alone (D11 holds: the PDD variant of the acceleration LoRA needs a
+ * custom node, so this recipe ships the Comfy-Org repackaged turbo LoRA that core loaders take).
+ * The first recipe whose output carries sound: H3 generates video and stereo audio in one pass,
+ * and `CreateVideo` muxes both into the same mp4 the arrival path already accepts.
+ *
+ * The graph was read off a running v0.33.1 engine's `/object_info` (2026-08-28), not from
+ * documentation, because the t2v assembly is not where documentation points: `MiniMaxH3ImageToVideo`
+ * takes the prompt as a STRING (with the clip and video VAE) and emits the positive conditioning
+ * and the joint AV latent itself. With `first_frame`/`last_frame` left unbound it IS the
+ * text-to-video graph — the frames stay deliberately unbound in v1 (R-2), the same doctrine as the
+ * Wan draft's unbound start image. `ConditioningZeroOut` fills the sampler's required negative
+ * slot; at the distilled cfg 1.0 it is never evaluated. Euler, 8 steps, cfg 1.0 and sigma shift
+ * 12/3 are the distillation's own contract (guidance is baked into the adapter), and 12/3 are the
+ * `MiniMaxH3SigmaShift` node's own defaults.
+ *
+ * File choices follow the publisher's guidance for this hardware class: `pruned_int8_convrot`
+ * diffusion (adaLN tables precomputed, cu130 kernels) and the `nvfp4_awq` text encoder (no
+ * Blackwell requirement). Every digest is the Hugging Face LFS oid — the sha256 of the exact bytes
+ * served — read 2026-08-28. The weights are under the MiniMax H3 Community License, whose
+ * territorial terms are under review; the catalogue records that fact rather than deciding it.
+ *
+ * Verified end to end on 2026-08-28: this exact graph produced 5.17s of 864×480 video with native
+ * stereo audio on the reference RTX 3080 in 14m53s, fetched back through the same paths every
+ * other recipe uses.
+ */
+const H3_VIDEO: ComfyUiRecipe = {
+  id: "comfyui-h3-video",
+  capability: "video",
+  displayName: "Local · H3 Video",
+  recipeVersion: 1,
+  params: {
+    prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
+    seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
+    durationSec: { kind: "number-enum", values: [5, 10, 15], bind: [] },
+    aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
+    length: { kind: "int", internal: true, required: true, min: 5, max: 362, bind: [["7", "length"]] },
+    width: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "width"]] },
+    height: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "height"]] },
+  },
+  graph: {
+    "1": {
+      class_type: "UNETLoader",
+      inputs: { unet_name: "minimax_h3_fl2va_pruned_int8_convrot.safetensors", weight_dtype: "default" },
+    },
+    "2": {
+      class_type: "LoraLoaderModelOnly",
+      inputs: {
+        model: ["1", 0],
+        lora_name: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        strength_model: 1.0,
+      },
+    },
+    "3": { class_type: "MiniMaxH3SigmaShift", inputs: { model: ["2", 0], shift_video: 12.0, shift_audio: 3.0 } },
+    "4": {
+      class_type: "CLIPLoader",
+      inputs: { clip_name: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", type: "minimax", device: "default" },
+    },
+    "5": { class_type: "VAELoader", inputs: { vae_name: "minimax_h3_video_vae_fp16.safetensors" } },
+    "6": { class_type: "VAELoader", inputs: { vae_name: "minimax_h3_audio_vae_fp32.safetensors" } },
+    "7": {
+      class_type: "MiniMaxH3ImageToVideo",
+      inputs: { clip: ["4", 0], vae: ["5", 0], prompt: "", width: 864, height: 480, length: 124 },
+    },
+    "8": { class_type: "ConditioningZeroOut", inputs: { conditioning: ["7", 0] } },
+    "9": {
+      class_type: "KSampler",
+      inputs: {
+        seed: 0,
+        steps: 8,
+        cfg: 1.0,
+        sampler_name: "euler",
+        scheduler: "simple",
+        denoise: 1,
+        model: ["3", 0],
+        positive: ["7", 0],
+        negative: ["8", 0],
+        latent_image: ["7", 1],
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["5", 0] } },
+    "11": { class_type: "VAEDecodeAudio", inputs: { samples: ["9", 0], vae: ["6", 0] } },
+    "12": { class_type: "CreateVideo", inputs: { images: ["10", 0], fps: 24, audio: ["11", 0] } },
+    "13": {
+      class_type: "SaveVideo",
+      inputs: { video: ["12", 0], filename_prefix: "arke", format: "mp4", codec: "h264" },
+    },
+  },
+  outputNode: "13",
+  requires: {
+    checkpoints: [
+      {
+        file: "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        sha256: "e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a",
+        sizeMb: 20000,
+        url: `${HF}/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors`,
+      },
+      {
+        file: "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+        sha256: "35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6",
+        sizeMb: 14961,
+        url: `${HF}/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors`,
+      },
+      {
+        file: "vae/minimax_h3_video_vae_fp16.safetensors",
+        sha256: "7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522",
+        sizeMb: 4967,
+        url: `${HF}/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors`,
+      },
+      {
+        file: "vae/minimax_h3_audio_vae_fp32.safetensors",
+        sha256: "8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48",
+        sizeMb: 577,
+        url: `${HF}/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors`,
+      },
+      {
+        file: "loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        sha256: "2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e",
+        sizeMb: 1866,
+        url: `${HF}/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors`,
+      },
+    ],
+    customNodes: [],
+  },
+  hardware: {
+    // The gate reads TOTAL VRAM (SPEC-022 §2.6's lesson), and 10 GB is what was actually proven:
+    // the run below completed with ~6 GB of the card already held by other applications, streaming
+    // the 20 GB transformer through dynamic VRAM loading. Community reports put 8 GB cards through
+    // reduced runs, but nothing below 10 GB was measured here, so nothing below 10 GB is claimed.
+    minVramMb: 10000,
+    recommendedVramMb: 24000,
+    floorSource:
+      "measured through ComfyUI on Arke reference hardware 2026-08-28: RTX 3080 10 GB, ~6 GB already in use by " +
+      "other applications, 864×480×124 frames at 8 steps completed in 14m53s with peak card usage 9699 MB and " +
+      "system RAM bottoming at 933 MB free of 32 GB — 32 GB system RAM is effectively part of this floor",
+  },
+};
+
 /**
  * Local · Cloned Voice — IndexTTS 2.5 through TTS-Audio-Suite (SPEC-022).
  *
@@ -407,7 +549,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -416,6 +558,11 @@ export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
 /** Seconds → Wan frame count, for the client's derivation. Exported for the tests' arithmetic. */
 export function wanFramesForSeconds(seconds: number): number | null {
   return WAN_FRAMES_BY_SECONDS[String(seconds)] ?? null;
+}
+
+/** Seconds → H3 frame count (17k+5 at 24 fps), for the client's derivation. */
+export function h3FramesForSeconds(seconds: number): number | null {
+  return H3_FRAMES_BY_SECONDS[String(seconds)] ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -573,6 +720,29 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
   "9:16": { width: 704, height: 1280 },
 };
 
+/**
+ * The verified 480p-class sizes, not the node's 1344×768 native default: the floor above was
+ * measured at exactly these, and a size nobody has run is a promise nobody has kept. Raise them
+ * from a measured run on bigger hardware, never from the node's defaults.
+ */
+export const H3_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  "16:9": { width: 864, height: 480 },
+  "9:16": { width: 480, height: 864 },
+};
+
+/**
+ * Which tables derive a video recipe's internal params (frames, pixels) from the caller's chosen
+ * seconds and aspect. Keyed by recipe id because the derivation is recipe arithmetic — Wan's 4k+1
+ * against H3's 17k+5 — and the client dispatching them should hold no model names of its own.
+ */
+export const VIDEO_DERIVATIONS: Record<
+  string,
+  { dimensions: Record<string, { width: number; height: number }>; framesBySeconds: Record<string, number> }
+> = {
+  [DRAFT_VIDEO.id]: { dimensions: WAN_DIMENSIONS, framesBySeconds: WAN_FRAMES_BY_SECONDS },
+  [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
+};
+
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
   {
     id: CLONED_VOICE.id,
@@ -621,6 +791,25 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     },
     pricing: { kind: "unmetered" },
     requires: { vramMb: DRAFT_VIDEO.hardware.minVramMb },
+  },
+  {
+    id: H3_VIDEO.id,
+    provider: "comfyui",
+    capability: "video",
+    displayName: H3_VIDEO.displayName,
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {
+      maxPromptChars: 2000,
+      maxDurationSec: 15,
+      // Seconds → seconds, exactly as the wan row: the wire word is the number itself and the
+      // client derives the 17k+5 frame count from it (h3FramesForSeconds).
+      durations: { "5": "5", "10": "10", "15": "15" },
+      durationWire: "number",
+      resolutions: ["480p"],
+      aspects: Object.keys(H3_DIMENSIONS),
+    },
+    pricing: { kind: "unmetered" },
+    requires: { vramMb: H3_VIDEO.hardware.minVramMb, diskMb: 42371 },
   },
 ];
 
