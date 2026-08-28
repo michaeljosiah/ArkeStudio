@@ -6,7 +6,7 @@ import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
-import { RuntimeHead, RuntimeSection, TONE_CLASS } from "./settings-parts.js";
+import { CAPABILITY_LABEL, CAPABILITY_ROWS, RuntimeHead, RuntimeSection, TONE_CLASS } from "./settings-parts.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -1493,7 +1493,7 @@ export function SettingsLayout() {
           </div>
         )}
         <div className="fy-scrim__wash" />
-        <div className="fy-scrim__center">
+        <div className="fy-scrim__center fy-scrim__center--flush">
           <div className="fy-settings">
             <div className="fy-settings__head">
               <div style={{ flex: 1 }}>
@@ -1578,24 +1578,6 @@ function ProbeChips({ status }: { status: ProviderStatus | undefined }) {
     </div>
   );
 }
-
-/**
- * One capability vocabulary, shared with Local AI (SPEC-033 R-62, R-89).
- *
- * `Clips`, `Frames & stills`, `Score & songs` and `Direct LLM work` are retired. They were our
- * words rather than a creator's, and a capability named differently on the two screens is what
- * stops the local/cloud split reading as two halves of one question — which is the whole reason
- * the duplication across them is deliberate rather than sloppy.
- */
-const CAPABILITY_LABEL: Record<Capability, string> = {
-  image: "Images",
-  video: "Video",
-  music: "Music",
-  llm: "Language",
-  "voice-tts": "Voice",
-  "voice-clone": "Voice cloning",
-  "voice-stt": "Dictation",
-};
 
 /**
  * A provider whose credential is not ours to hold (issue 137). There is no key to paste: the
@@ -2015,7 +1997,7 @@ export function SettingsProvidersScreen() {
   const [selected, setSelected] = useState<ProviderId | null>(null);
   const current = selected ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
   return (
-    <div data-screen="settings-providers" className="fy-set">
+    <div data-screen="settings-providers" className="fy-set fy-set--providers">
       <div className="fy-prov">
         <div className="fy-prov__rail" role="tablist" aria-label="Providers">
           {KEYED_PROVIDERS.map((p) => {
@@ -2686,10 +2668,16 @@ function HarnessPane({
 }
 
 /**
- * The five, in the order Local AI states them (R-47, R-89). The same words on both screens, in
- * the same sequence, because the symmetry is what makes the split legible rather than arbitrary.
+ * The capabilities a cloud default routes, in the order Local AI states them (R-47, R-89). The
+ * same words on both screens, in the same sequence, because the symmetry is what makes the split
+ * legible rather than arbitrary.
+ *
+ * Not every capability Local AI draws: `voice-stt` and `voice-clone` have no routing default, and
+ * a row here means a model somebody picks. The order is the rows' order, filtered.
  */
-const ROUTED_CAPABILITIES: readonly Capability[] = ["image", "video", "voice-tts", "music", "llm"];
+const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row) =>
+  row.capabilities.filter((c) => c === "image" || c === "video" || c === "voice-tts" || c === "music" || c === "llm"),
+);
 
 /**
  * Settings · Cloud AI (SPEC-033 §1.10). Which remote model runs each capability.

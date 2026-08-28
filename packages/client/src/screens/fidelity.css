@@ -2373,17 +2373,30 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   padding: 24px;
   overflow-y: auto;
 }
+/* For a child sized as a percentage of this box, the padding comes off the percentage — 80% of
+   the window measures 80% of the window minus 48px, which is not what 80% was asked to mean. The
+   modifier drops it; the child carries its own gap to the edge in a max-* instead. The dialogs
+   that centre here at a fixed max-width keep the padding, which is the only thing holding them
+   off the edge on a narrow window. */
+.fy-scrim__center--flush { padding: 0; }
 /*
- * 982px, not the canvas's declared 920.
+ * 80% of the window, both ways.
  *
- * The design canvas is content-box and this app resets everything to border-box, so a width read
- * off the canvas source is a *content* width and arrives here 60px of padding and 2px of border
- * short. 920 + 30 + 30 + 1 + 1 is what the canvas actually renders, and what the pane inside
- * needs in order to hold the provider list and its detail at the sizes 40a draws them.
+ * It was 982px wide and as tall as its content, which is what the canvas draws — and the canvas
+ * draws one screen at 1360×850, not the window somebody actually runs. On a real display the
+ * fixed width left the master-and-detail panes cramped while most of the screen sat empty behind
+ * the scrim. A proportion follows the window; a pixel width only ever suits one.
+ *
+ * A column, so the body takes whatever the head leaves instead of every pane inside guessing a
+ * viewport fraction of its own.
  */
 .fy-settings {
-  width: 982px;
-  max-width: 100%;
+  width: 80%;
+  height: 80%;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
   background: var(--background);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -2408,11 +2421,12 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   transition: var(--transition-control);
 }
 .fy-settings__close:hover { background: var(--accent); color: var(--foreground); }
-/* The canvas fixes this at 624px on an 850px frame (40a); the cap stays viewport-relative so a
-   short window still fits, but it no longer stops 64px short of the design on a tall one. */
-.fy-settings__body { display: flex; gap: 24px; margin-top: 18px; min-height: 470px; max-height: min(624px, 73vh); }
-/* 177px = the canvas's 160px of tab plus its 16px gutter and 1px rule; see .fy-settings above on
-   why every canvas width needs its padding and border added back here. */
+/* No height of its own: the panel is 80% of the window and the body is what is left of it after
+   the head. The min-height:0 is what lets the pane inside scroll rather than push the panel. */
+.fy-settings__body { display: flex; gap: 24px; margin-top: 18px; flex: 1; min-height: 0; }
+/* 177px = the canvas's 160px of tab plus its 16px gutter and 1px rule. A canvas width is a
+   content width — the canvas is content-box and this app is border-box — so padding and border
+   are added back before a number read off the design is used here. */
 .fy-settings__rail {
   width: 177px;
   flex: none;
@@ -2436,7 +2450,19 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-settings__tab:hover { background: var(--accent); color: var(--foreground); }
 .fy-settings__tab--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-settings__version { font: 400 9.5px var(--font-mono); color: var(--neutral-400); padding: 0 12px 4px; }
-.fy-settings__pane { flex: 1; min-width: 0; overflow-y: auto; display: grid; gap: var(--space-4); align-content: start; }
+/* The gutter is the scrollbar's, not decoration: without it a status dot and a size sit under the
+   bar. `stable` reserves it on every tab, so switching to a pane that does not scroll does not
+   shift the content 14px sideways. */
+.fy-settings__pane {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 14px;
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
 
 /*
  * Inside the panes. The prototype settles every setting into the same compact row — a name, a
@@ -2585,6 +2611,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* Local runtime fills its pane and scrolls inside the detail (turn 75), the way the appearance
    pane stretches so its swatches can sit at the foot. */
 .fy-settings__pane:has(.fy-set--runtime) { align-content: stretch; }
+.fy-settings__pane:has(.fy-set--providers) { align-content: stretch; }
 .fy-settings__pane:has(.fy-set--appearance) { align-content: stretch; }
 .fy-set--appearance { display: flex; flex-direction: column; }
 .fy-themeswatches { display: flex; gap: 12px; margin-top: auto; padding-top: 18px; }
@@ -2777,13 +2804,18 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
    the two panes that carry one share these declarations rather than restating them — a settings
    rail that drifted 2px between tabs would be visible on the switch between them. A flat list of every provider's every model was the alternative, and it
    put nine unrelated switches under one heading with nothing saying which key reached which. */
-/* overflow:hidden is load-bearing: without it a long model list grows the pane past max-height
+/* overflow:hidden is load-bearing: without it a long model list grows the pane past its height
    and the sections below are drawn over it. */
-.fy-prov { display: flex; min-height: 300px; max-height: 46vh; overflow: hidden; }
+.fy-prov { display: flex; min-height: 300px; overflow: hidden; }
+/* It used to cap itself at 46vh, which was about the whole panel when the panel was content-tall.
+   At 80% of the window that cap left a third of the pane empty under the model list. Same shape
+   as .fy-set--runtime: the screen takes the pane, and the scroll lives in the detail. */
+.fy-set--providers { display: flex; flex-direction: column; min-height: 0; }
+.fy-set--providers .fy-prov { flex: 1; min-height: 0; }
 /*
- * Local runtime, master and detail (design turn 75). Unlike .fy-prov it is the whole pane, so it
- * takes the settings body's full height instead of a 46vh cap, and the scroll lives in the detail.
- * That is what stops the settings panel scrolling as a whole: the pane no longer grows.
+ * Local runtime, master and detail (design turn 75). It is the whole pane, taking the settings
+ * body's full height with the scroll in the detail — which is what stops the settings panel
+ * scrolling as a whole: the pane no longer grows. .fy-set--providers above is now the same shape.
  */
 .fy-set--runtime { display: flex; flex-direction: column; min-height: 0; }
 .fy-rt { display: flex; flex: 1; min-height: 0; overflow: hidden; }

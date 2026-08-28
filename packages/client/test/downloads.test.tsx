@@ -100,11 +100,17 @@ function render(path: string, state: ClientState): string {
 
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+/**
+ * The Local AI pane holding the language models. Its rail draws one capability at a time, so a
+ * test about a model row has to name the row rather than land on whichever opens first.
+ */
+const LANGUAGE_ROW = "/settings/local-ai?capability=language";
+
 describe("the row states the whole chain's size, and only the count of the rest (R-40, R-41)", () => {
   it("quotes the closure, not the model's own weights", () => {
     // 7.6 GB of model plus a 750 MB runtime is an 8.2 GB press. Quoting the model alone while
     // fetching an engine beside it is what makes honest arithmetic dishonest.
-    const text = plain(render("/settings/local-ai", stateWith([RUNTIME, MODEL])));
+    const text = plain(render(LANGUAGE_ROW, stateWith([RUNTIME, MODEL])));
     assert.match(text, /Install · 8\.2 GB/);
     assert.match(text, /1 supporting component\b/);
     // Named nowhere on the line: `Install ComfyUI 0.3.48 and its nodes` is the machine's
@@ -113,20 +119,20 @@ describe("the row states the whole chain's size, and only the count of the rest 
   });
 
   it("drops the supporting count once the chain's other half is here", () => {
-    const text = plain(render("/settings/local-ai", stateWith([{ ...RUNTIME, state: "present" }, MODEL])));
+    const text = plain(render(LANGUAGE_ROW, stateWith([{ ...RUNTIME, state: "present" }, MODEL])));
     assert.match(text, /Install · 7\.4 GB/);
     assert.doesNotMatch(text, /supporting component/);
   });
 
   it("offers Remove wherever a size on disk is stated, and only where it can act (R-43)", () => {
-    const text = plain(render("/settings/local-ai", stateWith([RUNTIME, { ...MODEL, state: "ready" }])));
+    const text = plain(render(LANGUAGE_ROW, stateWith([RUNTIME, { ...MODEL, state: "ready" }])));
     assert.match(text, /Gemma 4 12B[\s\S]{0,200}Remove/);
     assert.doesNotMatch(text, /Install ·/);
 
     // A component Arke did not put there offers nothing: setup fetches a non-optional one again
     // on the next launch, and a weight file in a mapped folder may have been the user's first.
     const notOurs = plain(
-      render("/settings/local-ai", stateWith([RUNTIME, { ...MODEL, state: "ready", removable: undefined }])),
+      render(LANGUAGE_ROW, stateWith([RUNTIME, { ...MODEL, state: "ready", removable: undefined }])),
     );
     assert.doesNotMatch(notOurs, /Remove/);
   });
@@ -156,7 +162,7 @@ describe("Downloads shows everything in flight, whichever screen started it (R-8
     // One projection, one owner. The row renders a bar from the same figures rather than a
     // second derivation that can drift from this one.
     const downloads = render("/settings/downloads", stateWith(moving));
-    const local = render("/settings/local-ai", stateWith(moving));
+    const local = render(LANGUAGE_ROW, stateWith(moving));
     assert.match(plain(downloads), /25%/);
     assert.match(local, /width:25%/);
   });
