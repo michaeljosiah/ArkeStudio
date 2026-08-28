@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rmdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LedgerEntry, ModelManifest } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
@@ -88,6 +88,63 @@ describe("the ledger file (R-16, R-17, §3.2)", () => {
     await writeFile(path, `${JSON.stringify(entry({}))}\n{"not":"a ledger entry"}\n`, "utf8");
     await appendFile(path, JSON.stringify(entry({ outcome: "failed" })) + "\n", "utf8");
     assert.equal((await new LedgerFile(path).readAll()).length, 2);
+  });
+});
+
+describe("the strict reader — unreadable is not empty (SPEC-009 R-16)", () => {
+  it("a ledger that exists but cannot be read throws for dedupe, degrades to [] for display", async () => {
+    const dir = await tempDir("arke-ledger-");
+    // A directory at the ledger's path: readFile fails with EISDIR on every platform — the
+    // "exists but unreadable" shape, without permission games a privileged CI user would bypass.
+    const path = join(dir, "ledger.jsonl");
+    await mkdir(path);
+    const ledger = new LedgerFile(path);
+    assert.deepEqual(await ledger.readAll(), [], "display enrichment degrades to a blank figure");
+    await assert.rejects(() => ledger.readAllStrict(), /EISDIR/);
+    await assert.rejects(() => ledger.readJobIds(), /EISDIR/, "the dedupe snapshot must not answer 'never billed'");
+  });
+
+  it("a ledger that does not exist yet is genuinely empty, strict readers included (ENOENT)", async () => {
+    const dir = await tempDir("arke-ledger-");
+    const ledger = new LedgerFile(join(dir, "ledger.jsonl"));
+    assert.deepEqual(await ledger.readAllStrict(), []);
+    assert.equal((await ledger.readJobIds()).size, 0);
+  });
+
+  it("a first touch that cannot read does not mark the tail repaired, so no append merges into it", async () => {
+    const dir = await tempDir("arke-ledger-");
+    const path = join(dir, "ledger.jsonl");
+    const ledger = new LedgerFile(path);
+
+    // The first touch of the session finds the file unreadable — a directory here stands in for
+    // the transient EBUSY a virus scanner answers with, which is what the latch used to swallow.
+    await mkdir(path);
+    assert.deepEqual(await ledger.readAll(), [], "the unreadable first touch degrades for display");
+    await rmdir(path);
+
+    // The crash-torn tail that was underneath it all along. The latch must not have been set by
+    // that failed touch, or this append lands straight after the fragment and merges with it.
+    const good = JSON.stringify(entry({}));
+    await writeFile(path, good + "\n" + good.slice(0, 40), "utf8");
+    await ledger.append(entry({ jobId: "jb_01J8E0000000000000000000J9", outcome: "failed" }));
+    await ledger.drain();
+
+    const lines = (await readFile(path, "utf8")).split("\n").filter((l) => l.trim());
+    for (const line of lines) JSON.parse(line); // nothing merged into an unparseable line
+    assert.deepEqual(
+      (await ledger.readAllStrict()).map((e) => e.jobId),
+      ["jb_01J8E0000000000000000000J1", "jb_01J8E0000000000000000000J9"],
+      "the torn fragment went, and the newly billed entry survived to be seen",
+    );
+  });
+
+  it("strictness is about the file read, not the lines — torn and foreign lines still skip", async () => {
+    const dir = await tempDir("arke-ledger-");
+    const path = join(dir, "ledger.jsonl");
+    const good = JSON.stringify(entry({}));
+    await writeFile(path, `${good}\n{"not":"a ledger entry"}\n${good.slice(0, 40)}`, "utf8");
+    const entries = await new LedgerFile(path).readAllStrict();
+    assert.equal(entries.length, 1, "one valid entry; the foreign line and torn tail are not failures");
   });
 });
 
