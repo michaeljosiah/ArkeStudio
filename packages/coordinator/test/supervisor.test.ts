@@ -57,6 +57,15 @@ function processGone(pid: number): boolean {
 // enqueued ledger writes settling, which the same contention starves for seconds at a time.
 const CIM_WAIT_MS = 60_000;
 const SETTLE_WAIT_MS = 30_000;
+// The shim specs' readyTimeoutMs is the one budget the supervisor itself enforces — when it
+// expires the child is killed and "failed" is terminal, so no test-side wait can compensate
+// for it afterwards. 15s was the last number here still sized for the healthy case.
+const SHIM_READY_MS = 30_000;
+// Healthy waits sit above every spec's ready budget (10s plain, SHIM_READY_MS for shims). The
+// wait's clock starts at start() while the ready budget starts after the spawn settles, so a
+// wait at or under the budget can reject while the child is still legitimately coming up; a
+// genuinely expired budget then reports as "(at failed)" rather than a raw wait timeout.
+const HEALTHY_WAIT_MS = 40_000;
 
 describe("ChildSupervisor", () => {
   it("allocates distinct loopback ports", async () => {
@@ -82,12 +91,18 @@ describe("ChildSupervisor", () => {
       readyTimeoutMs: 10_000,
     });
     await sup.start();
-    await waitForStatus(sup, "healthy");
-    const pid = sup.pid;
-    assert.ok(pid !== null);
-    await sup.stop();
-    assert.equal(sup.status, "stopped");
-    await until(() => processGone(pid!), "the stopped child to be gone", SETTLE_WAIT_MS);
+    try {
+      await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
+      const pid = sup.pid;
+      assert.ok(pid !== null);
+      await sup.stop();
+      assert.equal(sup.status, "stopped");
+      await until(() => processGone(pid!), "the stopped child to be gone", SETTLE_WAIT_MS);
+    } finally {
+      // A failed wait must not leak the live child: its piped stdio holds this process open,
+      // and the file then hangs into CI's silence kill instead of reporting the named failure.
+      await sup.stop();
+    }
   });
 
   it("requires the configured health protocol before becoming healthy", async () => {
@@ -101,8 +116,12 @@ describe("ChildSupervisor", () => {
       probeIntervalMs: 50,
     });
     await sup.start();
-    assert.equal(sup.status, "failed");
-    assert.match(sup.reason ?? "", /did not become healthy/);
+    try {
+      assert.equal(sup.status, "failed");
+      assert.match(sup.reason ?? "", /did not become healthy/);
+    } finally {
+      await sup.stop();
+    }
   });
 
   it("reports a typed protocol failure instead of generic absence", async () => {
@@ -110,7 +129,9 @@ describe("ChildSupervisor", () => {
     // as soon as the child answers once — the budget only has to cover process spawn, which on a
     // loaded machine takes longer than the 500ms this used to allow. That race was the flake:
     // under load the child never answered in time, validateHealth never ran, and the assertion
-    // saw the timeout message instead of the reason.
+    // saw the timeout message instead of the reason. The reason itself proves the early exit —
+    // the budget-expiry path reports "did not become healthy" instead — so there is no
+    // wall-clock ceiling here for a starved shard to trip.
     const sup = new ChildSupervisor({
       id: "voxa",
       command: process.execPath,
@@ -120,14 +141,13 @@ describe("ChildSupervisor", () => {
       readyTimeoutMs: 20_000,
       probeIntervalMs: 50,
     });
-    const started = Date.now();
     await sup.start();
-    assert.equal(sup.status, "failed");
-    assert.equal(sup.reason, "voxa health contract is incompatible");
-    assert.ok(
-      Date.now() - started < 15_000,
-      "and it stops as soon as the contract is known to be wrong, rather than spending the budget",
-    );
+    try {
+      assert.equal(sup.status, "failed");
+      assert.equal(sup.reason, "voxa health contract is incompatible");
+    } finally {
+      await sup.stop();
+    }
   });
 
   it("does not restart or spend restart budget after a terminal startup contract failure", async () => {
@@ -170,12 +190,13 @@ describe("ChildSupervisor", () => {
       probeIntervalMs: 50,
       maxRestarts: 0,
     });
-    const started = Date.now();
     try {
       await sup.start();
-      await waitForStatus(sup, "failed", 5_000);
+      await waitForStatus(sup, "failed", SETTLE_WAIT_MS);
+      // The reason proves the path taken: an unobserved exit would probe to the 10s ready
+      // budget and report "did not become healthy", never touching the restart budget. No
+      // wall-clock ceiling — a starved spawn already pushed a 5s one past its line.
       assert.match(sup.reason ?? "", /restart budget/);
-      assert.ok(Date.now() - started < 5_000, "the exit was observed rather than timing out");
     } finally {
       await sup.stop();
     }
@@ -191,9 +212,13 @@ describe("ChildSupervisor", () => {
       probeIntervalMs: 100,
     });
     await sup.start();
-    assert.equal(sup.status, "failed");
-    assert.match(sup.reason ?? "", /did not become healthy/);
-    assert.equal(sup.pid, null);
+    try {
+      assert.equal(sup.status, "failed");
+      assert.match(sup.reason ?? "", /did not become healthy/);
+      assert.equal(sup.pid, null);
+    } finally {
+      await sup.stop();
+    }
   });
 
   it("restarts with backoff after an unexpected exit and fails once the budget is spent (R-5)", async () => {
@@ -209,15 +234,21 @@ describe("ChildSupervisor", () => {
     });
     const events = collect(sup);
     await sup.start();
-    await waitForStatus(sup, "failed", 30_000);
-    const statuses = events.map((e) => e.status);
-    assert.ok(statuses.includes("healthy"), `expected a healthy phase, saw ${statuses.join(",")}`);
-    assert.ok(
-      statuses.includes("unhealthy"),
-      `expected an unhealthy/restarting phase, saw ${statuses.join(",")}`,
-    );
-    assert.match(sup.reason ?? "", /restart budget/);
-    await sup.stop();
+    try {
+      // The wait spans a whole die -> backoff -> respawn -> probe -> die cycle: two spawns'
+      // worth of starved latency, so it gets two settle budgets the same way the reap test's
+      // two-spawn wait gets two CIM budgets.
+      await waitForStatus(sup, "failed", 2 * SETTLE_WAIT_MS);
+      const statuses = events.map((e) => e.status);
+      assert.ok(statuses.includes("healthy"), `expected a healthy phase, saw ${statuses.join(",")}`);
+      assert.ok(
+        statuses.includes("unhealthy"),
+        `expected an unhealthy/restarting phase, saw ${statuses.join(",")}`,
+      );
+      assert.match(sup.reason ?? "", /restart budget/);
+    } finally {
+      await sup.stop();
+    }
   });
 
   it("restarts a live child whose continuous health stays down", async () => {
@@ -236,7 +267,9 @@ describe("ChildSupervisor", () => {
     const events = collect(sup);
     try {
       await sup.start();
-      await waitForStatus(sup, "failed", 15_000);
+      // "failed" lands only after forceStop's taskkill spawn and the exit propagate — external
+      // work the settle tier is sized for.
+      await waitForStatus(sup, "failed", SETTLE_WAIT_MS);
       assert.ok(events.some((event) => event.status === "healthy"));
       assert.ok(events.some((event) => event.status === "unhealthy" && /continuous health/.test(event.reason ?? "")));
       assert.match(sup.reason ?? "", /restart budget/);
@@ -259,35 +292,48 @@ describe("ChildSupervisor", () => {
       },
       { ledger },
     );
-    const readRecords = async (): Promise<ChildRecord[]> => {
+    // Null on a failed read, never []: the release waits below assert emptiness, and a
+    // transiently unreadable file (a scanner's handle on the freshly renamed ledger) must
+    // retry rather than pass as "released".
+    const readRecords = async (): Promise<ChildRecord[] | null> => {
       try {
         const parsed = JSON.parse(await readFile(ledgerPath, "utf8")) as { children: ChildRecord[] };
         return parsed.children;
       } catch {
-        return [];
+        return null;
       }
     };
     await sup.start();
-    await waitForStatus(sup, "healthy");
-    const pid = sup.pid;
-    assert.ok(pid !== null);
-    // Recording is fire-and-forget off the spawn path, so it lands shortly after healthy.
-    await untilAsync(
-      async () => (await readRecords()).some((c) => c.pid === pid),
-      "the child's ledger record to land",
-      SETTLE_WAIT_MS,
-    );
-    const rec = (await readRecords()).find((c) => c.pid === pid)!;
-    assert.equal(rec.id, "voxa");
-    assert.equal(rec.image, basename(process.execPath).toLowerCase());
-    assert.equal(rec.ownerPid, process.pid);
-    await sup.stop();
-    // release() is enqueued from the exit listener, not awaited by stop() — let it settle.
-    await untilAsync(
-      async () => (await readRecords()).length === 0,
-      "the ledger to release the exited child",
-      SETTLE_WAIT_MS,
-    );
+    try {
+      await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
+      const pid = sup.pid;
+      assert.ok(pid !== null);
+      // Recording is fire-and-forget off the spawn path, so it lands shortly after healthy.
+      // The record is captured inside the poll: adoption keeps writing sibling records (the
+      // child's conhost.exe) as this wait ends, so a separate re-read could sample the file
+      // mid-rename and turn a green wait into a bare TypeError.
+      let rec: ChildRecord | undefined;
+      await untilAsync(
+        async () => {
+          rec = (await readRecords())?.find((c) => c.pid === pid);
+          return rec !== undefined;
+        },
+        "the child's ledger record to land",
+        SETTLE_WAIT_MS,
+      );
+      assert.equal(rec!.id, "voxa");
+      assert.equal(rec!.image, basename(process.execPath).toLowerCase());
+      assert.equal(rec!.ownerPid, process.pid);
+      await sup.stop();
+      // release() is enqueued from the exit listener, not awaited by stop() — let it settle.
+      await untilAsync(
+        async () => (await readRecords())?.length === 0,
+        "the ledger to release the exited child",
+        SETTLE_WAIT_MS,
+      );
+    } finally {
+      await sup.stop();
+    }
   });
 
   // A .cmd child makes the supervised pid a cmd.exe wrapper and the working process its
@@ -297,11 +343,12 @@ describe("ChildSupervisor", () => {
     const dir = await tempDir("arke-sup-shim-");
     const ledgerPath = join(dir, "children.json");
     const ledger = new ChildLedger(ledgerPath);
-    const readRecords = async (): Promise<ChildRecord[]> => {
+    // Null on a failed read, never [] — see the ledger test's reader for why.
+    const readRecords = async (): Promise<ChildRecord[] | null> => {
       try {
         return (JSON.parse(await readFile(ledgerPath, "utf8")) as { children: ChildRecord[] }).children;
       } catch {
-        return [];
+        return null;
       }
     };
     const sup = new ChildSupervisor(
@@ -309,14 +356,15 @@ describe("ChildSupervisor", () => {
         id: "opencode",
         command: SHIM,
         env: { MODE: "healthy", ARKE_SHIM_NODE: process.execPath, ARKE_SHIM_TARGET: CHILD },
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: SHIM_READY_MS,
       },
       { ledger },
     );
     let grandchild: number | null = null;
+    let grandchildSeenDead = false;
     try {
       await sup.start();
-      await waitForStatus(sup, "healthy");
+      await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
       const wrapperPid = sup.pid;
       assert.ok(wrapperPid !== null);
       const res = await fetch(`http://127.0.0.1:${sup.port}/health`);
@@ -324,27 +372,38 @@ describe("ChildSupervisor", () => {
       assert.notEqual(grandchild, wrapperPid, "the worker must be a grandchild, not the wrapper");
       assert.ok(!processGone(grandchild), "the grandchild must be alive while healthy");
       // The descendant snapshot lands in the ledger, so a crashed run's sweep can reach
-      // past the wrapper. Enumeration is the CIM round-trip the budget note explains.
+      // past the wrapper. Enumeration is the CIM round-trip the budget note explains; the
+      // record is captured inside the poll because adoption keeps writing sibling records
+      // as the wait ends, and a separate re-read could sample the file mid-rename.
+      let rec: ChildRecord | undefined;
       await untilAsync(
-        async () => (await readRecords()).some((c) => c.pid === grandchild),
+        async () => {
+          rec = (await readRecords())?.find((c) => c.pid === grandchild);
+          return rec !== undefined;
+        },
         "the grandchild's descendant snapshot to land in the ledger",
         CIM_WAIT_MS,
       );
-      const rec = (await readRecords()).find((c) => c.pid === grandchild)!;
-      assert.equal(rec.parentPid, wrapperPid);
-      assert.equal(rec.image, basename(process.execPath).toLowerCase());
+      assert.equal(rec!.parentPid, wrapperPid);
+      assert.equal(rec!.image, basename(process.execPath).toLowerCase());
       await sup.stop();
       assert.equal(sup.status, "stopped");
       await until(() => processGone(wrapperPid), "the wrapper to die after stop", SETTLE_WAIT_MS);
       await until(() => processGone(grandchild!), "the grandchild to die after stop", SETTLE_WAIT_MS);
+      grandchildSeenDead = true;
       await untilAsync(
-        async () => (await readRecords()).length === 0,
+        async () => (await readRecords())?.length === 0,
         "both ledger records to be released after stop",
         SETTLE_WAIT_MS,
       );
     } finally {
       await sup.stop();
-      if (grandchild !== null && !processGone(grandchild)) process.kill(grandchild, "SIGKILL");
+      // Fall back to a direct kill only when the test never saw the grandchild die: after a
+      // confirmed death the pid may already be a stranger's (Windows recycles aggressively,
+      // and the budgets above stretch the window to a minute).
+      if (!grandchildSeenDead && grandchild !== null && !processGone(grandchild)) {
+        process.kill(grandchild, "SIGKILL");
+      }
     }
   });
 
@@ -353,11 +412,12 @@ describe("ChildSupervisor", () => {
     const ledgerPath = join(dir, "children.json");
     const exitFlag = join(dir, "wrapper-exit.flag");
     const ledger = new ChildLedger(ledgerPath);
-    const readRecords = async (): Promise<ChildRecord[]> => {
+    // Null on a failed read, never [] — see the ledger test's reader for why.
+    const readRecords = async (): Promise<ChildRecord[] | null> => {
       try {
         return (JSON.parse(await readFile(ledgerPath, "utf8")) as { children: ChildRecord[] }).children;
       } catch {
-        return [];
+        return null;
       }
     };
     const sup = new ChildSupervisor(
@@ -370,38 +430,50 @@ describe("ChildSupervisor", () => {
           ARKE_SHIM_TARGET: CHILD,
           ARKE_SHIM_EXIT_FLAG: exitFlag,
         },
-        readyTimeoutMs: 15_000,
+        readyTimeoutMs: SHIM_READY_MS,
         maxRestarts: 0,
       },
       { ledger },
     );
     let grandchild: number | null = null;
+    let grandchildSeenDead = false;
     try {
       await sup.start();
-      await waitForStatus(sup, "healthy");
+      await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
       const res = await fetch(`http://127.0.0.1:${sup.port}/health`);
       grandchild = (JSON.parse(await res.text()) as { pid: number }).pid;
       // Wait for the adoption snapshot before pulling the wrapper away — a wrapper that
       // dies pre-snapshot is the documented gap, not what this test is about.
       await untilAsync(
-        async () => (await readRecords()).some((c) => c.pid === grandchild),
+        async () => ((await readRecords()) ?? []).some((c) => c.pid === grandchild),
         "the adoption snapshot to land before the wrapper is pulled away",
         CIM_WAIT_MS,
       );
       await writeFile(exitFlag, "go");
       // The wrapper exits "cleanly"; the worker survives it. The supervisor must notice and
       // take the survivor down before settling into failed (budget of zero). Noticing rides
-      // the reap path's CIM identity probe, so the deadline matches the snapshot's.
-      await waitForStatus(sup, "failed", CIM_WAIT_MS);
+      // TWO starved spawns in sequence — the reap path's CIM identity probe, then taskkill —
+      // where the snapshot waits ride one, so the deadline doubles theirs (the pinned-load
+      // measurement came out almost exactly 2x: 36.3s against 18.8s).
+      await waitForStatus(sup, "failed", 2 * CIM_WAIT_MS);
       await until(() => processGone(grandchild!), "the surviving grandchild to be reaped", SETTLE_WAIT_MS);
+      grandchildSeenDead = true;
+      // Released means a successful read that no longer shows the pid — an unreadable ledger
+      // must keep retrying rather than count as released.
       await untilAsync(
-        async () => !(await readRecords()).some((c) => c.pid === grandchild),
+        async () => {
+          const records = await readRecords();
+          return records !== null && !records.some((c) => c.pid === grandchild);
+        },
         "the reaped grandchild's record to be released",
         SETTLE_WAIT_MS,
       );
     } finally {
       await sup.stop();
-      if (grandchild !== null && !processGone(grandchild)) process.kill(grandchild, "SIGKILL");
+      // Same stale-pid guard as the shim-kill test's fallback: only when death was never seen.
+      if (!grandchildSeenDead && grandchild !== null && !processGone(grandchild)) {
+        process.kill(grandchild, "SIGKILL");
+      }
     }
   });
 
@@ -414,10 +486,14 @@ describe("ChildSupervisor", () => {
       readyTimeoutMs: 10_000,
     });
     await sup.start();
-    await waitForStatus(sup, "healthy");
-    const pid = sup.pid;
-    assert.ok(pid !== null);
-    await sup.stop();
-    await until(() => processGone(pid!), "the stop-ignoring child to be gone", SETTLE_WAIT_MS);
+    try {
+      await waitForStatus(sup, "healthy", HEALTHY_WAIT_MS);
+      const pid = sup.pid;
+      assert.ok(pid !== null);
+      await sup.stop();
+      await until(() => processGone(pid!), "the stop-ignoring child to be gone", SETTLE_WAIT_MS);
+    } finally {
+      await sup.stop();
+    }
   });
 });
