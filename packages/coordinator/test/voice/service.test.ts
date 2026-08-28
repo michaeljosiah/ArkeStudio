@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, LedgerEntry, ManifestModel, Sheet, WorldBundle } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
+import { until } from "../wait.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
 import {
   authoritativeBibleSpeech,
@@ -213,11 +214,13 @@ describe("routing (R-2, D1, §3.2): local never touches the queue; cloud always 
     assert.equal(job.estimatedMicroUsd, 26 * 300, "estimated from characters × manifest price");
     assert.ok(job.idempotencyKey.length === 26, "the queue's durable request identity exists before submission (R-2)");
     assert.equal(fake.submittedKeys[0], undefined, "ElevenLabs does not falsely receive an unsupported idempotency key");
-    const start = Date.now();
-    while (queue.listJobs().find((j) => j.id === job.id)?.status !== "succeeded") {
-      if (Date.now() - start > 3000) throw new Error("job did not finish");
-      await new Promise((r) => setTimeout(r, 5));
-    }
+    // 30s: the fake dispatch is in-process, but a starved shard stalls the event loop for
+    // seconds at a time — the settle tier from supervisor.test.ts's budget note.
+    await until(
+      () => queue.listJobs().find((j) => j.id === job.id)?.status === "succeeded",
+      "the voice job to fold to succeeded",
+      30_000,
+    );
     assert.equal(ledger.length, 1, "ledgered like any other dispatch");
     assert.equal(ledger[0]!.provider, "elevenlabs");
     queue.dispose();

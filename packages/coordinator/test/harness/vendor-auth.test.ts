@@ -23,6 +23,7 @@ import { FsWorldProvider } from "../../src/world/provider.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, makeTempWorld, WORLD_ID } from "../world/helpers.js";
+import { until, untilAsync } from "../wait.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -140,13 +141,9 @@ function makeService(
   return { service, published, opened, secrets };
 }
 
-async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    if (Date.now() > deadline) assert.fail("timed out waiting for condition");
-    await new Promise((r) => setTimeout(r, 10));
-  }
-}
+// 30s everywhere below: the publishes are in-process, but a starved shard stalls the event
+// loop for seconds at a time — the settle tier from supervisor.test.ts's budget note.
+const SETTLE_MS = 30_000;
 
 describe("the sign-in surface (R-7, R-10, R-12)", () => {
   it("offers oauth-capable vendors and connected ones, and drops the key-only crowd", async () => {
@@ -218,7 +215,7 @@ describe("beginning, waiting and abandoning an OAuth sign-in (§2.2, R-9b)", () 
     assert.deepEqual(opened, ["https://vendor.example/authorize"]);
     assert.equal(published.at(-1)!.signIn?.instructions, "Complete authorization in your browser.");
     adapter.attemptState = { status: "complete" };
-    await until(() => published.at(-1)!.signIn === null);
+    await until(() => published.at(-1)!.signIn === null, "the published sign-in to clear", SETTLE_MS);
     assert.equal(adapter.beginCalls.length, 1);
   });
 
@@ -236,7 +233,7 @@ describe("beginning, waiting and abandoning an OAuth sign-in (§2.2, R-9b)", () 
     const { service, published } = makeService(adapter);
     await service.beginOAuth("openai", "browser");
     adapter.attemptState = { status: "failed", message: "authorization was declined" };
-    await until(() => published.at(-1)!.signIn?.phase === "failed");
+    await until(() => published.at(-1)!.signIn?.phase === "failed", "the sign-in to publish as failed", SETTLE_MS);
     assert.equal(published.at(-1)!.signIn?.detail, "authorization was declined");
   });
 
@@ -246,7 +243,7 @@ describe("beginning, waiting and abandoning an OAuth sign-in (§2.2, R-9b)", () 
     adapter.attempt = { ...adapter.attempt, expiresAt: Date.now() - 60_000 };
     const { service, published } = makeService(adapter);
     await service.beginOAuth("openai", "browser");
-    await until(() => published.at(-1)!.signIn?.phase === "failed");
+    await until(() => published.at(-1)!.signIn?.phase === "failed", "the sign-in to publish as failed", SETTLE_MS);
     assert.match(published.at(-1)!.signIn?.detail ?? "", /did not complete in time/);
   });
 
@@ -278,7 +275,7 @@ describe("beginning, waiting and abandoning an OAuth sign-in (§2.2, R-9b)", () 
     assert.deepEqual(adapter.completeCalls, [{ attemptId: "con_1", code: "AAAA-BBBBB" }]);
     assert.deepEqual(secrets, ["AAAA-BBBBB"]);
     adapter.attemptState = { status: "complete" };
-    await until(() => published.at(-1)!.signIn === null);
+    await until(() => published.at(-1)!.signIn === null, "the published sign-in to clear", SETTLE_MS);
   });
 });
 
@@ -417,8 +414,8 @@ describe("marking a connection that needs sign-in (R-13, R-14)", () => {
     assert.equal(published.at(-1)!.vendors[0]?.needsSignIn, true);
     await service.beginOAuth("openai", "browser");
     adapter.attemptState = { status: "complete" };
-    await until(() => published.at(-1)!.signIn === null);
-    await until(() => published.at(-1)!.vendors[0]?.needsSignIn === false);
+    await until(() => published.at(-1)!.signIn === null, "the published sign-in to clear", SETTLE_MS);
+    await until(() => published.at(-1)!.vendors[0]?.needsSignIn === false, "the vendor to publish as signed in", SETTLE_MS);
   });
 });
 
@@ -451,8 +448,8 @@ describe("review round 2026-08-26: races, releases and retained refusals", () =>
     adapter.attempt = { ...adapter.attempt, expiresAt: Date.now() - 60_000 };
     const { service, published } = makeService(adapter);
     await service.beginOAuth("openai", "browser");
-    await until(() => published.at(-1)!.signIn?.phase === "failed");
-    await until(() => adapter.cancelCalls.includes("con_1"));
+    await until(() => published.at(-1)!.signIn?.phase === "failed", "the sign-in to publish as failed", SETTLE_MS);
+    await until(() => adapter.cancelCalls.includes("con_1"), "the superseded attempt to be cancelled", SETTLE_MS);
   });
 
   it("a refused removal keeps its reason across the refresh that follows", async () => {
@@ -494,7 +491,7 @@ describe("review round 2026-08-26: races, releases and retained refusals", () =>
     await service.beginOAuth("xai", "device");
     resolveFirst!({ ...adapter.attempt, attemptId: "con_old" });
     await first;
-    await until(() => adapter.cancelCalls.includes("con_old"));
+    await until(() => adapter.cancelCalls.includes("con_old"), "the stale attempt to be cancelled", SETTLE_MS);
     assert.equal(published.at(-1)!.signIn?.vendor, "xai");
   });
 
@@ -532,7 +529,7 @@ describe("review round 2026-08-26: races, releases and retained refusals", () =>
     };
     const { service, published } = makeService(adapter);
     await service.beginOAuth("openai", "browser");
-    await until(() => resolvePoll !== null);
+    await until(() => resolvePoll !== null, "the adapter's poll to be in flight", SETTLE_MS);
     const listedBefore = listCalls;
     service.stop();
     resolvePoll!({ status: "complete" });
@@ -608,14 +605,17 @@ describe("the audit log never holds sign-in material (R-1)", () => {
       });
       // A control event, so the assertion cannot pass because nothing was written at all.
       coordinator.emit({ at: new Date().toISOString(), type: "provider.status", providers: [] });
-      const deadline = Date.now() + 5_000;
+      // Captured inside the poll so the negative asserts below read the write that satisfied
+      // the wait, not a later sample.
       let written = "";
-      while (Date.now() < deadline) {
-        written = await readFile(changeLogPath, "utf8").catch(() => "");
-        if (written.includes("provider.status")) break;
-        await new Promise((r) => setTimeout(r, 25));
-      }
-      assert.ok(written.includes("provider.status"), "the control event landed in the audit log");
+      await untilAsync(
+        async () => {
+          written = await readFile(changeLogPath, "utf8").catch(() => "");
+          return written.includes("provider.status");
+        },
+        "the control event to land in the audit log",
+        SETTLE_MS,
+      );
       assert.ok(!written.includes("AAAA-BBBBB"), "the device code is in no line Arke writes");
       assert.ok(!written.includes("vendor-auth.status"), "the whole event stays out of the audit log");
     } finally {
