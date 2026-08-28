@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import {
   activationFor,
   ActivationStateSchema,
+  CLONED_VOICE_MODEL,
   comfyUiWeightsComponentId,
   FitVerdictSchema,
   localModelRowState,
@@ -18,6 +19,7 @@ import {
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { LOCAL_AI_ROWS } from "../src/screens/settings-local-ai.js";
+import { CAPABILITY_LABEL, CAPABILITY_ROWS } from "../src/screens/settings-parts.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -25,9 +27,13 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * Settings · Local AI (SPEC-033 §1.9). The screen answers *what can I make on this machine*.
  *
  * Two of its rules are boundaries rather than preferences, and both are checkable by enumerating
- * what rendered: no cloud provider appears here at all, and the five capability rows are always
- * all five. The rest is the projection in R-26, which is total over two closed vocabularies —
- * so it is tested as a table rather than case by case.
+ * what rendered: no cloud provider appears here at all, and every capability the local plane can
+ * serve keeps a rail row whether or not anything is installed under it. The rest is the
+ * projection in R-26, total over two closed vocabularies — so it is tested as a table rather than
+ * case by case.
+ *
+ * The rail draws one capability at a time, so an assertion about a model row has to ask for that
+ * row's pane. `renderRow` is that ask, and it forms the query the way the screen does.
  */
 
 const KOKORO: ManifestModel = {
@@ -158,38 +164,77 @@ function render(state: ClientState, path = "/settings/local-ai"): string {
   );
 }
 
+/** The rail's own slug, the way the screen forms it — the query the URL carries per row. */
+const slug = (label: string): string => label.toLowerCase().replace(/[^a-z]+/g, "-");
+
+/** One capability's pane. The rail draws one at a time, so a row assertion has to ask for it. */
+const renderRow = (state: ClientState, label: string): string =>
+  render(state, `/settings/local-ai?capability=${slug(label)}`);
+
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
-describe("Local AI: five rows, and no cloud provider anywhere (SPEC-033 R-2, R-47, R-50)", () => {
-  it("mounts at its own route and states the five capabilities in order", () => {
+describe("Local AI: every capability the local plane serves, and no cloud provider (SPEC-033 R-2, R-47, R-50)", () => {
+  it("mounts at its own route and states the capabilities in order", () => {
     const text = plain(render(stateWith()));
     assert.match(render(stateWith()), /data-screen="settings-local-ai"/);
-    const order = ["IMAGES", "VIDEO", "VOICE", "MUSIC", "LANGUAGE"];
+    const order = ["Images", "Video", "Speech-to-Text", "Text-to-Speech", "Voice clone", "Language"];
+    assert.deepEqual(
+      LOCAL_AI_ROWS.map((row) => row.label),
+      order,
+      "the rail's order is the specification's",
+    );
     let at = 0;
     for (const row of order) {
       const found = text.indexOf(row, at);
-      assert.notEqual(found, -1, `${row} is missing from Local AI`);
+      assert.notEqual(found, -1, `${row} is missing from the Local AI rail`);
       at = found;
     }
   });
 
-  it("shows Music with nothing behind it rather than hiding it (row 26, D20)", () => {
-    // A missing row reads as a missing feature; an empty one reads as an honest absence.
-    assert.match(plain(render(stateWith())), /MUSIC\s+NO LOCAL MODELS/);
+  it("opens on the first row, and follows the one the URL names", () => {
+    assert.match(plain(render(stateWith())), /IMAGES\s+NO LOCAL MODELS/);
+    assert.match(plain(renderRow(stateWith(), "Language")), /LANGUAGE\s+0 OF 1 INSTALLED/);
   });
 
-  it("names no cloud provider, in any state (row 37, R-2)", () => {
-    const text = plain(render(stateWith()));
-    for (const [id, info] of Object.entries(PROVIDERS)) {
-      if (info.local) continue;
-      assert.doesNotMatch(text, new RegExp(info.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), id);
-    }
-    // And not one of their models, in any state, under any row.
+  it("does not draw Music, which nothing local serves (R-50)", () => {
+    // A row for a capability no local engine has is an offer this machine cannot honour. The word
+    // survives in the shared table for Cloud AI, which routes music and has to name it — so the
+    // two lists differ by exactly that row, and the vocabulary R-89 shares is unbroken.
+    assert.doesNotMatch(plain(render(stateWith())), /Music/);
+    // A query naming a row this screen does not draw falls back to the first, rather than to a
+    // pane with a heading and nothing under it.
+    assert.doesNotMatch(plain(renderRow(stateWith(), "Music")), /MUSIC/);
+    assert.equal(CAPABILITY_LABEL.music, "Music");
+    assert.deepEqual(
+      CAPABILITY_ROWS.filter((row) => !LOCAL_AI_ROWS.includes(row)).map((row) => row.label),
+      ["Music"],
+    );
+  });
+
+  it("keeps drawing a row whose models are all uninstalled (R-50)", () => {
+    // The absence R-50 protects is *nothing installed yet*, which is a state somebody can change.
+    // It is not the same as a capability with no local engine behind it at all.
+    assert.match(plain(render(stateWith())), /Language\s+0\/1/);
+  });
+
+  it("names no cloud provider, in any state, under any row (row 37, R-2)", () => {
     assert.ok(CLOUD.length >= 4, "the manifest under test must carry a row for each of them");
-    for (const model of CLOUD) {
-      assert.doesNotMatch(text, new RegExp(model.displayName), model.id);
-      assert.doesNotMatch(text, new RegExp(model.id), model.id);
+    for (const row of LOCAL_AI_ROWS) {
+      const text = plain(renderRow(stateWith(), row.label));
+      for (const [id, info] of Object.entries(PROVIDERS)) {
+        if (info.local) continue;
+        assert.doesNotMatch(
+          text,
+          new RegExp(info.displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+          `${id} under ${row.label}`,
+        );
+      }
+      // And not one of their models, in any state.
+      for (const model of CLOUD) {
+        assert.doesNotMatch(text, new RegExp(model.displayName), `${model.id} under ${row.label}`);
+        assert.doesNotMatch(text, new RegExp(model.id), `${model.id} under ${row.label}`);
+      }
     }
   });
 
@@ -236,13 +281,15 @@ describe("Local AI: five rows, and no cloud provider anywhere (SPEC-033 R-2, R-4
 
 describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
   it("carries the state, the verdict and the size, and marks the one recommendation", () => {
-    const text = plain(render(stateWith()));
-    assert.match(text, /Kokoro 82M\s+installed · runs well · 400 MB/);
-    assert.match(text, /Gemma 4 12B\s+recommended\s+available · runs well · 7\.4 GB/);
+    assert.match(plain(renderRow(stateWith(), "Text-to-Speech")), /Kokoro 82M\s+installed · runs well · 400 MB/);
+    assert.match(
+      plain(renderRow(stateWith(), "Language")),
+      /Gemma 4 12B\s+recommended\s+available · runs well · 7\.4 GB/,
+    );
   });
 
   it("keeps a refusal to one clause, carrying its figures and nothing else (R-88)", () => {
-    const text = plain(render(stateWith()));
+    const text = plain(renderRow(stateWith(), "Video"));
     assert.match(text, /unsupported · not enough here · 13\.7 GB/);
     assert.match(text, /Needs 15\.6 GB VRAM · this machine has 12 GB/);
     // The gate carries a cloud alternative and this screen does not print it: R-2 keeps every
@@ -254,7 +301,7 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
   it("never heads or names a row by its engine (row 47, R-52)", () => {
     // Model ids carry their runtime, so a row that printed one would be listing engines whether
     // it meant to or not. The engine is a fact of the Engines screen, available in the detail.
-    const text = plain(render(stateWith()));
+    const text = plain(renderRow(stateWith(), "Language"));
     assert.doesNotMatch(text, /Ollama/);
     assert.doesNotMatch(text, /gemma4-12b/);
   });
@@ -262,16 +309,14 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
   it("states a model switched off in Providers as switched off, at any row state (R-32)", () => {
     // Being turned down is a decision; unsupported, unavailable and missing are conditions, and
     // letting the first read as one of the other three sends the reader to the wrong screen.
-    const text = plain(
-      render(stateWith({ models: { disabled: [GEMMA.id] } })),
-    );
+    const text = plain(renderRow(stateWith({ models: { disabled: [GEMMA.id] } }), "Language"));
     assert.match(text, /Gemma 4 12B[\s\S]{0,120}turned off in Providers/);
   });
 
   it("says the machine has not been measured on the row, not only in the header (R-28)", () => {
-    const text = plain(render(stateWith({ runtime: null })));
-    assert.match(text, /Kokoro 82M\s+installed · not measured · 400 MB/);
-    assert.match(text, /Gemma 4 12B\s+available · not measured · 7\.4 GB/);
+    const unmeasured = stateWith({ runtime: null });
+    assert.match(plain(renderRow(unmeasured, "Text-to-Speech")), /Kokoro 82M\s+installed · not measured · 400 MB/);
+    assert.match(plain(renderRow(unmeasured, "Language")), /Gemma 4 12B\s+available · not measured · 7\.4 GB/);
   });
 
   it("routes a remote engine's models out rather than judging them here (row 10, R-11)", () => {
@@ -282,7 +327,7 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
           : m,
       ),
     });
-    const text = plain(render(stateWith({ runtime: remote })));
+    const text = plain(renderRow(stateWith({ runtime: remote }), "Video"));
     assert.match(text, /Draft video\s+served elsewhere/);
     // No verdict about this machine, and nothing that says the work happens on it.
     assert.doesNotMatch(text, /Draft video\s+served elsewhere\s+Engines\s+Needs/);
@@ -290,7 +335,40 @@ describe("Local AI: what a model row states (R-51, R-52, R-27)", () => {
   });
 });
 
-describe("Local AI: Voice stays three readable lines (R-48, rows 18, 19)", () => {
+describe("Local AI: the cloned voice is drawn under Voice clone (R-47)", () => {
+  // Its capability is `voice-tts` on purpose (SPEC-022) so that no capability probe implies an
+  // engine can perform a clone. That is a dispatch fact; under which heading a person looks for
+  // it is not, and a Voice clone row with the one cloned-voice model missing from it is the
+  // grouping §2.11 rejected — a true statement about our engines, a confusing one about voices.
+  const cloned: ManifestModel = {
+    id: CLONED_VOICE_MODEL,
+    provider: "comfyui",
+    capability: "voice-tts",
+    displayName: "Local · Cloned Voice",
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "unmetered" },
+  };
+  const withCloned = (): ClientState => {
+    const base = stateWith();
+    return {
+      ...base,
+      app: { ...base.app, manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, cloned] } },
+    };
+  };
+
+  it("puts it under Voice clone and not under Text-to-Speech", () => {
+    assert.match(plain(renderRow(withCloned(), "Voice clone")), /Local · Cloned Voice/);
+    assert.doesNotMatch(plain(renderRow(withCloned(), "Text-to-Speech")), /Local · Cloned Voice/);
+  });
+
+  it("leaves Kokoro where it was", () => {
+    assert.match(plain(renderRow(withCloned(), "Text-to-Speech")), /Kokoro 82M/);
+    assert.doesNotMatch(plain(renderRow(withCloned(), "Voice clone")), /Kokoro 82M/);
+  });
+});
+
+describe("Local AI: voice stays three readable lines (R-48, rows 18, 19)", () => {
   const voxa = (kokoro: string, whisper: string) => ({
     source: "bundled" as const,
     configured: true,
@@ -314,16 +392,26 @@ describe("Local AI: Voice stays three readable lines (R-48, rows 18, 19)", () =>
   });
 
   it("kokoro unavailable with whisper ready still reads as dictation usable", () => {
-    const text = plain(render(stateWith({ voiceRuntime: voxa("failed", "ready") })));
-    assert.match(text, /Local voices\s+failed/);
-    assert.match(text, /Dictation\s+ready/);
-    // The row does not collapse to one failed state, which is SPEC-028 R-2 preserved exactly.
-    assert.match(text, /Conversational voice\s+needs both/);
+    const half = stateWith({ voiceRuntime: voxa("failed", "ready") });
+    assert.match(plain(renderRow(half, "Text-to-Speech")), /Local voices\s+failed/);
+    assert.match(plain(renderRow(half, "Speech-to-Text")), /Dictation\s+ready/);
+    // Neither capability collapses to one failed state, which is SPEC-028 R-2 preserved exactly.
+    assert.match(plain(renderRow(half, "Text-to-Speech")), /Conversational voice\s+needs both/);
+    assert.match(plain(renderRow(half, "Speech-to-Text")), /Conversational voice\s+needs both/);
   });
 
   it("both halves ready reads as conversational voice ready", () => {
-    const text = plain(render(stateWith({ voiceRuntime: voxa("ready", "ready") })));
-    assert.match(text, /Conversational voice\s+ready/);
+    const ready = stateWith({ voiceRuntime: voxa("ready", "ready") });
+    assert.match(plain(renderRow(ready, "Text-to-Speech")), /Conversational voice\s+ready/);
+    assert.match(plain(renderRow(ready, "Speech-to-Text")), /Conversational voice\s+ready/);
+  });
+
+  it("states each half only where it runs, never both under one heading", () => {
+    // The split is the point: `Voice` used to answer what reads aloud and what transcribes under
+    // one noun, which answered neither.
+    const ready = stateWith({ voiceRuntime: voxa("ready", "ready") });
+    assert.doesNotMatch(plain(renderRow(ready, "Text-to-Speech")), /Dictation/);
+    assert.doesNotMatch(plain(renderRow(ready, "Speech-to-Text")), /Local voices/);
   });
 });
 

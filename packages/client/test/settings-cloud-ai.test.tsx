@@ -9,16 +9,20 @@ import { PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/co
 import { App } from "../src/App.js";
 import { resolveModel } from "../src/components/dispatch-bar.js";
 import { __setStateForTest } from "../src/lib/store.js";
-import { LOCAL_AI_ROWS } from "../src/screens/settings-local-ai.js";
+import { CAPABILITY_ROWS } from "../src/screens/settings-parts.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
  * Settings · Cloud AI (SPEC-033 §1.10). Which remote model runs each capability.
  *
  * Two boundaries are load-bearing and both are checkable by enumerating what rendered: no local
- * model appears here in any state, and the five capability words are the five words Local AI
- * uses. The second is what makes the split read as two halves of one question rather than as an
- * arbitrary line — which is why the duplication across the two screens is deliberate.
+ * model appears here in any state, and every capability word is the word Local AI uses. The
+ * second is what makes the split read as two halves of one question rather than as an arbitrary
+ * line — which is why the duplication across the two screens is deliberate.
+ *
+ * The two screens draw different subsets of one table. Cloud AI omits the capabilities with no
+ * cloud routing default; Local AI omits the ones with no local engine. What they share is the
+ * vocabulary, not the row list.
  */
 
 const LOCAL_LLM: ManifestModel = {
@@ -103,10 +107,21 @@ describe("Cloud AI: cloud-only, absolutely (R-3, R-61, matrix row 38)", () => {
     }
   });
 
-  it("speaks the five words Local AI speaks, in the same order (R-62, R-89, row 43)", () => {
+  it("speaks Local AI's words for the capabilities it routes, in the same order (R-62, R-89, row 43)", () => {
     const text = plain(render("/settings/cloud-ai"));
+    // Neither screen's rows are the other's. `voice-stt` and `voice-clone` have no cloud routing
+    // default and are not drawn here; `music` has no local engine and is not drawn there. What
+    // both read off the one table is the *words* (R-89), in the table's order — so a rename
+    // cannot move only one of them.
+    const routed = CAPABILITY_ROWS.filter((row) =>
+      row.capabilities.some((c) => c === "image" || c === "video" || c === "voice-tts" || c === "music" || c === "llm"),
+    );
+    assert.deepEqual(
+      routed.map((row) => row.label),
+      ["Images", "Video", "Text-to-Speech", "Music", "Language"],
+    );
     let at = 0;
-    for (const row of LOCAL_AI_ROWS) {
+    for (const row of routed) {
       const found = text.indexOf(row.label, at);
       assert.notEqual(found, -1, `${row.label} is missing from Cloud AI`);
       at = found;

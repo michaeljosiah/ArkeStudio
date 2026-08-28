@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import {
   FIT_LABEL,
   ROW_STATE_LABEL,
@@ -10,7 +10,6 @@ import {
   setupClosure,
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
-  type Capability,
   type LocalModelRowState,
   type ManifestModel,
   type SetupClosure,
@@ -20,7 +19,15 @@ import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight } from "../components/icons.js";
 import { detectRuntimes, setupInstall, setupRemove, setupRepair, useSetup, useStore } from "../lib/store.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
-import { RuntimeSection, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
+import {
+  CAPABILITY_ROWS,
+  RuntimeSection,
+  RuntimeStatus,
+  TONE_CLASS,
+  sizeMb,
+  type CapabilityRow,
+  type RuntimeTone,
+} from "./settings-parts.js";
 
 /**
  * Settings · Local AI (SPEC-033 §1.9). What this machine can run, and what is on it.
@@ -30,9 +37,14 @@ import { RuntimeSection, RuntimeStatus, sizeMb, type RuntimeTone } from "./setti
  * different kinds of thing in one rail. Read together they answered *what is installed here*,
  * which is a question about our architecture. This answers *what can I make here*.
  *
- * Five rows, always all five, and no cloud provider anywhere on the screen. That second half is
- * not a matter of taste: the list is drawn from the local half of the manifest by construction,
- * so R-2 is checkable by enumerating what rendered rather than by reading the code.
+ * A capability rail and one capability's detail, the shape Providers and Engines already use.
+ * Stacked sections were the first draft: seven of them, one under the next, made the pane a long
+ * scroll where the machine header left the top of it and every capability read as equally close
+ * to hand. The rail is the heading, and only the capability being asked about is drawn.
+ *
+ * Every capability the local plane can serve, and no cloud provider anywhere on the screen. That
+ * second half is not a matter of taste: the list is drawn from the local half of the manifest by
+ * construction, so R-2 is checkable by enumerating what rendered rather than by reading the code.
  *
  * Nothing here derives a fact another surface owns. Locality and fit come from the gate,
  * activation from the setup ledger, and whether a model can dispatch *now* is SPEC-028 R-35's
@@ -41,19 +53,16 @@ import { RuntimeSection, RuntimeStatus, sizeMb, type RuntimeTone } from "./setti
  */
 
 /**
- * The five, in order, and the manifest capabilities each one speaks for (R-47). Exported so a
- * test can assert every capability a local provider declares lands in exactly one row — a
- * capability drawn nowhere renders no models and nothing else would notice.
+ * The rows this screen draws, in order (R-47), under the name the specification and the tests
+ * call them by.
+ *
+ * The table itself lives in `settings-parts` because Cloud AI reads its labels off the same
+ * object (R-89) — a capability named differently on the two screens is a defect, and two
+ * hand-kept lists is how that defect arrives. A `cloudOnly` row keeps its word for Cloud AI and
+ * is filtered out here: nothing local serves it, so the rail would offer a capability this
+ * machine cannot reach at all.
  */
-export const LOCAL_AI_ROWS: ReadonlyArray<{ label: string; capabilities: readonly Capability[] }> = [
-  { label: "Images", capabilities: ["image"] },
-  { label: "Video", capabilities: ["video"] },
-  // Dictation folds in here (epic decision 13): `voice-stt` is the one capability with no cloud
-  // counterpart, and it is not a sixth thing anybody thinks about. Its own line, not its own row.
-  { label: "Voice", capabilities: ["voice-tts", "voice-stt"] },
-  { label: "Music", capabilities: ["music"] },
-  { label: "Language", capabilities: ["llm"] },
-];
+export const LOCAL_AI_ROWS = CAPABILITY_ROWS.filter((row) => row.cloudOnly !== true);
 
 /** What each headline state does to a row's dot. Only a refusal warns. */
 const STATE_TONE: Record<LocalModelRowState, RuntimeTone> = {
@@ -85,10 +94,14 @@ interface Entry {
   supporting: string[];
 }
 
+/** The rail's own slug for a row, so a selection survives in the URL the way Engines' does. */
+const rowSlug = (row: CapabilityRow): string => row.label.toLowerCase().replace(/[^a-z]+/g, "-");
+
 export function SettingsLocalAiScreen() {
   const { state } = useStore();
   const setup = useSetup();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const runtime = state?.app.runtime ?? null;
   const comfyui = state?.app.comfyui ?? null;
   const [open, setOpen] = useState<string | null>(null);
@@ -113,11 +126,22 @@ export function SettingsLocalAiScreen() {
    * The gate's row is joined on where it exists; locality falls back to the engine's own answer,
    * which is where locality lives either way (R-9).
    */
-  const entriesFor = (capabilities: readonly Capability[]): Entry[] => {
-    const models = (manifest?.models ?? []).filter(
-      (m) => capabilities.includes(m.capability) && PROVIDER_TABLE[m.provider].local,
+  const entriesFor = (row: CapabilityRow): Entry[] => {
+    const claimedElsewhere = new Set(
+      LOCAL_AI_ROWS.filter((other) => other !== row).flatMap((other) => other.claims ?? []),
     );
-    const usableIds = new Set(capabilities.flatMap((c) => usableModels(state, c).map((m) => m.id)));
+    const models = (manifest?.models ?? []).filter(
+      (m) =>
+        PROVIDER_TABLE[m.provider].local &&
+        (row.claims?.includes(m.id) === true ||
+          (row.capabilities.includes(m.capability) && !claimedElsewhere.has(m.id))),
+    );
+    // Asked of each model's own capability, never the row's: a claimed model is drawn under a row
+    // it does not dispatch as, and asking `voice-clone` about a `voice-tts` recipe would strand a
+    // cloned voice that runs perfectly well.
+    const usableIds = new Set(
+      [...new Set(models.map((m) => m.capability))].flatMap((c) => usableModels(state, c).map((m) => m.id)),
+    );
     return models.map((model) => {
       const gated = gatedById.get(model.id);
       const locality =
@@ -169,41 +193,69 @@ export function SettingsLocalAiScreen() {
     });
   };
 
+  const rows = LOCAL_AI_ROWS.map((row) => ({ row, entries: entriesFor(row) }));
+  const asked = searchParams.get("capability");
+  const current = rows.find(({ row }) => rowSlug(row) === asked) ?? rows[0]!;
+  const currentInstalled = current.entries.filter((e) => e.state === "installed").length;
+
   return (
-    <div data-screen="settings-local-ai" className="fy-set">
-      <div className="fy-set__eyebrow">LOCAL AI</div>
+    <div data-screen="settings-local-ai" className="fy-set fy-set--runtime">
       <MachineHeader />
-      {LOCAL_AI_ROWS.map(({ label, capabilities }) => {
-        const entries = entriesFor(capabilities);
-        const installed = entries.filter((e) => e.state === "installed").length;
-        return (
-          <div key={label}>
-            <RuntimeSection label={label.toUpperCase()}>
-              <span className="fy-rt__count">
-                {entries.length === 0 ? "NO LOCAL MODELS" : `${installed} OF ${entries.length} INSTALLED`}
-              </span>
-            </RuntimeSection>
-            {label === "Voice" && <VoiceLines />}
-            {entries.map((entry) => (
-              <ModelRow
-                key={entry.model.id}
-                entry={entry}
-                open={open === entry.model.id}
-                onToggle={() => setOpen(open === entry.model.id ? null : entry.model.id)}
-                onOpenEngines={() => navigate("/settings/engines")}
-                onOpenDownloads={() => navigate("/settings/downloads")}
-              />
-            ))}
+      <div className="fy-rt">
+        <div className="fy-rt__rail" role="tablist" aria-label="Local AI">
+          {rows.map(({ row, entries }) => {
+            const installed = entries.filter((e) => e.state === "installed").length;
+            return (
+              <button
+                type="button"
+                key={row.label}
+                role="tab"
+                aria-selected={row === current.row}
+                className={cx("fy-rt__railitem", row === current.row && "is-current")}
+                onClick={() => setSearchParams({ capability: rowSlug(row) }, { replace: true })}
+              >
+                {/* A dot the rail can be scanned by: something on this machine can do this, or
+                    nothing yet can. An empty capability is not a fault (R-50), so it stays idle. */}
+                <span className={cx("fy-set__dot", installed > 0 && TONE_CLASS.ok)} />
+                <span>{row.label}</span>
+                <span style={{ flex: 1 }} />
+                <span className="fy-rt__count">{entries.length === 0 ? "—" : `${installed}/${entries.length}`}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="fy-rt__pane">
+          <RuntimeSection label={current.row.label.toUpperCase()}>
+            <span className="fy-rt__count">
+              {current.entries.length === 0
+                ? "NO LOCAL MODELS"
+                : `${currentInstalled} OF ${current.entries.length} INSTALLED`}
+            </span>
+          </RuntimeSection>
+          {/* The engine lines the split separated. Each capability states the half it runs on, and
+              both state conversational voice, which is the one line that needs the pair (R-48). */}
+          {current.row.label === "Speech-to-Text" && <VoiceLines engine="whisper" />}
+          {current.row.label === "Text-to-Speech" && <VoiceLines engine="kokoro" />}
+          {current.entries.map((entry) => (
+            <ModelRow
+              key={entry.model.id}
+              entry={entry}
+              open={open === entry.model.id}
+              onToggle={() => setOpen(open === entry.model.id ? null : entry.model.id)}
+              onOpenEngines={() => navigate("/settings/engines")}
+              onOpenDownloads={() => navigate("/settings/downloads")}
+            />
+          ))}
+          <div className="fy-rt__actions">
+            <span style={{ flex: 1 }} />
+            <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
+              {setup?.running === true ? "Downloads · running" : "Downloads"}
+            </Button>
+            <Button variant="secondary" onClick={() => navigate("/settings/engines")}>
+              Engines
+            </Button>
           </div>
-        );
-      })}
-      <div className="fy-set__actions">
-        <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
-          {setup?.running === true ? "Downloads · running" : "Downloads"}
-        </Button>
-        <Button variant="secondary" onClick={() => navigate("/settings/engines")}>
-          Engines
-        </Button>
+        </div>
       </div>
     </div>
   );
@@ -248,25 +300,32 @@ function MachineHeader() {
   );
 }
 
+/** Which engine each voice capability runs on, and what its line is called on the screen. */
+const VOICE_LINE = {
+  kokoro: "Local voices",
+  whisper: "Dictation",
+} as const;
+
 /**
  * Local voices, dictation and conversational voice, independently readable (R-48, SPEC-028 R-2).
  *
- * Kokoro unavailable with whisper.cpp ready still reads as dictation usable; the row does not
- * collapse to one failed state. Conversational voice is the one line that needs both halves,
- * because a conversation is speech in and speech out.
+ * Kokoro unavailable with whisper.cpp ready still reads as dictation usable; neither capability
+ * collapses into one failed state. Conversational voice is the one line that needs both halves,
+ * because a conversation is speech in and speech out — so it is stated under each of them rather
+ * than under whichever one it was arbitrarily filed with. Both readings come off the same
+ * `voiceRuntime` in the same render, so the two cannot disagree.
  */
-function VoiceLines() {
+function VoiceLines({ engine }: { engine: "kokoro" | "whisper" }) {
   const { state } = useStore();
   const voice = state?.app.voiceRuntime ?? null;
-  const engineState = (engine: "kokoro" | "whisper"): string => voice?.engineStatus[engine]?.state ?? "unknown";
-  const tone = (engine: "kokoro" | "whisper"): RuntimeTone => {
-    const value = engineState(engine);
+  const engineState = (which: "kokoro" | "whisper"): string => voice?.engineStatus[which]?.state ?? "unknown";
+  const tone = (which: "kokoro" | "whisper"): RuntimeTone => {
+    const value = engineState(which);
     return value === "ready" ? "ok" : value === "unknown" ? "idle" : "warn";
   };
   const both = engineState("kokoro") === "ready" && engineState("whisper") === "ready";
   const lines: Array<{ label: string; tone: RuntimeTone; state: string }> = [
-    { label: "Local voices", tone: tone("kokoro"), state: engineState("kokoro") },
-    { label: "Dictation", tone: tone("whisper"), state: engineState("whisper") },
+    { label: VOICE_LINE[engine], tone: tone(engine), state: engineState(engine) },
     {
       label: "Conversational voice",
       tone: both ? "ok" : voice === null ? "idle" : "warn",

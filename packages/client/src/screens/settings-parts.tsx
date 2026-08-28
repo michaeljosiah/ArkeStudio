@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ComponentHealth } from "@arke-studio/contracts";
+import { CLONED_VOICE_MODEL, type Capability, type ComponentHealth } from "@arke-studio/contracts";
 import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 
 /**
@@ -7,6 +7,72 @@ import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
  * while Local runtime was one screen; Local AI and Engines both draw rows the same way, and two
  * copies of a status dot is how two screens start looking like two products.
  */
+
+/**
+ * One capability row: the label a creator reads, and what it draws.
+ *
+ * `claims` names models the row takes out of another row's capability. It exists for exactly one
+ * model and is a *display* claim, never a capability claim — SPEC-022's cloned voice dispatches
+ * as `voice-tts` on purpose, so that no capability probe implies an engine can perform a clone,
+ * and that reasoning is about probes rather than about which heading a person looks under.
+ */
+export interface CapabilityRow {
+  label: string;
+  capabilities: readonly Capability[];
+  claims?: readonly string[];
+  /**
+   * No local plane at all — nothing in the local half of the manifest can serve this, and nothing
+   * is being fetched that would. The word is still needed, because Cloud AI routes the capability
+   * and has to name it; the row is not drawn on Local AI.
+   */
+  cloudOnly?: boolean;
+}
+
+/**
+ * The capability vocabulary, in the order Local AI states it (SPEC-033 R-47, R-62, R-89). One
+ * table, read by both screens, because a capability named differently on Local AI and Cloud AI
+ * is a defect and two hand-kept lists are how that defect arrives.
+ *
+ * `Voice` was one row over `voice-tts` and `voice-stt` together. It hid three separate questions
+ * — what reads text aloud, what transcribes speech, what a cloned voice needs — under a noun
+ * that answered none of them, and it put the cloned-voice recipe under a heading about voices in
+ * general. The three are named for what they do.
+ */
+export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
+  { label: "Images", capabilities: ["image"] },
+  { label: "Video", capabilities: ["video"] },
+  { label: "Speech-to-Text", capabilities: ["voice-stt"] },
+  { label: "Text-to-Speech", capabilities: ["voice-tts"] },
+  { label: "Voice clone", capabilities: ["voice-clone"], claims: [CLONED_VOICE_MODEL] },
+  // No local engine makes music, and none is coming — so Local AI does not draw it and Cloud AI,
+  // which routes it, still has its word. The guard against forgetting this row when that changes
+  // is the R-47 test: a capability a local provider declares must land in exactly one drawn row,
+  // so a local music provider turns that assertion red rather than rendering nowhere.
+  { label: "Music", capabilities: ["music"], cloudOnly: true },
+  { label: "Language", capabilities: ["llm"] },
+];
+
+/**
+ * A capability's creator-facing word, derived from the rows rather than restated beside them.
+ * Total over `Capability` because every capability sits in exactly one row — the invariant a
+ * test asserts, and the reason this map needs no fallback.
+ *
+ * `Clips`, `Frames & stills`, `Score & songs` and `Direct LLM work` are retired. They were our
+ * words rather than a creator's, and a capability named differently on the two screens is what
+ * stops the local/cloud split reading as two halves of one question. Cloud AI kept a map of its
+ * own until Local AI's rows were renamed and only one of the two moved.
+ */
+export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
+  CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
+) as Record<Capability, string>;
+
+/** The row a model is drawn under: its capability's, unless another row claims it by id. */
+export function rowForModel(model: { id: string; capability: Capability }): CapabilityRow {
+  return (
+    CAPABILITY_ROWS.find((row) => row.claims?.includes(model.id) === true) ??
+    CAPABILITY_ROWS.find((row) => row.capabilities.includes(model.capability))!
+  );
+}
 
 /** The three tones a runtime state comes in. Anything unmeasured is idle, never a fault (D12). */
 export type RuntimeTone = "ok" | "warn" | "idle";
