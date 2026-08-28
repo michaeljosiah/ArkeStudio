@@ -4609,6 +4609,13 @@ export const VIDEO_KIND_CHOICES = [
 /** The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2). */
 const STORED_KINDS = new Set(["microdrama", "music-video", "interactive"]);
 
+/*
+ * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
+ * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
+ * one. A kind added without a plate falls back to that same empty box rather than breaking.
+ */
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video", "interactive"]);
+
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
   { id: "30-45", label: "30–45s" },
@@ -4741,9 +4748,9 @@ export function NewProductionScreen() {
 
   /*
    * Step two (turn 53a): its own screen, with the step said out loud. The kinds carry a banner
-   * area because the choice is meant to be made by looking rather than by reading — the art is
-   * not drawn yet, so the area holds its place rather than collapsing and changing the layout
-   * when it arrives.
+   * area because the choice is meant to be made by looking rather than by reading — three lit
+   * vertical panels or one wide horizon say what you are starting faster than "Episodes,
+   * vertical." does, and the sentence underneath then confirms rather than teaches.
    */
   if (step === 2) {
     return (
@@ -4779,9 +4786,23 @@ export function NewProductionScreen() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    // The plate is drawn to the box's edges, so the radius has to clip it or the
+                    // four corners square off and the row stops looking like one set of cards.
+                    overflow: "hidden",
                   }}
                 >
-                  {k.id === "other" && <span className="fy-mono">no defaults</span>}
+                  {KIND_PLATES.has(k.id) ? (
+                    // Relative, not absolute: the packaged app loads from file://, where a
+                    // leading slash resolves to the filesystem root and every plate 404s (the
+                    // same lesson as the art-style previews and the setup reel).
+                    <img
+                      src={`./video-kinds/${k.id}.webp`}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <span className="fy-mono">no defaults</span>
+                  )}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />

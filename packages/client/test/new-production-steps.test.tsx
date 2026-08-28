@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   EPISODE_COUNT_CHOICES,
   EPISODE_LENGTH_CHOICES,
+  KIND_PLATES,
   MICRODRAMA_DEFAULTS,
   VIDEO_KIND_CHOICES,
   parseEpisodeLength,
@@ -87,6 +90,26 @@ describe("step two offers every kind and every default (design turn 53)", () => 
     );
     assert.equal(VIDEO_KIND_CHOICES[0]!.body, "Episodes, vertical.");
     assert.equal(VIDEO_KIND_CHOICES[3]!.body, "The viewer chooses.");
+  });
+
+  /**
+   * The kinds are chosen by looking, so a plate that is named but not shipped costs the whole
+   * point of the step — and it fails quietly: the box falls back to bare `--muted`, which is
+   * exactly what an unpicked card already looks like. Nothing on screen says the art is missing.
+   */
+  it("every kind that offers a plate has one on disk, and Other deliberately has none", () => {
+    const plates = fileURLToPath(new URL("../public/video-kinds/", import.meta.url));
+    for (const kind of VIDEO_KIND_CHOICES) {
+      const shipped = existsSync(`${plates}${kind.id}.webp`);
+      assert.equal(
+        shipped,
+        KIND_PLATES.has(kind.id),
+        shipped
+          ? `${kind.id} ships a plate the screen never asks for`
+          : `${kind.id} points at ./video-kinds/${kind.id}.webp, which is not there`,
+      );
+    }
+    assert.ok(!KIND_PLATES.has("other"), "nothing assumed is drawn as an empty box, not as a picture");
   });
 
   it("each kind carries the frame it delivers in, and only a micro drama is vertical", () => {
