@@ -71,6 +71,23 @@ describe("the snapshot holder (R-33, R-34)", () => {
     holder.dispose();
   });
 
+  it("an unchanged snapshot that CONTAINS findings is not re-broadcast (live facts carry the derivation instant)", async () => {
+    // runtime: null is the common session (§2.2) — it always yields hardware-unmeasured, whose
+    // facts are stamped with the derivation instant. A naive equality would re-send it on every
+    // tick forever.
+    const { holder, broadcasts } = holderWith(() => sources({ runtime: null }));
+    holder.schedule();
+    await tick();
+    assert.equal(broadcasts.length, 1);
+    assert.ok(broadcasts[0]!.findings.some((f) => f.kind === "hardware-unmeasured"));
+    holder.schedule();
+    await tick();
+    holder.schedule();
+    await tick();
+    assert.equal(broadcasts.length, 1, "nothing changed, nothing re-sent");
+    holder.dispose();
+  });
+
   it("broadcasts the first derivation, then only what changed", async () => {
     let paused = false;
     const { holder, broadcasts } = holderWith(() =>

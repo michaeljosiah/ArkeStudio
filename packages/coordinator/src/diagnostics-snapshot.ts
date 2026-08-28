@@ -41,20 +41,27 @@ export class DiagnosticsSnapshotHolder {
     if (this.disposed || this.scheduled !== null) return;
     this.scheduled = setImmediate(() => {
       this.scheduled = null;
-      this.deriveNow();
+      this.deriveNow(true);
     });
   }
 
   /**
    * The latest derived snapshot. Maintained eagerly from the first `schedule()`, so callers on
    * request paths (the support bundle, a fresh connection's replay) read rather than compute;
-   * deriving here is only the cold-start fallback before the first tick has fired.
+   * deriving here is only the cold-start fallback before the first tick has fired — and that
+   * one is not broadcast, because the caller is about to deliver it itself and no client holds
+   * an older one to correct.
    */
   currentSnapshot(): DiagnosticsSnapshot {
-    return this.current ?? this.deriveNow();
+    return this.current ?? this.deriveNow(false);
   }
 
-  private deriveNow(): DiagnosticsSnapshot {
+  private deriveNow(broadcast: boolean): DiagnosticsSnapshot {
+    // This derivation supersedes any pending one — running both would be two in a tick (R-33).
+    if (this.scheduled !== null) {
+      clearImmediate(this.scheduled);
+      this.scheduled = null;
+    }
     const snapshot = deriveDiagnostics({
       sources: this.deps.sources(),
       tails: this.deps.tails(),
@@ -64,7 +71,7 @@ export class DiagnosticsSnapshotHolder {
     });
     const changed = !diagnosticsEqual(this.current, snapshot);
     this.current = snapshot;
-    if (changed && !this.disposed) this.deps.onSnapshot(snapshot);
+    if (broadcast && changed && !this.disposed) this.deps.onSnapshot(snapshot);
     return snapshot;
   }
 

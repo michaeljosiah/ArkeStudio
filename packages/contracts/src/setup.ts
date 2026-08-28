@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IsoDateTimeSchema } from "./ids.js";
 import { EngineIdSchema } from "./local-ai.js";
 import { ProviderIdSchema } from "./provider.js";
 
@@ -65,6 +66,17 @@ export const SetupComponentSchema = z
      * has to name the drive.
      */
     blockedVolumeRoot: z.string().min(1).optional(),
+    /**
+     * The disk guard's own figures and instant, published beside the root it measured. The
+     * guard works per volume and `diskFreeMb` below is the app volume's figure — carrying that
+     * into a finding about a mapped drive would name D: and quote C:, the exact fact/screen
+     * disagreement SPEC-032 R-13 forbids. The need is the volume group's total, which is the
+     * number the detail sentence states.
+     */
+    blockedNeedMb: z.number().int().min(0).optional(),
+    blockedFreeMb: z.number().int().min(0).optional(),
+    /** Strict ISO: this instant lands in finding facts, whose schema would refuse anything looser. */
+    blockedAt: IsoDateTimeSchema.optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
     /**
@@ -233,9 +245,10 @@ export const SetupStatusSchema = z
     diskFreeMb: z.number().int().min(0).nullable(),
     /**
      * When that check ran (SPEC-032 R-7, R-16): a figure measured at start-up must not read as
-     * a statement about the drive right now. Defaulted null for payloads that predate it.
+     * a statement about the drive right now. Defaulted null for payloads that predate it, and
+     * strict ISO because it lands in finding facts whose schema refuses anything looser.
      */
-    diskCheckedAt: z.string().min(1).nullable().default(null),
+    diskCheckedAt: IsoDateTimeSchema.nullable().default(null),
   })
   .strict();
 export type SetupStatus = z.infer<typeof SetupStatusSchema>;

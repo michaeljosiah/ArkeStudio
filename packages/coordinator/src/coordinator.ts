@@ -1478,14 +1478,25 @@ export class Coordinator {
       // Deliberately not this.emit: the snapshot is derived FROM the read model, so folding it
       // back in would re-trigger its own derivation, and journalling it would record to disk a
       // projection of state the change log already carries.
-      onSnapshot: (snapshot) =>
-        this.transport.broadcast(
-          DomainEventSchema.parse({
-            at: new Date().toISOString(),
-            type: "diagnostics.snapshot",
-            snapshot,
-          }),
-        ),
+      onSnapshot: (snapshot) => {
+        // The broadcast runs inside the holder's setImmediate; a snapshot the event schema
+        // refuses must degrade to a logged line, never an uncaught exception (R-14's spirit,
+        // carried to the wire).
+        try {
+          this.transport.broadcast(
+            DomainEventSchema.parse({
+              at: new Date().toISOString(),
+              type: "diagnostics.snapshot",
+              snapshot,
+            }),
+          );
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "diagnostics.broadcast-failed",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
     });
     this.lifecycleDisposers.add(() => this.diagnosticsSnapshot?.dispose());
     // The first derivation, so request paths read an existing snapshot rather than computing

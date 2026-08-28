@@ -226,17 +226,23 @@ describe("a lane paused on a credential (R-20.2)", () => {
 
 describe("short of disk (R-20.3, R-20.4)", () => {
   const weightsId = comfyUiWeightsComponentId("wan-video");
+  // The guard's own figures ride the component: the D: reading, never the app volume's.
   const blockedWeights = component(weightsId, {
     state: "blocked",
     detail: "needs 17 GB plus room to work; D: has 4 GB free",
     blockedBy: "disk",
     blockedVolumeRoot: "D:\\",
+    blockedNeedMb: 17408,
+    blockedFreeMb: 4096,
+    blockedAt: RECENT,
     sizeMb: 17408,
   });
 
   it("row 3: the cause names the volume with both figures; the recipe is a suppressed consequence", () => {
     const snapshot = derive({
-      setup: { components: [blockedWeights], running: false, diskFreeMb: 4096, diskCheckedAt: RECENT },
+      // The app volume's figure disagrees on purpose: the finding must carry the guard's D:
+      // reading, not C:'s, or it contradicts its own cause sentence (R-13).
+      setup: { components: [blockedWeights], running: false, diskFreeMb: 90_000, diskCheckedAt: RECENT },
       comfyui: comfyui({
         recipes: [recipe("wan-video", "disabled", "files", "1 of 1 model files missing from the models folder")],
       }),
@@ -247,7 +253,9 @@ describe("short of disk (R-20.3, R-20.4)", () => {
     assert.equal(cause.cause.statement, "needs 17 GB plus room to work; D: has 4 GB free");
     assert.equal(cause.facts.find((f) => f.name === "volume")?.value, "D:\\");
     // R-7: the figure travels as the measured number; "4 GB" is the surface's business.
-    assert.equal(cause.facts.find((f) => f.name === "disk-free-mb")?.value, 4096);
+    assert.equal(cause.facts.find((f) => f.name === "volume-free-mb")?.value, 4096);
+    assert.equal(cause.facts.find((f) => f.name === "needs-mb")?.value, 17408);
+    assert.equal(cause.facts.some((f) => f.value === 90_000), false, "the app volume's figure stays out");
     assert.deepEqual(cause.consequences, [`comfyui-recipe-disabled:wan-video`]);
     const suppressed = suppressedRefs(snapshot);
     assert.ok(suppressed.has("comfyui-recipe-disabled:wan-video"));
@@ -290,16 +298,39 @@ describe("short of disk (R-20.3, R-20.4)", () => {
   });
 
   it("row 18: a stale free-disk figure is named stale with the re-measure control (R-16)", () => {
+    const staleBlock = component(weightsId, {
+      ...blockedWeights,
+      blockedAt: STALE,
+    });
     const snapshot = derive({
-      setup: { components: [blockedWeights], running: false, diskFreeMb: 4096, diskCheckedAt: STALE },
+      setup: { components: [staleBlock], running: false, diskFreeMb: 4096, diskCheckedAt: RECENT },
       comfyui: comfyui({ recipes: [] }),
     });
     const finding = snapshot.findings.find((f) => f.kind === "component-disk-short");
     assert.ok(finding?.stale);
-    assert.deepEqual(finding.stale.facts, ["disk-free-mb"]);
+    assert.ok(finding.stale.facts.includes("volume-free-mb"));
     assert.equal(finding.stale.remeasure?.control, "component-retry");
     // The age is computable at the surface from the fact's own instant.
-    assert.equal(finding.facts.find((f) => f.name === "disk-free-mb")?.measuredAt, STALE);
+    assert.equal(finding.facts.find((f) => f.name === "volume-free-mb")?.measuredAt, STALE);
+  });
+
+  it("row 48: derive, change the read model, derive again — the change is reflected, nothing cached survives (R-12)", () => {
+    const before = derive({
+      setup: { components: [blockedWeights], running: false, diskFreeMb: 4096, diskCheckedAt: RECENT },
+    });
+    assert.ok(before.findings.some((f) => f.kind === "component-disk-short"));
+    const after = derive(
+      {
+        setup: {
+          components: [component(weightsId, { state: "downloading" })],
+          running: true,
+          diskFreeMb: 90_000,
+          diskCheckedAt: RECENT,
+        },
+      },
+      before,
+    );
+    assert.equal(after.findings.some((f) => f.kind === "component-disk-short"), false);
   });
 });
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
-import { comfyUiWeightsComponentId, isComfyUiWeightsComponent } from "./comfyui.js";
+import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
 import type { ClientState } from "./client-state.js";
 
 /**
@@ -212,6 +212,19 @@ export type FindingRemedy = z.infer<typeof FindingRemedySchema>;
 
 /** R-25: what both surfaces say for a remedy of `null` — stated once, rendered anywhere. */
 export const REMEDY_ABSENT_STATEMENT = "No control resolves this.";
+
+/**
+ * What a surface states about a null remedy. A suppressed consequence resolves through the
+ * cause it is rendered under, so it gets no line at all; a primary finding with no control
+ * gets R-25's stated absence. Both surfaces use this so neither can misread the `null`.
+ */
+export function remedyAbsenceStatement(
+  snapshot: Pick<DiagnosticsSnapshot, "findings">,
+  finding: Finding,
+): string | null {
+  if (finding.remedy !== null) return null;
+  return suppressedRefs(snapshot).has(findingRef(finding)) ? null : REMEDY_ABSENT_STATEMENT;
+}
 
 export const FindingSchema = z
   .object({
@@ -574,25 +587,28 @@ const componentDiskShort: Rule = {
     const findings: DraftFinding[] = [];
     for (const component of setup.components) {
       if (component.state !== "blocked" || component.blockedBy !== "disk") continue;
-      const diskAt = setup.diskCheckedAt ?? ctx.now;
+      // The guard's own figures and instant. `setup.diskFreeMb` is the app volume's number, and
+      // a finding naming a mapped D: while quoting C:'s free space is the fact/screen
+      // disagreement R-13 forbids.
+      const blockedAt = component.blockedAt ?? ctx.now;
       const facts: FindingFact[] = [
         { name: "component", value: component.id, source: "app.setup.components", measuredAt: ctx.now },
         {
           name: "needs-mb",
-          value: component.installedMb ?? component.sizeMb,
+          value: component.blockedNeedMb ?? component.installedMb ?? component.sizeMb,
           source: "app.setup.components",
-          measuredAt: ctx.now,
+          measuredAt: blockedAt,
         },
         ...(component.blockedVolumeRoot !== undefined
-          ? [{ name: "volume", value: component.blockedVolumeRoot, source: "app.setup.components", measuredAt: ctx.now }]
+          ? [{ name: "volume", value: component.blockedVolumeRoot, source: "app.setup.components", measuredAt: blockedAt }]
           : []),
-        ...(setup.diskFreeMb !== null
-          ? [{ name: "disk-free-mb", value: setup.diskFreeMb, source: "app.setup.diskFreeMb", measuredAt: diskAt }]
+        ...(component.blockedFreeMb !== undefined
+          ? [{ name: "volume-free-mb", value: component.blockedFreeMb, source: "app.setup.components", measuredAt: blockedAt }]
           : []),
       ];
       const consequences: string[] = [];
-      if (isComfyUiWeightsComponent(component.id)) {
-        const recipeId = component.id.slice("comfyui-weights-".length);
+      const recipeId = comfyUiWeightsRecipeId(component.id);
+      if (recipeId !== null) {
         const disabled = ctx.sources.comfyui?.recipes.find(
           (r) => r.recipeId === recipeId && r.state === "disabled",
         );
@@ -854,10 +870,10 @@ const waitingOnComponent: Rule = {
       const waiting: string[] = setup.components
         .filter((c) => c.state === "blocked" && c.blockedBy === "dependency" && (c.requires ?? []).includes(component.id))
         .map((c) => c.id);
-      if (isComfyUiWeightsComponent(component.id)) {
-        const recipeId = component.id.slice("comfyui-weights-".length);
+      const weightsRecipeId = comfyUiWeightsRecipeId(component.id);
+      if (weightsRecipeId !== null) {
         const recipe = ctx.sources.comfyui?.recipes.find(
-          (r) => r.recipeId === recipeId && r.state === "disabled" && r.reasonKind === "files",
+          (r) => r.recipeId === weightsRecipeId && r.state === "disabled" && r.reasonKind === "files",
         );
         if (recipe) waiting.push(recipe.recipeId);
       }
@@ -894,9 +910,17 @@ const STATE_RULES: readonly Rule[] = [
   hardwareFacts,
 ];
 
-/** R-19: which of R-17's sources are present, so absence is stated rather than implied. */
+/**
+ * Every source R-17 names, with whether it was read or is legitimately absent (R-19) — the
+ * whole list, not the subset this release's rules happen to consult, so a rule added later
+ * changes no row and a reader can see the closed set. `unavailable` is reachable only for the
+ * log tail: the state fields are in memory, and a null one is a fact that was never taken,
+ * which is absence, not a failed read (R-14's distinction).
+ */
 function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
   const named: Array<{ name: string; state: DiagnosticsSourceState }> = [
+    { name: "app.version", state: "read" },
+    { name: "app.health", state: "read" },
     { name: "app.env", state: sources.env === null ? "absent" : "read" },
     { name: "app.runtime", state: sources.runtime === null ? "absent" : "read" },
     { name: "app.harness", state: sources.harness === null ? "absent" : "read" },
@@ -904,12 +928,18 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.setup", state: sources.setup === null ? "absent" : "read" },
     { name: "app.comfyui", state: sources.comfyui === null ? "absent" : "read" },
     { name: "app.voiceRuntime", state: sources.voiceRuntime === null ? "absent" : "read" },
-    { name: "app.manifest", state: sources.manifest === null ? "absent" : "read" },
-    { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
-    { name: "app.jobs", state: "read" },
     { name: "app.queues", state: "read" },
+    { name: "app.jobs", state: "read" },
     { name: "app.providers", state: "read" },
+    { name: "app.providerTools", state: "read" },
+    { name: "app.manifest", state: sources.manifest === null ? "absent" : "read" },
+    { name: "app.routing", state: "read" },
+    { name: "app.models", state: "read" },
+    { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
     { name: "app.ledger", state: "read" },
+    { name: "app.drift", state: "read" },
+    { name: "app.builds", state: "read" },
+    { name: "app.update", state: "read" },
     { name: "log.app", state: tails.appLog === "unavailable" ? "unavailable" : "read" },
   ];
   return named;
@@ -982,11 +1012,14 @@ export function deriveWithRules(
   }));
 
   // Deterministic order (R-11): severity rank, then kind, then occurrence.
+  // Code-unit comparison, not locale collation: two conforming builds in different locales
+  // must order identical snapshots identically (the divergence class D13 names).
+  const byCodeUnits = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
   findings.sort((a, b) => {
     const rank = FINDING_SEVERITY_RANK[a.severity] - FINDING_SEVERITY_RANK[b.severity];
     if (rank !== 0) return rank;
-    const kind = a.kind.localeCompare(b.kind);
-    return kind !== 0 ? kind : a.occurrence.localeCompare(b.occurrence);
+    const kind = byCodeUnits(a.kind, b.kind);
+    return kind !== 0 ? kind : byCodeUnits(a.occurrence, b.occurrence);
   });
 
   return {
@@ -1007,8 +1040,19 @@ export function diagnosticsEqual(
   b: DiagnosticsSnapshot | null,
 ): boolean {
   if (a === null || b === null) return a === b;
-  const strip = ({ derivedAt: _derivedAt, ...rest }: DiagnosticsSnapshot) => rest;
-  return JSON.stringify(strip(a)) === JSON.stringify(strip(b));
+  // Live facts are stamped with the derivation instant by construction, so a naive comparison
+  // would find every populated snapshot different from its predecessor and re-broadcast on
+  // every tick. Normalise exactly those; a recorded instant (`checkedAt`, `detectedAt`,
+  // `blockedAt`) stays significant because its movement IS a change.
+  const comparable = (snapshot: DiagnosticsSnapshot) => ({
+    findings: snapshot.findings.map((finding) => ({
+      ...finding,
+      facts: finding.facts.map((fact) =>
+        fact.measuredAt === snapshot.derivedAt ? { ...fact, measuredAt: "@derivation" } : fact,
+      ),
+    })),
+    checked: snapshot.checked,
+    sources: snapshot.sources,
+  });
+  return JSON.stringify(comparable(a)) === JSON.stringify(comparable(b));
 }
-
-export type { Rule as DiagnosticsRule };

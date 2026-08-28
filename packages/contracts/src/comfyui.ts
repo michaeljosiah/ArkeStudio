@@ -133,6 +133,13 @@ export function isComfyUiWeightsComponent(componentId: string): boolean {
   return componentId.startsWith(COMFYUI_WEIGHTS_COMPONENT_PREFIX);
 }
 
+/** The inverse: the recipe whose weights this component is, or null for any other component. */
+export function comfyUiWeightsRecipeId(componentId: string): string | null {
+  return isComfyUiWeightsComponent(componentId)
+    ? componentId.slice(COMFYUI_WEIGHTS_COMPONENT_PREFIX.length)
+    : null;
+}
+
 // ---------------------------------------------------------------------------
 // Recipe readiness (§2.12, R-16) — one answer, consumed everywhere
 // ---------------------------------------------------------------------------

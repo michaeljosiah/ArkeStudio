@@ -164,6 +164,9 @@ export class LocalSetupService {
     if (patch.state !== undefined && patch.state !== "blocked" && patch.blockedBy === undefined) {
       delete next.blockedBy;
       delete next.blockedVolumeRoot;
+      delete next.blockedNeedMb;
+      delete next.blockedFreeMb;
+      delete next.blockedAt;
     }
     this.components.set(id, next);
   }
@@ -433,15 +436,21 @@ export class LocalSetupService {
       // disk to everyone, and a refusal about D: phrased that way sends someone to clear space
       // on the wrong volume. A host with no drive letters has nothing useful to name.
       const where = group.root === appRootDrive ? "this disk" : group.root;
+      const blockedAt = new Date().toISOString();
       for (const c of group.components) {
         this.set(c.id, {
           state: "blocked",
           detail: `needs ${gb(group.needMb)} plus room to work; ${where} has ${gb(freeMb)} free`,
           // Declared, so the diagnostics join can tell a full drive from a waiting dependency
           // without parsing this sentence; the root is the one filesystem identification a
-          // diagnostics record may carry (SPEC-032 R-20.3, R-28).
+          // diagnostics record may carry (SPEC-032 R-20.3, R-28). The figures are this guard's
+          // own — `diskFreeMb` on the status is the app volume's, and a mapped models folder is
+          // routinely on another drive.
           blockedBy: "disk",
           blockedVolumeRoot: group.root,
+          blockedNeedMb: group.needMb,
+          blockedFreeMb: freeMb,
+          blockedAt,
         });
       }
       blockedAny = true;
