@@ -465,6 +465,8 @@ export function ComfyUiDetail() {
             className={cx(
               "fy-set__row--stack",
               "fy-set__row",
+              // A declared refusal recedes; a measured shortfall does not, because a smaller
+              // model or a bigger card answers it (SPEC-033 D8, SPEC-034 R-23).
               (recipe.state === "disabled" || gated?.fit === "unsupported") && "fy-set__row--off",
             )}
             data-testid="comfyui-recipe"

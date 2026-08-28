@@ -99,10 +99,12 @@ export const TONE_CLASS: Record<RuntimeTone, string> = {
 };
 
 /** A dot leading the word it qualifies — the pairing every runtime row states its state with. */
-export function RuntimeStatus({ tone, children }: { tone: RuntimeTone; children: ReactNode }) {
+export function RuntimeStatus({ tone, children }: { tone?: RuntimeTone; children: ReactNode }) {
   return (
     <span className="fy-set__status">
-      <span className={cx("fy-set__dot", TONE_CLASS[tone])} />
+      {/* No tone, no dot (SPEC-034 R-22). A caller that has nothing for the dot to say leaves it
+          out rather than drawing a neutral one, so the coloured one stays findable in a list. */}
+      {tone !== undefined && <span className={cx("fy-set__dot", TONE_CLASS[tone])} />}
       <span className="fy-set__state">{children}</span>
     </span>
   );

@@ -12,6 +12,7 @@ import {
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
   type EngineId,
+  type FitVerdict,
   type Locality,
   type LocalModelRowState,
   type ManifestModel,
@@ -32,6 +33,14 @@ import {
 } from "./settings-parts.js";
 
 /**
+ * A refusing verdict, which the row states as its headline and the reason line states with the
+ * figures behind it (SPEC-033 R-19, R-27). Between the two, the label itself says the same thing
+ * a third time and vaguer — `unsupported · not enough here · 18 GB` before the line that says
+ * how much (SPEC-034 R-21).
+ */
+const refuses = (fit: FitVerdict): boolean => fit === "insufficient" || fit === "unsupported";
+
+/**
  * The local half of Settings · Providers (SPEC-034 R-7). One engine's models, and the machine
  * they run on.
  *
@@ -45,14 +54,16 @@ import {
  * tested doing so.
  */
 
-/** What each headline state does to a row's dot. Only a refusal warns. */
-const STATE_TONE: Record<LocalModelRowState, RuntimeTone> = {
+/**
+ * Which headline states draw a dot at all (SPEC-034 R-22) — and it is only the refusal.
+ *
+ * The table used to be total over the states, with `ok` for installed and `idle` for the other
+ * six. Green said what the word beside it had already said, and grey stood for five states while
+ * separating none of them; drawn on every row, the one that meant something was competing with
+ * seven that did not.
+ */
+const STATE_TONE: Partial<Record<LocalModelRowState, RuntimeTone>> = {
   unsupported: "warn",
-  installed: "ok",
-  available: "idle",
-  downloading: "idle",
-  installing: "idle",
-  starting: "idle",
   "needs-attention": "warn",
 };
 
@@ -71,6 +82,8 @@ interface Entry {
   recommended: boolean;
   /** SPEC-028 R-35's answer, where it refuses a model that is otherwise installed (R-31). */
   ineligible: string | undefined;
+  /** A *declared* refusal, which recedes — never a measured one, which does not (R-23). */
+  declined: boolean;
   /** The component that provides this model, where one does. Absent means nothing can fetch it. */
   component: SetupComponent | undefined;
   /** What one press actually costs — the whole chain, never this model's own weights (R-40). */
@@ -144,6 +157,11 @@ export function EngineModelGroups({ engine }: { engine: EngineId }) {
         ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
       });
       const rowState = localModelRowState(gated?.fit, activation);
+      // A declared `unsupported` is a fact about this machine nobody can act on, so it recedes;
+      // a measured `insufficient` names a shortfall a smaller model or a bigger card answers,
+      // and receding hides something actionable (SPEC-033 D8, SPEC-034 R-23). The row state
+      // folds the two, so the verdict has to travel beside it.
+      const declined = gated?.fit === "unsupported";
       const component = components.find(
         (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
       );
@@ -151,16 +169,16 @@ export function EngineModelGroups({ engine }: { engine: EngineId }) {
         model,
         state: rowState,
         locality,
+        declined,
         reason: gated?.reason,
-        // Before the probe returns there is no verdict, and R-28 offers the model anyway — so
-        // the row says the machine has not been measured rather than leaving the line a word
-        // short. A remote model is the one case with no verdict to state at all.
+        // Only where it is not the unremarkable one (SPEC-034 R-20). `runs well` changes no
+        // decision; `not measured` is the machine row said once per model instead of once; and
+        // a refusal's figures are on the reason line beneath, which says the same thing with
+        // numbers in it — three words between the state and the size, all of them noise.
         fitLabel:
-          gated?.fit !== undefined
+          gated?.fit !== undefined && gated.fit !== "runs-well" && gated.fit !== "unknown" && !refuses(gated.fit)
             ? FIT_LABEL[gated.fit]
-            : locality === "local"
-              ? FIT_LABEL.unknown
-              : undefined,
+            : undefined,
         sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
         component,
         closure: component === undefined ? undefined : setupClosure(components, component.id),
@@ -279,9 +297,18 @@ export function MachineRow() {
     <div className="fy-rt__keyline">
       <div className="fy-rt__eyebrow">THIS MACHINE</div>
       <div className="fy-set__field">
+        {/* Nothing probed is one fact about the machine, not four about its parts: the figures
+            all came back the same way and saying so once per figure is the same sentence four
+            times. A probe that answered null is different, and keeps its own word. */}
         <span className="fy-set__state" data-testid="machine-header">
-          {accelerator} · {figure(probes?.vramMb)} VRAM · {figure(probes?.memMb)} memory ·{" "}
-          {figure(probes?.diskFreeMb)} free
+          {runtime === null ? (
+            "not measured"
+          ) : (
+            <>
+              {accelerator} · {figure(probes?.vramMb)} VRAM · {figure(probes?.memMb)} memory ·{" "}
+              {figure(probes?.diskFreeMb)} free
+            </>
+          )}
         </span>
       </div>
       <button type="button" className="fy-set__link" onClick={() => detectRuntimes()}>
@@ -362,7 +389,7 @@ function ModelRow({
   const parts = [ROW_STATE_LABEL[state], entry.fitLabel, entry.sizeMbytes && sizeMb(entry.sizeMbytes)];
   const line = parts.filter((part, at) => Boolean(part) && parts.indexOf(part) === at).join(" · ");
   return (
-    <div className={cx("fy-set__row", "fy-set__row--stack", !elsewhere && state === "unsupported" && "fy-set__row--off")}>
+    <div className={cx("fy-set__row", "fy-set__row--stack", !elsewhere && entry.declined && "fy-set__row--off")}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <button
           type="button"
@@ -377,7 +404,7 @@ function ModelRow({
           <div className="fy-set__title">{model.displayName}</div>
         </div>
         {entry.recommended && <span className="fy-prov__unverified">recommended</span>}
-        <RuntimeStatus tone={elsewhere ? "idle" : STATE_TONE[state]}>{line}</RuntimeStatus>
+        <RuntimeStatus tone={elsewhere ? undefined : STATE_TONE[state]}>{line}</RuntimeStatus>
         {/*
          * Starting work stays where the decision is made; watching it belongs to Downloads
          * (R-83). The figure on the button is the whole closure's, because quoting the model's

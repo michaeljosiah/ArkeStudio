@@ -251,17 +251,52 @@ describe("Providers: an engine's pane, and the models it hosts (SPEC-034 R-7, R-
 });
 
 describe("what a model row states (R-51, R-52, R-27)", () => {
-  it("carries the state, the verdict and the size, and marks the one recommendation", () => {
-    assert.match(plain(renderEngine(stateWith(), "voxa")), /Kokoro 82M\s+installed · runs well · 400 MB/);
-    assert.match(
-      plain(renderEngine(stateWith(), "ollama")),
-      /Gemma 4 12B\s+recommended\s+available · runs well · 7\.4 GB/,
-    );
+  it("carries the state and the size, and nothing that never varies (SPEC-034 R-19, R-20)", () => {
+    // `runs well` is the verdict that changes no decision, and `not measured` is the machine row
+    // said once per model rather than once. Neither prints; the state and the size do.
+    assert.match(plain(renderEngine(stateWith(), "voxa")), /Kokoro 82M\s+installed · 400 MB/);
+    assert.match(plain(renderEngine(stateWith(), "ollama")), /Gemma 4 12B\s+recommended\s+available · 7\.4 GB/);
+    assert.doesNotMatch(plain(renderEngine(stateWith(), "voxa")), /runs well/);
+  });
+
+  it("states runs slowly, which is the exception (SPEC-034 R-20)", () => {
+    const slow = stateWith({
+      runtime: runtime({
+        models: runtime().models.map((m) => (m.provider === "kokoro" ? { ...m, fit: "runs-slowly" as const } : m)),
+      }),
+    });
+    assert.match(plain(renderEngine(slow, "voxa")), /Kokoro 82M\s+installed · runs slowly · 400 MB/);
+  });
+
+  it("draws a dot only for a refusal (SPEC-034 R-22)", () => {
+    // Green stood for `installed` and the word beside it had already said so; grey stood for five
+    // states and separated none of them. One dot on the list is one that can be found.
+    const ollama = renderEngine(stateWith(), "ollama");
+    const rows = ollama.slice(ollama.indexOf("MODELS"));
+    assert.doesNotMatch(rows, /fy-set__dot/);
+    const refusing = renderEngine(stateWith(), "comfyui");
+    assert.match(refusing.slice(refusing.indexOf("MODELS")), /fy-set__dot--warn/);
+  });
+
+  it("dims a declared refusal and leaves a measured shortfall alone (SPEC-034 R-23)", () => {
+    // SPEC-033 D8: a machine short of VRAM can be given more; one with no supported accelerator
+    // cannot. The row state folds the two, so the dimming reads the verdict instead.
+    const measured = renderEngine(stateWith(), "comfyui");
+    assert.doesNotMatch(measured.slice(measured.indexOf("MODELS")), /fy-set__row--off/);
+    const declared = stateWith({
+      runtime: runtime({
+        models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "unsupported" as const } : m)),
+      }),
+    });
+    assert.match(renderEngine(declared, "comfyui").slice(0), /fy-set__row--off/);
   });
 
   it("keeps a refusal to one clause, carrying its figures and nothing else (R-88)", () => {
     const text = plain(renderEngine(stateWith(), "comfyui"));
-    assert.match(text, /unsupported · not enough here · 13\.7 GB/);
+    // The headline says it refuses and the line beneath says by how much. `not enough here`
+    // between the two said the same thing a third time and vaguer (SPEC-034 R-21).
+    assert.match(text, /unsupported · 13\.7 GB/);
+    assert.doesNotMatch(text, /not enough here/);
     assert.match(text, /Needs 15\.6 GB VRAM · this machine has 12 GB/);
     // The gate carries a cloud alternative and this screen does not print it: R-2 keeps every
     // cloud provider off Local AI in any state, and the smaller models R-24 offers instead are
@@ -286,10 +321,13 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
     assert.match(text, /Gemma 4 12B[\s\S]{0,120}turned off in Providers/);
   });
 
-  it("says the machine has not been measured on the row, not only in the header (R-28)", () => {
-    const unmeasured = stateWith({ runtime: null });
-    assert.match(plain(renderEngine(unmeasured, "voxa")), /Kokoro 82M\s+installed · not measured · 400 MB/);
-    assert.match(plain(renderEngine(unmeasured, "ollama")), /Gemma 4 12B\s+available · not measured · 7\.4 GB/);
+  it("says the machine has not been measured once, in its own row (SPEC-034 R-13, R-20)", () => {
+    // R-28 offers an unmeasured model rather than withholding it, and R-13's row is where the
+    // machine says so. Repeating it per model was the same sentence once for every row.
+    const unmeasured = plain(renderEngine(stateWith({ runtime: null }), "voxa"));
+    assert.match(unmeasured, /THIS MACHINE\s+not measured/);
+    assert.equal(unmeasured.match(/not measured/g)?.length, 1, "once, not once per model");
+    assert.match(unmeasured, /Kokoro 82M\s+installed · 400 MB/);
   });
 
   it("names a remote engine twice, and never on the rows it serves (SPEC-034 R-9, R-11)", () => {
