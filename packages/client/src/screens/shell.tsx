@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
@@ -6,7 +6,27 @@ import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
-import { CAPABILITY_LABEL, CAPABILITY_ROWS, RuntimeHead, RuntimeSection, TONE_CLASS } from "./settings-parts.js";
+import {
+  CAPABILITY_LABEL,
+  CAPABILITY_ROWS,
+  RuntimeHead,
+  RuntimeSection,
+  TONE_CLASS,
+  type RuntimeTone,
+} from "./settings-parts.js";
+// Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
+// details unabridged, and one engine's models grouped by the provider that owns them.
+import {
+  ComfyUiDetail,
+  OllamaDetail,
+  OtherComponentsDetail,
+  VoxaDetail,
+  componentsFor,
+  componentsTone,
+  comfyUiTone,
+  processTone,
+} from "./engine-panes.js";
+import { EngineModelGroups, MachineRow } from "./local-models.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
 import { Working } from "../components/working.js";
@@ -122,6 +142,11 @@ import {
   modelForCapability,
   supportsVoiceUse,
   ulid,
+  ENGINE_LABEL,
+  ENGINE_PROVIDERS,
+  activationFor,
+  comfyUiWeightsRecipeId,
+  type EngineId,
 } from "@arke-studio/contracts";
 
 
@@ -1520,8 +1545,6 @@ export function SettingsLayout() {
                   [
                     ["providers", "Providers"],
                     ["cloud-ai", "Cloud AI"],
-                    ["local-ai", "Local AI"],
-                    ["engines", "Engines"],
                     ["harness", "Harness"],
                     ["appearance", "Appearance"],
                     ["notifications", "Notifications"],
@@ -1998,72 +2021,217 @@ function ProviderPane({ id }: { id: ProviderId }) {
   );
 }
 
+/**
+ * Settings · Providers (SPEC-034 R-1). What can I reach, and what is on this machine.
+ *
+ * One rail in two bands. It absorbs Engines and Local AI, which were separate surfaces until a
+ * model's on/off switch and the credential that unlocks it turned out to live on different tabs:
+ * Cloud AI filtered its options by a switch it could not reach and shipped an `Open Providers`
+ * button to compensate, which is SPEC-033 R-7 met by giving up.
+ *
+ * **The bands are named for how a source is reached, never for where its work runs** (R-3).
+ * `PROVIDERS.comfyui.local` is `true` while the resolved engine may be a non-loopback URL, so a
+ * heading saying `Local` over that row is a heading that can lie. And `connect` rather than
+ * `keyed`, because Higgsfield's credential is `external` — an OAuth held by its own CLI.
+ *
+ * **The rail item is the engine; its providers are groups inside the pane** (R-7). Voxa hosts
+ * Kokoro and whisper.cpp: one executable, one port, one restart, two named groups. Listing four
+ * providers would state Voxa's machinery twice, which is the duplication `statedElsewhere` was
+ * invented to hide; calling three engines providers would put a word in the rail that no
+ * manifest row, ledger entry or finding uses.
+ */
 export function SettingsProvidersScreen() {
   const { state } = useStore();
+  const setup = useSetup();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
   const disabledModels = new Set(state?.app.models.disabled ?? []);
   const manifestModels = state?.app.manifest?.models ?? [];
   const providerStatus = state?.app.providers ?? [];
+  const all = setup?.components ?? [];
+  const comfyui = state?.app.comfyui ?? null;
+  const voiceRuntime = state?.app.voiceRuntime ?? null;
+  const unowned = componentsFor(all, null);
+
+  /** How many of a keyed service's models are on, counted the way the pickers decide. */
+  const onFor = (id: ProviderId): number => {
+    const unlocked = new Set(availability.filter((a) => a.via.includes(id)).map((a) => a.capability));
+    return manifestModels.filter(
+      (m) => m.provider === id && unlocked.has(m.capability) && !disabledModels.has(m.id),
+    ).length;
+  };
+
+  /**
+   * How many of an engine's models are installed here — and `elsewhere` in place of the count
+   * where the engine is not here at all (R-9). For a machine down the hall, *how many of its
+   * models are installed on this one* is not a question with an answer, so the column says the
+   * thing that is true rather than a number that is not.
+   */
+  const engineCount = (engine: EngineId): string => {
+    if (engine === "comfyui" && comfyui?.engine.locality === "remote") return "elsewhere";
+    const providers = ENGINE_PROVIDERS[engine];
+    const installed = manifestModels.filter(
+      (m) =>
+        providers.includes(m.provider) &&
+        activationFor(m.provider, m.id, {
+          components: all,
+          ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
+        }) === "ready",
+    ).length;
+    return `${installed} on`;
+  };
+
+  type Row = { id: string; label: string; tone: RuntimeTone; count: string; kind: "service" | "engine" | "other" };
+  const services: Row[] = KEYED_PROVIDERS.map((p) => {
+    const connected = providerStatus.some((s) => s.id === p.id && s.configured);
+    return {
+      id: p.id,
+      label: PROVIDER_TABLE[p.id].displayName,
+      tone: connected ? "ok" : "idle",
+      // An em dash, not "0 on": without a credential the question of how many models are on does
+      // not arise, and a zero would read as a choice someone made.
+      count: connected ? `${onFor(p.id)} on` : "—",
+      kind: "service",
+    };
+  });
+  const engines: Row[] = [
+    {
+      id: "comfyui",
+      label: ENGINE_LABEL.comfyui,
+      tone: comfyUiTone(comfyui?.engine ?? null),
+      count: engineCount("comfyui"),
+      kind: "engine",
+    },
+    {
+      id: "ollama",
+      label: ENGINE_LABEL.ollama,
+      // The same derivation the pane uses. Anything that is not `valid` reading as merely
+      // unmeasured made a stopped Ollama show a neutral dot on the rail — the half you scan to
+      // find what is broken — beside a pane that warned about it in red.
+      tone: processTone(providerStatus.find((p) => p.id === "ollama")?.validation),
+      count: engineCount("ollama"),
+      kind: "engine",
+    },
+    {
+      id: "voxa",
+      label: ENGINE_LABEL.voxa,
+      tone: processTone(voiceRuntime?.processState),
+      count: engineCount("voxa"),
+      kind: "engine",
+    },
+  ];
+  // A component required by neither an engine nor a provider keeps a place, and that place is
+  // drawn only where such a component exists (R-8). Every entry in today's catalogue declares one
+  // or the other, so this is a row nobody sees — and an always-drawn one is a heading over
+  // nothing.
+  const other: Row[] =
+    unowned.length === 0
+      ? []
+      : [
+          {
+            id: "other",
+            label: "Other components",
+            tone: componentsTone(unowned),
+            count: `${unowned.length}`,
+            kind: "other",
+          },
+        ];
+  const rows = [...services, ...engines, ...other];
+
   // First run has no key anywhere, so opening on the first provider is not a preference — it is
   // the only pane there is. Once something is connected, that is the one worth landing on.
-  const firstConnected = KEYED_PROVIDERS.find((p) =>
-    providerStatus.some((s) => s.id === p.id && s.configured),
-  );
-  // The query is the selection, like every sibling rail (Engines, Local AI): a diagnostics
-  // remedy addresses one provider's key row through it (SPEC-032 R-24), and a tab click
-  // rewrites it rather than shadowing it with component state the URL then lies about.
+  const firstConnected = KEYED_PROVIDERS.find((p) => providerStatus.some((s) => s.id === p.id && s.configured));
   const asked = searchParams.get("provider");
-  const askedId = KEYED_PROVIDERS.find((p) => p.id === asked)?.id ?? null;
-  const current = askedId ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
-  const setSelected = (id: ProviderId) => setSearchParams({ provider: id }, { replace: true });
+  // A diagnostics remedy addresses a component rather than a pane (SPEC-034 R-24): one registry
+  // entry serves components across all three engines, so its route cannot name one and its single
+  // targetParam is spent on the component id. The component declares its owner, so resolve it
+  // from there — recipe weights carry no engine field because their id is derived from the
+  // catalogue, so they resolve by that instead.
+  const askedComponent = searchParams.get("component");
+  const askedEntry = askedComponent === null ? null : (all.find((c) => c.id === askedComponent) ?? null);
+  const owning =
+    askedComponent === null
+      ? null
+      : (askedEntry?.provider ??
+        askedEntry?.engine ??
+        (comfyUiWeightsRecipeId(askedComponent) !== null ? "comfyui" : null));
+  const current =
+    (asked !== null && rows.some((r) => r.id === asked) ? asked : null) ??
+    (owning !== null && rows.some((r) => r.id === owning) ? owning : null) ??
+    firstConnected?.id ??
+    rows[0]!.id;
+  const currentRow = rows.find((r) => r.id === current) ?? rows[0]!;
+  const setSelected = (id: string) => setSearchParams({ provider: id }, { replace: true });
+  const remote = current === "comfyui" && comfyui?.engine.locality === "remote";
+
+  const band = (label: string, items: Row[]) =>
+    items.length === 0 ? null : (
+      <Fragment key={label}>
+        {label !== "" && <div className="fy-prov__band">{label}</div>}
+        {items.map((r) => (
+          <button
+            type="button"
+            key={r.id}
+            role="tab"
+            aria-selected={r.id === current}
+            className={cx("fy-prov__railitem", r.id === current && "is-current")}
+            onClick={() => setSelected(r.id)}
+          >
+            <span className={cx("fy-set__dot", TONE_CLASS[r.tone])} />
+            <span>{r.label}</span>
+            <span style={{ flex: 1 }} />
+            <span className="fy-prov__count">{r.count}</span>
+          </button>
+        ))}
+      </Fragment>
+    );
+
   return (
     <div data-screen="settings-providers" className="fy-set fy-set--providers">
       <div className="fy-prov">
         <div className="fy-prov__rail" role="tablist" aria-label="Providers">
-          {KEYED_PROVIDERS.map((p) => {
-            const connected = providerStatus.some((s) => s.id === p.id && s.configured);
-            const models = manifestModels.filter((m) => m.provider === p.id);
-            // Counted the same way the pane counts, which is the same way the pickers decide:
-            // a model behind a capability this key does not unlock is not on.
-            const unlocked = new Set(
-              availability.filter((a) => a.via.includes(p.id)).map((a) => a.capability),
-            );
-            const on = models.filter(
-              (m) => unlocked.has(m.capability) && !disabledModels.has(m.id),
-            ).length;
-            return (
-              <button
-                type="button"
-                key={p.id}
-                role="tab"
-                aria-selected={p.id === current}
-                className={cx("fy-prov__railitem", p.id === current && "is-current")}
-                onClick={() => setSelected(p.id)}
-              >
-                <span className={cx("fy-set__dot", connected && "fy-set__dot--ok")} />
-                <span>{PROVIDER_TABLE[p.id].displayName}</span>
-                <span style={{ flex: 1 }} />
-                {/* An em dash, not "0 on": without a key the question of how many models are on
-                    does not arise, and a zero would read as a choice someone made. */}
-                <span className="fy-prov__count">{connected ? `${on} on` : "—"}</span>
-              </button>
-            );
-          })}
+          {band("SERVICES YOU CONNECT", services)}
+          {band("ENGINES YOU RUN", engines)}
+          {band("", other)}
         </div>
-        <ProviderPane id={current} />
+        {currentRow.kind === "service" ? (
+          <ProviderPane id={current as ProviderId} />
+        ) : (
+          <div className="fy-prov__pane">
+            {currentRow.kind === "other" ? (
+              <OtherComponentsDetail components={unowned} />
+            ) : (
+              <>
+                {/* The figures every fit verdict turns on, once per pane rather than once per
+                    row — and absent where fit is not a question at all, because a remote engine
+                    has no verdict for them to explain (R-13, R-15). */}
+                {!remote && <MachineRow />}
+                {current === "comfyui" && <ComfyUiDetail />}
+                {current === "ollama" && <OllamaDetail components={componentsFor(all, "ollama")} />}
+                {current === "voxa" && (
+                  <VoxaDetail
+                    voiceRuntime={voiceRuntime}
+                    health={state?.app.health.voice}
+                    components={componentsFor(all, "voxa")}
+                  />
+                )}
+                <EngineModelGroups engine={current as EngineId} />
+              </>
+            )}
+            <div className="fy-rt__actions">
+              <span style={{ flex: 1 }} />
+              {/* Unconditional (R-25). Downloads has no tab, and a link that appears only while
+                  something is transferring leaves no way to reach the surface that reports what
+                  a failed or cancelled fetch left behind — which is what SPEC-033 R-85 sends a
+                  reader there for. */}
+              <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
+                {setup?.running === true ? "Downloads · running" : "Downloads"}
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
-      {/*
-       * The pane is the provider list and its detail, and nothing else (40a).
-       *
-       * Four things used to sit around it. "What this machine can do" is the same question as "who
-       * does what", which turn 35 gave a tab of its own — a copy here answered it twice and they
-       * could disagree. Spend belongs to Activity (26a), which already draws it by provider with
-       * the alert note; the threshold control moved there with it, so the note's own "Set" opens
-       * the thing it names rather than sending you to another screen to find it. The eyebrow and
-       * the closing note went with them: 35a needed a heading because its pane was a flat list of
-       * keys, and 40a's rail already says what this is.
-       */}
     </div>
   );
 }

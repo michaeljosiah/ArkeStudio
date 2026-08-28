@@ -31,7 +31,7 @@ function render(path: string, connection: "connecting" | "open" | "closed"): str
 
 describe("Settings without a coordinator", () => {
   it("says so rather than leaving the rows to be read as empty data", () => {
-    assert.match(render("/settings/local-ai", "closed"), /Waiting for the coordinator/);
+    assert.match(render("/settings/providers", "closed"), /Waiting for the coordinator/);
   });
 
   it("carries the line on whichever pane you opened", () => {
@@ -42,17 +42,17 @@ describe("Settings without a coordinator", () => {
   it("says the same thing the startup screen says, in the same words", () => {
     // Three screens wait on this and there is one sentence between them. A second wording would
     // read as a second condition.
-    assert.match(render("/settings/local-ai", "closed"), /dev browser session/);
+    assert.match(render("/settings/providers", "closed"), /dev browser session/);
   });
 
   it("stays quiet while the first connection is still being attempted", () => {
     // A refused socket reaches "closed" of its own accord — devBridge emits it from the socket's
     // own close event — so there is nothing to gain from announcing the gap before then, and a
     // banner that flashes on every launch is one nobody reads.
-    assert.doesNotMatch(render("/settings/local-ai", "connecting"), /Waiting for the coordinator/);
+    assert.doesNotMatch(render("/settings/providers", "connecting"), /Waiting for the coordinator/);
   });
 
   it("stays out of the way once connected", () => {
-    assert.doesNotMatch(render("/settings/local-ai", "open"), /Waiting for the coordinator/);
+    assert.doesNotMatch(render("/settings/providers", "open"), /Waiting for the coordinator/);
   });
 });

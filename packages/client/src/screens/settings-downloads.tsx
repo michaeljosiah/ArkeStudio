@@ -22,7 +22,8 @@ import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-p
  * for one transfer is precisely the duplication `statedElsewhere` existed to paper over, and R-6
  * deleted that mechanism, so nothing is left to resolve a disagreement between them.
  *
- * Reachable from Local AI and from Engines, and owned by neither (R-84).
+ * Reachable from Providers, unconditionally, and owned by it no more than it was owned by
+ * the two screens Providers absorbed (SPEC-034 R-25, amending SPEC-033 R-84).
  */
 
 /** In flight, or waiting its turn, or stopped mid-way — everything with an outstanding transfer. */
@@ -166,13 +167,12 @@ export function SettingsDownloadsScreen() {
       {installed.map((c) => (
         <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
       ))}
-      {/* Owned by neither of the two screens that reach it, which is why both are offered. */}
+      {/* Reached from Providers and owned by it no more than it was owned by the two screens
+          Providers absorbed (SPEC-034 R-25). One way back, because there is now one place to
+          go. */}
       <div className="fy-set__actions">
-        <Button variant="secondary" onClick={() => navigate("/settings/local-ai")}>
-          Local AI
-        </Button>
-        <Button variant="secondary" onClick={() => navigate("/settings/engines")}>
-          Engines
+        <Button variant="secondary" onClick={() => navigate("/settings/providers")}>
+          Providers
         </Button>
       </div>
     </div>

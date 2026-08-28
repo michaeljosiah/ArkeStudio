@@ -330,12 +330,14 @@ describe("the narrator in Settings", () => {
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
   });
 
-  it("is not on Local AI, which may not carry a cloud voice at all", () => {
-    const landing = render("/settings/local-ai");
-    assert.match(landing, /data-screen="settings-local-ai"/);
-    assert.doesNotMatch(landing, /data-testid="narrator-name"/);
-    // Nor on Engines: an engine is not a provider, and this control picks between them.
-    assert.doesNotMatch(render("/settings/engines?engine=voxa"), /data-testid="narrator-name"/);
+  it("is on no engine pane, which may not carry a cloud voice at all", () => {
+    // An engine is not a provider and this control picks between them, so it belongs to neither
+    // half of the Providers rail — it is Appearance's, where the reading voice is chosen.
+    for (const engine of ["comfyui", "ollama", "voxa"]) {
+      const pane = render(`/settings/providers?provider=${engine}`);
+      assert.match(pane, /data-screen="settings-providers"/);
+      assert.doesNotMatch(pane, /data-testid="narrator-name"/);
+    }
   });
 
   it("says plainly when the narrator will be billed", () => {
@@ -375,8 +377,8 @@ describe("remote ComfyUI locality", () => {
         },
       },
     };
-    const html = render("/settings/engines?engine=comfyui", state);
-    assert.match(html, /Your URL · never spawned · remote/);
+    const html = render("/settings/providers?provider=comfyui", state);
+    assert.match(html, /another machine · Your URL · never spawned/);
   });
 
   it("keeps managed Download beside a detected but unselected install", () => {
@@ -417,7 +419,7 @@ describe("remote ComfyUI locality", () => {
     };
     __setStateForTest(state, { setupStatus: state.app.setup });
     const html = renderToString(
-      <MemoryRouter initialEntries={["/settings/engines?engine=comfyui"]}>
+      <MemoryRouter initialEntries={["/settings/providers?provider=comfyui"]}>
         <App />
       </MemoryRouter>,
     );

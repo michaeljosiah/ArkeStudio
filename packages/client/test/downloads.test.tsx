@@ -102,10 +102,10 @@ function render(path: string, state: ClientState): string {
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
 /**
- * The Local AI pane holding the language models. Its rail draws one capability at a time, so a
+ * The Ollama pane holding the language models. Providers' rail draws one source at a time, so a
  * test about a model row has to name the row rather than land on whichever opens first.
  */
-const LANGUAGE_ROW = "/settings/local-ai?capability=language";
+const LANGUAGE_ROW = "/settings/providers?provider=ollama";
 
 describe("the row states the whole chain's size, and only the count of the rest (R-40, R-41)", () => {
   it("quotes the closure, not the model's own weights", () => {
@@ -187,10 +187,14 @@ describe("Downloads shows everything in flight, whichever screen started it (R-8
 
   it("is reachable from both screens and owned by neither (R-84)", () => {
     const state = stateWith([RUNTIME, MODEL]);
-    assert.match(plain(render("/settings/local-ai", state)), /Downloads/);
-    assert.match(plain(render("/settings/engines", state)), /Downloads/);
-    const downloads = plain(render("/settings/downloads", state));
-    assert.match(downloads, /Local AI/);
-    assert.match(downloads, /Engines/);
+    // Reached from Providers, and from every engine pane in it — unconditionally, because a
+    // link that appears only mid-transfer is no route for the reader who came to reclaim what a
+    // failed one left behind (SPEC-034 R-25).
+    for (const engine of ["comfyui", "ollama", "voxa"]) {
+      assert.match(plain(render(`/settings/providers?provider=${engine}`, state)), /Downloads/);
+    }
+    // One way back, because there is now one place to go: Providers absorbed both screens that
+    // used to reach this one (SPEC-034 R-25).
+    assert.match(plain(render("/settings/downloads", state)), /Providers/);
   });
 });

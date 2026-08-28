@@ -136,12 +136,12 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
 
   it("a remedy renders as the registry control's label with its place (R-24)", () => {
     const text = plain(render(badDay()));
-    assert.match(text, /Settings · Engines · ComfyUI/);
+    assert.match(text, /Settings · Providers · ComfyUI/);
     assert.match(text, /Restart/);
     assert.match(text, /Settings · Providers/);
     assert.match(text, /Key/);
     // The unmeasured finding names the measuring control.
-    assert.match(text, /Settings · Local AI/);
+    assert.match(text, /Settings · Providers · ComfyUI/);
     assert.match(text, /Measure/);
   });
 
@@ -208,13 +208,13 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
   it("a remedy's href carries its target under the registry's query key — stale re-measures included", () => {
     assert.equal(
       controlHref({ control: "component-retry", target: "tts-kokoro-82m" }),
-      "/settings/engines?component=tts-kokoro-82m",
+      "/settings/providers?component=tts-kokoro-82m",
     );
     assert.equal(
       controlHref({ control: "provider-key", target: "fal" }),
       "/settings/providers?provider=fal",
     );
-    assert.equal(controlHref({ control: "comfyui-restart" }), "/settings/engines?engine=comfyui");
+    assert.equal(controlHref({ control: "comfyui-restart" }), "/settings/providers?provider=comfyui");
   });
 
   it("every checked rule kind has a product word — a new rule must name itself here too (R-10)", () => {

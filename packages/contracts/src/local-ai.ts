@@ -55,6 +55,28 @@ export const ENGINE_LABEL: Record<EngineId, string> = {
 };
 
 /**
+ * Which providers each engine hosts (SPEC-034 R-7). The join that lets one rail row carry several
+ * named groups, and the reason the two lists above are not the same list.
+ *
+ * Voxa is the case the requirement exists for: one process, one executable, one port, hosting
+ * Kokoro and whisper.cpp. Naming it a provider would put a word in the rail that no manifest row,
+ * ledger entry or finding uses; naming its two providers separately would state its executable,
+ * port and restart twice. The rail takes the engine and the groups take the providers.
+ */
+export const ENGINE_PROVIDERS: Record<EngineId, readonly ProviderId[]> = {
+  comfyui: ["comfyui"],
+  ollama: ["ollama"],
+  voxa: ["kokoro", "whispercpp"],
+};
+
+/** The engine that hosts a provider, where one does. Cloud providers have none. */
+export function engineOfProvider(provider: ProviderId): EngineId | undefined {
+  return (Object.keys(ENGINE_PROVIDERS) as EngineId[]).find((engine) =>
+    ENGINE_PROVIDERS[engine].includes(provider),
+  );
+}
+
+/**
  * The closed set of headline states R-26's table produces. Nothing else may reach a row.
  *
  * `served-elsewhere` left in SPEC-034 R-10. Locality is the engine's fact, and the engine states

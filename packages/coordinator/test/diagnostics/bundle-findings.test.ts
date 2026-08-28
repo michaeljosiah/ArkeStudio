@@ -146,7 +146,7 @@ describe("readable without the application (R-39, row 43)", () => {
     assert.deepEqual(engine["remedy"], {
       control: "comfyui-restart",
       label: "Restart",
-      place: "Settings · Engines · ComfyUI",
+      place: "Settings · Providers · ComfyUI",
     });
   });
 
@@ -194,7 +194,7 @@ describe("readable without the application (R-39, row 43)", () => {
     assert.deepEqual(stale.remeasure, {
       control: "comfyui-refresh",
       label: "Refresh",
-      place: "Settings · Engines · ComfyUI",
+      place: "Settings · Providers · ComfyUI",
     });
   });
 
