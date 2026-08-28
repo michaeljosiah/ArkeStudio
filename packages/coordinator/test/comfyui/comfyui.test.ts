@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RuntimeProbes } from "@arke-studio/contracts";
 import { comfyUiRecoveryDecision } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
+import { until } from "../wait.js";
 import {
   comfyUiChildEnvironment,
   ComfyUiEngineService,
@@ -30,16 +31,6 @@ import type { ChildSupervisor, SupervisedSpec } from "../../src/supervisor.js";
  */
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
-
-/** Poll a condition to a deadline. Returns whether it became true, so callers can assert it. */
-async function waitFor(condition: () => boolean, budgetMs: number): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    if (condition()) return true;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  return condition();
-}
 
 // ---------------------------------------------------------------------------
 // Sanitisation (§2.10, R-14)
@@ -1336,12 +1327,8 @@ describe("recovery consults the per-source policy (§2.11)", () => {
     assert.equal(provider.pollCount, 0);
     assert.equal(provider.submitCount, 0);
     ready(true);
-    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
-    assert.equal(
-      await waitFor(() => provider.pollCount === 1, 1_000),
-      true,
-      "only the newly submitted provider id is polled",
-    );
+    await until(() => provider.submitCount === 1, "the released job to be submitted");
+    await until(() => provider.pollCount === 1, "only the newly submitted provider id to be polled");
     queue.dispose();
   });
 
@@ -1411,12 +1398,9 @@ describe("recovery consults the per-source policy (§2.11)", () => {
       estimatedMicroUsd: 0,
       landing: { dir: "productions/saltlight/audio" },
     });
-    assert.equal(
-      await waitFor(
-        () => first.listJobs()[0]?.error?.includes("waiting for the owning world") === true,
-        1_000,
-      ),
-      true,
+    await until(
+      () => first.listJobs()[0]?.error?.includes("waiting for the owning world") === true,
+      "the job to report that it is waiting for the owning world",
     );
     first.dispose();
     await first.drain();
@@ -1449,7 +1433,7 @@ describe("recovery consults the per-source policy (§2.11)", () => {
     assert.equal(provider.submitCount, 1);
     assert.equal(provider.pollCount, 0);
     release(true);
-    assert.equal(await waitFor(() => second.listJobs()[0]?.status === "succeeded", 1_000), true);
+    await until(() => second.listJobs()[0]?.status === "succeeded", "the released job to succeed");
     assert.equal(provider.submitCount, 1);
     assert.equal(provider.pollCount, 0);
     assert.equal(second.listJobs()[0]?.id, job.id);
@@ -1520,7 +1504,7 @@ describe("recovery consults the per-source policy (§2.11)", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(provider.submitCount, 0, "recovery did not race the engine's startup");
     release(true);
-    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
+    await until(() => provider.submitCount === 1, "the requeued job to be submitted once ready");
     queue.dispose();
   });
 
@@ -1549,7 +1533,7 @@ describe("recovery consults the per-source policy (§2.11)", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(provider.pollCount, 0);
     queue.releaseRecovery("comfyui");
-    assert.equal(await waitFor(() => provider.pollCount > 0, 1_000), true);
+    await until(() => provider.pollCount > 0, "the resumed poll to run once readiness returns");
     queue.dispose();
   });
 
@@ -1629,7 +1613,7 @@ describe("the ComfyUI provider has one process-wide execution lane", () => {
     await queue.start();
     await queue.enqueue(localInput());
     await queue.enqueue({ ...localInput(), worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" });
-    assert.equal(await waitFor(() => provider.submitCount === 1, 1_000), true);
+    await until(() => provider.submitCount === 1, "the first of the two jobs to take the lane");
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(provider.submitCount, 1);
     assert.equal(provider.maxObservedConcurrent, 1);
@@ -1811,12 +1795,9 @@ describe("retiring an engine mid-flight (§2.11)", () => {
         recipe: { ...RECIPE_IDENTITY, id: sample.model },
         engine: { source: "managed", instanceId: "same-path", processEpoch: "process-1" },
       });
-      assert.equal(
-        await waitFor(
-          () => queue.listJobs().find((candidate) => candidate.id === job.id)?.status === "running",
-          1_000,
-        ),
-        true,
+      await until(
+        () => queue.listJobs().find((candidate) => candidate.id === job.id)?.status === "running",
+        `the ${sample.label} job to reach running before the engine is retired`,
       );
 
       queue.blockRecovery("comfyui");
@@ -1839,7 +1820,7 @@ describe("retiring an engine mid-flight (§2.11)", () => {
       assert.equal(provider.submitCount, 1, "the replacement is gated while it starts");
 
       queue.releaseRecovery("comfyui");
-      assert.equal(await waitFor(() => provider.submitCount === 2, 1_000), true);
+      await until(() => provider.submitCount === 2, "the replacement job to be submitted");
       assert.equal(
         queue.listJobs().find((candidate) => candidate.id === job.id)?.engine?.processEpoch,
         "process-2",
@@ -1861,12 +1842,11 @@ describe("every local outcome records local-zero, not just the successful one", 
     // Settle in `running` before cancelling, and ASSERT we got there rather than proceeding
     // whatever happened. Cancelling mid-submit races the dispatcher's own transition to
     // running, which would overwrite the cancellation — a real but separate window, and not
-    // what this test is about. A generous budget keeps it deterministic under load.
-    const settled = await waitFor(
+    // what this test is about. `until` carries the budget that keeps it deterministic under load.
+    await until(
       () => queue.listJobs().find((j) => j.id === job.id)?.status === "running",
-      10_000,
+      "the job to reach running before the cancel",
     );
-    assert.ok(settled, "the job reached running before the cancel");
     await queue.cancel(job.id);
     const cancelled = queue.listJobs().find((j) => j.id === job.id)!;
     assert.equal(cancelled.status, "cancelled");

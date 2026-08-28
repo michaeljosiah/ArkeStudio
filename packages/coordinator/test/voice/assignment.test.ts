@@ -15,6 +15,7 @@ import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
+import { until } from "../wait.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const REQUEST = "01J8F3K2QW9VZX4N7M0RTYB6HD";
@@ -102,14 +103,6 @@ function flacBytes(): Uint8Array {
     frameWithoutCrc,
     Uint8Array.of(crc >>> 8, crc & 0xff),
   );
-}
-
-async function waitFor(condition: () => boolean, budgetMs = 1_000): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (!condition() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  return condition();
 }
 
 function readyRemoteService(token: string): ComfyUiEngineService {
@@ -506,20 +499,15 @@ describe("cloned voice assignment", () => {
       const accepted = events.find((event) => event.type === "queue.enqueue-result");
       assert.ok(accepted && accepted.type === "queue.enqueue-result");
       assert.equal(accepted.disposition, "accepted");
-      assert.equal(await waitFor(() => remote.submitCount === 1), true);
+      await until(() => remote.submitCount === 1, "the confirmed job to be submitted");
       assert.ok(remote.submittedVoiceReference, "the provider received the confined source clip");
-      assert.equal(
-        await waitFor(
-          () =>
-            events.some(
-              (event) =>
-                event.type === "voice.audio" &&
-                event.requestId === REQUEST &&
-                event.status === "ready",
-            ),
-          2_000,
-        ),
-        true,
+      await until(
+        () =>
+          events.some(
+            (event) =>
+              event.type === "voice.audio" && event.requestId === REQUEST && event.status === "ready",
+          ),
+        "the ready voice.audio event for the request",
       );
       const journal = await readFile(join(root, "queue", "jobs.jsonl"), "utf8");
       assert.match(journal, /"voiceUploadConfirmedFor":"remote-instance-1"/);
