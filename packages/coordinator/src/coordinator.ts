@@ -2462,12 +2462,11 @@ export class Coordinator {
     // (R-34); the awaits are the same shape as the log read inside the builder.
     this.refreshDiagnosticsLogTail();
     await this.diagnosticsLogTailWork;
-    return buildDiagnosticsBundle(
-      this.getState(),
-      this.appLog,
-      this.secrets,
-      (await this.diagnosticsSnapshot?.refreshed()) ?? null,
-    );
+    const findings = (await this.diagnosticsSnapshot?.refreshed()) ?? null;
+    // State is captured AFTER the awaits: an event landing mid-wait would otherwise put the
+    // old app section beside findings derived from the new one — the disagreement-in-one-
+    // artifact R-13 exists to forbid.
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings);
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */

@@ -207,6 +207,8 @@ describe("a lane paused on a credential (R-20.2)", () => {
     assert.equal(finding.cause.statement, "no credential stored");
     assert.equal(finding.facts.find((f) => f.name === "held-jobs")?.value, 4);
     assert.deepEqual(finding.remedy, { control: "provider-key", target: "fal" });
+    // Resuming is a deliberate second act (SPEC-009 D7); the finding says where it lives.
+    assert.match(finding.note ?? "", /resumes from Activity/);
   });
 
   it("a fault-paused lane is not this rule's finding", () => {
@@ -283,6 +285,27 @@ describe("short of disk (R-20.3, R-20.4)", () => {
     assert.ok(finding);
     assert.equal(finding.occurrence, "voxa-kokoro");
     assert.equal(finding.consequences.length, 0);
+  });
+
+  it("a provider-owned component's remedy routes to Providers, where its row actually is", () => {
+    const snapshot = derive({
+      setup: {
+        components: [
+          component("higgsfield-cli", {
+            state: "blocked",
+            detail: "needs 400 MB plus room to work; this disk has 120 MB free",
+            blockedBy: "disk",
+            blockedVolumeRoot: "C:\\",
+            provider: "higgsfield",
+          }),
+        ],
+        running: false,
+        diskFreeMb: 120,
+        diskCheckedAt: RECENT,
+      },
+    });
+    const finding = snapshot.findings.find((f) => f.kind === "component-disk-short")!;
+    assert.deepEqual(finding.remedy, { control: "provider-tool-install", target: "higgsfield" });
   });
 
   it("a component blocked on a dependency is not a disk finding", () => {
@@ -446,6 +469,23 @@ describe("an engine that is down (R-20.7)", () => {
     assert.equal(finding.severity, "advisory");
   });
 
+  it("nothing acts on somebody else's URL engine — a dead one carries R-25's stated absence", () => {
+    const snapshot = derive({
+      comfyui: comfyui({ source: "user-url", state: "unreachable", detail: "the engine did not answer" }),
+      jobs: [job({ engine: { source: "user-url", instanceId: ENGINE_INSTANCE } })],
+    });
+    const engine = snapshot.findings.find((f) => f.kind === "comfyui-engine-unavailable")!;
+    assert.equal(engine.remedy, null);
+    const held = snapshot.findings.find((f) => f.kind === "work-held-by-engine")!;
+    assert.equal(held.remedy, null);
+    // A spawned engine keeps its acting control.
+    const spawned = derive({ comfyui: comfyui({ state: "failed", detail: "exit code 1" }) });
+    assert.equal(
+      spawned.findings.find((f) => f.kind === "comfyui-engine-unavailable")?.remedy?.control,
+      "comfyui-restart",
+    );
+  });
+
   it("row 21: a state that owes a reason and gave none is carried as upstream-generic naming SPEC-021 (R-6)", () => {
     const snapshot = derive({ comfyui: comfyui({ state: "unreachable", detail: null }) });
     const finding = snapshot.findings.find((f) => f.kind === "comfyui-engine-unavailable")!;
@@ -454,7 +494,11 @@ describe("an engine that is down (R-20.7)", () => {
 
   it("an absent engine whose managed runtime is on its way is transient, not a fault (R-22)", () => {
     const snapshot = derive({
-      comfyui: comfyui({ state: "absent", instanceId: null }),
+      comfyui: comfyui({
+        state: "absent",
+        instanceId: null,
+        recipes: [recipe("a", "disabled", "engine", "no ComfyUI engine is configured or installed")],
+      }),
       setup: {
         components: [component("comfyui-runtime", { state: "downloading" })],
         running: true,
@@ -463,6 +507,10 @@ describe("an engine that is down (R-20.7)", () => {
       },
     });
     assert.equal(snapshot.findings.some((f) => f.kind === "comfyui-engine-unavailable"), false);
+    // The snapshot does not go silent about the disabled recipes: they wait on the runtime.
+    const waiting = snapshot.findings.find((f) => f.kind === "waiting-on-component");
+    assert.ok(waiting, "the transit is stated because something waits on it");
+    assert.ok(String(waiting.facts.find((f) => f.name === "waiting")?.value).includes("a"));
     // Once nothing is moving, the absence is a stated choice again.
     const settled = derive({
       comfyui: comfyui({ state: "absent", instanceId: null }),

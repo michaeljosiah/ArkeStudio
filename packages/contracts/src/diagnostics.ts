@@ -110,6 +110,18 @@ export const CONTROL_REGISTRY = {
     route: "/settings/providers",
     targetParam: "provider",
   },
+  /**
+   * A provider-owned component's install/retry — the Higgsfield CLI beside its sign-in.
+   * Providers owns the credential a tool exists for, so it owns the tool (SPEC-033 R-1), and
+   * Engines deliberately does not list it; a component remedy routed there would land on a
+   * pane with no matching row.
+   */
+  "provider-tool-install": {
+    label: "Install",
+    place: "Settings · Providers",
+    route: "/settings/providers",
+    targetParam: "provider",
+  },
   /** Resume a paused provider lane — the message is the explicit confirmation (SPEC-009 D7). */
   "queue-resume": {
     label: "Resume",
@@ -554,7 +566,8 @@ const workHeldByEngine: Rule = {
           engine.detail !== null
             ? carriedCause(ctx.boundary, engine.detail)
             : carriedCause(ctx.boundary, `the engine is ${engine.state}`, "SPEC-021"),
-        remedy: { control: engine.source === "user-url" ? "comfyui-refresh" : "comfyui-restart" },
+        // Restart acts on a spawned engine; nothing acts on somebody else's URL engine (R-25).
+        remedy: engine.source === "user-url" ? null : { control: "comfyui-restart" },
         consequences: [],
         ...staleOf(facts, ctx.now, { control: "comfyui-refresh" }),
       },
@@ -579,6 +592,9 @@ const queuePausedCredential: Rule = {
         ],
         cause: carriedCause(ctx.boundary, lane.reason ?? "no credential is stored for this provider"),
         remedy: { control: "provider-key" as const, target: lane.provider },
+        // Resuming is a deliberate second act (SPEC-009 D7: the message IS the confirmation),
+        // so a saved key alone leaves the lane paused — said here, with where.
+        note: "After a new key, the lane resumes from Activity · Needs you.",
         consequences: [],
       }));
   },
@@ -630,6 +646,12 @@ const componentDiskShort: Rule = {
           findings.push(recipeConsequence(ctx, disabled, ctx.sources.comfyui!.checkedAt));
         }
       }
+      // A provider-owned component is stated on Providers beside its sign-in, and Engines
+      // deliberately does not list it — the remedy goes where the row is (SPEC-033 R-1).
+      const retry: FindingRemedy =
+        component.provider !== undefined
+          ? { control: "provider-tool-install", target: component.provider }
+          : { control: "component-retry", target: component.id };
       findings.push({
         kind: "component-disk-short",
         occurrence: component.id,
@@ -639,9 +661,9 @@ const componentDiskShort: Rule = {
         cause: carriedCause(ctx.boundary, component.detail ?? "the volume cannot hold this download"),
         // Retry is the row's own control and re-runs the disk guard; nothing in the product
         // frees space, so this is the control that resolves the finding once the person has.
-        remedy: { control: "component-retry", target: component.id },
+        remedy: retry,
         consequences,
-        ...staleOf(facts, ctx.now, { control: "component-retry", target: component.id }),
+        ...staleOf(facts, ctx.now, retry),
       });
     }
     return findings;
@@ -755,13 +777,16 @@ const engineUnavailable: Rule = {
     // and is not answering is a lost capability (D5's line between advisory and degraded).
     const severity: FindingSeverity = engine.state === "absent" ? "advisory" : "degraded";
     const managedRuntime = ctx.sources.setup?.components.find((c) => c.id === "comfyui-runtime");
+    // Restart acts on a spawned engine. Nothing in the product can start or update somebody
+    // else's URL engine — Refresh only re-reads, which is the stale-fact re-measure's job, not
+    // a resolving control — so a dead URL engine carries R-25's stated absence instead.
     const remedy: FindingRemedy | null =
       engine.state === "absent"
         ? managedRuntime !== undefined
           ? { control: "component-download", target: managedRuntime.id }
           : null
         : engine.source === "user-url"
-          ? { control: "comfyui-refresh" }
+          ? null
           : { control: "comfyui-restart" };
     return [
       {
@@ -1117,6 +1142,14 @@ const waitingOnComponent: Rule = {
           (r) => r.recipeId === weightsRecipeId && r.state === "disabled" && r.reasonKind === "files",
         );
         if (recipe) waiting.push(recipe.recipeId);
+      }
+      // The engine rule suppresses an absent engine while this runtime is in transit (R-22);
+      // the recipes it will enable are what wait on it, and the snapshot must not go silent
+      // about why they are disabled in the meantime.
+      if (component.id === "comfyui-runtime" && ctx.sources.comfyui?.engine.state === "absent") {
+        for (const recipe of ctx.sources.comfyui.recipes) {
+          if (recipe.state === "disabled" && recipe.reasonKind === "engine") waiting.push(recipe.recipeId);
+        }
       }
       if (waiting.length === 0) continue;
       findings.push({

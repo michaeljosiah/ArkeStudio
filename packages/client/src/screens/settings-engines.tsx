@@ -677,10 +677,14 @@ export function SettingsEnginesScreen() {
   // engine whose pane states it, from the component's own declaration — recipe weights carry no
   // engine field because their id is already derived from the catalogue, so they resolve by it.
   const askedComponent = searchParams.get("component");
+  const askedEntry = askedComponent === null ? null : (all.find((c) => c.id === askedComponent) ?? null);
+  // A provider-owned component is not on this screen at all (SPEC-033 R-1) — never resolve it
+  // to the 'other' pane, where there is no matching row; the remedies for those route to
+  // Providers, and this guard is only the backstop for a hand-typed URL.
   const owning =
-    askedComponent === null
+    askedComponent === null || askedEntry?.provider !== undefined
       ? null
-      : (all.find((c) => c.id === askedComponent)?.engine ??
+      : (askedEntry?.engine ??
         (comfyUiWeightsRecipeId(askedComponent) !== null ? "comfyui" : "other"));
   const current = rows.some((r) => r.id === asked)
     ? (asked as EngineId | "other")
