@@ -296,7 +296,10 @@ describe("an unreadable ledger parks reconciliation instead of answering 'never 
     await h.queue.start();
     h.ledger.failReads = new Error("EACCES: permission denied, read");
     const job = await h.queue.enqueue(INPUT);
-    await until(() => h.events.some((e) => e.type === "job.ready" && e.job.id === job.id));
+    await until(
+      () => h.events.some((e) => e.type === "job.ready" && e.job.id === job.id),
+      "the job to reach ready with the ledger unreadable",
+    );
     assert.equal(foldedJob(h, job.id)?.status, "succeeded", "the job itself is unaffected");
     assert.equal(h.ledger.entries.length, 0, "presence unknowable → no append");
     h.queue.dispose();
@@ -322,7 +325,10 @@ describe("an unreadable ledger parks reconciliation instead of answering 'never 
       target: { kind: "character-sheet", id: "maren-kest/recover" },
       landing: { dir: "references/maren-kest/incoming" },
     });
-    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    await until(
+      () => foldedJob(h, job.id)?.finalization?.status === "failed",
+      "the finalization to fail rather than run ahead of the spend record",
+    );
     assert.equal(foldedJob(h, job.id)?.status, "succeeded");
     assert.equal(finalizations, 0, "no follow-on ran ahead of an unconfirmed entry");
     assert.equal(h.ledger.entries.length, 0);
@@ -448,7 +454,10 @@ describe("an unreadable ledger parks reconciliation instead of answering 'never 
       target: { kind: "character-sheet", id: "maren-kest/window" },
       landing: { dir: "references/maren-kest/incoming" },
     });
-    await until(() => foldedJob(h, job.id)?.finalization?.status === "complete");
+    await until(
+      () => foldedJob(h, job.id)?.finalization?.status === "complete",
+      "the finalization to complete on the append the check could not re-read",
+    );
     assert.equal(finalizations, 1, "the follow-on ran: its spend record had durably landed");
     assert.equal(h.ledger.entries.length, 1);
     h.queue.dispose();
