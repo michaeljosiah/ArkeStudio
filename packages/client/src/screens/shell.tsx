@@ -185,6 +185,24 @@ function stillPreferred(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 }
 
+/**
+ * The one line shown wherever a screen is waiting on a coordinator that is not there.
+ *
+ * Three screens had reason to say it — the setup reel, the same reel with nothing to download,
+ * and the settings pane, whose rows draw `—` from an absent snapshot exactly as they draw `—`
+ * from an unconfigured provider (issue 599). Three copies of one sentence drift; one does not.
+ * The remedy stays in it because the case that produces this is nearly always a dev browser
+ * session, and it self-qualifies for the case that is not.
+ */
+function WaitingForCoordinator() {
+  return (
+    <Callout tone="warning" title="Waiting for the coordinator">
+      The app keeps retrying on its own. If this is a dev browser session, start it with
+      `npm run dev:coordinator`.
+    </Callout>
+  );
+}
+
 export function StartupScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -314,12 +332,7 @@ export function StartupScreen() {
             <span style={{ flex: 1 }} />
             <span className="fy-mono">{remaining !== null ? aboutLeft(remaining) : ""}</span>
           </div>
-          {connection === "closed" && startup?.status !== "initializing" && (
-            <Callout tone="warning" title="Waiting for the coordinator">
-              The app keeps retrying on its own. If this is a dev browser session, start it with
-              `npm run dev:coordinator`.
-            </Callout>
-          )}
+          {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, justifyContent: "center" }}>
             <span style={{ font: "400 11.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
               One-time setup. After this, Arke runs on your machine. Your worlds never leave it.
@@ -342,12 +355,7 @@ export function StartupScreen() {
               answer is "opening", which a button that says so already gives.
             */
             <>
-              {connection === "closed" && startup?.status !== "initializing" && (
-                <Callout tone="warning" title="Waiting for the coordinator">
-                  The app keeps retrying on its own. If this is a dev browser session, start it
-                  with `npm run dev:coordinator`.
-                </Callout>
-              )}
+              {connection === "closed" && startup?.status !== "initializing" && <WaitingForCoordinator />}
               <div className="fy-startup__done">
                 <Button
                   variant="primary"
@@ -1534,16 +1542,12 @@ export function SettingsLayout() {
                 <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
               </div>
               <div className="fy-settings__pane">
-                {/* Every pane in here draws from the coordinator's snapshot, and with no snapshot
-                    they draw the same thing they draw when a provider has nothing to offer: `—`
-                    in the capability rows, `not measured` in the machine header. A dev
-                    coordinator that died at import produces exactly that screen, which reads as
-                    a data bug in whatever you last changed (issue 599). Say which one it is. */}
-                {connection !== "open" && (
-                  <Callout tone="warning" title="Waiting for the coordinator">
-                    Rows stay blank until it connects.
-                  </Callout>
-                )}
+                {/* Most panes in here draw from the coordinator's snapshot, and with no
+                    snapshot they draw the same thing they draw when a provider has nothing to
+                    offer: `—` in the capability rows, `not measured` in the machine header. A
+                    dev coordinator that died at import produces exactly that screen, which
+                    reads as a data bug in whatever you last changed (issue 599). */}
+                {connection === "closed" && <WaitingForCoordinator />}
                 <Outlet />
               </div>
             </div>
