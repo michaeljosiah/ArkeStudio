@@ -10,6 +10,7 @@ import {
   type ChildLedger,
   type DescendantInfo,
   type ProcessInfo,
+  type ProcessProbe,
 } from "./child-ledger.js";
 import { leashChildToParent } from "./job-leash.js";
 
@@ -123,6 +124,12 @@ const DESCENDANT_START_TOLERANCE_MS = 5_000;
 export interface SupervisorDeps {
   /** When present, spawns are recorded and exits released so a later sweep can reap. */
   ledger?: ChildLedger;
+  /**
+   * Test seams for the win32 CIM calls, mirroring ChildLedgerDeps. The retry paths below are
+   * only provable by making these fail on demand, which the real process table will not do.
+   */
+  listDescendants?: (rootPid: number) => Promise<DescendantInfo[]>;
+  probe?: ProcessProbe;
 }
 
 export class ChildSupervisor extends EventEmitter {
@@ -385,12 +392,29 @@ export class ChildSupervisor extends EventEmitter {
     if (process.platform !== "win32") return;
     const pid = child.pid;
     if (pid === undefined) return;
-    let found: DescendantInfo[];
-    try {
-      found = await listDescendants(pid);
-    } catch {
-      return; // no snapshot; taskkill /T on the live wrapper remains the cover
+    // The enumeration gets three tries. One WMI hiccup here used to cost the snapshot for
+    // the child's whole lifetime: stop/restart could still taskkill /T the live wrapper, but
+    // a wrapper that later died on its own left grandchildren no record could reach — not
+    // even the next run's sweep, because the record is only written below. Off the status
+    // path, so the backoff delays nobody; stop() resolves the sleep early and the child
+    // check aborts the loop.
+    let found: DescendantInfo[] | null = null;
+    for (let attempt = 0; attempt < 3 && found === null; attempt += 1) {
+      // Checked on both sides of the backoff: before, so an attempt that failed after stop()
+      // does not park a fresh timer past the stopped supervisor; after, because stop()
+      // resolves the sleep early and the loop must not touch the seam again.
+      if (attempt > 0) {
+        if (this.child !== child) return;
+        await this.sleep(500 * attempt);
+      }
+      if (this.child !== child) return; // stopped or restarted while waiting
+      try {
+        found = await (this.deps.listDescendants ?? listDescendants)(pid);
+      } catch {
+        /* the process table would not answer; the retry covers the transient case */
+      }
     }
+    if (found === null) return; // no snapshot; taskkill /T on the live wrapper remains the cover
     if (this.child !== child) return; // stopped or restarted while enumerating
     this.descendants = found;
     for (const d of found) {
@@ -416,6 +440,7 @@ export class ChildSupervisor extends EventEmitter {
    * failed probe keeps them so the next startup's sweep still has something to go on.
    */
   private async reapSurvivors(): Promise<void> {
+    const epoch = this.launchEpoch;
     const tracked = this.descendants;
     this.descendants = [];
     if (tracked.length === 0) return;
@@ -425,12 +450,28 @@ export class ChildSupervisor extends EventEmitter {
       else void this.deps.ledger?.release(d.pid).catch(() => {});
     }
     if (survivors.length === 0) return;
-    let probed: Map<number, ProcessInfo>;
-    try {
-      probed = await platformProbe(survivors.map((d) => d.pid));
-    } catch {
-      return; // cannot verify identity — kill nothing, keep the records for the sweep
+    // Identity comes before any kill, and the probe gets one retry: nothing else in-process
+    // ever re-attempts it, and the exit backstop reads the descendant list this method has
+    // already cleared, so a single transient probe failure used to strand the survivors for
+    // the next startup's sweep. Only one retry, because this path is awaited inside stop()
+    // — every extra attempt is shutdown latency for the case where WMI is genuinely down.
+    let probed: Map<number, ProcessInfo> | null = null;
+    for (let attempt = 0; attempt < 2 && probed === null; attempt += 1) {
+      if (attempt > 0) {
+        await this.sleep(250);
+        // stop() resolves that sleep early, which would send this straight into a second
+        // probe mid-shutdown — a bumped epoch means the retry belongs to a dead lifecycle,
+        // so keep the records for the sweep instead. stop()'s own call bumped the epoch
+        // before entering, so its retry still runs.
+        if (this.launchEpoch !== epoch) return;
+      }
+      try {
+        probed = await (this.deps.probe ?? platformProbe)(survivors.map((d) => d.pid));
+      } catch {
+        /* unreadable process table; retried once, then the records stay for the sweep */
+      }
     }
+    if (probed === null) return; // cannot verify identity — kill nothing, keep the records
     for (const d of survivors) {
       const live = probed.get(d.pid);
       const isOurs =
@@ -612,10 +653,16 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   private async handleUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
+    const epoch = this.launchEpoch;
     this.clearHealthTimer();
     // The wrapper exiting says nothing about its grandchildren: they survive it, still
     // holding the old port. Clear them out before deciding whether to restart.
     await this.reapSurvivors();
+    // A stop or restart that landed while the reap was in flight owns the supervisor now.
+    // Resuming here would spend the new child's restart budget, overwrite its status, and
+    // spawn a second child beside it — `stopping` alone cannot carry this, because a
+    // completed restart has already reset it (found in review of the reap retry).
+    if (this.stopping || epoch !== this.launchEpoch) return;
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
     if (this.restarts >= this.spec.maxRestarts) {
       this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
@@ -624,7 +671,7 @@ export class ChildSupervisor extends EventEmitter {
     this.restarts += 1;
     this.setStatus("unhealthy", `${this.id} exited (${why}); restarting (attempt ${this.restarts})`);
     await this.sleep(this.spec.backoffMs * 2 ** (this.restarts - 1));
-    if (this.stopping) return;
+    if (this.stopping || epoch !== this.launchEpoch) return;
     await this.spawnOnce();
   }
 
