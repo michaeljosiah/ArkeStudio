@@ -28,6 +28,8 @@ interface Harness {
   ledger: {
     entries: LedgerEntry[];
     onAppend: ((e: LedgerEntry) => void) | null;
+    /** Set to make both reads reject — the file exists but cannot be read (EACCES, a lock). */
+    failReads: Error | null;
     readJobIdsCount: number;
     hasCount: number;
   };
@@ -73,7 +75,7 @@ function build(
   },
 ): Harness {
   const events: DomainEvent[] = [];
-  const ledger: Harness["ledger"] = { entries: [], onAppend: null, readJobIdsCount: 0, hasCount: 0 };
+  const ledger: Harness["ledger"] = { entries: [], onAppend: null, failReads: null, readJobIdsCount: 0, hasCount: 0 };
   const faults: Harness["faults"] = [];
   const queue = new JobQueue({
     journalPath,
@@ -83,10 +85,12 @@ function build(
     ledger: {
       readJobIds: async () => {
         ledger.readJobIdsCount += 1;
+        if (ledger.failReads) throw ledger.failReads;
         return new Set(ledger.entries.map((entry) => entry.jobId));
       },
       has: async (jobId) => {
         ledger.hasCount += 1;
+        if (ledger.failReads) throw ledger.failReads;
         return ledger.entries.some((e) => e.jobId === jobId);
       },
       append: async (entry) => {
@@ -217,6 +221,157 @@ describe("startup reconciliation scaling", () => {
     assert.equal(h.ledger.hasCount, 0, "terminal jobs use the snapshot rather than per-job reads");
     assert.equal(h.ledger.entries.length, jobs.length, "reconciliation does not duplicate entries");
     h.queue.dispose();
+  });
+});
+
+/**
+ * The seam contract: an unreadable ledger rejects rather than answering empty (R-16). Folded
+ * into [], the startup snapshot said every job in history was never billed, and the ⑦
+ * completion pass appended a second entry for each — permanent duplicates in an append-only
+ * file. The queue's fail-safe is to park the ledger-gated work: entries stay missing (the
+ * recoverable state ⑦ already handles) rather than doubled, and finalization verdicts wait
+ * for a start-up that can actually read the file.
+ */
+function terminalRow(suffix: string, extra: Partial<Job> = {}): Job {
+  return {
+    ...INPUT,
+    id: `jb_01J8E000000000000000000${suffix}`,
+    idempotencyKey: `01J8E100000000000000000${suffix}`,
+    status: "succeeded",
+    providerJobId: `remote-${suffix}`,
+    attempt: 1,
+    error: null,
+    createdAt: "2026-08-04T12:00:00.000Z",
+    updatedAt: "2026-08-04T12:01:00.000Z",
+    ...extra,
+  };
+}
+
+function entryFor(job: Job): LedgerEntry {
+  return {
+    ts: job.updatedAt,
+    worldId: job.worldId,
+    productionId: job.productionId!,
+    jobId: job.id,
+    provider: job.provider,
+    model: job.model,
+    outcome: "succeeded",
+    estimatedMicroUsd: job.estimatedMicroUsd,
+    actualMicroUsd: job.estimatedMicroUsd,
+    actualSource: "manifest-derived",
+  };
+}
+
+describe("an unreadable ledger parks reconciliation instead of answering 'never billed'", () => {
+  it("appends no duplicate for a job that was billed, and no completion for one that was not", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    h.queue.dispose();
+    const billed = terminalRow("DB1");
+    const unbilled = terminalRow("DB2");
+    await appendFile(h.journalPath, `${JSON.stringify(billed)}\n${JSON.stringify(unbilled)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(billed));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    const report = await h2.queue.start();
+    assert.equal(h2.ledger.entries.length, 1, "nothing appended while billed-or-not is unknowable");
+    assert.equal(report.some((a) => a.action === "ledger-completed"), false);
+    assert.equal(fake.submitCount, 0, "parking the ledger never re-dispatches terminal work");
+    h2.queue.dispose();
+
+    // The restart that can read the file completes exactly the one genuinely missing entry.
+    const h3 = h2.revive();
+    const recovered = await h3.queue.start();
+    assert.deepEqual(
+      recovered.filter((a) => a.action === "ledger-completed").map((a) => a.jobId),
+      [unbilled.id],
+    );
+    assert.equal(h3.ledger.entries.length, 2);
+    assert.equal(h3.ledger.entries.filter((e) => e.jobId === billed.id).length, 1, "still exactly one (R-16)");
+    h3.queue.dispose();
+  });
+
+  it("a live terminalization skips the append rather than risking a duplicate, and ⑦ completes it later", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    h.ledger.failReads = new Error("EACCES: permission denied, read");
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => h.events.some((e) => e.type === "job.ready" && e.job.id === job.id));
+    assert.equal(foldedJob(h, job.id)?.status, "succeeded", "the job itself is unaffected");
+    assert.equal(h.ledger.entries.length, 0, "presence unknowable → no append");
+    h.queue.dispose();
+
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((a) => a.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(h2.ledger.entries.length, 1);
+    assert.equal(fake.submitCount, 1, "recovery never resubmitted");
+    h2.queue.dispose();
+  });
+
+  it("a live follow-on fails its finalization honestly rather than running ahead of the spend record", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.ledger.failReads = new Error("EACCES: permission denied, read");
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/recover" },
+      landing: { dir: "references/maren-kest/incoming" },
+    });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "failed");
+    assert.equal(foldedJob(h, job.id)?.status, "succeeded");
+    assert.equal(finalizations, 0, "no follow-on ran ahead of an unconfirmed entry");
+    assert.equal(h.ledger.entries.length, 0);
+    h.queue.dispose();
+
+    // The readable restart completes the missing entry; the failed finalization keeps its
+    // user-facing retry rather than replaying by itself.
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((a) => a.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(h2.ledger.entries.length, 1);
+    assert.equal(foldedJob(h2, job.id)?.finalization?.status, "failed");
+    await h2.queue.retryFinalization(job.id);
+    assert.equal(finalizations, 1, "the explicit retry now runs, with the entry in place");
+    assert.equal(h2.ledger.entries.length, 1, "and appends nothing further");
+    h2.queue.dispose();
+  });
+
+  it("neither replays nor fails a pending finalization on a guess; the readable restart decides", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal = terminalRow("DF1", {
+      target: { kind: "voice-preview", id: "maren-kest/elevenlabs/v1" },
+      landedFiles: [".cache/voice-previews/lf1.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "pending", "no verdict on a guess");
+    assert.equal(finalizations, 0);
+    assert.equal(h2.ledger.entries.length, 1, "and no duplicate entry either");
+    h2.queue.dispose();
+
+    const h3 = h2.revive();
+    await h3.queue.start();
+    assert.equal(foldedJob(h3, terminal.id)?.finalization?.status, "complete", "the readable restart replays it");
+    assert.equal(finalizations, 1);
+    assert.equal(h3.ledger.entries.length, 1);
+    h3.queue.dispose();
   });
 });
 

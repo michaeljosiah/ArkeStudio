@@ -1265,9 +1265,17 @@ export class Coordinator {
                 this.foundingBuild?.noteJobSettled(event.job);
               }
             },
+            // Dedupe-grade reads (SPEC-009 R-16): both reject when ledger.jsonl exists but
+            // cannot be read, because the tolerant readAll folded that into [] — which told
+            // the queue every job in history was never billed, and its ⑦ completion pass
+            // appended a second entry for each. The queue parks on rejection; the failure is
+            // logged here because the parking itself is deliberately silent in the queue.
             ledger: {
-              readJobIds: () => this.ledger!.readJobIds(),
-              has: async (jobId) => (await this.ledger!.readAll()).some((e) => e.jobId === jobId),
+              readJobIds: () => this.dedupeLedgerRead("startup snapshot", () => this.ledger!.readJobIds()),
+              has: async (jobId) =>
+                (await this.dedupeLedgerRead("terminal dedupe", () => this.ledger!.readAllStrict())).some(
+                  (e) => e.jobId === jobId,
+                ),
               append: (entry) => this.recordLedger(entry),
             },
             landInWorld: async (worldId, fn) => {
@@ -3033,6 +3041,24 @@ export class Coordinator {
       if (JSON.stringify(drift) !== JSON.stringify(this.getState().app.drift)) {
         this.emit({ at: new Date().toISOString(), type: "manifest.drift", reports: drift });
       }
+    }
+  }
+
+  /**
+   * A ledger read whose answer the queue appends on. The rejection is rethrown — the queue's
+   * fail-safe is to park, not to be handed [] — but logged first, because a queue that parks
+   * quietly leaves nothing for support to correlate a "spend chart stopped moving" report with.
+   */
+  private async dedupeLedgerRead<T>(context: string, read: () => Promise<T>): Promise<T> {
+    try {
+      return await read();
+    } catch (err) {
+      void this.appLog?.append({
+        kind: "ledger.read-failed",
+        context,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
     }
   }
 

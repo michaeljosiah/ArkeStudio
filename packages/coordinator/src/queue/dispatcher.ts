@@ -131,7 +131,14 @@ export interface JobQueueOptions {
   clients: Record<string, DispatchClient>;
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
-  /** The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger. */
+  /**
+   * The idempotency seam (R-16): startup snapshots once; runtime checks the live ledger.
+   * The reads MUST reject when the ledger exists but cannot be read, never answer empty —
+   * "empty" here means "never billed", and the queue would append a duplicate entry for work
+   * that was. The queue treats a rejection as unknown: it parks the ledger-gated reconciliation
+   * and appends nothing, leaving entries missing rather than doubled, because a missing entry
+   * is completed idempotently by the next start-up and a duplicate is permanent.
+   */
   ledger: {
     readJobIds(): Promise<ReadonlySet<string>>;
     has(jobId: string): Promise<boolean>;
@@ -1087,7 +1094,14 @@ export class JobQueue {
     if (this.disposed) return;
     await this.appendLedgerOnce(terminal, costMicroUsd);
     if (this.disposed) return;
-    if (terminal.finalization?.status === "pending" && !(await this.opts.ledger.has(terminal.id))) {
+    // `catch → false`: an unreadable ledger means the entry did not land this pass either (the
+    // same failing read stopped appendLedgerOnce from appending), and a follow-on never runs
+    // ahead of its spend record — so the honest outcome is the same failed finalization a
+    // failed append gets, retryable once the file is readable again.
+    if (
+      terminal.finalization?.status === "pending" &&
+      !(await this.opts.ledger.has(terminal.id).catch(() => false))
+    ) {
       await this.failFinalization(terminal);
       return;
     }
@@ -1113,6 +1127,9 @@ export class JobQueue {
     } catch {
       // A failed ledger write is the ⑦ crash window: the terminal row is already durable, and
       // the next start-up completes the missing entry idempotently (R-16). Never crash a pump.
+      // A failed ledger READ lands here too, and deliberately skips the append: with presence
+      // unknowable, appending risks the permanent duplicate while skipping risks only the
+      // missing entry that ⑦ recovery already completes.
       if (startupJobIds && (await this.opts.ledger.has(job.id).catch(() => false))) {
         startupJobIds.add(job.id);
         return true;
@@ -1224,7 +1241,16 @@ export class JobQueue {
   async start(): Promise<ReconcileAction[]> {
     const history = await this.journal.readHistory();
     const folded = foldJobHistory(history);
-    const ledgerJobIds = new Set(await this.opts.ledger.readJobIds());
+    // `null` when the ledger exists but could not be read. Not an empty set: an empty snapshot
+    // says every terminal job in history was never billed, and the ⑦ completion pass below
+    // would append a second entry for each — permanent duplicates in an append-only file,
+    // doubling every spend total and reading exactly like the double-charge bug (R-16, D11).
+    // Unknown parks the ledger-gated work instead; entries stay missing until a start-up that
+    // can read the file completes them, the same idempotent recovery a ⑦ crash relies on.
+    // Job recovery itself proceeds — none of it consults the ledger, and R-18 still holds.
+    const ledgerJobIds = await this.opts.ledger
+      .readJobIds()
+      .then((ids) => new Set(ids), () => null);
     const missingLedger: Job[] = [];
     for (const { job } of folded) this.jobs.set(job.id, job);
     const report: ReconcileAction[] = [];
@@ -1260,19 +1286,23 @@ export class JobQueue {
 
     for (const { job, prior } of folded) {
       if (TERMINAL.has(job.status)) {
-        // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
-        if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
-        if (
-          job.status === "succeeded" &&
-          ledgerJobIds.has(job.id) &&
-          this.needsReplayableFinalization(job) &&
-          this.finalizationUnsettled(job)
-        ) {
-          await this.retryFinalization(job.id);
-        } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
-          // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
-          // preparation honestly instead of duplicating takes or mutating domain state.
-          await this.failFinalization(job);
+        // Both passes here read the snapshot, so both park on an unreadable ledger: billed or
+        // not is unknowable, and neither an append nor a finalization verdict runs on a guess.
+        if (ledgerJobIds !== null) {
+          // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
+          if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
+          if (
+            job.status === "succeeded" &&
+            ledgerJobIds.has(job.id) &&
+            this.needsReplayableFinalization(job) &&
+            this.finalizationUnsettled(job)
+          ) {
+            await this.retryFinalization(job.id);
+          } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
+            // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
+            // preparation honestly instead of duplicating takes or mutating domain state.
+            await this.failFinalization(job);
+          }
         }
         await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
         continue;
@@ -1346,9 +1376,13 @@ export class JobQueue {
       }
     }
 
-    for (const job of missingLedger) {
-      if (await this.appendLedgerOnce(job, undefined, ledgerJobIds)) {
-        report.push({ jobId: job.id, action: "ledger-completed" });
+    // missingLedger is only ever populated from a readable snapshot; the guard restates that
+    // for the types and keeps the completion pass structurally unreachable while parked.
+    if (ledgerJobIds !== null) {
+      for (const job of missingLedger) {
+        if (await this.appendLedgerOnce(job, undefined, ledgerJobIds)) {
+          report.push({ jobId: job.id, action: "ledger-completed" });
+        }
       }
     }
 

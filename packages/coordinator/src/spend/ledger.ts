@@ -45,7 +45,13 @@ export class LedgerFile {
     });
   }
 
-  /** Every valid entry; malformed interior lines are skipped, never fatal (tolerant reader). */
+  /**
+   * Every valid entry; malformed interior lines are skipped, never fatal (tolerant reader).
+   * The whole read is tolerant too — a file that cannot be read answers as empty. Only for
+   * callers whose answer decorates something else (a take's actual cost, a spend chart):
+   * for them a blank figure is honest degradation. Anything that would *append* on the
+   * strength of an absence must use `readAllStrict`.
+   */
   async readAll(): Promise<LedgerEntry[]> {
     await this.queue.enqueue(() => this.repairTail());
     let raw: string;
@@ -54,6 +60,37 @@ export class LedgerFile {
     } catch {
       return [];
     }
+    return this.parseLines(raw);
+  }
+
+  /**
+   * `readAll` for callers whose answer changes money. A missing file is a genuinely empty
+   * ledger — nothing has ever been recorded — but any other read failure (EACCES, a transient
+   * lock) throws rather than answering []: folded into "empty", an unreadable ledger tells the
+   * reconciliation dedupe that every job in history was never billed, and the crash-window-⑦
+   * completion pass appends a second entry for each — permanent, in a file that is never
+   * rewritten or compacted, and indistinguishable from the double-charge bug SPEC-009 R-16
+   * exists to prevent. A *missing* entry, by contrast, is the recoverable state: the next
+   * start-up that can read the file completes it idempotently.
+   */
+  async readAllStrict(): Promise<LedgerEntry[]> {
+    await this.queue.enqueue(() => this.repairTail());
+    let raw: string;
+    try {
+      raw = await readFile(this.path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+    return this.parseLines(raw);
+  }
+
+  /** The reconciliation dedupe snapshot — strict, because its only caller appends on absence. */
+  async readJobIds(): Promise<Set<string>> {
+    return new Set((await this.readAllStrict()).map((entry) => entry.jobId));
+  }
+
+  private parseLines(raw: string): LedgerEntry[] {
     const out: LedgerEntry[] = [];
     for (const line of raw.split("\n")) {
       const t = line.trim();
@@ -66,10 +103,6 @@ export class LedgerFile {
       }
     }
     return out;
-  }
-
-  async readJobIds(): Promise<Set<string>> {
-    return new Set((await this.readAll()).map((entry) => entry.jobId));
   }
 
   drain(): Promise<void> {
