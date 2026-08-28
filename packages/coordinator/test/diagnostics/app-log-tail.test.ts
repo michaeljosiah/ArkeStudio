@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DIAGNOSTICS_LOG_TAIL_RECORDS } from "@arke-studio/contracts";
 import { AppLog } from "../../src/app-log.js";
+import { ProviderService } from "../../src/providers/service.js";
 import { SecretRegistry } from "../../src/redact.js";
 import { tempDir } from "../tmp.js";
 
@@ -107,6 +108,19 @@ describe("the bounded log tail (R-18)", () => {
     assert.match(tail[99]!, /"n":249/);
     const missing = new AppLog(join(dir, "absent.jsonl"), new SecretRegistry());
     assert.deepEqual(await missing.tail(100), []);
+  });
+
+  it("markFault stamps the fault's category on the record, so the correlation never re-reads the sentence", async () => {
+    const dir = await tempDir("arke-taillog-");
+    const log = new AppLog(join(dir, "app.jsonl"), new SecretRegistry());
+    const service = new ProviderService(null, {}, log);
+    await service.init();
+    service.markFault("fal", "quota exhausted for this billing period (HTTP 402)");
+    service.markFault("fal", "FAL rejected the key (HTTP 401)");
+    await log.drain();
+    const tail = (await log.diagnosticsTail()) as ReadonlyArray<Record<string, unknown>>;
+    assert.equal(tail[0]!["category"], "billing");
+    assert.equal(tail[1]!["category"], "auth");
   });
 
   it("says when a record lands, after it landed — the re-read trigger (R-33)", async () => {

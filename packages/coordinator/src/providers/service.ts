@@ -1,4 +1,10 @@
-import { PROVIDERS, type CapabilityProbe, type ProviderId, type ProviderStatus } from "@arke-studio/contracts";
+import {
+  PROVIDERS,
+  providerFaultCategory,
+  type CapabilityProbe,
+  type ProviderId,
+  type ProviderStatus,
+} from "@arke-studio/contracts";
 import type { AppLog } from "../app-log.js";
 import type { CredentialStore } from "../credentials/store.js";
 
@@ -126,7 +132,15 @@ export class ProviderService {
 
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
   markFault(id: ProviderId, message: string): ProviderStatus {
-    void this.log?.append({ kind: "provider.fault", provider: id, message });
+    // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
+    // key row for a quota that a replaced key would not refill, and stamping at the producer is
+    // what keeps that a fact of the record rather than a re-reading of its sentence.
+    void this.log?.append({
+      kind: "provider.fault",
+      provider: id,
+      message,
+      category: providerFaultCategory(message),
+    });
     return this.patch(id, { fault: message, validation: "invalid" });
   }
 }

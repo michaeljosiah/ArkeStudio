@@ -678,7 +678,12 @@ const recipeWeightsMissing: Rule = {
         title: `${recipe.displayName} · model files missing`,
         facts,
         cause: carriedCause(ctx.boundary, recipe.reason ?? "model files are missing"),
-        remedy: { control: "component-download", target: weights.id },
+        // The row's own control for the state: Download is drawn for `available`, Retry for
+        // `skipped` — a remedy naming a button the row does not draw is a false promise.
+        remedy: {
+          control: weights.state === "skipped" ? "component-retry" : "component-download",
+          target: weights.id,
+        },
         consequences: [`comfyui-recipe-disabled:${recipe.recipeId}`],
         ...staleOf(facts, ctx.now, { control: "comfyui-refresh" }),
       });
@@ -728,6 +733,16 @@ const engineUnavailable: Rule = {
     if (comfyui === null) return [];
     const engine = comfyui.engine;
     if (!ENGINE_DOWN_STATES.has(engine.state)) return [];
+    // An absent engine whose managed runtime is already on its way is a component in a
+    // transient state, not a fault (R-22): the finding would advertise a Download the Engines
+    // pane has already disabled as installing. The waiting-on-component rule states the
+    // transit where something waits on it.
+    const managedInTransit = ctx.sources.setup?.components.some(
+      (c) =>
+        c.id === "comfyui-runtime" &&
+        (c.state === "queued" || c.state === "downloading" || c.state === "installing"),
+    );
+    if (engine.state === "absent" && managedInTransit === true) return [];
     const disabled = comfyui.recipes.filter(
       (r) => r.state === "disabled" && r.reasonKind === "engine",
     );
@@ -905,7 +920,7 @@ const providerRepeatedFaults: Rule = {
     }
     const nowMs = Date.parse(ctx.now);
     const cutoff = nowMs - PROVIDER_FAULT_WINDOW_MS;
-    const byProvider = new Map<string, { count: number; last?: string }>();
+    const byProvider = new Map<string, { count: number; last?: string; category?: "auth" | "billing" }>();
     for (const record of ctx.tails.appLog) {
       if (record["kind"] !== "provider.fault") continue;
       const provider = record["provider"];
@@ -920,11 +935,16 @@ const providerRepeatedFaults: Rule = {
       const entry = byProvider.get(provider) ?? { count: 0 };
       entry.count += 1;
       const message = record["message"];
-      if (typeof message === "string" && message.length > 0) entry.last = message;
+      if (typeof message === "string" && message.length > 0) {
+        entry.last = message;
+        const stamped = record["category"];
+        entry.category =
+          stamped === "auth" || stamped === "billing" ? stamped : providerFaultCategory(message);
+      }
       byProvider.set(provider, entry);
     }
     const findings: DraftFinding[] = [];
-    for (const [provider, { count, last }] of byProvider) {
+    for (const [provider, { count, last, category }] of byProvider) {
       if (count < PROVIDER_FAULT_THRESHOLD) continue;
       findings.push({
         kind: "provider-repeated-faults",
@@ -944,9 +964,10 @@ const providerRepeatedFaults: Rule = {
             : { statement: `${count} provider faults inside the window` },
         // A provider.fault record is credential-or-billing class by construction (the queue's
         // classifier admits 401/403/402/quota/billing and nothing else) — but the control that
-        // answers it depends on where the credential lives: a key row for one we store, the
-        // sign-in for a tool-held one, and nothing for a keyless runtime (R-25).
-        remedy: providerCredentialRemedy(provider),
+        // answers it depends on which half, and on where the credential lives: a key row for a
+        // stored one, the sign-in for a tool-held one, nothing for a keyless runtime, and
+        // nothing for billing — a replaced key does not refill a quota (R-25).
+        remedy: providerCredentialRemedy(provider, category ?? "auth"),
         consequences: [],
       });
     }
@@ -954,8 +975,22 @@ const providerRepeatedFaults: Rule = {
   },
 };
 
-/** The control that answers a credential-class fault, by where the credential lives. */
-function providerCredentialRemedy(provider: string): FindingRemedy | null {
+/**
+ * Which half of the fault class a provider.fault record is (SPEC-032 R-20.9): the queue's
+ * classifier admits authentication AND billing shapes into one class, and only the first has a
+ * control that resolves it — a replaced key does not refill a quota. One spelling, used by the
+ * log producer to stamp records and by the rule as the fallback for records that predate the
+ * stamp, so the two can never classify one message differently.
+ */
+export function providerFaultCategory(message: string): "auth" | "billing" {
+  return /(quota exhaust|billing|payment required|HTTP 402)/i.test(message) ? "billing" : "auth";
+}
+
+/** The control that answers an authentication fault, by where the credential lives (R-25). */
+function providerCredentialRemedy(provider: string, category: "auth" | "billing"): FindingRemedy | null {
+  // No control refills an account; the finding says so rather than pointing at a key row the
+  // condition would survive (R-25).
+  if (category === "billing") return null;
   const kind = (PROVIDERS as Partial<Record<ProviderId, { credential: string }>>)[provider as ProviderId]?.credential;
   if (kind === "in-app") return { control: "provider-key", target: provider };
   if (kind === "external") return { control: "provider-sign-in", target: provider };

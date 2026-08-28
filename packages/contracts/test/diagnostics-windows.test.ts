@@ -163,6 +163,20 @@ describe("repeated provider faults (R-20.9)", () => {
     const keyless = deriveWithTail(three("ollama")).findings.find((f) => f.kind === "provider-repeated-faults")!;
     assert.equal(keyless.remedy, null);
   });
+
+  it("a billing-class fault carries no key remedy — a replaced key does not refill a quota (R-25)", () => {
+    const billing = (n: number) => fault("fal", n, "quota exhausted for this billing period (HTTP 402)");
+    const finding = deriveWithTail([billing(1), billing(2), billing(3)]).findings.find(
+      (f) => f.kind === "provider-repeated-faults",
+    )!;
+    assert.equal(finding.remedy, null);
+    // A producer-stamped category outranks re-reading the sentence.
+    const stamped = [1, 2, 3].map((n) => ({ ...fault("fal", n, "opaque provider text"), category: "billing" }));
+    const stampedFinding = deriveWithTail(stamped).findings.find(
+      (f) => f.kind === "provider-repeated-faults",
+    )!;
+    assert.equal(stampedFinding.remedy, null);
+  });
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;

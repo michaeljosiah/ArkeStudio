@@ -2455,8 +2455,13 @@ export class Coordinator {
   async diagnostics(): Promise<Record<string, unknown>> {
     // The findings ride the one bundle (SPEC-032 R-38) — freshly derived, because a bundle
     // pulled after a quiet stretch must not carry staleness marks computed for an older
-    // instant. The derivation runs on its own immediate, off this handler's path (R-34); the
-    // await is the same shape as the log read inside the builder.
+    // instant. The tail is re-read first and awaited, or the derivation could run against a
+    // cache older than the recentLog the builder reads beside it — findings omitting the very
+    // faults the tail shows; this also heals a tail stuck `unavailable` since a transient read
+    // failure. The derivation itself still runs on its own immediate, off this handler's path
+    // (R-34); the awaits are the same shape as the log read inside the builder.
+    this.refreshDiagnosticsLogTail();
+    await this.diagnosticsLogTailWork;
     return buildDiagnosticsBundle(
       this.getState(),
       this.appLog,

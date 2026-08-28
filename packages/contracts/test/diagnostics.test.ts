@@ -452,6 +452,47 @@ describe("an engine that is down (R-20.7)", () => {
     assert.equal(finding.cause.upstreamGeneric, "SPEC-021");
   });
 
+  it("an absent engine whose managed runtime is on its way is transient, not a fault (R-22)", () => {
+    const snapshot = derive({
+      comfyui: comfyui({ state: "absent", instanceId: null }),
+      setup: {
+        components: [component("comfyui-runtime", { state: "downloading" })],
+        running: true,
+        diskFreeMb: 500_000,
+        diskCheckedAt: RECENT,
+      },
+    });
+    assert.equal(snapshot.findings.some((f) => f.kind === "comfyui-engine-unavailable"), false);
+    // Once nothing is moving, the absence is a stated choice again.
+    const settled = derive({
+      comfyui: comfyui({ state: "absent", instanceId: null }),
+      setup: {
+        components: [component("comfyui-runtime", { state: "available" })],
+        running: false,
+        diskFreeMb: 500_000,
+        diskCheckedAt: RECENT,
+      },
+    });
+    assert.ok(settled.findings.some((f) => f.kind === "comfyui-engine-unavailable"));
+  });
+
+  it("skipped weights offer the row's own Retry, never a Download the row does not draw", () => {
+    const weightsId = comfyUiWeightsComponentId("wan-video");
+    const snapshot = derive({
+      setup: {
+        components: [component(weightsId, { state: "skipped" })],
+        running: false,
+        diskFreeMb: 500_000,
+        diskCheckedAt: RECENT,
+      },
+      comfyui: comfyui({
+        recipes: [recipe("wan-video", "disabled", "files", "1 of 1 model files missing from the models folder")],
+      }),
+    });
+    const finding = snapshot.findings.find((f) => f.kind === "comfyui-recipe-weights-missing");
+    assert.deepEqual(finding?.remedy, { control: "component-retry", target: weightsId });
+  });
+
   it("a starting engine is transient, not a fault (R-22)", () => {
     const snapshot = derive({
       comfyui: comfyui({ state: "starting", recipes: [recipe("a", "disabled", "engine", "the engine is starting")] }),
