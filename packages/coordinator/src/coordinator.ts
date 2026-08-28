@@ -6,6 +6,7 @@ import { basename, extname, join, resolve, sep } from "node:path";
 import {
   DomainEventSchema,
   JobSchema,
+  diagnosticsSources,
   CHARACTER_REFERENCE_ARTIFACT_TARGETS,
   REFERENCE_FINALIZATION_TARGETS,
   UlidSchema,
@@ -91,6 +92,7 @@ import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
 import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
+import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
   compileBoard,
   composeDispatches,
@@ -291,7 +293,7 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
-import { SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
@@ -733,6 +735,33 @@ export class Coordinator {
   private readonly foundingBuild: FoundingBuildService | null;
   private readonly setup: LocalSetupService | null;
   private readonly lifecycleDisposers = new Set<() => void>();
+  /**
+   * The findings snapshot (SPEC-032 §1.9). Nullable only because services constructed above it
+   * emit during construction; every hook guards, and it exists before the constructor returns.
+   */
+  private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
+  /**
+   * The bounded operational-log tail the derivation reads (SPEC-032 R-18), cached so a
+   * derivation per event tick does not become a file read per event tick. Refreshed only when
+   * the log actually gains a record, serialised so re-reads never interleave, and collapsed so
+   * a burst of appends costs one read, not one each.
+   */
+  private diagnosticsLogTail: ReadonlyArray<Record<string, unknown>> | "unavailable" = [];
+  private diagnosticsLogTailWork = Promise.resolve();
+  private diagnosticsLogTailQueued = false;
+
+  private refreshDiagnosticsLogTail(): void {
+    if (this.diagnosticsLogTailQueued) return;
+    this.diagnosticsLogTailQueued = true;
+    const run = async (): Promise<void> => {
+      // Reset before the read: an append landing while we read queues exactly one more pass.
+      this.diagnosticsLogTailQueued = false;
+      if (!this.appLog) return;
+      this.diagnosticsLogTail = await this.appLog.diagnosticsTail();
+      this.diagnosticsSnapshot?.schedule();
+    };
+    this.diagnosticsLogTailWork = this.diagnosticsLogTailWork.then(run, run);
+  }
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
@@ -1163,7 +1192,14 @@ export class Coordinator {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
-    this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
+    this.appLog = opts.appRoot
+      ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets, () =>
+          // A landed record can change the fault correlation without any state event carrying
+          // it there (the append is async behind the write queue, so it can land after the
+          // event's own derivation already read the file). Re-read, then re-derive.
+          this.refreshDiagnosticsLogTail(),
+        )
+      : null;
     this.credentials =
       opts.appRoot && opts.cipher
         ? new CredentialStore(
@@ -1408,15 +1444,23 @@ export class Coordinator {
       : null;
     this.transport = new Transport({
       getSnapshot: () => this.getState(),
-      getInitialEvents: () =>
-        [...this.pendingPermissions].map(([permissionId, permission]) => ({
+      getInitialEvents: () => {
+        const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
           at: new Date().toISOString(),
           type: "permission.pending" as const,
           permissionId,
           actionClass: permission.actionClass,
           description: describeActionClass(permission.actionClass),
           rememberable: permission.rememberable,
-        })),
+        }));
+        // The findings are transient state like held permissions: a client that reloads would
+        // otherwise be blind until the next source change (SPEC-032 R-33's "on demand").
+        const findings = this.diagnosticsSnapshot?.currentSnapshot();
+        if (findings !== undefined) {
+          replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
+        }
+        return replayed;
+      },
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1452,6 +1496,42 @@ export class Coordinator {
       log: (line) => void this.appLog?.append({ kind: "transport.dropped", message: line }),
     });
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
+    this.diagnosticsSnapshot = new DiagnosticsSnapshotHolder({
+      sources: () => diagnosticsSources(this.getState().app),
+      tails: () => ({ appLog: this.diagnosticsLogTail }),
+      // Subsystem reasons are built from subprocess output and Error.message, which routinely
+      // embed secrets a provider echoed back and the install's own absolute paths — the one
+      // composition redact.ts exports, so the property test exercises what ships (D7, R-28).
+      boundary: diagnosticsBoundary(this.secrets),
+      // Deliberately not this.emit: the snapshot is derived FROM the read model, so folding it
+      // back in would re-trigger its own derivation, and journalling it would record to disk a
+      // projection of state the change log already carries.
+      onSnapshot: (snapshot) => {
+        // The broadcast runs inside the holder's setImmediate; a snapshot the event schema
+        // refuses must degrade to a logged line, never an uncaught exception (R-14's spirit,
+        // carried to the wire).
+        try {
+          this.transport.broadcast(
+            DomainEventSchema.parse({
+              at: new Date().toISOString(),
+              type: "diagnostics.snapshot",
+              snapshot,
+            }),
+          );
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "diagnostics.broadcast-failed",
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
+    });
+    this.lifecycleDisposers.add(() => this.diagnosticsSnapshot?.dispose());
+    // The first derivation, so request paths read an existing snapshot rather than computing
+    // one inside a frame handler (R-34) — and the first tail read, so the fault correlation
+    // sees a log that predates this session.
+    this.diagnosticsSnapshot.schedule();
+    this.refreshDiagnosticsLogTail();
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.
@@ -1688,12 +1768,22 @@ export class Coordinator {
       parsed.type !== "voice.runtime-test" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
-      parsed.type !== "vendor-auth.status"
+      parsed.type !== "vendor-auth.status" &&
+      // The bundle is a state dump made for a support thread, and since SPEC-032 R-38 it also
+      // carries the findings — whose firstSeen bookkeeping R-35 says is never written to disk.
+      // Journalling the event would have durably recorded both on every generate.
+      parsed.type !== "diagnostics.ready"
     ) {
       // Health and application appearance are transient/user-interface state, not domain audit.
       void this.changeLog.append({ kind: "event", event: parsed });
     }
     this.transport.broadcast(parsed);
+    // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
+    // re-derive when something changed, coalesced to one derivation per tick, never a timer.
+    // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
+    // as `unavailable` until the next append; retrying on the next event is still event-driven.
+    if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
+    this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);
     } catch {
@@ -2363,7 +2453,20 @@ export class Coordinator {
    * material, no world content. Exposed for the About screen and support flows.
    */
   async diagnostics(): Promise<Record<string, unknown>> {
-    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets);
+    // The findings ride the one bundle (SPEC-032 R-38) — freshly derived, because a bundle
+    // pulled after a quiet stretch must not carry staleness marks computed for an older
+    // instant. The tail is re-read first and awaited, or the derivation could run against a
+    // cache older than the recentLog the builder reads beside it — findings omitting the very
+    // faults the tail shows; this also heals a tail stuck `unavailable` since a transient read
+    // failure. The derivation itself still runs on its own immediate, off this handler's path
+    // (R-34); the awaits are the same shape as the log read inside the builder.
+    this.refreshDiagnosticsLogTail();
+    await this.diagnosticsLogTailWork;
+    const findings = (await this.diagnosticsSnapshot?.refreshed()) ?? null;
+    // State is captured AFTER the awaits: an event landing mid-wait would otherwise put the
+    // old app section beside findings derived from the new one — the disagreement-in-one-
+    // artifact R-13 exists to forbid.
+    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets, findings);
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
@@ -6647,6 +6750,12 @@ export class Coordinator {
       }
       case "acknowledge-update": {
         this.opts.updates?.acknowledge();
+        return;
+      }
+      case "refresh-diagnostics": {
+        // Schedules only; the derivation runs on the next immediate, off this handler's path
+        // (R-34), and reaches the asker as the ordinary broadcast.
+        this.diagnosticsSnapshot?.refresh();
         return;
       }
       case "generate-diagnostics": {

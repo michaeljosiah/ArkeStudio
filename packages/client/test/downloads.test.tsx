@@ -84,7 +84,8 @@ function stateWith(components: SetupComponent[]): ClientState {
         ],
         recommended: {},
       },
-      setup: { running: components.some((c) => c.state === "downloading"), diskFreeMb: 400_000, components },
+      setup: { running: components.some((c) => c.state === "downloading"), diskFreeMb: 400_000,
+      diskCheckedAt: null, components },
     },
   };
 }

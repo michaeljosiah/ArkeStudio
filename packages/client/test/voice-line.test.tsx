@@ -401,6 +401,7 @@ describe("remote ComfyUI locality", () => {
         setup: {
           running: false,
           diskFreeMb: 100000,
+      diskCheckedAt: null,
           components: [{
             id: "comfyui-runtime",
             displayName: "ComfyUI",

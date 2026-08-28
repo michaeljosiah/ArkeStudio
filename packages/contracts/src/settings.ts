@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BenchPresetSchema } from "./bench.js";
+import { IsoDateTimeSchema } from "./ids.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 
@@ -395,7 +396,8 @@ export type LocalRuntimeModel = z.infer<typeof LocalRuntimeModelSchema>;
 export const LocalRuntimeStatusSchema = z
   .object({
     probes: RuntimeProbesSchema,
-    detectedAt: z.string().min(1),
+    /** Strict ISO: SPEC-032 carries this instant in finding facts, whose schema refuses looser. */
+    detectedAt: IsoDateTimeSchema,
     models: z.array(LocalRuntimeModelSchema),
     /**
      * capability → the one model id recommended for it (R-35, R-38). Authored order, measured

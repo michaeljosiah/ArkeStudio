@@ -2084,6 +2084,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("acknowledge-update") }).strict(),
   /** SPEC-016 R-15: a diagnostics bundle safe to paste publicly. */
   z.object({ kind: z.literal("generate-diagnostics") }).strict(),
+  /**
+   * SPEC-032 R-33's on-demand half: opening the Diagnostics view asks for a fresh derivation,
+   * so a quiet session's staleness marks and derivation instant are current when somebody
+   * finally looks. Coalesced like any other trigger; never a timer.
+   */
+  z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
   /** SPEC-016 R-17: open the data location in the file manager. */
   z.object({ kind: z.literal("open-data-folder") }).strict(),
 

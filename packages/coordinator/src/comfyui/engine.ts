@@ -8,6 +8,7 @@ import type {
   JobEngineIdentity,
   RecipeIdentity,
   RecipeReadiness,
+  RecipeReasonKind,
   RuntimeProbes,
 } from "@arke-studio/contracts";
 import type { ChildSupervisor, SupervisedSpec } from "../supervisor.js";
@@ -225,7 +226,7 @@ export class ComfyUiEngineService {
   /** class_type → present, from /object_info, per engine instance. */
   private nodeClasses: Set<string> | null = null;
   /** The last pre-flight verdict per recipe (§2.5): a mismatch disables until re-verified. */
-  private readonly verification = new Map<string, { ok: boolean; reason?: string }>();
+  private readonly verification = new Map<string, { ok: boolean; reason?: string; reasonKind?: RecipeReasonKind }>();
   private verificationGeneration = 0;
   /** Recipes invalidated by setup/restart and awaiting a healthy engine for verification. */
   private readonly pendingVerification = new Set<string>();
@@ -734,10 +735,12 @@ export class ComfyUiEngineService {
    * calls this immediately before submit — and its verdict is what readiness reports until
    * the next verification changes it.
    */
-  async preflight(recipeId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  async preflight(
+    recipeId: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string; reasonKind?: RecipeReasonKind }> {
     const recipe = this.deps.recipes.find((r) => r.id === recipeId);
-    if (!recipe) return { ok: false, reason: `"${recipeId}" is not a shipped recipe` };
-    type Verdict = { ok: true } | { ok: false; reason: string };
+    if (!recipe) return { ok: false, reason: `"${recipeId}" is not a shipped recipe`, reasonKind: "catalogue" };
+    type Verdict = { ok: true } | { ok: false; reason: string; reasonKind?: RecipeReasonKind };
     const generation = this.verificationGeneration;
     const hashSignal = this.hashAbort.signal;
     const record = (verdict: Verdict, complete = true): Verdict => {
@@ -745,6 +748,7 @@ export class ComfyUiEngineService {
         return {
           ok: false,
           reason: "the engine changed during dependency verification; re-verification is required",
+          reasonKind: "verification",
         };
       }
       this.verification.set(recipeId, verdict);
@@ -752,11 +756,11 @@ export class ComfyUiEngineService {
       return verdict;
     };
     if (recipe.unavailableReason !== undefined) {
-      const verdict = { ok: false as const, reason: recipe.unavailableReason };
+      const verdict = { ok: false as const, reason: recipe.unavailableReason, reasonKind: "catalogue" as const };
       return record(verdict);
     }
     if (this.baseUrl() === null) {
-      const verdict = { ok: false as const, reason: "the ComfyUI engine is not ready" };
+      const verdict = { ok: false as const, reason: "the ComfyUI engine is not ready", reasonKind: "engine" as const };
       return record(verdict, false);
     }
     const dir = this.modelsDir();
@@ -769,6 +773,7 @@ export class ComfyUiEngineService {
         ok: false as const,
         reason:
           "Arke cannot verify this engine's files — map its models folder in Settings to enable local recipes",
+        reasonKind: "models-folder" as const,
       };
       return record(verdict);
     }
@@ -778,6 +783,7 @@ export class ComfyUiEngineService {
         const verdict = {
           ok: false as const,
           reason: `${checkpoint.file} is missing from the models folder`,
+          reasonKind: "files" as const,
         };
         return record(verdict);
       }
@@ -785,6 +791,7 @@ export class ComfyUiEngineService {
         return {
           ok: false,
           reason: "the engine changed during dependency verification; re-verification is required",
+          reasonKind: "verification",
         };
       }
       const found = await this.deps.hashFile(path, hashSignal);
@@ -792,12 +799,14 @@ export class ComfyUiEngineService {
         return {
           ok: false,
           reason: "dependency verification was stopped because the engine lifecycle changed",
+          reasonKind: "verification" as const,
         };
       }
       if (found === null) {
         const verdict = {
           ok: false as const,
           reason: `${checkpoint.file} could not be read for verification`,
+          reasonKind: "verification" as const,
         };
         return record(verdict);
       }
@@ -807,6 +816,7 @@ export class ComfyUiEngineService {
           reason:
             `${checkpoint.file} does not match its pinned version — ` +
             `expected sha256 ${checkpoint.sha256.slice(0, 8)}…, found sha256 ${found.slice(0, 8)}…`,
+          reasonKind: "digest" as const,
         };
         return record(verdict);
       }
@@ -831,18 +841,20 @@ export class ComfyUiEngineService {
         const verdict = {
           ok: false as const,
           reason: `custom node ${node.id} cannot be verified on a URL engine — map its models folder in Settings (SPEC-021 D13)`,
+          reasonKind: "models-folder" as const,
         };
         return record(verdict);
       }
       const nodeDir = join(customNodesDir, node.id);
       if (!(await this.deps.fileExists(nodeDir))) {
-        const verdict = { ok: false as const, reason: `custom node ${node.id} is missing from the engine` };
+        const verdict = { ok: false as const, reason: `custom node ${node.id} is missing from the engine`, reasonKind: "node" as const };
         return record(verdict);
       }
       if (generation !== this.verificationGeneration) {
         return {
           ok: false,
           reason: "the engine changed during dependency verification; re-verification is required",
+          reasonKind: "verification",
         };
       }
       const ref = await this.deps.readNodeRef(nodeDir).catch(() => null);
@@ -850,12 +862,14 @@ export class ComfyUiEngineService {
         return {
           ok: false,
           reason: "the engine changed during dependency verification; re-verification is required",
+          reasonKind: "verification",
         };
       }
       if (ref === null) {
         const verdict = {
           ok: false as const,
           reason: `custom node ${node.id} source/content identity could not be read; it is unverified`,
+          reasonKind: "verification" as const,
         };
         return record(verdict);
       }
@@ -863,6 +877,7 @@ export class ComfyUiEngineService {
         const verdict = {
           ok: false as const,
           reason: `custom node ${node.id} is at ${ref.slice(0, 10)}, not the pinned ${node.pinnedRef.slice(0, 10)}`,
+          reasonKind: "node" as const,
         };
         return record(verdict);
       }
@@ -934,38 +949,47 @@ export class ComfyUiEngineService {
       displayName: recipe.displayName,
       capability: recipe.capability,
     } as const;
-    const disabled = (reason: string, cloudAlternative?: string): RecipeReadiness => ({
+    // The reason kind is the walk saying WHICH step refused (SPEC-032 R-20, D3): the
+    // diagnostics joins branch on it, and without it they would be parsing this function's
+    // sentences to reconstruct what this function already knew.
+    const disabled = (
+      reasonKind: RecipeReasonKind,
+      reason: string,
+      cloudAlternative?: string,
+    ): RecipeReadiness => ({
       ...base,
       state: "disabled",
       reason,
+      reasonKind,
       ...(cloudAlternative !== undefined ? { cloudAlternative } : {}),
     });
 
     // A known-incomplete closure is a hard dependency refusal, not an empty dependency set.
-    if (recipe.unavailableReason !== undefined) return disabled(recipe.unavailableReason);
+    if (recipe.unavailableReason !== undefined) return disabled("catalogue", recipe.unavailableReason);
 
     // 1 · The engine itself.
-    if (engine.state === "absent") return disabled("no ComfyUI engine is configured or installed");
-    if (engine.state === "unreachable") return disabled("the engine did not answer");
-    if (engine.state === "incompatible") return disabled(engine.detail ?? "the engine is incompatible");
-    if (engine.state === "failed") return disabled(engine.detail ?? "the engine did not start");
-    if (engine.state === "starting") return disabled("the engine is starting");
+    if (engine.state === "absent") return disabled("engine", "no ComfyUI engine is configured or installed");
+    if (engine.state === "unreachable") return disabled("engine", "the engine did not answer");
+    if (engine.state === "incompatible") return disabled("engine", engine.detail ?? "the engine is incompatible");
+    if (engine.state === "failed") return disabled("engine", engine.detail ?? "the engine did not start");
+    if (engine.state === "starting") return disabled("engine", "the engine is starting");
 
     // 2 · A URL engine's files are unverifiable without the explicit mapping (D13) — but only
     // where there are files to verify. Step 4 is the only one that reads the folder and it
     // already skips when there is none, so a checkpoint-less recipe was being refused here for
     // want of something it never asks for, and could not be enabled on a URL engine at all.
     if (engine.source === "user-url" && this.modelsDir() === null && recipe.checkpoints.length > 0) {
-      return disabled("Arke cannot verify this engine's files — map its models folder to enable");
+      return disabled("models-folder", "Arke cannot verify this engine's files — map its models folder to enable");
     }
 
     // 3 · The compatibility probe, per recipe (D14): a missing node names itself.
     if (this.nodeClasses === null) {
-      return disabled("the engine's node catalogue could not be verified");
+      return disabled("verification", "the engine's node catalogue could not be verified");
     }
     const missing = recipe.nodeClasses.filter((cls) => !this.nodeClasses!.has(cls));
     if (missing.length > 0) {
       return disabled(
+        "node",
         `this engine has no ${missing[0]} node — ComfyUI ${VERSION_FLOOR} or later is required`,
       );
     }
@@ -980,6 +1004,7 @@ export class ComfyUiEngineService {
       if (missing > 0) {
         const total = recipe.checkpoints.length;
         return disabled(
+          "files",
           `${missing} of ${total} model file${total === 1 ? "" : "s"} missing from the models folder`,
         );
       }
@@ -987,7 +1012,9 @@ export class ComfyUiEngineService {
 
     // 5 · A pin mismatch found at pre-flight disables until re-verified (§2.5).
     const verified = this.verification.get(recipe.id) ?? (await this.preflight(recipe.id));
-    if (!verified.ok) return disabled(verified.reason ?? "verification failed");
+    if (!verified.ok) {
+      return disabled(verified.reasonKind ?? "verification", verified.reason ?? "verification failed");
+    }
 
     // 6 · Hardware (§2.7): both figures when measured; unknown stays unknown and dispatches (D15).
     // Desktop probes describe this computer. Applying them to a non-loopback URL would report
@@ -998,10 +1025,12 @@ export class ComfyUiEngineService {
         ...base,
         state: "unknown",
         reason: `${engine.locality === "remote" ? "Remote engine" : "VRAM"} VRAM could not be measured. The ${gb(recipe.minVramMb)} floor was not checked.`,
+        reasonKind: "vram",
       };
     }
     if (vram < recipe.minVramMb) {
       return disabled(
+        "vram",
         `Needs ${gb(recipe.minVramMb)} VRAM. This machine has ${gb(vram)}. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
@@ -1031,6 +1060,7 @@ export class ComfyUiEngineService {
         : await this.deps.freeVramMb().catch(() => null);
     if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minVramMb) {
       return disabled(
+        "vram-busy",
         `Needs ${gb(recipe.minVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );

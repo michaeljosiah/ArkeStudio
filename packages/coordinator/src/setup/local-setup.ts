@@ -99,6 +99,8 @@ export class LocalSetupService {
   private readonly components = new Map<string, Live>();
   private abort = new AbortController();
   private diskFreeMb: number | null = null;
+  /** When that figure was read — carried so a start-up reading never poses as current (SPEC-032 R-16). */
+  private diskCheckedAt: string | null = null;
   private running = false;
   private disposed = false;
   /** A failed repair stays failed while the exact undeleted file survives at the same root. */
@@ -143,6 +145,7 @@ export class LocalSetupService {
       components: [...this.components.values()].map(({ entry: _entry, ...c }) => c),
       running: this.running,
       diskFreeMb: this.diskFreeMb,
+      diskCheckedAt: this.diskCheckedAt,
     };
   }
 
@@ -154,7 +157,18 @@ export class LocalSetupService {
   private set(id: string, patch: Partial<SetupComponent>): void {
     const current = this.components.get(id);
     if (!current) return;
-    this.components.set(id, { ...current, ...patch });
+    const next = { ...current, ...patch };
+    // A blocked cause describes the blocked state alone. Merging patches would otherwise leave
+    // "disk" on a component that has moved on to downloading, and a diagnostics join reading it
+    // would report a shortage the screen no longer shows (SPEC-032 R-13).
+    if (patch.state !== undefined && patch.state !== "blocked" && patch.blockedBy === undefined) {
+      delete next.blockedBy;
+      delete next.blockedVolumeRoot;
+      delete next.blockedNeedMb;
+      delete next.blockedFreeMb;
+      delete next.blockedAt;
+    }
+    this.components.set(id, next);
   }
 
   private async componentReady(id: string): Promise<void> {
@@ -269,6 +283,7 @@ export class LocalSetupService {
       }
     }
     this.diskFreeMb = await this.deps.diskFreeMb(this.opts.appRoot).catch(() => null);
+    this.diskCheckedAt = new Date().toISOString();
     this.publish();
   }
 
@@ -421,10 +436,21 @@ export class LocalSetupService {
       // disk to everyone, and a refusal about D: phrased that way sends someone to clear space
       // on the wrong volume. A host with no drive letters has nothing useful to name.
       const where = group.root === appRootDrive ? "this disk" : group.root;
+      const blockedAt = new Date().toISOString();
       for (const c of group.components) {
         this.set(c.id, {
           state: "blocked",
           detail: `needs ${gb(group.needMb)} plus room to work; ${where} has ${gb(freeMb)} free`,
+          // Declared, so the diagnostics join can tell a full drive from a waiting dependency
+          // without parsing this sentence; the root is the one filesystem identification a
+          // diagnostics record may carry (SPEC-032 R-20.3, R-28). The figures are this guard's
+          // own — `diskFreeMb` on the status is the app volume's, and a mapped models folder is
+          // routinely on another drive.
+          blockedBy: "disk",
+          blockedVolumeRoot: group.root,
+          blockedNeedMb: group.needMb,
+          blockedFreeMb: freeMb,
+          blockedAt,
         });
       }
       blockedAny = true;
@@ -445,7 +471,11 @@ export class LocalSetupService {
           return !dep || (dep.state !== "ready" && dep.state !== "present");
         });
         if (blocker !== undefined) {
-          this.set(c.id, { state: "blocked", detail: `waiting on ${this.components.get(blocker)?.displayName ?? blocker}` });
+          this.set(c.id, {
+            state: "blocked",
+            detail: `waiting on ${this.components.get(blocker)?.displayName ?? blocker}`,
+            blockedBy: "dependency",
+          });
           this.publish();
           continue;
         }
@@ -485,6 +515,7 @@ export class LocalSetupService {
           this.set(entry.id, {
             state: "blocked",
             detail: "no models folder is mapped for this engine — set one in Settings",
+            blockedBy: "models-folder",
           });
           this.publish();
           return;
@@ -593,6 +624,7 @@ export class LocalSetupService {
           this.set(entry.id, {
             state: "blocked",
             detail: `no ${entry.displayName} build is published for this machine's architecture`,
+            blockedBy: "architecture",
           });
           this.publish();
           return;
@@ -941,6 +973,7 @@ export class LocalSetupService {
         state: "blocked",
         detail: "no models folder is mapped for this engine — set one in Settings",
         repairRequired: undefined,
+        blockedBy: "models-folder",
       });
       this.publish();
       return false;

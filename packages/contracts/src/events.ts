@@ -5,6 +5,7 @@ import { BenchPresetSchema } from "./bench.js";
 import { BibleHelperKindSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
+import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
 import { HarnessStatusSchema } from "./harness.js";
@@ -793,6 +794,15 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** A diagnostics bundle, already through the redaction boundary (SPEC-016 R-15, D9). */
   z.object({ ...base, type: z.literal("diagnostics.ready"), bundle: z.string() }).strict(),
+  /**
+   * The derived findings snapshot (SPEC-032 R-33): re-derived when any source changes, at most
+   * once per tick, and broadcast only when what it states has changed. Replayed to a fresh
+   * connection like held permissions are, so a reloading client is never blind until the next
+   * change. Transient — never journalled.
+   */
+  z
+    .object({ ...base, type: z.literal("diagnostics.snapshot"), snapshot: DiagnosticsSnapshotSchema })
+    .strict(),
 
   /** The sidecar's four degradation states, each with its copy (SPEC-011 §2.10). */
   z

@@ -2675,6 +2675,26 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-working__key { opacity: 0.6; font-size: 10px; }
 .fy-set__why { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
 .fy-set__why span:last-child { font: 400 10.5px/1.5 var(--font-sans); color: var(--muted-foreground); }
+/* Settings · Diagnostics (SPEC-032 §1.10, design turn 111): severity bands, causes over the
+   consequences they explain, remedies as registry label + place. */
+.fy-diag__head { display: flex; align-items: baseline; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-diag__band { display: flex; align-items: baseline; gap: 10px; padding: 12px 2px 3px; }
+/* Doubled selectors on purpose: .fy-rt__eyebrow sets neutral-400 later in this sheet at equal
+   specificity, and these exist precisely to beat it for the two severities that are not calm. */
+.fy-rt__eyebrow.fy-diag__band--bad { color: var(--destructive); }
+.fy-rt__eyebrow.fy-diag__band--warn { color: var(--warning); }
+.fy-diag__dot--bad { background: var(--destructive); }
+.fy-diag__title { font: 600 12.5px var(--font-sans); min-width: 0; }
+.fy-diag__meta { font: 400 9.5px var(--font-mono); color: var(--neutral-400); flex: none; }
+.fy-diag__place { font: 400 9.5px var(--font-mono); color: var(--neutral-400); flex: none; }
+.fy-diag__go { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; flex: none; }
+.fy-diag__go:hover { background: var(--accent); }
+.fy-diag__chip { font: 500 8.5px var(--font-mono); color: var(--neutral-400); border: 1px solid var(--border); border-radius: 999px; padding: 1px 6px; flex: none; }
+.fy-diag__explains { margin-top: 6px; padding-left: 17px; }
+.fy-diag__sub { display: flex; align-items: center; gap: 9px; padding: 3px 0 3px 17px; opacity: 0.6; }
+.fy-diag__sub span:nth-child(2) { font: 400 11px var(--font-sans); flex: none; }
+.fy-diag__empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; padding: 80px 0; }
+.fy-diag__emptytitle { font: 600 14px var(--font-sans); }
 .fy-set__bar { height: 4px; border-radius: 999px; background: var(--muted); margin-top: 8px; overflow: hidden; }
 .fy-set__barfill { height: 4px; border-radius: 999px; background: var(--foreground); }
 /* The art-direction step of genesis, and the preset library it shares with the proposal screen

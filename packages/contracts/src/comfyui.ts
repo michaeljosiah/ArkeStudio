@@ -133,6 +133,13 @@ export function isComfyUiWeightsComponent(componentId: string): boolean {
   return componentId.startsWith(COMFYUI_WEIGHTS_COMPONENT_PREFIX);
 }
 
+/** The inverse: the recipe whose weights this component is, or null for any other component. */
+export function comfyUiWeightsRecipeId(componentId: string): string | null {
+  return isComfyUiWeightsComponent(componentId)
+    ? componentId.slice(COMFYUI_WEIGHTS_COMPONENT_PREFIX.length)
+    : null;
+}
+
 // ---------------------------------------------------------------------------
 // Recipe readiness (§2.12, R-16) — one answer, consumed everywhere
 // ---------------------------------------------------------------------------
@@ -140,6 +147,35 @@ export function isComfyUiWeightsComponent(componentId: string): boolean {
 /** `unknown` is a real state: the floor could not be checked, and dispatch is permitted (D15). */
 export const RecipeReadinessStateSchema = z.enum(["ready", "disabled", "unknown"]);
 export type RecipeReadinessState = z.infer<typeof RecipeReadinessStateSchema>;
+
+/**
+ * Which step of the readiness walk refused (SPEC-032 R-20, D3). The diagnostics joins need to
+ * know *which* condition disabled a recipe — engine down, folder unmapped, files missing, digest
+ * wrong — and the walk is the only thing that knows; classifying its prose after the fact would
+ * couple a correlation to a sentence. Declared beside the reason, optional because the reason
+ * predates it and a status without one still parses.
+ */
+export const RecipeReasonKindSchema = z.enum([
+  /** A known-incomplete dependency closure declared in the catalogue itself. */
+  "catalogue",
+  /** The engine is absent, unreachable, incompatible, failed or starting. */
+  "engine",
+  /** A URL engine with no mapped models folder, where there are files to verify (D13). */
+  "models-folder",
+  /** A node class the engine does not have. */
+  "node",
+  /** Weight files missing from the models folder. */
+  "files",
+  /** A pinned file is present and its digest does not match — repair territory (§2.5). */
+  "digest",
+  /** Verification could not run or could not read what it needed. */
+  "verification",
+  /** The card is too small for the floor. */
+  "vram",
+  /** The card clears the floor and is too busy right now. */
+  "vram-busy",
+]);
+export type RecipeReasonKind = z.infer<typeof RecipeReasonKindSchema>;
 
 export const RecipeReadinessSchema = z
   .object({
@@ -150,6 +186,8 @@ export const RecipeReadinessSchema = z
     state: RecipeReadinessStateSchema,
     /** The specific measured reason (R-10): never a generic "unavailable". */
     reason: z.string().min(1).optional(),
+    /** Which walk step the reason came from, for joins that must not parse the sentence. */
+    reasonKind: RecipeReasonKindSchema.optional(),
     /** The cloud alternative worth naming, when one exists. */
     cloudAlternative: z.string().min(1).optional(),
   })
