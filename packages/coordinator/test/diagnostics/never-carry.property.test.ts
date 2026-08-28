@@ -239,7 +239,16 @@ describe("what a diagnostics record may never carry (R-28..R-32)", () => {
         authoringRuns: [],
         worldOpenFailure: null,
       } as unknown as ClientState;
-      const bundle = await buildDiagnosticsBundle(state, null, registry);
+      // The findings ride the bundle since SPEC-032 R-38, so the poisoned derivation goes in
+      // with the state: the guarantee must hold over the union, not the halves.
+      const snapshot = deriveDiagnostics({
+        sources: generatedSources(prng(seed)),
+        tails: { appLog: generatedTail(prng(seed)) },
+        previous: null,
+        now: "2026-08-28T12:00:00.000Z",
+        boundary: boundary(registry),
+      });
+      const bundle = await buildDiagnosticsBundle(state, null, registry, snapshot);
       assertCarriesNone(JSON.stringify(bundle), seed, "the bundle");
     }
   });

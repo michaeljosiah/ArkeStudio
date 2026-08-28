@@ -2449,7 +2449,14 @@ export class Coordinator {
    * material, no world content. Exposed for the About screen and support flows.
    */
   async diagnostics(): Promise<Record<string, unknown>> {
-    return buildDiagnosticsBundle(this.getState(), this.appLog, this.secrets);
+    // The findings ride the one bundle (SPEC-032 R-38); the holder maintains them eagerly, so
+    // this read computes nothing on the frame handler's path (R-34).
+    return buildDiagnosticsBundle(
+      this.getState(),
+      this.appLog,
+      this.secrets,
+      this.diagnosticsSnapshot?.currentSnapshot() ?? null,
+    );
   }
 
   /** A credential failed mid-session: a provider fault naming the provider, never a work failure (R-4). */
