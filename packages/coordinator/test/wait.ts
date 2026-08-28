@@ -25,3 +25,21 @@ export async function until(condition: () => boolean, what: string, ms = 10_000)
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+/**
+ * The same contract for a condition that must itself be awaited — a file read, an HTTP probe.
+ * A separate function rather than a wider type on until(): handed an async condition there by
+ * mistake, the loop would see a Promise, which is always truthy, and report success without
+ * ever awaiting the answer. The poll is a shade coarser because each check does real I/O.
+ */
+export async function untilAsync(
+  condition: () => Promise<boolean>,
+  what: string,
+  ms = 10_000,
+): Promise<void> {
+  const start = Date.now();
+  while (!(await condition())) {
+    if (Date.now() - start > ms) throw new Error(`timed out after ${ms}ms waiting for: ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}

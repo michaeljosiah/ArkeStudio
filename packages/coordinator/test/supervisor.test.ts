@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./tmp.js";
+import { until, untilAsync } from "./wait.js";
 import { ChildLedger, type ChildRecord } from "../src/child-ledger.js";
 import {
   ChildSupervisor,
@@ -48,23 +49,14 @@ function processGone(pid: number): boolean {
   }
 }
 
-async function eventually(check: () => boolean, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (check()) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(check(), "condition not met in time");
-}
-
-async function eventuallyAsync(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await check()) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(await check(), "condition not met in time");
-}
+// Wait budgets sized for a starved runner, not the healthy case — polling returns the moment
+// the condition holds, so a generous cap costs a green run nothing. The descendant snapshot and
+// the reap path's identity check each ride a PowerShell Get-CimInstance round-trip that takes
+// ~1s on an idle machine but stretched past a 20s budget on a loaded windows-latest shard (runs
+// 33165842362 / 33166864850 burned exactly that cap). Everything else is process death and
+// enqueued ledger writes settling, which the same contention starves for seconds at a time.
+const CIM_WAIT_MS = 60_000;
+const SETTLE_WAIT_MS = 30_000;
 
 describe("ChildSupervisor", () => {
   it("allocates distinct loopback ports", async () => {
@@ -95,7 +87,7 @@ describe("ChildSupervisor", () => {
     assert.ok(pid !== null);
     await sup.stop();
     assert.equal(sup.status, "stopped");
-    await eventually(() => processGone(pid!));
+    await until(() => processGone(pid!), "the stopped child to be gone", SETTLE_WAIT_MS);
   });
 
   it("requires the configured health protocol before becoming healthy", async () => {
@@ -280,13 +272,22 @@ describe("ChildSupervisor", () => {
     const pid = sup.pid;
     assert.ok(pid !== null);
     // Recording is fire-and-forget off the spawn path, so it lands shortly after healthy.
-    await eventuallyAsync(async () => (await readRecords()).some((c) => c.pid === pid));
+    await untilAsync(
+      async () => (await readRecords()).some((c) => c.pid === pid),
+      "the child's ledger record to land",
+      SETTLE_WAIT_MS,
+    );
     const rec = (await readRecords()).find((c) => c.pid === pid)!;
     assert.equal(rec.id, "voxa");
     assert.equal(rec.image, basename(process.execPath).toLowerCase());
     assert.equal(rec.ownerPid, process.pid);
     await sup.stop();
-    await eventuallyAsync(async () => (await readRecords()).length === 0);
+    // release() is enqueued from the exit listener, not awaited by stop() — let it settle.
+    await untilAsync(
+      async () => (await readRecords()).length === 0,
+      "the ledger to release the exited child",
+      SETTLE_WAIT_MS,
+    );
   });
 
   // A .cmd child makes the supervised pid a cmd.exe wrapper and the working process its
@@ -323,16 +324,24 @@ describe("ChildSupervisor", () => {
       assert.notEqual(grandchild, wrapperPid, "the worker must be a grandchild, not the wrapper");
       assert.ok(!processGone(grandchild), "the grandchild must be alive while healthy");
       // The descendant snapshot lands in the ledger, so a crashed run's sweep can reach
-      // past the wrapper. Enumeration is a PowerShell round-trip — give it time.
-      await eventuallyAsync(async () => (await readRecords()).some((c) => c.pid === grandchild), 20_000);
+      // past the wrapper. Enumeration is the CIM round-trip the budget note explains.
+      await untilAsync(
+        async () => (await readRecords()).some((c) => c.pid === grandchild),
+        "the grandchild's descendant snapshot to land in the ledger",
+        CIM_WAIT_MS,
+      );
       const rec = (await readRecords()).find((c) => c.pid === grandchild)!;
       assert.equal(rec.parentPid, wrapperPid);
       assert.equal(rec.image, basename(process.execPath).toLowerCase());
       await sup.stop();
       assert.equal(sup.status, "stopped");
-      await eventually(() => processGone(wrapperPid), 10_000);
-      await eventually(() => processGone(grandchild!), 10_000);
-      await eventuallyAsync(async () => (await readRecords()).length === 0, 10_000);
+      await until(() => processGone(wrapperPid), "the wrapper to die after stop", SETTLE_WAIT_MS);
+      await until(() => processGone(grandchild!), "the grandchild to die after stop", SETTLE_WAIT_MS);
+      await untilAsync(
+        async () => (await readRecords()).length === 0,
+        "both ledger records to be released after stop",
+        SETTLE_WAIT_MS,
+      );
     } finally {
       await sup.stop();
       if (grandchild !== null && !processGone(grandchild)) process.kill(grandchild, "SIGKILL");
@@ -374,13 +383,22 @@ describe("ChildSupervisor", () => {
       grandchild = (JSON.parse(await res.text()) as { pid: number }).pid;
       // Wait for the adoption snapshot before pulling the wrapper away — a wrapper that
       // dies pre-snapshot is the documented gap, not what this test is about.
-      await eventuallyAsync(async () => (await readRecords()).some((c) => c.pid === grandchild), 20_000);
+      await untilAsync(
+        async () => (await readRecords()).some((c) => c.pid === grandchild),
+        "the adoption snapshot to land before the wrapper is pulled away",
+        CIM_WAIT_MS,
+      );
       await writeFile(exitFlag, "go");
       // The wrapper exits "cleanly"; the worker survives it. The supervisor must notice and
-      // take the survivor down before settling into failed (budget of zero).
-      await waitForStatus(sup, "failed", 20_000);
-      await eventually(() => processGone(grandchild!), 10_000);
-      await eventuallyAsync(async () => !(await readRecords()).some((c) => c.pid === grandchild), 10_000);
+      // take the survivor down before settling into failed (budget of zero). Noticing rides
+      // the reap path's CIM identity probe, so the deadline matches the snapshot's.
+      await waitForStatus(sup, "failed", CIM_WAIT_MS);
+      await until(() => processGone(grandchild!), "the surviving grandchild to be reaped", SETTLE_WAIT_MS);
+      await untilAsync(
+        async () => !(await readRecords()).some((c) => c.pid === grandchild),
+        "the reaped grandchild's record to be released",
+        SETTLE_WAIT_MS,
+      );
     } finally {
       await sup.stop();
       if (grandchild !== null && !processGone(grandchild)) process.kill(grandchild, "SIGKILL");
@@ -400,6 +418,6 @@ describe("ChildSupervisor", () => {
     const pid = sup.pid;
     assert.ok(pid !== null);
     await sup.stop();
-    await eventually(() => processGone(pid!), 10_000);
+    await until(() => processGone(pid!), "the stop-ignoring child to be gone", SETTLE_WAIT_MS);
   });
 });
