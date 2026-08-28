@@ -4575,15 +4575,48 @@ export function ProductionsScreen() {
 }
 
 /**
- * Step one asks what the audience receives (Scope §01; SPEC-023 R-5), and nothing else (turn 99).
- * Two cards, not three: turn 100 moved Interactive video down to step two, where kinds live, and
- * the Audio medium turn 99 draws has no production shape behind it yet — a card that created
- * something with no screens would be worse than the card's absence.
+ * The door (turn 113). Three pictures, and what each one is offering is what the audience does
+ * with the thing — read it, watch it, decide it — rather than which record the app writes.
+ *
+ * `CHOOSE` is here by turn 113a, which amends turn 100's last sentence and leaves its first
+ * standing: interactive video is still a kind of video and not a medium, so this card writes the
+ * same production the step-two radio used to write — `medium: video`, `productionKind:
+ * interactive`. Nothing about scenes, shots, takes or the cut differs, and no medium was added
+ * to the contracts. What changed is only where it is offered, because step one is a set of
+ * intentions now and branching is one a person arrives holding.
+ *
+ * Audio is deliberately not a card: turn 99 claimed it as a medium and nothing has ever shipped
+ * behind it, so the audiobook rides under `WRITE` until there is something to open.
  */
-const MEDIUM_CHOICES = [
-  { id: "video", label: "Video", body: "Scenes, shots, a cut.", kinds: "micro drama · film · music video" },
-  { id: "story", label: "Story", body: "Chapters of prose.", kinds: "novel · script · serial" },
+export const DOOR_CHOICES = [
+  {
+    id: "write",
+    eyebrow: "WRITE",
+    label: "Tell a story",
+    body: "Novel, novella, episodic fiction or audiobook",
+    affordance: "Begin with words",
+    medium: "story",
+  },
+  {
+    id: "watch",
+    eyebrow: "WATCH",
+    label: "Make a film",
+    body: "Short film, series, animation or micro-drama",
+    affordance: "Begin with a screen",
+    medium: "video",
+  },
+  {
+    id: "choose",
+    eyebrow: "CHOOSE",
+    label: "Make it interactive",
+    body: "Branching movie, playable story or mixed experience",
+    affordance: "Begin with a choice",
+    medium: "video",
+    productionKind: "interactive",
+  },
 ] as const;
+
+type DoorId = (typeof DOOR_CHOICES)[number]["id"];
 
 /**
  * Step two: which kind, and the handful of numbers the kind can answer (turns 53, 99, 100). Where
@@ -4594,20 +4627,35 @@ const MEDIUM_CHOICES = [
  * scenes, shots, takes and cut. Music video accordingly needs nothing of its own to be offered —
  * what turn 60 draws for it (the Spine, the song as the clock) is authoring that does not exist
  * yet, and its absence makes a music video an ordinary Video production rather than a broken one.
- * Interactive adds the branch map and nothing else, which is exactly why turn 100 makes it a kind.
+ *
+ * Interactive is not here. It was a kind from turn 100 until turn 113a gave it a card at the
+ * door, and nothing is offered twice — a person who pressed `CHOOSE` has already answered this
+ * question, and one who pressed `WATCH` is not asking for a branch map.
  */
 export const VIDEO_KIND_CHOICES = [
-  { id: "microdrama", label: "Micro drama · series", body: "Episodes, vertical.", aspect: "9:16" },
+  // "Micro drama" without "· series": the label sat in a four-column row and wrapped to two
+  // lines, which made its card taller than the three beside it.
+  { id: "microdrama", label: "Micro drama", body: "Episodes, vertical.", aspect: "9:16" },
   { id: "film", label: "Film · short", body: "One linear cut.", aspect: "16:9" },
   { id: "music-video", label: "Music video", body: "The song is the clock.", aspect: "16:9" },
-  { id: "interactive", label: "Interactive", body: "The viewer chooses.", aspect: "16:9" },
   // Nothing assumed, and therefore nothing stored: a plain Video production, which is what
   // "none of these" means on disk. It reads back as Video rather than as a kind called Other.
   { id: "other", label: "Other", body: "Nothing assumed.", aspect: "16:9" },
 ] as const;
 
-/** The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2). */
+/**
+ * The kinds that write themselves down. The rest are the medium's plain default (SPEC-023 R-2).
+ * `interactive` is still one of them and still reads back the same way — it just arrives from
+ * the door now rather than from the kind row (turn 113a).
+ */
 const STORED_KINDS = new Set(["microdrama", "music-video", "interactive"]);
+
+/*
+ * The kinds with a plate in `public/video-kinds`. Other is deliberately absent: an image of
+ * "nothing assumed" would be a picture of something, and the empty box saying so is the truer
+ * one. A kind added without a plate falls back to that same empty box rather than breaking.
+ */
+export const KIND_PLATES = new Set(["microdrama", "film", "music-video"]);
 
 /** The episode-length ranges step two offers, and the seconds each one means (turn 53). */
 export const EPISODE_LENGTH_CHOICES = [
@@ -4630,10 +4678,16 @@ export function parseEpisodeLength(value: string): { min: number; max: number } 
 
 type VideoKind = (typeof VIDEO_KIND_CHOICES)[number]["id"];
 
-/** Which media have more than one kind — the whole of what decides whether step two exists. */
-const KINDS_BY_MEDIUM: Record<"story" | "video", readonly { id: string }[]> = {
-  story: [],
-  video: VIDEO_KIND_CHOICES,
+/**
+ * What each card has left to ask. Step two always renders now (turn 113): it is the screen that
+ * holds the name, so a card with nothing else to ask shows the name alone rather than sending
+ * the person through a dialog the other cards do not get. `choose` is empty until branching has
+ * kinds of its own — its card already names three — and `write` until a story does.
+ */
+const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number][]> = {
+  write: [],
+  watch: VIDEO_KIND_CHOICES,
+  choose: [],
 };
 
 /**
@@ -4670,10 +4724,12 @@ export function NewProductionScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
-  const [medium, setMedium] = useState<"story" | "video">("video");
+  // Null until a card is pressed: the door is step one, and which card was pressed is the whole
+  // of what step one produces. There is no default — a preselected card would answer the
+  // question the screen is asking.
+  const [door, setDoor] = useState<DoorId | null>(null);
   const [videoKind, setVideoKind] = useState<VideoKind>("film");
   const [title, setTitle] = useState("");
-  const [seriesTitle, setSeriesTitle] = useState("");
   // Seeded from the kind and re-seeded whenever the kind changes: a default the kind can answer
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
@@ -4682,12 +4738,6 @@ export function NewProductionScreen() {
   const [episodeLength, setEpisodeLength] = useState(
     `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
   );
-  /*
-   * Which step is on screen (turn 83). A family with more than one kind cannot create from step
-   * one: its primary continues here and says so, because the kind and the numbers that differ
-   * between kinds are chosen before anything exists. A one-kind family never reaches this state.
-   */
-  const [step, setStep] = useState<1 | 2>(1);
   // Pending until the correlated result arrives (issue 384): success opens the created production
   // at its own workspace — never back to the list — and failure names itself in place, with
   // everything entered still here.
@@ -4706,26 +4756,37 @@ export function NewProductionScreen() {
     });
   }, [pendingRequest, worldId, navigate]);
   const characters = world?.sheets.filter((s) => s.type === "character").length ?? 0;
-  const isMicrodrama = medium === "video" && videoKind === "microdrama";
-  // Turn 83, both sides of it: more than one kind means step two decides; exactly one means step
-  // one creates and step two never renders.
-  const hasSecondStep = KINDS_BY_MEDIUM[medium].length > 1;
+  const chosen = door === null ? null : DOOR_CHOICES.find((d) => d.id === door)!;
+  const kinds = door === null ? [] : KINDS_BY_DOOR[door];
+  const isMicrodrama = door === "watch" && videoKind === "microdrama";
   const lengthRange = parseEpisodeLength(episodeLength);
 
   const create = () => {
-    if (!worldId || pendingRequest) return;
+    if (!worldId || pendingRequest || !chosen) return;
     setFailure(null);
     setPendingRequest(
       createProduction(worldId, {
         title: title.trim(),
-        medium,
-        ...(medium === "video" && STORED_KINDS.has(videoKind) ? { productionKind: videoKind } : {}),
+        medium: chosen.medium,
+        /*
+         * The card's own kind wins where it has one — `CHOOSE` writes `interactive` without ever
+         * showing a kind row (turn 113a) — and otherwise the kind row answers for it. The two
+         * cannot both apply: a card that carries a kind has no kinds left to offer.
+         */
+        ..."productionKind" in chosen
+          ? { productionKind: chosen.productionKind }
+          : chosen.medium === "video" && STORED_KINDS.has(videoKind)
+            ? { productionKind: videoKind }
+            : {},
         // The frame a video delivers in is answerable for every kind, so it travels for every
         // kind (turn 99): before this, a film could not be made vertical until after it existed.
-        ...(medium === "video" ? { aspect } : {}),
+        ...(chosen.medium === "video" ? { aspect } : {}),
         ...(isMicrodrama
           ? {
-              seriesTitle: seriesTitle.trim() || title.trim(),
+              // One name, not two (turn 113): the series takes the production's name. The
+              // separate field only ever existed to let them differ at creation, and it already
+              // defaulted to this — a rename covers the rest.
+              seriesTitle: title.trim(),
               defaults: {
                 ...MICRODRAMA_DEFAULTS,
                 episodeCount,
@@ -4740,25 +4801,50 @@ export function NewProductionScreen() {
   };
 
   /*
-   * Step two (turn 53a): its own screen, with the step said out loud. The kinds carry a banner
-   * area because the choice is meant to be made by looking rather than by reading — the art is
-   * not drawn yet, so the area holds its place rather than collapsing and changing the layout
-   * when it arrives.
+   * Step two (turn 53a, rebuilt by turn 113): its own screen, with the step said out loud. The
+   * kinds carry a plate because the choice is meant to be made by looking rather than by reading
+   * — three lit vertical panels or one wide horizon say what you are starting faster than
+   * "Episodes, vertical." does, and the sentence underneath then confirms rather than teaches.
+   *
+   * It always renders now, because it is the screen that holds the name. A card with no kinds
+   * left to ask shows the name alone rather than sending that person through a dialog the other
+   * cards do not get — thin, and honestly so, until branching and prose have kinds of their own.
    */
-  if (step === 2) {
+  if (chosen) {
     return (
       <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
         <ProductionDialogBackdrop world={world} />
-        <div className="fy-dialog" style={{ maxWidth: 980, position: "relative" }}>
+        <div
+          className="fy-dialog"
+          style={{ maxWidth: kinds.length > 0 ? 980 : 560, position: "relative" }}
+        >
           <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-            <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
-              What kind of video?
-            </div>
+            {kinds.length > 0 ? (
+              <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
+                What kind of video?
+              </div>
+            ) : (
+              // The eyebrow names the card that was pressed. Without a kind row there is nothing
+              // else on this screen to say which door you came through.
+              <div className="fy-mono">{chosen.label.toUpperCase()}</div>
+            )}
             <span style={{ flex: 1 }} />
             <span className="fy-mono">step 2 of 2</span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 12 }}>
-            {VIDEO_KIND_CHOICES.map((k) => (
+          {kinds.length === 0 && (
+            <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
+              Name it
+            </div>
+          )}
+          {kinds.length > 0 && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${kinds.length}, minmax(0, 1fr))`,
+              gap: 12,
+            }}
+          >
+            {kinds.map((k) => (
               <button
                 key={k.id}
                 type="button"
@@ -4779,9 +4865,23 @@ export function NewProductionScreen() {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
+                    // The plate is drawn to the box's edges, so the radius has to clip it or the
+                    // four corners square off and the row stops looking like one set of cards.
+                    overflow: "hidden",
                   }}
                 >
-                  {k.id === "other" && <span className="fy-mono">no defaults</span>}
+                  {KIND_PLATES.has(k.id) ? (
+                    // Relative, not absolute: the packaged app loads from file://, where a
+                    // leading slash resolves to the filesystem root and every plate 404s (the
+                    // same lesson as the art-style previews and the setup reel).
+                    <img
+                      src={`./video-kinds/${k.id}.webp`}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <span className="fy-mono">no defaults</span>
+                  )}
                 </div>
                 <div className="fy-radio__head">
                   <span className="fy-radio__dot" />
@@ -4799,12 +4899,19 @@ export function NewProductionScreen() {
               </button>
             ))}
           </div>
+          )}
+          {/*
+            The name, asked once, on the screen that creates (turn 113). It used to sit under the
+            media on step one, and a micro drama was then asked for a SERIES name here as well —
+            two fields for one thing, since the second already defaulted to the first.
+          */}
+          <Input
+            placeholder="Name it · working titles are fine"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
           {isMicrodrama && (
-            <Input
-              placeholder={`Series name · ${title.trim() || "defaults to the title"} — Season 1 is created with it`}
-              value={seriesTitle}
-              onChange={(e) => setSeriesTitle(e.target.value)}
-            />
+            <span className="fy-mono">names the series · Season 1 created with it</span>
           )}
           {/*
             Everything the kind can answer, under one label that says what it is (turn 99). What
@@ -4812,6 +4919,9 @@ export function NewProductionScreen() {
             asked of somebody who had not written a line. The test for the door — if the kind can
             answer it, it is a default; if only the story can, it is not asked here.
           */}
+          {/* Only a video has any of these to answer. A story showing an empty DEFAULTS label
+              would promise settings that are not there. */}
+          {chosen.medium === "video" && (
           <div style={{ display: "grid", gap: 8 }}>
             <div className="fy-mono">DEFAULTS · CHANGE LATER</div>
             {/* Three columns whatever is in them: a lone FRAME select stretched across the whole
@@ -4847,109 +4957,142 @@ export function NewProductionScreen() {
               )}
             </div>
           </div>
+          )}
           {failure && (
             <Callout tone="danger" title="Not created">
               {failure}
             </Callout>
           )}
+          {/* The narrow screen has no room to run this beside the buttons — it wrapped to two
+              lines and crowded them — so there it takes a row of its own. */}
+          {kinds.length === 0 && (
+            <span className="fy-mono">
+              joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
+            </span>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {kinds.length > 0 && (
+              <span className="fy-mono">
+                joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
+              </span>
+            )}
             <span style={{ flex: 1 }} />
-            <Button variant="ghost" onClick={() => setStep(1)}>
+            {/* Back to the door, and nothing was created on the way here. */}
+            <Button variant="ghost" onClick={() => setDoor(null)}>
               Back
             </Button>
-            <Button variant="primary" disabled={pendingRequest !== null} onClick={create}>
+            <Button
+              variant="primary"
+              disabled={title.trim().length === 0 || pendingRequest !== null}
+              onClick={create}
+            >
               {pendingRequest
                 ? "Creating…"
                 : isMicrodrama
                   ? "Create Series and Season 1"
-                  : "Create and open it"}
+                  : chosen.medium === "story"
+                    ? "Create and open day one"
+                    : "Create and open it"}
             </Button>
           </div>
+          {/* The promise the action needs beside it: pressing this spends nothing. Right-aligned
+              because it belongs to the button above it, not to the joins line on the left. */}
+          <span className="fy-mono" style={{ textAlign: "right" }}>
+            nothing generates
+          </span>
         </div>
       </div>
     );
   }
 
+  /*
+   * The door (turn 113). Three pictures on the world, and no panel around them: this was a
+   * dialog holding three radio cards and a name field, which asked a person to read three
+   * paragraphs to answer a question about what they want to make.
+   *
+   * Nothing is decided here but which card — the name moved to step two, beside the button that
+   * uses it, so nothing typed is ever stranded behind a Back.
+   */
   return (
-    <div className="fy-dialogwrap" data-screen="new-production" style={{ position: "relative" }}>
-      <ProductionDialogBackdrop world={world} />
-      <div className="fy-dialog" style={{ maxWidth: 780, position: "relative" }}>
-        {/* The question is the title, and the counter only appears where there is a second step
-            (turn 99): a Story creates from here, and "step 1 of 2" would be a lie to it. */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "650 22px var(--font-sans)", letterSpacing: "-0.02em" }}>
-            What are you making?
-          </div>
-          <span style={{ flex: 1 }} />
-          {hasSecondStep && <span className="fy-mono">step 1 of 2</span>}
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${MEDIUM_CHOICES.length}, minmax(0, 1fr))`,
-            gap: 14,
-          }}
-        >
-          {MEDIUM_CHOICES.map((f) => (
+    /*
+     * A page, and dressed like every other page in the world (the eyebrow/title/lede hero, the
+     * page background). It briefly wore the creation DIALOG's treatment — the world's key art
+     * blurred behind a panel — which on a full page read as a grey band that stopped partway
+     * down instead of a backdrop. The blurred art belongs to step two, which is still a dialog.
+     */
+    <div data-screen="new-production">
+      <div className="fy-hero">
+        <div className="fy-hero__eyebrow">Create something new</div>
+        <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
+          What should this world become next?
+        </h1>
+        {/* Wide enough to hold the sentence on one line: broken over two it reads as a paragraph
+            of instructions rather than the one aside it is. */}
+        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 640 }}>
+          Choose a card that feels closest. The format can become more specific afterwards.
+        </p>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(3, minmax(0, 372px))",
+          justifyContent: "center",
+          gap: 30,
+          // The rhythm .fy-prodcards uses between a hero and the row under it.
+          padding: "40px 24px 0",
+        }}
+      >
+          {DOOR_CHOICES.map((d, i) => (
             <button
-              key={f.id}
+              key={d.id}
               type="button"
-              className={cx("fy-radio", medium === f.id && "fy-radio--on")}
-              onClick={() => setMedium(f.id)}
+              className="fy-door"
+              // Staggered so the row arrives as a row rather than three things appearing at once.
+              style={{ animationDelay: `${i * 0.06}s` }}
+              onClick={() => {
+                setDoor(d.id);
+                // A card that carries no kind still delivers in a frame, and the kind row it is
+                // about to see (or not see) is what would otherwise have seeded this.
+                if (d.medium === "video") {
+                  setAspect(
+                    "productionKind" in d
+                      ? "16:9"
+                      : (VIDEO_KIND_CHOICES.find((k) => k.id === videoKind)?.aspect ?? "16:9"),
+                  );
+                }
+              }}
             >
-              <div className="fy-radio__head">
-                <span className="fy-radio__dot" />
-                {f.label}
-              </div>
-              <div
-                style={{
-                  font: "400 12px/1.55 var(--font-sans)",
-                  color: "var(--muted-foreground)",
-                  marginTop: 7,
-                }}
-              >
-                {f.body}
-              </div>
-              <div className="fy-mono" style={{ marginTop: 14 }}>
-                {f.kinds}
-              </div>
+              {/*
+                The tilt is on the print, never on the card: the card carries fy-fade-up, and that
+                keyframe ends on `transform: none`, which would flatten a rotation on the same
+                element the moment the entrance finished.
+              */}
+              <span className="fy-door__print" style={{ transform: `rotate(${[-1.2, 0, 1][i]}deg)` }}>
+                {/* Relative, not absolute: the packaged app loads from file://, where a leading
+                    slash resolves to the filesystem root and every card 404s. */}
+                <img src={`./doors/${d.id}.webp`} alt="" aria-hidden="true" />
+              </span>
+              <span className="fy-door__pad">
+                <span className="fy-mono" style={{ letterSpacing: "0.14em" }}>
+                  {d.eyebrow}
+                </span>
+                <span className="fy-door__name">{d.label}</span>
+                <span className="fy-door__body">{d.body}</span>
+                <span className="fy-door__go">{d.affordance} →</span>
+              </span>
             </button>
           ))}
         </div>
-        <Input
-          placeholder="Name it · working titles are fine"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        {failure && (
+      {failure && (
+        <div style={{ margin: "24px auto 0", width: "100%", maxWidth: 560 }}>
           <Callout tone="danger" title="Not created">
             {failure}
           </Callout>
-        )}
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span className="fy-mono">
-            joins {world?.meta.name ?? "the world"} · {characters} characters, every location, the whole canon
-          </span>
-          <span style={{ flex: 1 }} />
-          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/productions`)}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            disabled={title.trim().length === 0 || pendingRequest !== null}
-            onClick={() => (hasSecondStep ? setStep(2) : create())}
-          >
-            {pendingRequest
-              ? "Creating…"
-              : hasSecondStep
-                ? "Continue · what kind of video?"
-                : "Create and open day one"}
-          </Button>
         </div>
-        {/* The promise the action needs beside it: pressing this spends nothing. The joins line
-            above already says the world is shared rather than copied (turn 99, halved). */}
-        <span className="fy-mono">nothing generates</span>
-      </div>
+      )}
+      {/* The row is the last thing on the page, so it needs the bottom the hero gives the top —
+          .fy-prodcards carries its own 46px and this row is built from scratch. */}
+      <div style={{ height: 46 }} />
     </div>
   );
 }

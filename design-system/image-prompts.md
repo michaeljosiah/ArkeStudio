@@ -176,6 +176,8 @@ Use the four `art-direction-*.png` images as hard keyframes. Reject the result i
 | Story format banner | `np-story` | `assets/banner-story.png` | ✅ Generated |
 | Video format banner | `np-video` | `assets/banner-video.png` | ✅ Generated |
 | Game format banner | `np-game` | `assets/banner-game.png` | ✅ Generated |
+| Audio format banner | `np3-listen` | `assets/banner-audio.png` | ✅ Generated |
+| Kind plates, step two | `kind-*` | `assets/kind-{microdrama,film,music-video,interactive}.webp` | ✅ Generated |
 | Board A, shots 12–14 | `sc4-boardA` | `assets/board-scene4-a.png` | ✅ Generated |
 | Maren pitch-board sheet v5 | sheet preview | `assets/maren-sheet-pitchboard.png` | ✅ Generated |
 | Maren composite model sheet | reference kit | `assets/maren-model-sheet.png` | ✅ Generated |
@@ -252,8 +254,26 @@ A writing desk against a rain-streaked window overlooking the drowned harbour at
 **Video** (`np-video`)
 A vintage film camera on a tripod at the end of a flooded pier at blue hour, aimed at a distant lighthouse beam, storyboard cards clipped to its side fluttering in wind, painterly cinematic concept art, muted palette with one warm accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border
 
+**Audio** (`np3-listen`, 4:3 &mdash; drawn at 344&times;258 in turn 113)
+A lamplit recording room above the drowned harbour at night: a ribbon microphone on a stand facing an open window, a brass gramophone horn and a wax cylinder on a worn work table, sheet music weighted by a tide-stone, the dark harbour and a distant lighthouse beam beyond the window, no screen and no picture anywhere in the room, painterly cinematic concept art, muted teal-slate palette with one warm lamplight accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border
+
 **Game** (`np-game`)
 A miniature diorama of a drowned city street seen from above at an isometric angle, tiny glowing waypoint lanterns marking a path between sunken rooftops, one figurine of a hooded ferryman on a game-board tile, painterly cinematic concept art, muted palette with one warm accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border
+
+---
+
+## Kind plates, "What kind of video?" (step two)
+Four 16:9 plates at 640×360, `assets/kind-<id>.webp`, shipped in the app at `packages/client/public/video-kinds/`. These are **not** Undersong scenes: they are graphic marks that must read at 143×97, so the brief is large shapes and high contrast rather than painterly detail. `Other` has no plate on purpose.
+
+Shared style clause for all four: *Full-bleed artwork, the illustration is the entire image edge to edge. Bold minimal graphic poster illustration built to stay legible at thumbnail size (170x98 pixels): a few large shapes, high contrast, composition fills the frame with almost no empty margin, no fine detail. Deep charcoal-slate ground, warm amber glow, pale bone. Not a screenshot, no application window, no toolbar, no user interface, no letterbox bars, no frame within the image, no text, no letters, no numbers, no logos.*
+
+**Micro drama** (`kind-microdrama`) — three tall vertical panels standing shoulder to shoulder, filling the frame top edge to bottom edge, the centre panel lit warm amber and holding a bold black silhouette of two figures face to face in a tense close two-shot, the flanking panels dimmer echoes of it.
+
+**Film** (`kind-film`) — one wide blue-hour landscape: a deep charcoal-slate night sky across the upper two thirds, a narrow band of warm amber burning along the horizon, a dark ridge sweeping edge to edge, one bold black silhouetted figure in a modern coat standing alone on the ridge.
+
+**Music video** (`kind-music-video`) — a large bold black silhouette of a singer leaning into a microphone stand filling the left two thirds, cut through by a hard amber stage beam from above, a strong pale audio waveform running the full width across the lower third like a ruler of time.
+
+**Interactive** (`kind-interactive`) — one glowing amber rectangular frame at the left edge, two thick bold lines diverging to two frames at the right edge, the upper lit warm and the lower dim and cool; the branching structure spans the full width and height.
 
 ---
 
