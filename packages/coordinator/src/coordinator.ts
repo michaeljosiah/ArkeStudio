@@ -10019,12 +10019,11 @@ export class Coordinator {
 
   private async seed(): Promise<void> {
     if (this.opts.jobsSeedPath) {
-      this.readModel.seedJobs(await readNdjson(this.opts.jobsSeedPath, (x) => JobSchema.parse(x)));
+      this.readModel.seedJobs((await readNdjson(this.opts.jobsSeedPath, (x) => JobSchema.parse(x))).entries);
     }
     if (this.opts.ledgerSeedPath) {
-      this.readModel.seedLedger(
-        await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x)),
-      );
+      const seeded = await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
+      this.readModel.seedLedger(seeded.entries, seeded.unavailable);
     }
     // Asked once, at start-up: whether the sample world is installable is a fact about the
     // build, and the Settings pane should not have to discover it by trying.
@@ -10097,16 +10096,37 @@ export class Coordinator {
   }
 }
 
-async function readNdjson<T>(path: string, parse: (x: unknown) => T): Promise<T[]> {
+/**
+ * The NDJSON seed reader, stating when the file exists and could not be read. A missing file is
+ * an empty seed — nothing has been recorded yet — but an EACCES or a transient I/O failure
+ * folded into the same empty array published a ledger that read as clean (SPEC-032 R-21): the
+ * spend correlation compared two windows of nothing and found nothing wrong. Every call site
+ * decides what `unavailable` means for its source rather than a wrapper dropping it silently.
+ *
+ * Lines that do not parse are skipped, never fatal — the ledger's tolerant-reader doctrine
+ * (SPEC-008 §3.2). A crash mid-append leaves a torn final line, and this read runs at start-up
+ * before `LedgerFile`'s repair, so a strict parse here turned that crash artifact into an app
+ * that would not boot.
+ */
+async function readNdjson<T>(
+  path: string,
+  parse: (x: unknown) => T,
+): Promise<{ entries: T[]; unavailable: boolean }> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    return [];
+  } catch (err) {
+    return { entries: [], unavailable: (err as NodeJS.ErrnoException).code !== "ENOENT" };
   }
-  return raw
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => parse(JSON.parse(l)));
+  const entries: T[] = [];
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      entries.push(parse(JSON.parse(t)));
+    } catch {
+      /* torn or foreign line — skipped */
+    }
+  }
+  return { entries, unavailable: false };
 }

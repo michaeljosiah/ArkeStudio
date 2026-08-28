@@ -380,6 +380,7 @@ export type DiagnosticsSources = Pick<
   | "models"
   | "spend"
   | "ledger"
+  | "ledgerUnavailable"
   | "drift"
   | "builds"
   | "update"
@@ -405,6 +406,7 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     models: app.models,
     spend: app.spend,
     ledger: app.ledger,
+    ledgerUnavailable: app.ledgerUnavailable,
     drift: app.drift,
     builds: app.builds,
     update: app.update,
@@ -920,6 +922,30 @@ export const SPEND_RISE_FRACTION = 0.5;
 export const SPEND_RISE_FLOOR_MICRO_USD = 1_000_000;
 
 /**
+ * R-21's unknown, in one spelling: a correlation whose input could not be read states what is
+ * missing, never a silent skip that would read as a clean bill. Shared so the windowed rules
+ * (and any later one) cannot drift apart on what an unavailable input states.
+ */
+function correlationUnavailable(
+  occurrence: FindingKind,
+  title: string,
+  missingInput: string,
+  statement: string,
+  now: string,
+): DraftFinding {
+  return {
+    kind: "correlation-unavailable",
+    occurrence,
+    severity: "unknown",
+    title,
+    facts: [{ name: "missing-input", value: missingInput, source: "derivation", measuredAt: now }],
+    cause: { statement },
+    remedy: null,
+    consequences: [],
+  };
+}
+
+/**
  * R-20.9 — repeated provider faults, counted from the operational log tail. One finding per
  * provider carrying the count and the window, never one per fault. The provider-call record is
  * deliberately not a source (R-17): the fault count comes from the log alone.
@@ -927,20 +953,15 @@ export const SPEND_RISE_FLOOR_MICRO_USD = 1_000_000;
 const providerRepeatedFaults: Rule = {
   kind: "provider-repeated-faults",
   run(ctx) {
-    // R-21: an unreadable input makes the correlation `unknown`, naming what is missing —
-    // never a silent skip, which would read as a clean bill.
     if (ctx.tails.appLog === "unavailable") {
       return [
-        {
-          kind: "correlation-unavailable",
-          occurrence: "provider-repeated-faults",
-          severity: "unknown",
-          title: "Provider faults · not countable",
-          facts: [{ name: "missing-input", value: "log.app", source: "derivation", measuredAt: ctx.now }],
-          cause: { statement: "the operational log could not be read" },
-          remedy: null,
-          consequences: [],
-        },
+        correlationUnavailable(
+          "provider-repeated-faults",
+          "Provider faults · not countable",
+          "log.app",
+          "the operational log could not be read",
+          ctx.now,
+        ),
       ];
     }
     const nowMs = Date.parse(ctx.now);
@@ -1047,6 +1068,20 @@ export function spendProjection(
 const spendAbovePrevious: Rule = {
   kind: "spend-above-previous",
   run(ctx) {
+    // R-21: a ledger that exists and could not be read is not an empty ledger. The read model
+    // publishes the failed read (`ledgerUnavailable`), and the correlation answers unknown
+    // rather than comparing two windows of nothing and reporting a clean fortnight.
+    if (ctx.sources.ledgerUnavailable) {
+      return [
+        correlationUnavailable(
+          "spend-above-previous",
+          "Spend · not comparable",
+          "app.ledger",
+          "the spend ledger could not be read",
+          ctx.now,
+        ),
+      ];
+    }
     const entries = spendProjection(ctx.sources.ledger);
     const now = Date.parse(ctx.now);
     const period = SPEND_PERIOD_DAYS * 24 * 60 * 60 * 1000;
@@ -1189,9 +1224,11 @@ const STATE_RULES: readonly Rule[] = [
 /**
  * Every source R-17 names, with whether it was read or is legitimately absent (R-19) — the
  * whole list, not the subset this release's rules happen to consult, so a rule added later
- * changes no row and a reader can see the closed set. `unavailable` is reachable only for the
- * log tail: the state fields are in memory, and a null one is a fact that was never taken,
- * which is absence, not a failed read (R-14's distinction).
+ * changes no row and a reader can see the closed set. `unavailable` is reachable for the log
+ * tail and for the ledger, whose availability the read model publishes beside its entries
+ * (R-21). The jobs list is file-seeded too but does not carry availability yet, so its row can
+ * only say `read`; the remaining state fields are in memory, where a null one is a fact that
+ * was never taken — absence, not a failed read (R-14's distinction).
  */
 function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
   const named: Array<{ name: string; state: DiagnosticsSourceState }> = [
@@ -1212,7 +1249,7 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.routing", state: "read" },
     { name: "app.models", state: "read" },
     { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
-    { name: "app.ledger", state: "read" },
+    { name: "app.ledger", state: sources.ledgerUnavailable ? "unavailable" : "read" },
     { name: "app.drift", state: "read" },
     { name: "app.builds", state: "read" },
     { name: "app.update", state: "read" },
