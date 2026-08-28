@@ -33,12 +33,7 @@ import { appendChanges } from "../world/change-writer.js";
 import { changesAnything, classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
-import {
-  GRAPH_SCENE_SCHEMA_VERSION,
-  graphSceneContent,
-  parseSceneRecord,
-  sceneFrom,
-} from "../productions/scene-record.js";
+import { graphSceneContent, parseSceneRecord, sceneFrom } from "../productions/scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import {
   draftStagingPath,
@@ -780,31 +775,34 @@ export class ProposalManager {
         return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story";
       });
       /*
-       * An accepted scene lands graph-backed, and the world crosses schema 3 with it
-       * (SPEC-029 R-11): an accepted proposal is an authored write, and every authored write
-       * produces the one shape (§3.3). The migration happens here rather than at staging so
-       * what a person reviewed, what the record checks above read, and what the drafting agent
-       * may still repair all stay in the shape they were written in; what changes is the bytes
-       * the one commit lands. A target already graph-backed keeps its own graph — node ids and
-       * authored groups survive an amendment that only rewrites payloads.
+       * An accepted scene lands graph-backed (SPEC-029 R-11): an accepted proposal is an
+       * authored write, and every authored write produces the one shape (§3.3). The migration
+       * happens here rather than at staging so that what a person reviewed, what the record
+       * checks above read, and what the drafting agent may still repair all stay in the shape
+       * they were written in; what changes is the bytes the one commit lands.
        *
-       * It also subsumes the old scene arm of the check above: schema 3 is past 2, so a scene
-       * carrying `script` or an explicit `order` is fenced by the newer boundary anyway.
+       * A target authored as a graph is left exactly as it was reviewed. Its node ids, edges
+       * and authored groups are the proposal — not decoration on one — and projecting it to
+       * `shots[]` in order to rebuild a flow would silently discard every graph edit somebody
+       * had just approved. Its topology was validated with the rest of the record above.
        *
-       * The refusal here is about the file being landed on, not the one proposed: the checks
-       * above read the target, and a live scene whose own graph is malformed is one no write may
-       * be built over (R-59). It is reported like any other record problem, because a thrown
-       * error out of accept is a card that cannot be accepted and does not say why.
+       * The world crosses schema 3 inside the commit, from the bytes (see `commit.ts`), so a
+       * scene carrying `script` or an explicit `order` is fenced by the newer boundary and the
+       * old scene arm of the check above is subsumed.
+       *
+       * The refusal here is mostly about the file being landed on, not the one proposed: the
+       * checks above read the target, and a live scene that cannot be read at all is one no
+       * write may be built over (R-59). It is reported like any other record problem, because a
+       * thrown error out of accept is a card that cannot be accepted and does not say why.
        */
-      let sceneAccepted = false;
       const refusals: Array<{ path: string; message: string }> = [];
       for (const file of files) {
         if (classify(file.path).track !== "scene" || file.content === undefined) continue;
-        sceneAccepted = true;
-        const live = liveByPath.get(file.path);
-        const current = live !== undefined && live !== null ? parseSceneRecord(live) : null;
         try {
-          file.content = graphSceneContent(current, sceneFrom(parseSceneRecord(file.content)));
+          const proposedScene = parseSceneRecord(file.content);
+          if (isGraphScene(proposedScene)) continue;
+          const live = liveByPath.get(file.path) ?? null;
+          file.content = graphSceneContent(live !== null ? parseSceneRecord(live) : null, proposedScene);
         } catch (err) {
           refusals.push({
             path: file.path,
@@ -813,18 +811,13 @@ export class ProposalManager {
         }
       }
       if (refusals.length > 0) return { status: "invalid", problems: refusals };
-      const raiseSchemaVersion = sceneAccepted
-        ? GRAPH_SCENE_SCHEMA_VERSION
-        : crossesBoundary
-          ? 2
-          : undefined;
       // Exactly one commit (R-11); versions derive inside the primitive (R-12, D7).
       const result = await this.store.commitUnserialised({
         kind: proposal.kind,
         source: proposal.source,
         proposalId: proposal.id,
         files,
-        ...(raiseSchemaVersion !== undefined ? { raiseSchemaVersion } : {}),
+        ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
       await this.retire(proposalId, result.commitId);
       return { status: "accepted", result };

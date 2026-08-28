@@ -24,6 +24,7 @@ import {
 } from "../../src/productions/ops.js";
 import { readWorldMeta, scanWorld, WorldOpenError } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -467,6 +468,104 @@ describe("restore passes a legacy snapshot through the same migration (T-8)", ()
     await assertOneStructuralAuthority(dir);
     await access(join(dir, ".history", "productions", PRODUCTION, "scenes", VERSE, `v${legacy.version + 1}.json`));
   });
+
+  it("refuses a snapshot whose graph is not one path, and leaves the live scene alone", async () => {
+    /*
+     * Undo is the operation that has to be trusted absolutely (codex, 2026-08-28). A graph
+     * snapshot restored verbatim without being checked can be one the scan then drops — so
+     * pressing undo would replace a scene somebody can open with one nobody can, and the thing
+     * they were undoing would be the last version they could still read.
+     */
+    const { dir, store } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await saveScene(store, {
+      productionId: PRODUCTION,
+      sceneFile: VERSE,
+      scene: { ...legacy, version: legacy.version + 1, title: "Later" },
+      baseVersion: legacy.version + 1,
+    });
+    const live = await readRaw(dir, scenePath(VERSE));
+
+    // Break the graph snapshot the way a hand edit would: one connection short of a path.
+    const snapshotPath = `.history/productions/${PRODUCTION}/scenes/${VERSE}/v${legacy.version + 1}.json`;
+    const snapshot = (await readJson(dir, snapshotPath)) as unknown as GraphScene;
+    snapshot.flow.edges = snapshot.flow.edges.slice(1);
+    await writeFile(join(dir, ...snapshotPath.split("/")), `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+
+    await assert.rejects(
+      restoreScene(store, { productionId: PRODUCTION, sceneFile: VERSE, version: legacy.version + 1 }),
+      /cannot be restored/,
+    );
+    assert.equal(await readRaw(dir, scenePath(VERSE)), live, "the scene that still works is still there");
+    assert.deepEqual((await scanWorld(dir)).problems, [], "and the world opens with nothing to report");
+  });
+});
+
+describe("the boundary follows the bytes, not the caller (R-9)", () => {
+  it("adopting a hand-written graph scene fences the world it landed in", async () => {
+    /*
+     * Codex, 2026-08-28: a world at schema 1 or 2 can be closed, one of its scenes replaced by
+     * hand with a valid graph scene, and reopened. The union reads it happily, and adoption
+     * writes those bytes back as the person typed them — which is what adoption is. What must
+     * not stay behind is the boundary: a world holding a `flow` scene that an older build will
+     * open, read as a parse failure, and quietly show one scene short.
+     */
+    const { dir, store } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    assert.equal(await schemaVersion(dir), 1);
+    await store.close();
+
+    await writeFile(
+      join(dir, ...scenePath(VERSE).split("/")),
+      `${JSON.stringify(migrateLegacyScene(legacy), null, 2)}\n`,
+      "utf8",
+    );
+
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => reopened.close());
+    assert.equal(await schemaVersion(dir), 1, "opening it still writes nothing (R-10)");
+    assert.deepEqual(
+      reopened.getBundle().externalEdits.map((edit) => edit.path),
+      [scenePath(VERSE)],
+      "the hand edit is offered for adoption like any other",
+    );
+
+    await reopened.reconcileExternalEdit(scenePath(VERSE));
+
+    assert.equal(await schemaVersion(dir), 3, "adopting it fences the world");
+    const adopted = await readScene(dir, VERSE);
+    assert.ok(isGraphScene(adopted), "and the bytes adopted are the bytes that were typed");
+    assert.deepEqual(shotsOf(adopted), legacy.shots);
+    await assertOneStructuralAuthority(dir);
+  });
+
+  it("a commit that lands one fences the world even though nothing asked it to", async () => {
+    // The rule where it lives. A caller that has never heard of SPEC-029 writes a graph scene
+    // through the ordinary commit primitive, passes no `raiseSchemaVersion`, and the world is
+    // fenced regardless — which is what makes the five callers that do know unable to get it
+    // wrong, and the sixth one nobody has written yet safe by default.
+    const { dir, store } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    const raw = await readRaw(dir, scenePath(VERSE));
+
+    await store.commit({
+      kind: "scene-save",
+      source: "test",
+      files: [
+        {
+          path: scenePath(VERSE),
+          action: "replace",
+          content: `${JSON.stringify(migrateLegacyScene(legacy), null, 2)}\n`,
+          baseHash: sha256(raw),
+        },
+      ],
+    });
+
+    assert.equal(await schemaVersion(dir), 3, "nobody asked; the bytes did");
+    assert.ok(isGraphScene(await readScene(dir, VERSE)));
+    await assertOneStructuralAuthority(dir);
+  });
 });
 
 describe("a graph scene keeps its own structure through a writer that has none (R-2, R-61)", () => {
@@ -551,6 +650,81 @@ describe("a proposal that says what a graph scene already says is a no-op (R-3)"
 
     assert.equal(outcome.status, "no-op", "the world already says this");
     assert.equal(await readRaw(dir, scenePath(VERSE)), raw, "so the scene was not rewritten or re-versioned");
+  });
+
+  it("but a change that lives only in the graph is a change, and lands as proposed", async () => {
+    /*
+     * The other half of the same question (codex, 2026-08-28). Comparing through the projection
+     * answers "did the authored content move?", and between two graph scenes that is the wrong
+     * question: a proposal that adds a beat, or re-points an edge, says nothing about the shots
+     * at all. Read that way it would be retired as a no-op — reviewed, approved, and thrown
+     * away — so two records of the same shape are compared as they are.
+     */
+    const { dir, store, gate } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    const graph = (await readScene(dir, VERSE)) as GraphScene;
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: ["sfn_sh-12", "sfn_sh-13"] };
+
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "One beat",
+      source: "chat:studio",
+      targets: [
+        {
+          path: scenePath(VERSE),
+          content: `${JSON.stringify({ ...graph, flow: { ...graph.flow, storyboardGroups: [beat] } }, null, 2)}\n`,
+        },
+      ],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "accepted");
+    const after = (await readScene(dir, VERSE)) as GraphScene;
+    assert.deepEqual(after.flow.storyboardGroups, [beat], "the beat that was reviewed is the beat that landed");
+    assert.deepEqual(
+      after.flow.nodes.map((node) => node.id),
+      graph.flow.nodes.map((node) => node.id),
+      "and the graph it was authored against was not rebuilt underneath it",
+    );
+    assert.deepEqual(after.flow.edges, graph.flow.edges);
+    assert.equal(after.version, graph.version + 1);
+    await assertOneStructuralAuthority(dir);
+  });
+
+  it("refuses in words rather than throwing when the scene on disk cannot be read", async () => {
+    /*
+     * A repair proposal staged in a session that opened a world whose scene file was already
+     * broken. The base it records is the broken file, so staleness has nothing to say and accept
+     * is the first thing to look at those bytes — and it has to say so on the card. An exception
+     * out of accept is a card that cannot be accepted, cannot be usefully discarded, and says
+     * nothing at all when pressed.
+     */
+    const dir = await makeTempWorld();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    await writeFile(join(dir, ...scenePath(VERSE).split("/")), '{"id":"sc_04"}\n', "utf8");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "A repair",
+      source: "chat:studio",
+      targets: [
+        {
+          path: scenePath(VERSE),
+          content: `${JSON.stringify({ ...legacy, synopsis: "Put right." }, null, 2)}\n`,
+        },
+      ],
+    });
+
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "invalid", "the refusal is an outcome, not an exception");
+    assert.ok(outcome.status === "invalid");
+    assert.equal(outcome.problems[0]!.path, scenePath(VERSE));
+    assert.match(outcome.problems[0]!.message, /cannot be written over/);
   });
 });
 

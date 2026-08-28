@@ -41,7 +41,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
 import { CommitStaleError, type CommitFileInput } from "../world/commit.js";
-import { GRAPH_SCENE_SCHEMA_VERSION, graphSceneContent, readSceneRecord } from "./scene-record.js";
+import { graphSceneContent, readSceneRecord } from "./scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
@@ -693,7 +693,9 @@ async function readScene(
  *
  * This is an authored write, so it is also where a legacy scene becomes graph-backed and the
  * world crosses schema 3 (SPEC-029 R-11): one commit, one version, and the outgoing legacy file
- * snapshotted into the scene's ordinary history track on the way past (R-13).
+ * snapshotted into the scene's ordinary history track on the way past (R-13). The boundary is
+ * not asked for here — the committer raises it from the bytes it is about to land, so no writer
+ * can produce a graph scene and forget to fence it.
  */
 export async function saveScene(
   store: WorldStore,
@@ -718,7 +720,6 @@ export async function saveScene(
     kind: "scene-save",
     source: "editor",
     files: [{ path, action: "replace", content: graphSceneContent(record, next), baseHash: sha256(raw) }],
-    raiseSchemaVersion: GRAPH_SCENE_SCHEMA_VERSION,
   });
 }
 
@@ -849,7 +850,6 @@ export async function setPromptOverride(
     files: [
       { path, action: "replace", content: graphSceneContent(record, { ...scene, shots }), baseHash: sha256(raw) },
     ],
-    raiseSchemaVersion: GRAPH_SCENE_SCHEMA_VERSION,
   });
 }
 

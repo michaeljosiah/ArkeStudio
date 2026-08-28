@@ -21,8 +21,8 @@ import {
  *   scanning, drawing a board and exporting a legacy scene write nothing and raise nothing.
  *
  *   Every authored write lands the graph shape (R-11). The first one to touch a legacy scene
- *   materialises its `flow` and raises the world to 3 in the same commit; there is no phase in
- *   which a file carries both, and no write that puts `shots[]` back.
+ *   materialises its `flow`; there is no phase in which a file carries both, and no write that
+ *   puts `shots[]` back.
  *
  * Which writes count as authored is decided by the callers, not here. The storyboard's save, a
  * shot's prompt override, an accepted proposal and a restore do. Three do not, each for its own
@@ -30,6 +30,10 @@ import {
  * `preserveVersion` (R-10); scene reorder writes `order`, which R-19 keeps outside the scene
  * graph; and adopting an outside edit writes back the bytes a person typed, unchanged, because
  * that is what adoption is (R-62). All three leave whichever shape they found in place.
+ *
+ * The boundary itself is nobody's decision here. It follows the bytes, inside the commit — see
+ * `carriesSceneFlow` and its use in `commit.ts` — so a graph scene that reached the disk by a
+ * route none of this anticipated still fences the world it landed in.
  */
 
 /**
@@ -141,4 +145,39 @@ function refuseUnlessOnePath(scene: GraphScene): GraphScene {
 /** The same, as the bytes a commit takes. Two spaces and a trailing newline, like every record. */
 export function graphSceneContent(current: SceneRecord | null, next: Scene): string {
   return `${JSON.stringify(graphSceneFor(current, next), null, 2)}\n`;
+}
+
+/**
+ * The bytes a restore lands (R-15).
+ *
+ * A schema-2 snapshot is a legacy scene, and putting it back as it stands would write `shots[]`
+ * into a world that has moved past that shape. It goes through the same deterministic migration
+ * the first authored write used, so what comes back is the snapshot's authored content and
+ * nothing else. A snapshot already graph-backed comes back verbatim — node ids and authored
+ * groups intact — but only once its topology has been checked: restoring a graph the scan would
+ * then drop replaces a scene somebody can open with one nobody can, which is the opposite of
+ * what undo is for (R-59, R-61).
+ */
+export function restoredSceneContent(snapshot: string): string {
+  const record = parseSceneRecord(snapshot);
+  if (!isGraphScene(record)) return graphSceneContent(null, record);
+  const findings = validateSceneFlow(record.flow);
+  if (findings.length > 0) throw new SceneFlowRefused(findings);
+  return snapshot;
+}
+
+/**
+ * Do these bytes need the graph-scene boundary (R-9)?
+ *
+ * Asked of the file rather than of a parsed record, and deliberately: a scene carrying `flow` is
+ * one an older build reads as a parse failure and drops, whether or not it satisfies the strict
+ * schema. The fence is about what is on disk, not about what is well-formed.
+ */
+export function carriesSceneFlow(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    return typeof value === "object" && value !== null && !Array.isArray(value) && "flow" in value;
+  } catch {
+    return false;
+  }
 }

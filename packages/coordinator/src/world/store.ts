@@ -1,13 +1,9 @@
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { BIBLE_PATH, isGraphScene, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
+import { BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
-import {
-  GRAPH_SCENE_SCHEMA_VERSION,
-  graphSceneContent,
-  parseSceneRecord,
-} from "../productions/scene-record.js";
+import { restoredSceneContent } from "../productions/scene-record.js";
 import { atomicWriteFile } from "./atomic.js";
 import { readBible } from "./bible.js";
 import { readChanges } from "./change-writer.js";
@@ -339,31 +335,23 @@ export class WorldStore {
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
     const live = await this.readEntity(portablePath);
     /*
-     * A restored scene comes back graph-backed (SPEC-029 R-15).
-     *
-     * A schema-2 snapshot is a legacy scene, and putting it back as it stands would write
-     * `shots[]` into a world that has moved past that shape — the one thing no write may
-     * produce (§3.3). It goes through the same deterministic migration the first authored write
-     * used, so what is restored is the snapshot's authored content and nothing else, and the
-     * legacy version now being replaced is snapshotted on the way past like any other. A
-     * snapshot that is already a graph scene restores verbatim, node ids and authored groups
-     * intact. Either way the boundary is raised in the same commit and never lowered.
+     * A restored scene comes back graph-backed (SPEC-029 R-15) — see `restoredSceneContent`,
+     * which decides what those bytes are and refuses a snapshot it cannot stand behind. Undo is
+     * the one operation that has to be trusted absolutely, so a snapshot that cannot be read, or
+     * whose graph is not one path, is named rather than written back on the strength of not
+     * having been understood. The boundary is raised inside the commit, from the bytes, and
+     * never lowered.
      */
-    let record = null;
+    let content = snapshot;
     if (kind.track === "scene") {
       try {
-        record = parseSceneRecord(snapshot);
+        content = restoredSceneContent(snapshot);
       } catch (err) {
-        // A snapshot this cannot read is one it cannot migrate, and putting the bytes back
-        // unchanged would write `shots[]` into a schema-3 world on the strength of not having
-        // understood them. Refused by name, with the snapshot still on disk to look at.
         throw new CommitPlanError(
-          `${historyPath} is not a scene record: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+          `${historyPath} cannot be restored: ${err instanceof Error ? err.message.slice(0, 300) : "unreadable"}`,
         );
       }
     }
-    const content =
-      record === null || isGraphScene(record) ? snapshot : graphSceneContent(null, record);
     return this.commit({
       kind: "restore",
       source,
@@ -375,7 +363,6 @@ export class WorldStore {
           baseHash: live === null ? null : sha256(live),
         },
       ],
-      ...(kind.track === "scene" ? { raiseSchemaVersion: GRAPH_SCENE_SCHEMA_VERSION } : {}),
     });
   }
 

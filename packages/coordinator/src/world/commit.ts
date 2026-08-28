@@ -6,11 +6,17 @@ import {
   ArtDirectionRecordSchema,
   BIBLE_PATH,
   deriveArtDirectionDescription,
+  isGraphScene,
   newId,
   projectSceneRecord,
   SceneRecordSchema,
   WorldMetaSchema,
+  type SceneRecord,
 } from "@arke-studio/contracts";
+import {
+  carriesSceneFlow,
+  GRAPH_SCENE_SCHEMA_VERSION,
+} from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -233,17 +239,28 @@ export function changesAnything(path: string, live: string, proposed: string): b
       return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
     }
     /*
-     * A scene is compared through its legacy projection (SPEC-029 §3.3 step 2).
+     * A scene is compared arm by arm (SPEC-029 §3.3 step 2).
      *
-     * Arke's amendments and the storyboard's edits are still authored in the legacy shape, and
-     * the file they are proposed against may already be graph-backed. Key by key, `flow` and
-     * `shots` never match, so a proposal that says exactly what the world already says would read
-     * as a change forever — and accept uses this question to tell "the world moved" from "the
-     * world already agrees", which is precisely the trap the note above records for sheets.
+     * Two shapes now reach this question. Between two of the same shape the records themselves
+     * are what is compared, so a change living only in the graph — a storyboard group, a
+     * re-pointed edge — is the change it is, and a proposal carrying one is never mistaken for
+     * saying nothing.
+     *
+     * Across the two shapes the comparison goes through the legacy projection instead. Arke's
+     * amendments and the storyboard's edits are still authored as `shots[]`, and the file they
+     * are proposed against may already be graph-backed; key by key, `flow` and `shots` never
+     * match, so a proposal that says exactly what the world already says would read as a change
+     * forever. Accept uses this question to tell "the world moved" from "the world already
+     * agrees", which is precisely the trap the note above records for sheets. A legacy shape
+     * cannot state anything about a graph, so what it can disagree about is the authored
+     * content, and that is what the projection answers.
      */
     if (track === "scene") {
-      const before = sceneFields(live);
-      const after = sceneFields(proposed);
+      const liveRecord = SceneRecordSchema.parse(JSON.parse(live));
+      const proposedRecord = SceneRecordSchema.parse(JSON.parse(proposed));
+      const sameShape = isGraphScene(liveRecord) === isGraphScene(proposedRecord);
+      const before = sameShape ? asFields(liveRecord) : sceneFields(liveRecord);
+      const after = sameShape ? asFields(proposedRecord) : sceneFields(proposedRecord);
       if (before === null || after === null) return true;
       const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
       keys.delete("version");
@@ -280,14 +297,17 @@ export function changesAnything(path: string, live: string, proposed: string): b
   return true;
 }
 
+const asFields = (record: SceneRecord): Record<string, unknown> =>
+  record as unknown as Record<string, unknown>;
+
 /**
- * One scene file's fields in the one shape both arms can be compared in, or null when it is not
- * a readable scene at all — which leaves the caller comparing bytes, as it does for anything
- * else it cannot parse.
+ * One scene record's fields in the one shape both arms can be compared in, or null when its
+ * graph is malformed — which leaves the caller comparing bytes, as it does for anything else it
+ * cannot read.
  */
-function sceneFields(raw: string): Record<string, unknown> | null {
-  const projection = projectSceneRecord(SceneRecordSchema.parse(JSON.parse(raw)));
-  return projection.kind === "invalid" ? null : (projection.scene as unknown as Record<string, unknown>);
+function sceneFields(record: SceneRecord): Record<string, unknown> | null {
+  const projection = projectSceneRecord(record);
+  return projection.kind === "invalid" ? null : asFields(projection.scene);
 }
 
 /** The revision stamp a canon entry's content carries — what addresses its history snapshot. */
@@ -552,10 +572,30 @@ export class Committer {
     const allocatedCanonIds: string[] = [];
     const worldUpdates: Record<string, unknown> = { updated: at };
     if (touchesCanon) worldUpdates["canonRevision"] = revisionTo;
-    if (input.raiseSchemaVersion !== undefined) {
+    /*
+     * A commit that lands a graph-backed scene fences the world (SPEC-029 R-9), whoever asked
+     * for it and whether or not they thought about it.
+     *
+     * Derived from the bytes rather than taken from the caller, because the boundary is not an
+     * intention — it is a fact about what is now on disk. A build that knows only `shots[]`
+     * reads a `flow` scene as a parse failure and opens the world one scene short of itself, so
+     * every route by which such a file can appear has to fence it: the migration writer, an
+     * accepted proposal, a restore, and the two that would never have thought to — adopting a
+     * hand-written graph scene through closed-world reconciliation, and landing a board on a
+     * scene that is already one. One rule at the funnel every write passes through beats five
+     * callers each remembering.
+     */
+    const landsGraphScene = files.some(
+      (f) => classify(f.path).track === "scene" && f.newContent != null && carriesSceneFlow(f.newContent),
+    );
+    const raiseSchemaVersion = Math.max(
+      input.raiseSchemaVersion ?? 0,
+      landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
+    );
+    if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;
-      if (input.raiseSchemaVersion > current) {
-        worldUpdates["schemaVersion"] = input.raiseSchemaVersion;
+      if (raiseSchemaVersion > current) {
+        worldUpdates["schemaVersion"] = raiseSchemaVersion;
         // The audit trail names the boundary crossing: older builds refuse this world from
         // here on, and the log is where "since when?" gets answered.
         changes.push({
@@ -564,7 +604,7 @@ export class Committer {
           entity: "world",
           fieldsChanged: ["schemaVersion"],
           fromVersion: current,
-          toVersion: input.raiseSchemaVersion,
+          toVersion: raiseSchemaVersion,
           source: input.source,
         });
       }
