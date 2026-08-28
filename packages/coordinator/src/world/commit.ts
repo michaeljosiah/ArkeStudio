@@ -7,14 +7,15 @@ import {
   BIBLE_PATH,
   deriveArtDirectionDescription,
   isGraphScene,
+  migrateLegacyScene,
   newId,
-  projectSceneRecord,
   SceneRecordSchema,
   WorldMetaSchema,
   type SceneRecord,
 } from "@arke-studio/contracts";
 import {
   carriesSceneFlow,
+  graphSceneFor,
   GRAPH_SCENE_SCHEMA_VERSION,
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
@@ -239,32 +240,31 @@ export function changesAnything(path: string, live: string, proposed: string): b
       return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
     }
     /*
-     * A scene is compared arm by arm (SPEC-029 §3.3 step 2).
+     * A scene is compared as the graph scene each side means (SPEC-029 §3.3 step 2).
      *
-     * Two shapes now reach this question. Between two of the same shape the records themselves
-     * are what is compared, so a change living only in the graph — a storyboard group, a
-     * re-pointed edge — is the change it is, and a proposal carrying one is never mistaken for
-     * saying nothing.
+     * Two shapes reach this question now, and the honest comparison is not between the files as
+     * written but between what each one says once it is a graph: the live scene as it stands or
+     * as it would deterministically migrate, and the proposal as itself if it carries a flow, or
+     * as the record accepting it would land if it does not.
      *
-     * Across the two shapes the comparison goes through the legacy projection instead. Arke's
-     * amendments and the storyboard's edits are still authored as `shots[]`, and the file they
-     * are proposed against may already be graph-backed; key by key, `flow` and `shots` never
-     * match, so a proposal that says exactly what the world already says would read as a change
-     * forever. Accept uses this question to tell "the world moved" from "the world already
-     * agrees", which is precisely the trap the note above records for sheets. A legacy shape
-     * cannot state anything about a graph, so what it can disagree about is the authored
-     * content, and that is what the projection answers.
+     * Both halves matter, and both were got wrong before landing here. A legacy amendment — all
+     * Arke and the storyboard can still author — over a scene that is already graph-backed must
+     * come out equal when it says what the world already says, or it reads as a change forever
+     * and can never be settled: the trap the note above records for sheets. And a proposal that
+     * carries a flow must be compared with its flow, or a beat, an edge or a node identity that
+     * nothing else could have expressed vanishes into the projection and the proposal is retired
+     * as a no-op — reviewed, approved, and silently thrown away.
      */
     if (track === "scene") {
       const liveRecord = SceneRecordSchema.parse(JSON.parse(live));
       const proposedRecord = SceneRecordSchema.parse(JSON.parse(proposed));
-      const sameShape = isGraphScene(liveRecord) === isGraphScene(proposedRecord);
-      const before = sameShape ? asFields(liveRecord) : sceneFields(liveRecord);
-      const after = sameShape ? asFields(proposedRecord) : sceneFields(proposedRecord);
-      if (before === null || after === null) return true;
+      const before = isGraphScene(liveRecord) ? liveRecord : migrateLegacyScene(liveRecord);
+      const after = isGraphScene(proposedRecord)
+        ? proposedRecord
+        : graphSceneFor(liveRecord, proposedRecord);
       const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
       keys.delete("version");
-      return [...keys].some((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+      return [...keys].some((k) => JSON.stringify(asFields(before)[k]) !== JSON.stringify(asFields(after)[k]));
     }
     if (
       track === "story" ||
@@ -299,16 +299,6 @@ export function changesAnything(path: string, live: string, proposed: string): b
 
 const asFields = (record: SceneRecord): Record<string, unknown> =>
   record as unknown as Record<string, unknown>;
-
-/**
- * One scene record's fields in the one shape both arms can be compared in, or null when its
- * graph is malformed — which leaves the caller comparing bytes, as it does for anything else it
- * cannot read.
- */
-function sceneFields(record: SceneRecord): Record<string, unknown> | null {
-  const projection = projectSceneRecord(record);
-  return projection.kind === "invalid" ? null : asFields(projection.scene);
-}
 
 /** The revision stamp a canon entry's content carries — what addresses its history snapshot. */
 function canonStamp(data: Record<string, unknown>): number {

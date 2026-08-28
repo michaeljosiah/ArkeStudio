@@ -726,6 +726,86 @@ describe("a proposal that says what a graph scene already says is a no-op (R-3)"
     assert.equal(outcome.problems[0]!.path, scenePath(VERSE));
     assert.match(outcome.problems[0]!.message, /cannot be written over/);
   });
+
+  it("refuses the same way when the proposal carries a graph of its own", async () => {
+    // Whether the live scene may be written over is a fact about the live scene (codex round 2).
+    // Reading it only when the proposal happened to be legacy made the rule depend on the shape
+    // of the thing replacing it, so a graph proposal overwrote a file nobody could read.
+    const dir = await makeTempWorld();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    await writeFile(join(dir, ...scenePath(VERSE).split("/")), '{"id":"sc_04"}\n', "utf8");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "A repair, as a graph",
+      source: "chat:studio",
+      targets: [{ path: scenePath(VERSE), content: `${JSON.stringify(migrateLegacyScene(legacy), null, 2)}\n` }],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "invalid");
+    assert.ok(outcome.status === "invalid");
+    assert.match(outcome.problems[0]!.message, /cannot be written over/);
+    assert.equal(await readRaw(dir, scenePath(VERSE)), '{"id":"sc_04"}\n', "and the file was not overwritten");
+  });
+
+  it("carries a graph proposal's beat onto a scene that is still legacy", async () => {
+    /*
+     * Codex round 2's P1. The first fix compared two records of the same shape as they are and
+     * anything else through the projection — which left the case that matters most unguarded: a
+     * graph proposal over a scene that has never been migrated. Its beat lives only in the flow,
+     * the legacy side has no flow at all, so the projection swallowed the difference and the
+     * proposal was retired as a no-op after somebody had approved it.
+     */
+    const { dir, gate } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    assert.ok(!isGraphScene(await readScene(dir, VERSE)), "the scene starts legacy and stays that way until this lands");
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: ["sfn_sh-12", "sfn_sh-13"] };
+    const migrated = migrateLegacyScene(legacy);
+
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "One beat",
+      source: "chat:studio",
+      targets: [
+        {
+          path: scenePath(VERSE),
+          content: `${JSON.stringify({ ...migrated, flow: { ...migrated.flow, storyboardGroups: [beat] } }, null, 2)}\n`,
+        },
+      ],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "accepted", "a beat is a change, whatever shape the file it lands on was");
+    const after = (await readScene(dir, VERSE)) as GraphScene;
+    assert.deepEqual(after.flow.storyboardGroups, [beat]);
+    assert.deepEqual(shotsOf(after), legacy.shots, "and the shots came across untouched");
+    assert.equal(await schemaVersion(dir), 3);
+    await assertOneStructuralAuthority(dir);
+  });
+
+  it("still calls a graph proposal that only restates the migration a no-op", async () => {
+    // The other side of the same rule: a graph proposal saying exactly what the legacy scene
+    // already says is what the world already says, so it settles instead of cutting a version.
+    const { dir, gate } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    const raw = await readRaw(dir, scenePath(VERSE));
+
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "The same thing",
+      source: "chat:studio",
+      targets: [{ path: scenePath(VERSE), content: `${JSON.stringify(migrateLegacyScene(legacy), null, 2)}\n` }],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "no-op");
+    assert.equal(await readRaw(dir, scenePath(VERSE)), raw, "nothing was written, so nothing was fenced");
+    assert.equal(await schemaVersion(dir), 1);
+  });
 });
 
 describe("a malformed graph is named, and takes nothing else down with it (R-60)", () => {

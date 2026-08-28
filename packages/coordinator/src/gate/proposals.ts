@@ -33,7 +33,12 @@ import { appendChanges } from "../world/change-writer.js";
 import { changesAnything, classify, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
-import { graphSceneContent, parseSceneRecord, sceneFrom } from "../productions/scene-record.js";
+import {
+  graphSceneContent,
+  parseSceneRecord,
+  readSceneRecord,
+  sceneFrom,
+} from "../productions/scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import {
   draftStagingPath,
@@ -790,19 +795,25 @@ export class ProposalManager {
        * scene carrying `script` or an explicit `order` is fenced by the newer boundary and the
        * old scene arm of the check above is subsumed.
        *
-       * The refusal here is mostly about the file being landed on, not the one proposed: the
-       * checks above read the target, and a live scene that cannot be read at all is one no
-       * write may be built over (R-59). It is reported like any other record problem, because a
-       * thrown error out of accept is a card that cannot be accepted and does not say why.
+       * The refusal here is about the file being landed on, not the one proposed: the checks
+       * above read the target, and a live scene that cannot be read — unparseable, or a graph
+       * that is not one path — is one no write may be built over (R-59). It is read first,
+       * before the proposed shape is even looked at, because whether that rule applies is a fact
+       * about the thing being written over and never about the shape of the thing replacing it.
+       * And it is reported like any other record problem, because a thrown error out of accept
+       * is a card that cannot be accepted, cannot be usefully discarded, and says nothing when
+       * pressed.
        */
       const refusals: Array<{ path: string; message: string }> = [];
       for (const file of files) {
         if (classify(file.path).track !== "scene" || file.content === undefined) continue;
         try {
+          const live = liveByPath.get(file.path) ?? null;
+          // `readSceneRecord` projects as well as parses, and the projection is the graph check.
+          const current = live !== null ? readSceneRecord(live).record : null;
           const proposedScene = parseSceneRecord(file.content);
           if (isGraphScene(proposedScene)) continue;
-          const live = liveByPath.get(file.path) ?? null;
-          file.content = graphSceneContent(live !== null ? parseSceneRecord(live) : null, proposedScene);
+          file.content = graphSceneContent(current, proposedScene);
         } catch (err) {
           refusals.push({
             path: file.path,
