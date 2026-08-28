@@ -400,7 +400,13 @@ export class ChildSupervisor extends EventEmitter {
     // check aborts the loop.
     let found: DescendantInfo[] | null = null;
     for (let attempt = 0; attempt < 3 && found === null; attempt += 1) {
-      if (attempt > 0) await this.sleep(500 * attempt);
+      // Checked on both sides of the backoff: before, so an attempt that failed after stop()
+      // does not park a fresh timer past the stopped supervisor; after, because stop()
+      // resolves the sleep early and the loop must not touch the seam again.
+      if (attempt > 0) {
+        if (this.child !== child) return;
+        await this.sleep(500 * attempt);
+      }
       if (this.child !== child) return; // stopped or restarted while waiting
       try {
         found = await (this.deps.listDescendants ?? listDescendants)(pid);
@@ -434,6 +440,7 @@ export class ChildSupervisor extends EventEmitter {
    * failed probe keeps them so the next startup's sweep still has something to go on.
    */
   private async reapSurvivors(): Promise<void> {
+    const epoch = this.launchEpoch;
     const tracked = this.descendants;
     this.descendants = [];
     if (tracked.length === 0) return;
@@ -450,7 +457,14 @@ export class ChildSupervisor extends EventEmitter {
     // — every extra attempt is shutdown latency for the case where WMI is genuinely down.
     let probed: Map<number, ProcessInfo> | null = null;
     for (let attempt = 0; attempt < 2 && probed === null; attempt += 1) {
-      if (attempt > 0) await this.sleep(250);
+      if (attempt > 0) {
+        await this.sleep(250);
+        // stop() resolves that sleep early, which would send this straight into a second
+        // probe mid-shutdown — a bumped epoch means the retry belongs to a dead lifecycle,
+        // so keep the records for the sweep instead. stop()'s own call bumped the epoch
+        // before entering, so its retry still runs.
+        if (this.launchEpoch !== epoch) return;
+      }
       try {
         probed = await (this.deps.probe ?? platformProbe)(survivors.map((d) => d.pid));
       } catch {
@@ -639,10 +653,16 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   private async handleUnexpectedExit(code: number | null, signal: NodeJS.Signals | null): Promise<void> {
+    const epoch = this.launchEpoch;
     this.clearHealthTimer();
     // The wrapper exiting says nothing about its grandchildren: they survive it, still
     // holding the old port. Clear them out before deciding whether to restart.
     await this.reapSurvivors();
+    // A stop or restart that landed while the reap was in flight owns the supervisor now.
+    // Resuming here would spend the new child's restart budget, overwrite its status, and
+    // spawn a second child beside it — `stopping` alone cannot carry this, because a
+    // completed restart has already reset it (found in review of the reap retry).
+    if (this.stopping || epoch !== this.launchEpoch) return;
     const why = signal ? `signal ${signal}` : `exit code ${code}`;
     if (this.restarts >= this.spec.maxRestarts) {
       this.setStatus("failed", `${this.id} exited (${why}) and exceeded its restart budget`);
@@ -651,7 +671,7 @@ export class ChildSupervisor extends EventEmitter {
     this.restarts += 1;
     this.setStatus("unhealthy", `${this.id} exited (${why}); restarting (attempt ${this.restarts})`);
     await this.sleep(this.spec.backoffMs * 2 ** (this.restarts - 1));
-    if (this.stopping) return;
+    if (this.stopping || epoch !== this.launchEpoch) return;
     await this.spawnOnce();
   }
 

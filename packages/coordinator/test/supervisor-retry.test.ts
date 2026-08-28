@@ -22,7 +22,10 @@ const isWin = process.platform === "win32";
 
 // Budgets follow supervisor.test.ts's tiers. The injected calls settle instantly, so these
 // are starved-runner ceilings, not expectations — polling returns the moment each holds.
+// Healthy waits sit above the spec's 30s ready budget, per that file's doctrine: a wait at
+// or under the budget can reject while the child is still legitimately coming up.
 const SETTLE_WAIT_MS = 30_000;
+const HEALTHY_MS = 40_000;
 
 // A pid no live process plausibly wears, for descendants that only need to exist on paper.
 const PAPER_PID = 999_999_937;
@@ -74,7 +77,7 @@ describe("ChildSupervisor CIM retries", () => {
     });
     try {
       await sup.start();
-      await until(() => sup.status === "healthy", "the child to become healthy", SETTLE_WAIT_MS);
+      await until(() => sup.status === "healthy", "the child to become healthy", HEALTHY_MS);
       // The first attempt failed; the snapshot must still land, from the retry.
       let rec: ChildRecord | undefined;
       await untilAsync(
@@ -113,9 +116,11 @@ describe("ChildSupervisor CIM retries", () => {
     });
     try {
       await sup.start();
-      await until(() => sup.status === "healthy", "the child to become healthy", SETTLE_WAIT_MS);
+      await until(() => sup.status === "healthy", "the child to become healthy", HEALTHY_MS);
       await until(() => calls === 3, "all three enumeration attempts to be spent", SETTLE_WAIT_MS);
-      await quiet(800);
+      // A fourth attempt would fire 1500ms after the third (the backoff grows 500ms per
+      // attempt), so the quiet window must be longer than that or the assertion is vacuous.
+      await quiet(2_000);
       assert.equal(calls, 3, "the bound holds — no fourth attempt");
       assert.deepEqual(sup.descendantPids, [], "no snapshot from failed enumeration");
     } finally {
@@ -145,12 +150,13 @@ describe("ChildSupervisor CIM retries", () => {
     });
     try {
       await sup.start();
-      await until(() => sup.status === "healthy", "the child to become healthy", SETTLE_WAIT_MS);
+      await until(() => sup.status === "healthy", "the child to become healthy", HEALTHY_MS);
       await until(() => calls === 1, "the first enumeration attempt to fail", SETTLE_WAIT_MS);
       // The loop is now in its 500ms backoff. stop() nulls the child synchronously and
       // resolves the sleep early, so the second attempt must never run — and this ordering
-      // holds under load, because the poll timer above fires before the longer backoff timer
-      // and stop() runs inside its callback.
+      // holds under load: expired timers fire in due-time order and the whole microtask
+      // drain after the earlier poll timer (through this stop()) runs before the backoff's
+      // callback can.
       await sup.stop();
       await quiet(800);
       assert.equal(calls, 1, "the abandoned retry never re-enumerated");
@@ -201,7 +207,7 @@ describe("ChildSupervisor CIM retries", () => {
     });
     try {
       await sup.start();
-      await until(() => sup.status === "healthy", "the child to become healthy", SETTLE_WAIT_MS);
+      await until(() => sup.status === "healthy", "the child to become healthy", HEALTHY_MS);
       await untilAsync(
         async () => ((await readRecords()) ?? []).some((c) => c.pid === survivorPid),
         "the survivor's snapshot to land before stopping",
@@ -251,7 +257,7 @@ describe("ChildSupervisor CIM retries", () => {
     });
     try {
       await sup.start();
-      await until(() => sup.status === "healthy", "the child to become healthy", SETTLE_WAIT_MS);
+      await until(() => sup.status === "healthy", "the child to become healthy", HEALTHY_MS);
       await untilAsync(
         async () => ((await readRecords()) ?? []).some((c) => c.pid === survivorPid),
         "the survivor's snapshot to land before stopping",
