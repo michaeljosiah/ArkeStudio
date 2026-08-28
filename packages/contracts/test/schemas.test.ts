@@ -1054,6 +1054,8 @@ describe("domain events and frames", () => {
       world: null,
     };
     assert.doesNotThrow(() => ClientStateSchema.parse(state));
+    // A payload from before the ledger availability field reads as available (SPEC-032 R-21).
+    assert.equal(ClientStateSchema.parse(state).app.ledgerUnavailable, false);
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "snapshot", seq: 1, state }));
     assert.doesNotThrow(() => FrameSchema.parse({ kind: "event", seq: 2, event }));
     assert.doesNotThrow(() =>

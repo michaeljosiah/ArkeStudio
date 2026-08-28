@@ -380,6 +380,7 @@ export type DiagnosticsSources = Pick<
   | "models"
   | "spend"
   | "ledger"
+  | "ledgerUnavailable"
   | "drift"
   | "builds"
   | "update"
@@ -405,6 +406,7 @@ export function diagnosticsSources(app: ClientState["app"]): DiagnosticsSources 
     models: app.models,
     spend: app.spend,
     ledger: app.ledger,
+    ledgerUnavailable: app.ledgerUnavailable,
     drift: app.drift,
     builds: app.builds,
     update: app.update,
@@ -1047,6 +1049,23 @@ export function spendProjection(
 const spendAbovePrevious: Rule = {
   kind: "spend-above-previous",
   run(ctx) {
+    // R-21: a ledger that exists and could not be read is not an empty ledger. The read model
+    // publishes the failed read (`ledgerUnavailable`), and the correlation answers unknown
+    // rather than comparing two windows of nothing and reporting a clean fortnight.
+    if (ctx.sources.ledgerUnavailable) {
+      return [
+        {
+          kind: "correlation-unavailable",
+          occurrence: "spend-above-previous",
+          severity: "unknown",
+          title: "Spend · not comparable",
+          facts: [{ name: "missing-input", value: "app.ledger", source: "derivation", measuredAt: ctx.now }],
+          cause: { statement: "the spend ledger could not be read" },
+          remedy: null,
+          consequences: [],
+        },
+      ];
+    }
     const entries = spendProjection(ctx.sources.ledger);
     const now = Date.parse(ctx.now);
     const period = SPEND_PERIOD_DAYS * 24 * 60 * 60 * 1000;
@@ -1189,9 +1208,10 @@ const STATE_RULES: readonly Rule[] = [
 /**
  * Every source R-17 names, with whether it was read or is legitimately absent (R-19) — the
  * whole list, not the subset this release's rules happen to consult, so a rule added later
- * changes no row and a reader can see the closed set. `unavailable` is reachable only for the
- * log tail: the state fields are in memory, and a null one is a fact that was never taken,
- * which is absence, not a failed read (R-14's distinction).
+ * changes no row and a reader can see the closed set. `unavailable` is reachable for the log
+ * tail and for the ledger — the two sources built from a file read, which can fail with the
+ * file still there. The other state fields are in memory: a null one is a fact that was never
+ * taken, which is absence, not a failed read (R-14's distinction).
  */
 function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
   const named: Array<{ name: string; state: DiagnosticsSourceState }> = [
@@ -1212,7 +1232,7 @@ function sourceStates(sources: DiagnosticsSources, tails: DiagnosticsTails) {
     { name: "app.routing", state: "read" },
     { name: "app.models", state: "read" },
     { name: "app.spend", state: sources.spend === null ? "absent" : "read" },
-    { name: "app.ledger", state: "read" },
+    { name: "app.ledger", state: sources.ledgerUnavailable ? "unavailable" : "read" },
     { name: "app.drift", state: "read" },
     { name: "app.builds", state: "read" },
     { name: "app.update", state: "read" },

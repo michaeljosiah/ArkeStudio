@@ -29,6 +29,7 @@ export class ReadModel {
         jobs: [],
         builds: [],
         ledger: [],
+        ledgerUnavailable: false,
         providers: [],
         providerTools: [],
         vendorAuth: vendorAuthUnavailable("the harness has not started"),
@@ -200,8 +201,12 @@ export class ReadModel {
     this.state = { ...this.state, app: { ...this.state.app, builds } };
   }
 
-  seedLedger(ledger: ClientState["app"]["ledger"]): void {
-    this.state = { ...this.state, app: { ...this.state.app, ledger } };
+  /**
+   * Seed the ledger read at start-up — and whether that read failed, which is a published fact
+   * (SPEC-032 R-21): folded into an empty array, an unreadable ledger reads as a clean one.
+   */
+  seedLedger(ledger: ClientState["app"]["ledger"], unavailable = false): void {
+    this.state = { ...this.state, app: { ...this.state.app, ledger, ledgerUnavailable: unavailable } };
   }
 
   /** Fold one domain event. Unknown-to-this-fold events are deliberate no-ops. */

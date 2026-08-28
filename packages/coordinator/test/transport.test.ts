@@ -19,6 +19,7 @@ const STATE: ClientState = {
     jobs: [],
     builds: [],
     ledger: [],
+    ledgerUnavailable: false,
     providers: [],
     providerTools: [],
     vendorAuth: vendorAuthUnavailable("not configured"),

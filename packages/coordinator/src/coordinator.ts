@@ -10022,9 +10022,8 @@ export class Coordinator {
       this.readModel.seedJobs(await readNdjson(this.opts.jobsSeedPath, (x) => JobSchema.parse(x)));
     }
     if (this.opts.ledgerSeedPath) {
-      this.readModel.seedLedger(
-        await readNdjson(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x)),
-      );
+      const seeded = await readNdjsonChecked(this.opts.ledgerSeedPath, (x) => LedgerEntrySchema.parse(x));
+      this.readModel.seedLedger(seeded.entries, seeded.unavailable);
     }
     // Asked once, at start-up: whether the sample world is installable is a fact about the
     // build, and the Settings pane should not have to discover it by trying.
@@ -10098,15 +10097,31 @@ export class Coordinator {
 }
 
 async function readNdjson<T>(path: string, parse: (x: unknown) => T): Promise<T[]> {
+  return (await readNdjsonChecked(path, parse)).entries;
+}
+
+/**
+ * `readNdjson`, stating when the file exists and could not be read. A missing file is an empty
+ * seed — nothing has been recorded yet — but an EACCES or a transient I/O failure folded into
+ * the same empty array published a ledger that read as clean (SPEC-032 R-21): the spend
+ * correlation compared two windows of nothing and found nothing wrong.
+ */
+async function readNdjsonChecked<T>(
+  path: string,
+  parse: (x: unknown) => T,
+): Promise<{ entries: T[]; unavailable: boolean }> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    return [];
+  } catch (err) {
+    return { entries: [], unavailable: (err as NodeJS.ErrnoException).code !== "ENOENT" };
   }
-  return raw
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => parse(JSON.parse(l)));
+  return {
+    entries: raw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => parse(JSON.parse(l))),
+    unavailable: false,
+  };
 }

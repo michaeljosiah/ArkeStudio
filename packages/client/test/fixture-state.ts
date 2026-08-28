@@ -53,6 +53,7 @@ const state: ClientState = {
         actualSource: "provider-reported",
       },
     ],
+    ledgerUnavailable: false,
     providers: [
       {
         id: "fal",

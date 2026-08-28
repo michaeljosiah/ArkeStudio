@@ -49,6 +49,9 @@ export async function buildDiagnosticsBundle(
       manifestVersion: state.app.manifest?.manifestVersion ?? null,
       jobCount: state.app.jobs.length,
       ledgerEntries: state.app.ledger.length,
+      // Beside the count, or a failed read exports as "0 entries" — the ambiguity R-21 exists
+      // to close, reproduced in the one place a support reader has no product to check against.
+      ledgerUnavailable: state.app.ledgerUnavailable,
     },
     findings: findings === null ? null : exportedFindings(findings),
     // Deliberately absent: worlds, world names, sheets, canon, productions, file paths.

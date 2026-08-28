@@ -53,6 +53,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       jobs: [],
       builds: [],
       ledger: [],
+      ledgerUnavailable: false,
       providers: [],
       providerTools: [],
       vendorAuth: vendorAuthUnavailable("not configured"),

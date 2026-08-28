@@ -139,6 +139,7 @@ function generatedSources(random: () => number): DiagnosticsSources {
     models: { disabled: [] },
     spend: null,
     ledger: [],
+    ledgerUnavailable: false,
     drift: [],
     builds: [],
     update: IDLE_UPDATE_STATE,
