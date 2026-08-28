@@ -171,8 +171,9 @@ describe("swapping a staged runtime into place", () => {
   });
 
   it("clears a leftover attic rather than swapping the wrong copy into it", async () => {
-    // A swap killed part-way leaves the attic populated. The next run must not mistake that for
-    // the copy it is displacing, or a two-runs-old ffmpeg becomes the one that gets restored.
+    // A swap killed part-way leaves the attic populated. While there is still a stage to displace
+    // that attic is stale, and must not be mistaken for the copy being displaced — or a
+    // two-runs-old ffmpeg becomes the one that gets restored.
     const { root, fresh, stage, attic } = await scene();
     try {
       await mkdir(attic, { recursive: true });
@@ -182,6 +183,57 @@ describe("swapping a staged runtime into place", () => {
       swapStagedDirectory(fresh, stage, attic);
       assert.equal(await readFile(join(stage, "ffmpeg.exe"), "utf8"), "new");
       assert.equal(existsSync(attic), false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("adopts the attic when a killed run left it holding the only copy", async () => {
+    // The other half of the rule above (Codex round 1). Interrupted between displacing the stage
+    // and landing the new copy, a run leaves the attic as the only working runtime and nothing at
+    // `stage`. Clearing it unconditionally destroyed exactly the copy the attic exists to save.
+    const { root, fresh, stage, attic } = await scene();
+    try {
+      await mkdir(attic, { recursive: true });
+      await writeFile(join(attic, "ffmpeg.exe"), "the only copy left");
+      assert.equal(existsSync(stage), false, "the interrupted run left no stage");
+      swapStagedDirectory(fresh, stage, attic);
+      assert.equal(await readFile(join(stage, "ffmpeg.exe"), "utf8"), "new");
+      assert.equal(existsSync(attic), false, "and the survivor is released once the new copy is in");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("lands the fresh copy beside the attic, never part-written into the live stage", async () => {
+    // The cross-volume path copies rather than renames, and a copy can die half-way. It must not
+    // do that inside `stage`: electron-builder reads that directory, and a partial runtime there
+    // cannot be renamed back over. The landing spot is a sibling of the attic, and nothing of it
+    // survives a completed swap.
+    const { root, fresh, stage, attic } = await scene();
+    const landing = `${attic}.incoming`;
+    try {
+      await mkdir(landing, { recursive: true });
+      await writeFile(join(landing, "ffmpeg.exe"), "wreckage of a copy that died");
+      swapStagedDirectory(fresh, stage, attic);
+      assert.equal(await readFile(join(stage, "ffmpeg.exe"), "utf8"), "new", "the wreckage is not what got staged");
+      assert.equal(existsSync(landing), false, "and the landing spot is left empty");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses before displacing anything when the attic location is unusable", async () => {
+    // Every rename here assumes the attic can be created. If it cannot, the failure has to happen
+    // while the stage is still whole rather than after it has been moved out of the way.
+    const { root, fresh, stage } = await scene();
+    const blocked = join(root, "not-a-directory");
+    try {
+      await writeFile(blocked, "a file where the attic's parent should be");
+      await mkdir(stage, { recursive: true });
+      await writeFile(join(stage, "ffmpeg.exe"), "old but working");
+      assert.throws(() => swapStagedDirectory(fresh, stage, join(blocked, "ffmpeg")));
+      assert.equal(await readFile(join(stage, "ffmpeg.exe"), "utf8"), "old but working");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

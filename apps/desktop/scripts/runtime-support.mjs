@@ -115,35 +115,59 @@ export function assertNoticeMatchesLicence(licenceText, noticeText, label) {
  * The old copy moves aside whole rather than being deleted in front of the new one: a directory
  * rename either happens or does not, where a recursive delete can stop halfway on a locked file
  * and leave a half-emptied stage that electron-builder would package without complaint. `attic`
- * is where it waits, and must sit on the same volume as `stage` for that rename to be the cheap
- * kind.
+ * is where it waits, and must sit on the same volume as `stage` -- every rename below depends on
+ * that, and a `.incoming` sibling of it is where the fresh copy lands on the way in.
  */
 export function swapStagedDirectory(fresh, stage, attic) {
   if (!existsSync(fresh)) throw new Error(`${fresh} was never prepared, so ${stage} was left as it was`);
   mkdirSync(dirname(stage), { recursive: true });
-  rmSync(attic, { recursive: true, force: true });
-  const displaced = existsSync(stage);
-  if (displaced) {
-    mkdirSync(dirname(attic), { recursive: true });
-    renameSync(stage, attic);
-  }
+  mkdirSync(dirname(attic), { recursive: true });
+
+  /*
+   * Get the fresh copy onto the stage's own volume first, while nothing has been displaced yet.
+   *
+   * `--work` may point at another drive, where rename is EXDEV and the fallback is a recursive
+   * copy. That copy used to run straight into `stage`: if it died part-way -- a full disk, a
+   * locked file -- it left a half-written runtime at the path electron-builder reads, and the
+   * displaced copy could not then be renamed back over the remains (Codex round 1). Landing
+   * beside the attic instead keeps a failed copy somewhere nothing reads, and makes the arrival
+   * at `stage` a rename in both cases.
+   */
+  const landing = `${attic}.incoming`;
+  rmSync(landing, { recursive: true, force: true });
   try {
-    moveDirectory(fresh, stage);
+    renameSync(fresh, landing);
+  } catch (error) {
+    if (error.code !== "EXDEV") throw error;
+    cpSync(fresh, landing, { recursive: true });
+    rmSync(fresh, { recursive: true, force: true });
+  }
+
+  /*
+   * An attic is stale only when there is a `stage` to make it stale.
+   *
+   * A run killed between the two renames below leaves the attic holding the only working runtime
+   * and nothing at `stage`. Clearing it unconditionally, as this did, destroyed that survivor and
+   * then reported no displaced copy to restore -- losing a runtime that had in fact been saved
+   * (Codex round 1). With no stage, the attic IS the displaced copy.
+   */
+  let displaced = existsSync(stage);
+  if (displaced) {
+    rmSync(attic, { recursive: true, force: true });
+    renameSync(stage, attic);
+  } else {
+    displaced = existsSync(attic);
+  }
+
+  try {
+    renameSync(landing, stage);
   } catch (error) {
     // The displaced copy is now the only one there is; put it back rather than leave neither.
-    if (displaced) renameSync(attic, stage);
+    if (displaced) {
+      rmSync(stage, { recursive: true, force: true });
+      renameSync(attic, stage);
+    }
     throw error;
   }
   rmSync(attic, { recursive: true, force: true });
-}
-
-function moveDirectory(from, to) {
-  try {
-    renameSync(from, to);
-  } catch (error) {
-    // --work may point at another volume, where rename is EXDEV rather than a metadata update.
-    if (error.code !== "EXDEV") throw error;
-    cpSync(from, to, { recursive: true });
-    rmSync(from, { recursive: true, force: true });
-  }
 }
