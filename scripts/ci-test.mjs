@@ -31,19 +31,22 @@ const SHARDED = "@arke-studio/coordinator";
 /**
  * How long a step may print nothing before it is called hung rather than slow.
  *
- * Measured on CI, 2026-08-28, over all eight shards of one green run: the longest a healthy shard
- * went without printing was **26s** on windows-latest (9s, 23s, 24s, 26s) and 5s on
- * ubuntu-latest. Eight minutes is eighteen times the worst of those.
+ * Measured on CI, 2026-08-28, over sixteen shards of two green runs: the longest a healthy shard
+ * went without printing was **183s**, on windows-latest; every ubuntu shard stayed under 6s.
+ * That 183s is not runner noise — it is one test in apps/desktop building the installer bundle,
+ * which does minutes of work before it can print its first result. A test like that sets the
+ * floor here, and nothing stops another one being written.
  *
- * Generous on purpose. A limit that fires on a slow runner recreates the exact failure this
- * replaces — a red check that means "busy", which teaches everyone to re-run and look away.
- * Being late to a genuine hang costs a few minutes of runner time; being early costs the
- * credibility of every red check on the repo.
+ * Ten minutes is 3.3× that, and generous on purpose. A limit that fires on a slow runner
+ * recreates the exact failure this replaces — a red check that means "busy", which teaches
+ * everyone to re-run and look away. Being late to a genuine hang costs a few minutes of runner
+ * time; being early costs the credibility of every red check on the repo.
  *
- * The summary prints the longest silence each run actually saw, so the next person to wonder
- * whether this number still holds can read it off a log instead of measuring again.
+ * The summary prints the longest silence each run actually saw, which is how this number stays
+ * honest rather than drifting the way the job ceiling did. Worth its own line already: the two
+ * runs it has seen reported 26s and then 183s.
  */
-const SILENCE_LIMIT_MS = 8 * 60_000;
+const SILENCE_LIMIT_MS = 10 * 60_000;
 
 /** The largest gap between two bytes of output across every step this shard ran. */
 let longestSilence = 0;
@@ -104,8 +107,15 @@ const others = all.filter((w) => w.name !== SHARDED);
  */
 function killTree(pid) {
   if (process.platform === "win32") {
-    const done = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-    return done.error ? `taskkill: ${done.error.message}` : null;
+    // taskkill reports failure in its exit code, not by failing to spawn, and 128 covers both
+    // "already gone" and "could not be terminated" — so keep its stderr and pass its own words
+    // along rather than trying to tell those two apart from a number.
+    const done = spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: ["ignore", "ignore", "pipe"],
+      encoding: "utf8",
+    });
+    if (done.error) return `taskkill would not run: ${done.error.message}`;
+    return done.status === 0 ? null : `taskkill said: ${(done.stderr ?? "").trim().split("\n")[0]}`;
   }
   try {
     // A negative pid is the process group, which `detached` below made this child the leader of.
@@ -161,16 +171,18 @@ async function run(label, command, args, cwd) {
     hungStep = label;
     longestSilence = Math.max(longestSilence, silentFor);
     console.log(`\n=== ${label} HUNG: nothing printed for ${Math.round(silentFor / 1000)}s`);
-    // Naming it is the point: on a leak it is the test that leaked. A step that hung before
-    // printing anything at all says so, rather than trailing off after the colon.
+    // A hint, not an identification. Test files run concurrently, so this is the last test that
+    // FINISHED, which by construction is not the one that is stuck — but it narrows the search
+    // to a moment. A step that hung before printing anything at all says so, rather than
+    // trailing off after the colon.
     console.log(`=== last line was: ${lastLine === "" ? "(it never printed anything)" : lastLine.trim()}`);
     console.log(`=== A suite that has stopped printing has stopped working — the usual cause is`);
-    console.log(`=== a file watcher or a database handle left open by the test above.`);
+    console.log(`=== a file watcher or a database handle left open somewhere in this shard.`);
     // Killing it closes the pipes being read here, which ends the wait below and leaves by the
     // ordinary route — so the summary still prints and there is one way out of this script
     // rather than two.
-    const stuck = child.pid === undefined ? "no pid to kill" : killTree(child.pid);
-    if (stuck !== null) console.log(`=== the kill reported: ${stuck}`);
+    const stuck = child.pid === undefined ? "there was no pid to kill" : killTree(child.pid);
+    if (stuck !== null) console.log(`=== ${stuck}`);
     // And a way out even if it did not work. A guard that waits forever for a kill that never
     // landed is one more path to the ceiling, which is the thing being replaced. Ten seconds is
     // long past when a SIGKILL or a taskkill /F has either worked or failed for good.
