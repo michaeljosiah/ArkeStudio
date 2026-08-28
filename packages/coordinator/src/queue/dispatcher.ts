@@ -1092,14 +1092,17 @@ export class JobQueue {
     const terminal: Job = { ...job, status: outcome, error, updatedAt: this.clock() };
     await this.transition(terminal);
     if (this.disposed) return;
-    await this.appendLedgerOnce(terminal, costMicroUsd);
+    // An append that landed this pass is proof enough; asking the file again could only be
+    // wrong. A lock arriving in that window (a scanner opening the file we just wrote) used to
+    // answer "no entry" and fail a finalization whose spend record was durably in place —
+    // settled, so no later start-up replayed it, and the user got a needs-you row for work that
+    // had wholly succeeded. Only when nothing was appended is presence still an open question,
+    // and there `catch → false` is the honest read: unknown means the follow-on waits.
+    const ledgered = await this.appendLedgerOnce(terminal, costMicroUsd);
     if (this.disposed) return;
-    // `catch → false`: an unreadable ledger means the entry did not land this pass either (the
-    // same failing read stopped appendLedgerOnce from appending), and a follow-on never runs
-    // ahead of its spend record — so the honest outcome is the same failed finalization a
-    // failed append gets, retryable once the file is readable again.
     if (
       terminal.finalization?.status === "pending" &&
+      !ledgered &&
       !(await this.opts.ledger.has(terminal.id).catch(() => false))
     ) {
       await this.failFinalization(terminal);
@@ -1286,23 +1289,29 @@ export class JobQueue {
 
     for (const { job, prior } of folded) {
       if (TERMINAL.has(job.status)) {
-        // Both passes here read the snapshot, so both park on an unreadable ledger: billed or
-        // not is unknowable, and neither an append nor a finalization verdict runs on a guess.
+        // Only what the ledger can answer parks. The append and the replay both turn on
+        // "was this billed", so an unreadable snapshot withholds them; the fail verdict below
+        // never asked, and parking it stranded the job as an undeletable, uncancellable
+        // "preparing result" row for the rest of the session (Codex round 1).
         if (ledgerJobIds !== null) {
           // Crash window ⑦: terminal without its ledger entry → append exactly one (R-16).
           if (!ledgerJobIds.has(job.id)) missingLedger.push(job);
-          if (
-            job.status === "succeeded" &&
-            ledgerJobIds.has(job.id) &&
-            this.needsReplayableFinalization(job) &&
-            this.finalizationUnsettled(job)
-          ) {
-            await this.retryFinalization(job.id);
-          } else if (job.status === "succeeded" && job.finalization?.status === "pending") {
-            // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
-            // preparation honestly instead of duplicating takes or mutating domain state.
-            await this.failFinalization(job);
-          }
+        }
+        // A replayable follow-on's verdict turns on the ledger — entry present replays it,
+        // entry absent fails it — so an unreadable snapshot withholds that one. Every other
+        // pending follow-on is failed either way, which is why withholding it bought nothing.
+        const replayable =
+          job.status === "succeeded" && this.needsReplayableFinalization(job) && this.finalizationUnsettled(job);
+        if (replayable && ledgerJobIds?.has(job.id) === true) {
+          await this.retryFinalization(job.id);
+        } else if (
+          job.status === "succeeded" &&
+          job.finalization?.status === "pending" &&
+          !(replayable && ledgerJobIds === null)
+        ) {
+          // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
+          // preparation honestly instead of duplicating takes or mutating domain state.
+          await this.failFinalization(job);
         }
         await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
         continue;
@@ -1591,6 +1600,15 @@ export class JobQueue {
     }
   }
 
+  /**
+   * The world-open sweep (SPEC-014): replay every finalization this world is still owed.
+   *
+   * Ledger-gated like start-up's replay, and for the same reason — this is the one automatic
+   * path that reaches a *pending* row, so without the gate a job whose verdict start-up
+   * deliberately withheld got replayed the moment its world opened, running the follow-on
+   * ahead of a spend record nobody could confirm (Codex round 1). The park has to hold until
+   * a start-up that can read the file, not until the first world open.
+   */
   async retryFinalizationsForWorld(worldId: string): Promise<void> {
     const jobs = [...this.jobs.values()].filter(
       (job) =>
@@ -1599,7 +1617,12 @@ export class JobQueue {
         this.needsReplayableFinalization(job) &&
         this.finalizationUnsettled(job),
     );
-    for (const job of jobs) await this.retryFinalization(job.id);
+    if (jobs.length === 0) return;
+    // One probe for the sweep, not one per job: the answer cannot change mid-pass in a way
+    // that would make a withheld replay safe.
+    const billed = await this.opts.ledger.readJobIds().catch(() => null);
+    if (billed === null) return;
+    for (const job of jobs) if (billed.has(job.id)) await this.retryFinalization(job.id);
   }
 
   /**

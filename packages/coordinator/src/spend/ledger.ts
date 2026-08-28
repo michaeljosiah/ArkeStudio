@@ -16,23 +16,37 @@ export class LedgerFile {
 
   constructor(readonly path: string) {}
 
-  /** Tolerate-and-repair a torn tail once, before the first append or read (§3.2). */
+  /**
+   * Tolerate-and-repair a torn tail once, before the first append or read (§3.2).
+   *
+   * The latch is set only on a settled outcome — the same shape as the bench store's repair.
+   * Latching before the read instead meant one transiently unreadable first touch (an EBUSY
+   * from a virus scanner) permanently marked the file repaired: the next append then wrote
+   * straight after the torn fragment, merging it with a valid entry into one line that parses
+   * as neither, so a billed job vanished from a file that is never rewritten — and its absence
+   * later reads as "never billed". Unrepairable now means the append rejects, which the queue
+   * already treats as the ⑦ crash window and completes idempotently next start-up.
+   */
   private async repairTail(): Promise<void> {
     if (this.repaired) return;
-    this.repaired = true;
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
-    } catch {
-      return; // no file yet
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") this.repaired = true; // no file yet
+      return;
     }
-    if (raw.length === 0 || raw.endsWith("\n")) return;
+    if (raw.length === 0 || raw.endsWith("\n")) {
+      this.repaired = true;
+      return;
+    }
     // A final line without its newline is a torn write: keep every complete line, drop the tail.
     const cut = raw.lastIndexOf("\n");
     const keep = cut === -1 ? "" : raw.slice(0, cut + 1);
     const tmp = join(dirname(this.path), `.tmp-ledger-repair-${process.pid}`);
     await writeFile(tmp, keep, "utf8");
     await rename(tmp, this.path);
+    this.repaired = true;
   }
 
   /** Append one terminal outcome (R-16). Serialised; validated before it can land. */
@@ -47,20 +61,17 @@ export class LedgerFile {
 
   /**
    * Every valid entry; malformed interior lines are skipped, never fatal (tolerant reader).
-   * The whole read is tolerant too — a file that cannot be read answers as empty. Only for
-   * callers whose answer decorates something else (a take's actual cost, a spend chart):
-   * for them a blank figure is honest degradation. Anything that would *append* on the
-   * strength of an absence must use `readAllStrict`.
+   * The whole read is tolerant too — a file that cannot be read, or whose torn tail cannot be
+   * repaired, answers as empty. Only for callers whose answer decorates something else (a
+   * take's actual cost, a spend chart): for them a blank figure is honest degradation.
+   * Anything that would *append* on the strength of an absence must use `readAllStrict`.
    */
   async readAll(): Promise<LedgerEntry[]> {
-    await this.queue.enqueue(() => this.repairTail());
-    let raw: string;
     try {
-      raw = await readFile(this.path, "utf8");
+      return await this.read();
     } catch {
       return [];
     }
-    return this.parseLines(raw);
   }
 
   /**
@@ -73,7 +84,21 @@ export class LedgerFile {
    * exists to prevent. A *missing* entry, by contrast, is the recoverable state: the next
    * start-up that can read the file completes it idempotently.
    */
-  async readAllStrict(): Promise<LedgerEntry[]> {
+  readAllStrict(): Promise<LedgerEntry[]> {
+    return this.read();
+  }
+
+  /** The reconciliation dedupe snapshot — strict, because its only caller appends on absence. */
+  async readJobIds(): Promise<Set<string>> {
+    return new Set((await this.readAllStrict()).map((entry) => entry.jobId));
+  }
+
+  /**
+   * The one read path, strict: ENOENT is an empty ledger, every other failure — the repair
+   * included — reaches the caller. `readAll` is this with the degradation applied on top, so
+   * the two can never drift over what "the file" means; only over what to do when it resists.
+   */
+  private async read(): Promise<LedgerEntry[]> {
     await this.queue.enqueue(() => this.repairTail());
     let raw: string;
     try {
@@ -83,11 +108,6 @@ export class LedgerFile {
       throw err;
     }
     return this.parseLines(raw);
-  }
-
-  /** The reconciliation dedupe snapshot — strict, because its only caller appends on absence. */
-  async readJobIds(): Promise<Set<string>> {
-    return new Set((await this.readAllStrict()).map((entry) => entry.jobId));
   }
 
   private parseLines(raw: string): LedgerEntry[] {

@@ -373,6 +373,89 @@ describe("an unreadable ledger parks reconciliation instead of answering 'never 
     assert.equal(h3.ledger.entries.length, 1);
     h3.queue.dispose();
   });
+
+  it("a world open does not replay what the park withheld — only a readable start-up releases it", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    const terminal = terminalRow("DW1", {
+      target: { kind: "voice-preview", id: "maren-kest/elevenlabs/v2" },
+      landedFiles: [".cache/voice-previews/dw1.mp3"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    // The world open that used to walk straight past the park (Codex round 1).
+    await h2.queue.retryFinalizationsForWorld(INPUT.worldId);
+    assert.equal(finalizations, 0, "the follow-on did not run ahead of a spend record nobody could confirm");
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "pending");
+
+    // Readable again, without a restart: the same world open now releases it.
+    h2.ledger.failReads = null;
+    await h2.queue.retryFinalizationsForWorld(INPUT.worldId);
+    assert.equal(finalizations, 1);
+    assert.equal(foldedJob(h2, terminal.id)?.finalization?.status, "complete");
+    assert.equal(h2.ledger.entries.length, 1);
+    h2.queue.dispose();
+  });
+
+  it("still fails a non-replayable pending follow-on, whose verdict never needed the ledger", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    h.queue.dispose();
+    // A shot: a follow-on target outside the replayable set, so start-up's verdict is "fail"
+    // whether or not the entry landed. Parking it left an undeletable "preparing result" row.
+    const terminal = terminalRow("DN1", {
+      target: { kind: "shot", id: "sh_14" },
+      landedFiles: ["incoming/DN1.mp4"],
+      finalization: { status: "pending", error: null, updatedAt: "2026-08-04T12:01:00.000Z" },
+    });
+    await appendFile(h.journalPath, `${JSON.stringify(terminal)}\n`, "utf8");
+    h.ledger.entries.push(entryFor(terminal));
+
+    const h2 = h.revive();
+    h2.ledger.failReads = new Error("EACCES: permission denied, read");
+    await h2.queue.start();
+    assert.equal(
+      foldedJob(h2, terminal.id)?.finalization?.status,
+      "failed",
+      "the ledger-free verdict still runs, so the row settles instead of stranding",
+    );
+    assert.equal(finalizations, 0, "failing it replays nothing");
+    assert.equal(h2.ledger.entries.length, 1, "and appends nothing on a guess");
+    h2.queue.dispose();
+  });
+
+  it("does not fail a finalization whose entry it just appended, when the next read is locked out", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: pngBytes() }];
+    let finalizations = 0;
+    const h = await makeHarness({ fake }, { onTerminal: () => void (finalizations += 1) });
+    await h.queue.start();
+    // The scanner opens the file in the window between the append landing and the check —
+    // asking again could only be wrong, and its wrong answer used to settle the row as failed.
+    h.ledger.onAppend = () => {
+      h.ledger.failReads = new Error("EBUSY: resource busy or locked");
+    };
+    const job = await h.queue.enqueue({
+      ...INPUT,
+      capability: "image",
+      target: { kind: "character-sheet", id: "maren-kest/window" },
+      landing: { dir: "references/maren-kest/incoming" },
+    });
+    await until(() => foldedJob(h, job.id)?.finalization?.status === "complete");
+    assert.equal(finalizations, 1, "the follow-on ran: its spend record had durably landed");
+    assert.equal(h.ledger.entries.length, 1);
+    h.queue.dispose();
+  });
 });
 
 describe("the happy path writes exactly one ledger entry and lands artifacts atomically", () => {
