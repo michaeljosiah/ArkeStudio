@@ -1775,6 +1775,9 @@ export class Coordinator {
     this.transport.broadcast(parsed);
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
+    // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
+    // as `unavailable` until the next append; retrying on the next event is still event-driven.
+    if (this.diagnosticsLogTail === "unavailable") this.refreshDiagnosticsLogTail();
     this.diagnosticsSnapshot?.schedule();
     try {
       this.opts.observeEvent?.(parsed);

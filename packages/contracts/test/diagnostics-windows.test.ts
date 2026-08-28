@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ModelManifestSchema,
   PROVIDER_FAULT_THRESHOLD,
   SPEND_RISE_FLOOR_MICRO_USD,
   deriveDiagnostics,
@@ -189,15 +190,23 @@ describe("spend above the previous period (R-20.10)", () => {
   });
 
   it("row 14a: an equal share names both models, in manifest order — never an arbitrary winner", () => {
-    const manifest = {
+    // A schema-valid manifest, so the fixture stays honest if the rule ever reads more than ids.
+    const model = (id: string, capability: "image" | "video") => ({
+      id,
+      provider: "fal" as const,
+      capability,
+      displayName: id,
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: {},
+      pricing: { kind: "perImage" as const, microUsdPerImage: 1 },
+    });
+    const manifest = ModelManifestSchema.parse({
       manifestVersion: 1,
-      models: [
-        { id: "flux-pro", provider: "fal" as const, displayName: "Flux Pro", capability: "image" as const, unitCostMicroUsd: 1, unit: "image" },
-        { id: "veo-3", provider: "fal" as const, displayName: "Veo 3", capability: "video" as const, unitCostMicroUsd: 1, unit: "second" },
-      ],
-    };
+      generated: "2026-08-28",
+      models: [model("flux-pro", "image"), model("veo-3", "video")],
+    });
     const snapshot = deriveWithTail([], {
-      manifest: manifest as never,
+      manifest,
       ledger: [
         entry(10, "anchor", 100_000),
         entry(3, "veo-3", 1_000_000),

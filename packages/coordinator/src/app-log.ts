@@ -29,17 +29,20 @@ async function readLastLines(path: string, maxLines: number): Promise<string[]> 
     const size = (await handle.stat()).size;
     if (size === 0 || maxLines <= 0) return [];
     let position = size;
-    let buffer = Buffer.alloc(0);
+    const chunks: Buffer[] = [];
     let newlines = 0;
     while (position > 0 && newlines <= maxLines) {
       const length = Math.min(TAIL_CHUNK_BYTES, position);
       position -= length;
-      const chunk = Buffer.alloc(length);
-      await handle.read(chunk, 0, length, position);
+      const wanted = Buffer.alloc(length);
+      // In-bounds reads of a regular file fill the request; honour bytesRead anyway so a
+      // short read can never decode alloc'd zeroes as content.
+      const { bytesRead } = await handle.read(wanted, 0, length, position);
+      const chunk = bytesRead === length ? wanted : wanted.subarray(0, bytesRead);
       for (const byte of chunk) if (byte === 0x0a) newlines += 1;
-      buffer = Buffer.concat([chunk, buffer]);
+      chunks.unshift(chunk);
     }
-    let text = buffer.toString("utf8");
+    let text = Buffer.concat(chunks).toString("utf8");
     if (position > 0) {
       // Stopped mid-file: everything before the first newline is the tail of a line whose head
       // was never read. It is not a record; drop it.
@@ -97,10 +100,12 @@ export class AppLog {
 
   /**
    * The derivation's tail (SPEC-032 R-18): bounded at the contract's 500 records — the bound is
-   * this method's, never a caller argument — parsed, and scrubbed again on the way out for any
-   * secret registered since the write. A log that does not exist yet is a log with nothing in
-   * it; any other failure is a source the derivation must name unavailable rather than read as
-   * quiet (R-19, R-21).
+   * this method's, never a caller argument — parsed, as written. Records were redacted at
+   * write time; text carried out of them into a finding passes the derivation's redaction
+   * boundary, which is the scrub that can also RECORD that it altered something (R-13) — a
+   * pre-scrub here would make that marker structurally unreachable. A log that does not exist
+   * yet is a log with nothing in it; any other failure is a source the derivation must name
+   * unavailable rather than read as quiet (R-19, R-21).
    */
   async diagnosticsTail(): Promise<ReadonlyArray<Record<string, unknown>> | "unavailable"> {
     let raw: string[];
@@ -112,7 +117,7 @@ export class AppLog {
     const records: Array<Record<string, unknown>> = [];
     for (const line of raw) {
       try {
-        const parsed: unknown = JSON.parse(this.registry.scrub(line));
+        const parsed: unknown = JSON.parse(line);
         if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
           records.push(parsed as Record<string, unknown>);
         }
