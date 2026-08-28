@@ -117,6 +117,22 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // An explicit engine choice still outranks the component's owner.
     const explicit = plain(render("/settings/providers?provider=ollama&component=tts-kokoro-82m"));
     assert.match(explicit, /Gemma 4 · 12B/);
+    // And a provider-owned component resolves to its provider, which is now a row in the same
+    // rail rather than a screen away: Higgsfield's CLI is the credential's, not an engine's.
+    const tool = plain(
+      render(
+        "/settings/providers?component=higgsfield-cli",
+        stateWith({
+          setup: {
+            running: false,
+            diskFreeMb: 0,
+            diskCheckedAt: null,
+            components: [component({ id: "higgsfield-cli", provider: "higgsfield", displayName: "Higgsfield CLI" })],
+          },
+        }),
+      ),
+    );
+    assert.match(tool, /Higgsfield\s+SIGN-IN|Higgsfield[\s\S]{0,200}sign/i);
   });
 
   it("states each engine's components under that engine and nowhere else", () => {

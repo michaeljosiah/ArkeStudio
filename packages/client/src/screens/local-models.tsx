@@ -277,6 +277,7 @@ export function MachineRow() {
           : probes.accelerators.join(" · ");
   return (
     <div className="fy-rt__keyline">
+      <div className="fy-rt__eyebrow">THIS MACHINE</div>
       <div className="fy-set__field">
         <span className="fy-set__state" data-testid="machine-header">
           {accelerator} · {figure(probes?.vramMb)} VRAM · {figure(probes?.memMb)} memory ·{" "}

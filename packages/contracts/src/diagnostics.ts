@@ -20,7 +20,8 @@ import type { ClientState } from "./client-state.js";
 
 /**
  * Five, not four (D5). `unmeasured` exists because hardware detection does not run until someone
- * opens Settings · Local AI — so in most sessions every hardware fact is missing, and reporting
+ * opens an engine pane in Settings · Providers — so in most sessions every hardware fact is
+ * missing, and reporting
  * that as `unknown` would say *we tried and failed* when the truth is *nobody asked*.
  */
 export const FindingSeveritySchema = z.enum([
@@ -138,14 +139,16 @@ export const CONTROL_REGISTRY = {
   /**
    * Runs hardware detection on demand — the control `unmeasured` names (§2.2, SPEC-033 R-58).
    *
-   * The row it names appears in every engine pane, so the route names a concrete one rather than
-   * landing on whichever pane happens to open (SPEC-034 R-13, R-24). ComfyUI, because its models
-   * are the ones whose fit verdicts turn on the heaviest figures.
+   * The row it names appears in every engine pane that asks a fit question, so the route names a
+   * concrete one rather than landing on whichever pane happens to open (SPEC-034 R-13, R-24).
+   * Ollama, not ComfyUI: a ComfyUI resolved to a URL has no fit question and draws no such row,
+   * and `hardware-unmeasured` fires exactly when nothing has probed — so that pairing could send
+   * a reader to the one pane with no Measure button on it.
    */
   "runtime-detect": {
     label: "Measure",
-    place: "Settings · Providers · ComfyUI",
-    route: "/settings/providers?provider=comfyui",
+    place: "Settings · Providers · Ollama",
+    route: "/settings/providers?provider=ollama",
   },
 } as const satisfies Record<
   string,

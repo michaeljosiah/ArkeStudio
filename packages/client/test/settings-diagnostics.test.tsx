@@ -140,8 +140,9 @@ describe("Settings · Diagnostics (R-36, R-37, turn 111)", () => {
     assert.match(text, /Restart/);
     assert.match(text, /Settings · Providers/);
     assert.match(text, /Key/);
-    // The unmeasured finding names the measuring control.
-    assert.match(text, /Settings · Providers · ComfyUI/);
+    // The unmeasured finding names the measuring control — and a different pane, because a
+    // ComfyUI resolved to a URL draws no machine row for Measure to sit in.
+    assert.match(text, /Settings · Providers · Ollama/);
     assert.match(text, /Measure/);
   });
 

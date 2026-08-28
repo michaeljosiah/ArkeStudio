@@ -431,9 +431,15 @@ export function ComfyUiDetail() {
       {recipes.map((recipe) => {
         const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
         const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === recipe.recipeId);
-        // Only where it refuses. `runs well` is the verdict that changes no decision, and a
-        // machine nobody has measured says so once in its own row rather than once per recipe.
         const refused = gated?.fit === "insufficient" || gated?.fit === "unsupported";
+        // Stated where it is not the unremarkable one. `runs well` changes no decision and a
+        // machine nobody has measured says so once in its own row, so neither prints; the other
+        // three do, because each of them changes what a reader would do next.
+        const verdict =
+          gated?.fit !== undefined && gated.fit !== "runs-well" && gated.fit !== "unknown"
+            ? FIT_LABEL[gated.fit]
+            : undefined;
+        const recommended = state?.app.runtime?.recommended[recipe.capability] === recipe.recipeId;
         const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
         // The shared projection, not a second derivation: Downloads owns progress, and a row
         // that computes its own figure is how two surfaces come to disagree about one transfer
@@ -489,14 +495,20 @@ export function ComfyUiDetail() {
               <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
                 Re-verify
               </button>
+              {recommended && <span className="fy-prov__unverified">recommended</span>}
               <RuntimeStatus tone={refused ? "warn" : tone}>
-                {refused
-                  ? FIT_LABEL[gated.fit!]
-                  : speaksForRecipe
-                    ? weights.state === "downloading"
-                      ? `${pct}%`
-                      : weights.state
-                    : recipe.state}
+                {[
+                  verdict,
+                  refused
+                    ? undefined
+                    : speaksForRecipe
+                      ? weights.state === "downloading"
+                        ? `${pct}%`
+                        : weights.state
+                      : recipe.state,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </RuntimeStatus>
             </div>
             {/* The bar only exists while something is actually moving. */}

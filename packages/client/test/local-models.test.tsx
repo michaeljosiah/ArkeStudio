@@ -13,6 +13,7 @@ import {
   type ActivationState,
   type ClientState,
   type EngineId,
+  type RecipeReadiness,
   type FitVerdict,
   type LocalRuntimeStatus,
   type ManifestModel,
@@ -204,6 +205,34 @@ describe("Providers: an engine's pane, and the models it hosts (SPEC-034 R-7, R-
     }
   });
 
+  it("states a model once, never as a component beside itself (SPEC-033 R-6)", () => {
+    // A component that provides a model *is* that model. Listed in the COMPONENTS band as well,
+    // one fetch carried two Downloads on one pane — which is what ComfyUI's pane dropped its own
+    // band to avoid, and what the other two had not caught up with. The engine's own supporting
+    // pieces, which provide no model, keep their band.
+    const declared = stateWith({
+      setup: {
+        running: false,
+        diskFreeMb: 480_000,
+        diskCheckedAt: null,
+        components: [
+          component({ id: "ollama-runtime", engine: "ollama", displayName: "Ollama runtime", state: "ready" }),
+          component({
+            id: "ollama-gemma4-12b",
+            engine: "ollama",
+            displayName: "Gemma 4 12B",
+            state: "available",
+            sizeMb: 7600,
+            provides: [GEMMA.id],
+          }),
+        ],
+      },
+    });
+    const ollama = plain(renderEngine(declared, "ollama"));
+    assert.equal(ollama.match(/Gemma 4 12B/g)?.length, 1, "the model is stated once");
+    assert.match(ollama, /Ollama runtime/, "and the engine's own pieces keep their band");
+  });
+
   it("states the machine in every figure a verdict turns on (R-53, SPEC-034 R-13)", () => {
     assert.match(plain(renderEngine(stateWith(), "ollama")), /cuda · 12 GB VRAM · 32 GB memory · 480 GB free/);
   });
@@ -380,6 +409,113 @@ describe("Voxa states three readable voice lines, once (R-48, rows 18, 19)", () 
     assert.match(plain(renderEngine(ready, "voxa")), /Conversational voice\s+ready/);
   });
 
+});
+
+describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)", () => {
+  /** The engine has answered for Draft video, so the recipe list is where it belongs. */
+  const answered = (over: Partial<RecipeReadiness> = {}): ClientState =>
+    stateWith({
+      comfyui: {
+        engine: {
+          source: "managed",
+          state: "ready",
+          locality: "local",
+          location: "127.0.0.1:8188",
+          version: "0.3.48",
+          detail: null,
+          detected: [],
+          instanceId: "local-1",
+        },
+        recipes: [
+          {
+            recipeId: DRAFT_VIDEO.id,
+            recipeVersion: 1,
+            displayName: DRAFT_VIDEO.displayName,
+            capability: "video",
+            state: "ready",
+            ...over,
+          },
+        ],
+        checkedAt: "2026-08-27T12:00:00.000Z",
+      },
+    });
+
+  it("draws it under RECIPES and not again under MODELS", () => {
+    // The two lists partition rather than overlap. Drawn in both, one fetch would carry two
+    // Downloads on one pane — the duplication `statedElsewhere` existed to hide.
+    const text = plain(renderEngine(answered(), "comfyui"));
+    assert.match(text, /RECIPES/);
+    assert.equal(text.match(/Draft video/g)?.length, 1);
+    assert.doesNotMatch(text.slice(text.indexOf("RECIPES")), /MODELS/);
+  });
+
+  it("draws it under MODELS while the engine has not answered for it", () => {
+    // With no engine resolved the recipe list is empty, and dropping the manifest row with it
+    // would withhold every model this machine could install — the opposite of R-28.
+    const text = plain(renderEngine(stateWith(), "comfyui"));
+    assert.match(text, /MODELS/);
+    assert.match(text, /Draft video/);
+  });
+
+  it("carries the fit verdict the recipe list had no way to state (SPEC-034 R-6)", () => {
+    // Local AI stated this before Providers absorbed it, and a verdict with no home is what R-6
+    // forbids. `insufficient` is the fixture's own verdict for Draft video.
+    const text = plain(renderEngine(answered(), "comfyui"));
+    assert.match(text, /not enough here/);
+    assert.match(text, /Needs 15\.6 GB VRAM · this machine has 12 GB/);
+  });
+
+  it("states runs slowly, and neither runs well nor not measured (SPEC-034 R-20)", () => {
+    const slow = answered();
+    const withFit = {
+      ...slow,
+      app: {
+        ...slow.app,
+        runtime: runtime({
+          models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "runs-slowly" as const } : m)),
+        }),
+      },
+    };
+    const text = plain(renderEngine(withFit, "comfyui"));
+    assert.match(text, /runs slowly/);
+    const well = {
+      ...slow,
+      app: {
+        ...slow.app,
+        runtime: runtime({
+          models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "runs-well" as const } : m)),
+        }),
+      },
+    };
+    assert.doesNotMatch(plain(renderEngine(well, "comfyui")), /runs well|not measured/);
+  });
+
+  it("marks the one recommendation, which for images and video is always a recipe", () => {
+    // `localPreference` names recipes for both, so a recommendation filtered out of the model
+    // group has nowhere else to appear (SPEC-033 §1.7).
+    const state = answered();
+    const recommended = {
+      ...state,
+      app: { ...state.app, runtime: runtime({ recommended: { video: DRAFT_VIDEO.id } }) },
+    };
+    assert.match(plain(renderEngine(recommended, "comfyui")), /recommended/);
+  });
+
+  it("dims a declared refusal and leaves a measured shortfall alone", () => {
+    // SPEC-033 D8: a machine short of VRAM can be given more; one with no supported accelerator
+    // cannot. Only the second recedes.
+    const state = answered();
+    const declared = {
+      ...state,
+      app: {
+        ...state.app,
+        runtime: runtime({
+          models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "unsupported" as const } : m)),
+        }),
+      },
+    };
+    assert.match(renderEngine(declared, "comfyui"), /fy-set__row--off/);
+  });
 });
 
 describe("the row state is a projection, never a new vocabulary (R-26)", () => {

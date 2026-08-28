@@ -2053,6 +2053,15 @@ export function SettingsProvidersScreen() {
   const comfyui = state?.app.comfyui ?? null;
   const voiceRuntime = state?.app.voiceRuntime ?? null;
   const unowned = componentsFor(all, null);
+  /**
+   * An engine's own supporting pieces, which is what its COMPONENTS band is for now that the
+   * models are drawn as models. A component that provides one is that model — listing it twice
+   * put two Downloads for one fetch on one pane, which is the duplication `statedElsewhere` was
+   * invented to hide and SPEC-033 R-6 deletes. ComfyUI's pane already omitted its band for
+   * exactly this reason; the other two had not caught up.
+   */
+  const supporting = (engine: EngineId): SetupComponent[] =>
+    componentsFor(all, engine).filter((c) => (c.provides ?? []).length === 0);
 
   /** How many of a keyed service's models are on, counted the way the pickers decide. */
   const onFor = (id: ProviderId): number => {
@@ -2203,19 +2212,20 @@ export function SettingsProvidersScreen() {
               <OtherComponentsDetail components={unowned} />
             ) : (
               <>
-                {/* The figures every fit verdict turns on, once per pane rather than once per
-                    row — and absent where fit is not a question at all, because a remote engine
-                    has no verdict for them to explain (R-13, R-15). */}
-                {!remote && <MachineRow />}
                 {current === "comfyui" && <ComfyUiDetail />}
-                {current === "ollama" && <OllamaDetail components={componentsFor(all, "ollama")} />}
+                {current === "ollama" && <OllamaDetail components={supporting("ollama")} />}
                 {current === "voxa" && (
                   <VoxaDetail
                     voiceRuntime={voiceRuntime}
                     health={state?.app.health.voice}
-                    components={componentsFor(all, "voxa")}
+                    components={supporting("voxa")}
                   />
                 )}
+                {/* The figures every fit verdict turns on, once per pane rather than once per
+                    row — after the head, because the pane says what it is before it says what
+                    this machine can do under it. Absent where fit is not a question at all: a
+                    remote engine has no verdict for them to explain (R-13, R-15). */}
+                {!remote && <MachineRow />}
                 <EngineModelGroups engine={current as EngineId} />
               </>
             )}

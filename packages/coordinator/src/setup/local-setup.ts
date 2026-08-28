@@ -605,7 +605,7 @@ export class LocalSetupService {
           if (!now) {
             this.set(entry.id, {
               state: "failed",
-              detail: "Ollama's installer did not finish — run it yourself from Settings · Engines",
+              detail: "Ollama's installer did not finish — run it yourself from Settings · Providers",
             });
             this.publish();
             return;
