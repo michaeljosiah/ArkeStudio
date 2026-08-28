@@ -117,6 +117,12 @@ interface StoreState {
   transcripts: Record<string, Array<{ role: "user" | "gate"; text: string; at: string }>>;
   /** Local-runtime setup progress — the whole picture, newest wins. */
   setupStatus: import("@arke-studio/contracts").SetupStatus | null;
+  /**
+   * The derived findings snapshot (SPEC-032 R-33): pushed when it changes, replayed on connect
+   * beside held permissions. Held outside ClientState because it is a projection OF that state,
+   * not a part of it — folding it in would make the read model carry its own derivative.
+   */
+  diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
   /** The review before the press, per conversation (SPEC-031 R-12): the plan, or the refusal. */
   buildPlans: Record<
     string,
@@ -281,6 +287,7 @@ let current: StoreState = {
   buildPlans: {},
   keyArtPlans: {},
   setupStatus: null,
+  diagnostics: null,
   reading: {},
   archiveNote: null,
   permissions: {},
@@ -1107,7 +1114,11 @@ function handleFrame(json: string): void {
     }
     let envCheck = current.envCheck;
     let diagnosticsBundle = current.diagnosticsBundle;
+    let diagnostics = current.diagnostics;
     let providerCallsByJob = current.providerCallsByJob;
+    if (event.type === "diagnostics.snapshot") {
+      diagnostics = event.snapshot;
+    }
     if (event.type === "env.check") {
       envCheck = {
         pathBudgetOk: event.pathBudgetOk,
@@ -1220,6 +1231,7 @@ function handleFrame(json: string): void {
       attached,
       envCheck,
       diagnosticsBundle,
+      diagnostics,
       providerCallsByJob,
     });
   }
@@ -1639,6 +1651,11 @@ export function setupCancel(): void {
 export function useSetup(): import("@arke-studio/contracts").SetupStatus | null {
   const { setupStatus, state } = useStore();
   return setupStatus ?? state?.app.setup ?? null;
+}
+
+/** The findings snapshot, or null before the first replay arrives (SPEC-032 R-33). */
+export function useDiagnostics(): import("@arke-studio/contracts").DiagnosticsSnapshot | null {
+  return useStore().diagnostics;
 }
 
 export function genesisChat(genesisId: string, text: string): void {
@@ -3233,6 +3250,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     buildPlans: {},
     keyArtPlans: {},
     setupStatus: null,
+    diagnostics: null,
     reading: {},
     archiveNote: null,
     permissions: {},

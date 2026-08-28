@@ -1519,6 +1519,7 @@ export function SettingsLayout() {
                     ["notifications", "Notifications"],
                     ["sign-in", "Sign-in"],
                     ["sample-world", "Sample world"],
+                    ["diagnostics", "Diagnostics"],
                     ["about", "About"],
                   ] as const
                 ).map(([slug, label]) => (
@@ -1985,6 +1986,7 @@ function ProviderPane({ id }: { id: ProviderId }) {
 
 export function SettingsProvidersScreen() {
   const { state } = useStore();
+  const [searchParams] = useSearchParams();
   const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
   const disabledModels = new Set(state?.app.models.disabled ?? []);
   const manifestModels = state?.app.manifest?.models ?? [];
@@ -1995,7 +1997,11 @@ export function SettingsProvidersScreen() {
     providerStatus.some((s) => s.id === p.id && s.configured),
   );
   const [selected, setSelected] = useState<ProviderId | null>(null);
-  const current = selected ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
+  // A diagnostics remedy addresses one provider's key row (SPEC-032 R-24): the registry
+  // promises the query opens the right pane, and this is the half that keeps the promise.
+  const asked = searchParams.get("provider");
+  const askedId = KEYED_PROVIDERS.find((p) => p.id === asked)?.id ?? null;
+  const current = selected ?? askedId ?? firstConnected?.id ?? KEYED_PROVIDERS[0]!.id;
   return (
     <div data-screen="settings-providers" className="fy-set fy-set--providers">
       <div className="fy-prov">

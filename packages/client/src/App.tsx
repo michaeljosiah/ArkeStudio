@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { SettingsLocalAiScreen } from "./screens/settings-local-ai.js";
 import { SettingsEnginesScreen } from "./screens/settings-engines.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
+import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -188,6 +189,7 @@ export function App() {
             <Route path="agents" element={<Navigate to="/settings/harness" replace />} />
             <Route path="who-does-what" element={<Navigate to="/settings/cloud-ai" replace />} />
             <Route path="sample-world" element={<SettingsSampleWorldScreen />} />
+            <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
           </Route>
           <Route path="/activity" element={<ActivityScreen />} />
