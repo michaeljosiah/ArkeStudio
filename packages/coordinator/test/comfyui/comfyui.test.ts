@@ -1126,6 +1126,31 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.equal((await readiness(9000)).startsWith("ready|"), true);
   });
 
+  it("a streaming recipe's small free floor still has a sayable busy state", async () => {
+    // H3's shape: a 4 GB free floor sitting under the 4 GB reclaim allowance. Unbounded, the
+    // busy inequality could never hold for any nonnegative reading — a slammed card advertised
+    // ready, and Generate bought the dependency verification walk before dispatch refused. The
+    // allowance caps at half the floor, so under 2 GB free is busy and the verified ~4 GB is not.
+    const streaming = async (freeMb: number): Promise<string> => {
+      const world = fakeWorld();
+      world.urls.set("http://127.0.0.1:8188", {});
+      world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+      world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+      const service = new ComfyUiEngineService({
+        ...engineDeps(world, "C:/app"),
+        recipes: [{ ...FACTS[0]!, minVramMb: 10000, minFreeVramMb: 4000 }],
+        freeVramMb: async () => freeMb,
+      });
+      await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: "C:/models" });
+      const status = await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 });
+      return `${status.recipes[0]!.state}|${status.recipes[0]!.reason ?? ""}`;
+    };
+    const slammed = await streaming(500);
+    assert.equal(slammed.startsWith("disabled|"), true);
+    assert.match(slammed, /Needs 4 GB free/);
+    assert.equal((await streaming(4100)).startsWith("ready|"), true);
+  });
+
   it("a card that cannot be asked how much is free is not refused for it", async () => {
     // D15 again: unknown stays unknown. A build with no way to ask must not disable local work
     // on every machine, so a null free reading falls back to the total the probe did measure.

@@ -188,10 +188,14 @@ export function fitFor(model: ManifestModel, probes: RuntimeProbes): FitResult {
   // 5 · Every floor is met. The binding one — the one closest to its floor — is what decides
   //     between the two passing verdicts, and it is the figure worth stating either way.
   if (floors.length === 0) return { fit: "runs-well" };
-  const binding = floors.reduce((tightest, f) => (f.have! / f.need < tightest.have! / tightest.need ? f : tightest));
   // An authored boundary beats the generic margin: the author measured where comfortable begins,
-  // and 25% over a floor built for offloading is not it.
-  const comfortable = binding.have! >= (binding.well ?? binding.need * (1 + LOCAL_FIT_HEADROOM_RATIO));
+  // and 25% over a floor built for offloading is not it. Comfort is judged per floor and ALL
+  // floors must clear their own boundary — selecting one floor by nearness to its minimum let a
+  // 20 GB card ride memory's comfortable margin straight past the authored 24 GB VRAM boundary.
+  // The stated floor is the least comfortable one, because that is the one deciding the verdict.
+  const wellAt = (f: Floor): number => f.well ?? f.need * (1 + LOCAL_FIT_HEADROOM_RATIO);
+  const binding = floors.reduce((tightest, f) => (f.have! / wellAt(f) < tightest.have! / wellAt(tightest) ? f : tightest));
+  const comfortable = floors.every((f) => f.have! >= wellAt(f));
   const both = figures(binding.need, binding.have!);
   return {
     fit: comfortable ? "runs-well" : "runs-slowly",

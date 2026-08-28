@@ -189,6 +189,10 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(row.requires?.memMb, 30720);
     // The authored runs-well boundary: between the minimum and this, offered but not recommended.
     assert.equal(row.requires?.recommendedVramMb, 24000);
+    // int8_convrot and NVFP4 AWQ are CUDA quantisations, and the node-catalogue probe cannot
+    // see that — the loader classes exist on every backend. Declared, so a big AMD card is
+    // refused before the 42 GB download rather than at model load.
+    assert.deepEqual(row.requires?.accelerator, ["cuda"]);
   });
 
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {

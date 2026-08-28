@@ -1064,7 +1064,16 @@ export class ComfyUiEngineService {
       engine.locality === "remote" || !this.deps.freeVramMb
         ? null
         : await this.deps.freeVramMb().catch(() => null);
-    if (free !== null && free + RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb) {
+    /*
+     * The allowance is capped below the recipe's own free floor: a floor at or under the reclaim
+     * assumption (H3's 4 GB against the 4 GB allowance) would otherwise make this inequality
+     * unsatisfiable for any nonnegative reading — a slammed card advertised ready, and Generate
+     * bought the dependency verification walk before dispatch refused. Half the floor is the
+     * largest assumption that still leaves the busy sentence sayable.
+     */
+    const assumedReclaimMb =
+      RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb ? RECLAIMABLE_VRAM_MB : Math.floor(recipe.minFreeVramMb / 2);
+    if (free !== null && free + assumedReclaimMb < recipe.minFreeVramMb) {
       return disabled(
         "vram-busy",
         `Needs ${gb(recipe.minFreeVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,

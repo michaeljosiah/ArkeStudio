@@ -674,6 +674,19 @@ describe("what this machine can run (SPEC-033 R-14..R-24)", () => {
     assert.equal(verdict({ vramMb: 10000, recommendedVramMb: 24000 }, { vramMb: 8 * 1024 }).fit, "insufficient");
   });
 
+  it("every floor must clear its own comfort boundary — one comfortable floor cannot carry another", () => {
+    // H3's real shape: 20 GB card, 48 GB RAM. Memory sits nearer its minimum than VRAM does, so
+    // a verdict decided by the floor nearest ITS MINIMUM rode memory's comfortable 25% margin
+    // straight past the authored 24 GB VRAM boundary and recommended the 42 GB install anyway.
+    const requires = { vramMb: 10000, recommendedVramMb: 24000, memMb: 30720 };
+    const carried = verdict(requires, { vramMb: 20 * 1024, memMb: 48 * 1024 });
+    assert.equal(carried.fit, "runs-slowly");
+    // The stated figure is the floor that decided — VRAM against its authored boundary.
+    assert.match(carried.reason!, /VRAM/);
+    // Clear both boundaries and the verdict is earned.
+    assert.equal(verdict(requires, { vramMb: 24 * 1024, memMb: 48 * 1024 }).fit, "runs-well");
+  });
+
   it("a measured shortfall is insufficient, never unsupported, and keeps both figures (row 3)", () => {
     const short = verdict({ vramMb: 12 * 1024 }, { vramMb: 8 * 1024 });
     assert.equal(short.fit, "insufficient");

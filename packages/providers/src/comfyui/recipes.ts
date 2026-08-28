@@ -841,6 +841,11 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       // meant to admit exactly the class of machine the measurement was made on.
       memMb: 30720,
       diskMb: 42371,
+      // The chosen files are CUDA quantisations — int8_convrot wants cu130 kernels and the text
+      // encoder is NVFP4 AWQ; the engine's own non-CUDA backends report those capabilities
+      // unavailable. The node-catalogue probe cannot catch this (the loader classes exist
+      // everywhere), so the machine is refused here, before a 42 GB download it cannot run.
+      accelerator: ["cuda"],
     },
   },
 ];
