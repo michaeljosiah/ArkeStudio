@@ -3136,6 +3136,34 @@ export function ActivityScreen() {
   const spend = state
     ? spendSummary(state.app.ledger.filter(inScope), state.app.spend?.settings.periodDays ?? 7, new Date())
     : null;
+  const spendStatus = state?.app.spend ?? null;
+  const spendThreshold = spendStatus?.settings.thresholdMicroUsd ?? 0;
+  // The source-quality slot, and a failed read is the loudest source fact there is: the figure
+  // beside it sums only what survived the read, a lower bound wearing the shape of a total.
+  // Keyed on the published list's own read — latched to the seed — where the alert note below
+  // states the fate of the evaluation's own, fresher read. The two can honestly differ.
+  const sourceNote = state?.app.ledgerUnavailable
+    ? "ledger could not be read"
+    : spend?.mixed
+      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
+      : (spend?.derivedEntries ?? 0) > 0
+        ? "derived from the manifest"
+        : "provider-reported";
+  /*
+   * The threshold row. A fired alert outranks everything: `alerted` is only ever computed from
+   * entries that were read, so the crossing is real even when a later read failed, and hiding
+   * it would be the reverse of this screen's fault. Then the un-evaluated case — a status whose
+   * read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19). A zero
+   * threshold stays `off` throughout: an alert that is off asks nothing of the ledger.
+   */
+  const alertWindow = `Alert at ${formatMicroUsd(spendThreshold)} / ${spend?.periodDays ?? 7}d`;
+  const alertNote = spendStatus?.alerted
+    ? `Over the threshold: ${formatMicroUsd(spendStatus.rollingMicroUsd)} against ${formatMicroUsd(spendThreshold)}. Nothing is blocked.`
+    : spendThreshold === 0
+      ? `${alertWindow} · off`
+      : spendStatus?.ledgerUnavailable
+        ? `${alertWindow} · not evaluated`
+        : alertWindow;
   const drift = state?.app.drift ?? [];
   const today = new Date().toISOString().slice(0, 10);
   const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));
@@ -3380,22 +3408,7 @@ export function ActivityScreen() {
           {spend && (
             <>
               <div className="fy-spendtotal">
-                {formatMicroUsd(spend.totalMicroUsd)}{" "}
-                <span className="fy-mono">
-                  {/* The source-quality slot, and a failed read is the loudest source fact
-                      there is: this figure sums only what survived it, a lower bound wearing
-                      the shape of a total. The same fact Settings · Diagnostics states, in the
-                      same words, so the two surfaces cannot disagree (SPEC-032 R-13). Keyed on
-                      the published list's own read — latched to the seed — where the alert row
-                      below states the fate of the evaluation's fresh read. */}
-                  {state?.app.ledgerUnavailable
-                    ? "ledger could not be read"
-                    : spend.mixed
-                      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
-                      : spend.derivedEntries > 0
-                        ? "derived from the manifest"
-                        : "provider-reported"}
-                </span>
+                {formatMicroUsd(spend.totalMicroUsd)} <span className="fy-mono">{sourceNote}</span>
               </div>
               {spend.byProvider
                 .filter((p) => !p.unmetered)
@@ -3419,16 +3432,8 @@ export function ActivityScreen() {
                 </div>
               )}
               <div className="fy-notecard" style={{ background: "var(--background)" }}>
-                <span className={`fy-dot fy-dot--${state?.app.spend?.alerted ? "warn" : "sketch"}`} />
-                {/* `not evaluated` outranks the quiet branch: the status was computed over a
-                    read that failed, so its un-fired alert is not an all-clear (SPEC-008
-                    R-19). A zero threshold stays `off` — an alert that is off asks nothing of
-                    the ledger. The sketch dot already is the unknown band's neutral (111a). */}
-                {state?.app.spend?.ledgerUnavailable && state.app.spend.settings.thresholdMicroUsd > 0
-                  ? `Alert at ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)} / ${spend.periodDays}d · not evaluated`
-                  : state?.app.spend?.alerted && state.app.spend
-                    ? `Over the threshold: ${formatMicroUsd(state.app.spend.rollingMicroUsd)} against ${formatMicroUsd(state.app.spend.settings.thresholdMicroUsd)}. Nothing is blocked.`
-                    : `Alert at ${formatMicroUsd(state?.app.spend?.settings.thresholdMicroUsd ?? 0)} / ${spend.periodDays}d${(state?.app.spend?.settings.thresholdMicroUsd ?? 0) === 0 ? " · off" : ""}`}
+                <span className={`fy-dot fy-dot--${spendStatus?.alerted ? "warn" : "sketch"}`} />
+                {alertNote}
                 {/* Opens the control in place. It used to send you to Settings, which is where the
                     threshold lived; 26a puts the threshold on this screen, so it is here now. */}
                 <button

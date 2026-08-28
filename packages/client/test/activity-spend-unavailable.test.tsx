@@ -84,4 +84,20 @@ describe("Activity spend states a failed ledger read (SPEC-032 R-13)", () => {
     assert.ok(html.includes("· off"), "off outranks not-evaluated");
     assert.equal(html.includes("not evaluated"), false);
   });
+
+  /*
+   * A fired alert outranks the caveat. `alerted` is only ever computed from entries that were
+   * read, so the crossing is real even if a later read failed — hiding it behind "not
+   * evaluated" would be this screen's own fault in reverse: a true figure suppressed rather
+   * than a false one shown.
+   */
+  it("states a fired alert even when a later read failed", () => {
+    const html = render({
+      ledger: [],
+      ledgerUnavailable: true,
+      spend: { ...unavailableSpend(true), rollingMicroUsd: 60_000_000, alerted: true },
+    });
+    assert.ok(html.includes("Over the threshold"), "the crossing was measured and is stated");
+    assert.equal(html.includes("not evaluated"), false);
+  });
 });

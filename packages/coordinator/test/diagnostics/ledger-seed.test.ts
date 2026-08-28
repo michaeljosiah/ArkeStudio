@@ -3,40 +3,17 @@ import { describe, it } from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
-import { Coordinator } from "../../src/coordinator.js";
-import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
+import { startLedgerCoordinator as startedAt } from "../spend/seeded-ledger.js";
 
 /**
  * The ledger seed publishes its own failure (SPEC-032 R-21, matrix row 15a).
  *
  * The seed read used to fold every failure into an empty array, so a ledger.jsonl that existed
  * and could not be read published as a clean, empty ledger — and the spend correlation reported
- * nothing wrong off a lie. EACCES has no portable fixture, so the unreadable file here is a
- * directory named ledger.jsonl: readFile fails EISDIR on every platform, which is exactly a
- * path that exists and cannot be read as a file.
+ * nothing wrong off a lie. The boot wiring and its unreadable-file fixture are shared with the
+ * spend suite (../spend/seeded-ledger.ts), which describes both.
  */
-
-async function startedAt(root: string) {
-  const provider = new FsWorldProvider(root, { clock: () => "2026-08-28T12:00:00.000Z" });
-  const coordinator = new Coordinator({
-    provider,
-    adapter: null,
-    changeLogPath: join(root, "logs", "changes.jsonl"),
-    appVersion: "test",
-    appRoot: root,
-    // The desktop shell's own wiring: the seed path is the ledger file (apps/desktop/main.ts).
-    ledgerSeedPath: join(root, "ledger.jsonl"),
-  });
-  await coordinator.start(0);
-  return {
-    coordinator,
-    close: async () => {
-      await coordinator.stop();
-      await provider.close();
-    },
-  };
-}
 
 describe("the ledger seed carries availability (SPEC-032 R-21, row 15a)", () => {
   it("a ledger that exists and cannot be read publishes unavailable, and the snapshot says unknown", async () => {
