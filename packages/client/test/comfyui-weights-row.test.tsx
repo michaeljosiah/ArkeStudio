@@ -101,9 +101,10 @@ describe("a recipe's weights hang off the recipe", () => {
     );
     assert.match(html, /42%/);
     assert.match(html, /fy-set__barfill/);
-    // The dot has to agree with the word beside it: a download in progress is not a fault,
-    // even though the recipe it belongs to is still disabled underneath.
-    assert.match(html, /<span class="fy-set__dot"><\/span><span class="fy-set__state">42%/);
+    // The dot used to have to agree with the word beside it — a download in progress is not a
+    // fault, even though the recipe it belongs to is still disabled underneath. Under SPEC-034
+    // R-22 there is no dot to disagree: one is drawn only where something warns.
+    assert.match(html, /<span class="fy-set__status"><span class="fy-set__state">42%/);
     // Nothing to press while it is already moving.
     assert.doesNotMatch(html, DOWNLOAD_AT_SIZE);
   });

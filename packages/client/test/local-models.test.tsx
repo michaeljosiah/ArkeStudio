@@ -176,6 +176,20 @@ const renderEngine = (state: ClientState, engine: EngineId): string =>
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+/**
+ * One model's row, from the `fy-set__row` that opens it to the one that opens the next.
+ *
+ * Assertions about a row have to be scoped to it: the row's own class sits before its name, the
+ * reason line beneath carries a dot of its own, and the pane's footer carries a Downloads link —
+ * so a document-wide match is satisfied by three things that are not the row.
+ */
+function rowFor(html: string, name: string): string {
+  const at = html.indexOf(`>${name}<`);
+  const start = html.lastIndexOf('<div class="fy-set__row', at);
+  const next = html.indexOf('<div class="fy-set__row', at);
+  return html.slice(start, next === -1 ? undefined : next);
+}
+
 describe("Providers: an engine's pane, and the models it hosts (SPEC-034 R-7, R-13)", () => {
   it("mounts on Providers and groups an engine's models under it", () => {
     const text = plain(renderEngine(stateWith(), "ollama"));
@@ -274,21 +288,65 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
     const ollama = renderEngine(stateWith(), "ollama");
     const rows = ollama.slice(ollama.indexOf("MODELS"));
     assert.doesNotMatch(rows, /fy-set__dot/);
+    // Asserted on the status span, not on the row: the reason line beneath carries a warn dot
+    // of its own, so a document-wide match is satisfied whether or not the status has one.
     const refusing = renderEngine(stateWith(), "comfyui");
-    assert.match(refusing.slice(refusing.indexOf("MODELS")), /fy-set__dot--warn/);
+    const status = rowFor(refusing, "Draft video");
+    assert.match(status.slice(0, status.indexOf("fy-set__why")), /fy-set__dot--warn/);
+    // And an installed row has none — the case the rule is named for, where green said what the
+    // word beside it had already said.
+    const voxa = renderEngine(stateWith(), "voxa");
+    assert.doesNotMatch(rowFor(voxa, "Kokoro 82M"), /fy-set__dot/);
+    // And no reason line either: a passing verdict's reason is the floor it cleared, which is
+    // the good news stated as a requirement (R-21).
+    assert.doesNotMatch(plain(rowFor(voxa, "Kokoro 82M")), /Needs 3\.9 GB memory/);
+  });
+
+  it("never prints not measured on a row, only in the machine's own (SPEC-034 R-20)", () => {
+    // Reachable with a runtime present: the gate answers `unknown` whenever a declared floor's
+    // probe came back null, and printing it per model restores the repetition R-13's row removed.
+    const unknown = stateWith({
+      runtime: runtime({
+        models: runtime().models.map((m) => (m.provider === "kokoro" ? { ...m, fit: "unknown" as const } : m)),
+      }),
+    });
+    const text = plain(renderEngine(unknown, "voxa"));
+    assert.match(text, /Kokoro 82M\s+installed · 400 MB/);
+    assert.doesNotMatch(text, /not measured/);
+  });
+
+  it("states a transfer's progress beside its size, never instead of it (SPEC-034 R-19)", () => {
+    // 62 percent of what. The bar beneath is a shape; the figure belongs on the line.
+    const moving = stateWith({
+      setup: {
+        running: true,
+        diskFreeMb: 480_000,
+        diskCheckedAt: null,
+        components: [
+          component({
+            id: "ollama-gemma4-12b",
+            state: "downloading",
+            sizeMb: 7600,
+            bytesDone: 4_712_000_000,
+            bytesTotal: 7_600_000_000,
+            provides: [GEMMA.id],
+          }),
+        ],
+      },
+    });
+    assert.match(plain(renderEngine(moving, "ollama")), /Gemma 4 12B[\s\S]{0,40}downloading · 62% · 7\.4 GB/);
   });
 
   it("dims a declared refusal and leaves a measured shortfall alone (SPEC-034 R-23)", () => {
     // SPEC-033 D8: a machine short of VRAM can be given more; one with no supported accelerator
     // cannot. The row state folds the two, so the dimming reads the verdict instead.
-    const measured = renderEngine(stateWith(), "comfyui");
-    assert.doesNotMatch(measured.slice(measured.indexOf("MODELS")), /fy-set__row--off/);
+    assert.doesNotMatch(rowFor(renderEngine(stateWith(), "comfyui"), "Draft video"), /fy-set__row--off/);
     const declared = stateWith({
       runtime: runtime({
         models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "unsupported" as const } : m)),
       }),
     });
-    assert.match(renderEngine(declared, "comfyui").slice(0), /fy-set__row--off/);
+    assert.match(rowFor(renderEngine(declared, "comfyui"), "Draft video"), /fy-set__row--off/);
   });
 
   it("keeps a refusal to one clause, carrying its figures and nothing else (R-88)", () => {
@@ -499,7 +557,10 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
     // Local AI stated this before Providers absorbed it, and a verdict with no home is what R-6
     // forbids. `insufficient` is the fixture's own verdict for Draft video.
     const text = plain(renderEngine(answered(), "comfyui"));
-    assert.match(text, /not enough here/);
+    // The same words a model row uses, because a recipe is a ComfyUI model: the headline says it
+    // refuses and the line beneath says by how much (SPEC-034 R-20, R-21).
+    assert.match(text, /unsupported/);
+    assert.doesNotMatch(text, /not enough here/);
     assert.match(text, /Needs 15\.6 GB VRAM · this machine has 12 GB/);
   });
 

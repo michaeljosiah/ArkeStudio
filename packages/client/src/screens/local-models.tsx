@@ -12,7 +12,6 @@ import {
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
   type EngineId,
-  type FitVerdict,
   type Locality,
   type LocalModelRowState,
   type ManifestModel,
@@ -33,14 +32,6 @@ import {
 } from "./settings-parts.js";
 
 /**
- * A refusing verdict, which the row states as its headline and the reason line states with the
- * figures behind it (SPEC-033 R-19, R-27). Between the two, the label itself says the same thing
- * a third time and vaguer — `unsupported · not enough here · 18 GB` before the line that says
- * how much (SPEC-034 R-21).
- */
-const refuses = (fit: FitVerdict): boolean => fit === "insufficient" || fit === "unsupported";
-
-/**
  * The local half of Settings · Providers (SPEC-034 R-7). One engine's models, and the machine
  * they run on.
  *
@@ -55,12 +46,17 @@ const refuses = (fit: FitVerdict): boolean => fit === "insufficient" || fit === 
  */
 
 /**
- * Which headline states draw a dot at all (SPEC-034 R-22) — and it is only the refusal.
+ * Which headline states draw a dot at all (SPEC-034 R-22) — the two that warn, and nothing else.
  *
  * The table used to be total over the states, with `ok` for installed and `idle` for the other
  * six. Green said what the word beside it had already said, and grey stood for five states while
  * separating none of them; drawn on every row, the one that meant something was competing with
  * seven that did not.
+ *
+ * `needs-attention` keeps its dot beside `unsupported` although it is not a refusal: it is a
+ * transfer somebody can retry and never does, which is the one thing on this list worth finding
+ * by scanning for colour. R-23 separates the two for dimming and this joins them for the dot,
+ * deliberately — what warns and what recedes are different questions.
  */
 const STATE_TONE: Partial<Record<LocalModelRowState, RuntimeTone>> = {
   unsupported: "warn",
@@ -171,14 +167,11 @@ export function EngineModelGroups({ engine }: { engine: EngineId }) {
         locality,
         declined,
         reason: gated?.reason,
-        // Only where it is not the unremarkable one (SPEC-034 R-20). `runs well` changes no
-        // decision; `not measured` is the machine row said once per model instead of once; and
-        // a refusal's figures are on the reason line beneath, which says the same thing with
-        // numbers in it — three words between the state and the size, all of them noise.
-        fitLabel:
-          gated?.fit !== undefined && gated.fit !== "runs-well" && gated.fit !== "unknown" && !refuses(gated.fit)
-            ? FIT_LABEL[gated.fit]
-            : undefined,
+        // One of the five outcomes prints (SPEC-034 R-20, R-21). `runs well` changes no
+        // decision; `unknown` is the machine row said once per model instead of once; and a
+        // refusal is already the row's headline, with its figures on the line beneath — the
+        // label between them says the same thing a third time and vaguer.
+        fitLabel: gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined,
         sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
         component,
         closure: component === undefined ? undefined : setupClosure(components, component.id),
@@ -386,7 +379,15 @@ function ModelRow({
   // `unsupported` is both a headline state and a fit verdict, so a declared refusal would print
   // the word twice and say nothing the second time. What distinguishes the two verdicts under
   // that one label is the reason beneath, which R-27 puts there.
-  const parts = [ROW_STATE_LABEL[state], entry.fitLabel, entry.sizeMbytes && sizeMb(entry.sizeMbytes)];
+  // A transfer's progress rides between the state and the size (R-19): the percentage alone
+  // does not say 62 percent of what, and the bar below is a shape rather than a figure.
+  const moving = entry.component !== undefined ? transferProgress(entry.component) : null;
+  const parts = [
+    ROW_STATE_LABEL[state],
+    moving?.active === true ? `${moving.percent}%` : undefined,
+    entry.fitLabel,
+    entry.sizeMbytes && sizeMb(entry.sizeMbytes),
+  ];
   const line = parts.filter((part, at) => Boolean(part) && parts.indexOf(part) === at).join(" · ");
   return (
     <div className={cx("fy-set__row", "fy-set__row--stack", !elsewhere && entry.declined && "fy-set__row--off")}>
@@ -474,7 +475,10 @@ function ModelRow({
           The gate's cloud alternative is deliberately not printed. R-2 keeps every cloud provider
           off this screen in any state, and R-24's remedy for `insufficient` is the smaller models
           for that capability — which are already the other entries in this very row. */}
-      {entry.reason && (
+      {/* Only a refusal owes one (R-27, R-21). A passing verdict's reason is the floor it
+          cleared — `Needs 3.9 GB memory · this machine has 32 GB` under a row that says
+          `installed` — which is the good news stated as a requirement, and changes nothing. */}
+      {entry.reason && (entry.state === "unsupported" || entry.state === "needs-attention") && (
         <div className="fy-set__why">
           <span className={cx("fy-set__dot", !elsewhere && state === "unsupported" && "fy-set__dot--warn")} />
           <span>{entry.reason}</span>

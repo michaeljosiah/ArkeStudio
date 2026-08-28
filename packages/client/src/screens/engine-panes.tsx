@@ -432,13 +432,10 @@ export function ComfyUiDetail() {
         const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
         const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === recipe.recipeId);
         const refused = gated?.fit === "insufficient" || gated?.fit === "unsupported";
-        // Stated where it is not the unremarkable one. `runs well` changes no decision and a
-        // machine nobody has measured says so once in its own row, so neither prints; the other
-        // three do, because each of them changes what a reader would do next.
-        const verdict =
-          gated?.fit !== undefined && gated.fit !== "runs-well" && gated.fit !== "unknown"
-            ? FIT_LABEL[gated.fit]
-            : undefined;
+        // One of the five outcomes prints, and it is the same one a model row prints (R-20,
+        // R-21). A refusal is the headline with its figures on the line beneath; `runs well` and
+        // `unknown` change no decision.
+        const verdict = gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined;
         const recommended = state?.app.runtime?.recommended[recipe.capability] === recipe.recipeId;
         const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
         // The shared projection, not a second derivation: Downloads owns progress, and a row
@@ -498,8 +495,11 @@ export function ComfyUiDetail() {
                 Re-verify
               </button>
               {recommended && <span className="fy-prov__unverified">recommended</span>}
-              <RuntimeStatus tone={refused ? "warn" : tone}>
+              {/* A dot only where it warns (R-22): a refusal, or a transfer that failed. `ready`
+                  says what a green dot would have said, and grey stood for the rest. */}
+              <RuntimeStatus tone={refused ? "warn" : tone === "warn" ? "warn" : undefined}>
                 {[
+                  refused ? "unsupported" : undefined,
                   verdict,
                   refused
                     ? undefined
