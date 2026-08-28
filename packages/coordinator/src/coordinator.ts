@@ -740,6 +740,28 @@ export class Coordinator {
    * emit during construction; every hook guards, and it exists before the constructor returns.
    */
   private diagnosticsSnapshot: DiagnosticsSnapshotHolder | null = null;
+  /**
+   * The bounded operational-log tail the derivation reads (SPEC-032 R-18), cached so a
+   * derivation per event tick does not become a file read per event tick. Refreshed only when
+   * the log actually gains a record, serialised so re-reads never interleave, and collapsed so
+   * a burst of appends costs one read, not one each.
+   */
+  private diagnosticsLogTail: ReadonlyArray<Record<string, unknown>> | "unavailable" = [];
+  private diagnosticsLogTailWork = Promise.resolve();
+  private diagnosticsLogTailQueued = false;
+
+  private refreshDiagnosticsLogTail(): void {
+    if (this.diagnosticsLogTailQueued) return;
+    this.diagnosticsLogTailQueued = true;
+    const run = async (): Promise<void> => {
+      // Reset before the read: an append landing while we read queues exactly one more pass.
+      this.diagnosticsLogTailQueued = false;
+      if (!this.appLog) return;
+      this.diagnosticsLogTail = await this.appLog.diagnosticsTail();
+      this.diagnosticsSnapshot?.schedule();
+    };
+    this.diagnosticsLogTailWork = this.diagnosticsLogTailWork.then(run, run);
+  }
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
@@ -1170,7 +1192,14 @@ export class Coordinator {
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
-    this.appLog = opts.appRoot ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets) : null;
+    this.appLog = opts.appRoot
+      ? new AppLog(join(opts.appRoot, "logs", "app.jsonl"), this.secrets, () =>
+          // A landed record can change the fault correlation without any state event carrying
+          // it there (the append is async behind the write queue, so it can land after the
+          // event's own derivation already read the file). Re-read, then re-derive.
+          this.refreshDiagnosticsLogTail(),
+        )
+      : null;
     this.credentials =
       opts.appRoot && opts.cipher
         ? new CredentialStore(
@@ -1469,9 +1498,7 @@ export class Coordinator {
     this.worldQuery = new WorldQueryServer(() => this.opts.provider.openStore?.() ?? null);
     this.diagnosticsSnapshot = new DiagnosticsSnapshotHolder({
       sources: () => diagnosticsSources(this.getState().app),
-      // #555 supplies the bounded operational-log read; until then the tail is empty and no
-      // rule consumes it.
-      tails: () => ({ appLog: [] }),
+      tails: () => ({ appLog: this.diagnosticsLogTail }),
       // Subsystem reasons are built from subprocess output and Error.message, which routinely
       // embed secrets a provider echoed back — the same boundary the logs pass (SPEC-032 D7).
       boundary: { scrub: (text) => this.secrets.scrub(text) },
@@ -1500,8 +1527,10 @@ export class Coordinator {
     });
     this.lifecycleDisposers.add(() => this.diagnosticsSnapshot?.dispose());
     // The first derivation, so request paths read an existing snapshot rather than computing
-    // one inside a frame handler (R-34).
+    // one inside a frame handler (R-34) — and the first tail read, so the fault correlation
+    // sees a log that predates this session.
     this.diagnosticsSnapshot.schedule();
+    this.refreshDiagnosticsLogTail();
     // Every session config goes through here, so a per-agent override reaches genesis,
     // authoring, extraction and ask alike — or none of them. Read at build time rather than
     // captured, so changing a model in Settings applies to the next session, not the next run.

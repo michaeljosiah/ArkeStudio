@@ -852,6 +852,184 @@ const hardwareFacts: Rule = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// The windowed correlations (R-20.9, R-20.10) — the two joins over the log and the ledger
+// ---------------------------------------------------------------------------
+
+/** R-18: the derivation's log tail bound — a property of the derivation, never a caller argument. */
+export const DIAGNOSTICS_LOG_TAIL_RECORDS = 500;
+
+/** R-20.9, D13: three or more faults for one provider inside fifteen minutes. */
+export const PROVIDER_FAULT_THRESHOLD = 3;
+export const PROVIDER_FAULT_WINDOW_MS = 15 * 60 * 1000;
+
+/** R-20.10, D13: seven trailing days against the seven before, fifty per cent and a floor. */
+export const SPEND_PERIOD_DAYS = 7;
+export const SPEND_RISE_FRACTION = 0.5;
+export const SPEND_RISE_FLOOR_MICRO_USD = 1_000_000;
+
+/**
+ * R-20.9 — repeated provider faults, counted from the operational log tail. One finding per
+ * provider carrying the count and the window, never one per fault. The provider-call record is
+ * deliberately not a source (R-17): the fault count comes from the log alone.
+ */
+const providerRepeatedFaults: Rule = {
+  kind: "provider-repeated-faults",
+  run(ctx) {
+    // R-21: an unreadable input makes the correlation `unknown`, naming what is missing —
+    // never a silent skip, which would read as a clean bill.
+    if (ctx.tails.appLog === "unavailable") {
+      return [
+        {
+          kind: "correlation-unavailable",
+          occurrence: "provider-repeated-faults",
+          severity: "unknown",
+          title: "Provider faults · not countable",
+          facts: [{ name: "missing-input", value: "log.app", source: "derivation", measuredAt: ctx.now }],
+          cause: { statement: "the operational log could not be read" },
+          remedy: null,
+          consequences: [],
+        },
+      ];
+    }
+    const cutoff = Date.parse(ctx.now) - PROVIDER_FAULT_WINDOW_MS;
+    const byProvider = new Map<string, { count: number; last?: string }>();
+    for (const record of ctx.tails.appLog) {
+      if (record["kind"] !== "provider.fault") continue;
+      const provider = record["provider"];
+      const at = record["at"];
+      if (typeof provider !== "string" || provider.length === 0 || typeof at !== "string") continue;
+      const instant = Date.parse(at);
+      // The window is measured backwards from the derivation instant (matrix row 11): a fault
+      // sixteen minutes old does not count however many neighbours it has.
+      if (!Number.isFinite(instant) || instant < cutoff) continue;
+      const entry = byProvider.get(provider) ?? { count: 0 };
+      entry.count += 1;
+      const message = record["message"];
+      if (typeof message === "string" && message.length > 0) entry.last = message;
+      byProvider.set(provider, entry);
+    }
+    const findings: DraftFinding[] = [];
+    for (const [provider, { count, last }] of byProvider) {
+      if (count < PROVIDER_FAULT_THRESHOLD) continue;
+      findings.push({
+        kind: "provider-repeated-faults",
+        occurrence: provider,
+        severity: "degraded",
+        title: `${provider} · ${count} faults · 15 min`,
+        facts: [
+          { name: "provider", value: provider, source: "log.app", measuredAt: ctx.now },
+          { name: "fault-count", value: count, source: "log.app", measuredAt: ctx.now },
+          { name: "window-minutes", value: PROVIDER_FAULT_WINDOW_MS / 60_000, source: "derivation", measuredAt: ctx.now },
+        ],
+        // The most recent fault's own words, already redacted at the log boundary and scrubbed
+        // again here — the specific thing observed, not a summary of it (R-6).
+        cause:
+          last !== undefined
+            ? carriedCause(ctx.boundary, last)
+            : { statement: `${count} provider faults inside the window` },
+        remedy: { control: "provider-key", target: provider },
+        consequences: [],
+      });
+    }
+    return findings;
+  },
+};
+
+/**
+ * The ledger as the spend correlation may see it (R-30): when, what model, what it cost.
+ * Ledger entries carry a world and production identifier, and this projection is where they
+ * are dropped — a spend finding is about money and models, never about what was being made.
+ * The accounting mirrors `rollingSpend` (SPEC-008 R-19): actual where recorded, estimate
+ * otherwise, so this figure and the Spend screen's can never rest on different arithmetic.
+ */
+export function spendProjection(
+  ledger: DiagnosticsSources["ledger"],
+): Array<{ ts: number; model: string; microUsd: number }> {
+  return ledger.map((entry) => ({
+    ts: Date.parse(entry.ts),
+    model: entry.model,
+    microUsd: entry.actualMicroUsd ?? entry.estimatedMicroUsd,
+  }));
+}
+
+/**
+ * R-20.10 — the trailing seven days against the seven before. Advisory when the later period
+ * exceeds the earlier by both fifty per cent and the floor — the floor being what stops a
+ * rounding difference on a quiet fortnight reading as a trend.
+ */
+const spendAbovePrevious: Rule = {
+  kind: "spend-above-previous",
+  run(ctx) {
+    const entries = spendProjection(ctx.sources.ledger);
+    const now = Date.parse(ctx.now);
+    const period = SPEND_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+    const laterStart = now - period;
+    const earlierStart = now - 2 * period;
+    // R-21's absent-versus-unreadable distinction: an install too young to have a previous
+    // period produces no finding and no `unknown` either (matrix row 15). The evidence of a
+    // previous period is any entry older than the trailing window.
+    if (!entries.some((entry) => Number.isFinite(entry.ts) && entry.ts < laterStart)) return [];
+    let later = 0;
+    let earlier = 0;
+    const laterByModel = new Map<string, number>();
+    const earlierByModel = new Map<string, number>();
+    for (const entry of entries) {
+      if (!Number.isFinite(entry.ts)) continue;
+      if (entry.ts >= laterStart) {
+        later += entry.microUsd;
+        laterByModel.set(entry.model, (laterByModel.get(entry.model) ?? 0) + entry.microUsd);
+      } else if (entry.ts >= earlierStart) {
+        earlier += entry.microUsd;
+        earlierByModel.set(entry.model, (earlierByModel.get(entry.model) ?? 0) + entry.microUsd);
+      }
+    }
+    const rise = later - earlier;
+    if (rise < SPEND_RISE_FLOOR_MICRO_USD || rise < earlier * SPEND_RISE_FRACTION) return [];
+    // The model accounting for the largest share of the difference; a tie names them all, in
+    // manifest order, because a coin toss would make two conforming builds disagree (D13).
+    const models = new Set([...laterByModel.keys(), ...earlierByModel.keys()]);
+    let largest = -Infinity;
+    let winners: string[] = [];
+    for (const model of models) {
+      const delta = (laterByModel.get(model) ?? 0) - (earlierByModel.get(model) ?? 0);
+      if (delta > largest) {
+        largest = delta;
+        winners = [model];
+      } else if (delta === largest) {
+        winners.push(model);
+      }
+    }
+    const manifestIndex = new Map(
+      (ctx.sources.manifest?.models ?? []).map((model, index) => [model.id, index]),
+    );
+    winners.sort((a, b) => {
+      const ai = manifestIndex.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const bi = manifestIndex.get(b) ?? Number.MAX_SAFE_INTEGER;
+      return ai !== bi ? ai - bi : a < b ? -1 : a > b ? 1 : 0;
+    });
+    return [
+      {
+        kind: "spend-above-previous",
+        occurrence: "trailing-7d",
+        severity: "advisory",
+        title: "Spend · above the previous 7 days",
+        facts: [
+          { name: "later-micro-usd", value: later, source: "app.ledger", measuredAt: ctx.now },
+          { name: "earlier-micro-usd", value: earlier, source: "app.ledger", measuredAt: ctx.now },
+          { name: "rise-micro-usd", value: rise, source: "app.ledger", measuredAt: ctx.now },
+          { name: "largest-share", value: winners.join(", "), source: "app.ledger", measuredAt: ctx.now },
+        ],
+        cause: {
+          statement: `spend rose ${rise} microUSD over the seven days before; ${winners.join(", ")} accounts for the largest share`,
+        },
+        remedy: null,
+        consequences: [],
+      },
+    ];
+  },
+};
+
 /**
  * R-22 — a component in a transient state is not a fault. It is stated only where it blocks
  * something else, as `advisory`, naming what is waiting: the components blocked on it through
@@ -897,7 +1075,7 @@ const waitingOnComponent: Rule = {
   },
 };
 
-/** #554's rule set. #555 appends the two windowed correlations without touching these. */
+/** The ten joins and the hardware facts: eight over published state, two windowed (R-20). */
 const STATE_RULES: readonly Rule[] = [
   workHeldByEngine,
   queuePausedCredential,
@@ -908,6 +1086,8 @@ const STATE_RULES: readonly Rule[] = [
   modelsFolderUnmapped,
   waitingOnComponent,
   hardwareFacts,
+  providerRepeatedFaults,
+  spendAbovePrevious,
 ];
 
 /**

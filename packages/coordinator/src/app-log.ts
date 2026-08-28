@@ -1,5 +1,6 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open } from "node:fs/promises";
 import { dirname } from "node:path";
+import { DIAGNOSTICS_LOG_TAIL_RECORDS } from "@arke-studio/contracts";
 import { WriteQueue } from "./change-log.js";
 import { redactDeep, type SecretRegistry } from "./redact.js";
 
@@ -8,12 +9,58 @@ import { redactDeep, type SecretRegistry } from "./redact.js";
  * faults, validation runs, threshold alerts. Every record passes through the redaction
  * boundary on the way in — there is no unredacted write path to this file.
  */
+
+const TAIL_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * At most `maxLines` complete lines from the end of the file, without loading it whole
+ * (SPEC-032 R-18): the log grows for the life of an install, and the old read-then-slice
+ * paid the whole file to answer for its last hundred lines.
+ *
+ * Chunks are read backwards and prepended until the buffer holds one newline more than the
+ * bound — the extra one is the proof that every counted line below it is whole. Decoding
+ * happens once, over the accumulated buffer, so a multi-byte character split between chunks
+ * never lands on a decode boundary; the front edge is cut at a newline, which is single-byte
+ * in UTF-8, so that cut is character-aligned too.
+ */
+async function readLastLines(path: string, maxLines: number): Promise<string[]> {
+  const handle = await open(path, "r");
+  try {
+    const size = (await handle.stat()).size;
+    if (size === 0 || maxLines <= 0) return [];
+    let position = size;
+    let buffer = Buffer.alloc(0);
+    let newlines = 0;
+    while (position > 0 && newlines <= maxLines) {
+      const length = Math.min(TAIL_CHUNK_BYTES, position);
+      position -= length;
+      const chunk = Buffer.alloc(length);
+      await handle.read(chunk, 0, length, position);
+      for (const byte of chunk) if (byte === 0x0a) newlines += 1;
+      buffer = Buffer.concat([chunk, buffer]);
+    }
+    let text = buffer.toString("utf8");
+    if (position > 0) {
+      // Stopped mid-file: everything before the first newline is the tail of a line whose head
+      // was never read. It is not a record; drop it.
+      const firstBreak = text.indexOf("\n");
+      text = firstBreak < 0 ? "" : text.slice(firstBreak + 1);
+    }
+    const lines = text.split("\n").filter((line) => line.trim().length > 0);
+    return lines.slice(-maxLines);
+  } finally {
+    await handle.close();
+  }
+}
+
 export class AppLog {
   private readonly queue = new WriteQueue();
 
   constructor(
     private readonly path: string,
     private readonly registry: SecretRegistry,
+    /** Called after a record actually lands, so a derived reader can re-read (SPEC-032 R-33). */
+    private readonly onAppended?: () => void,
   ) {}
 
   append(record: Record<string, unknown>): Promise<void> {
@@ -24,6 +71,12 @@ export class AppLog {
         await appendFile(this.path, JSON.stringify(redacted) + "\n", "utf8");
       } catch {
         /* an unwritable log degrades audit, never the app */
+        return;
+      }
+      try {
+        this.onAppended?.();
+      } catch {
+        /* a listener's failure must not stall the write queue */
       }
     });
   }
@@ -34,13 +87,39 @@ export class AppLog {
 
   /** The recent tail, for diagnostics — already redacted at write time, scrubbed again on read. */
   async tail(lines: number): Promise<string[]> {
-    let raw: string;
     try {
-      raw = await readFile(this.path, "utf8");
+      const raw = await readLastLines(this.path, lines);
+      return raw.map((line) => this.registry.scrub(line));
     } catch {
       return [];
     }
-    const all = raw.split("\n").filter((l) => l.trim().length > 0);
-    return all.slice(-lines).map((l) => this.registry.scrub(l));
+  }
+
+  /**
+   * The derivation's tail (SPEC-032 R-18): bounded at the contract's 500 records — the bound is
+   * this method's, never a caller argument — parsed, and scrubbed again on the way out for any
+   * secret registered since the write. A log that does not exist yet is a log with nothing in
+   * it; any other failure is a source the derivation must name unavailable rather than read as
+   * quiet (R-19, R-21).
+   */
+  async diagnosticsTail(): Promise<ReadonlyArray<Record<string, unknown>> | "unavailable"> {
+    let raw: string[];
+    try {
+      raw = await readLastLines(this.path, DIAGNOSTICS_LOG_TAIL_RECORDS);
+    } catch (err) {
+      return (err as NodeJS.ErrnoException).code === "ENOENT" ? [] : "unavailable";
+    }
+    const records: Array<Record<string, unknown>> = [];
+    for (const line of raw) {
+      try {
+        const parsed: unknown = JSON.parse(this.registry.scrub(line));
+        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+          records.push(parsed as Record<string, unknown>);
+        }
+      } catch {
+        /* a torn line is not a record */
+      }
+    }
+    return records;
   }
 }
