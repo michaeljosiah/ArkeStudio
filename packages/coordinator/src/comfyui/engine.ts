@@ -77,6 +77,14 @@ export interface EngineServiceDeps {
 }
 
 /** ComfyUI's own default port — where an already-running instance is discovered, never spawned. */
+/**
+ * How many times `status()` will recompute before answering with what it has (#632).
+ *
+ * Small on purpose: this exists to converge, not to keep trying. Each pass is cheap when the
+ * engine is unreachable — every recipe short-circuits — so the cost of the cap is a possibly
+ * stale reading, and the cost of no cap is a wedged core and a screen that never updates again.
+ */
+const STATUS_RECOMPUTE_LIMIT = 4;
 const DEFAULT_PORT_URL = "http://127.0.0.1:8188";
 const MANAGED_DIR = "comfyui-runtime";
 const VERSION_FLOOR = "0.3.45";
@@ -227,6 +235,20 @@ export class ComfyUiEngineService {
     reachable: false,
     detail: null,
   };
+  /**
+   * The re-probe for an engine we do not spawn (#632).
+   *
+   * A `user-path` or `managed` engine is supervised, and supervision carries a health interval
+   * that keeps asking. A `user-url` engine had exactly one reading, taken inside
+   * `applySettingsOnce`, and nothing ever took another — so a single failure was permanent. It
+   * survived restarts, and neither Refresh nor re-committing the URL reliably cleared it, because
+   * those take another single reading and can lose the same race with the reset above.
+   *
+   * A healthy engine answering in five milliseconds stayed marked unreachable for as long as the
+   * app ran, with every local recipe disabled behind it. This is the interval that supervision
+   * would have given it.
+   */
+  private urlProbeTimer: ReturnType<typeof setInterval> | null = null;
   /** class_type → present, from /object_info, per engine instance. */
   private nodeClasses: Set<string> | null = null;
   /** The last pre-flight verdict per recipe (§2.5): a mismatch disables until re-verified. */
@@ -365,17 +387,26 @@ export class ComfyUiEngineService {
 
   // ---- probing (§2.6 D14) --------------------------------------------------
 
-  private async systemStats(base: string): Promise<{ reachable: boolean; version: string | null }> {
+  /**
+   * The probe, and — when it fails — what actually happened (#632).
+   *
+   * This used to swallow every failure into one sentence: "the engine did not answer". That
+   * sentence is read by a person deciding whether their engine is running, and it describes a
+   * timeout or a refused connection. It was also what a 404 said, and a version floor, and an
+   * abort. An engine answering `/system_stats` in five milliseconds was reported as silent, and
+   * the only way to find out otherwise was to read the source. A failure names itself here.
+   */
+  private async systemStats(base: string): Promise<{ reachable: boolean; version: string | null; detail: string | null }> {
+    const url = `${base.replace(/\/+$/, "")}/system_stats`;
     try {
-      const res = await this.deps.fetch(`${base.replace(/\/+$/, "")}/system_stats`, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!res.ok) return { reachable: false, version: null };
+      const res = await this.deps.fetch(url, { signal: AbortSignal.timeout(3_000) });
+      if (!res.ok) return { reachable: false, version: null, detail: `${url} answered HTTP ${res.status}` };
       const body = (await res.json().catch(() => null)) as { system?: { comfyui_version?: unknown } } | null;
       const version = body?.system?.comfyui_version;
-      return { reachable: true, version: typeof version === "string" ? version : null };
-    } catch {
-      return { reachable: false, version: null };
+      return { reachable: true, version: typeof version === "string" ? version : null, detail: null };
+    } catch (err) {
+      const named = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      return { reachable: false, version: null, detail: `${url} — ${named}` };
     }
   }
 
@@ -541,6 +572,7 @@ export class ComfyUiEngineService {
     this.nodeClasses = null;
     this.invalidateVerification();
     this.settings = settings;
+    this.stopUrlProbe();
     await this.stopSupervision();
     if (this.disposed) {
       this.resolved = { source: "absent", root: null, url: null, problem: null };
@@ -558,14 +590,51 @@ export class ComfyUiEngineService {
       await this.startSupervision(this.resolved.root!);
     }
     if (this.resolved.source === "user-url") {
-      const stats = await this.systemStats(this.resolved.url!);
-      this.probed = {
-        version: stats.version,
-        reachable: stats.reachable,
-        detail: stats.reachable ? null : "the engine did not answer",
-      };
+      await this.probeUrlEngine();
+      this.startUrlProbe();
     }
     await this.publish();
+  }
+
+  /** One reading of a URL engine, recorded. Publishes nothing — callers decide. */
+  private async probeUrlEngine(): Promise<void> {
+    if (this.resolved.source !== "user-url" || this.resolved.url === null) return;
+    const stats = await this.systemStats(this.resolved.url);
+    this.probed = {
+      version: stats.version,
+      reachable: stats.reachable,
+      detail: stats.reachable ? null : (stats.detail ?? "the engine did not answer"),
+    };
+  }
+
+  /**
+   * Keep asking, and publish when the answer changes (#632). Mirrors the 15 s health interval a
+   * supervised engine already gets — the point is that no single reading is final.
+   */
+  private startUrlProbe(): void {
+    this.stopUrlProbe();
+    if (this.disposed) return;
+    this.urlProbeTimer = setInterval(() => {
+      void (async () => {
+        if (this.disposed || this.resolved.source !== "user-url") return;
+        const before = { ...this.probed };
+        await this.probeUrlEngine();
+        const changed =
+          before.reachable !== this.probed.reachable ||
+          before.version !== this.probed.version ||
+          before.detail !== this.probed.detail;
+        if (changed) await this.publish();
+      })();
+    }, 15_000);
+    // Never hold the process open for a poll: the app closing matters more than the next reading.
+    this.urlProbeTimer.unref?.();
+  }
+
+  private stopUrlProbe(): void {
+    if (this.urlProbeTimer !== null) {
+      clearInterval(this.urlProbeTimer);
+      this.urlProbeTimer = null;
+    }
   }
 
   /** Where a dispatch reaches the engine right now, or null when nothing healthy answers. */
@@ -922,22 +991,36 @@ export class ComfyUiEngineService {
 
   // ---- readiness (§2.12) ---------------------------------------------------
 
-  /** The one combined result. `probes` may be null when hardware was never measured. */
+  /**
+   * The one combined result. `probes` may be null when hardware was never measured.
+   *
+   * The restart is bounded (#632). Readiness is recomputed when verification is invalidated
+   * underneath it, so that the answer describes one coherent moment — but the retry used to be
+   * `for (;;)`, which assumes invalidation eventually stops. When it does not, this spins a core
+   * at 100% and never returns, and because `refreshComfyUi` awaits it, **no `comfyui.status` is
+   * ever published again**: the engine pane keeps whatever it last had, every recipe stays
+   * disabled, and nothing anywhere says why. That is not a hypothetical — it is how this was
+   * found, with the engine answering `/system_stats` in five milliseconds throughout.
+   *
+   * A stale-but-delivered answer beats a perfect one that never arrives, and the next
+   * invalidation publishes again anyway.
+   */
   async status(probes: RuntimeProbes | null): Promise<ComfyUiStatus> {
-    for (;;) {
+    for (let attempt = 0; ; attempt += 1) {
+      const settled = attempt >= STATUS_RECOMPUTE_LIMIT;
       const generation = this.verificationGeneration;
       const engine = this.engineStatus();
       const base = this.baseUrl();
       if (engine.state === "ready" && base !== null && this.nodeClasses === null) {
         const nodeClasses = await this.loadNodeClasses(base);
-        if (generation !== this.verificationGeneration || base !== this.baseUrl()) continue;
+        if (!settled && (generation !== this.verificationGeneration || base !== this.baseUrl())) continue;
         this.nodeClasses = nodeClasses;
       }
       const recipes: RecipeReadiness[] = [];
       for (const recipe of this.deps.recipes) {
         recipes.push(await this.recipeReadiness(recipe, engine, probes));
       }
-      if (generation !== this.verificationGeneration) continue;
+      if (!settled && generation !== this.verificationGeneration) continue;
       return { engine, recipes, checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
     }
   }
@@ -1137,6 +1220,7 @@ export class ComfyUiEngineService {
   async dispose(): Promise<void> {
     if (this.disposePromise !== null) return this.disposePromise;
     this.disposed = true;
+    this.stopUrlProbe();
     this.hashAbort.abort();
     this.resolved = { source: "absent", root: null, url: null, problem: null };
     for (const waiter of this.readinessWaiters) waiter(false);
