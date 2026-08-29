@@ -210,6 +210,26 @@ export function sceneFileOf(
   return production?.sceneFiles[scene.id] ?? null;
 }
 
+/**
+ * The dispatch dialog's address, with the scene the press was about (issue 634).
+ *
+ * Every way in goes through here so no door can forget: five controls reached this screen and
+ * none of them said which scene, so it opened on the first one and its priced button spent
+ * there — pressing `Generate scene` on scene 7 could dispatch scene 1. A caller with no scene
+ * in hand omits it and the dialog falls back as it always did.
+ */
+export function dispatchPath(
+  worldId: string | undefined,
+  prodId: string | undefined,
+  sceneId?: string | null,
+): string {
+  const base = `/w/${worldId}/p/${prodId}/generate/dispatch`;
+  // encodeURIComponent, because a scene id is data going into a query string. Ids are minted
+  // as `sc_<slug>` today and would survive raw; the escape is here so that stays an accident
+  // of the format rather than something this function depends on.
+  return sceneId ? `${base}?scene=${encodeURIComponent(sceneId)}` : base;
+}
+
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
   if (decision === "accepted") return "ok";
   if (decision === "rejected") return "sketch";
@@ -2129,7 +2149,10 @@ function TakesView({
               of this view had no way to generate and no way to reject, so "Generate frame" from
               the storyboard landed on a screen that told you to generate and offered nothing to
               press, and a drifted take could only be ignored — never taught from. */}
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
+          <Button
+            variant="primary"
+            onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
+          >
             Generate
           </Button>
           <Button
@@ -2243,7 +2266,7 @@ export function GenerateScreen() {
         worldId={worldId}
         prodId={prodId}
         onShotLens={() => setSearchParams({}, { replace: true })}
-        onScene={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+        onScene={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
       />
     );
   }
@@ -2307,7 +2330,7 @@ export function GenerateScreen() {
             <button
               type="button"
               className="fy-seg__item"
-              onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+              onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
             >
               Scene
             </button>
@@ -2449,7 +2472,10 @@ export function GenerateScreen() {
             </span>
           )}
           <span className="fy-h1row__push" />
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}>
+          <Button
+            variant="primary"
+            onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
+          >
             Generate…
           </Button>
         </div>
@@ -2829,7 +2855,7 @@ function GenerateDrawer({
         <Button
           variant="primary"
           disabled={!plan}
-          onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+          onClick={() => navigate(dispatchPath(worldId, prodId, scene.id))}
         >
           Generate
         </Button>
@@ -2839,7 +2865,7 @@ function GenerateDrawer({
         <button
           type="button"
           className="fy-gendrawer__more"
-          onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/dispatch`)}
+          onClick={() => navigate(dispatchPath(worldId, prodId, scene.id))}
         >
           Generation options
           <ChevronRight size={13} />
@@ -2901,10 +2927,31 @@ export function DispatchDialogScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const capability = production ? productionShape(production.meta).dispatchCapability : "video";
-  const [sceneIdx, setSceneIdx] = useState(0);
+  /*
+   * The scene the press was about, carried in the address (`?scene=`) — the same shape the
+   * takes view uses for `?shot=`, and for the same reason. This held an index starting at 0,
+   * so `Generate scene` on scene 7 opened a dialog priced for scene 1 and its priced button
+   * spent on scene 1: nothing carried which scene had sent you.
+   *
+   * By id, never by index. `production.scenes` is a mutable ordered array — a reorder moves
+   * every position — and an index that survives a reorder points at a different scene than
+   * the one the person was looking at. The same rule the board overrides keep (SPEC-034 D2).
+   *
+   * Derived every render rather than seeded into state: the production arrives a beat after
+   * the route, and an initialiser would have run against an empty scene list. A chip pressed
+   * here still wins — the address is where you arrived, not a lock.
+   */
+  const [pickedSceneId, setPickedSceneId] = useState<string | null>(null);
+  const asked = searchParams.get("scene");
+  const sceneId =
+    pickedSceneId ??
+    (asked !== null && production?.scenes.some((s) => s.id === asked) ? asked : null) ??
+    production?.scenes[0]?.id ??
+    null;
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
-  const scene = production?.scenes[sceneIdx] ?? null;
+  const scene = production?.scenes.find((s) => s.id === sceneId) ?? null;
   // One resolver for the bar and its host, so the dialog cannot show one model and dispatch
   // another. Planning from every manifest row let a switched-off model be enqueued from the mode
   // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
@@ -3081,11 +3128,11 @@ export function DispatchDialogScreen() {
           </Button>
         </div>
         <div className="fy-choicerow">
-          {(production?.scenes ?? []).map((s, i) => (
+          {(production?.scenes ?? []).map((s) => (
             <Button
               key={s.id}
-              variant={i === sceneIdx ? "primary" : "secondary"}
-              onClick={() => setSceneIdx(i)}
+              variant={s.id === sceneId ? "primary" : "secondary"}
+              onClick={() => setPickedSceneId(s.id)}
             >
               {s.title}
             </Button>
