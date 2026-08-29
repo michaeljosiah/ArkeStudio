@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hasOwnFrame, type Selections, type Take } from "@arke-studio/contracts";
-import { fileDrawnFrame } from "../../src/takes/drawn-frame.js";
+import { acceptStill, fileDrawnFrame } from "../../src/takes/drawn-frame.js";
 import { acceptTake } from "../../src/takes/review.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -50,6 +50,15 @@ async function still(store: WorldStore, id: string, shotId: string): Promise<Tak
   return take;
 }
 
+/** Narrow to a filing that actually filed — a superseded no-op has no artifact to assert on. */
+function filedOk(
+  outcome: Awaited<ReturnType<typeof fileDrawnFrame>>,
+): { ok: true; artifactId: string; shotId: string } {
+  assert.ok(outcome.ok, outcome.ok ? "" : outcome.reason);
+  assert.ok(!("superseded" in outcome), "expected a filing, not a superseded no-op");
+  return outcome as { ok: true; artifactId: string; shotId: string };
+}
+
 describe("a drawn frame is filed where the dispatch can send it", () => {
   it("files the still as an image artifact and points the frame slot at it", async () => {
     const store = await open();
@@ -59,15 +68,15 @@ describe("a drawn frame is filed where the dispatch can send it", () => {
       shotId: "sh_12",
       producedBy: "frame-run:test",
     });
-    assert.ok(filed.ok, `expected a filing, got ${filed.ok ? "" : filed.reason}`);
+    const ok = filedOk(filed);
 
     const map = await selections(store);
-    assert.equal(map["sh_12"]?.startFrameArtifactId, filed.artifactId);
+    assert.equal(map["sh_12"]?.startFrameArtifactId, ok.artifactId);
     assert.equal(map["sh_12"]?.startFrameTakeId, null, "the footage pointer is cleared in the same commit");
 
     // The artifact carries bytes and a hash, which is what the dispatch audits against — and
     // exactly what a take could never provide.
-    const sidecar = store.getBundle().artifacts.find((a) => a.id === filed.artifactId);
+    const sidecar = store.getBundle().artifacts.find((a) => a.id === ok.artifactId);
     assert.ok(sidecar, "the sidecar is on the world's shelf");
     assert.equal(sidecar!.kind, "image");
     assert.match(sidecar!.hash, /^sha256:[0-9a-f]{16}$/);
@@ -112,11 +121,12 @@ describe("a drawn frame is filed where the dispatch can send it", () => {
       shotId: "sh_12",
       producedBy: "t2",
     });
-    assert.ok(first.ok && second.ok);
+    const firstOk = filedOk(first);
+    const secondOk = filedOk(second);
     const map = await selections(store);
-    assert.equal(map["sh_12"]?.startFrameArtifactId, second.artifactId, "the newest decision holds");
+    assert.equal(map["sh_12"]?.startFrameArtifactId, secondOk.artifactId, "the newest decision holds");
     assert.ok(
-      store.getBundle().artifacts.some((a) => a.id === first.artifactId),
+      store.getBundle().artifacts.some((a) => a.id === firstOk.artifactId),
       "and the one it replaced is still on the shelf, not deleted",
     );
   });
@@ -136,7 +146,7 @@ describe("the continuity chain never overwrites a frame somebody chose", () => {
       shotId: "sh_13",
       producedBy: "frame-run:test",
     });
-    assert.ok(drawn.ok);
+    const drawnOk = filedOk(drawn);
 
     const clipDir = join(store.dir, "productions", "saltlight", "takes", "tk_clip99");
     await mkdir(clipDir, { recursive: true });
@@ -163,7 +173,7 @@ describe("the continuity chain never overwrites a frame somebody chose", () => {
     const map = await selections(store);
     assert.equal(
       map["sh_13"]?.startFrameArtifactId,
-      drawn.artifactId,
+      drawnOk.artifactId,
       "the drawn frame still holds the slot",
     );
     assert.notEqual(
@@ -211,5 +221,108 @@ describe("hasOwnFrame reads provenance, not a flag", () => {
     assert.equal(hasOwnFrame({ startFrameArtifactId: "art_gone", trimInSec: 0 }, shelf), false);
     assert.equal(hasOwnFrame({ trimInSec: 0 }, shelf), false);
     assert.equal(hasOwnFrame(undefined, shelf), false);
+  });
+});
+
+describe("a late arrival never overwrites a newer choice (R-22, T-18)", () => {
+  it("declines to file when the slot moved since the run was authorized", async () => {
+    /*
+     * A frame run can be in flight for a minute. If somebody accepts a different frame for the
+     * same shot meanwhile, the older job must not win by finishing later: completion order is
+     * not authorization order. The take still lands — it is paid for and browsable — it is
+     * simply not this shot's frame.
+     */
+    const store = await open();
+    const authorized = (await selections(store))["sh_12"]?.startFrameArtifactId ?? null;
+
+    // The newer choice, made while the run was out.
+    const newer = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: await still(store, "tk_newer", "sh_12"),
+        shotId: "sh_12",
+        producedBy: "accept:newer",
+      }),
+    );
+
+    const late = await fileDrawnFrame(store, production(store), {
+      take: await still(store, "tk_late", "sh_12"),
+      shotId: "sh_12",
+      producedBy: "frame-run:slow",
+      expectedArtifactId: authorized,
+    });
+    assert.ok(late.ok, "being overtaken is not a failure");
+    assert.ok("superseded" in late, "it is reported as superseded, so nothing logs an error");
+
+    const map = await selections(store);
+    assert.equal(map["sh_12"]?.startFrameArtifactId, newer.artifactId, "the newer choice stands");
+  });
+
+  it("files when the slot is exactly what the run was authorized against", async () => {
+    const store = await open();
+    const authorized = (await selections(store))["sh_12"]?.startFrameArtifactId ?? null;
+    const filed = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: await still(store, "tk_ontime", "sh_12"),
+        shotId: "sh_12",
+        producedBy: "frame-run:ontime",
+        expectedArtifactId: authorized,
+      }),
+    );
+    assert.equal((await selections(store))["sh_12"]?.startFrameArtifactId, filed.artifactId);
+  });
+
+  it("has no fence at all for an explicit accept", async () => {
+    // Somebody pressing Accept is looking at the picture; the newest explicit act wins.
+    const store = await open();
+    filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: await still(store, "tk_first", "sh_12"),
+        shotId: "sh_12",
+        producedBy: "t1",
+      }),
+    );
+    const second = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: await still(store, "tk_second", "sh_12"),
+        shotId: "sh_12",
+        producedBy: "accept:second",
+      }),
+    );
+    assert.equal((await selections(store))["sh_12"]?.startFrameArtifactId, second.artifactId);
+  });
+});
+
+describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
+  it("lands the decision, the artifact and the frame slot together", async () => {
+    const store = await open();
+    const take = await still(store, "tk_acc01", "sh_13");
+    const fresh = { ...production(store), takes: [...production(store).takes, take] };
+    const { decision, outcome } = await acceptStill(store, fresh, {
+      takeId: "tk_acc01",
+      shotId: "sh_13",
+      by: "user",
+    });
+    const ok = filedOk(outcome);
+    assert.equal(decision.decision, "accept");
+
+    // The review and the selection agree, because they were written together.
+    const reviews = await readFile(
+      join(store.dir, "productions", "saltlight", "reviews.jsonl"),
+      "utf8",
+    );
+    assert.match(reviews, /tk_acc01/, "the decision is durable");
+    const map = await selections(store);
+    assert.equal(map["sh_13"]?.startFrameArtifactId, ok.artifactId, "and the slot names the frame");
+    assert.equal(map["sh_13"]?.acceptedTakeId ?? null, null, "a still never enters the clip slot");
+  });
+
+  it("refuses a still through the footage path, rather than half-writing it", async () => {
+    const store = await open();
+    const take = await still(store, "tk_acc02", "sh_13");
+    const fresh = { ...production(store), takes: [...production(store).takes, take] };
+    await assert.rejects(
+      () => acceptTake(store, fresh, { takeId: "tk_acc02", shotId: "sh_13", by: "user" }),
+      /is a still/,
+    );
   });
 });

@@ -175,7 +175,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { fileDrawnFrame } from "./takes/drawn-frame.js";
+import { acceptStill, fileDrawnFrame } from "./takes/drawn-frame.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -2752,20 +2752,50 @@ export class Coordinator {
          */
         if (job.params["landing"] === "frame-slot") {
           const fresh = store.getBundle().productions.find((p) => p.meta.id === job.productionId);
+          /*
+           * What the slot held when this run was authorized (SPEC-036 R-22). A run in flight
+           * must not overwrite a frame chosen after it was sent, and two runs finishing out of
+           * dispatch order must not let completion order decide. Absent for a job dispatched
+           * before the frame run recorded it, which fences nothing and behaves as before.
+           */
+          const authorized = job.params["slotAtAuthorization"];
           for (const take of takes) {
             const shotId = take.coversShots[0];
             if (fresh === undefined || shotId === undefined || take.coversShots.length !== 1) continue;
+            const expected =
+              typeof authorized === "object" && authorized !== null
+                ? (authorized as Record<string, string | null>)[shotId]
+                : undefined;
             const filed = await fileDrawnFrame(store, fresh, {
               take,
               shotId,
               producedBy: `frame-run:${job.id}`,
+              ...(expected !== undefined ? { expectedArtifactId: expected } : {}),
             });
+            if (filed.ok && "superseded" in filed) {
+              // Not a failure: the newer choice won and this take stays history (T-18).
+              void this.appLog?.append({
+                kind: "drawn-frame.superseded",
+                reason: filed.reason,
+                detail: { takeId: take.id, shotId },
+              });
+              continue;
+            }
             if (!filed.ok) {
+              /*
+               * Thrown, not just logged. The generation is already paid for
+               * and the take is on disk, but the shot has no new frame — and a `shot` target
+               * is not in REPLAYABLE_FINALIZATION_TARGETS, so completing here would leave no
+               * way to retry the local filing at all. Failing the finalization keeps it
+               * pending and retryable; re-running is safe because take recording joins the
+               * take it already wrote.
+               */
               void this.appLog?.append({
                 kind: "drawn-frame.unavailable",
                 reason: filed.reason,
                 detail: { takeId: take.id, shotId },
               });
+              throw new Error(`the frame for ${shotId} could not be filed: ${filed.reason}`);
             }
           }
         }
@@ -5845,11 +5875,28 @@ export class Coordinator {
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         try {
-          const decision = await acceptTake(store, production, {
-            takeId: msg.takeId,
-            shotId: msg.shotId,
-            by: "user",
-          });
+          /*
+           * A still is this shot's frame, never footage (SPEC-036 R-21) — and its decision, its
+           * artifact and its frame slot land in ONE commit, so a crash cannot leave a durable
+           * review saying it was accepted while the slot still names the old frame.
+           */
+          const acceptedKind = production.takes.find((t) => t.id === msg.takeId)?.kind;
+          const decision =
+            acceptedKind === "frame" || acceptedKind === "still"
+              ? await (async () => {
+                  const { decision: d, outcome } = await acceptStill(store, production, {
+                    takeId: msg.takeId,
+                    shotId: msg.shotId,
+                    by: "user",
+                  });
+                  if (!outcome.ok) throw new Error(outcome.reason);
+                  return d;
+                })()
+              : await acceptTake(store, production, {
+                  takeId: msg.takeId,
+                  shotId: msg.shotId,
+                  by: "user",
+                });
           this.emit({
             at: new Date().toISOString(),
             type: "review.recorded",
@@ -5881,28 +5928,11 @@ export class Coordinator {
           const fresh = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
           const acceptedTake = fresh?.takes.find((t) => t.id === msg.takeId);
           /*
-           * A still accepted anywhere is the shot's own frame (SPEC-036 R-21), never footage.
-           * `acceptTake` recorded the decision and deliberately touched no selection; filing the
-           * picture is what puts it in the frame slot. Nothing below this runs for a still: a
-           * take that was never footage seeds no continuity and supersedes no clip.
+           * A still is already filed — `acceptStill` did it in the same commit as the decision.
+           * Nothing below runs for one: a take that was never footage seeds no continuity and
+           * supersedes no clip.
            */
-          if (
-            fresh !== undefined &&
-            acceptedTake !== undefined &&
-            (acceptedTake.kind === "frame" || acceptedTake.kind === "still")
-          ) {
-            const filed = await fileDrawnFrame(store, fresh, {
-              take: acceptedTake,
-              shotId: msg.shotId,
-              producedBy: `accept:${msg.takeId}`,
-            });
-            if (!filed.ok) {
-              void this.appLog?.append({
-                kind: "drawn-frame.unavailable",
-                reason: filed.reason,
-                detail: { takeId: msg.takeId, shotId: msg.shotId },
-              });
-            }
+          if (acceptedKind === "frame" || acceptedKind === "still") {
             await this.refreshWorldSnapshot(msg.worldId);
             return;
           }
@@ -5921,6 +5951,8 @@ export class Coordinator {
                 maker: this.opts.boundaryFrameMaker,
                 clock: () => new Date().toISOString(),
               });
+              // A skipped chain is the precedence rule working, not a fault, so it is not
+              // logged as unavailable.
               if (!chained.ok) {
                 void this.appLog?.append({
                   kind: "boundary-frame.unavailable",

@@ -92,6 +92,12 @@ export function createBoundaryFrameMaker(runner: MediaProbeRunner): BoundaryFram
 
 export type BoundaryChainResult =
   | { ok: true; artifactId: string; followingShotId: string }
+  /**
+   * The following shot already opens on a picture it was given, so no boundary was chained
+   * (SPEC-036 R-20). A correct no-op, not a failure — reported apart so the caller does not log
+   * `boundary-frame.unavailable` for an operation that did exactly the right thing.
+   */
+  | { ok: true; skipped: "following-shot-has-own-frame"; followingShotId: string }
   | { ok: false; reason: string };
 
 export type BoundaryExtractResult =
@@ -220,6 +226,20 @@ export async function chainBoundaryFrame(
   const { take, sourceShotId, followingShotId, maker, clock } = input;
   if (maker === undefined) return { ok: false, reason: "not-configured" };
 
+  /*
+   * Nothing to chain onto a shot that already owns its frame (SPEC-036 R-20) — checked here,
+   * before any decoding, so the common "drew the frames first" path never pays for an ffmpeg
+   * run whose output is thrown away. The same check runs again inside the gate below, where it
+   * catches a frame filed while this extraction was in flight; this one is the cheap early
+   * exit, that one is the race.
+   */
+  const bundle = store.getBundle();
+  const followingSelection = bundle.productions.find((p) => p.meta.id === production.meta.id)
+    ?.selections[followingShotId];
+  if (hasOwnFrame(followingSelection, bundle.artifacts)) {
+    return { ok: true, skipped: "following-shot-has-own-frame", followingShotId };
+  }
+
   // The media actually decoded: the pass clip for a segment, the take's own file otherwise.
   const mediaTakeId = take.segment?.passTakeId ?? take.id;
   const mediaTake = take.segment !== undefined ? production.takes.find((t) => t.id === mediaTakeId) : take;
@@ -290,7 +310,7 @@ export async function chainBoundaryFrame(
        * a boundary still nobody asked for. Checked at the moment of writing, inside the same
        * gate as the fence above, because that is the only point where the answer cannot go stale.
        */
-      if (hasOwnFrame(selections[followingShotId] as never, store.getBundle().artifacts)) return false;
+      if (hasOwnFrame(selections[followingShotId] as never, store.getBundle().artifacts)) return "protected";
       await atomicWriteFile(join(store.dir, "artifacts", file), png);
       selections[followingShotId] = {
         trimInSec: 0,
@@ -321,6 +341,12 @@ export async function chainBoundaryFrame(
       });
       return true;
     });
+    // Two different outcomes, told apart rather than sharing one `false`: a frame filed while
+    // this extraction ran is the rule working, and reporting it as a stale source would log a
+    // failure for an operation that behaved correctly.
+    if (installed === "protected") {
+      return { ok: true, skipped: "following-shot-has-own-frame", followingShotId };
+    }
     if (!installed) return { ok: false, reason: "a newer accepted take replaced this boundary frame source" };
     return { ok: true, artifactId: sidecar.id, followingShotId };
   } catch (error) {

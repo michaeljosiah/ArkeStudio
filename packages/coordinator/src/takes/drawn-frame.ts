@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { extname, join } from "node:path";
-import { ulid, type ArtifactSidecar, type ProductionBundle, type Take } from "@arke-studio/contracts";
+import {
+  ulid,
+  type ArtifactSidecar,
+  type ProductionBundle,
+  type ReviewDecision,
+  type Take,
+} from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -34,6 +40,12 @@ const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
 export type DrawnFrameOutcome =
   | { ok: true; artifactId: string; shotId: string }
+  /**
+   * The slot moved after this work was authorized, so the result stays history and nothing was
+   * filed (SPEC-036 R-22, T-18). Not a failure — the newer decision won, which is the rule —
+   * so callers can tell "went wrong" from "was overtaken" and log neither as an error.
+   */
+  | { ok: true; superseded: true; shotId: string; reason: string }
   | { ok: false; reason: string };
 
 /**
@@ -50,6 +62,31 @@ export async function fileDrawnFrame(
     shotId: string;
     /** What produced it, for the sidecar's origin line — a run id, or the accept. */
     producedBy: string;
+    /**
+     * The frame slot as it stood when this work was authorized (SPEC-036 R-22).
+     *
+     * A frame run can be in flight for a minute while somebody accepts a different frame for
+     * the same shot, and two runs can finish out of the order they were dispatched. Without
+     * this, *completion* order decides what a shot opens on rather than *authorization* order,
+     * and a slow job silently overwrites a choice made after it was sent.
+     *
+     * `undefined` means no fence — an explicit foreground act, which is allowed to replace
+     * whatever is there because the person is looking at it when they press.
+     */
+    expectedArtifactId?: string | null;
+    /**
+     * Extra files landing in the SAME commit — the accept's review append (SPEC-013 R-9, D6).
+     *
+     * A still's decision and its frame are one act. Committed separately they leave a crash
+     * window where the durable review says the take was accepted while the slot still names
+     * the old frame, which is the divergence the one-commit rule exists to prevent.
+     */
+    alsoCommit?: readonly {
+      path: string;
+      action: "create" | "replace";
+      content: string;
+      baseHash: string | null;
+    }[];
   },
 ): Promise<DrawnFrameOutcome> {
   const { take, shotId } = input;
@@ -110,6 +147,24 @@ export async function fileDrawnFrame(
         existed = false;
       }
       const selections = JSON.parse(raw) as Record<string, Record<string, unknown>>;
+      /*
+       * The authorization fence, checked inside the gate — the only point where the answer
+       * cannot go stale between reading it and writing on it. Nothing is written when it
+       * fails: the take is already on disk, browsable and priced, and it simply is not this
+       * shot's frame.
+       */
+      if (input.expectedArtifactId !== undefined) {
+        const current =
+          (selections[shotId]?.["startFrameArtifactId"] as string | null | undefined) ?? null;
+        if (current !== input.expectedArtifactId) {
+          return {
+            ok: true as const,
+            superseded: true as const,
+            shotId,
+            reason: "the frame changed while this one was being made",
+          };
+        }
+      }
       await mkdir(join(store.dir, "artifacts"), { recursive: true });
       await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
       selections[shotId] = {
@@ -128,6 +183,9 @@ export async function fileDrawnFrame(
         kind: "drawn-frame",
         source: input.producedBy,
         files: [
+          // The accept's review append rides here, so a still's decision and its frame are one
+          // commit and cannot diverge across a crash (SPEC-013 R-9, D6).
+          ...(input.alsoCommit ?? []),
           {
             path: `artifacts/${file}.json`,
             action: "create",
@@ -151,4 +209,62 @@ export async function fileDrawnFrame(
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Accept a still: the decision, the artifact and the frame slot in ONE commit (SPEC-013 R-9, D6).
+ *
+ * `acceptTake` states the invariant this preserves — "record the decision AND set the selection
+ * in one commit; the journalled primitive is exactly the multi-file atomicity a crash window
+ * needs". A still is not footage, so it takes none of that function's clip machinery: no
+ * continuity seed, no supersession sweep, no trim reset, and nothing in the clip slot. But it
+ * keeps the same promise, which is why the review append travels into the filing commit rather
+ * than landing in one of its own. Committed separately, a crash between them leaves a durable
+ * review saying the take was accepted while the slot still names the old frame.
+ *
+ * No authorization fence here, deliberately: this is somebody pressing Accept on a picture they
+ * are looking at, and the newest explicit decision is the one that should win.
+ */
+export async function acceptStill(
+  store: WorldStore,
+  production: ProductionBundle,
+  input: { takeId: string; shotId: string; by: string },
+): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
+  const take = production.takes.find((candidate) => candidate.id === input.takeId);
+  if (!take) throw new Error(`take ${input.takeId} is not in this production`);
+  if (!take.coversShots.includes(input.shotId)) {
+    throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
+  }
+
+  const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
+  let reviewsRaw = "";
+  let reviewsExisted = true;
+  try {
+    reviewsRaw = await readFile(toExtendedLength(join(store.dir, reviewsPath)), "utf8");
+  } catch {
+    reviewsExisted = false;
+  }
+
+  const decision: ReviewDecision = {
+    ts: store.now(),
+    takeId: input.takeId as ReviewDecision["takeId"],
+    shotId: input.shotId as ReviewDecision["shotId"],
+    decision: "accept",
+    by: input.by,
+  };
+
+  const outcome = await fileDrawnFrame(store, production, {
+    take,
+    shotId: input.shotId,
+    producedBy: `accept:${input.takeId}`,
+    alsoCommit: [
+      {
+        path: reviewsPath,
+        action: reviewsExisted ? "replace" : "create",
+        content: reviewsRaw + JSON.stringify(decision) + "\n",
+        baseHash: reviewsExisted ? sha256(reviewsRaw) : null,
+      },
+    ],
+  });
+  return { decision, outcome };
 }

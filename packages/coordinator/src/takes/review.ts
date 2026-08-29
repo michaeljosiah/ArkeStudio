@@ -63,13 +63,15 @@ export async function acceptTake(
   /*
    * A still is not footage, and the clip slot is for footage (SPEC-036 R-21).
    *
-   * The contact sheet has always filed an accepted still into `acceptedTakeId`, where it sits in
-   * the slot the cut reads and collides with clip acceptance. A still accepted anywhere now
-   * records its decision and stops there; the picture itself is filed by `fileDrawnFrame`, onto
-   * the frame slot, in its own commit — so nothing about the cut, continuity or supersession
-   * runs for a take that was never footage.
+   * The contact sheet used to file an accepted still into `acceptedTakeId`, where it sat in the
+   * slot the cut reads and collided with clip acceptance. Stills now go through `acceptStill`,
+   * which lands the decision, the artifact and the frame slot in one commit — so a still reaching
+   * this function is a routing bug upstream, and refusing it loudly beats running the cut's
+   * continuity and supersession machinery over a take that was never footage.
    */
-  const isStill = take.kind === "frame" || take.kind === "still";
+  if (take.kind === "frame" || take.kind === "still") {
+    throw new Error(`take ${input.takeId} is a still — accept it as this shot's frame, not as footage`);
+  }
 
   const map = JSON.parse(selections.raw) as Selections;
   /*
@@ -155,18 +157,12 @@ export async function acceptTake(
         content: reviews.raw + JSON.stringify(decision) + "\n",
         baseHash: reviews.existed ? sha256(reviews.raw) : null,
       },
-      // A still writes no selection here at all: `fileDrawnFrame` owns the frame slot, and a
-      // rewritten-but-unchanged selections file would be a commit claiming something happened.
-      ...(isStill
-        ? []
-        : [
-            {
-              path: selectionsPath,
-              action: selections.existed ? ("replace" as const) : ("create" as const),
-              content: JSON.stringify(next, null, 2) + "\n",
-              baseHash: selections.existed ? sha256(selections.raw) : null,
-            },
-          ]),
+      {
+        path: selectionsPath,
+        action: selections.existed ? "replace" : "create",
+        content: JSON.stringify(next, null, 2) + "\n",
+        baseHash: selections.existed ? sha256(selections.raw) : null,
+      },
     ],
   });
   return decision;
