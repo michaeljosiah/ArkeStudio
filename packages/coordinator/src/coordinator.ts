@@ -175,7 +175,12 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { acceptStill, fileDrawnFrame, slotAtAuthorizationOf } from "./takes/drawn-frame.js";
+import {
+  acceptStill,
+  fileDrawnFrame,
+  reviewAppendFor,
+  slotAtAuthorizationOf,
+} from "./takes/drawn-frame.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -2764,11 +2769,25 @@ export class Coordinator {
             const shotId = take.coversShots[0];
             if (fresh === undefined || shotId === undefined || take.coversShots.length !== 1) continue;
             const expected = authorized?.[shotId];
+            /*
+             * The filing IS the acceptance (R-20: no second accept), so the decision rides the
+             * same commit. Without it, `computeNeedsYou` counts the take as awaiting review —
+             * paid work nagging for exactly the second Accept this flow retires. An overtaken
+             * filing commits nothing, so its decision rightly never lands either.
+             */
+            const decision = {
+              ts: store.now(),
+              takeId: take.id,
+              shotId,
+              decision: "accept",
+              by: `frame-run:${job.id}`,
+            } as Parameters<typeof reviewAppendFor>[2];
             const filed = await fileDrawnFrame(store, fresh, {
               take,
               shotId,
               producedBy: `frame-run:${job.id}`,
               toPng: this.opts.boundaryFrameMaker,
+              alsoCommit: [await reviewAppendFor(store, fresh.meta.id, decision)],
               ...(expected !== undefined ? { expectedArtifactId: expected } : {}),
             });
             if (filed.ok && "superseded" in filed) {

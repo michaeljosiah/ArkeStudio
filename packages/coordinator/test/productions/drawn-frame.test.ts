@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hasOwnFrame, type Job, type Selections, type Take } from "@arke-studio/contracts";
-import { acceptStill, fileDrawnFrame, slotAtAuthorizationOf } from "../../src/takes/drawn-frame.js";
+import { acceptStill, fileDrawnFrame, reviewAppendFor, slotAtAuthorizationOf } from "../../src/takes/drawn-frame.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
 import { acceptTake } from "../../src/takes/review.js";
@@ -441,5 +441,71 @@ describe("a frame-slot finalization can replay", () => {
     assert.equal(first.id, `tk_${job.id.slice(3)}`, "deterministic, so a crash mid-write is recoverable");
     const [second] = await recordTakesFromJob(store, job, null);
     assert.equal(second?.id, first.id, "the replay rejoins rather than minting a second take");
+  });
+});
+
+describe("an auto-filed frame is already decided", () => {
+  const decisionFor = (takeId: string, shotId: string) =>
+    ({
+      ts: CLOCK(),
+      takeId,
+      shotId,
+      decision: "accept",
+      by: "frame-run:jb_test",
+    }) as Parameters<typeof reviewAppendFor>[2];
+
+  it("the filing carries its accept, so nothing asks for a second one", async () => {
+    // computeNeedsYou counts a production take with no review as awaiting one; a frame the run
+    // installed would nag for exactly the second Accept SPEC-036 R-20 retires.
+    const store = await open();
+    const take = await still(store, "tk_auto01", "sh_13");
+    filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take,
+        shotId: "sh_13",
+        producedBy: "frame-run:jb_test",
+        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto01", "sh_13"))],
+      }),
+    );
+    const reviews = await readFile(join(store.dir, "productions", "saltlight", "reviews.jsonl"), "utf8");
+    assert.match(reviews, /tk_auto01/, "the decision landed with the filing");
+  });
+
+  it("consecutive filings chain their appends, and an overtaken one records nothing", async () => {
+    const store = await open();
+    const first = await still(store, "tk_auto02", "sh_13");
+    const second = await still(store, "tk_auto03", "sh_14");
+    filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: first,
+        shotId: "sh_13",
+        producedBy: "frame-run:jb_test",
+        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto02", "sh_13"))],
+      }),
+    );
+    filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: second,
+        shotId: "sh_14",
+        producedBy: "frame-run:jb_test",
+        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto03", "sh_14"))],
+      }),
+    );
+
+    // A stale fence: the append is prepared, but the superseded filing commits nothing at all.
+    const late = await still(store, "tk_auto04", "sh_13");
+    const overtaken = await fileDrawnFrame(store, production(store), {
+      take: late,
+      shotId: "sh_13",
+      producedBy: "frame-run:jb_slow",
+      expectedArtifactId: null,
+      alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto04", "sh_13"))],
+    });
+    assert.ok(overtaken.ok && "superseded" in overtaken);
+
+    const reviews = await readFile(join(store.dir, "productions", "saltlight", "reviews.jsonl"), "utf8");
+    assert.match(reviews, /tk_auto02/);
+    assert.match(reviews, /tk_auto03/, "the second append chained on the first");
+    assert.ok(!reviews.includes("tk_auto04"), "no decision for a frame that was never installed");
   });
 });

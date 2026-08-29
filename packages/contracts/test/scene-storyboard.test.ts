@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createHash } from "node:crypto";
 import {
+  chooseReferenceSteering,
   effectiveFraming,
   SceneSchema,
   ShotSchema,
   shotCoverage,
+  type ManifestModel,
+  type Scene,
+  type Selections,
 } from "../src/index.js";
 
 /**
@@ -96,5 +100,52 @@ describe("coverage, derived (SPEC-023 R-13 · turn 97's Re-read chip)", () => {
       ],
     };
     assert.equal(shotCoverage(gone, blocks), "uncovered");
+  });
+});
+
+describe("steering counts artifact-backed frames (SPEC-036)", () => {
+  /*
+   * SPEC-036 files every frame — drawn, chained, accepted — as an image artifact in
+   * `startFrameArtifactId` and clears the take pointer in the same commit. A derivation that
+   * reads only the take pointers reports "no frames" for a scene the dispatch would in fact
+   * steer with every one of them.
+   */
+  const model = {
+    displayName: "seedance-like",
+    capability: "video",
+    accepts: { referenceImages: 4 },
+  } as unknown as ManifestModel;
+  const scene = {
+    id: "sc_01",
+    number: 1,
+    shots: [
+      { id: "sh_1", number: 1, description: "one" },
+      { id: "sh_2", number: 2, description: "two" },
+    ],
+  } as unknown as Scene;
+
+  it("chooses keyframes when every shot is framed through the artifact slot", () => {
+    const selections = {
+      sh_1: { trimInSec: 0, startFrameArtifactId: "ar_01J8E0000000000000000000D1", startFrameTakeId: null },
+      sh_2: { trimInSec: 0, startFrameArtifactId: "ar_01J8E0000000000000000000D2", startFrameTakeId: null },
+    } as unknown as Selections;
+    const steering = chooseReferenceSteering({ scene, selections, model });
+    assert.equal(steering.mode, "keyframes", steering.statement);
+  });
+
+  it("the pinned artifact outranks the take pointers, matching what the dispatch sends", () => {
+    const selections = {
+      sh_1: {
+        trimInSec: 0,
+        startFrameArtifactId: "ar_01J8E0000000000000000000D3",
+        startFrameTakeId: "tk_01J8E0000000000000000000D4",
+      },
+      sh_2: { trimInSec: 0, startFrameTakeId: "tk_01J8E0000000000000000000D5" },
+    } as unknown as Selections;
+    const steering = chooseReferenceSteering({ scene, selections, model });
+    assert.equal(steering.mode, "keyframes");
+    assert.ok(steering.mode === "keyframes");
+    assert.equal(steering.frames[0]!.takeId, "ar_01J8E0000000000000000000D3");
+    assert.equal(steering.frames[1]!.takeId, "tk_01J8E0000000000000000000D5");
   });
 });

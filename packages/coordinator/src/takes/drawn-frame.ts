@@ -278,6 +278,32 @@ export async function fileDrawnFrame(
  * No authorization fence here, deliberately: this is somebody pressing Accept on a picture they
  * are looking at, and the newest explicit decision is the one that should win.
  */
+/**
+ * The review append for a decision that must land in the same commit as the frame it decides
+ * on. Read fresh on every call, so consecutive filings — a run landing several shots — chain
+ * their base hashes correctly.
+ */
+export async function reviewAppendFor(
+  store: WorldStore,
+  productionId: string,
+  decision: ReviewDecision,
+): Promise<{ path: string; action: "create" | "replace"; content: string; baseHash: string | null }> {
+  const reviewsPath = `productions/${productionId}/reviews.jsonl`;
+  let raw = "";
+  let existed = true;
+  try {
+    raw = await readFile(toExtendedLength(join(store.dir, reviewsPath)), "utf8");
+  } catch {
+    existed = false;
+  }
+  return {
+    path: reviewsPath,
+    action: existed ? "replace" : "create",
+    content: raw + JSON.stringify(decision) + "\n",
+    baseHash: existed ? sha256(raw) : null,
+  };
+}
+
 export async function acceptStill(
   store: WorldStore,
   production: ProductionBundle,
@@ -287,15 +313,6 @@ export async function acceptStill(
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
   if (!take.coversShots.includes(input.shotId)) {
     throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
-  }
-
-  const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
-  let reviewsRaw = "";
-  let reviewsExisted = true;
-  try {
-    reviewsRaw = await readFile(toExtendedLength(join(store.dir, reviewsPath)), "utf8");
-  } catch {
-    reviewsExisted = false;
   }
 
   const decision: ReviewDecision = {
@@ -311,14 +328,7 @@ export async function acceptStill(
     shotId: input.shotId,
     producedBy: `accept:${input.takeId}`,
     toPng: input.toPng,
-    alsoCommit: [
-      {
-        path: reviewsPath,
-        action: reviewsExisted ? "replace" : "create",
-        content: reviewsRaw + JSON.stringify(decision) + "\n",
-        baseHash: reviewsExisted ? sha256(reviewsRaw) : null,
-      },
-    ],
+    alsoCommit: [await reviewAppendFor(store, production.meta.id, decision)],
   });
   return { decision, outcome };
 }

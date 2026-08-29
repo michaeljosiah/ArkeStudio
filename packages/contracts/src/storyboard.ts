@@ -159,10 +159,22 @@ export type ReferenceSteering =
   | { mode: "storyboard"; file: string; statement: string }
   | { mode: "none"; statement: string };
 
-/** The frame a shot would contribute, pinned first, then whatever take it currently uses. */
+/**
+ * The frame a shot would contribute: the pinned artifact first — a drawn or chained frame
+ * (SPEC-036 files every frame there and clears the take pointer) — then the pinned take, then
+ * whatever take it currently uses. The id is for the derivation and its display, so an `ar_`
+ * value beside `tk_` ones is fine: what matters is that a shot framed through the artifact
+ * slot counts as framed, or the steering summary reports "no frames" for a scene the dispatch
+ * would in fact steer with every one of them.
+ */
 function frameFor(shotId: string, selections: Selections): string | null {
   const selection = selections[shotId];
-  return selection?.startFrameTakeId ?? selection?.acceptedTakeId ?? null;
+  return (
+    selection?.startFrameArtifactId ??
+    selection?.startFrameTakeId ??
+    selection?.acceptedTakeId ??
+    null
+  );
 }
 
 /**
