@@ -239,6 +239,22 @@ describe("the memo key covers the inputs and nothing else (T-8)", () => {
       boardPackKey(shots, 30, new Set(["sh_1", "sh_2"]), NONE, "11"),
     );
   });
+
+  it("cannot be confused by separators inside free-text values", () => {
+    /*
+     * `timeOfDay` and `lighting` come from art direction and are unrestricted. A key that
+     * joined them with a separator would encode these two scenes identically — and they pack
+     * differently, so a memo would hand one scene the other's boards.
+     */
+    const a = [shot({ id: "sh_1", number: 1, timeOfDay: "night:blue hour", lighting: "lantern" })];
+    const b = [shot({ id: "sh_1", number: 1, timeOfDay: "night", lighting: "blue hour:lantern" })];
+    assert.notEqual(boardPackKey(a, 30, NONE, NONE, "1"), boardPackKey(b, 30, NONE, NONE, "1"));
+
+    // The same trap one level out: a cast entry containing the cast separator.
+    const c = [shot({ id: "sh_1", number: 1, cast: ["a+b"] })];
+    const d = [shot({ id: "sh_1", number: 1, cast: ["a", "b"] })];
+    assert.notEqual(boardPackKey(c, 30, NONE, NONE, "1"), boardPackKey(d, 30, NONE, NONE, "1"));
+  });
 });
 
 describe("an empty cast is an unknown, not a change (T-9)", () => {
@@ -477,6 +493,48 @@ describe("assembling the packer's input (T-18)", () => {
       packed.map((s) => s.solo),
       [true, false, false],
     );
+  });
+
+  it("never calls a whole-scene pass segment solo — it is the opposite (T-18)", () => {
+    /*
+     * Arrival derives one `clip` per shot from a pass, each covering exactly its own shot and
+     * naming the pass in `segment`. By coverage alone that is indistinguishable from a solo
+     * render, while the meaning is inverted: this footage was made WITH its neighbours, which
+     * is the whole point of a board. Reading it as solo would make an accepted pass warn that
+     * its own members were rendered separately.
+     */
+    const packed = packShotsFor({
+      scene: {},
+      shots: [
+        { id: "sh_1", number: 1, title: "a", description: "" },
+        { id: "sh_2", number: 2, title: "b", description: "" },
+      ],
+      selections: {
+        sh_1: { acceptedTakeId: "tk_seg1", trimInSec: 0 },
+        sh_2: { acceptedTakeId: "tk_seg2", trimInSec: 0 },
+      },
+      takes: [
+        clip({
+          id: "tk_seg1",
+          coversShots: ["sh_1"],
+          segment: { passTakeId: "tk_pass", inSec: 0, outSec: 4 },
+        }),
+        clip({
+          id: "tk_seg2",
+          coversShots: ["sh_2"],
+          segment: { passTakeId: "tk_pass", inSec: 4, outSec: 8 },
+        }),
+      ],
+      castOf: () => [],
+      defaultDurationSec: 4,
+    });
+    assert.deepEqual(
+      packed.map((s) => s.solo),
+      [false, false],
+    );
+    // And so the board says nothing about them.
+    const pack = packBoards(packed, 60, NONE, NONE, framed);
+    assert.deepEqual(noteTexts(pack), []);
   });
 
   it("takes cast from the caller's resolver, in order", () => {

@@ -67,7 +67,7 @@ export interface PackShot {
   lighting: string | null;
   /** Resolved sheet ids, first appearance first. Empty means unknown, not "nobody". */
   cast: string[];
-  /** A clip covers this shot and only this shot. */
+  /** A clip of this shot alone — not a segment cut from a pass, which is the opposite. */
   solo: boolean;
 }
 
@@ -104,19 +104,21 @@ export function boardPackKey(
   frames: string,
   maxMembers?: number,
 ): string {
-  return [
+  /*
+   * JSON, not delimiters. `timeOfDay` and `lighting` are free text from art direction, so a
+   * separator-joined key is not injective: `timeOfDay: "night:blue hour"` with
+   * `lighting: "lantern"` would encode identically to `"night"` with `"blue hour:lantern"`,
+   * and those two scenes pack differently. A memo keyed by an ambiguous string hands back
+   * another scene's boards.
+   */
+  return JSON.stringify([
     capSec,
-    maxMembers ?? "",
-    shots
-      .map(
-        (s) =>
-          `${s.id}:${s.durationSec}:${s.timeOfDay}:${s.lighting}:${s.solo ? 1 : 0}:${s.cast.join("+")}`,
-      )
-      .join(";"),
-    [...splits].sort().join(","),
-    [...merges].sort().join(","),
+    maxMembers ?? null,
+    shots.map((s) => [s.id, s.durationSec, s.timeOfDay, s.lighting, s.solo, s.cast]),
+    [...splits].sort(),
+    [...merges].sort(),
     frames,
-  ].join("|");
+  ]);
 }
 
 export function packBoards(
@@ -368,12 +370,25 @@ export function packShotsFor(input: {
       lighting: framing.lighting ?? null,
       cast: input.castOf(shot),
       /*
-       * Kind `clip`, not merely a take in the clip slot. An upgraded world can still hold a
-       * still misfiled there (SPEC-036 §2.5 reads those as *framed*), and without this check
-       * every board holding that shot would warn about a separate video render that never
+       * Rendered on its own, and genuinely on its own.
+       *
+       * Kind `clip`, not merely a take in the clip slot: an upgraded world can still hold a
+       * still misfiled there (SPEC-036 §2.5 reads those as *framed*), and without the kind
+       * check every board holding that shot would warn about a video render that never
        * happened.
+       *
+       * And not a pass segment. Arrival derives one `clip` per shot from a whole-scene pass,
+       * each covering exactly its own shot and naming the pass in `segment` — so the shape is
+       * indistinguishable from a solo render by coverage alone, while the meaning is its
+       * exact opposite: that footage was rendered WITH its neighbours, which is what a board
+       * is for. Without this, accepting a pass would make every board it covers warn that its
+       * own members were rendered separately.
        */
-      solo: take?.kind === "clip" && take.coversShots.length === 1 && take.coversShots[0] === shot.id,
+      solo:
+        take?.kind === "clip" &&
+        take.segment === undefined &&
+        take.coversShots.length === 1 &&
+        take.coversShots[0] === shot.id,
     };
   });
 }
