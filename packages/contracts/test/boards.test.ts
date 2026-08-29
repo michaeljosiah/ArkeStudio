@@ -205,6 +205,41 @@ describe("overrides key by shot id, never by position (T-5, T-6)", () => {
   });
 });
 
+describe("durations add exactly, not in binary floating point", () => {
+  it("keeps a board whose decimal durations fill the cap precisely", () => {
+    /*
+     * 0.3 + 7.9 + 1.8 is 10.000000000000002 in float, which is over a 10-second cap by a
+     * number nobody typed. Packed in seconds, this scene split in two — and the singleton
+     * could not fold back, because the collapse re-checks the same overflowing sum.
+     */
+    assert.ok(0.3 + 7.9 + 1.8 > 10, "the float hazard this test exists for");
+    const shots = [
+      shot({ id: "sh_1", number: 1, durationSec: 0.3 }),
+      shot({ id: "sh_2", number: 2, durationSec: 7.9 }),
+      shot({ id: "sh_3", number: 3, durationSec: 1.8 }),
+    ];
+    const pack = packBoards(shots, 10, NONE, NONE, framed);
+    assert.equal(shape(pack), "A:sh_1,sh_2,sh_3", "an exact fit is one board");
+    assert.equal(boardsOf(pack)[0]!.durationSec, 10, "and it reports the duration a person would write");
+  });
+
+  it("still breaks where the durations genuinely exceed the cap", () => {
+    const shots = [
+      shot({ id: "sh_1", number: 1, durationSec: 0.3 }),
+      shot({ id: "sh_2", number: 2, durationSec: 7.9 }),
+      shot({ id: "sh_3", number: 3, durationSec: 1.9 }),
+    ];
+    assert.equal(shape(packBoards(shots, 10, NONE, NONE, framed)), "A:sh_1,sh_2 | B:sh_3");
+  });
+
+  it("refuses a shot over the cap by a real margin, not a float artefact", () => {
+    const exact = packBoards([shot({ id: "sh_1", number: 1, durationSec: 10 })], 10, NONE, NONE, framed);
+    assert.ok(exact.ok, "a shot exactly at the cap fits");
+    const over = packBoards([shot({ id: "sh_1", number: 1, durationSec: 10.1 })], 10, NONE, NONE, framed);
+    assert.equal(over.ok, false);
+  });
+});
+
 describe("the model cap decides membership (T-7)", () => {
   it("repacks when the cap changes", () => {
     const shots = [

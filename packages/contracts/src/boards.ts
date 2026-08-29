@@ -124,6 +124,18 @@ export function boardPackKey(
   ]);
 }
 
+/**
+ * Durations become integer milliseconds for the whole of packing.
+ *
+ * Shot durations are decimal seconds, and binary floating point does not add them the way the
+ * cap is written: `0.3 + 7.9 + 1.8` is `10.000000000000002`, which is over a 10-second cap by
+ * a number no editor typed. That splits a board that mathematically fits — and the singleton
+ * cannot fold back either, because the collapse re-checks the same overflowing sum. Rounding to
+ * the millisecond removes the class rather than papering over one comparison: a millisecond is
+ * far below anything a shot list distinguishes, and integers add exactly.
+ */
+const ms = (seconds: number): number => Math.round(seconds * 1000);
+
 export function packBoards(
   shots: readonly PackShot[],
   capSec: number,
@@ -133,9 +145,11 @@ export function packBoards(
   /** Frame-sheet packing passes the sheet's panel cap, so a board always fits one sheet (R-12). */
   maxMembers?: number,
 ): BoardPack {
+  const capMs = ms(capSec);
+
   // R-5: refuse before walking. Nothing downstream can rescue a shot no cap can hold.
   for (const shot of shots) {
-    if (shot.durationSec > capSec) {
+    if (ms(shot.durationSec) > capMs) {
       return {
         ok: false,
         oversizeShot: {
@@ -211,8 +225,11 @@ export function packBoards(
           text: `spans a cast change · shot ${at.number} brings ${at.cast.join(", ")}`,
         };
 
-  /** `byHand` is not on the board itself: it is a fact about the walk that the collapse reads. */
-  type Working = PackedBoard & { byHand: boolean };
+  /**
+   * `byHand` is a fact about the walk that the collapse reads, and `durationMs` is the exact
+   * arithmetic behind the seconds the board reports. Neither survives into the result.
+   */
+  type Working = Omit<PackedBoard, "durationSec"> & { byHand: boolean; durationMs: number };
   const out: Working[] = [];
   let current: Working | null = null;
   let previous: PackShot | null = null;
@@ -227,7 +244,7 @@ export function packBoards(
         : castBreaks(previous, shot)
           ? "cast changes"
           : null;
-      if (current.durationSec + shot.durationSec > capSec) reason = "clip limit";
+      if (current.durationMs + ms(shot.durationSec) > capMs) reason = "clip limit";
       else if (maxMembers !== undefined && current.memberShotIds.length >= maxMembers) {
         reason = "panel limit";
       } else if (splits.has(shot.id)) reason = "by hand";
@@ -239,7 +256,7 @@ export function packBoards(
       current = {
         letter: "",
         memberShotIds: [],
-        durationSec: 0,
+        durationMs: 0,
         missingFrames: 0,
         reason,
         notes: [],
@@ -248,7 +265,7 @@ export function packBoards(
       out.push(current);
     }
     current.memberShotIds.push(shot.id);
-    current.durationSec += shot.durationSec;
+    current.durationMs += ms(shot.durationSec);
     if (!hasFrame(shot.id)) current.missingFrames += 1;
     // R-6: lighting is an accent, never a break. A practical lantern inside a blue-hour scene
     // is an accent; breaking on it once produced four single-shot boards out of five shots,
@@ -277,7 +294,7 @@ export function packBoards(
     if (board.memberShotIds.length > 1 || out.length === 1 || board.byHand) continue;
     const fits = (candidate: Working | undefined): boolean =>
       candidate !== undefined &&
-      candidate.durationSec + board.durationSec <= capSec &&
+      candidate.durationMs + board.durationMs <= capMs &&
       (maxMembers === undefined || candidate.memberShotIds.length + 1 <= maxMembers);
     const before = out[i - 1];
     const after = out[i + 1];
@@ -310,7 +327,7 @@ export function packBoards(
       into.reason = board.reason;
       into.byHand = board.byHand;
     }
-    into.durationSec += board.durationSec;
+    into.durationMs += board.durationMs;
     into.missingFrames += board.missingFrames;
     out.splice(i, 1);
     i -= 1;
@@ -332,7 +349,11 @@ export function packBoards(
 
   return {
     ok: true,
-    boards: out.map(({ byHand: _byHand, ...board }, i) => ({ ...board, letter: boardLetter(i) })),
+    boards: out.map(({ byHand: _byHand, durationMs, ...board }, i) => ({
+      ...board,
+      durationSec: durationMs / 1000,
+      letter: boardLetter(i),
+    })),
   };
 }
 
