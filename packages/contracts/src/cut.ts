@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { orderedShots } from "./scene-flow.js";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
 import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js";
@@ -210,10 +211,11 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
   const entries: CutEntry[] = [];
   for (const scene of scenes) {
-    for (const [shotIndex, shot] of scene.shots.entries()) {
+    const shots = orderedShots(scene);
+    for (const [shotIndex, shot] of shots.entries()) {
       const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
       const selected = takeId !== null ? (takesById.get(takeId) ?? null) : null;
-      const previousShot = shotIndex > 0 ? scene.shots[shotIndex - 1] : undefined;
+      const previousShot = shotIndex > 0 ? shots[shotIndex - 1] : undefined;
       const predecessorId = previousShot
         ? (production.selections[previousShot.id]?.acceptedTakeId ?? null)
         : null;

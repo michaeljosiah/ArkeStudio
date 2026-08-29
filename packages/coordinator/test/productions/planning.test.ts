@@ -45,6 +45,7 @@ import {
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
@@ -197,7 +198,7 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
     const { store, gate } = await open();
     let bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const sceneFile = `${String(scene.number).padStart(2, "0")}-${scene.slug}`;
     const target = scene.shots[0]!;
     const assembled = assemblePrompt(bundle.meta, bundle.sheets, scene, target);
@@ -209,7 +210,7 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
       text: "Something else entirely — my tuned wording.",
     });
     bundle = store.getBundle();
-    let liveShot = bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!.shots.find((s) => s.id === target.id)!;
+    let liveShot = orderedShots(bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!).find((s) => s.id === target.id)!;
     assert.equal(promptFor(bundle.meta, bundle.sheets, scene, liveShot).overridden, true);
     assert.equal(
       bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!.version,
@@ -223,7 +224,7 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
     const staged = await stageSheetRename(store, gate, { path: "characters/maren-kest.md", name: "Maren K" });
     await gate.accept(staged.id);
     bundle = store.getBundle();
-    liveShot = bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!.shots.find((s) => s.id === target.id)!;
+    liveShot = orderedShots(bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!).find((s) => s.id === target.id)!;
     const stale = overrideStaleAgainst(liveShot, bundle.sheets);
     assert.equal(stale.length, 1);
     assert.equal(stale[0]!.sheetId, "maren-kest");
@@ -232,7 +233,7 @@ describe("prompt assembly and overrides (R-14..R-16, D6, D7, §3.2)", () => {
     // Reset: the override clears; the assembled form returns exactly; canon untouched throughout.
     await setPromptOverride(store, bundle, { productionId: production.meta.id, sceneFile, shotId: target.id, text: null });
     bundle = store.getBundle();
-    liveShot = bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!.shots.find((s) => s.id === target.id)!;
+    liveShot = orderedShots(bundle.productions[0]!.scenes.find((s) => s.id === scene.id)!).find((s) => s.id === target.id)!;
     const restored = promptFor(bundle.meta, bundle.sheets, scene, liveShot);
     assert.equal(restored.overridden, false);
     assert.equal(
@@ -250,7 +251,7 @@ describe("boards (R-11..R-13, D8, §3.2)", () => {
     const { dir, store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const a = await compileBoard(store, production, scene);
     const b = await compileBoard(store, production, scene);
     assert.deepEqual(Buffer.from(a), Buffer.from(b), "local, free, repeatable (R-11)");
@@ -281,7 +282,7 @@ describe("the dispatch dialog warnings (R-20, D12, §3.2)", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     // The fixture scene: maren (locked, has designated compilation) + the-vigil location.
     const plan = planScene(
       {
@@ -335,7 +336,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [
@@ -373,7 +374,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [{ ...base.shots[0]!, id: "sh_94", number: 94, description: "@maren-kest", durationSec: 6 }],
@@ -409,7 +410,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [{ ...base.shots[0]!, id: "sh_95", number: 95, description: "@maren-kest" }],
@@ -461,7 +462,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [{ ...base.shots[0]!, id: "sh_96", number: 96, description: "@maren-kest", durationSec: 5 }],
@@ -497,7 +498,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [{ ...base.shots[0]!, id: "sh_97", number: 97, description: "@maren-kest", durationSec: 22 }],
@@ -537,7 +538,7 @@ describe("whole-scene reference budgeting", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [
@@ -572,7 +573,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const plan = planScene(
       {
         world: bundle.meta,
@@ -594,7 +595,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const styleOverride = "Bleached documentary realism with hard noon shadows.";
 
     for (const mode of ["per-shot", "whole-scene"] as const) {
@@ -639,7 +640,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
       ...production.scenes[0]!,
       shots: [
         {
-          ...production.scenes[0]!.shots[0]!,
+          ...orderedShots(production.scenes[0]!)[0]!,
           promptOverride: { text: override, sheetVersions: {} },
         },
       ],
@@ -672,7 +673,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
     const withLook = {
       ...maren,
@@ -723,7 +724,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
     const withLook = {
       ...maren,
@@ -779,7 +780,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
     const wide = {
       id: "council-coat",
@@ -833,7 +834,7 @@ describe("SPEC-017 art direction and scoped looks", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
     const older = {
       id: "council-coat",
@@ -893,7 +894,7 @@ describe("inheritance (R-1, D1, §3.2): a production is a lens, not a container"
     await gate.accept(staged.id);
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const plan = planScene(
       { world: bundle.meta, sheets: bundle.sheets, kits: bundle.referenceKits, scene, selections: production.selections, model: VIDEO_MODEL },
       "per-shot",
@@ -965,7 +966,7 @@ describe("SPEC-019 reference binding (R-1..R-4, D1, D2)", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const plan = planScene(
       {
         world: bundle.meta,
@@ -1451,7 +1452,7 @@ describe("SPEC-019 derived negatives (R-9..R-13, D8..D10)", () => {
     const { store } = await open();
     let bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene = production.scenes[0]!;
+    const scene = writerSceneView(production.scenes[0]!);
     const sceneFile = `${String(scene.number).padStart(2, "0")}-${scene.slug}`;
     const target = scene.shots[0]!;
     await setPromptOverride(store, bundle, {
@@ -1586,7 +1587,7 @@ describe("SPEC-019 skill-family mismatch at dispatch (R-21, T-14)", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const scene: Scene = { ...production.scenes[0]!, draftedWith: drafted };
+    const scene: Scene = { ...writerSceneView(production.scenes[0]!), draftedWith: drafted };
     const other = { ...VIDEO_MODEL, id: "veo-3.1", displayName: "Veo 3.1", family: "veo" };
     const plan = planScene(
       {
@@ -1824,7 +1825,7 @@ describe("standing constraints (#244, design turn 59)", () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
-    const base = production.scenes[0]!;
+    const base = writerSceneView(production.scenes[0]!);
     const scene: Scene = { ...base, shots: [shot(1, 5, "@maren-kest at the rail"), shot(2, 5, "@maren-kest turns")] };
     const input = {
       world: bundle.meta,

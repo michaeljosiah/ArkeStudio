@@ -8,6 +8,7 @@ import {
   type ShotPlanEntry,
   type Take,
   type TakeQc,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -65,10 +66,11 @@ function continuedFromOf(store: WorldStore, job: Job): Take["continuedFrom"] {
     throw new Error("continuedFrom cannot name a take that was itself continued");
   }
   const scene = production?.scenes.find((candidate) =>
-    candidate.shots.some((shot) => shot.id === job.target.id),
+    orderedShots(candidate).some((shot) => shot.id === job.target.id),
   );
-  const targetIndex = scene?.shots.findIndex((shot) => shot.id === job.target.id) ?? -1;
-  const previousShot = targetIndex > 0 ? scene?.shots[targetIndex - 1] : undefined;
+  const ordered = scene === undefined ? [] : orderedShots(scene);
+  const targetIndex = ordered.findIndex((shot) => shot.id === job.target.id);
+  const previousShot = targetIndex > 0 ? ordered[targetIndex - 1] : undefined;
   if (previousShot === undefined || !predecessor.coversShots.includes(previousShot.id)) {
     throw new Error("continuedFrom must name footage for the immediately previous shot in this scene");
   }

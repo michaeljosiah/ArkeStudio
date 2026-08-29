@@ -76,6 +76,7 @@ import {
   supportsVoiceUse,
   COMFYUI_WEIGHTS_COMPONENT_PREFIX,
   isComfyUiWeightsComponent,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -5956,9 +5957,9 @@ export class Coordinator {
           }
           if (fresh !== undefined && acceptedTake !== undefined) {
             const targetScene = sortScenes(fresh.scenes).find((candidate) =>
-              candidate.shots.some((shot) => shot.id === msg.shotId),
+              orderedShots(candidate).some((shot) => shot.id === msg.shotId),
             );
-            const ordered = targetScene?.shots ?? [];
+            const ordered = targetScene === undefined ? [] : orderedShots(targetScene);
             const index = ordered.findIndex((s) => s.id === msg.shotId);
             const following = index >= 0 ? ordered[index + 1] : undefined;
             if (following !== undefined) {
@@ -7366,7 +7367,7 @@ export class Coordinator {
         }
         const bundle = store.getBundle();
         const production = bundle.productions.find((p) => p.meta.id === msg.productionId);
-        const shot = production?.scenes.flatMap((scene) => scene.shots).find((s) => s.id === msg.shotId);
+        const shot = production?.scenes.flatMap((scene) => orderedShots(scene)).find((s) => s.id === msg.shotId);
         if (!shot?.audio?.line) {
           this.rejectEnqueue(msg.requestId, msg.kind, "That shot has no spoken line.");
           return;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { orderedShots } from "./scene-flow.js";
 import type { ProductionBundle } from "./client-state.js";
 import type { ManifestModel } from "./manifest.js";
 import type { Sheet } from "./world.js";
@@ -349,7 +350,7 @@ export function previewLineFor(sheet: Sheet, productions: ProductionBundle[]): P
   // 1 — existing dialogue for this sheet, in any production.
   for (const production of productions) {
     for (const scene of production.scenes) {
-      for (const shot of scene.shots) {
+      for (const shot of orderedShots(scene)) {
         const line = shot.audio?.kind === "vo" && shot.audio.speaker === sheet.id ? shot.audio.line : undefined;
         if (line !== undefined && line.trim().length > 0) {
           return { text: line, source: "own-line" };

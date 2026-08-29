@@ -1,4 +1,5 @@
 import {
+  orderedShots,
   CHARACTER_ROLE_MAX,
   SHEET_SHAPES,
   type Sheet,
@@ -95,7 +96,7 @@ export function entityRefExists(
     if (!scene) return false;
     return target.shotId === undefined
       ? options.allowUnallocated === true
-      : scene.shots.some((shot) => shot.id === target.shotId);
+      : orderedShots(scene).some((shot) => shot.id === target.shotId);
   }
   return bundle.series.some((s) => s.id === target.seriesId);
 }

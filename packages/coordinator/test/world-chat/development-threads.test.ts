@@ -22,6 +22,7 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 /**
  * Production-scoped threads (SPEC-023 R-20, issue #400): the same durable conversation, entered
@@ -203,7 +204,7 @@ describe("production-scoped threads (issue 400)", () => {
     it("amends only the fields it carries, and leaves everything else exactly as it was", async () => {
       const w = await world();
       const before = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-      const live = before.scenes.find((s) => s.id === "sc_04")!.shots.find((s) => s.id === "sh_12")!;
+      const live = orderedShots(before.scenes.find((s) => s.id === "sc_04")!).find((s) => s.id === "sh_12")!;
       assert.ok(live.camera, "the fixture shot has a camera, which this amendment does not mention");
 
       const seq = await withCandidates(w.log, [
@@ -227,10 +228,9 @@ describe("production-scoped threads (issue 400)", () => {
       assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
 
       const after = await scanWorld(w.dir);
-      const shot = after.bundle.productions
-        .find((p) => p.meta.id === "saltlight")!
-        .scenes.find((s) => s.id === "sc_04")!
-        .shots.find((s) => s.id === "sh_12")!;
+      const shot = orderedShots(
+        after.bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!,
+      ).find((s) => s.id === "sh_12")!;
       assert.equal(shot.durationSec, 6, "what was settled landed");
       assert.match(shot.intent ?? "", /Held, not slow/);
       assert.equal(shot.camera, live.camera, "and what nobody mentioned is untouched");
@@ -243,9 +243,9 @@ describe("production-scoped threads (issue 400)", () => {
       const w = await world();
       const production = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
       const highest = production.scenes
-        .flatMap((s) => s.shots)
+        .flatMap((s) => orderedShots(s))
         .reduce((a, s) => Math.max(a, Number(s.id.replace(/^sh_0*/, "")) || 0), 0);
-      const sceneBefore = production.scenes.find((s) => s.id === "sc_04")!;
+      const sceneBefore = writerSceneView(production.scenes.find((s) => s.id === "sc_04")!);
 
       const seq = await withCandidates(w.log, [
         candidate({
@@ -271,9 +271,9 @@ describe("production-scoped threads (issue 400)", () => {
       assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
 
       const after = await scanWorld(w.dir);
-      const scene = after.bundle.productions
-        .find((p) => p.meta.id === "saltlight")!
-        .scenes.find((s) => s.id === "sc_04")!;
+      const scene = writerSceneView(
+        after.bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!,
+      );
       assert.equal(scene.shots.length, sceneBefore.shots.length + 1, "it went on the end");
       const added = scene.shots[scene.shots.length - 1]!;
       assert.equal(added.title, "The water answers");
@@ -548,7 +548,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("holds back a shot amendment that restates the shot", async () => {
     const w = await world();
-    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const shot = scene.shots[0]!;
     const restated = candidate({
       classification: "development.shot",
@@ -563,7 +563,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("carries a shot amendment that moves the camera, leaving the rest of the shot alone", async () => {
     const w = await world();
-    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const shot = scene.shots[0]!;
     const moved = candidate({
       classification: "development.shot",
@@ -575,7 +575,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("never holds back a new shot or a new episode — a creation always writes", async () => {
     const w = await world();
-    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const added = candidate({
       classification: "development.shot",
       target: { kind: "shot", productionId: "saltlight", sceneId: scene.id },

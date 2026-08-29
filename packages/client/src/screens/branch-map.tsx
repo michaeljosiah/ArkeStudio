@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
-import {
+import { orderedShots,
   layoutRouting,
   productionShape,
   routingFindings,
@@ -141,7 +141,7 @@ export function BranchMapScreen() {
   const previewScene = preview !== null ? scenes.find((scene) => scene.id === preview.sceneId) : null;
   const previewMedia = (() => {
     if (!previewScene) return null;
-    const takeId = previewScene.shots
+    const takeId = orderedShots(previewScene)
       .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
       .find((id) => id !== null);
     const take = takeId != null ? production.takes.find((t) => t.id === takeId) : undefined;

@@ -33,7 +33,8 @@ import { SetupStatusSchema } from "./setup.js";
 import { VendorAuthStatusSchema, vendorAuthUnavailable } from "./vendor-auth.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { RoutingSchema } from "./routing.js";
-import { SceneSchema, SelectionsSchema } from "./scene.js";
+import { SelectionsSchema } from "./scene.js";
+import { SceneRecordSchema } from "./scene-flow.js";
 import { EpisodeIdSchema, SceneIdSchema } from "./ids.js";
 import { ReviewDecisionSchema, TakeSchema } from "./take.js";
 import { ClonedVoiceSchema, VoiceRuntimeStatusSchema } from "./voice.js";
@@ -128,7 +129,12 @@ export const ProductionBundleSchema = z
     /** story.md — freeform treatment / script prose, per format (§2.2). */
     treatment: z.string().nullable(),
     chapters: z.array(ChapterSummarySchema),
-    scenes: z.array(SceneSchema),
+    /**
+     * Scene records as the R-1 union (SPEC-029 §3.3 step 3): a graph scene crosses the wire
+     * with its `flow`, and order is derived where it is read — `linearizeSceneFlow` /
+     * `orderedShots` — never carried as a second authority beside it.
+     */
+    scenes: z.array(SceneRecordSchema),
     /**
      * Scene id → the actual on-disk file stem (issue #387). Captured at scan so no consumer
      * ever reconstructs a path from number and slug — the stem is the address the save, board,

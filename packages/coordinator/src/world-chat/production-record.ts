@@ -1,5 +1,5 @@
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
-import { productionShape } from "@arke-studio/contracts";
+import { orderedShots, productionShape } from "@arke-studio/contracts";
 
 /**
  * One production, read whole (round 3, 2026-08-22).
@@ -38,7 +38,7 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
       number: s.number,
       title: s.title,
       ...(s.synopsis !== undefined ? { synopsis: s.synopsis } : {}),
-      shots: s.shots.length,
+      shots: orderedShots(s).length,
     })),
   };
 }

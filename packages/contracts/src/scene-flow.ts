@@ -14,11 +14,12 @@ import { SceneBaseShape, SceneSchema, ShotSchema, type Scene, type Shot } from "
  * exactly once (R-6). The data shape is extensible; the accepted shape is not — a future node
  * or edge kind needs its own specification and schema boundary before it may parse (R-4).
  *
- * Rollout steps 1 and 2 (§3.3) live here: the shapes, pure validation and linearisation, the
- * deterministic legacy projection, and — since the scan now reads the union — the two functions
- * the schema-3 writer and the legacy-shaped read path are made of. Nothing in this file touches
- * a disk. The consumer sweep is step 3; until it lands, `projectSceneRecord` is what a consumer
- * still reading `scene.shots` is handed, and it is derived read-side state, never stored.
+ * Rollout steps 1–3 (§3.3) live here: the shapes, pure validation and linearisation, and the
+ * one ordered-shot boundary every consumer now derives through — `linearizeSceneFlow`, with
+ * `orderedShots` as its guaranteed-valid narrowing. Nothing in this file touches a disk. What
+ * remains of the legacy projection (`projectSceneRecord`, `writerSceneView`) serves the WRITE
+ * side only: whole-scene writers still build legacy payloads until step 4's semantic commands,
+ * and their working copy is derived read-side state, never stored.
  */
 
 // ---------------------------------------------------------------------------
@@ -646,19 +647,50 @@ export function linearizeSceneFlow(scene: SceneRecord): SceneSequence {
   };
 }
 
+/**
+ * The ordered shots of a scene the scan already validated (R-16): the one pure function,
+ * narrowed for the consumers that have nothing to do with an invalid graph. The scan surfaces
+ * an invalid flow as that file's problem and keeps it out of the bundle, so reaching this with
+ * one is a caller bug — refused by name, never guessed around (R-59).
+ */
+export function orderedShots(scene: SceneRecord): Shot[] {
+  const sequence = linearizeSceneFlow(scene);
+  if (sequence.kind === "invalid") {
+    throw new Error(
+      `scene ${scene.id} has an invalid flow: ${sequence.findings.map((finding) => finding.message).join("; ")}`,
+    );
+  }
+  return sequence.shots.map((pair) => pair.shot);
+}
+
+/**
+ * The legacy-shaped working copy a WRITE surface edits (SPEC-029 §3.3: writers keep building
+ * legacy `Scene` values until step 4's semantic commands). The storyboard editor and the shot
+ * sheet mutate a whole scene and save it back; the commit path re-derives the graph through
+ * `graphSceneFor`, so the view is an input format, never a stored authority. Its shot order
+ * comes through `orderedShots` — the one boundary — and read-path consumers must not reach for
+ * this: they take the sequence itself.
+ */
+export function writerSceneView(record: SceneRecord): LegacyScene {
+  if (!isGraphScene(record)) return record;
+  const { flow: _flow, ...base } = record;
+  return { ...base, shots: orderedShots(record) };
+}
+
 /** A scene in the legacy shape, or the reasons it could not be read as one. */
 export type SceneProjection =
   | { kind: "scene"; scene: LegacyScene }
   | { kind: "invalid"; findings: SceneFlowFinding[] };
 
 /**
- * Either arm as the legacy shape — the read path's scaffolding for rollout step 2 (§3.3).
+ * Either arm as the legacy shape — the WRITERS' remaining scaffolding (§3.3 step 3).
  *
- * The scan reads the union; every consumer still reads `scene.shots`. This is the one place
- * those two facts are reconciled, and it is a *derivation*, not a second stored authority: it is
- * computed at scan, never written back, and a graph scene's `flow` remains the only thing on
- * disk that says what follows what (R-14). Step 3 moves the consumers onto `linearizeSceneFlow`
- * and deletes this function; nothing new should be built on it.
+ * The read path no longer touches this: the scan carries the record forward and every consumer
+ * derives order through `linearizeSceneFlow`. What remains is the write side — whole-scene
+ * writers still build legacy `Scene` payloads until step 4's semantic commands — and the
+ * projection is how a writer gets its working copy (`writerSceneView`, `sceneFrom`). Still a
+ * *derivation*, never written back: `flow` remains the only thing on disk that says what
+ * follows what (R-14). Nothing new should be built on it, and step 4 deletes it.
  *
  * A malformed graph projects to nothing at all rather than to a guessed array (R-7, R-59) — the
  * caller reports the findings as the per-file problem they are and leaves the rest of the world

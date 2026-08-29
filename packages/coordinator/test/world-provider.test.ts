@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { WorldBundleSchema } from "@arke-studio/contracts";
 import { scanWorld } from "../src/world/scan.js";
 import { makeTempWorld } from "./world/helpers.js";
+import { orderedShots } from "@arke-studio/contracts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_WORLD = resolve(here, "../../../fixtures/worlds/the-undersong");
@@ -46,7 +47,7 @@ describe("scanWorld over the fixture corpus (T-18)", () => {
     const { bundle } = await scanWorld(FIXTURE_WORLD);
     const saltlight = bundle.productions[0]!;
     assert.equal(saltlight.meta.format, "video");
-    assert.equal(saltlight.scenes[0]!.shots.length, 4);
+    assert.equal(orderedShots(saltlight.scenes[0]!).length, 4);
     assert.equal(saltlight.takes.length, 4);
     assert.equal(saltlight.reviews.length, 2);
     assert.equal(saltlight.selections["sh_12"]?.acceptedTakeId, "tk_01J8F0000000000000000000B2");

@@ -13,12 +13,14 @@ import {
   type WorldBundle,
   type WorldChangeCandidate,
   type WorldChatLinkRef,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
 import { buildSheetContent, editSheetContent } from "../sheets/authoring.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
+import { sceneFrom } from "../productions/scene-record.js";
 
 /**
  * Turning a proposition into the files a proposal is made of (#70 §11.2).
@@ -681,11 +683,18 @@ export function materialiseCandidate(
        */
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
-      const scene = production.scenes.find((s) => s.id === candidate.target.sceneId);
+      const record = production.scenes.find((s) => s.id === candidate.target.sceneId);
       const stem = production.sceneFiles[candidate.target.sceneId];
-      if (!scene || stem === undefined) {
+      if (!record || stem === undefined) {
         throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
       }
+      /*
+       * This is a writer, and writers still speak the legacy shape (SPEC-029 §3.3: semantic
+       * commands are step 4): the whole scene goes back out with one shot changed inside it,
+       * and the commit path re-derives the graph through `graphSceneFor`. The legacy view is
+       * the writer's privilege — read-path consumers use `linearizeSceneFlow` instead.
+       */
+      const scene = sceneFrom(record);
       const draft = candidate.draft;
       const shotId = candidate.target.shotId;
       let shots: Shot[];
@@ -715,7 +724,7 @@ export function materialiseCandidate(
          * collision either way.
          */
         const highestId = production.scenes
-          .flatMap((s) => s.shots)
+          .flatMap((s) => orderedShots(s))
           .reduce((a, shot) => Math.max(a, Number(shot.id.replace(/^sh_0*/, "")) || 0), 0);
         const claimedIds = claimed?.shotIds ?? new Set<string>();
         let n = highestId + 1;

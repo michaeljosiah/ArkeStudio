@@ -42,7 +42,7 @@ function bundle(over: {
 }): ProductionBundle {
   return {
     meta: { id: "prod-1" },
-    scenes: [{ number: 1, shots: over.shots }],
+    scenes: [{ id: "sc_01", number: 1, shots: over.shots }],
     takes: over.takes ?? [],
     selections: over.selections ?? {},
     takeMediaInfo: Object.fromEntries(

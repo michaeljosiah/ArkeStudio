@@ -65,10 +65,11 @@ export function parseSceneRecord(raw: string): SceneRecord {
 }
 
 /**
- * The legacy-shaped view every consumer in this step still reads (R-10, R-16's scaffolding).
+ * The legacy-shaped view the WRITERS still work in (R-10; §3.3 step 3 moved every reader onto
+ * `linearizeSceneFlow`, so only the write side reaches for this until step 4).
  *
- * A malformed graph throws instead of projecting a guess. In the scan that becomes the file's
- * problem entry and the rest of the world opens (R-60); in a writer it refuses the write.
+ * A malformed graph throws instead of projecting a guess — in a writer that refuses the write
+ * by name.
  */
 export function sceneFrom(record: SceneRecord): Scene {
   const projection = projectSceneRecord(record);
@@ -76,7 +77,7 @@ export function sceneFrom(record: SceneRecord): Scene {
   return projection.scene;
 }
 
-/** Both halves at once, for the readers that need to know which arm they got. */
+/** Both halves at once, for the writers that need the record beside their working copy. */
 export function readSceneRecord(raw: string): { record: SceneRecord; scene: Scene } {
   const record = parseSceneRecord(raw);
   return { record, scene: sceneFrom(record) };

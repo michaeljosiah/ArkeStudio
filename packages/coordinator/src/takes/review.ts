@@ -15,6 +15,7 @@ import {
   type ClipAudioMode,
   type CutOverlay,
   type ShotSelection,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -89,10 +90,10 @@ export async function acceptTake(
   const previous = map[input.shotId];
   const takeChanged = previous?.acceptedTakeId !== decision.takeId;
   const targetScene = sortScenes(production.scenes).find((scene) =>
-    scene.shots.some((shot) => shot.id === input.shotId),
+    orderedShots(scene).some((shot) => shot.id === input.shotId),
   );
   if (targetScene === undefined) throw new Error(`shot ${input.shotId} is not in this production`);
-  const ordered = targetScene.shots;
+  const ordered = orderedShots(targetScene);
   const index = ordered.findIndex((shot) => shot.id === input.shotId);
   if (take.continuedFrom !== undefined) {
     const predecessor = index > 0 ? ordered[index - 1] : undefined;
