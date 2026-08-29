@@ -51,6 +51,8 @@ import {
   type Shot,
   type SpineCutSegment,
   type SizeTier,
+  orderedShots,
+  writerSceneView,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -267,7 +269,7 @@ export function ProductionLayout() {
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes
-      .flatMap((s) => s.shots)
+      .flatMap((s) => orderedShots(s))
       .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue").length ?? 0);
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
   const guestCount = prodId
@@ -1011,10 +1013,10 @@ export function ProductionDashboardScreen() {
   const dayOne = isDayOne(production);
   const decisions = takeDecisions(production);
   const pending = production.takes.filter((t) => decisions[t.id] === "pending");
-  const shots = production.scenes.flatMap((s) => s.shots);
+  const shots = production.scenes.flatMap((s) => orderedShots(s));
   const acceptedShots = shots.filter((s) => acceptedTakeId(production, s.id)).length;
   const nextGap = production.scenes
-    .flatMap((scene) => scene.shots.map((shot) => ({ scene, shot })))
+    .flatMap((scene) => orderedShots(scene).map((shot) => ({ scene, shot })))
     .find(({ shot }) => !acceptedTakeId(production, shot.id));
   const latest = [...production.takes]
     .sort((a, b) => (b.completedAt ?? b.dispatchedAt).localeCompare(a.completedAt ?? a.dispatchedAt))
@@ -1582,7 +1584,7 @@ export function ScenesScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const totalSec =
-    production?.scenes.reduce((s, sc) => s + sc.shots.reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
+    production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
     0;
   return (
     <div className="fy-prodmain" data-screen="scenes">
@@ -1599,7 +1601,8 @@ export function ScenesScreen() {
       {production && production.scenes.length > 0 ? (
         <div className="fy-ledger">
           {production.scenes.map((scene) => {
-            const covered = scene.shots.filter((s) => acceptedTakeId(production, s.id)).length;
+            const sceneShots = orderedShots(scene);
+            const covered = sceneShots.filter((s) => acceptedTakeId(production, s.id)).length;
             return (
               <button
                 key={scene.id}
@@ -1619,12 +1622,12 @@ export function ScenesScreen() {
                   <div className="fy-row__name">
                     {scene.number} · {scene.title}
                     <span
-                      className={`fy-dot fy-dot--${covered === scene.shots.length && scene.shots.length > 0 ? "ok" : "warn"}`}
+                      className={`fy-dot fy-dot--${covered === sceneShots.length && sceneShots.length > 0 ? "ok" : "warn"}`}
                     />
                   </div>
                   <div className="fy-row__sub">
-                    {scene.shots.length} shots ·{" "}
-                    {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0))}
+                    {sceneShots.length} shots ·{" "}
+                    {seconds(sceneShots.reduce((s, x) => s + (x.durationSec ?? 0), 0))}
                     {scene.inherits?.location ? ` · @${scene.inherits.location}` : ""}
                     {scene.inherits?.timeOfDay ? ` · ${scene.inherits.timeOfDay}` : ""}
                   </div>
@@ -1665,7 +1668,8 @@ export function SceneChatScreen() {
   const { worldId, prodId, sceneId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const scene = production?.scenes.find((s) => s.id === sceneId);
+  const record = production?.scenes.find((s) => s.id === sceneId);
+  const scene = record === undefined ? undefined : writerSceneView(record);
   if (!production || !scene || !prodId || !sceneId) {
     return (
       <div className="fy-story" data-screen="scene-chat">
@@ -1720,7 +1724,8 @@ export function SceneDetailScreen() {
   /* Turn 102: a review is consulted and put away, and spending is a drawer over the work. */
   const [reviewing, setReviewing] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const scene = production?.scenes.find((s) => s.id === sceneId);
+  const record = production?.scenes.find((s) => s.id === sceneId);
+  const scene = record === undefined ? undefined : writerSceneView(record);
   if (!production || !scene) {
     return (
       <Screen id="scene-detail">
@@ -1976,7 +1981,7 @@ function TakesView({
 }) {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const all = production?.scenes.flatMap((s) => s.shots) ?? [];
+  const all = production?.scenes.flatMap((s) => orderedShots(s)) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   /*
    * The shot the storyboard sent, if it sent one (found by driving: `Generate frame` on shot 14
@@ -1986,7 +1991,8 @@ function TakesView({
   const asked = askedFor !== null && all.some((s) => s.id === askedFor) ? askedFor : null;
   const shotId = selectedShotId ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
-  const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
+  const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
+  const scene = found === null ? null : writerSceneView(found);
   /*
    * The chips are this scene's shots, not the production's (found by driving: a production with
    * two scenes drew three chips, two of them reading "Shot 1", because a shot's number is
@@ -2105,7 +2111,7 @@ function TakesView({
                   type="button"
                   className={cx("fy-takechip", sc.id === scene.id && "fy-takechip--on")}
                   onClick={() => {
-                    setSelectedShotId(sc.shots[0]?.id ?? null);
+                    setSelectedShotId(orderedShots(sc)[0]?.id ?? null);
                     setPickedId(null);
                   }}
                 >
@@ -2222,7 +2228,7 @@ export function GenerateScreen() {
   // Deep-linkable — the retired /stills address redirects here with the lens on.
   const [searchParams, setSearchParams] = useSearchParams();
   const contactLens = searchParams.get("view") === "stills";
-  const shots = production?.scenes.flatMap((s) => s.shots) ?? [];
+  const shots = production?.scenes.flatMap((s) => orderedShots(s)) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedTakeId, setSelectedTakeId] = useState<string | null>(null);
   /* The bench honours the address the same way the takes view does (review 2026-08-22). */
@@ -2233,7 +2239,8 @@ export function GenerateScreen() {
     shots[0]?.id ??
     null;
   const shot = shots.find((s) => s.id === shotId) ?? null;
-  const scene = production?.scenes.find((s) => s.shots.some((x) => x.id === shotId)) ?? null;
+  const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
+  const scene = found === null ? null : writerSceneView(found);
   const takes = production && shotId ? takesForShot(production, shotId) : [];
   const decisions = production ? takeDecisions(production) : {};
   const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;
@@ -2951,7 +2958,8 @@ export function DispatchDialogScreen() {
     production?.scenes[0]?.id ??
     null;
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
-  const scene = production?.scenes.find((s) => s.id === sceneId) ?? null;
+  const sceneRecord = production?.scenes.find((s) => s.id === sceneId) ?? null;
+  const scene = sceneRecord === null ? null : writerSceneView(sceneRecord);
   // One resolver for the bar and its host, so the dialog cannot show one model and dispatch
   // another. Planning from every manifest row let a switched-off model be enqueued from the mode
   // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
@@ -3407,7 +3415,7 @@ export function VoiceLineDialogScreen() {
   const clientState = useStore().state;
   const navigate = useNavigate();
   const spoken =
-    production?.scenes.flatMap((s) => s.shots).filter((s) => s.audio?.line && s.audio.speaker) ?? [];
+    production?.scenes.flatMap((s) => orderedShots(s)).filter((s) => s.audio?.line && s.audio.speaker) ?? [];
   // The shot the row asked for. Without this the dialog showed whichever line came first, so
   // pressing Generate beside one character opened another character's line.
   const asked = params.get("shot");
@@ -4840,7 +4848,7 @@ export function AudioScreen() {
   const voLines = isStory
     ? []
     : (production?.scenes
-        .flatMap((s) => s.shots)
+        .flatMap((s) => orderedShots(s))
         .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ?? []);
   const speakerOf = (id: string | undefined) => world?.sheets.find((c) => c.id === id);
   return (

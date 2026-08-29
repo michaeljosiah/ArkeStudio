@@ -26,7 +26,6 @@ import {
   SeasonSchema,
   SeriesSchema,
   sortScenes,
-  type Scene,
   SelectionsSchema,
   ProductionSpineSchema,
   CutFileSchema,
@@ -47,6 +46,8 @@ import {
   type WorldBundle,
   type WorldMeta,
   type WorldProblem,
+  linearizeSceneFlow,
+  type SceneRecord,
 } from "@arke-studio/contracts";
 import { MarkdownFile, sha256 } from "./text-files.js";
 import { readBible } from "./bible.js";
@@ -54,7 +55,7 @@ import { projectReview } from "../gate/review.js";
 import { SETTLED_FILE } from "../gate/proposals.js";
 import { toExtendedLength, toPortable } from "./paths.js";
 import { readChanges } from "./change-writer.js";
-import { readSceneRecord } from "../productions/scene-record.js";
+import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.js";
 
 /**
  * The world scan (SPEC-002 R-2, §2.12): parse and validate every entity, collecting per-file
@@ -480,14 +481,21 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // break by id — never by filename. The actual on-disk stem is captured beside each scene so
     // no consumer ever reconstructs a path from number and slug.
     //
-    // Read through the R-1 union and handed on as the legacy shape (SPEC-029 §3.3 step 2): both
-    // scene shapes parse, and a graph scene's ordered shots are derived here so that consumers,
-    // who move onto `linearizeSceneFlow` in step 3, keep reading exactly what they always read.
-    // Nothing derived is written back — `flow` stays the only order authority on disk (R-14).
-    const sceneEntries: Array<{ file: string; scene: Scene }> = [];
+    // Read through the R-1 union and carried forward AS the union (SPEC-029 §3.3 step 3): the
+    // record is what the bundle holds, and order is derived where it is read — every consumer
+    // goes through `linearizeSceneFlow` / `orderedShots`, so no legacy projection rides beside
+    // the graph as a second authority. The flow is still validated here: an invalid graph is
+    // this file's problem entry, named finding by finding, and the rest of the world opens
+    // (R-59, R-60) — no consumer downstream ever meets a graph it would have to guess about.
+    const sceneEntries: Array<{ file: string; scene: SceneRecord }> = [];
     const sceneFiles: Record<string, string> = {};
     for (const file of (await listDir(join(pdir, "scenes"))).filter((f) => f.endsWith(".json")).sort()) {
-      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => readSceneRecord(raw).scene);
+      const scene = await tryParse(`productions/${id}/scenes/${file}`, (raw) => {
+        const record = parseSceneRecord(raw);
+        const sequence = linearizeSceneFlow(record);
+        if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
+        return record;
+      });
       if (!scene) continue;
       const stem = file.slice(0, -".json".length);
       if (sceneFiles[scene.id] !== undefined) {

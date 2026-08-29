@@ -20,7 +20,7 @@ import {
   sceneImageOutput,
   type ManifestModel,
 } from "./manifest.js";
-import type { Scene } from "./scene.js";
+import type { SceneRecord } from "./scene-flow.js";
 import type { Sheet } from "./world.js";
 import type { WorldBundle } from "./client-state.js";
 
@@ -223,7 +223,7 @@ function droppedOf(
 
 export interface CompilePassesInput {
   productionId: string;
-  scene: Scene;
+  scene: SceneRecord;
   plan: ScenePlan;
   model: ManifestModel;
   world: Pick<WorldBundle, "meta" | "sheets" | "artDirection">;

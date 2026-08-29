@@ -1,5 +1,5 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { orderedShots, productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "./wrapup.js";
 
 /**
@@ -132,9 +132,10 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const shape = describeShape(production);
       if (shape) lines.push(shape);
       if (scene) {
+        const shots = orderedShots(scene);
         lines.push(
-          scene.shots.length > 0
-            ? `Its shots, in order: ${scene.shots
+          shots.length > 0
+            ? `Its shots, in order: ${shots
                 .slice(0, 30)
                 .map(
                   (sh) =>
@@ -142,7 +143,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
                       sh.durationSec !== undefined ? ` (${sh.durationSec}s)` : ""
                     } — "${clip(sh.description)}"`,
                 )
-                .join("; ")}${scene.shots.length > 30 ? "; …" : ""}.`
+                .join("; ")}${shots.length > 30 ? "; …" : ""}.`
             : "It has no shots yet.",
         );
         if (scene.inherits) {

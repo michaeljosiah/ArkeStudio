@@ -1,4 +1,5 @@
 import type { ProductionBundle } from "./client-state.js";
+import { orderedShots } from "./scene-flow.js";
 import { DEFAULT_SHOT_SEC } from "./planning.js";
 import type { Sheet } from "./world.js";
 
@@ -161,7 +162,7 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
   const mentioned = new Set<string>();
   for (const scene of production.scenes) {
     if (!inEpisodes.has(scene.id)) continue;
-    for (const shot of scene.shots) for (const slug of mentionsOf(shot.description)) mentioned.add(slug);
+    for (const shot of orderedShots(scene)) for (const slug of mentionsOf(shot.description)) mentioned.add(slug);
   }
   for (const sheet of sheets) {
     if (sheet.type !== "character" || sheet.retired === true) continue;
@@ -183,7 +184,7 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
     for (const sceneId of episode.scenes) {
       const scene = scenesById.get(sceneId);
       if (!scene) continue;
-      for (const shot of scene.shots) {
+      for (const shot of orderedShots(scene)) {
         for (const slug of mentionsOf(shot.description)) {
           if (!seen.has(slug)) introduced.add(slug);
         }
@@ -208,7 +209,7 @@ export function seasonFindings(production: ProductionBundle, sheets: readonly Sh
         const scene = scenesById.get(sceneId);
         // The same default every other module bills at (DEFAULT_SHOT_SEC): summing unauthored
         // shots as zero made a 120s episode of default-length shots read "nothing planned".
-        return sum + (scene?.shots.reduce((s, shot) => s + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0) ?? 0);
+        return sum + (scene === undefined ? 0 : orderedShots(scene).reduce((total, shot) => total + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0));
       }, 0);
       if (seconds === 0) continue; // an episode with no shots at all is not a cost finding
       const min = defaults.episodeSecondsMin;

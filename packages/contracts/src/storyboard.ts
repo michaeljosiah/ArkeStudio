@@ -1,7 +1,8 @@
 import { assembleBlocks } from "./planning.js";
 import type { ManifestModel } from "./manifest.js";
-import type { Scene, Selections, Shot } from "./scene.js";
+import type { Selections, Shot } from "./scene.js";
 import type { Sheet, WorldMeta } from "./world.js";
+import { orderedShots, type SceneRecord } from "./scene-flow.js";
 
 /**
  * Storyboards drawn to be read (SPEC-019 §2.12, R-22..R-25, R-27).
@@ -78,12 +79,12 @@ function storyboardPrompt(panels: StoryboardPanel[], style: string | undefined):
 export function planStoryboard(input: {
   world: WorldMeta;
   sheets: Sheet[];
-  scene: Scene;
+  scene: SceneRecord;
   shots?: Shot[];
   target: ManifestModel;
   artDirection?: string;
 }): StoryboardPlan {
-  const shots = input.shots ?? input.scene.shots;
+  const shots = input.shots ?? orderedShots(input.scene);
   const cap = input.target.limits.storyboardPanels ?? null;
   const kept = cap === null ? shots : shots.slice(0, cap);
   const excess = cap === null ? [] : shots.slice(cap);
@@ -122,7 +123,7 @@ export function planStoryboard(input: {
  * it stands: an edited shot description beside an unredrawn panel is exactly the contradiction
  * R-24 exists to make unrepresentable, reintroduced by time rather than by authorship.
  */
-export function storyboardUsable(scene: Scene, aspect?: string): { usable: boolean; reason: string | null } {
+export function storyboardUsable(scene: SceneRecord, aspect?: string): { usable: boolean; reason: string | null } {
   const board = scene.storyboard;
   if (board === undefined) return { usable: false, reason: "no storyboard has been drawn for this scene" };
   if (!board.accepted) return { usable: false, reason: "the storyboard has not been accepted yet" };
@@ -195,14 +196,14 @@ function frameFor(shotId: string, selections: Selections): string | null {
  * silently is one nobody can correct.
  */
 export function chooseReferenceSteering(input: {
-  scene: Scene;
+  scene: SceneRecord;
   shots?: Shot[];
   selections: Selections;
   model: ManifestModel;
   /** The production's delivery aspect (issue 389), gating a board drawn for another shape. */
   aspect?: string;
 }): ReferenceSteering {
-  const shots = input.shots ?? input.scene.shots;
+  const shots = input.shots ?? orderedShots(input.scene);
   const board = storyboardUsable(input.scene, input.aspect);
   const boardFile = input.scene.storyboard?.file ?? null;
   const fallback = (why: string): ReferenceSteering =>

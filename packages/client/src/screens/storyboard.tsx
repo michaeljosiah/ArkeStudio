@@ -15,6 +15,8 @@ import {
   type Scene,
   type Shot,
   type ShotFraming,
+  orderedShots,
+  writerSceneView,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, Callout, Textarea, cx } from "../components/ui.js";
@@ -239,12 +241,12 @@ export function StoryboardStrip({
 
   const insertAt = (index: number) =>
     mutateShots((shots) => {
-      shots.splice(index, 0, blankShot(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots));
+      shots.splice(index, 0, blankShot(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots));
       return shots;
     });
   const duplicate = (shot: Shot) =>
     mutateShots((shots) => {
-      const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots);
+      const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots);
       const at = shots.findIndex((s) => s.id === shot.id);
       // A duplicate is the authored shot again, not its output: no takes ride along, and a
       // fresh id means no selections or covers point at it by accident.
@@ -642,7 +644,10 @@ export function ShotSheetScreen() {
   const { worldId, prodId, sceneId, shotId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const scene = production?.scenes.find((s) => s.id === sceneId);
+  const record = production?.scenes.find((s) => s.id === sceneId);
+  // The shot sheet edits and saves the whole scene, so it works in the writer's view; the
+  // order inside it comes through the one boundary (`orderedShots`).
+  const scene = record === undefined ? undefined : writerSceneView(record);
   const shot = scene?.shots.find((s) => s.id === shotId);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [addingRef, setAddingRef] = useState(false);
@@ -734,7 +739,7 @@ export function ShotSheetScreen() {
         <Button
           variant="ghost"
           onClick={() => {
-            const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => x.shots) ?? scene.shots);
+            const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots);
             const at = scene.shots.findIndex((s) => s.id === shot.id);
             const shots = [...scene.shots];
             const copy = { ...shot, id, number };

@@ -26,6 +26,7 @@ import {
   type WorldChatProposalOrigin,
   type RippleItem,
   type RipplePreview,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -964,17 +965,16 @@ export class ProposalManager {
      * through the gate, and the storyboard was the only way to touch it. A pre-existing overlap
      * is a fact about the world; what this check exists to stop is a new one being added.
      */
-    const already = new Set(
-      (production.scenes.find((s) => s.id === scene.id || production.sceneFiles[s.id] === stem)?.shots ?? []).map(
-        (shot) => shot.id,
-      ),
+    const priorScene = production.scenes.find(
+      (s) => s.id === scene.id || production.sceneFiles[s.id] === stem,
     );
+    const already = new Set((priorScene === undefined ? [] : orderedShots(priorScene)).map((shot) => shot.id));
     const taken = new Map<string, string>();
     for (const other of production.scenes) {
       // The scene this file IS, matched by stem as well as id: a redraft of the same file keeps
       // its own ids, and calling that a collision would make every second draft unacceptable.
       if (other.id === scene.id || production.sceneFiles[other.id] === stem) continue;
-      for (const shot of other.shots) taken.set(shot.id, other.title || other.id);
+      for (const shot of orderedShots(other)) taken.set(shot.id, other.title || other.id);
     }
     const clashes = mine.filter((id) => taken.has(id) && !already.has(id));
     if (clashes.length === 0) return null;

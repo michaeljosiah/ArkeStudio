@@ -29,9 +29,10 @@ import {
 } from "./manifest.js";
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
+import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import { effectiveFraming } from "./scene.js";
 import { packBoards, packShotsFor } from "./boards.js";
-import type { Scene, Shot, ShotFraming } from "./scene.js";
+import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
 import type { Sheet, WorldMeta } from "./world.js";
@@ -157,7 +158,7 @@ export interface PromptBlocks {
 export interface AssembleInput {
   world: WorldMeta;
   sheets: Sheet[];
-  scene: Scene;
+  scene: SceneRecord;
   shot: Shot;
   artDirection?: string;
   /**
@@ -183,7 +184,7 @@ export interface AssembleInput {
  * asked of an agent — a fixture list nobody wrote is a fixture list nobody can be held to, and
  * the failure mode this block exists to fix is precisely a model inventing geometry.
  */
-export function spatialLayoutFor(scene: Scene, sheets: readonly Sheet[]): string | null {
+export function spatialLayoutFor(scene: SceneRecord, sheets: readonly Sheet[]): string | null {
   const locationId = scene.inherits?.location;
   const location = locationId !== undefined ? sheets.find((sheet) => sheet.id === locationId) : undefined;
   if (location?.type !== "location") return null;
@@ -375,7 +376,7 @@ export function joinBlocks(blocks: PromptBlocks): string {
 export function assemblePassBlocks(input: {
   world: WorldMeta;
   sheets: Sheet[];
-  scene: Scene;
+  scene: SceneRecord;
   entries: ReadonlyArray<{ shot: Shot; prompt: { text: string; overridden: boolean } }>;
   artDirection?: string;
   carriedSheetIds?: ReadonlySet<string>;
@@ -438,7 +439,7 @@ export function assemblePassBlocks(input: {
 export function assemblePrompt(
   world: WorldMeta,
   sheets: Sheet[],
-  scene: Scene,
+  scene: SceneRecord,
   shot: Shot,
   artDirection?: string,
   carriedSheetIds?: ReadonlySet<string>,
@@ -467,7 +468,7 @@ export function assemblePrompt(
 export function promptFor(
   world: WorldMeta,
   sheets: Sheet[],
-  scene: Scene,
+  scene: SceneRecord,
   shot: Shot,
   artDirection?: string,
   carriedSheetIds?: ReadonlySet<string>,
@@ -1244,7 +1245,7 @@ export interface DispatchWarnings {
  * money moves.
  */
 export function skillFamilyMismatch(
-  scene: Scene,
+  scene: SceneRecord,
   model: ManifestModel,
 ): DispatchWarnings["skillFamilyMismatch"] {
   const drafted = scene.draftedWith;
@@ -1275,7 +1276,7 @@ export interface ScenePlanInput {
   world: WorldMeta;
   sheets: Sheet[];
   kits: ReferenceKit[];
-  scene: Scene;
+  scene: SceneRecord;
   selections: Selections;
   /**
    * The production's takes, which is how a continuation finds the footage it extends (R-50).
@@ -1404,13 +1405,13 @@ export interface ScenePlan {
 }
 
 function sceneCast(
-  scene: Scene,
+  scene: SceneRecord,
   sheets: Sheet[],
 ): { resolved: ResolvedCast; perShot: Map<string, ResolvedCast> } {
   const perShot = new Map<string, ResolvedCast>();
   const seen = new Map<string, { sheet: Sheet; retired: boolean }>();
   const unknown = new Set<string>();
-  for (const shot of scene.shots) {
+  for (const shot of orderedShots(scene)) {
     const resolved = resolveCast(shot.description, sheets);
     perShot.set(shot.id, resolved);
     for (const entry of resolved.cast) if (!seen.has(entry.sheet.id)) seen.set(entry.sheet.id, entry);
@@ -1422,7 +1423,7 @@ function sceneCast(
 function budgetFor(
   cast: ResolvedCast["cast"],
   kits: ReferenceKit[],
-  scene: Scene,
+  scene: SceneRecord,
   sheets: Sheet[],
   model: ManifestModel,
   productionId?: string,
@@ -1550,7 +1551,7 @@ export function continuationAvailable(input: {
  * in the one place both the dialog and the compiler read.
  */
 function resolveContinuations(
-  scene: Scene,
+  scene: SceneRecord,
   selections: Selections,
   model: ManifestModel,
   takes: readonly Take[] | undefined,
@@ -1561,7 +1562,7 @@ function resolveContinuations(
   // that predates continuation, and it gets exactly the dispatch it got before.
   if (takes === undefined) return states;
   const route = continueDispatchFor(model);
-  for (const [shotIndex, shot] of scene.shots.entries()) {
+  for (const [shotIndex, shot] of orderedShots(scene).entries()) {
     if (shot.continuity?.continuesPrevious !== true) continue;
     if (mode !== "per-shot") {
       states.set(shot.id, {
@@ -1573,13 +1574,13 @@ function resolveContinuations(
       states.set(shot.id, { unavailable: modeUnavailableReason(model, "continue") ?? "no continue route" });
       continue;
     }
-    const availability = continuationAvailable({ shotIndex, shots: scene.shots, selections, takes });
+    const availability = continuationAvailable({ shotIndex, shots: orderedShots(scene), selections, takes });
     if (!availability.available) {
       states.set(shot.id, { unavailable: availability.reason });
       continue;
     }
     const predecessor = availability.predecessor;
-    const from = scene.shots[shotIndex - 1]!;
+    const from = orderedShots(scene)[shotIndex - 1]!;
     /*
      * The file lives with the PASS, not with the segment (SPEC-013 R-3).
      *
@@ -1613,7 +1614,7 @@ function resolveContinuations(
 
 /** How each shot's boundary-frame selection resolves against the world's shelf (issue 154). */
 function resolveBoundaryFrames(
-  scene: Scene,
+  scene: SceneRecord,
   selections: Selections,
   model: ManifestModel,
   artifacts: readonly ArtifactSidecar[] | undefined,
@@ -1624,7 +1625,7 @@ function resolveBoundaryFrames(
   // caller that cannot supply artifacts is the caller that predates them.
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
-  for (const [shotIndex, shot] of scene.shots.entries()) {
+  for (const [shotIndex, shot] of orderedShots(scene).entries()) {
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -1640,7 +1641,7 @@ function resolveBoundaryFrames(
       states.set(shot.id, { stale: `${artifactId} has been superseded` });
       continue;
     }
-    const predecessor = shotIndex > 0 ? scene.shots[shotIndex - 1] : undefined;
+    const predecessor = shotIndex > 0 ? orderedShots(scene)[shotIndex - 1] : undefined;
     const selectedPredecessor = predecessor
       ? (selections[predecessor.id]?.acceptedTakeId ?? null)
       : null;
@@ -1683,7 +1684,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // the world forbids.
   const constraints = standingConstraints(input.artDirection, input.production);
 
-  const shots: ShotDispatchPlan[] = scene.shots.map((shot) => {
+  const shots: ShotDispatchPlan[] = orderedShots(scene).map((shot) => {
     const cast = perShot.get(shot.id)!;
     const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId);
     const references = budget.carried.map((c) =>
@@ -1800,7 +1801,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = packBoards(
       packShotsFor({
         scene,
-        shots: scene.shots,
+        shots: orderedShots(scene),
         selections,
         takes: input.takes ?? [],
         /*
@@ -1829,7 +1830,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
   })();
 
-  const pack = packScene(scene.shots, capSec, {
+  const pack = packScene(orderedShots(scene), capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
     forceBreakBefore: boardBoundaries,
@@ -1862,7 +1863,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           negatives: derivedNegatives({
             capability: model.capability,
             shots: pass.plan
-              .map((entry) => scene.shots.find((s) => s.id === entry.shotId))
+              .map((entry) => orderedShots(scene).find((s) => s.id === entry.shotId))
               .filter((s): s is Shot => s !== undefined),
             constraints,
             ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
@@ -1903,7 +1904,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               ) === index,
           )
       : sceneBudget.dropped;
-  const overlongShots = scene.shots
+  const overlongShots = orderedShots(scene)
     .map((shot) => ({
       shot,
       choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
@@ -1953,7 +1954,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // rather than a picture, so "no start frame" is not a gap in it.
     shotsWithoutFrame:
       frameDispatchFor(model, 1) !== null || model.accepts.startFrame
-        ? scene.shots
+        ? orderedShots(scene)
             .filter(
               (s) =>
                 continuations.get(s.id)?.continuation === undefined &&
@@ -1979,7 +1980,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // that matters — and leaving it here would be worse than noise: compilation refuses a plan
     // with any stale frame, so an old selection on a shot now extending footage would block the
     // whole dispatch over a field this route never reads.
-    staleFrames: scene.shots.flatMap((shot) => {
+    staleFrames: orderedShots(scene).flatMap((shot) => {
       if (continuations.get(shot.id)?.continuation !== undefined) return [];
       const stale = boundaryFrames.get(shot.id)?.stale;
       return stale !== undefined ? [{ shotId: shot.id, number: shot.number, detail: stale }] : [];
@@ -2001,7 +2002,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           ]
         : [],
     ),
-    continuationUnavailable: scene.shots.flatMap((shot) => {
+    continuationUnavailable: orderedShots(scene).flatMap((shot) => {
       const reason = continuations.get(shot.id)?.unavailable;
       return reason !== undefined ? [{ shotId: shot.id, number: shot.number, reason }] : [];
     }),
@@ -2047,7 +2048,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       const verdict = payloadVerdict(raw, ceiling);
       return verdict.over ? verdict : null;
     })(),
-    overriddenStale: scene.shots
+    overriddenStale: orderedShots(scene)
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),
     // Refused by name before enqueue (issue 389): the shape, the model, and what it does offer.

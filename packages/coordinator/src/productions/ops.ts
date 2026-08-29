@@ -32,6 +32,7 @@ import {
   type Shot,
   type WorldBundle,
   type Capability,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -639,7 +640,7 @@ export async function draftSceneSkeleton(
    * gate refuses a collision either way, and the repair turn quotes the same rule.
    */
   const shotBase =
-    (production?.scenes ?? []).flatMap((s) => s.shots).reduce((a, shot) => {
+    (production?.scenes ?? []).flatMap((s) => orderedShots(s)).reduce((a, shot) => {
       const n = Number(shot.id.replace(/^sh_0*/, ""));
       return Number.isFinite(n) ? Math.max(a, n) : a;
     }, 0) + 1;
@@ -865,14 +866,15 @@ const BOARD_GAP = 12;
 export async function compileBoard(
   store: WorldStore,
   production: ProductionBundle,
-  scene: Scene,
+  scene: SceneRecord,
   artifacts: readonly ArtifactSidecar[] = [],
 ): Promise<Uint8Array> {
-  const rows = Math.max(1, Math.ceil(scene.shots.length / BOARD_COLS));
+  const shots = orderedShots(scene);
+  const rows = Math.max(1, Math.ceil(shots.length / BOARD_COLS));
   const width = BOARD_COLS * BOARD_CELL + (BOARD_COLS + 1) * BOARD_GAP;
   const height = rows * BOARD_CELL + (rows + 1) * BOARD_GAP;
   const canvas: RgbaImage = solidImage(width, height, [24, 24, 26, 255]);
-  for (const [i, shot] of scene.shots.entries()) {
+  for (const [i, shot] of shots.entries()) {
     const selection = production.selections[shot.id];
     const col = i % BOARD_COLS;
     const row = Math.floor(i / BOARD_COLS);
@@ -935,7 +937,7 @@ export async function landBoard(
 export async function exportBoard(
   store: WorldStore,
   productionId: string,
-  scene: Scene,
+  scene: SceneRecord,
   png: Uint8Array,
   clock: () => string,
 ): Promise<string> {
@@ -1076,7 +1078,7 @@ export async function setProductionModel(
 export function composeDispatches(
   worldId: string,
   productionId: string,
-  scene: Scene,
+  scene: SceneRecord,
   plan: ScenePlan,
   model: ManifestModel,
   world: WorldBundle,

@@ -1,4 +1,5 @@
 import type { ProductionBundle } from "./client-state.js";
+import { orderedShots } from "./scene-flow.js";
 import type { Take } from "./take.js";
 import { anchorBudgetSec, anchorProblems, orderedAnchors, type ClipAudioPolicy, type ProductionSpine } from "./spine.js";
 
@@ -215,7 +216,7 @@ export function deriveSpineCut(
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
   const shotsById = new Map<string, { sceneNumber: number; number: number; title: string }>();
   for (const scene of production.scenes) {
-    for (const shot of scene.shots) {
+    for (const shot of orderedShots(scene)) {
       shotsById.set(shot.id, { sceneNumber: scene.number, number: shot.number, title: shot.title });
     }
   }

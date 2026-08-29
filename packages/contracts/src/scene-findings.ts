@@ -1,4 +1,5 @@
-import { effectiveFraming, type Scene, type Shot } from "./scene.js";
+import { effectiveFraming, type Shot } from "./scene.js";
+import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import type { ProductionBundle } from "./client-state.js";
 
 /**
@@ -38,14 +39,14 @@ function name(shot: Shot): string {
 }
 
 export function sceneFindings(
-  scene: Scene,
+  scene: SceneRecord,
   /**
    * Shots whose script has moved since it was last read into coverage, computed by the caller —
    * the digests are hashed in the browser, which contracts cannot do (SPEC-023's coverage rule).
    */
   staleShotIds: readonly string[] = [],
 ): SceneFinding[] {
-  const shots = scene.shots ?? [];
+  const shots = orderedShots(scene);
   if (shots.length === 0) {
     return [
       {
@@ -117,9 +118,9 @@ export function sceneFindings(
  * episode membership and the selections its shots carried. Those are bookkeeping the deletion
  * owns, not decisions the person has to make twice.
  */
-export function sceneDeleteBlockers(production: ProductionBundle, scene: Scene): string[] {
+export function sceneDeleteBlockers(production: ProductionBundle, scene: SceneRecord): string[] {
   const reasons: string[] = [];
-  const accepted = scene.shots.filter((shot) => production.selections[shot.id]?.acceptedTakeId != null);
+  const accepted = orderedShots(scene).filter((shot) => production.selections[shot.id]?.acceptedTakeId != null);
   if (accepted.length > 0) {
     reasons.push(
       `${accepted.map((s) => `shot ${s.number}`).join(", ")} ${accepted.length === 1 ? "has" : "have"} an accepted take — reject it first, or the footage is left belonging to nothing`,

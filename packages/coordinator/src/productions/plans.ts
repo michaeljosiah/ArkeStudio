@@ -23,7 +23,7 @@ import {
   type PlanPolicy,
   type PlanState,
   type ProductionBundle,
-  type Scene,
+  type SceneRecord,
   type ScenePlan,
   type Take,
   type WorldBundle,
@@ -102,7 +102,7 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
 export interface CreatePlanInput {
   worldId: string;
   productionId: string;
-  scene: Scene;
+  scene: SceneRecord;
   plan: ScenePlan;
   model: ManifestModel;
   world: WorldBundle;

@@ -8,6 +8,7 @@ import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 /**
  * The voice-line dialog (built 2026-08-17). Everything around it already existed — the Audio
@@ -28,7 +29,7 @@ function render(path: string, state: ClientState = FIXTURE_STATE, extra: Record<
 
 const production = () => FIXTURE_STATE.world?.productions?.[0];
 const spokenShots = () =>
-  (production()?.scenes ?? []).flatMap((s) => s.shots).filter((s) => s.audio?.line && s.audio.speaker);
+  (production()?.scenes ?? []).flatMap((s) => orderedShots(s)).filter((s) => s.audio?.line && s.audio.speaker);
 
 describe("the voice-line dialog", () => {
   /** The fixture ships one spoken shot; a second is added here so the test can discriminate. */
@@ -37,7 +38,7 @@ describe("the voice-line dialog", () => {
     const first = spokenShots()[0]!;
     const secondLine = "the ledger is not the tide, and the tide does not read";
     const second = { ...first, id: "sh_99", number: 99, audio: { ...first.audio!, line: secondLine } };
-    const scenes = prod.scenes.map((scene, i) => (i === 0 ? { ...scene, shots: [...scene.shots, second] } : scene));
+    const scenes = prod.scenes.map((record) => writerSceneView(record)).map((scene, i) => (i === 0 ? { ...scene, shots: [...scene.shots, second] } : scene));
     return {
       state: {
         ...FIXTURE_STATE,

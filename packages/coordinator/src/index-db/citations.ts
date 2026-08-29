@@ -1,4 +1,5 @@
 import type { CanonEntry, Sheet, WorldBundle } from "@arke-studio/contracts";
+import { orderedShots } from "@arke-studio/contracts";
 
 /**
  * Citation extraction (SPEC-003 §2.4) — the heart of the index. Every reference between
@@ -268,7 +269,7 @@ export function extract(bundle: WorldBundle): Extraction {
           productionId: production.meta.id,
         });
       }
-      for (const shot of scene.shots) {
+      for (const shot of orderedShots(scene)) {
         entities.push({
           kind: "shot",
           id: shot.id,

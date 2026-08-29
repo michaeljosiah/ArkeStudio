@@ -22,6 +22,7 @@ import {
   supportsVoiceUse,
   isClonedVoice,
   isGeneratedArtifact,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -674,7 +675,7 @@ function WorldProductions({ worldId, world }: { worldId: string; world: WorldBun
           }}
         >
           {productions.map((p) => {
-            const shots = p.scenes.flatMap((s) => s.shots);
+            const shots = p.scenes.flatMap((s) => orderedShots(s));
             const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
             const board = p.scenes.find((s) => s.board)?.board;
             const take = p.takes.find((t) => t.media);
@@ -4499,7 +4500,7 @@ export function ProductionsScreen() {
       <div className="fy-prodcards">
         {productions.map((p, i) => {
           const tilt = PRODUCTION_TILT[i % PRODUCTION_TILT.length]!;
-          const shots = p.scenes.flatMap((s) => s.shots);
+          const shots = p.scenes.flatMap((s) => orderedShots(s));
           const covered = shots.filter((s) => p.selections[s.id]?.acceptedTakeId).length;
           const active = p.meta.status !== "complete" && shots.length > 0 && covered < shots.length;
           return (

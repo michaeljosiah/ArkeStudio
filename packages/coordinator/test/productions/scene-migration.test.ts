@@ -27,6 +27,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { orderedShots } from "@arke-studio/contracts";
 
 /**
  * World schema 3 and lazy per-scene migration (SPEC-029 R-9..R-15, T-5..T-8; issue 583).
@@ -144,7 +145,7 @@ describe("read is pure: opening a legacy world writes nothing and raises nothing
     // preserves the version and leaves the shape it found exactly as it found it.
     const { dir, store } = await open();
     const production = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!;
-    assert.equal(production.scenes.find((s) => s.id === "sc_04")!.shots.length, 4, "the scan hands over the shots it always did");
+    assert.equal(orderedShots(production.scenes.find((s) => s.id === "sc_04")!).length, 4, "the scan hands over the shots it always did");
 
     await landBoard(store, PRODUCTION, VERSE, new Uint8Array([1, 2, 3]), CLOCK);
 
@@ -353,7 +354,7 @@ describe("an older build refuses a schema-3 world before it reads a scene (T-6)"
     const scan = await scanWorld(dir);
     assert.deepEqual(scan.problems, [], "the writer's own build reads what it wrote");
     assert.deepEqual(
-      scan.bundle.productions.find((p) => p.meta.id === PRODUCTION)!.scenes.find((s) => s.id === "sc_04")!.shots,
+      orderedShots(scan.bundle.productions.find((p) => p.meta.id === PRODUCTION)!.scenes.find((s) => s.id === "sc_04")!),
       legacy.shots,
       "and hands consumers the same shots it did before the migration",
     );

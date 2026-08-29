@@ -16,6 +16,7 @@ import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/expor
 import { acceptTake, rejectTake, setTrim } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -375,7 +376,7 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
       "re-accepting the same predecessor invalidates nothing",
     );
     const reordered = productionWithEdge();
-    reordered.scenes = reordered.scenes.map((scene) =>
+    reordered.scenes = reordered.scenes.map((record) => writerSceneView(record)).map((scene) =>
       scene.shots.some((shot) => shot.id === "sh_13")
         ? {
             ...scene,
@@ -436,7 +437,7 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     const predecessor = "tk_01J8F0000000000000000000B2";
     const continuation = "tk_01J8D0000000000000000000D4";
     const firstScene = production.scenes[0]!;
-    const allShots = production.scenes.flatMap((scene) => scene.shots);
+    const allShots = production.scenes.flatMap((scene) => orderedShots(scene));
     const firstShot = allShots.find((shot) => shot.id === "sh_12")!;
     const secondShot = allShots.find((shot) => shot.id === "sh_13")!;
     const split = {

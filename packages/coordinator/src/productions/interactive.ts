@@ -17,6 +17,7 @@ import {
   type Routing,
   type RoutingFinding,
   type TraversalEvidence,
+  orderedShots,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -243,8 +244,9 @@ export async function exportInteractive(
   const shipped = production.scenes.filter((scene) => !excluded.has(scene.id));
   const media: Array<{ sceneId: string; source: string; file: string }> = [];
   for (const scene of shipped) {
+    const shots = orderedShots(scene);
     const acceptedIds = new Set(
-      scene.shots
+      shots
         .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
         .filter((takeId): takeId is string => takeId !== null),
     );
@@ -257,12 +259,12 @@ export async function exportInteractive(
     });
     const covering = resolved.find(
       (take) =>
-        take?.media !== undefined && scene.shots.every((shot) => take.coversShots.includes(shot.id)),
+        take?.media !== undefined && shots.every((shot) => take.coversShots.includes(shot.id)),
     );
     if (covering?.media === undefined) {
       blockers.push(
-        scene.shots.length > 1 && acceptedIds.size > 0
-          ? `${scene.id} spans ${scene.shots.length} shots with no single clip covering them — cut a whole-scene pass before export`
+        shots.length > 1 && acceptedIds.size > 0
+          ? `${scene.id} spans ${shots.length} shots with no single clip covering them — cut a whole-scene pass before export`
           : `${scene.id} has no accepted footage to ship`,
       );
       continue;
@@ -270,7 +272,7 @@ export async function exportInteractive(
     // Every shot's accepted take must BE the covering clip (directly or as its segment): a
     // covering pass silently overriding a newer per-shot accept would ship footage the screen
     // says was replaced.
-    const outsideCovering = scene.shots.filter((shot) => {
+    const outsideCovering = shots.filter((shot) => {
       const acceptedId = production.selections[shot.id]?.acceptedTakeId ?? null;
       if (acceptedId === null) return true;
       const accepted = production.takes.find((t) => t.id === acceptedId);

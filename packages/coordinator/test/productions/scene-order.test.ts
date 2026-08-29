@@ -10,6 +10,7 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 /**
  * Scene identity, order, and path become separate authorities (issue #387): identity is stable
@@ -60,7 +61,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     const { dir, store, gate } = await open();
     const onDisk = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
     const highest = onDisk.scenes
-      .flatMap((s) => s.shots)
+      .flatMap((s) => orderedShots(s))
       .reduce((a, shot) => Math.max(a, Number(shot.id.replace(/^sh_0*/, "")) || 0), 0);
 
     const draft = await draftSceneSkeleton(store, gate, {
@@ -77,7 +78,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     // An agent that numbers from one anyway is refused in words it can act on.
     const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
     const staged = SceneSchema.parse(JSON.parse(await readFile(target, "utf8")));
-    const taken = onDisk.scenes[0]!.shots[0]!.id;
+    const taken = orderedShots(onDisk.scenes[0]!)[0]!.id;
     await writeFile(
       target,
       JSON.stringify(
@@ -106,8 +107,8 @@ describe("scene identity and explicit order (issue 387)", () => {
      */
     const { dir, store, gate } = await open();
     const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    const first = production.scenes[0]!;
-    const second = production.scenes[1]!;
+    const first = writerSceneView(production.scenes[0]!);
+    const second = writerSceneView(production.scenes[1]!);
     const shared = first.shots[0]!.id;
 
     // Put the overlap on disk, the way concurrent drafting once did.
@@ -133,7 +134,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     });
 
     // Now edit that scene for a reason that has nothing to do with ids.
-    const live = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === second.id)!;
+    const live = writerSceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === second.id)!);
     const staged = await gate.stage({
       kind: "scene-edit",
       summary: "A synopsis, nothing to do with shot ids",
@@ -149,7 +150,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     );
 
     // A NEW collision is still refused.
-    const other = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === first.id)!;
+    const other = writerSceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === first.id)!);
     const introduces = await gate.stage({
       kind: "scene-edit",
       summary: "This one takes an id it never had",

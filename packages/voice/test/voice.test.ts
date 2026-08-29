@@ -84,9 +84,10 @@ describe("preview lines (R-9, D7, §3.2)", () => {
   const productionWithLine = {
     scenes: [
       {
+        id: "sc_01",
         shots: [
-          { audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water" } },
-          { audio: { kind: "vo", speaker: "bray-half-hitch", line: "not my knot" } },
+          { id: "sh_1", audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water" } },
+          { id: "sh_2", audio: { kind: "vo", speaker: "bray-half-hitch", line: "not my knot" } },
         ],
       },
     ],

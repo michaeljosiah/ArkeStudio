@@ -9,6 +9,7 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { writerSceneView } from "@arke-studio/contracts";
 
 /**
  * Removing a scene, and refusing to when something still needs it.
@@ -35,7 +36,7 @@ describe("deleting a scene (round 3's other gap)", () => {
   it("takes the file, and history keeps it", async () => {
     const { dir, store } = await open();
     const before = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    const scene = before.scenes.find((s) => s.id === "sc_04")!;
+    const scene = writerSceneView(before.scenes.find((s) => s.id === "sc_04")!);
     // The fixture's shot carries an accepted take; reject it by clearing the selection first,
     // which is exactly what the refusal below tells a person to do.
     await saveScene(store, {
