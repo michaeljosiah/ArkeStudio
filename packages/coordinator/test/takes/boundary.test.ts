@@ -281,6 +281,37 @@ describe("boundary-frame extraction (issue 154)", () => {
     assert.equal(calls.length, 0, "nothing was extracted");
   });
 
+  it("a build with no maker still yields the no-op answer for a protected frame", async () => {
+    // Ownership is checked before requiring ffmpeg: with the frame already owned there is no
+    // extraction to be unconfigured about, and `not-configured` here would log an unavailable
+    // for an operation that needed nothing.
+    const { dir, store, production } = await open();
+    const accepted = take("tk_01J8E0000000000000000000C1");
+    await landClip(dir, production.meta.id, accepted.id);
+    await expectBoundaryFrom(store, dir, production.meta.id, "sh_1", "sh_2", accepted.id);
+    const drawn = take("tk_01J8E0000000000000000000C2", {
+      kind: "frame",
+      media: "frame.png",
+      coversShots: ["sh_2"],
+    });
+    const takeDir = join(dir, "productions", production.meta.id, "takes", drawn.id);
+    await mkdir(takeDir, { recursive: true });
+    await writeFile(join(takeDir, "frame.png"), encodePng(solidImage(4, 4, [0, 255, 0, 255])));
+    const filed = await fileDrawnFrame(store, production, {
+      take: drawn,
+      shotId: "sh_2",
+      producedBy: "test:drawn",
+    });
+    assert.ok(filed.ok);
+
+    const result = await chainBoundaryFrame(
+      store,
+      { ...production, takes: [accepted, drawn] },
+      { take: accepted, sourceShotId: "sh_1", followingShotId: "sh_2", maker: undefined, clock: CLOCK },
+    );
+    assert.ok(result.ok && "skipped" in result && result.skipped === "following-shot-has-own-frame");
+  });
+
   it("declines inside the gate when a drawn frame lands while extraction is in flight", async () => {
     const { dir, store, production } = await open();
     const accepted = take("tk_01J8E0000000000000000000B8");

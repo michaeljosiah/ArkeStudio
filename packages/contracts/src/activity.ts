@@ -1,7 +1,7 @@
 import type { ClientState } from "./client-state.js";
 import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
-import { REPLAYABLE_FINALIZATION_TARGETS } from "./job.js";
+import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 import type { Take } from "./take.js";
 
@@ -83,7 +83,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     if (job.finalization?.status === "failed") {
       // Every kind the queue can replay gets the action, or the row strands: a failed
       // finalization cannot be deleted, so an entry with no retry has no way out at all.
-      const retryable = REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind);
+      const retryable = isReplayableFinalization(job);
       entries.push({
         urgency: 1,
         kind: "job-finalization-failed",

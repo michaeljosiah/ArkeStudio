@@ -6,7 +6,7 @@ import {
   formatMicroUsd,
   PROVIDERS,
   REFERENCE_FINALIZATION_TARGETS,
-  REPLAYABLE_FINALIZATION_TARGETS,
+  isReplayableFinalization,
   ulid,
   type Capability,
   type ClientDeclarations,
@@ -1535,7 +1535,7 @@ export class JobQueue {
   }
 
   private needsReplayableFinalization(job: Job): boolean {
-    return REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind) && job.landedFiles?.[0] !== undefined;
+    return isReplayableFinalization(job) && job.landedFiles?.[0] !== undefined;
   }
 
   /**

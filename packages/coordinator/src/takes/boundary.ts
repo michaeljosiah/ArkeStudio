@@ -224,14 +224,15 @@ export async function chainBoundaryFrame(
   },
 ): Promise<BoundaryChainResult> {
   const { take, sourceShotId, followingShotId, maker, clock } = input;
-  if (maker === undefined) return { ok: false, reason: "not-configured" };
 
   /*
-   * Nothing to chain onto a shot that already owns its frame (SPEC-036 R-20) — checked here,
-   * before any decoding, so the common "drew the frames first" path never pays for an ffmpeg
-   * run whose output is thrown away. The same check runs again inside the gate below, where it
-   * catches a frame filed while this extraction was in flight; this one is the cheap early
-   * exit, that one is the race.
+   * Nothing to chain onto a shot that already owns its frame (SPEC-036 R-20) — checked first,
+   * before even requiring a maker: a build with no ffmpeg configured still owes the correct
+   * no-op answer, not a `not-configured` complaint about an extraction nobody needed. It also
+   * means the common "drew the frames first" path never pays for an ffmpeg run whose output is
+   * thrown away. The same check runs again inside the gate below, where it catches a frame
+   * filed while this extraction was in flight; this one is the cheap early exit, that one is
+   * the race.
    */
   const bundle = store.getBundle();
   const followingSelection = bundle.productions.find((p) => p.meta.id === production.meta.id)
@@ -239,6 +240,7 @@ export async function chainBoundaryFrame(
   if (hasOwnFrame(followingSelection, bundle.artifacts)) {
     return { ok: true, skipped: "following-shot-has-own-frame", followingShotId };
   }
+  if (maker === undefined) return { ok: false, reason: "not-configured" };
 
   // The media actually decoded: the pass clip for a segment, the take's own file otherwise.
   const mediaTakeId = take.segment?.passTakeId ?? take.id;

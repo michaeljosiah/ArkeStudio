@@ -182,7 +182,14 @@ export async function recordTakesFromJob(
 ): Promise<Take[]> {
   if (job.status !== "succeeded" || job.productionId === undefined) return [];
   const continuedFrom = continuedFromOf(store, job);
-  if (job.target.kind === "voice-line") {
+  /*
+   * Replayable finalizations rejoin the take they already wrote instead of minting a second.
+   * Voice lines always did; a frame-slot job joins them because its finalization can fail
+   * *after* the take is durable (the local filing), and the retry must find that take rather
+   * than trying to move a landing file that is long gone.
+   */
+  const rejoins = job.target.kind === "voice-line" || job.params["landing"] === "frame-slot";
+  if (rejoins) {
     const existing = await takeForJob(store, job.productionId, job.id);
     if (existing !== null) return [existing];
   }
@@ -195,9 +202,9 @@ export async function recordTakesFromJob(
   const written: Take[] = [];
 
   await store.gateOp(async () => {
-    // Voice-line finalization is replayable. A deterministic id lets a retry recover the window
+    // A replayable finalization needs a deterministic id, so a retry can recover the window
     // after media moved into its take directory but before take.json became durable.
-    const primaryId = job.target.kind === "voice-line" ? `tk_${job.id.slice(3)}` : `tk_${ulid()}`;
+    const primaryId = rejoins ? `tk_${job.id.slice(3)}` : `tk_${ulid()}`;
     const takeDir = join(store.dir, "productions", job.productionId!, "takes", primaryId);
     const finalMedia = join(takeDir, mediaName);
     // The landed file moves into the take's own directory — one stored artifact (R-3).

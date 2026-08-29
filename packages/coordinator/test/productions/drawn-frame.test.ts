@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { hasOwnFrame, type Selections, type Take } from "@arke-studio/contracts";
-import { acceptStill, fileDrawnFrame } from "../../src/takes/drawn-frame.js";
+import { hasOwnFrame, type Job, type Selections, type Take } from "@arke-studio/contracts";
+import { acceptStill, fileDrawnFrame, slotAtAuthorizationOf } from "../../src/takes/drawn-frame.js";
+import { recordTakesFromJob } from "../../src/takes/arrival.js";
+import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
 import { acceptTake } from "../../src/takes/review.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
-import { makeTempWorld } from "../world/helpers.js";
+import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
@@ -324,5 +326,120 @@ describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
       () => acceptTake(store, fresh, { takeId: "tk_acc02", shotId: "sh_13", by: "user" }),
       /is a still/,
     );
+  });
+});
+
+describe("a non-PNG still normalises to PNG at filing", () => {
+  /** A still whose media arrived as JPEG — valid provider output the board compiler cannot read. */
+  async function jpegStill(store: WorldStore, id: string, shotId: string): Promise<Take> {
+    const take = await still(store, id, shotId);
+    const dir = join(store.dir, "productions", "saltlight", "takes", id);
+    await writeFile(join(dir, "frame.jpg"), Buffer.from("jpeg-ish-bytes"));
+    return { ...take, media: "frame.jpg" };
+  }
+
+  it("files the converted bytes, so compiled boards can decode every frame", async () => {
+    const store = await open();
+    const take = await jpegStill(store, "tk_jpg01", "sh_13");
+    const converted = encodePng(solidImage(4, 4, [9, 9, 9, 255]));
+    const toPng: BoundaryFrameMaker = {
+      write: async (input, output, atSec) => {
+        assert.ok(input.endsWith("frame.jpg"), "converts the take's own media");
+        assert.equal(atSec, 0, "frame zero of a still image is the image");
+        await writeFile(output, converted);
+        return { ok: true };
+      },
+    };
+    const filed = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take,
+        shotId: "sh_13",
+        producedBy: "frame-run:jpg",
+        toPng,
+      }),
+    );
+    const sidecar = store.getBundle().artifacts.find((a) => a.id === filed.artifactId);
+    assert.ok(sidecar!.file.endsWith(".png"), "the filed frame is PNG");
+    const bytes = await readFile(join(store.dir, "artifacts", sidecar!.file));
+    assert.deepEqual(Uint8Array.from(bytes), Uint8Array.from(converted));
+  });
+
+  it("files the original bytes when conversion fails — a good frame is never lost to it", async () => {
+    const store = await open();
+    const take = await jpegStill(store, "tk_jpg02", "sh_13");
+    const toPng: BoundaryFrameMaker = { write: async () => ({ ok: false, reason: "process-failed" }) };
+    const filed = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take,
+        shotId: "sh_13",
+        producedBy: "frame-run:jpg",
+        toPng,
+      }),
+    );
+    const sidecar = store.getBundle().artifacts.find((a) => a.id === filed.artifactId);
+    assert.ok(sidecar!.file.endsWith(".jpg"), "the original format stands");
+    const bytes = await readFile(join(store.dir, "artifacts", sidecar!.file));
+    assert.equal(bytes.toString(), "jpeg-ish-bytes");
+  });
+});
+
+describe("the authorization snapshot rides the frozen request", () => {
+  it("reads the durable frame-run shape: params.request.slotAtAuthorization", () => {
+    const map = { sh_12: "ar_01J8E0000000000000000000A1", sh_13: null };
+    assert.deepEqual(
+      slotAtAuthorizationOf({ frameRun: "fr_x", landing: "frame-slot", request: { slotAtAuthorization: map } }),
+      map,
+    );
+  });
+
+  it("honours a top-level snapshot on a hand-enqueued one-shot", () => {
+    const map = { sh_12: null };
+    assert.deepEqual(slotAtAuthorizationOf({ landing: "frame-slot", slotAtAuthorization: map }), map);
+  });
+
+  it("returns undefined — no fence — when neither shape carries one", () => {
+    assert.equal(slotAtAuthorizationOf({ landing: "frame-slot" }), undefined);
+    assert.equal(slotAtAuthorizationOf({ landing: "frame-slot", request: { prompt: "x" } }), undefined);
+  });
+});
+
+describe("a frame-slot finalization can replay", () => {
+  it("recording twice for the same job rejoins the take it already wrote", async () => {
+    /*
+     * The retry path: filing failed after the take became durable, the user pressed retry, and
+     * the whole finalization re-ran. The landing file is long gone — it moved into the take's
+     * directory the first time — so the replay must find that take, not mint a second and try
+     * to move nothing.
+     */
+    const store = await open();
+    const landingDir = "productions/saltlight/incoming/jb-frame";
+    await mkdir(join(store.dir, landingDir), { recursive: true });
+    await writeFile(join(store.dir, landingDir, "output-1.png"), encodePng(solidImage(4, 4, [1, 2, 3, 255])));
+    const job = {
+      id: "jb_01J8E000000000000000000FR1",
+      idempotencyKey: "01J8E100000000000000000FR1",
+      worldId: WORLD_ID,
+      productionId: "saltlight",
+      target: { kind: "shot", id: "sh_13", coversShots: ["sh_13"] },
+      capability: "image",
+      provider: "fal",
+      model: "image-like",
+      params: { prompt: "the opening picture", landing: "frame-slot" },
+      estimatedMicroUsd: 1000,
+      status: "succeeded",
+      providerJobId: "fal_1",
+      attempt: 1,
+      landing: { dir: landingDir },
+      landedFiles: [`${landingDir}/output-1.png`],
+      error: null,
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    } as unknown as Job;
+
+    const [first] = await recordTakesFromJob(store, job, null);
+    assert.ok(first);
+    assert.equal(first.id, `tk_${job.id.slice(3)}`, "deterministic, so a crash mid-write is recoverable");
+    const [second] = await recordTakesFromJob(store, job, null);
+    assert.equal(second?.id, first.id, "the replay rejoins rather than minting a second take");
   });
 });

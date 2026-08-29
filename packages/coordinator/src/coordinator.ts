@@ -175,7 +175,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { acceptStill, fileDrawnFrame } from "./takes/drawn-frame.js";
+import { acceptStill, fileDrawnFrame, slotAtAuthorizationOf } from "./takes/drawn-frame.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -2755,21 +2755,20 @@ export class Coordinator {
           /*
            * What the slot held when this run was authorized (SPEC-036 R-22). A run in flight
            * must not overwrite a frame chosen after it was sent, and two runs finishing out of
-           * dispatch order must not let completion order decide. Absent for a job dispatched
-           * before the frame run recorded it, which fences nothing and behaves as before.
+           * dispatch order must not let completion order decide. The snapshot lives inside the
+           * frozen step request (`params.request`), where the run record persists it. Absent
+           * for a job dispatched without one, which fences nothing and behaves as before.
            */
-          const authorized = job.params["slotAtAuthorization"];
+          const authorized = slotAtAuthorizationOf(job.params);
           for (const take of takes) {
             const shotId = take.coversShots[0];
             if (fresh === undefined || shotId === undefined || take.coversShots.length !== 1) continue;
-            const expected =
-              typeof authorized === "object" && authorized !== null
-                ? (authorized as Record<string, string | null>)[shotId]
-                : undefined;
+            const expected = authorized?.[shotId];
             const filed = await fileDrawnFrame(store, fresh, {
               take,
               shotId,
               producedBy: `frame-run:${job.id}`,
+              toPng: this.opts.boundaryFrameMaker,
               ...(expected !== undefined ? { expectedArtifactId: expected } : {}),
             });
             if (filed.ok && "superseded" in filed) {
@@ -2783,12 +2782,11 @@ export class Coordinator {
             }
             if (!filed.ok) {
               /*
-               * Thrown, not just logged. The generation is already paid for
-               * and the take is on disk, but the shot has no new frame — and a `shot` target
-               * is not in REPLAYABLE_FINALIZATION_TARGETS, so completing here would leave no
-               * way to retry the local filing at all. Failing the finalization keeps it
-               * pending and retryable; re-running is safe because take recording joins the
-               * take it already wrote.
+               * Thrown, not just logged: completing here would report a job done whose shot
+               * has no new frame, with the generation already paid for. Failing the
+               * finalization hands the user the retry instead — a frame-slot job is
+               * replayable (`isReplayableFinalization`), and re-running is safe because take
+               * recording rejoins the take it already wrote by job id.
                */
               void this.appLog?.append({
                 kind: "drawn-frame.unavailable",
@@ -5888,6 +5886,7 @@ export class Coordinator {
                     takeId: msg.takeId,
                     shotId: msg.shotId,
                     by: "user",
+                    toPng: this.opts.boundaryFrameMaker,
                   });
                   if (!outcome.ok) throw new Error(outcome.reason);
                   return d;

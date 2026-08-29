@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { extname, join } from "node:path";
 import {
   ulid,
@@ -11,6 +11,7 @@ import {
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
+import type { BoundaryFrameMaker } from "./boundary.js";
 import type { WorldStore } from "../world/store.js";
 
 /**
@@ -37,6 +38,29 @@ import type { WorldStore } from "../world/store.js";
 
 /** Image media a still can arrive as. Anything else is not a picture and is refused by name. */
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+/**
+ * The per-shot authorization snapshot a frame-run job carries (SPEC-036 §2.7, R-22).
+ *
+ * The durable enqueue shape nests it inside the frozen step request — `params: { frameRun,
+ * landing, request }` — because the whole point of the snapshot is to be part of what was
+ * frozen at authorization. A hand-enqueued one-shot may carry it at the top level instead.
+ * Both are honoured, the frozen request first; reading only the top level is how the fence
+ * silently disarms for every real frame run.
+ */
+export function slotAtAuthorizationOf(
+  params: Record<string, unknown>,
+): Record<string, string | null> | undefined {
+  const request = params["request"];
+  const nested =
+    typeof request === "object" && request !== null
+      ? (request as Record<string, unknown>)["slotAtAuthorization"]
+      : undefined;
+  const found = nested ?? params["slotAtAuthorization"];
+  return typeof found === "object" && found !== null
+    ? (found as Record<string, string | null>)
+    : undefined;
+}
 
 export type DrawnFrameOutcome =
   | { ok: true; artifactId: string; shotId: string }
@@ -87,6 +111,15 @@ export async function fileDrawnFrame(
       content: string;
       baseHash: string | null;
     }[];
+    /**
+     * Normalises a non-PNG still to PNG while filing. The board compiler reads every filed
+     * frame through `decodePng` and swallows the decode error, so a JPEG or WebP filed raw
+     * becomes a blank cell in every compiled board — valid provider output, silently absent.
+     * The boundary maker already is an image-to-PNG converter when asked for frame zero, so
+     * the one ffmpeg the app ships does the job. Absent, or on failure, the original bytes
+     * file unchanged: a good frame is never lost to a failed conversion.
+     */
+    toPng?: BoundaryFrameMaker;
   },
 ): Promise<DrawnFrameOutcome> {
   const { take, shotId } = input;
@@ -95,18 +128,38 @@ export async function fileDrawnFrame(
   }
   const media = take.media;
   if (media === undefined) return { ok: false, reason: `take ${take.id} has no media to file` };
-  const extension = extname(media).toLowerCase();
+  let extension = extname(media).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) {
     return { ok: false, reason: `take ${take.id}'s media is not an image` };
   }
 
-  let bytes: Buffer;
-  try {
-    bytes = await readFile(
-      toExtendedLength(join(store.dir, "productions", production.meta.id, "takes", take.id, media)),
-    );
-  } catch (error) {
-    return { ok: false, reason: `take ${take.id}'s media could not be read: ${String(error)}` };
+  const mediaPath = join(store.dir, "productions", production.meta.id, "takes", take.id, media);
+  let bytes: Buffer | null = null;
+  if (extension !== ".png" && input.toPng !== undefined) {
+    // Frame zero of a still image IS that image, so the boundary cutter converts it.
+    const staging = join(store.dir, ".cache", "frames", `${ulid()}.png`);
+    try {
+      await mkdir(toExtendedLength(join(store.dir, ".cache", "frames")), { recursive: true });
+      const converted = await input.toPng.write(mediaPath, staging, 0);
+      if (converted.ok) {
+        const png = await readFile(toExtendedLength(staging));
+        if (png.byteLength > 0) {
+          bytes = png;
+          extension = ".png";
+        }
+      }
+    } catch {
+      // Fall through to the original bytes; the take's own media is always the safe answer.
+    } finally {
+      await rm(toExtendedLength(staging), { force: true }).catch(() => {});
+    }
+  }
+  if (bytes === null) {
+    try {
+      bytes = await readFile(toExtendedLength(mediaPath));
+    } catch (error) {
+      return { ok: false, reason: `take ${take.id}'s media could not be read: ${String(error)}` };
+    }
   }
   if (bytes.byteLength === 0) return { ok: false, reason: `take ${take.id}'s media is empty` };
 
@@ -228,7 +281,7 @@ export async function fileDrawnFrame(
 export async function acceptStill(
   store: WorldStore,
   production: ProductionBundle,
-  input: { takeId: string; shotId: string; by: string },
+  input: { takeId: string; shotId: string; by: string; toPng?: BoundaryFrameMaker },
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
@@ -257,6 +310,7 @@ export async function acceptStill(
     take,
     shotId: input.shotId,
     producedBy: `accept:${input.takeId}`,
+    toPng: input.toPng,
     alsoCommit: [
       {
         path: reviewsPath,
