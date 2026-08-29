@@ -255,6 +255,14 @@ describe("the memo key covers the inputs and nothing else (T-8)", () => {
     const d = [shot({ id: "sh_1", number: 1, cast: ["a", "b"] })];
     assert.notEqual(boardPackKey(c, 30, NONE, NONE, "1"), boardPackKey(d, 30, NONE, NONE, "1"));
   });
+
+  it("moves when a shot is renumbered, because the number reaches the output", () => {
+    // Every warning, accent and refusal names `shot.number`. A key blind to it would return a
+    // cached pack whose text names the number the shot used to have.
+    const before = [shot({ id: "sh_1", number: 1 })];
+    const after = [shot({ id: "sh_1", number: 7 })];
+    assert.notEqual(boardPackKey(before, 30, NONE, NONE, "1"), boardPackKey(after, 30, NONE, NONE, "1"));
+  });
 });
 
 describe("an empty cast is an unknown, not a change (T-9)", () => {
@@ -514,6 +522,8 @@ describe("assembling the packer's input (T-18)", () => {
         sh_2: { acceptedTakeId: "tk_seg2", trimInSec: 0 },
       },
       takes: [
+        // The parent, covering both — this is what makes the segments non-solo.
+        clip({ id: "tk_pass", coversShots: ["sh_1", "sh_2"] }),
         clip({
           id: "tk_seg1",
           coversShots: ["sh_1"],
@@ -535,6 +545,57 @@ describe("assembling the packer's input (T-18)", () => {
     // And so the board says nothing about them.
     const pack = packBoards(packed, 60, NONE, NONE, framed);
     assert.deepEqual(noteTexts(pack), []);
+  });
+
+  it("still calls a SINGLE-shot pass segment solo, judged by its parent (T-18)", () => {
+    /*
+     * A pass can cover one shot — the cap isolated it — and arrival gives it a segment all the
+     * same. That footage was rendered without neighbours, so if a later repack groups the shot
+     * with some, the board must still say it may not match. The parent's coverage is what
+     * separates this from the multi-shot case; the segment's own coverage cannot.
+     */
+    const packed = packShotsFor({
+      scene: {},
+      shots: [
+        { id: "sh_1", number: 1, title: "a", description: "" },
+        { id: "sh_2", number: 2, title: "b", description: "" },
+      ],
+      selections: { sh_1: { acceptedTakeId: "tk_seg", trimInSec: 0 } },
+      takes: [
+        clip({ id: "tk_lonepass", coversShots: ["sh_1"] }),
+        clip({
+          id: "tk_seg",
+          coversShots: ["sh_1"],
+          segment: { passTakeId: "tk_lonepass", inSec: 0, outSec: 4 },
+        }),
+      ],
+      castOf: () => [],
+      defaultDurationSec: 4,
+    });
+    assert.deepEqual(
+      packed.map((s) => s.solo),
+      [true, false],
+    );
+    const pack = packBoards(packed, 60, NONE, NONE, framed);
+    assert.match(noteTexts(pack)[0]!, /shot 1 rendered separately/);
+  });
+
+  it("treats a segment whose parent is missing as solo, preferring a visible seam", () => {
+    const packed = packShotsFor({
+      scene: {},
+      shots: [{ id: "sh_1", number: 1, title: "a", description: "" }],
+      selections: { sh_1: { acceptedTakeId: "tk_orphan", trimInSec: 0 } },
+      takes: [
+        clip({
+          id: "tk_orphan",
+          coversShots: ["sh_1"],
+          segment: { passTakeId: "tk_gone", inSec: 0, outSec: 4 },
+        }),
+      ],
+      castOf: () => [],
+      defaultDurationSec: 4,
+    });
+    assert.equal(packed[0]!.solo, true, "a seam that might exist is said, not hidden");
   });
 
   it("takes cast from the caller's resolver, in order", () => {

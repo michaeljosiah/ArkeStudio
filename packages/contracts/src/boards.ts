@@ -114,7 +114,10 @@ export function boardPackKey(
   return JSON.stringify([
     capSec,
     maxMembers ?? null,
-    shots.map((s) => [s.id, s.durationSec, s.timeOfDay, s.lighting, s.solo, s.cast]),
+    // `number` is in here because it reaches the OUTPUT: oversize refusals, continuity
+    // warnings, lighting accents and solo warnings all name it. Renumbering a shot without
+    // touching anything else would otherwise return a cached pack naming the old number.
+    shots.map((s) => [s.id, s.number, s.durationSec, s.timeOfDay, s.lighting, s.solo, s.cast]),
     [...splits].sort(),
     [...merges].sort(),
     frames,
@@ -343,6 +346,12 @@ export function packBoards(
  * `shots` arrive in canonical order — the caller reads them through the scene-sequence boundary
  * (SPEC-029 R-17), never a private walk of `shots[]`.
  */
+function renderedWithNeighbours(take: Take, takeById: ReadonlyMap<string, Take>): boolean {
+  if (take.segment === undefined) return false;
+  const parent = takeById.get(take.segment.passTakeId);
+  return parent !== undefined && parent.coversShots.length > 1;
+}
+
 export function packShotsFor(input: {
   scene: Pick<Scene, "defaults" | "inherits">;
   shots: readonly Shot[];
@@ -377,16 +386,21 @@ export function packShotsFor(input: {
        * check every board holding that shot would warn about a video render that never
        * happened.
        *
-       * And not a pass segment. Arrival derives one `clip` per shot from a whole-scene pass,
-       * each covering exactly its own shot and naming the pass in `segment` — so the shape is
-       * indistinguishable from a solo render by coverage alone, while the meaning is its
-       * exact opposite: that footage was rendered WITH its neighbours, which is what a board
-       * is for. Without this, accepting a pass would make every board it covers warn that its
-       * own members were rendered separately.
+       * And a pass segment is judged by its PARENT, not by its own coverage. Arrival derives
+       * one `clip` per shot from a pass, each covering exactly its own shot and naming the
+       * pass in `segment` — so by coverage alone a segment is indistinguishable from a solo
+       * render. What separates them is what the parent covered: several shots means this
+       * footage was made WITH its neighbours, which is the opposite of solo and must not
+       * warn. But a pass can cover ONE shot — the cap isolated it — and that segment is a
+       * solo render in every sense that matters here, so if a later repack groups that shot
+       * with neighbours the board must still say so.
+       *
+       * An unresolvable parent counts as solo: this spec's honesty rule prefers a seam that
+       * is visible to one that is silent, and the warning is advisory rather than blocking.
        */
       solo:
         take?.kind === "clip" &&
-        take.segment === undefined &&
+        !renderedWithNeighbours(take, takeById) &&
         take.coversShots.length === 1 &&
         take.coversShots[0] === shot.id,
     };
