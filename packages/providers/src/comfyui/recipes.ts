@@ -277,17 +277,21 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
  *
  * Measured on the reference machine (RTX 3080 10 GB, 31.9 GB system RAM, engine v0.33.1):
  *
- *   124 frames → 5.167 s   933 MB of RAM to spare
- *   243 frames → 10.125 s  1,314 MB to spare at its lowest, 9,565 MiB peak VRAM, 17 min wall
+ *   124 frames →  5.167 s   933 MB RAM to spare               —            ~25 min
+ *   243 frames → 10.125 s  1,314 MB to spare, 9,565 MiB VRAM  —            ~17 min
+ *   362 frames → 15.083 s    758 MB to spare, 9,613 MiB VRAM  —            ~20 min
  *
- * The 10s decode was the shape to worry about — it holds roughly twice the image sequence — and
- * the low-water mark came at the decode, not the sampling. It cleared, so 10s ships.
+ * Every length H3 offers has now been run here, so the map is complete rather than partial. The
+ * decode is where each one comes closest to the floor — the sampling holds steady around 2 GB
+ * free and the low-water mark lands at the end, on the frame sequence rather than the model.
  *
- * 362 frames (15.083 s) is the next grid value and is still unrun. On this card it would hold
- * three times the 5s sequence, which is the far side of the headroom above, so it waits for a
- * measurement like the others did.
+ * 758 MB is the narrowest of the three and it is on the longest clip, which is the shape to
+ * expect: VRAM barely moves between 10s and 15s (9,565 → 9,613 MiB, both against a 10,240 MiB
+ * card) because the transformer streams either way, while the decoded sequence grows with the
+ * length. A card with less system RAM behind it is where this would give out first, not a
+ * smaller card.
  */
-export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 243 };
+export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 243, "15": 362 };
 
 /**
  * Local · H3 Video — MiniMax H3 FL2VA (open-sourced 2026-08-03) with Alibaba-lineage 8-step turbo
@@ -324,9 +328,9 @@ const H3_VIDEO: ComfyUiRecipe = {
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
-    durationSec: { kind: "number-enum", values: [5, 10], bind: [] },
+    durationSec: { kind: "number-enum", values: [5, 10, 15], bind: [] },
     aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
-    length: { kind: "int", internal: true, required: true, min: 5, max: 243, bind: [["7", "length"]] },
+    length: { kind: "int", internal: true, required: true, min: 5, max: 362, bind: [["7", "length"]] },
     width: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "width"]] },
     height: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "height"]] },
   },
@@ -847,11 +851,11 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     accepts: { referenceImages: 0, startFrame: false, endFrame: false },
     limits: {
       maxPromptChars: 2000,
-      // The lengths that have been run — see H3_FRAMES_BY_SECONDS for why 15s still waits.
-      maxDurationSec: 10,
+      // Every length H3 offers, each one run on the reference machine — see H3_FRAMES_BY_SECONDS.
+      maxDurationSec: 15,
       // Seconds → seconds, exactly as the wan row: the wire word is the number itself and the
       // client derives the 17k+5 frame count from it (h3FramesForSeconds).
-      durations: { "5": "5", "10": "10" },
+      durations: { "5": "5", "10": "10", "15": "15" },
       durationWire: "number",
       resolutions: ["480p"],
       aspects: Object.keys(H3_DIMENSIONS),

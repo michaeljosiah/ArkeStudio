@@ -161,11 +161,11 @@ describe("the recipe catalogue projects into the manifest like any other model",
 
   it("the h3 row's lengths round-trip as numbers on the model's own 17k+5 grid", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
-    // The lengths that have been run, in order. 15s waits for a measurement of its own: the
-    // 243-frame decode came within 1.3 GB of the declared floor, and a 362-frame one holds
-    // roughly three times the 5s image sequence under the same floor.
-    assert.deepEqual(durationOptions(row), [5, 10]);
-    assert.equal(dispatchDuration(row, 15).kind, "over-cap");
+    // Every length H3 offers, in order, each one run on the reference machine. The decode is
+    // where each comes closest to the floor: 933 MB free at 124 frames, 1,314 at 243, 758 at
+    // 362 — narrowest on the longest clip, which is the frame sequence growing, not the model.
+    assert.deepEqual(durationOptions(row), [5, 10, 15]);
+    assert.equal(dispatchDuration(row, 20).kind, "over-cap");
     for (const seconds of durationOptions(row)) {
       const choice = dispatchDuration(row, seconds);
       assert.equal(choice.kind, "asked");
@@ -528,7 +528,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
         capability: "video",
         params: { prompt: "x", duration: 3 },
       }),
-      /cannot be asked for 3s — it offers 5, 10s/,
+      /cannot be asked for 3s — it offers 5, 10, 15s/,
     );
   });
 
