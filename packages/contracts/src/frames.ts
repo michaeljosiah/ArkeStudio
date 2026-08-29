@@ -5,6 +5,8 @@ import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ShotSchema } from "./scene.js";
+import { ShotAnchorSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1556,6 +1558,62 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       /** The same stem-only rule as save-scene, for the same reason. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    })
+    .strict(),
+  /**
+   * One scene edit, named (SPEC-029 R-36).
+   *
+   * `save-scene` above writes a whole document and lets the writer work out what happened; these
+   * say what happened. Every one carries the scene version it was composed against, so a scene
+   * that moved refuses the command rather than merging edges by array position (R-62), and the
+   * coordinator commits exactly one validated record or writes nothing at all (R-61).
+   *
+   * The payload is shot ids and shot fields — never nodes and edges. There is deliberately no
+   * "save graph" command: arbitrary graph JSON is what these exist to replace.
+   */
+  z
+    .object({
+      kind: z.literal("scene-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /** The same stem-only rule as save-scene, for the same reason. */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      baseVersion: z.number().int().min(1),
+      command: z.discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("insert-shot"),
+            at: ShotAnchorSchema,
+            /** The beat, without identity: the coordinator mints the id past the whole production. */
+            shot: ShotSchema.omit({ id: true, number: true }),
+          })
+          .strict(),
+        z.object({ kind: z.literal("move-shot"), shotId: ShotIdSchema, to: ShotAnchorSchema }).strict(),
+        z.object({ kind: z.literal("duplicate-shot"), shotId: ShotIdSchema }).strict(),
+        z
+          .object({
+            kind: z.literal("edit-shot"),
+            shotId: ShotIdSchema,
+            /** A patch: absent leaves the field, explicit null clears it. */
+            change: ShotSchema.omit({ id: true, number: true }).partial(),
+          })
+          .strict(),
+        z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),
+        z
+          .object({
+            kind: z.literal("set-board-override"),
+            shotId: ShotIdSchema,
+            override: z.enum(["split", "merge"]),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("clear-board-override"),
+            shotId: ShotIdSchema,
+            override: z.enum(["split", "merge"]),
+          })
+          .strict(),
+      ]),
     })
     .strict(),
   z

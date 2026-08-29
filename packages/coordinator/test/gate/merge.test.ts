@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SheetSchema } from "@arke-studio/contracts";
-import { applyResolution, mergeMarkdown } from "../../src/gate/merge.js";
+import { applyResolution, mergeJson, mergeMarkdown } from "../../src/gate/merge.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { splitSections } from "../../src/frontmatter.js";
 
@@ -138,5 +138,103 @@ describe("field-level three-way merge (R-6, D3, D4)", () => {
     const resolved = applyResolution("characters/maren-kest.md", merged, conflicts[0]!, "theirs");
     assert.equal(sectionsOf(resolved).get("Appearance"), "White braids.");
     assertValidSheet(resolved);
+  });
+});
+
+describe("a scene's structure is ONE field, however it is spelled (SPEC-029 R-1, issue 601)", () => {
+  /*
+   * The failure this closes: Arke stages a shot amendment against a legacy scene, somebody
+   * saves the same scene in the storyboard (which migrates it), and the rebase merges the
+   * proposal's `shots` beside the live `flow`. The union then refuses the target, and no
+   * resolution of the `shots` conflict can save it — the proposal is stranded.
+   */
+  const shot = (id: string, number: number, description: string) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description,
+  });
+  const legacy = (shots: ReturnType<typeof shot>[], version = 3) =>
+    JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      shots,
+    });
+  const migrated = (raw: string, version = 4): string => {
+    const scene = JSON.parse(raw) as { shots: ReturnType<typeof shot>[] };
+    const { shots, ...base } = scene;
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: `sfn_${s.id.replace("_", "-")}`, kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const edges = nodes.slice(1).map((to, index) => {
+      const from = nodes[index]!;
+      const token = (n: (typeof nodes)[number]) =>
+        n.kind === "shot" ? (n as { shot: { id: string } }).shot.id.replace("_", "-") : n.kind;
+      return {
+        id: `sfe_${token(from)}-${token(to)}`,
+        kind: "sequence",
+        from: { nodeId: from.id, port: "out" },
+        to: { nodeId: to.id, port: "in" },
+      };
+    });
+    return JSON.stringify({
+      ...base,
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+      },
+    });
+  };
+
+  const A = shot("sh_1", 1, "The tide turns.");
+  const B = shot("sh_2", 2, "The verse rises.");
+
+  it("carries a legacy amendment across a live migration without producing both fields", () => {
+    const base = legacy([A, B]);
+    const mine = legacy([A, { ...B, description: "The verse rises, and the room answers." }]);
+    const theirs = migrated(base);
+
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, mine, theirs).merged) as Record<
+      string,
+      unknown
+    >;
+    assert.equal("flow" in merged && "shots" in merged, false, "one structural field, never both");
+    assert.ok("shots" in merged, "the proposal's answer is the array the gate re-derives at accept");
+    const shots = merged["shots"] as ReturnType<typeof shot>[];
+    assert.equal(shots[1]?.description, "The verse rises, and the room answers.");
+  });
+
+  it("keeps the live migration when the proposal changed nothing structural", () => {
+    const base = legacy([A, B]);
+    const theirs = migrated(base);
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, base, theirs).merged) as Record<
+      string,
+      unknown
+    >;
+    assert.ok("flow" in merged, "a migration nobody contradicted stands");
+    assert.equal("shots" in merged, false);
+  });
+
+  it("raises ONE conflict when both sides changed the shots, not two half-answers", () => {
+    const base = legacy([A, B]);
+    const mine = legacy([A, { ...B, description: "mine" }]);
+    const theirs = migrated(legacy([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const structural = result.conflicts.filter((c) => c.field === "shots" || c.field === "flow");
+    assert.equal(structural.length, 1, "one field, one conflict");
+    const merged = JSON.parse(result.merged) as Record<string, unknown>;
+    assert.equal("flow" in merged && "shots" in merged, false);
   });
 });

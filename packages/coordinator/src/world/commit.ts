@@ -11,6 +11,7 @@ import {
   newId,
   SceneRecordSchema,
   WorldMetaSchema,
+  type GraphScene,
   type SceneRecord,
 } from "@arke-studio/contracts";
 import {
@@ -224,6 +225,21 @@ const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
  * cannot judge, and calling it unchanged on those grounds would drop a real edit — much the worse
  * of the two mistakes.
  */
+/**
+ * A flow in an order that cannot disagree with itself: nodes and edges sorted by id, and the
+ * terminals kept as the named fields they already are. Two flows that mean the same graph
+ * serialise identically here whatever order their arrays happen to sit in (R-18).
+ */
+function canonicalFlow(flow: GraphScene["flow"]): unknown {
+  const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return {
+    ...flow,
+    nodes: [...flow.nodes].sort(byId),
+    edges: [...flow.edges].sort(byId),
+    storyboardGroups: [...flow.storyboardGroups].sort(byId),
+  };
+}
+
 export function changesAnything(path: string, live: string, proposed: string): boolean {
   if (live === proposed) return false;
   const track = classify(path).track;
@@ -264,7 +280,17 @@ export function changesAnything(path: string, live: string, proposed: string): b
         : graphSceneFor(liveRecord, proposedRecord);
       const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
       keys.delete("version");
-      return [...keys].some((k) => JSON.stringify(asFields(before)[k]) !== JSON.stringify(asFields(after)[k]));
+      /*
+       * The flow is compared as a TOPOLOGY, not as two arrays (R-18).
+       *
+       * Node and edge storage order carries no meaning — permuting it changes nothing any
+       * consumer answers — so comparing the raw arrays reports a change where there is none:
+       * a needless version for a reordering proposal, and worse, a staleness refusal when the
+       * live file was reordered after staging and says exactly what the proposal says.
+       */
+      const fieldsBefore: Record<string, unknown> = { ...asFields(before), flow: canonicalFlow(before.flow) };
+      const fieldsAfter: Record<string, unknown> = { ...asFields(after), flow: canonicalFlow(after.flow) };
+      return [...keys].some((k) => JSON.stringify(fieldsBefore[k]) !== JSON.stringify(fieldsAfter[k]));
     }
     if (
       track === "story" ||

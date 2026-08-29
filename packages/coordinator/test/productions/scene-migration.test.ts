@@ -28,6 +28,7 @@ import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { orderedShots } from "@arke-studio/contracts";
+import { graphSceneFor } from "../../src/productions/scene-record.js";
 
 /**
  * World schema 3 and lazy per-scene migration (SPEC-029 R-9..R-15, T-5..T-8; issue 583).
@@ -828,6 +829,96 @@ describe("a malformed graph is named, and takes nothing else down with it (R-60)
       scan.bundle.productions.find((p) => p.meta.id === PRODUCTION)!.scenes.map((s) => s.id),
       ["sc_02", "sc_06"],
       "the other scenes still open",
+    );
+  });
+});
+
+describe("storage order carries no meaning to the gate either (R-18, issue 601)", () => {
+  it("a proposal that only permutes nodes[] and edges[] is a no-op", async () => {
+    /*
+     * R-18 says permuting the arrays changes nothing any consumer answers, and the gate has to
+     * agree: compared as raw arrays, a reordered-but-identical graph cuts a needless version —
+     * and worse, a live file reordered after staging makes an otherwise identical proposal read
+     * as stale, which nothing the user does can clear.
+     */
+    const { dir, store, gate } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    const graph = (await readScene(dir, VERSE)) as GraphScene;
+    const raw = await readRaw(dir, scenePath(VERSE));
+
+    const permuted = {
+      ...graph,
+      flow: {
+        ...graph.flow,
+        nodes: [...graph.flow.nodes].reverse(),
+        edges: [...graph.flow.edges].reverse(),
+      },
+    };
+    const proposal = await gate.stage({
+      kind: "scene-edit",
+      summary: "The same graph, written backwards",
+      source: "chat:studio",
+      targets: [{ path: scenePath(VERSE), content: `${JSON.stringify(permuted, null, 2)}
+` }],
+    });
+    const outcome = await gate.accept(proposal.id);
+
+    assert.equal(outcome.status, "no-op", "the same graph, however its arrays are ordered");
+    assert.equal(await readRaw(dir, scenePath(VERSE)), raw, "and no version was cut for it");
+  });
+});
+
+describe("a structural edit keeps the node identity the scene already had (issue 601)", () => {
+  it("a surviving shot keeps its node id when a writer adds one beside it", async () => {
+    /*
+     * Rebuilding the flow from the legacy projection re-mints every id. Harmless while every id
+     * in the world came from that same rule — and a silent corruption the moment a command or a
+     * group edit authors one it would not have chosen: the shot survives, its node id changes,
+     * and the groups naming it no longer resolve.
+     *
+     * Driven against `graphSceneFor` itself rather than through a store, because the authored
+     * id has to be planted by hand and a hand-edited world refuses every later write.
+     */
+    const { dir } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    const graph = migrateLegacyScene(legacy);
+
+    // An id no projection would mint, standing in for what a later authoring step can produce.
+    const authored = "sfn_authored-by-hand";
+    const first = graph.flow.nodes.find((node) => node.kind === "shot")!;
+    const renamed: GraphScene = {
+      ...graph,
+      flow: {
+        ...graph.flow,
+        nodes: graph.flow.nodes.map((node) => (node.id === first.id ? { ...node, id: authored } : node)),
+        edges: graph.flow.edges.map((edge) => ({
+          ...edge,
+          from: edge.from.nodeId === first.id ? { ...edge.from, nodeId: authored } : edge.from,
+          to: edge.to.nodeId === first.id ? { ...edge.to, nodeId: authored } : edge.to,
+        })),
+      },
+    };
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [authored] };
+    const held: GraphScene = { ...renamed, flow: { ...renamed.flow, storyboardGroups: [beat] } };
+
+    // A structural edit through the whole-scene writer: one shot added at the end.
+    const shots = orderedShots(held);
+    const added = { ...shots[0]!, id: "sh_900", number: shots.length + 1, title: "A held breath" };
+    const after = graphSceneFor(held, { ...legacy, shots: [...shots, added] });
+
+    const survivor = after.flow.nodes.find(
+      (node) => node.kind === "shot" && node.shot.id === shots[0]!.id,
+    )!;
+    assert.equal(survivor.id, authored, "the surviving shot kept the id the scene gave it");
+    assert.ok(
+      after.flow.edges.some((edge) => edge.from.nodeId === authored || edge.to.nodeId === authored),
+      "and its edges still reach it",
+    );
+    assert.deepEqual(
+      after.flow.storyboardGroups,
+      [beat],
+      "so the beat naming it still resolves, which is what the re-mint broke",
     );
   });
 });

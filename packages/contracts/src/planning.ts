@@ -1409,9 +1409,10 @@ function sceneCast(
   sheets: Sheet[],
 ): { resolved: ResolvedCast; perShot: Map<string, ResolvedCast> } {
   const perShot = new Map<string, ResolvedCast>();
+  const shots = orderedShots(scene);
   const seen = new Map<string, { sheet: Sheet; retired: boolean }>();
   const unknown = new Set<string>();
-  for (const shot of orderedShots(scene)) {
+  for (const shot of shots) {
     const resolved = resolveCast(shot.description, sheets);
     perShot.set(shot.id, resolved);
     for (const entry of resolved.cast) if (!seen.has(entry.sheet.id)) seen.set(entry.sheet.id, entry);
@@ -1558,11 +1559,12 @@ function resolveContinuations(
   mode: "per-shot" | "whole-scene",
 ): Map<string, { continuation?: ContinuationPlan; unavailable?: string }> {
   const states = new Map<string, { continuation?: ContinuationPlan; unavailable?: string }>();
+  const shots = orderedShots(scene);
   // Without the takes nothing can be resolved — the caller that cannot supply them is the caller
   // that predates continuation, and it gets exactly the dispatch it got before.
   if (takes === undefined) return states;
   const route = continueDispatchFor(model);
-  for (const [shotIndex, shot] of orderedShots(scene).entries()) {
+  for (const [shotIndex, shot] of shots.entries()) {
     if (shot.continuity?.continuesPrevious !== true) continue;
     if (mode !== "per-shot") {
       states.set(shot.id, {
@@ -1574,13 +1576,13 @@ function resolveContinuations(
       states.set(shot.id, { unavailable: modeUnavailableReason(model, "continue") ?? "no continue route" });
       continue;
     }
-    const availability = continuationAvailable({ shotIndex, shots: orderedShots(scene), selections, takes });
+    const availability = continuationAvailable({ shotIndex, shots: shots, selections, takes });
     if (!availability.available) {
       states.set(shot.id, { unavailable: availability.reason });
       continue;
     }
     const predecessor = availability.predecessor;
-    const from = orderedShots(scene)[shotIndex - 1]!;
+    const from = shots[shotIndex - 1]!;
     /*
      * The file lives with the PASS, not with the segment (SPEC-013 R-3).
      *
@@ -1621,11 +1623,12 @@ function resolveBoundaryFrames(
   mode: "per-shot" | "whole-scene",
 ): Map<string, { frame?: BoundaryFramePlan; stale?: string }> {
   const states = new Map<string, { frame?: BoundaryFramePlan; stale?: string }>();
+  const shots = orderedShots(scene);
   // Without the shelf nothing can be resolved — no frame travels, none is called stale. The
   // caller that cannot supply artifacts is the caller that predates them.
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
-  for (const [shotIndex, shot] of orderedShots(scene).entries()) {
+  for (const [shotIndex, shot] of shots.entries()) {
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -1641,7 +1644,7 @@ function resolveBoundaryFrames(
       states.set(shot.id, { stale: `${artifactId} has been superseded` });
       continue;
     }
-    const predecessor = shotIndex > 0 ? orderedShots(scene)[shotIndex - 1] : undefined;
+    const predecessor = shotIndex > 0 ? shots[shotIndex - 1] : undefined;
     const selectedPredecessor = predecessor
       ? (selections[predecessor.id]?.acceptedTakeId ?? null)
       : null;
@@ -1670,6 +1673,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const effectiveStyle = styleFor(world, productionStyleFor(input.production, input.artDirection?.description));
   const { resolved, perShot } = sceneCast(scene, sheets);
   const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
+  const ordered = orderedShots(scene);
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
   const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
@@ -1684,7 +1688,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // the world forbids.
   const constraints = standingConstraints(input.artDirection, input.production);
 
-  const shots: ShotDispatchPlan[] = orderedShots(scene).map((shot) => {
+  const shots: ShotDispatchPlan[] = ordered.map((shot) => {
     const cast = perShot.get(shot.id)!;
     const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId);
     const references = budget.carried.map((c) =>
@@ -1801,7 +1805,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = packBoards(
       packShotsFor({
         scene,
-        shots: orderedShots(scene),
+        shots: ordered,
         selections,
         takes: input.takes ?? [],
         /*
@@ -1830,7 +1834,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
   })();
 
-  const pack = packScene(orderedShots(scene), capSec, {
+  const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
     forceBreakBefore: boardBoundaries,
@@ -1863,7 +1867,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           negatives: derivedNegatives({
             capability: model.capability,
             shots: pass.plan
-              .map((entry) => orderedShots(scene).find((s) => s.id === entry.shotId))
+              .map((entry) => ordered.find((s) => s.id === entry.shotId))
               .filter((s): s is Shot => s !== undefined),
             constraints,
             ...(input.audioDesign !== undefined ? { audioDesign: input.audioDesign } : {}),
@@ -1904,7 +1908,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               ) === index,
           )
       : sceneBudget.dropped;
-  const overlongShots = orderedShots(scene)
+  const overlongShots = ordered
     .map((shot) => ({
       shot,
       choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
@@ -1954,7 +1958,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // rather than a picture, so "no start frame" is not a gap in it.
     shotsWithoutFrame:
       frameDispatchFor(model, 1) !== null || model.accepts.startFrame
-        ? orderedShots(scene)
+        ? ordered
             .filter(
               (s) =>
                 continuations.get(s.id)?.continuation === undefined &&
@@ -1980,7 +1984,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // that matters — and leaving it here would be worse than noise: compilation refuses a plan
     // with any stale frame, so an old selection on a shot now extending footage would block the
     // whole dispatch over a field this route never reads.
-    staleFrames: orderedShots(scene).flatMap((shot) => {
+    staleFrames: ordered.flatMap((shot) => {
       if (continuations.get(shot.id)?.continuation !== undefined) return [];
       const stale = boundaryFrames.get(shot.id)?.stale;
       return stale !== undefined ? [{ shotId: shot.id, number: shot.number, detail: stale }] : [];
@@ -2002,7 +2006,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           ]
         : [],
     ),
-    continuationUnavailable: orderedShots(scene).flatMap((shot) => {
+    continuationUnavailable: ordered.flatMap((shot) => {
       const reason = continuations.get(shot.id)?.unavailable;
       return reason !== undefined ? [{ shotId: shot.id, number: shot.number, reason }] : [];
     }),
@@ -2048,7 +2052,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       const verdict = payloadVerdict(raw, ceiling);
       return verdict.over ? verdict : null;
     })(),
-    overriddenStale: orderedShots(scene)
+    overriddenStale: ordered
       .map((s) => ({ shotId: s.id, number: s.number, against: overrideStaleAgainst(s, sheets) }))
       .filter((s) => s.against.length > 0),
     // Refused by name before enqueue (issue 389): the shape, the model, and what it does offer.

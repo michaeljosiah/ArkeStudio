@@ -9,6 +9,7 @@ import {
   type Scene,
   type SceneFlowFinding,
   type SceneRecord,
+  sequenceEdgeIdFor,
 } from "@arke-studio/contracts";
 
 /**
@@ -118,9 +119,47 @@ export function graphSceneFor(current: SceneRecord | null, next: Scene): GraphSc
     held.shots.length === next.shots.length &&
     held.shots.every((pair, index) => pair.shot.id === next.shots[index]!.id);
   if (!structureHeld) {
+    /*
+     * A structural edit keeps the node identity the scene already had (#601 round 2).
+     *
+     * Rebuilding from `migrateLegacyScene` alone re-mints every node and edge id from the
+     * projection's own rule. That is harmless while every id in the world came from that same
+     * rule — but a semantic command or a group edit can author ids the projection would not
+     * have chosen, and then a surviving shot silently changes node id while the groups that
+     * name it do not, so a grouped scene is refused even though all its shots are still there.
+     * So: a shot that survives keeps the node id the live flow gave it, and only a shot the
+     * edit introduced gets a freshly minted one. Edges are re-derived either way — the
+     * adjacency is exactly what changed.
+     */
+    const heldNodeIds = new Map(
+      current.flow.nodes.flatMap((node) => (node.kind === "shot" ? [[node.shot.id, node.id] as const] : [])),
+    );
+    const nodes = migrated.flow.nodes.map((node) =>
+      node.kind === "shot" && heldNodeIds.has(node.shot.id)
+        ? { ...node, id: heldNodeIds.get(node.shot.id)! }
+        : node,
+    );
+    // Only shot nodes can be renamed here — the terminals are named from the scene id, which a
+    // structural edit does not touch — so the edge rewrite reads its endpoints off the same map.
+    const renamed = new Map(
+      migrated.flow.nodes.flatMap((node, index) =>
+        node.id === nodes[index]!.id ? [] : [[node.id, nodes[index]!.id] as const],
+      ),
+    );
+    const byNode = new Map(nodes.map((node) => [node.id, node] as const));
+    const edges = migrated.flow.edges.map((edge) => {
+      const from = byNode.get(renamed.get(edge.from.nodeId) ?? edge.from.nodeId)!;
+      const to = byNode.get(renamed.get(edge.to.nodeId) ?? edge.to.nodeId)!;
+      return {
+        ...edge,
+        id: sequenceEdgeIdFor(from, to),
+        from: { ...edge.from, nodeId: from.id },
+        to: { ...edge.to, nodeId: to.id },
+      };
+    });
     return refuseUnlessOnePath({
       ...migrated,
-      flow: { ...migrated.flow, storyboardGroups: current.flow.storyboardGroups },
+      flow: { ...migrated.flow, nodes, edges, storyboardGroups: current.flow.storyboardGroups },
     });
   }
 
