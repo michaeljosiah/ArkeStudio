@@ -465,7 +465,7 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
 
 describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
   it("changes with a selection immediately; gaps carry labels and durations", async () => {
-    const { store } = await open();
+    const { dir, store } = await open();
     let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
     const before = deriveCut(production);
     assert.ok(before.entries.length > 0);
@@ -476,11 +476,25 @@ describe("the derived cut (R-14..R-16, D9, §3.2)", () => {
     assert.match(gap!.label, /SHOT \d+/);
     assert.ok(gap!.durationSec > 0);
 
-    // Accept a different take for sh_12: the cut reflects it with no reconciliation step.
-    await acceptTake(store, production, { takeId: "tk_01J8A0000000000000000000A1", shotId: "sh_12", by: "user" });
+    /*
+     * Accept a different take for sh_12: the cut reflects it with no reconciliation step.
+     *
+     * The take has to be *footage*. This used to accept `tk_...A1`, which is the fixture's
+     * `kind: "frame"` take — a PNG — and asserted the cut played it. That was the collision
+     * SPEC-036 R-21 ends: a still in the clip slot, which the cut then treats as a clip and
+     * the export tries to encode. A still accepted anywhere now lands on the frame slot
+     * instead, so the shot is covered here by a clip the test lands itself.
+     */
+    const landed = await landPass(dir);
+    const passTakes = await recordTakesFromJob(store, passJob(landed), 400000);
+    const coveringShot12 = passTakes.find(
+      (t) => t.coversShots.length === 1 && t.coversShots[0] === "sh_12",
+    )!;
+    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await acceptTake(store, production, { takeId: coveringShot12.id, shotId: "sh_12", by: "user" });
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
     const after = deriveCut(production);
-    assert.equal(after.entries.find((e) => e.shot.id === "sh_12")!.takeId, "tk_01J8A0000000000000000000A1");
+    assert.equal(after.entries.find((e) => e.shot.id === "sh_12")!.takeId, coveringShot12.id);
     await store.close();
   });
 

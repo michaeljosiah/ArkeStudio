@@ -72,6 +72,21 @@ export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "bench-take",
 ]);
 
+/**
+ * Whether a job's finalization can be replayed — the set above by target kind, plus the one
+ * parameterised case: a shot job that asked for frame-slot landing (SPEC-036 §2.8). Its
+ * finalization is pure local filing — the take rejoins by job id, the filing is fenced — so a
+ * retry touches no provider and spends nothing. Bare `shot` stays out: a clip's finalization
+ * moves media through a window a replay cannot re-enter.
+ */
+export function isReplayableFinalization(job: {
+  target: { kind: string };
+  params: Record<string, unknown>;
+}): boolean {
+  if (REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind)) return true;
+  return job.target.kind === "shot" && job.params["landing"] === "frame-slot";
+}
+
 export const JobFinalizationSchema = z
   .object({
     status: z.enum(["pending", "complete", "failed"]),

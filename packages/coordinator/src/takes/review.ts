@@ -9,6 +9,7 @@ import {
   type AudioDesign,
   type ProductionBundle,
   type ReviewDecision,
+  hasOwnFrame,
   type Selections,
   type CutFile,
   type ClipAudioMode,
@@ -58,6 +59,19 @@ export async function acceptTake(
     decision: "accept",
     by: input.by,
   };
+
+  /*
+   * A still is not footage, and the clip slot is for footage (SPEC-036 R-21).
+   *
+   * The contact sheet used to file an accepted still into `acceptedTakeId`, where it sat in the
+   * slot the cut reads and collided with clip acceptance. Stills now go through `acceptStill`,
+   * which lands the decision, the artifact and the frame slot in one commit — so a still reaching
+   * this function is a routing bug upstream, and refusing it loudly beats running the cut's
+   * continuity and supersession machinery over a take that was never footage.
+   */
+  if (take.kind === "frame" || take.kind === "still") {
+    throw new Error(`take ${input.takeId} is a still — accept it as this shot's frame, not as footage`);
+  }
 
   const map = JSON.parse(selections.raw) as Selections;
   /*
@@ -116,11 +130,19 @@ export async function acceptTake(
     }
   }
 
-  // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
-  // pass segment the frame source is the pass, not the segment — a coinciding boundary must
-  // not chain the same frame twice.
+  /*
+   * Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a pass
+   * segment the frame source is the pass, not the segment — a coinciding boundary must not
+   * chain the same frame twice.
+   *
+   * Unless that shot already opens on a picture it was given (SPEC-036 R-20). Drawing every
+   * shot and then accepting takes one by one would otherwise replace each following shot's
+   * drawn frame with its predecessor's footage — silently, and precisely where the point of
+   * drawing first was to choose what the shot opens on. A shot that wants the predecessor's
+   * footage asks for it with `continuity.continuesPrevious` (SPEC-019 R-50).
+   */
   const following = index >= 0 ? ordered[index + 1] : undefined;
-  if (following) {
+  if (following && !hasOwnFrame(next[following.id], store.getBundle().artifacts)) {
     const frameSourceTakeId = take.segment?.passTakeId ?? take.id;
     next[following.id] = { trimInSec: 0, ...next[following.id], startFrameTakeId: frameSourceTakeId as never };
   }

@@ -390,3 +390,32 @@ export type ShotSelection = z.infer<typeof ShotSelectionSchema>;
 
 export const SelectionsSchema = z.record(ShotIdSchema, ShotSelectionSchema);
 export type Selections = z.infer<typeof SelectionsSchema>;
+
+/**
+ * Does this shot open on a picture it was given, rather than one chained onto it (SPEC-036 R-20)?
+ *
+ * The frame slot answers one question — what this shot opens on — and two things write it. A
+ * frame run, or a still accepted by hand, files *this shot's own* picture there. The continuity
+ * chain files the *previous* shot's boundary still there when its take is accepted, so a cut
+ * can open where the last one ended.
+ *
+ * The author's own frame outranks the automatic seed, and that is what this predicate is for.
+ * Without it, drawing every shot and then accepting takes one by one would silently replace
+ * each following shot's drawn frame — the app quietly overruling a picture somebody chose,
+ * exactly where the point of drawing first was to choose it. A shot that genuinely wants the
+ * predecessor's footage says so with `continuity.continuesPrevious` (SPEC-019 R-50); it does
+ * not arrive there through an accept it never asked for.
+ *
+ * Told apart by provenance already on the sidecar, never by a new flag: a boundary still
+ * carries `boundaryExtraction` naming the take it was cut from, and a drawn frame does not.
+ * Nothing stored can disagree with where the picture came from.
+ */
+export function hasOwnFrame(
+  selection: ShotSelection | undefined,
+  artifacts: readonly { id: string; kind: string; boundaryExtraction?: unknown }[],
+): boolean {
+  const artifactId = selection?.startFrameArtifactId ?? null;
+  if (artifactId === null) return false;
+  const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+  return artifact !== undefined && artifact.kind === "image" && artifact.boundaryExtraction === undefined;
+}

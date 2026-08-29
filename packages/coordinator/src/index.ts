@@ -169,6 +169,7 @@ export {
   type BoundaryFrameMaker,
   type BoundaryFrameUnavailableReason,
 } from "./takes/boundary.js";
+export { fileDrawnFrame, type DrawnFrameOutcome } from "./takes/drawn-frame.js";
 export { exportWorld, runExport, WORLD_EXPORT_EXCLUDED, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 export { acceptTake, rejectTake, saveAudioTracks } from "./takes/review.js";
 export {

@@ -678,6 +678,21 @@ describe("a failed finalization always leaves the user a way out", () => {
     assert.ok(entry);
     assert.deepEqual(entry.actions, []);
   });
+
+  it("offers retry-finalization for a frame-slot shot job, whose finalization is pure local filing", () => {
+    // The one parameterised case (SPEC-036 §2.8): the take rejoins by job id and the filing is
+    // fenced, so replaying touches no provider — where a bare shot job's finalization moves
+    // media through a window a replay cannot re-enter, and stays without the action above.
+    const job: Job = { ...failed("shot"), params: { landing: "frame-slot" } };
+    const [entry] = computeNeedsYou({
+      app: { jobs: [job], queues: [] },
+      world: null,
+      worlds: [],
+    } as unknown as ClientState).filter((candidate) => candidate.kind === "job-finalization-failed");
+    assert.ok(entry);
+    assert.deepEqual(entry.actions, ["retry-finalization"]);
+    assert.equal(canDeleteJob(job), false);
+  });
 });
 
 describe("reference kits", () => {
