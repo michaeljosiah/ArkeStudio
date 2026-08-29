@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { ulid, type ArtifactSidecar, type ProductionBundle, type Take } from "@arke-studio/contracts";
+import { hasOwnFrame, ulid, type ArtifactSidecar, type ProductionBundle, type Take } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -283,6 +283,14 @@ export async function chainBoundaryFrame(
       // A newer accept may finish while this extraction is in flight. A segment and its backing
       // pass share mediaTakeId, so fence against the exact accepted source take instead.
       if (selections[sourceShotId]?.["acceptedTakeId"] !== take.id) return false;
+      /*
+       * And never over a picture the following shot was given (SPEC-036 R-20). The accept's own
+       * continuity write already declines this, but the extraction runs afterwards and against a
+       * selections file re-read here — so a drawn frame filed in between would be overwritten by
+       * a boundary still nobody asked for. Checked at the moment of writing, inside the same
+       * gate as the fence above, because that is the only point where the answer cannot go stale.
+       */
+      if (hasOwnFrame(selections[followingShotId] as never, store.getBundle().artifacts)) return false;
       await atomicWriteFile(join(store.dir, "artifacts", file), png);
       selections[followingShotId] = {
         trimInSec: 0,

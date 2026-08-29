@@ -9,6 +9,7 @@ import {
   type AudioDesign,
   type ProductionBundle,
   type ReviewDecision,
+  hasOwnFrame,
   type Selections,
   type CutFile,
   type ClipAudioMode,
@@ -58,6 +59,17 @@ export async function acceptTake(
     decision: "accept",
     by: input.by,
   };
+
+  /*
+   * A still is not footage, and the clip slot is for footage (SPEC-036 R-21).
+   *
+   * The contact sheet has always filed an accepted still into `acceptedTakeId`, where it sits in
+   * the slot the cut reads and collides with clip acceptance. A still accepted anywhere now
+   * records its decision and stops there; the picture itself is filed by `fileDrawnFrame`, onto
+   * the frame slot, in its own commit — so nothing about the cut, continuity or supersession
+   * runs for a take that was never footage.
+   */
+  const isStill = take.kind === "frame" || take.kind === "still";
 
   const map = JSON.parse(selections.raw) as Selections;
   /*
@@ -116,11 +128,19 @@ export async function acceptTake(
     }
   }
 
-  // Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a
-  // pass segment the frame source is the pass, not the segment — a coinciding boundary must
-  // not chain the same frame twice.
+  /*
+   * Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a pass
+   * segment the frame source is the pass, not the segment — a coinciding boundary must not
+   * chain the same frame twice.
+   *
+   * Unless that shot already opens on a picture it was given (SPEC-036 R-20). Drawing every
+   * shot and then accepting takes one by one would otherwise replace each following shot's
+   * drawn frame with its predecessor's footage — silently, and precisely where the point of
+   * drawing first was to choose what the shot opens on. A shot that wants the predecessor's
+   * footage asks for it with `continuity.continuesPrevious` (SPEC-019 R-50).
+   */
   const following = index >= 0 ? ordered[index + 1] : undefined;
-  if (following) {
+  if (following && !hasOwnFrame(next[following.id], store.getBundle().artifacts)) {
     const frameSourceTakeId = take.segment?.passTakeId ?? take.id;
     next[following.id] = { trimInSec: 0, ...next[following.id], startFrameTakeId: frameSourceTakeId as never };
   }
@@ -135,12 +155,18 @@ export async function acceptTake(
         content: reviews.raw + JSON.stringify(decision) + "\n",
         baseHash: reviews.existed ? sha256(reviews.raw) : null,
       },
-      {
-        path: selectionsPath,
-        action: selections.existed ? "replace" : "create",
-        content: JSON.stringify(next, null, 2) + "\n",
-        baseHash: selections.existed ? sha256(selections.raw) : null,
-      },
+      // A still writes no selection here at all: `fileDrawnFrame` owns the frame slot, and a
+      // rewritten-but-unchanged selections file would be a commit claiming something happened.
+      ...(isStill
+        ? []
+        : [
+            {
+              path: selectionsPath,
+              action: selections.existed ? ("replace" as const) : ("create" as const),
+              content: JSON.stringify(next, null, 2) + "\n",
+              baseHash: selections.existed ? sha256(selections.raw) : null,
+            },
+          ]),
     ],
   });
   return decision;

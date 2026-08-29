@@ -175,6 +175,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
+import { fileDrawnFrame } from "./takes/drawn-frame.js";
 
 /**
  * How long an opening bench session may spend drawing pictures it should already have. Long
@@ -2741,6 +2742,33 @@ export class Coordinator {
           ledgerEntry?.actualSource ?? "manifest-derived",
         );
         if (takes.length === 0) throw new Error("production take finalization produced no take");
+        /*
+         * A job that asked for it files its still as the shot's frame (SPEC-036 R-20).
+         *
+         * Keyed on what the dispatch asked for, never on the take's kind alone: every other
+         * image job in the app — a character's main photo, a look, a model sheet — lands as an
+         * image take too, and none of them is a shot's start frame. `landing` is the request
+         * saying which it was, so nothing that did not ask is touched.
+         */
+        if (job.params["landing"] === "frame-slot") {
+          const fresh = store.getBundle().productions.find((p) => p.meta.id === job.productionId);
+          for (const take of takes) {
+            const shotId = take.coversShots[0];
+            if (fresh === undefined || shotId === undefined || take.coversShots.length !== 1) continue;
+            const filed = await fileDrawnFrame(store, fresh, {
+              take,
+              shotId,
+              producedBy: `frame-run:${job.id}`,
+            });
+            if (!filed.ok) {
+              void this.appLog?.append({
+                kind: "drawn-frame.unavailable",
+                reason: filed.reason,
+                detail: { takeId: take.id, shotId },
+              });
+            }
+          }
+        }
         for (const take of takes) {
           this.emit({
             at: new Date().toISOString(),
@@ -5852,6 +5880,32 @@ export class Coordinator {
           // accept stands exactly as it did before boundary frames existed.
           const fresh = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
           const acceptedTake = fresh?.takes.find((t) => t.id === msg.takeId);
+          /*
+           * A still accepted anywhere is the shot's own frame (SPEC-036 R-21), never footage.
+           * `acceptTake` recorded the decision and deliberately touched no selection; filing the
+           * picture is what puts it in the frame slot. Nothing below this runs for a still: a
+           * take that was never footage seeds no continuity and supersedes no clip.
+           */
+          if (
+            fresh !== undefined &&
+            acceptedTake !== undefined &&
+            (acceptedTake.kind === "frame" || acceptedTake.kind === "still")
+          ) {
+            const filed = await fileDrawnFrame(store, fresh, {
+              take: acceptedTake,
+              shotId: msg.shotId,
+              producedBy: `accept:${msg.takeId}`,
+            });
+            if (!filed.ok) {
+              void this.appLog?.append({
+                kind: "drawn-frame.unavailable",
+                reason: filed.reason,
+                detail: { takeId: msg.takeId, shotId: msg.shotId },
+              });
+            }
+            await this.refreshWorldSnapshot(msg.worldId);
+            return;
+          }
           if (fresh !== undefined && acceptedTake !== undefined) {
             const targetScene = sortScenes(fresh.scenes).find((candidate) =>
               candidate.shots.some((shot) => shot.id === msg.shotId),
