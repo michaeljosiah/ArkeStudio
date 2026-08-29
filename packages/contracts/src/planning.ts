@@ -30,6 +30,7 @@ import {
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import { effectiveFraming } from "./scene.js";
+import { packBoards, packShotsFor } from "./boards.js";
 import type { Scene, Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
@@ -533,10 +534,20 @@ export const DEFAULT_SHOT_SEC = 4;
 export function packScene(
   shots: Shot[],
   capSec: number,
-  opts?: { referenceCapSec?: number; shotCarriesReferences?: (shotId: string) => boolean },
+  opts?: {
+    referenceCapSec?: number;
+    shotCarriesReferences?: (shotId: string) => boolean;
+    /**
+     * Shot ids a pass may not run through (SPEC-035 R-13): the board boundaries — continuity
+     * breaks and the author's own splits and merges. A pass never spans one, and a route cap
+     * may still subdivide the board between them into several passes.
+     */
+    forceBreakBefore?: ReadonlySet<string>;
+  },
 ): PackResult {
   const referenceCap = opts?.referenceCapSec ?? capSec;
   const carries = opts?.shotCarriesReferences ?? (() => false);
+  const forced = opts?.forceBreakBefore;
   const passes: Pass[] = [];
   let current: ShotPlanEntry[] = [];
   let cursor = 0;
@@ -559,6 +570,9 @@ export function packScene(
         oversizeShot: { shotId: shot.id, number: shot.number, durationSec: duration, capSec: shotCap },
       };
     }
+    // A board boundary closes the pass before the cap is even consulted: continuity and the
+    // author's seams decide where a pass MAY run, the route cap decides how far it CAN.
+    if (forced?.has(shot.id) === true) close();
     // The cap the pass would live under if this shot joined it.
     const effectiveCap = currentHasReferences || shotRefs ? referenceCap : capSec;
     if (cursor + duration > effectiveCap) close();
@@ -1767,9 +1781,58 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const referenceCapSec =
     model.limits.maxReferenceDurationSec ??
     (referenceCapCandidates.length > 0 ? referenceCapCandidates[referenceCapCandidates.length - 1]! : capSec);
+  /*
+   * Where a pass may not run through (SPEC-035 R-13).
+   *
+   * Boards are the continuity structure — time-of-day and cast breaks, plus the author's own
+   * splits and merges — and passes are a refinement of them, never a rival: a pass never spans
+   * a board boundary, and the route cap may subdivide the shots between two boundaries into
+   * several passes. That is SPEC-029 R-43's surviving principle exactly, in the one place it
+   * always belonged: a provider limit is execution policy, and it subdivides authored
+   * structure without ever rewriting it.
+   *
+   * Packed at the text cap here rather than the reference cap: this call is only being asked
+   * where the CONTINUITY seams fall, and `packScene` below owns every cap decision, including
+   * the retroactive reference ceiling it alone can see (issue #390).
+   */
+  const boardOverrides = scene.boards;
+  const boardBoundaries = ((): ReadonlySet<string> => {
+    const packed = packBoards(
+      packShotsFor({
+        scene,
+        shots: scene.shots,
+        selections,
+        takes: input.takes ?? [],
+        /*
+         * Characters, not every sheet a shot mentions. `@the-vigil` is where the shot is, not
+         * who is in it — and counting a location as cast makes a scene set in one place break
+         * wherever the prose happens to name the place again, which is the same self-defeat
+         * the lighting exemption exists to prevent (R-6). Found against the fixture: four
+         * shots in one location packed into three boards on location mentions alone.
+         */
+        castOf: (shot) =>
+          resolveCast(shot.description, sheets)
+            .cast.filter((entry) => entry.sheet.type === "character")
+            .map((entry) => entry.sheet.id),
+        defaultDurationSec: DEFAULT_SHOT_SEC,
+      }),
+      capSec,
+      new Set(boardOverrides?.splits ?? []),
+      new Set(boardOverrides?.merges ?? []),
+      // Frame coverage does not move a seam; it only counts, and nothing here reads the count.
+      () => true,
+    );
+    // A refusal is `packScene`'s to report, in its own shape, from its own oversize check.
+    if (!packed.ok) return new Set();
+    return new Set(
+      packed.boards.slice(1).map((board) => board.memberShotIds[0]!).filter((id) => id !== undefined),
+    );
+  })();
+
   const pack = packScene(scene.shots, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
+    forceBreakBefore: boardBoundaries,
   });
 
   const passReferences = pack.ok

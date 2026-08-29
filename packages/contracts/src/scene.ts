@@ -218,6 +218,41 @@ export const SceneBaseShape = {
       .optional(),
     /** Turn 97 (14d): camera defaults every shot inherits — a shot's `framing` field wins. */
     defaults: ShotFramingSchema.optional(),
+    /**
+     * The authored board overrides (SPEC-035 R-4).
+     *
+     * Boards themselves are derived and never stored — packed live from the model's cap and
+     * the continuity of the shots. What a person authors is only this: a **split** forcing a
+     * board to begin at a shot, a **merge** suppressing the automatic break that would begin
+     * one, and the consolidated prompt they have edited for a board.
+     *
+     * Keyed by shot id, never by ordinal, so reordering shots cannot silently move a seam.
+     * An id naming no current shot is dropped where it is read rather than refused: shots are
+     * deleted without ceremony, and a stale override is a no-op, not a broken scene.
+     *
+     * `splits` and `merges` are disjoint — a boundary cannot be both forced and suppressed —
+     * and the writer keeps them so. A legacy record carrying an id in both reads as a split
+     * with the merge dropped, because a dormant merge that wakes when a split is later cleared
+     * would be a seam nobody chose.
+     *
+     * `prompts` key by the board's frozen member set, the only identity stable across a
+     * repack: letters renumber and membership moves, so an entry whose members no longer match
+     * a packed board is dropped at read and the prompt visibly returns to `auto` rather than
+     * silently attaching to different shots.
+     *
+     * Optional, and absent means empty — this schema is a read path, and every scene ever
+     * written parses unchanged.
+     */
+    boards: z
+      .object({
+        splits: z.array(ShotIdSchema),
+        merges: z.array(ShotIdSchema),
+        prompts: z
+          .array(z.object({ members: z.array(ShotIdSchema).min(1), text: z.string().min(1) }).strict())
+          .optional(),
+      })
+      .strict()
+      .optional(),
     board: SceneBoardSchema.optional(),
     /** The reference storyboard drawn for this scene, when one has been (R-22). */
     storyboard: SceneStoryboardSchema.optional(),
