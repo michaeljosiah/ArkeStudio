@@ -348,6 +348,50 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   return { summary, standing, spatial, cameraAnchor, body, direction, persistent };
 }
 
+/** One board prompt: shared scene context, then the ordered beats it must hold together. */
+export function assembleBoardPrompt(input: {
+  world: WorldMeta;
+  sheets: Sheet[];
+  scene: SceneRecord;
+  shots: readonly Shot[];
+  aspect: string;
+  artDirection?: string;
+}): string {
+  const location =
+    input.scene.inherits?.location === undefined
+      ? undefined
+      : input.sheets.find((sheet) => sheet.id === input.scene.inherits?.location);
+  const contexts = input.shots.map((shot) =>
+    assembleBlocks({
+      world: input.world,
+      sheets: input.sheets,
+      scene: input.scene,
+      shot,
+      ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
+      capability: "video",
+    }),
+  );
+  const context = [
+    input.artDirection,
+    location?.name,
+    input.scene.inherits?.timeOfDay,
+    input.scene.defaults?.lighting,
+    input.aspect,
+    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing, blocks.persistent]),
+  ].filter((part, index, all): part is string =>
+    typeof part === "string" && part.trim().length > 0 && all.indexOf(part) === index,
+  );
+  const head = `${context.join(", ")}. Continuous cast, light and grade across every cell.`;
+  const beats = input.shots.map((shot, index) => {
+    const blocks = contexts[index]!;
+    const framing = effectiveFraming(input.scene, shot);
+    const camera = [framing.size, framing.lens].filter(Boolean).join(", ");
+    const direction = [blocks.cameraAnchor, blocks.direction].filter(Boolean).join(" ");
+    return `${index + 1}. ${camera.length > 0 ? `${camera} — ` : ""}${blocks.body}${direction.length > 0 ? ` ${direction}` : ""}`;
+  });
+  return [head, ...beats].join("\n\n");
+}
+
 /** The blocks joined, one paragraph each, empty ones omitted rather than emitted (R-7). */
 export function joinBlocks(blocks: PromptBlocks): string {
   return [

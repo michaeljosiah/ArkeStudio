@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   linearizeSceneFlow,
-  packBoards,
   resolveCast,
   type ArtifactSidecar,
+  type ClientMessage,
   type ProductionBundle,
   type SceneRecord,
   type Sheet,
@@ -11,7 +11,10 @@ import {
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
+import type { WorkspaceBoardPack } from "./boards.js";
 import { useWorkspaceSelection } from "./selection.js";
+
+type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 /**
  * Flow — the node canvas (SPEC-029 R-24, R-25; the prototype's §11).
@@ -48,6 +51,7 @@ interface FlowNode {
   meta: string;
   thumb?: string;
   shotId?: string;
+  staged: boolean;
 }
 
 interface FlowEdge {
@@ -62,6 +66,7 @@ interface FlowEdge {
   label: string;
   fromShotId: string | null;
   toShotId: string | null;
+  staged: boolean;
 }
 
 const ZOOM_MIN = 0.5;
@@ -74,27 +79,45 @@ export function SceneFlow({
   sheets,
   artifacts,
   slug,
-  capSec,
+  boardPack,
+  stagedShotIds,
+  newShotIds,
+  stagedBoards,
+  locked,
+  onCommand,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
   sheets: readonly Sheet[];
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
-  /** The clip cap the boards pack against — the model's limit, as the rows use. */
-  capSec: number;
+  boardPack: WorkspaceBoardPack;
+  stagedShotIds: ReadonlySet<string>;
+  newShotIds: ReadonlySet<string>;
+  stagedBoards: boolean;
+  locked: boolean;
+  onCommand: (command: Command) => boolean;
 }) {
   const sequence = linearizeSceneFlow(scene);
   const { subject, select } = useWorkspaceSelection();
   const canvas = useRef<HTMLDivElement | null>(null);
+  const nodeControls = useRef(new Map<string, HTMLDivElement>());
   const [pan, setPan] = useState({ x: 24, y: 20 });
   const [zoom, setZoom] = useState(1);
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
+  const [linkSource, setLinkSource] = useState<string | null>(null);
+  const [activeShotId, setActiveShotId] = useState<string | null>(
+    subject.kind === "shot" ? subject.shotId : null,
+  );
+  const [deleteShotId, setDeleteShotId] = useState<string | null>(null);
 
-  const shots = sequence.kind === "linear" ? sequence.shots.map((pair) => pair.shot) : [];
+  const shots = useMemo(
+    () => sequence.kind === "linear" ? sequence.shots.map((pair) => pair.shot) : [],
+    [scene],
+  );
   const graph = useMemo(
-    () => buildGraph({ shots, production, sheets, artifacts, slug, capSec, moved, scene }),
-    [shots, production, sheets, artifacts, slug, capSec, moved, scene],
+    () => buildGraph({ shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards }),
+    [shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards],
   );
 
   /** Fit the graph to the viewport — what opening Flow does, and what `Fit` returns to. */
@@ -191,6 +214,32 @@ export function SceneFlow({
   }
 
   const current = subject.kind === "shot" ? subject.shotId : null;
+  useEffect(() => {
+    if (activeShotId !== null && shots.some((shot) => shot.id === activeShotId)) return;
+    setActiveShotId(shots[0]?.id ?? null);
+  }, [activeShotId, shots]);
+  const focusShot = (shotId: string) => {
+    setActiveShotId(shotId);
+    select({ kind: "shot", shotId });
+    requestAnimationFrame(() => nodeControls.current.get(shotId)?.focus());
+  };
+  const moveFocus = (fromShotId: string, key: string) => {
+    const index = shots.findIndex((shot) => shot.id === fromShotId);
+    const next =
+      key === "Home"
+        ? shots[0]
+        : key === "End"
+          ? shots.at(-1)
+          : key === "ArrowUp" || key === "ArrowLeft"
+            ? shots[Math.max(0, index - 1)]
+            : shots[Math.min(shots.length - 1, index + 1)];
+    if (next !== undefined) focusShot(next.id);
+  };
+  const reconnect = (targetShotId: string) => {
+    if (linkSource === null || linkSource === targetShotId || locked || stagedShotIds.has(linkSource)) return;
+    onCommand({ kind: "move-shot", shotId: linkSource, to: { after: targetShotId } });
+    setLinkSource(null);
+  };
 
   return (
     <div
@@ -215,6 +264,7 @@ export function SceneFlow({
               stroke={edge.soft ? "var(--neutral-300)" : "var(--neutral-400)"}
               strokeWidth={edge.soft ? 1.25 : 1.5}
               strokeDasharray={edge.soft ? "4 4" : undefined}
+              data-staged={edge.staged ? "true" : undefined}
             />
           ))}
         </svg>
@@ -226,23 +276,69 @@ export function SceneFlow({
         {graph.nodes.map((node) => (
           <div
             key={node.id}
+            ref={(element) => {
+              if (node.shotId === undefined) return;
+              if (element === null) nodeControls.current.delete(node.shotId);
+              else nodeControls.current.set(node.shotId, element);
+            }}
             className="fy-swnode"
             data-kind={node.kind}
             data-testid={`flow-node-${node.id}`}
             data-selected={node.shotId !== undefined && node.shotId === current ? "true" : undefined}
+            data-staged={node.staged ? "true" : undefined}
             style={{ left: node.x, top: node.y, width: NODE[node.kind].w, height: NODE[node.kind].h }}
             role="button"
-            tabIndex={0}
+            tabIndex={
+              node.staged
+                ? -1
+                : node.kind !== "shot"
+                  ? 0
+                  : activeShotId === node.shotId || (activeShotId === null && node.shotId === shots[0]?.id)
+                  ? 0
+                  : -1
+            }
             aria-label={ariaFor(node)}
+            aria-disabled={node.staged ? "true" : undefined}
             aria-current={node.shotId !== undefined && node.shotId === current ? "true" : undefined}
-            onMouseDown={(event) => dragNode(node, event)}
+            onMouseDown={(event) => !node.staged && dragNode(node, event)}
+            onDragOver={(event) => {
+              if (node.shotId !== undefined && linkSource !== null) event.preventDefault();
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (node.shotId !== undefined) reconnect(node.shotId);
+            }}
             onClick={(event) => {
               event.stopPropagation();
-              select(node.shotId === undefined ? { kind: "scene" } : { kind: "shot", shotId: node.shotId });
+              if (node.staged || locked) return;
+              if (node.shotId !== undefined && linkSource !== null) {
+                reconnect(node.shotId);
+                return;
+              }
+              if (node.shotId === undefined) select({ kind: "scene" });
+              else focusShot(node.shotId);
             }}
             onKeyDown={(event) => {
+              if (node.staged) return;
+              if (
+                node.shotId !== undefined &&
+                ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+              ) {
+                event.preventDefault();
+                moveFocus(node.shotId, event.key);
+                return;
+              }
+              if (node.shotId !== undefined && event.key === "Delete") {
+                event.preventDefault();
+                setDeleteShotId(node.shotId);
+                return;
+              }
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
+              if (node.shotId !== undefined && linkSource !== null) {
+                reconnect(node.shotId);
+                return;
+              }
               select(node.shotId === undefined ? { kind: "scene" } : { kind: "shot", shotId: node.shotId });
             }}
           >
@@ -251,9 +347,49 @@ export function SceneFlow({
             )}
             <span className="fy-swnode__name">{node.name}</span>
             <span className="fy-swnode__meta">{node.meta}</span>
+            {node.staged ? <span className="fy-swnode__staged">staged</span> : null}
           </div>
         ))}
+        {graph.nodes.flatMap((node) =>
+          node.kind !== "shot" || node.shotId === undefined
+            ? []
+            : [
+                <button
+                  key={`port:${node.id}`}
+                  type="button"
+                  className="fy-swnode__port"
+                  style={{ left: node.x + NODE.shot.w - 8, top: node.y + NODE.shot.h / 2 - 8 }}
+                  draggable={!locked && !node.staged}
+                  disabled={locked || node.staged}
+                  aria-pressed={linkSource === node.shotId}
+                  aria-label={`Connect shot ${shots.find((shot) => shot.id === node.shotId)?.number ?? node.shotId} after another shot`}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDragStart={() => setLinkSource(node.shotId!)}
+                  onDragEnd={() => setLinkSource(null)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setLinkSource((held) => held === node.shotId ? null : node.shotId!);
+                  }}
+                />,
+              ],
+        )}
       </div>
+
+      {linkSource === null ? null : (
+        <div className="fy-swlinkhint" role="status">
+          Connect shot {shots.find((shot) => shot.id === linkSource)?.number} after… choose a shot
+          <button type="button" onClick={() => setLinkSource(null)}>Cancel</button>
+        </div>
+      )}
+      {deleteShotId === null ? null : (
+        <div className="fy-swlinkhint" role="alert">
+          Delete shot {shots.find((shot) => shot.id === deleteShotId)?.number}?
+          <button type="button" disabled={locked} onClick={() => { onCommand({ kind: "delete-shot", shotId: deleteShotId }); setDeleteShotId(null); }}>
+            Delete
+          </button>
+          <button type="button" onClick={() => setDeleteShotId(null)}>Cancel</button>
+        </div>
+      )}
 
       {/*
         The same graph as a list, for assistive technology and the keyboard (R-63, R-64).
@@ -267,7 +403,8 @@ export function SceneFlow({
           <li key={`alt:${edge.id}`}>
             <button
               type="button"
-              onClick={() => select({ kind: "edge", fromShotId: edge.fromShotId, toShotId: edge.toShotId })}
+              disabled={edge.staged}
+              onClick={() => !edge.staged && select({ kind: "edge", fromShotId: edge.fromShotId, toShotId: edge.toShotId })}
             >
               {edge.label}
             </button>
@@ -317,15 +454,17 @@ function pathFor(edge: FlowEdge): string {
  */
 function buildGraph(input: {
   shots: readonly Shot[];
-  scene: SceneRecord;
   production: ProductionBundle;
   sheets: readonly Sheet[];
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
-  capSec: number;
+  boardPack: WorkspaceBoardPack;
   moved: Record<string, { x: number; y: number }>;
+  stagedShotIds: ReadonlySet<string>;
+  newShotIds: ReadonlySet<string>;
+  stagedBoards: boolean;
 }): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const { shots, production, sheets, artifacts, slug, capSec, moved, scene } = input;
+  const { shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards } = input;
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
   const at = (id: string, x: number, y: number) => moved[id] ?? { x, y };
@@ -351,6 +490,7 @@ function buildGraph(input: {
       y: point.y,
       name: sheet.name,
       meta: sheet.type,
+      staged: false,
     });
   });
 
@@ -369,11 +509,28 @@ function buildGraph(input: {
       name: `Shot ${shot.number}`,
       meta: shot.title,
       shotId: shot.id,
-      ...(artifact !== undefined && slug !== undefined
+      staged: stagedShotIds.has(shot.id),
+      ...(!newShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
         ? { thumb: mediaUrl(slug, `artifacts/${artifact.file}`) }
         : {}),
     });
   });
+  for (let index = 1; index < shots.length; index += 1) {
+    const before = shots[index - 1]!;
+    const after = shots[index]!;
+    edges.push({
+      id: `seq:${before.id}:${after.id}`,
+      from: shotAt.get(before.id)!,
+      fromKind: "shot",
+      to: shotAt.get(after.id)!,
+      toKind: "shot",
+      soft: false,
+      label: `Shot ${before.number} goes to shot ${after.number}`,
+      fromShotId: before.id,
+      toShotId: after.id,
+      staged: stagedShotIds.has(before.id) || stagedShotIds.has(after.id),
+    });
+  }
   for (const [sheetId, shotIds] of citedBy) {
     const from = refAt.get(sheetId);
     if (from === undefined) continue;
@@ -392,32 +549,14 @@ function buildGraph(input: {
         label: `${sheet?.name ?? sheetId} is cited by shot ${shot?.number ?? shotId}`,
         fromShotId: null,
         toShotId: shotId,
+        staged: stagedShotIds.has(shotId),
       });
     }
   }
 
   // Boards, packed the way the rows pack them, and the clip each renders to.
-  const pack = packBoards(
-    shots.map((shot) => ({
-      id: shot.id,
-      number: shot.number,
-      durationSec: shot.durationSec ?? 0,
-      timeOfDay: shot.framing?.timeOfDay ?? null,
-      lighting: null,
-      // Characters only: locations overlap everything, which broke the fixture into three
-      // boards for reasons nobody looking at the scene would recognise (SPEC-035 R-3).
-      cast: resolveCast(shot.description, [...sheets]).cast
-        .filter((entry) => entry.sheet.type === "character")
-        .map((entry) => entry.sheet.id),
-      solo: false,
-    })),
-    capSec,
-    new Set(scene.boards?.splits ?? []),
-    new Set(scene.boards?.merges ?? []),
-    (shotId) => production.selections[shotId]?.startFrameArtifactId != null,
-  );
-  if (pack.ok) {
-    for (const board of pack.boards) {
+  if (boardPack.ok) {
+    for (const board of boardPack.boards) {
       const members = board.memberShotIds.flatMap((shotId: string) => {
         const point = shotAt.get(shotId);
         return point === undefined ? [] : [{ shotId, point }];
@@ -432,6 +571,7 @@ function buildGraph(input: {
         y: point.y,
         name: `Board ${board.letter}`,
         meta: `${board.memberShotIds.length} cells`,
+        staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
       });
       for (const member of members) {
         edges.push({
@@ -444,9 +584,14 @@ function buildGraph(input: {
           label: `Shot ${shots.find((s) => s.id === member.shotId)?.number ?? member.shotId} goes to board ${board.letter}`,
           fromShotId: member.shotId,
           toShotId: null,
+          staged: stagedBoards || stagedShotIds.has(member.shotId),
         });
       }
-      const rendered = board.memberShotIds.some((shotId: string) => acceptedTakeId(production, shotId) !== null);
+      const rendered = board.memberShotIds.some((shotId: string) => {
+        if (newShotIds.has(shotId)) return false;
+        const accepted = acceptedTakeId(production, shotId);
+        return accepted !== null && production.takes.find((take) => take.id === accepted)?.kind === "clip";
+      });
       const clipPoint = at(`c:${board.letter}`, 960, point.y + 6);
       nodes.push({
         id: `c:${board.letter}`,
@@ -455,6 +600,7 @@ function buildGraph(input: {
         y: clipPoint.y,
         name: `Clip ${board.letter}`,
         meta: rendered ? "rendered" : "not rendered",
+        staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
       });
       edges.push({
         id: `e:b${board.letter}:c`,
@@ -466,6 +612,7 @@ function buildGraph(input: {
         label: `Board ${board.letter} goes to clip ${board.letter}`,
         fromShotId: null,
         toShotId: null,
+        staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
       });
     }
   }

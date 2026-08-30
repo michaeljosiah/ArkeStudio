@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { landed, ProposalManager } from "../../src/gate/proposals.js";
+import { migrateLegacyScene } from "@arke-studio/contracts";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -296,5 +297,51 @@ describe("the world snapshot agrees with the gate about what is open", () => {
       scan.bundle.proposals.some((p) => p.proposal.id === staged.id),
       "an open decision is still a decision to make",
     );
+  });
+
+  it("carries a complete staged scene candidate for the workspace to draw in place", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const path = `productions/saltlight/scenes/${production.sceneFiles[scene.id]}.json`;
+    const proposed = structuredClone(scene);
+    if ("shots" in proposed) {
+      proposed.shots.push({
+        id: "sh_999",
+        number: proposed.shots.length + 1,
+        title: "The proposed beat",
+        description: "It waits at the gate.",
+      });
+    }
+    const staged = await gate.stage({
+      kind: "scene-edit",
+      summary: "Add the held beat",
+      source: "chat:scene",
+      targets: [{ path, content: `${JSON.stringify(proposed, null, 2)}\n` }],
+    });
+
+    const scan = await scanWorld(store.dir);
+    const read = scan.bundle.proposals.find((entry) => entry.proposal.id === staged.id);
+    assert.deepEqual(read?.scenes?.[path], proposed);
+  });
+
+  it("names an invalid staged graph but never puts it in the workspace snapshot", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const path = `productions/saltlight/scenes/${production.sceneFiles[scene.id]}.json`;
+    const proposed = "flow" in scene ? structuredClone(scene) : migrateLegacyScene(scene);
+    proposed.flow.edges = [];
+    const staged = await gate.stage({
+      kind: "scene-edit",
+      summary: "Break the graph",
+      source: "chat:scene",
+      targets: [{ path, content: `${JSON.stringify(proposed, null, 2)}\n` }],
+    });
+
+    const scan = await scanWorld(store.dir);
+    const read = scan.bundle.proposals.find((entry) => entry.proposal.id === staged.id);
+    assert.equal(read?.scenes, undefined);
+    assert.ok(scan.problems.some((problem) => problem.path.includes(staged.id) && /connected/.test(problem.message)));
   });
 });

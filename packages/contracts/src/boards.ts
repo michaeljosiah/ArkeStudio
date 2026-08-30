@@ -357,6 +357,20 @@ export function packBoards(
   };
 }
 
+/** The authored prompt for exactly these members; a repack retires it rather than retargeting it. */
+export function boardPromptFor(
+  scene: Pick<Scene, "boards">,
+  members: readonly string[],
+): string | null {
+  return (
+    scene.boards?.prompts?.find(
+      (prompt) =>
+        prompt.members.length === members.length &&
+        prompt.members.every((member, index) => member === members[index]),
+    )?.text ?? null
+  );
+}
+
 /**
  * The packer's input, assembled from what the world already holds (SPEC-035 §2.3).
  *

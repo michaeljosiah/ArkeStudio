@@ -5800,14 +5800,15 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* ---------------------------------------------------------------------------
    the scene workspace (SPEC-029 R-21..R-29, SPEC-036 §1.5) — rows, not a strip
 
-   Behind `internal.sceneWorkspace`. Read-only at this step, so there is nothing
-   here for hover-to-edit or drag affordances yet; what is here is the anatomy
-   the editing step hangs its controls on.
+   Behind `internal.sceneWorkspace`. Direct edits use named scene commands; staged
+   assistant changes draw in place without borrowing the accepted scene's actions.
    --------------------------------------------------------------------------- */
 .fy-sw { display: grid; grid-template-columns: 232px minmax(0, 1fr) 331px; min-height: 100%; }
 .fy-sw[data-dock="false"] { grid-template-columns: 232px minmax(0, 1fr); }
 .fy-sw__put { border: 0; background: transparent; cursor: pointer; color: var(--muted-fg); font-size: 12px; padding: 4px 6px; }
 .fy-sw__put:hover, .fy-sw__put:focus-visible { color: var(--fg); }
+.fy-sw__boards-toggle { border: 0; background: transparent; cursor: pointer; color: var(--muted-fg); font-size: 12px; padding: 4px 6px; }
+.fy-sw__boards-toggle:hover, .fy-sw__boards-toggle:focus-visible { color: var(--fg); }
 .fy-sw__centre { min-width: 0; padding: 0 24px; max-width: 1010px; }
 .fy-sw__head { padding: 18px 0 10px; }
 .fy-sw__title { font-size: 26px; font-weight: 600; margin: 0; }
@@ -5822,6 +5823,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-sw__coverage { margin-left: auto; color: var(--muted-fg); font-size: 12px; }
 .fy-sw__dock { border-left: 1px solid var(--border); padding: 18px 16px; }
 .fy-sw__subject { font-size: 13px; font-weight: 500; margin: 0; }
+.fy-swproposal__removes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; padding: 8px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-size: 11px; }
 
 /* the index — counts, never explanations */
 .fy-swindex { border-right: 1px solid var(--border); padding: 18px 12px; }
@@ -5842,6 +5844,32 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* the rows — the prototype's §7.1, structure and measurements */
 .fy-swrows { list-style: none; margin: 0; padding: 12px 0 40px; display: flex; flex-direction: column; gap: 10px; }
 .fy-swrow { display: block; }
+.fy-swdivider {
+  height: 18px; display: flex; align-items: center; gap: 9px; color: transparent;
+  transition: var(--transition-control);
+}
+.fy-swdivider:hover, .fy-swdivider:focus-within, .fy-swdivider[data-moving="true"] { color: var(--muted-fg); }
+.fy-swdivider > span { flex: 1; height: 1px; background: currentColor; opacity: .45; }
+.fy-swdivider button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 10px; white-space: nowrap; }
+.fy-swdivider[data-moving="true"] > span { height: 0; border-top: 1.5px dashed currentColor; background: none; }
+.fy-swdivider button:disabled { cursor: default; opacity: .45; }
+.fy-swboard { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 6px; }
+.fy-swboard[data-staged="true"] { border-left: 2px dashed var(--warning); padding-left: 7px; }
+.fy-swboard__line { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 10px; color: var(--muted-fg); }
+.fy-swboard__line button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
+.fy-swboard__line button:disabled { cursor: default; opacity: .45; text-decoration: none; }
+.fy-swboard__handle { color: var(--fg) !important; font-weight: 600; text-decoration: none !important; cursor: grab !important; }
+.fy-swboard__staged { color: var(--warning); font-family: var(--font-mono, ui-monospace, monospace); }
+.fy-swboard__rule { flex: 1; height: 1px; background: var(--border); }
+.fy-swboard__notes { display: flex; flex-direction: column; gap: 2px; font: 400 9.5px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard__notes [data-kind="warning"] { color: var(--warning); }
+.fy-swboard__notes [data-kind="accent"] { color: var(--muted-fg); }
+.fy-swboard__prompt { display: flex; flex-direction: column; gap: 5px; padding-bottom: 8px; }
+.fy-swboard__prompt > div { display: flex; align-items: center; gap: 8px; color: var(--muted-fg); font: 400 10px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard__prompt > div span { flex: 1; }
+.fy-swboard__prompt button { border: 0; background: transparent; color: var(--muted-fg); cursor: pointer; font-size: 10px; text-decoration: underline; }
+.fy-swboard__prompt textarea { min-height: 116px; resize: vertical; border: 1px solid var(--border); border-radius: 9px; background: var(--muted); color: var(--fg); padding: 9px 11px; font: 400 10.5px/1.7 var(--font-mono, ui-monospace, monospace); }
+.fy-swboards__refusal { color: var(--danger); font-size: 11px; margin: 10px 0 0; }
 .fy-swrow__band {
   position: relative; display: flex; align-items: stretch; min-height: 158px; width: 100%;
   border: 1px solid var(--border); border-radius: var(--radius-card);
@@ -5849,6 +5877,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   transition: var(--transition-control); cursor: pointer; text-align: left; padding: 0;
 }
 .fy-swrow__band:hover { box-shadow: var(--shadow-md); }
+.fy-swrow__band[data-staged="true"] { border-style: dashed; cursor: default; }
 .fy-swrow__band:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* Drawn over the row, never as a border: a border on selection changes the box and everything
    below it moves by a pixel. */
@@ -5856,6 +5885,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   position: absolute; inset: 0; border: 1.5px solid var(--fg);
   border-radius: var(--radius-card); pointer-events: none; z-index: 6;
 }
+.fy-swrow__staged { position: absolute; right: 8px; top: 8px; z-index: 7; border: 1px dashed var(--warning); border-radius: 999px; background: var(--card); color: var(--warning); padding: 2px 7px; font: 400 9px var(--font-mono, ui-monospace, monospace); }
 
 .fy-swrow__frame { width: 252px; flex: none; position: relative; background: var(--muted); }
 .fy-swrow__img { width: 100%; height: 100%; background-size: cover; background-position: center; }
@@ -5891,7 +5921,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-swrow__stalelabel { font-size: 10px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--warning); flex: 1; }
 /* The script at full weight — 13px on 1.7, and nothing else on the row matches it. */
-.fy-swrow__script { margin: 0; font-size: 13px; line-height: 1.7; }
+.fy-swrow__script { margin: 0; font-size: 13px; line-height: 1.7; min-height: 22px; outline: none; }
+.fy-swrow__script[contenteditable="true"]:focus { box-shadow: 0 1px 0 var(--ring); }
 .fy-swrow__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fy-swrow__refs { display: flex; flex-wrap: wrap; gap: 4px; }
 .fy-swrow__ref {
@@ -5905,6 +5936,14 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   width: 158px; flex: none; border-left: 1px solid var(--border);
   padding: 12px 12px 13px; display: flex; flex-direction: column; align-items: stretch; gap: 9px;
 }
+.fy-swedit { border: 1px solid var(--border); border-radius: var(--radius-control); background: transparent; color: var(--muted-fg); cursor: pointer; padding: 5px 8px; }
+.fy-swedit:hover, .fy-swedit:focus-visible { background: var(--accent); color: var(--fg); }
+.fy-swrow__menu, .fy-swrow__confirm { display: flex; flex-direction: column; gap: 3px; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); box-shadow: var(--shadow-sm); }
+.fy-swrow__menu button, .fy-swrow__confirm button { border: 0; background: transparent; color: var(--fg); cursor: pointer; text-align: left; padding: 4px 6px; font-size: 10px; border-radius: 5px; }
+.fy-swrow__menu button:hover, .fy-swrow__confirm button:hover { background: var(--accent); }
+.fy-swrow__menu button:disabled { cursor: default; opacity: .4; }
+.fy-swrow__menu .fy-swrow__danger, .fy-swrow__confirm button:first-of-type { color: var(--danger); }
+.fy-swrow__confirm span { font-size: 10px; }
 .fy-swrow__slot { margin: auto 0 0; font-size: 10px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--muted-fg); min-height: 14px; }
 
 .fy-swempty { padding: 40px 0; color: var(--muted-fg); }
@@ -5929,6 +5968,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swcanvas:active { cursor: grabbing; }
 .fy-swlayer { position: absolute; left: 0; top: 0; width: 1400px; height: 1000px; transform-origin: 0 0; }
 .fy-swedges { position: absolute; left: 0; top: 0; overflow: visible; }
+.fy-swedges path[data-staged="true"] { stroke: var(--warning); stroke-dasharray: 3 3; }
 .fy-swnode {
   position: absolute; box-sizing: border-box; cursor: grab;
   display: flex; flex-direction: column; gap: 4px; padding: 10px;
@@ -5936,11 +5976,18 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   box-shadow: var(--shadow-xs); overflow: hidden;
 }
 .fy-swnode[data-selected="true"] { border-color: var(--ring); box-shadow: var(--shadow-sm); }
+.fy-swnode[data-staged="true"] { border-style: dashed; border-color: var(--warning); cursor: default; }
 .fy-swnode:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-swnode[data-kind="ref"] .fy-swnode__thumb { flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
 .fy-swnode__thumb { display: block; flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
 .fy-swnode__name { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-swnode__meta { font-size: 9px; color: var(--muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-swnode__staged { color: var(--warning); font: 400 9px var(--font-mono, ui-monospace, monospace); }
+.fy-swnode__port { position: absolute; width: 16px; height: 16px; border: 2px solid var(--card); border-radius: 999px; background: var(--muted-fg); box-shadow: 0 0 0 1px var(--border); cursor: crosshair; z-index: 4; }
+.fy-swnode__port[aria-pressed="true"] { background: var(--warning); box-shadow: 0 0 0 2px var(--ring); }
+.fy-swnode__port:disabled { opacity: .35; cursor: default; }
+.fy-swlinkhint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 9; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--warning); border-radius: 9px; background: var(--card); color: var(--fg); box-shadow: var(--shadow-sm); font-size: 11px; }
+.fy-swlinkhint button { border: 0; background: transparent; color: var(--muted-fg); cursor: pointer; text-decoration: underline; }
 .fy-swzoom {
   position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
@@ -5964,15 +6011,15 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 
 /* Narrow: the index folds to a picker and Arke can be put away (R-28, R-66). */
 @media (max-width: 900px) {
-  .fy-sw { grid-template-columns: minmax(0, 1fr); }
+  .fy-sw, .fy-sw[data-dock="false"] { grid-template-columns: minmax(0, 1fr); }
   .fy-sw__centre { padding: 0 14px; }
   .fy-swindex { border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
   .fy-swindex__list { flex-direction: row; overflow-x: auto; }
   .fy-swindex__scene { width: auto; min-width: 148px; }
   .fy-sw__dock { border-left: 0; border-top: 1px solid var(--border); }
-  .fy-swrow { grid-template-columns: minmax(0, 1fr); }
-  .fy-swrow__frame, .fy-swrow__frame[data-aspect="9:16"], .fy-swrow__frame[data-aspect="1:1"] { width: 100%; }
-  .fy-swrow__actions { border-left: 0; border-top: 1px solid var(--border); padding: 8px 0 0; }
+  .fy-swrow__band { flex-direction: column; }
+  .fy-swrow__frame { width: 100%; min-height: 158px; }
+  .fy-swrow__actions { width: auto; border-left: 0; border-top: 1px solid var(--border); }
 }
 
 /* Reduced motion disables the layout transitions, per R-67. */
