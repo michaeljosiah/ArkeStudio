@@ -124,8 +124,8 @@ describe("selection survives a view switch (T-18)", () => {
 
     const second = rows[1]!;
     const shotId = second.getAttribute("data-testid")!.replace("workspace-row-", "");
-    await click(second.querySelector(".fy-swrow__hit") as unknown as HTMLElement);
-    assert.equal(second.getAttribute("data-selected"), "true");
+    await click(second.querySelector(".fy-swrow__band") as unknown as HTMLElement);
+    assert.equal(second.querySelector(".fy-swrow__band")?.getAttribute("data-selected"), "true");
 
     const tabs = all(mounted, ".fy-sw__tab");
     await click(tabs.find((tab) => tab.textContent === "Flow")!);
@@ -138,25 +138,25 @@ describe("selection survives a view switch (T-18)", () => {
     // And back: the row is still the selected one, so nothing was lost in either direction.
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
     const back = q(mounted, `[data-testid="workspace-row-${shotId}"]`);
-    assert.equal(back?.getAttribute("data-selected"), "true");
+    assert.equal(back?.querySelector(".fy-swrow__band")?.getAttribute("data-selected"), "true");
   });
 
   it("Arke's subject follows the selection without being asked", async () => {
     const mounted = await mount(true);
     assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", /Scene /);
     const row = all(mounted, '[data-testid^="workspace-row-"]')[0]!;
-    await click(row.querySelector(".fy-swrow__hit") as unknown as HTMLElement);
+    await click(row.querySelector(".fy-swrow__band") as unknown as HTMLElement);
     assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", /Shot /);
   });
 
   it("a node chosen in Flow is the row Storyboard shows as current", async () => {
     const mounted = await mount(true);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
-    const nodes = all(mounted, ".fy-swnode--shot");
+    const nodes = all(mounted, '.fy-swnode[data-kind="shot"]');
     assert.ok(nodes.length >= 2);
     await click(nodes[1]!);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
-    const selected = all(mounted, '[data-testid^="workspace-row-"][data-selected="true"]');
+    const selected = all(mounted, '[data-testid^="workspace-row-"] .fy-swrow__band[data-selected="true"]');
     assert.equal(selected.length, 1, "exactly one row is current, and it is the one Flow chose");
   });
 });
@@ -165,23 +165,32 @@ describe("every read-side operation is reachable by keyboard (T-19)", () => {
   it("rows, nodes, edges and tabs are all real controls, and each announces itself", async () => {
     const mounted = await mount(true);
     // A row's whole hit area is one button, so a shot is one focus stop rather than a stack.
-    for (const row of all(mounted, ".fy-swrow__hit")) {
-      assert.equal(row.tagName, "BUTTON");
-      assert.match(row.getAttribute("aria-label") ?? "", /^Shot \d+, /, "kind, number and state");
+    for (const row of all(mounted, ".fy-swrow__band")) {
+      assert.equal(row.getAttribute("role"), "button");
+      assert.equal(row.getAttribute("tabindex"), "0");
+      assert.match(row.getAttribute("aria-label") ?? "", /^Shot \d+, /, "number, title and state");
     }
     for (const tab of all(mounted, ".fy-sw__tab")) {
       assert.equal(tab.getAttribute("role"), "radio");
       assert.ok(tab.getAttribute("aria-checked"));
     }
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
-    for (const node of all(mounted, ".fy-swnode--shot")) {
-      assert.equal(node.tagName, "BUTTON");
-      // R-63: kind, title/number, and the in/out counts a canvas would show by drawing.
-      assert.match(node.getAttribute("aria-label") ?? "", /Shot \d+, .*, 1 in, 1 out/);
+    // A canvas node carries a drag, so it is a div — but it is a control besides: focusable,
+    // named, and activated by Enter or Space.
+    for (const node of all(mounted, '.fy-swnode[data-kind="shot"]')) {
+      assert.equal(node.getAttribute("role"), "button");
+      assert.equal(node.getAttribute("tabindex"), "0");
+      // R-63: kind, what it is, and the in/out counts a canvas would otherwise show by drawing.
+      assert.match(node.getAttribute("aria-label") ?? "", /Shot \d+, shot, .*, 1 in, 1 out/);
     }
-    const edges = all(mounted, ".fy-swedge");
-    assert.ok(edges.length > 0, "edges are keyboard reachable in their own right (R-63)");
-    for (const edge of edges) assert.equal(edge.tagName, "BUTTON");
+    // Edges are drawn as SVG paths, which no keyboard can reach — so the same graph is offered
+    // in words, each edge naming its source and destination (R-63).
+    const edges = all(mounted, '[data-testid="workspace-flow-alt"] button');
+    assert.ok(edges.length > 0, "the graph is reachable in words as well as in the drawing");
+    for (const edge of edges) {
+      assert.equal(edge.tagName, "BUTTON");
+      assert.match(edge.textContent ?? "", /goes to|is cited by/, "source and destination, said");
+    }
   });
 
   it("the lists are semantic, so a screen reader gets the structure for free", async () => {
@@ -226,13 +235,25 @@ describe("a scene the workspace cannot read is named, never guessed (R-29, R-60)
     const container = dom.document.createElement("div") as unknown as HTMLElement;
     dom.document.body.append(container);
     const root = createRoot(container);
-    await act(async () => root.render(<SceneFlow scene={broken} />));
+    const production = FIXTURE_STATE.world!.productions.find((p) => p.meta.id === "saltlight")!;
+    await act(async () =>
+      root.render(
+        <SceneFlow
+          scene={broken}
+          production={production}
+          sheets={FIXTURE_STATE.world!.sheets}
+          artifacts={FIXTURE_STATE.world!.artifacts}
+          slug={FIXTURE_STATE.world!.meta.slug}
+          capSec={10}
+        />,
+      ),
+    );
     open.push({ container, root });
 
     const invalid = container.querySelector('[data-testid="workspace-flow-invalid"]');
     assert.ok(invalid, "the view says the order cannot be trusted rather than drawing a guess");
     assert.ok((invalid.textContent ?? "").length > 0, "and names why, finding by finding");
-    assert.equal(container.querySelector(".fy-swnode--shot"), null, "no shot node is invented");
+    assert.equal(container.querySelector('.fy-swnode[data-kind="shot"]'), null, "no shot node is invented");
   });
 });
 
@@ -290,7 +311,68 @@ describe("a 200-shot scene renders in both views (T-20, R-69)", () => {
     const switched = Date.now();
     await act(async () => flowTab.click());
     const flowElapsed = Date.now() - switched;
-    assert.equal(container.querySelectorAll(".fy-swnode--shot").length, 200, "and every node");
+    assert.equal(container.querySelectorAll('.fy-swnode[data-kind="shot"]').length, 200, "and every node");
     assert.ok(flowElapsed < 8000, `flow rendered 200 nodes in ${flowElapsed}ms`);
+  });
+});
+
+describe("Flow is a canvas (the prototype's §11)", () => {
+  const openFlow = async (): Promise<Mounted> => {
+    const mounted = await mount(true);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    return mounted;
+  };
+
+  it("draws nodes at coordinates on a transformed layer, not as a list", async () => {
+    const mounted = await openFlow();
+    const layer = q(mounted, '[data-testid="workspace-flow-layer"]')!;
+    assert.match(layer.getAttribute("style") ?? "", /translate\(.*px.*px\) scale\(/, "pan and zoom");
+    const node = all(mounted, '.fy-swnode[data-kind="shot"]')[0]!;
+    const style = node.getAttribute("style") ?? "";
+    assert.match(style, /left:/, "a node has a position");
+    assert.match(style.replace(/\s+/g, ""), /width:232px/, "and the prototype's box for its kind");
+  });
+
+  it("joins the nodes with bezier edges out of one box and into the next", async () => {
+    const mounted = await openFlow();
+    const paths = all(mounted, ".fy-swedges path");
+    assert.ok(paths.length > 0, "the graph is drawn, not merely listed");
+    for (const path of paths) {
+      // M x,y C … — the prototype's cubic, leaving a right edge and arriving at a left one.
+      assert.match(path.getAttribute("d") ?? "", /^M[\d.-]+,[\d.-]+ C/);
+    }
+  });
+
+  it("zooms between the prototype's stops and says where it is", async () => {
+    const mounted = await openFlow();
+    const label = () => q(mounted, ".fy-swzoom__label")?.textContent ?? "";
+    const zoomIn = all(mounted, ".fy-swzoom button").find((b) => b.getAttribute("aria-label") === "Zoom in")!;
+    const zoomOut = all(mounted, ".fy-swzoom button").find((b) => b.getAttribute("aria-label") === "Zoom out")!;
+
+    const before = label();
+    await click(zoomIn);
+    assert.notEqual(label(), before, "zooming in changes the reading");
+    // The ceiling holds: many presses cannot take it past 140%.
+    for (let i = 0; i < 12; i += 1) await click(zoomIn);
+    assert.equal(label(), "140%");
+    for (let i = 0; i < 20; i += 1) await click(zoomOut);
+    assert.equal(label(), "50%", "and the floor holds too");
+  });
+
+  it("fits the graph to the canvas, and returns to it after a drag", async () => {
+    const mounted = await openFlow();
+    const node = all(mounted, '.fy-swnode[data-kind="shot"]')[0]!;
+    const before = node.getAttribute("style") ?? "";
+
+    // A drag moves the node itself, not the canvas under it.
+    await act(async () => {
+      node.dispatchEvent(new dom.window.Event("mousedown", { bubbles: true }));
+    });
+    assert.ok(before.length > 0);
+
+    const fit = all(mounted, ".fy-swzoom button").find((b) => b.textContent === "Fit")!;
+    await click(fit);
+    const layer = q(mounted, '[data-testid="workspace-flow-layer"]')!;
+    assert.match(layer.getAttribute("style") ?? "", /scale\(/, "fit leaves a transform behind it");
   });
 });

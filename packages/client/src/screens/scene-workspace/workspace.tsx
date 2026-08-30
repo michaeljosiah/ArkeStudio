@@ -49,6 +49,9 @@ export function SceneWorkspace({
   const shots = orderedShots(scene);
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
   const aspect = production.meta.aspect ?? "16:9";
+  // The cap the boards pack against, so Flow packs exactly as the rows do. Absent a model, the
+  // widest common clip length rather than a guess that would draw boards nothing would render.
+  const capSec = 10;
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? 0), 0);
   const framed = shots.filter((shot) => production.selections[shot.id]?.startFrameArtifactId != null).length;
   const focus = selectedShotId(subject);
@@ -112,12 +115,20 @@ export function SceneWorkspace({
               scene={scene}
               production={production}
               artifacts={artifacts}
+              sheets={world.sheets}
               slug={world.meta.slug}
               digests={digests}
               aspect={aspect}
             />
           ) : (
-            <SceneFlow scene={scene} />
+            <SceneFlow
+              scene={scene}
+              production={production}
+              sheets={world.sheets}
+              artifacts={artifacts}
+              slug={world.meta.slug}
+              capSec={capSec}
+            />
           )}
         </main>
 
