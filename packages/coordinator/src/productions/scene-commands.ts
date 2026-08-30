@@ -280,11 +280,16 @@ async function candidateFor(
 }
 
 /**
- * The selection the deleted shot carried, dropped in the deletion's own commit.
+ * The selection the deleted shot carried, dropped in the deletion's own commit — and the
+ * selections file claimed as a write dependency even when it carries no row for this shot.
  *
- * An accepted take is a blocker, so what is dropped here is never a decision — a trim, a pinned
- * frame, a cleared slot. Absent selections and an absent file are both ordinary: a shot nobody
- * has generated for has no row, and a production nobody has selected in has no file.
+ * An accepted take is a blocker, so what is dropped here is never a decision: a trim, a pinned
+ * frame, a cleared slot. The claim is the subtler half. `acceptTake` reads and validates before
+ * queuing its commit, so an acceptance that began before the blocker check can commit after the
+ * shot is gone — and if the shot had no row, a deletion that never touched the file leaves that
+ * accept's `baseHash` still valid, so it lands a selection keyed to a shot that no longer
+ * exists. Rewriting the file makes the two writes collide on the hash instead: whichever
+ * commits second is refused by name, and neither order can orphan a selection.
  */
 async function appendSelectionCleanup(
   store: WorldStore,
@@ -308,7 +313,7 @@ async function appendSelectionCleanup(
     ]);
   }
   const selections = JSON.parse(raw) as Record<string, unknown>;
-  if (!(shotId in selections)) return;
+  // No early return when the row is absent: the point is to claim the file, not only to edit it.
   delete selections[shotId];
   files.push({
     path,

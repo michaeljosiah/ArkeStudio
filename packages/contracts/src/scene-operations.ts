@@ -168,14 +168,24 @@ function renumbered(shots: readonly Shot[]): Shot[] {
   return shots.map((shot, index) => ({ ...shot, number: index + 1 }));
 }
 
-/** The first free `sh_<n>` across the WHOLE production — ids are unique per production, not per scene. */
+/**
+ * The first free `sh_<n>` across the WHOLE production — ids are unique per production, not per
+ * scene, so a per-scene answer collides with another scene's shot 3.
+ *
+ * Counted in `BigInt`, not `Number`. A suffix past 2^53 rounds when it becomes a float, so
+ * `highest + 1` can land on an id another scene already holds — and the collision check only
+ * looks at the scene being edited, so the duplicate commits cleanly. Larger suffixes stringify
+ * as `1e+21` besides, which is not an id at all.
+ */
 export function nextShotIdIn(taken: Iterable<string>): string {
-  let highest = 0;
+  let highest = 0n;
   for (const id of taken) {
-    const n = Number(id.replace(/^sh_0*/, ""));
-    if (Number.isFinite(n)) highest = Math.max(highest, n);
+    const digits = /^sh_(\d+)$/.exec(id)?.[1];
+    if (digits === undefined) continue;
+    const n = BigInt(digits);
+    if (n > highest) highest = n;
   }
-  return `sh_${highest + 1}`;
+  return `sh_${highest + 1n}`;
 }
 
 /**
@@ -283,17 +293,37 @@ export function deleteShot(record: SceneRecord, input: { shotId: string }): Grap
   if (!shots.some((shot) => shot.id === input.shotId)) {
     throw new SceneOperationRefused([`shot ${input.shotId} is not in this scene`]);
   }
-  const held = isGraphScene(record) ? record.flow.storyboardGroups : [];
-  const orphaned = held.filter((group) => group.shotNodeIds.includes(shotNodeIdFor(input.shotId)));
-  if (orphaned.length > 0) {
-    throw new SceneOperationRefused(
-      orphaned.map(
-        (group) => `"${group.title}" still holds this shot — take it out of the group first`,
-      ),
-    );
-  }
+  // The node as this scene names it, which is not always what the projection would mint.
+  const heldNodeId = isGraphScene(record)
+    ? (record.flow.nodes.find((node) => node.kind === "shot" && node.shot.id === input.shotId)?.id ??
+      shotNodeIdFor(input.shotId))
+    : shotNodeIdFor(input.shotId);
+  /*
+   * A legacy group loses the deleted member first, and an emptied group is dissolved — before
+   * validation, because a group naming a node that is gone is exactly what validation refuses.
+   *
+   * Refusing instead would be a dead end: SPEC-035 superseded authored groups, so no command
+   * writes or edits one, and a scene written before that supersession would hold a grouped shot
+   * nobody could ever delete — told to "take it out of the group first" through an API with no
+   * way to do it. Membership is bookkeeping about which shots a beat covers; the beat survives
+   * as long as it still covers something.
+   */
+  const source: SceneRecord = isGraphScene(record)
+    ? {
+        ...record,
+        flow: {
+          ...record.flow,
+          storyboardGroups: record.flow.storyboardGroups
+            .map((group) => ({
+              ...group,
+              shotNodeIds: group.shotNodeIds.filter((nodeId) => nodeId !== heldNodeId),
+            }))
+            .filter((group) => group.shotNodeIds.length > 0),
+        },
+      }
+    : record;
   const next = renumbered(shots.filter((shot) => shot.id !== input.shotId));
-  const scene = complete(record, next);
+  const scene = complete(source, next);
   return withBoards(scene, prune(scene.boards, input.shotId));
 }
 

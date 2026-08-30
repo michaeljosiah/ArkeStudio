@@ -237,4 +237,45 @@ describe("ids are minted past everything already taken", () => {
     assert.equal(nextShotIdIn([]), "sh_1");
     assert.equal(nextShotIdIn(["sh_04"]), "sh_5", "a padded id is the same number");
   });
+
+  it("counts past the float range, where rounding would hand back an id already taken", () => {
+    // 2^53 is where Number stops being able to tell consecutive integers apart, and the
+    // collision check only sees the scene being edited — so a rounded answer commits cleanly.
+    assert.equal(nextShotIdIn(["sh_9007199254740992"]), "sh_9007199254740993");
+    assert.equal(nextShotIdIn(["sh_1000000000000000000000"]), "sh_1000000000000000000001");
+  });
+
+  it("ignores anything that is not a plain sh_<n>", () => {
+    assert.equal(nextShotIdIn(["sh_2", "sh_x", "shot_9"]), "sh_3");
+  });
+});
+
+describe("a legacy group loses its deleted member rather than blocking forever", () => {
+  it("drops the member and keeps the beat that still covers something", () => {
+    /*
+     * SPEC-035 superseded authored groups, so nothing writes or edits one — refusing the delete
+     * and saying "take it out of the group first" pointed at an operation that does not exist,
+     * which made a grouped shot in an old scene permanently undeletable.
+     */
+    const base = graph(["sh_1", "sh_2", "sh_3"]);
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: ["sfn_sh-1", "sfn_sh-2"] };
+    const before: GraphScene = { ...base, flow: { ...base.flow, storyboardGroups: [beat] } };
+    const after = deleteShot(before, { shotId: "sh_2" });
+    assert.deepEqual(after.flow.storyboardGroups, [{ ...beat, shotNodeIds: ["sfn_sh-1"] }]);
+  });
+
+  it("dissolves a group the deletion empties", () => {
+    const base = graph(["sh_1", "sh_2"]);
+    const beat = { id: "sbg_alone", title: "Alone", shotNodeIds: ["sfn_sh-2"] };
+    const before: GraphScene = { ...base, flow: { ...base.flow, storyboardGroups: [beat] } };
+    assert.deepEqual(deleteShot(before, { shotId: "sh_2" }).flow.storyboardGroups, []);
+  });
+
+  it("finds the member by the node id the scene actually gave it", () => {
+    const AUTHORED = "sfn_authored-by-hand";
+    const base = authored(["sh_1", "sh_2"]);
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [AUTHORED] };
+    const before: GraphScene = { ...base, flow: { ...base.flow, storyboardGroups: [beat] } };
+    assert.deepEqual(deleteShot(before, { shotId: "sh_1" }).flow.storyboardGroups, []);
+  });
 });
