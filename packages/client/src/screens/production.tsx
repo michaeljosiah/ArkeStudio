@@ -96,6 +96,7 @@ import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
 import { mediaSpans, mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
   MIN_CLIP_SEC,
   applyClipDrag,
@@ -1726,6 +1727,15 @@ export function SceneDetailScreen() {
   const [generating, setGenerating] = useState(false);
   const record = production?.scenes.find((s) => s.id === sceneId);
   const scene = record === undefined ? undefined : writerSceneView(record);
+  /*
+   * The rollout step's shell, where it can be walked before it replaces anything (SPEC-029
+   * §3.3 step 5). With the flag off this branch is never taken and the screen below is
+   * untouched — not hidden by CSS but never mounted, so a regression here cannot reach anyone
+   * who has not turned it on.
+   */
+  if (state?.app.internal.sceneWorkspace === true && world && production && record) {
+    return <SceneWorkspace world={world} production={production} scene={record} />;
+  }
   if (!production || !scene) {
     return (
       <Screen id="scene-detail">

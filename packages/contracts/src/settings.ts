@@ -191,6 +191,22 @@ const AppSettingsObjectSchema = z
      * switching it off reaches the next session rather than the running one.
      */
     research: z.object({ web: z.boolean().default(false) }).strict().default({ web: false }),
+    /**
+     * Surfaces that are built but not yet the way anyone works (SPEC-029 §3.3 step 5).
+     *
+     * A rollout step lands its screens where they can be walked and reviewed before they
+     * replace anything — so the flag defaults OFF and, with it off, the surface it gates is
+     * not merely hidden but not mounted: the existing screen is untouched, byte for byte.
+     * These are internal switches, not preferences; nothing in Settings offers them, and a
+     * world opened by a build that never heard of one parses exactly as before.
+     */
+    internal: z
+      .object({
+        /** The vertical Storyboard and read-only Flow shell (SPEC-029 R-21..R-29). */
+        sceneWorkspace: z.boolean().default(false),
+      })
+      .strict()
+      .default({ sceneWorkspace: false }),
     routing: RoutingDefaultsSchema.default({}),
     /**
      * Local capability defaults SPEC-033 R-66 parked here, read on load and then dropped.

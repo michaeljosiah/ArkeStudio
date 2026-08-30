@@ -5796,3 +5796,186 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   padding-top: 14px;
   border-top: 1px solid var(--border);
 }
+
+/* ---------------------------------------------------------------------------
+   the scene workspace (SPEC-029 R-21..R-29, SPEC-036 §1.5) — rows, not a strip
+
+   Behind `internal.sceneWorkspace`. Read-only at this step, so there is nothing
+   here for hover-to-edit or drag affordances yet; what is here is the anatomy
+   the editing step hangs its controls on.
+   --------------------------------------------------------------------------- */
+.fy-sw { display: grid; grid-template-columns: 232px minmax(0, 1fr) 331px; min-height: 100%; }
+.fy-sw[data-dock="false"] { grid-template-columns: 232px minmax(0, 1fr); }
+.fy-sw__put { border: 0; background: transparent; cursor: pointer; color: var(--muted-fg); font-size: 12px; padding: 4px 6px; }
+.fy-sw__put:hover, .fy-sw__put:focus-visible { color: var(--fg); }
+.fy-sw__centre { min-width: 0; padding: 0 24px; max-width: 1010px; }
+.fy-sw__head { padding: 18px 0 10px; }
+.fy-sw__title { font-size: 26px; font-weight: 600; margin: 0; }
+.fy-sw__metrics { color: var(--muted-fg); font-size: 13px; margin: 4px 0 0; }
+.fy-sw__tabs { display: flex; align-items: center; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-sw__tab {
+  border: 1px solid transparent; background: transparent; cursor: pointer;
+  padding: 5px 12px; border-radius: var(--radius-control); font-size: 13px; color: var(--muted-fg);
+  transition: var(--transition-control);
+}
+.fy-sw__tab[data-on="true"] { background: var(--card); border-color: var(--border); color: var(--fg); }
+.fy-sw__coverage { margin-left: auto; color: var(--muted-fg); font-size: 12px; }
+.fy-sw__dock { border-left: 1px solid var(--border); padding: 18px 16px; }
+.fy-sw__subject { font-size: 13px; font-weight: 500; margin: 0; }
+
+/* the index — counts, never explanations */
+.fy-swindex { border-right: 1px solid var(--border); padding: 18px 12px; }
+.fy-swindex__head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted-fg); margin: 12px 4px 6px; }
+.fy-swindex__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-swindex__scene {
+  display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 8px; width: 100%;
+  text-align: left; border: 1px solid transparent; background: transparent; cursor: pointer;
+  padding: 7px 8px; border-radius: var(--radius-control); transition: var(--transition-control);
+}
+.fy-swindex__scene:hover { background: var(--card); }
+.fy-swindex__scene[data-current="true"] { background: var(--card); border-color: var(--border); }
+.fy-swindex__no { color: var(--muted-fg); font-size: 12px; }
+.fy-swindex__title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-swindex__counts { grid-column: 2; color: var(--muted-fg); font-size: 11px; }
+.fy-swindex__mark { grid-column: 2; color: var(--danger); font-size: 11px; }
+
+/* the rows — the prototype's §7.1, structure and measurements */
+.fy-swrows { list-style: none; margin: 0; padding: 12px 0 40px; display: flex; flex-direction: column; gap: 10px; }
+.fy-swrow { display: block; }
+.fy-swrow__band {
+  position: relative; display: flex; align-items: stretch; min-height: 158px; width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-xs); background: var(--card); overflow: hidden;
+  transition: var(--transition-control); cursor: pointer; text-align: left; padding: 0;
+}
+.fy-swrow__band:hover { box-shadow: var(--shadow-md); }
+.fy-swrow__band:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* Drawn over the row, never as a border: a border on selection changes the box and everything
+   below it moves by a pixel. */
+.fy-swrow__ring {
+  position: absolute; inset: 0; border: 1.5px solid var(--fg);
+  border-radius: var(--radius-card); pointer-events: none; z-index: 6;
+}
+
+.fy-swrow__frame { width: 252px; flex: none; position: relative; background: var(--muted); }
+.fy-swrow__img { width: 100%; height: 100%; background-size: cover; background-position: center; }
+.fy-swrow__hatch {
+  box-sizing: border-box; width: 100%; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+  background: repeating-linear-gradient(45deg, var(--muted) 0 9px, var(--accent) 9px 18px);
+  color: var(--muted-fg);
+}
+.fy-swrow__nofr { font-size: 10px; font-family: var(--font-mono, ui-monospace, monospace); }
+.fy-swrow__label {
+  position: absolute; top: 8px; left: 9px; font-size: 10px; font-weight: 500;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  background: var(--card); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px;
+}
+.fy-swrow__chipmeta {
+  position: absolute; bottom: 8px; left: 9px; font-size: 9.5px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  /* The prototype's dark scrim over a still, via the media tokens rather than a literal. */
+  background: var(--media-overlay-bg); color: var(--media-overlay-fg); opacity: 0.92;
+  border-radius: 5px; padding: 2px 6px;
+}
+
+.fy-swrow__body { flex: 1; min-width: 0; padding: 12px 16px 13px; display: flex; flex-direction: column; gap: 8px; }
+.fy-swrow__titleline { display: flex; align-items: center; gap: 7px; }
+.fy-swrow__title {
+  font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fy-swrow__stale {
+  display: flex; align-items: center; gap: 7px; padding: 4px 8px;
+  border: 1px solid var(--warning); border-radius: 7px; background: var(--muted);
+}
+.fy-swrow__stalelabel { font-size: 10px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--warning); flex: 1; }
+/* The script at full weight — 13px on 1.7, and nothing else on the row matches it. */
+.fy-swrow__script { margin: 0; font-size: 13px; line-height: 1.7; }
+.fy-swrow__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fy-swrow__refs { display: flex; flex-wrap: wrap; gap: 4px; }
+.fy-swrow__ref {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 999px; font-size: 10px;
+}
+.fy-swrow__overrides { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-swrow__override { font-size: 9.5px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--muted-fg); }
+
+.fy-swrow__actions {
+  width: 158px; flex: none; border-left: 1px solid var(--border);
+  padding: 12px 12px 13px; display: flex; flex-direction: column; align-items: stretch; gap: 9px;
+}
+.fy-swrow__slot { margin: auto 0 0; font-size: 10px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--muted-fg); min-height: 14px; }
+
+.fy-swempty { padding: 40px 0; color: var(--muted-fg); }
+.fy-swempty__line { margin: 0; font-size: 13px; }
+
+/* the chips — text and shape, never colour alone (R-67) */
+.fy-swchip { font-size: 9.5px; font-family: var(--font-mono, ui-monospace, monospace); white-space: nowrap; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted-fg); }
+.fy-swchip[data-state="needs attention"] { border-color: var(--danger); color: var(--danger); }
+.fy-swchip[data-state="storyboard"] { border-color: var(--warning); color: var(--warning); }
+.fy-swchip[data-state="production-ready"] { border-color: var(--success); color: var(--success); }
+.fy-swchip[data-state="rendered"] { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+
+/* Flow — a real canvas (the prototype's §11): dotted ground, a transformed layer, bezier edges */
+.fy-swcanvas {
+  position: relative; flex: 1; min-height: 520px; margin: 12px 0 24px;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  background-color: var(--muted);
+  background-image: radial-gradient(var(--neutral-300) 1px, transparent 1px);
+  background-size: 22px 22px;
+  overflow: hidden; cursor: grab;
+}
+.fy-swcanvas:active { cursor: grabbing; }
+.fy-swlayer { position: absolute; left: 0; top: 0; width: 1400px; height: 1000px; transform-origin: 0 0; }
+.fy-swedges { position: absolute; left: 0; top: 0; overflow: visible; }
+.fy-swnode {
+  position: absolute; box-sizing: border-box; cursor: grab;
+  display: flex; flex-direction: column; gap: 4px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 11px; background: var(--card);
+  box-shadow: var(--shadow-xs); overflow: hidden;
+}
+.fy-swnode[data-selected="true"] { border-color: var(--ring); box-shadow: var(--shadow-sm); }
+.fy-swnode:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-swnode[data-kind="ref"] .fy-swnode__thumb { flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
+.fy-swnode__thumb { display: block; flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
+.fy-swnode__name { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-swnode__meta { font-size: 9px; color: var(--muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-swzoom {
+  position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 6px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: var(--shadow-sm); padding: 4px;
+}
+.fy-swzoom button {
+  width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--muted-fg); cursor: pointer; transition: var(--transition-control);
+}
+.fy-swzoom button:hover, .fy-swzoom button:focus-visible { background: var(--accent); color: var(--fg); }
+.fy-swzoom__label { font-size: 10px; color: var(--muted-fg); width: 34px; text-align: center; }
+.fy-swzoom__fit { width: auto !important; padding: 0 8px; font-size: 11px; }
+/* The graph in words: reachable and readable, and never drawn. Not display:none — that would
+   take it out of the accessibility tree too, which is the whole point of having it. */
+.fy-swalt { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.fy-swalt button:focus-visible { position: fixed; left: 12px; top: 12px; width: auto; height: auto; clip-path: none; padding: 6px 10px; background: var(--card); border: 1px solid var(--ring); border-radius: var(--radius-control); z-index: 20; }
+.fy-swflow { padding: 16px 0 40px; }
+.fy-swflow--invalid { color: var(--muted-fg); }
+.fy-swflow__why { margin: 0 0 8px; font-size: 13px; color: var(--danger); }
+.fy-swflow__findings { margin: 0; padding-left: 18px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+
+/* Narrow: the index folds to a picker and Arke can be put away (R-28, R-66). */
+@media (max-width: 900px) {
+  .fy-sw { grid-template-columns: minmax(0, 1fr); }
+  .fy-sw__centre { padding: 0 14px; }
+  .fy-swindex { border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
+  .fy-swindex__list { flex-direction: row; overflow-x: auto; }
+  .fy-swindex__scene { width: auto; min-width: 148px; }
+  .fy-sw__dock { border-left: 0; border-top: 1px solid var(--border); }
+  .fy-swrow { grid-template-columns: minmax(0, 1fr); }
+  .fy-swrow__frame, .fy-swrow__frame[data-aspect="9:16"], .fy-swrow__frame[data-aspect="1:1"] { width: 100%; }
+  .fy-swrow__actions { border-left: 0; border-top: 1px solid var(--border); padding: 8px 0 0; }
+}
+
+/* Reduced motion disables the layout transitions, per R-67. */
+@media (prefers-reduced-motion: reduce) {
+  .fy-swrow, .fy-swnode, .fy-sw__tab, .fy-swindex__scene { transition: none; }
+}

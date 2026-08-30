@@ -118,7 +118,7 @@ function digestBlocks(blocks: readonly { id: string; text: string }[]): Promise<
   return hit;
 }
 
-function useBlockDigests(scene: Scene): Map<string, string> {
+export function useBlockDigests(scene: Scene): Map<string, string> {
   const [digests, setDigests] = useState<Map<string, string>>(() => new Map());
   const blocks = scene.script?.blocks;
   useEffect(() => {
