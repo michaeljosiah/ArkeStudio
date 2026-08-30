@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord } from "@arke-studio/contracts";
-import { applySceneCommand, SceneCommandRefused, SceneVersionMoved } from "../../src/productions/scene-commands.js";
+import {
+  applySceneCommand,
+  sceneCommandFrom,
+  SceneCommandRefused,
+  SceneVersionMoved,
+} from "../../src/productions/scene-commands.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -19,6 +24,7 @@ import { closeOnCleanup } from "../tmp.js";
 const CLOCK = () => "2026-08-30T09:00:00.000Z";
 const PRODUCTION = "saltlight";
 const SCENE = "04-the-verse-rises";
+const SCENE_ID = "sc_04";
 
 async function open(): Promise<{ dir: string; store: WorldStore }> {
   const store = await WorldStore.open(await makeTempWorld(), { clock: CLOCK });
@@ -71,6 +77,7 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: before.version,
       command: {
         kind: "insert-shot",
@@ -108,6 +115,7 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: before.version,
       // A forward move: resolving the anchor against the ORIGINAL list would land it before the
       // target instead of after it, which is the off-by-one this asserts against.
@@ -127,6 +135,7 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: before.version,
       command: { kind: "duplicate-shot", shotId: source.id },
     });
@@ -148,6 +157,7 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
         applySceneCommand(store, {
           productionId: PRODUCTION,
           sceneFile: SCENE,
+          sceneId: SCENE_ID,
           baseVersion: before.version + 5,
           command: { kind: "delete-shot", shotId: shotIds(before)[0]! },
         }),
@@ -166,6 +176,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: first.version,
       command: { kind: "set-board-override", shotId: target, override: "split" },
     });
@@ -178,6 +189,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: split.version,
       command: { kind: "set-board-override", shotId: target, override: "merge" },
     });
@@ -188,6 +200,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: merged.version,
       command: { kind: "clear-board-override", shotId: target, override: "merge" },
     });
@@ -203,6 +216,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
         applySceneCommand(store, {
           productionId: PRODUCTION,
           sceneFile: SCENE,
+          sceneId: SCENE_ID,
           baseVersion: before.version,
           command: { kind: "set-board-override", shotId: shotIds(before)[0]!, override: "split" },
         }),
@@ -218,6 +232,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: first.version,
       command: { kind: "set-board-override", shotId: target, override: "split" },
     });
@@ -225,6 +240,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: split.version,
       command: {
         kind: "insert-shot",
@@ -251,6 +267,7 @@ describe("deletion names every blocker and cleans up atomically (T-11)", () => {
         applySceneCommand(store, {
           productionId: PRODUCTION,
           sceneFile: SCENE,
+          sceneId: SCENE_ID,
           baseVersion: before.version,
           command: { kind: "delete-shot", shotId: "sh_12" },
         }),
@@ -271,6 +288,7 @@ describe("deletion names every blocker and cleans up atomically (T-11)", () => {
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: before.version,
       command: { kind: "delete-shot", shotId: target },
     });
@@ -294,6 +312,7 @@ describe("deletion names every blocker and cleans up atomically (T-11)", () => {
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: first.version,
       command: { kind: "set-board-override", shotId: target, override: "split" },
     });
@@ -301,6 +320,7 @@ describe("deletion names every blocker and cleans up atomically (T-11)", () => {
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: split.version,
       command: { kind: "delete-shot", shotId: target },
     });
@@ -315,6 +335,7 @@ describe("deletion names every blocker and cleans up atomically (T-11)", () => {
         applySceneCommand(store, {
           productionId: PRODUCTION,
           sceneFile: SCENE,
+          sceneId: SCENE_ID,
           baseVersion: before.version,
           command: { kind: "delete-shot", shotId: "sh_999" },
         }),
@@ -332,6 +353,7 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     await applySceneCommand(store, {
       productionId: PRODUCTION,
       sceneFile: SCENE,
+      sceneId: SCENE_ID,
       baseVersion: before.version,
       command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 9 } },
     });
@@ -343,5 +365,159 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     assert.equal(edited.title, target.title);
     assert.deepEqual(shotIds(after), shotIds(before), "an edit is not a move");
     assert.equal(nodeIdOf(after, target.id), nodeIdOf(before, target.id));
+  });
+});
+
+describe("the fence names a scene, not a filename (codex round on #653)", () => {
+  it("refuses a command composed against a different scene at the same path", async () => {
+    /*
+     * Deleting a scene frees its id AND its stem, and a new scene drafted at the same path can
+     * be at v1 too. A delayed command composed against v1 of the deleted one would sail through
+     * a version check and land in a scene it was never about.
+     */
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    const print = await worldPrint(dir);
+
+    await assert.rejects(
+      () =>
+        applySceneCommand(store, {
+          productionId: PRODUCTION,
+          sceneFile: SCENE,
+          sceneId: "sc_99",
+          baseVersion: before.version,
+          command: { kind: "delete-shot", shotId: shotIds(before).at(-1)! },
+        }),
+      /holds scene sc_04, not sc_99/,
+    );
+    assert.equal(await worldPrint(dir), print);
+  });
+});
+
+describe("a deletion refuses when it cannot prove itself safe", () => {
+  it("names the unreadable dispatch plans as a blocker rather than assuming none", async () => {
+    // "I could not look" is not "there is nothing there": this is exactly the moment a delete
+    // must not proceed, because a running dispatch may still reference the shot.
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    const print = await worldPrint(dir);
+
+    await assert.rejects(
+      () =>
+        applySceneCommand(
+          store,
+          {
+            productionId: PRODUCTION,
+            sceneFile: SCENE,
+            sceneId: SCENE_ID,
+            baseVersion: before.version,
+            command: { kind: "delete-shot", shotId: shotIds(before).at(-1)! },
+          },
+          {
+            activePlans: () => Promise.reject(new Error("the journal could not be read")),
+          },
+        ),
+      /could not be read, so a running one cannot be ruled out/,
+    );
+    assert.equal(await worldPrint(dir), print, "and nothing was written while it could not tell");
+  });
+
+  it("names an authorized plan for this scene", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await assert.rejects(
+      () =>
+        applySceneCommand(
+          store,
+          {
+            productionId: PRODUCTION,
+            sceneFile: SCENE,
+            sceneId: SCENE_ID,
+            baseVersion: before.version,
+            command: { kind: "delete-shot", shotId: shotIds(before).at(-1)! },
+          },
+          {
+            activePlans: () =>
+              Promise.resolve([{ planId: "pl_01", sceneId: SCENE_ID, status: "active" }]),
+          },
+        ),
+      /pl_01/,
+    );
+  });
+});
+
+describe("an edit can clear an optional field, which JSON alone cannot say", () => {
+  it("translates the named fields to the absence editShot reads as removal", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const target = orderedShots(before).find((shot) => shot.durationSec !== undefined)!;
+
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: sceneCommandFrom({ kind: "edit-shot", shotId: target.id, change: {}, clear: ["durationSec"] }),
+    });
+
+    const after = await sceneOnDisk(store);
+    const edited = orderedShots(after).find((shot) => shot.id === target.id)!;
+    assert.equal("durationSec" in edited, false, "the key is gone, not set to the word undefined");
+    assert.equal(edited.description, target.description, "and nothing else moved");
+  });
+
+  it("leaves every field a change did not name", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const target = orderedShots(before)[0]!;
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: sceneCommandFrom({ kind: "edit-shot", shotId: target.id, change: { intent: "Held." } }),
+    });
+    const edited = orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === target.id)!;
+    assert.equal(edited.intent, "Held.");
+    assert.equal(edited.durationSec, target.durationSec, "an omitted key is not a cleared one");
+  });
+});
+
+describe("shot ids are minted under the same lock that writes them", () => {
+  it("two inserts into different scenes never mint the same id", async () => {
+    /*
+     * The race the gate closes: both handlers read the same production snapshot before either
+     * commits, mint the same next id, and both commit cleanly — their base hashes never collide
+     * because they replace DIFFERENT files. The result is two shots with one id, and selections
+     * and takes keyed by the bare id then alias the wrong one.
+     */
+    const { store } = await open();
+    const other = "02-the-tables-say-neap";
+    const first = await sceneOnDisk(store);
+    const second = await sceneOnDisk(store, other);
+    const beat = { title: "A held breath", description: "Nothing moves.", durationSec: 2 };
+
+    await Promise.all([
+      applySceneCommand(store, {
+        productionId: PRODUCTION,
+        sceneFile: SCENE,
+        sceneId: first.id,
+        baseVersion: first.version,
+        command: { kind: "insert-shot", at: { atStart: true }, shot: beat },
+      }),
+      applySceneCommand(store, {
+        productionId: PRODUCTION,
+        sceneFile: other,
+        sceneId: second.id,
+        baseVersion: second.version,
+        command: { kind: "insert-shot", at: { atStart: true }, shot: beat },
+      }),
+    ]);
+
+    const ids = [
+      ...shotIds(await sceneOnDisk(store)),
+      ...shotIds(await sceneOnDisk(store, other)),
+    ];
+    assert.equal(new Set(ids).size, ids.length, `ids must be unique across the production: ${ids.join(", ")}`);
   });
 });

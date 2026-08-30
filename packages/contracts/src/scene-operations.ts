@@ -5,6 +5,7 @@ import {
   isGraphScene,
   linearizeSceneFlow,
   migrateLegacyScene,
+  sequenceEdgeIdFor,
   shotNodeIdFor,
   validateSceneFlow,
   type GraphScene,
@@ -85,7 +86,37 @@ function shotsOf(record: SceneRecord): Shot[] {
 function complete(record: SceneRecord, shots: readonly Shot[]): GraphScene {
   const held = isGraphScene(record) ? record.flow.storyboardGroups : [];
   const base = migrateLegacyScene({ ...stripFlow(record), shots: [...shots] });
-  const flow = { ...base.flow, storyboardGroups: held };
+  /*
+   * A shot that survives keeps the node id the scene gave it, even when that id is not one the
+   * projection would mint. Rebuilding from the projection alone re-mints every id — invisible
+   * while every id in the world came from that same rule, and a silent corruption the moment
+   * anything authors one it would not have chosen: a payload edit changes stable identity, and
+   * a group naming the old id no longer resolves, so the edit is refused for a shot that never
+   * moved. Edges follow the nodes, because their ids are named from the pair they join.
+   */
+  const heldNodeIds = isGraphScene(record)
+    ? new Map(record.flow.nodes.flatMap((node) => (node.kind === "shot" ? [[node.shot.id, node.id] as const] : [])))
+    : new Map<string, string>();
+  const nodes = base.flow.nodes.map((node) =>
+    node.kind === "shot" && heldNodeIds.has(node.shot.id)
+      ? { ...node, id: heldNodeIds.get(node.shot.id)! }
+      : node,
+  );
+  const renamed = new Map(
+    base.flow.nodes.flatMap((node, index) => (node.id === nodes[index]!.id ? [] : [[node.id, nodes[index]!.id] as const])),
+  );
+  const byNode = new Map(nodes.map((node) => [node.id, node] as const));
+  const edges = base.flow.edges.map((edge) => {
+    const from = byNode.get(renamed.get(edge.from.nodeId) ?? edge.from.nodeId)!;
+    const to = byNode.get(renamed.get(edge.to.nodeId) ?? edge.to.nodeId)!;
+    return {
+      ...edge,
+      id: sequenceEdgeIdFor(from, to),
+      from: { ...edge.from, nodeId: from.id },
+      to: { ...edge.to, nodeId: to.id },
+    };
+  });
+  const flow = { ...base.flow, nodes, edges, storyboardGroups: held };
   const findings = validateSceneFlow(flow);
   if (findings.length > 0) {
     throw new SceneOperationRefused(
@@ -268,12 +299,14 @@ function prune(boards: Boards | undefined, shotId: string): Boards | undefined {
     ...boards,
     splits: boards.splits.filter((id) => id !== shotId),
     merges: boards.merges.filter((id) => id !== shotId),
+    /*
+     * A consolidated prompt is keyed by the exact set of shots it was written for, so a prompt
+     * with a member removed is a DIFFERENT prompt — text authored for "A and B together"
+     * silently becomes the text for B alone. The whole entry goes rather than being retargeted
+     * at the survivors.
+     */
     ...(boards.prompts !== undefined
-      ? {
-          prompts: boards.prompts
-            .map((prompt) => ({ ...prompt, members: prompt.members.filter((id) => id !== shotId) }))
-            .filter((prompt) => prompt.members.length > 0),
-        }
+      ? { prompts: boards.prompts.filter((prompt) => !prompt.members.includes(shotId)) }
       : {}),
   });
 }

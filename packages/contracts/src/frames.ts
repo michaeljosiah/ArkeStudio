@@ -6,6 +6,23 @@ import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
+
+/**
+ * The shot fields an edit may clear (SPEC-029 R-36). Identity and the required text are absent
+ * deliberately: a shot with no id, number, title or description is not a shot, and clearing one
+ * would be a deletion wearing an edit's name.
+ */
+export const CLEARABLE_SHOT_FIELDS = [
+  "camera",
+  "audio",
+  "durationSec",
+  "intent",
+  "beats",
+  "framing",
+  "continuity",
+  "covers",
+  "promptOverride",
+] as const;
 import { ShotAnchorSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
@@ -1578,6 +1595,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       /** The same stem-only rule as save-scene, for the same reason. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      /**
+       * The scene this was composed against, by id — the stem alone cannot say which scene it
+       * is. Deleting a scene frees its id and its stem for a new one drafted at the same path,
+       * and a delayed command would otherwise pass a version check into a different scene.
+       */
+      sceneId: SceneIdSchema,
       baseVersion: z.number().int().min(1),
       command: z.discriminatedUnion("kind", [
         z
@@ -1594,8 +1617,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
           .object({
             kind: z.literal("edit-shot"),
             shotId: ShotIdSchema,
-            /** A patch: absent leaves the field, explicit null clears it. */
+            /** A patch: a field the change omits is left exactly as the shot has it. */
             change: ShotSchema.omit({ id: true, number: true }).partial(),
+            /**
+             * Fields to remove, named rather than sent as a value.
+             *
+             * JSON cannot carry `undefined`, and an omitted key means "leave it" — so without
+             * this there is no way to clear an optional field at all: no way to drop a hand-
+             * tuned prompt override, a camera line, or a continuity flag once written.
+             */
+            clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
           })
           .strict(),
         z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),

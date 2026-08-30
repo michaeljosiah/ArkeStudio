@@ -46,6 +46,27 @@ export type SceneCommand =
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
   | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" };
 
+/**
+ * The wire command as the operations take it: `clear` becomes the explicit `undefined` that
+ * `editShot` reads as "remove this key".
+ *
+ * JSON cannot carry `undefined` and an omitted key means "leave it", so the transport names the
+ * fields to drop instead of sending a value for them. Translating here keeps the operations
+ * working in one vocabulary — a patch where present-with-undefined clears — rather than
+ * teaching every one of them about a wire shape.
+ */
+export function sceneCommandFrom(wire: WireSceneCommand): SceneCommand {
+  if (wire.kind !== "edit-shot") return wire as SceneCommand;
+  const change: Record<string, unknown> = { ...wire.change };
+  for (const field of wire.clear ?? []) change[field] = undefined;
+  return { kind: "edit-shot", shotId: wire.shotId, change: change as Partial<Shot> };
+}
+
+/** The wire shape, structurally — the frame owns its schema; this is what reaches the command. */
+type WireSceneCommand =
+  | Exclude<SceneCommand, { kind: "edit-shot" }>
+  | { kind: "edit-shot"; shotId: string; change: Partial<Shot>; clear?: readonly string[] };
+
 /** A refusal that names what stands in the way, never a code (R-39, R-59). */
 export class SceneCommandRefused extends Error {
   constructor(readonly reasons: string[]) {
@@ -84,6 +105,14 @@ export interface SceneCommandInput {
   productionId: string;
   /** A file stem, never a path — the same rule `save-scene` follows, for the same reason. */
   sceneFile: string;
+  /**
+   * The scene the caller composed against, by id.
+   *
+   * The version alone cannot tell a scene from its replacement: deleting a scene frees both its
+   * id and its stem, a new scene can be drafted at the same path, and a delayed command
+   * composed against v1 of the old one would pass a v1 check and land in the new one.
+   */
+  sceneId: string;
   /** The version the caller composed against. Refused if the file has moved past it (R-62). */
   baseVersion: number;
   command: SceneCommand;
@@ -104,23 +133,102 @@ export async function applySceneCommand(
 ): Promise<void> {
   const stem = stemOrThrow(input.sceneFile);
   const path = `productions/${input.productionId}/scenes/${stem}.json`;
-  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  const record = parseSceneRecord(raw);
 
+  /*
+   * The fence answers first, twice, for two different reasons.
+   *
+   * Here, because a command composed against a scene that has since moved should say so rather
+   * than report on a world it was never looking at — deriving blockers for a stale edit reads
+   * the wrong scene and names the wrong reasons. Again inside the gate below, because this
+   * check can go stale between here and the write, and only the one inside the lock cannot.
+   */
+  const opening = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  fenceOrThrow(input, parseSceneRecord(opening), stem);
+
+  // Blockers are derived OUTSIDE the gate deliberately: reading plan journals is I/O with
+  // nothing to do with this scene's bytes, and holding the write lock across it would put every
+  // other writer behind it. Anything that could race it edits this same scene, and that is what
+  // the fence inside the gate catches.
+  const blockers =
+    input.command.kind === "delete-shot"
+      ? await deletionBlockers(store, input, input.command.shotId, deps)
+      : [];
+  if (blockers.length > 0) throw new SceneCommandRefused(blockers);
+
+  /*
+   * Read, mint, validate and commit inside ONE serialised region.
+   *
+   * Shot ids are unique per production, not per scene, and minting one means looking at every
+   * scene. Two inserts into DIFFERENT scenes therefore read the same snapshot, mint the same
+   * id, and both commit cleanly — their base hashes never collide, because they replace
+   * different files. The result is two shots with one id, and selections and takes keyed by the
+   * bare id then alias the wrong one. The gate is what makes the read and the write one act.
+   */
+  await store.gateOp(async () => {
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    const record = parseSceneRecord(raw);
+    fenceOrThrow(input, record, stem);
+
+    const files: CommitFileInput[] = [];
+    const next = await candidateFor(store, input, record, files);
+
+    files.unshift({
+      path,
+      action: "replace",
+      content: `${JSON.stringify(next, null, 2)}\n`,
+      baseHash: sha256(raw),
+    });
+    await store.commitUnserialised({ kind: "scene-command", source: input.command.kind, files });
+  });
+}
+
+/**
+ * Is this the scene the command was composed against, as it was composed against it?
+ *
+ * The id first, because the version alone cannot tell a scene from its replacement: deleting a
+ * scene frees both its id and its stem, a new scene can be drafted at the same path, and a
+ * delayed command composed against v1 of the old one would sail through a version check and
+ * land in the new one.
+ */
+function fenceOrThrow(input: SceneCommandInput, record: SceneRecord, stem: string): void {
+  if (record.id !== input.sceneId) {
+    throw new SceneCommandRefused([
+      `${stem}.json holds scene ${record.id}, not ${input.sceneId} — this edit was composed against a different scene`,
+    ]);
+  }
   if (record.version !== input.baseVersion) {
     throw new SceneVersionMoved(input.baseVersion, record.version);
   }
+}
 
-  const files: CommitFileInput[] = [];
-  const next = await candidateFor(store, input, record, files, deps);
-
-  files.unshift({
-    path,
-    action: "replace",
-    content: `${JSON.stringify(next, null, 2)}\n`,
-    baseHash: sha256(raw),
-  });
-  await store.commit({ kind: "scene-command", source: input.command.kind, files });
+/**
+ * What a deletion would strand (R-39), refusing rather than guessing when it cannot be read.
+ *
+ * An unreadable plan journal is not "no active plans": it is the coordinator being unable to
+ * prove the deletion is safe, which is exactly when it must not proceed. "I could not look"
+ * belongs on the blocker list beside the blockers themselves.
+ */
+async function deletionBlockers(
+  store: WorldStore,
+  input: SceneCommandInput,
+  shotId: string,
+  deps: SceneCommandDeps,
+): Promise<string[]> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
+  if (!production) return [`production ${input.productionId} is not in this world`];
+  const scene = production.scenes.find((candidate) => candidate.id === input.sceneId);
+  if (!scene) return [`scene ${input.sceneId} is not in ${input.productionId}`];
+  let plans: Array<{ planId: string; sceneId: string; status: string }>;
+  try {
+    plans = (await deps.activePlans?.(input.productionId)) ?? [];
+  } catch (error) {
+    return [
+      `the dispatch plans for this production could not be read, so a running one cannot be ruled out: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ];
+  }
+  return shotDeleteBlockers(production, scene, shotId, plans);
 }
 
 /**
@@ -135,7 +243,6 @@ async function candidateFor(
   input: SceneCommandInput,
   record: SceneRecord,
   files: CommitFileInput[],
-  deps: SceneCommandDeps,
 ): Promise<GraphScene> {
   const command = input.command;
   switch (command.kind) {
@@ -159,14 +266,8 @@ async function candidateFor(
     case "edit-shot":
       return editShot(record, { shotId: command.shotId, change: command.change });
     case "delete-shot": {
-      const production = productionOrThrow(store, input.productionId);
-      const blockers = shotDeleteBlockers(
-        production,
-        record,
-        command.shotId,
-        await (deps.activePlans?.(input.productionId) ?? Promise.resolve([])),
-      );
-      if (blockers.length > 0) throw new SceneCommandRefused(blockers);
+      // The live-dependency blockers were derived before the gate opened; what is left is the
+      // graph's own refusal and the selection that must ride this commit.
       const next = deleteShot(record, { shotId: command.shotId });
       await appendSelectionCleanup(store, input.productionId, command.shotId, files);
       return next;
@@ -195,8 +296,16 @@ async function appendSelectionCleanup(
   let raw: string;
   try {
     raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  } catch {
-    return;
+  } catch (error) {
+    // Only "there is no file" is ordinary — a production nobody has selected in has none. Any
+    // other read failure means the file may hold a selection for this shot that this commit
+    // would then fail to remove, so the deletion is refused rather than left half-done.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new SceneCommandRefused([
+      `the selections for ${productionId} could not be read, so this shot's selection cannot be removed with it: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ]);
   }
   const selections = JSON.parse(raw) as Record<string, unknown>;
   if (!(shotId in selections)) return;

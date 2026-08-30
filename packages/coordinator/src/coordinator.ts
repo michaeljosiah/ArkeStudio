@@ -176,7 +176,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { applySceneCommand, type SceneCommand } from "./productions/scene-commands.js";
+import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -5246,14 +5246,21 @@ export class Coordinator {
        */
       case "scene-command": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        /*
+         * The open store must BE the world the command was composed for. A command still in
+         * flight while another world opens would otherwise edit whichever world is open now —
+         * two worlds can hold the same production id, scene stem and version — while the
+         * refusal and snapshot bookkeeping still named the old one.
+         */
+        if (!store || store.worldId !== msg.worldId) return;
         await applySceneCommand(
           store,
           {
             productionId: msg.productionId,
             sceneFile: msg.sceneFile,
+            sceneId: msg.sceneId,
             baseVersion: msg.baseVersion,
-            command: msg.command as SceneCommand,
+            command: sceneCommandFrom(msg.command),
           },
           {
             // Plan status is folded from the journal joined with live queue facts, so the probe
