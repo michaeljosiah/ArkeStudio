@@ -53,6 +53,7 @@ const STATE: ClientState = {
   worldChat: null,
   bench: null,
   authoringRuns: [],
+  frameRuns: [],
 };
 
 const EVENT = {

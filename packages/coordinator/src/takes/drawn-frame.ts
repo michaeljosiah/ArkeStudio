@@ -210,6 +210,18 @@ export async function fileDrawnFrame(
         const current =
           (selections[shotId]?.["startFrameArtifactId"] as string | null | undefined) ?? null;
         if (current !== input.expectedArtifactId) {
+          // Recovery after the filing commit but before the run outcome write sees the slot move
+          // to this job's own artifact. That is proof the earlier filing completed, not a newer
+          // decision overtaking it; return its existing id without appending another review.
+          const existing = store.getBundle().artifacts.find(
+            (artifact) =>
+              artifact.id === current &&
+              artifact.origin.by === "system" &&
+              artifact.origin.producedBy === input.producedBy &&
+              artifact.links.includes(shotId) &&
+              artifact.links.includes(take.id),
+          );
+          if (existing !== undefined) return { ok: true as const, artifactId: existing.id, shotId };
           return {
             ok: true as const,
             superseded: true as const,
@@ -311,6 +323,7 @@ export async function acceptStill(
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
+  if (take.boardSheetParent === true) throw new Error(`take ${input.takeId} is a board-sheet parent and cannot be accepted for a shot`);
   if (!take.coversShots.includes(input.shotId)) {
     throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
   }

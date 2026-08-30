@@ -413,6 +413,24 @@ describe("takes and reviews", () => {
     assert.throws(() => TakeSchema.parse({ ...take, status: "accepted" }));
   });
 
+  it("marks only a generated multi-shot frame as a board-sheet parent", () => {
+    const parent = { ...take, kind: "frame", boardSheetParent: true, coversShots: ["sh_12", "sh_13"] };
+    assert.equal(TakeSchema.parse(parent).boardSheetParent, true);
+    assert.throws(() => TakeSchema.parse({ ...parent, kind: "clip" }), /board-sheet parent/);
+    assert.throws(() => TakeSchema.parse({ ...parent, jobId: undefined }), /board-sheet parent/);
+    assert.throws(() => TakeSchema.parse({ ...parent, coversShots: [] }), /board-sheet parent/);
+    assert.throws(() => TakeSchema.parse({ ...parent, panel: {
+      parentTakeId: newId("tk"),
+      sourceJobId: newId("jb"),
+      index: 1,
+      shotId: "sh_12",
+      crop: { x: 0, y: 0, width: 16, height: 9 },
+      parentHash: "sha256:0000000000000000",
+      cropSourceHash: "sha256:0000000000000000",
+      hash: "sha256:0000000000000000",
+    } }), /board-sheet parent/);
+  });
+
   it("take QC is optional, strict, and accepts the adjacent-framemd5-v1 record", () => {
     // Absent is the legacy and the unmeasured state, and both must keep parsing (#248).
     assert.equal(TakeSchema.parse(take).qc, undefined);

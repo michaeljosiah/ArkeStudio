@@ -97,7 +97,12 @@ async function takeForJob(store: WorldStore, productionId: string, jobId: string
       .then((raw) => JSON.parse(raw) as unknown)
       .catch(() => null);
     const parsed = TakeSchema.safeParse(value);
-    if (parsed.success && parsed.data.jobId === jobId && parsed.data.segment === undefined) return parsed.data;
+    if (
+      parsed.success &&
+      parsed.data.jobId === jobId &&
+      parsed.data.segment === undefined &&
+      parsed.data.panel === undefined
+    ) return parsed.data;
   }
   return null;
 }
@@ -265,6 +270,7 @@ export async function recordTakesFromJob(
       ...base,
       coversShots: (job.target.coversShots ?? (job.target.id !== undefined ? [job.target.id] : [])) as Take["coversShots"],
       kind: takeKindFor(job),
+      ...(job.target.kind === "board-sheet" ? { boardSheetParent: true as const } : {}),
       ...(continuedFrom !== undefined ? { continuedFrom } : {}),
       cost: {
         estimatedMicroUsd: job.estimatedMicroUsd,

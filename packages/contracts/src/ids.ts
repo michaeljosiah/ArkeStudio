@@ -75,6 +75,8 @@ export const ID_PREFIXES = {
   dispatchPlan: "pl",
   /** One founding build's authorization record (SPEC-031 R-13). */
   foundingBuild: "fb",
+  /** One durable frame-generation run (SPEC-036 §2.7). */
+  frameRun: "fr",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];
@@ -94,6 +96,7 @@ export const PassIdSchema = prefixedIdSchema("ps");
 export const ProposalIdSchema = prefixedIdSchema("pr");
 export const ArtifactIdSchema = prefixedIdSchema("ar");
 export const ProviderCallIdSchema = prefixedIdSchema("pc");
+export const FrameRunIdSchema = prefixedIdSchema("fr");
 
 /**
  * A bench session's durable id (issue 305). The `sess` prefix predates this and was loosely
@@ -127,6 +130,7 @@ export type CheckReceiptId = z.infer<typeof CheckReceiptIdSchema>;
 export type CandidateId = z.infer<typeof CandidateIdSchema>;
 export type CandidateGroupId = z.infer<typeof CandidateGroupIdSchema>;
 export type ChatAttachmentId = z.infer<typeof ChatAttachmentIdSchema>;
+export type FrameRunId = z.infer<typeof FrameRunIdSchema>;
 
 /**
  * Entity slugs are filenames (master spec §2.2): lowercase kebab-case, no spaces. Kept

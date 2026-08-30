@@ -315,7 +315,7 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
     assert.equal(q(mounted, '[data-testid="flow-node-s:sh_999"]')?.getAttribute("data-staged"), "true");
     await click(all(mounted, "button").find((button) => button.textContent === "Keep discussing")!);
     assert.ok(q(mounted, '[data-testid="flow-node-s:sh_999"]'), "folding the decision does not drop the proposal");
-    assert.equal(sent.length, 0, "Keep discussing is not a write or a discard");
+    assert.deepEqual(sent.map((message) => message.kind), ["frame-run-list"], "Keep discussing is not a write or a discard");
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
     await click(q(mounted, ".fy-madeaside")!);

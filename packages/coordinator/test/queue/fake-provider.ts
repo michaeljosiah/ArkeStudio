@@ -65,6 +65,8 @@ export class FakeProvider implements DispatchClient {
   onFetch: (() => void) | null = null;
   artifacts: DispatchArtifact[] = [];
   pollState: RemoteJob["state"] = "succeeded";
+  pollError: Error | null = null;
+  pollFailureMessage = "the provider reported failure";
   costMicroUsd: number | undefined = undefined;
   /** Listing behaviour for strategy B: whether entries carry idempotency keys. */
   listingCarriesKeys = true;
@@ -127,12 +129,13 @@ export class FakeProvider implements DispatchClient {
 
   async poll(_key: string, remoteId: string): Promise<{ state: RemoteJob["state"]; costMicroUsd?: number; error?: string }> {
     this.pollCount += 1;
+    if (this.pollError !== null) throw this.pollError;
     const job = this.remote.get(remoteId);
     if (!job) return { state: "failed", error: "unknown remote id" };
     return {
       state: job.state,
       ...(job.costMicroUsd !== undefined ? { costMicroUsd: job.costMicroUsd } : {}),
-      ...(job.state === "failed" ? { error: "the provider reported failure" } : {}),
+      ...(job.state === "failed" ? { error: this.pollFailureMessage } : {}),
     };
   }
 

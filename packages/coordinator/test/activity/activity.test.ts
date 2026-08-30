@@ -88,6 +88,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
     worldChat: null,
     bench: null,
     authoringRuns: [],
+    frameRuns: [],
   };
 }
 
@@ -340,6 +341,25 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     const shot = jobOrigin(job({ status: "failed", productionId: "saltlight", target: { kind: "shot", id: "sh_12" } }));
     assert.equal(shot?.path, `/w/${WORLD}/p/saltlight/generate/dispatch`);
     assert.match(shot!.where, /production/);
+    const frameRun = job({
+      status: "failed",
+      productionId: "saltlight",
+      target: { kind: "shot", id: "sh_12", coversShots: ["sh_12"] },
+      failureClass: "transient",
+      params: {
+        frameRun: "fr_01J8E0000000000000000000R1",
+        provenance: { sceneId: "sc_04" },
+      },
+    });
+    assert.equal(jobOrigin(frameRun)?.path, `/w/${WORLD}/p/saltlight/scenes/sc_04`);
+    assert.deepEqual(jobActions(frameRun), ["retry"]);
+    for (const failureClass of ["terminal", "provider-fault", "offline", null] as const) {
+      assert.deepEqual(
+        jobActions({ ...frameRun, failureClass }),
+        [],
+        `frame-run ${failureClass ?? "unclassified"} failures do not offer paid retry`,
+      );
+    }
     // Except a line, which has a dialog of its own. The shot dispatch dialog carries no
     // dialogue or delivery controls, so sending a failed line there is the same dead end.
     const line = jobOrigin(
@@ -397,6 +417,12 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     });
     assert.ok(!canDeleteJob(unprepared));
     assert.equal(computeNeedsYou(baseState({ jobs: [unprepared] })).length, 1, "it is still on the queue");
+
+    for (const status of ["succeeded", "failed", "cancelled"] as const) {
+      const frameRun = job({ status, params: { frameRun: "fr_01J8E0000000000000000000R1" } });
+      assert.equal(canDeleteJob(frameRun), false, `${status} frame-run history remains available to its durable run`);
+      assert.ok(!jobActions(frameRun).includes("delete"));
+    }
   });
 });
 

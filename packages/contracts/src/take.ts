@@ -123,6 +123,8 @@ export const TakeSchema = z
     completedAt: IsoDateTimeSchema.optional(),
     /** Media filename within the take directory, e.g. "clip.mp4". */
     media: z.string().optional(),
+    /** Durable provider sheet retained for review/context, never a shot-selectable frame. */
+    boardSheetParent: z.literal(true).optional(),
     /**
      * A pass segment references the pass's media with an in/out range — a range, not a file
      * (SPEC-013 R-3, D2). Boundaries come from the pre-dispatch shot plan, never from
@@ -133,6 +135,29 @@ export const TakeSchema = z
         passTakeId: TakeIdSchema,
         inSec: z.number().min(0),
         outSec: z.number().min(0),
+      })
+      .strict()
+      .optional(),
+    /** A deterministic image crop derived from an immutable multi-panel parent sheet. */
+    panel: z
+      .object({
+        parentTakeId: TakeIdSchema,
+        sourceJobId: JobIdSchema,
+        index: z.number().int().min(1),
+        shotId: ShotIdSchema,
+        crop: z
+          .object({
+            x: z.number().int().min(0),
+            y: z.number().int().min(0),
+            width: z.number().int().min(1),
+            height: z.number().int().min(1),
+          })
+          .strict(),
+        /** Hash of the immutable provider result retained by the parent take. */
+        parentHash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+        /** Hash of the normalized PNG bytes whose pixels the crop geometry addresses. */
+        cropSourceHash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+        hash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
       })
       .strict()
       .optional(),
@@ -151,7 +176,12 @@ export const TakeSchema = z
      */
     qc: TakeQcSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((take, ctx) => {
+    if (take.boardSheetParent === true && (take.kind !== "frame" || take.jobId === undefined || take.coversShots.length === 0 || take.panel !== undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["boardSheetParent"], message: "a board-sheet parent must be a generated frame covering shots, not a panel crop" });
+    }
+  });
 export type Take = z.infer<typeof TakeSchema>;
 
 // ---------------------------------------------------------------------------

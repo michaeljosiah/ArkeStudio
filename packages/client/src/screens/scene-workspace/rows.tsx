@@ -8,6 +8,7 @@ import {
   shotCoverage,
   type ArtifactSidecar,
   type ClientMessage,
+  type FrameRunState,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
@@ -20,6 +21,8 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
+import { frameRunCommand } from "../../lib/store.js";
+import { frameRunShotState } from "./frame-run.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -49,6 +52,8 @@ export function StoryboardRows({
   locked,
   onCommand,
   refusalVersion,
+  frameRun,
+  worldId,
 }: {
   scene: SceneRecord;
   acceptedScene: SceneRecord;
@@ -68,6 +73,8 @@ export function StoryboardRows({
   locked: boolean;
   onCommand: (command: Command) => boolean;
   refusalVersion: number;
+  frameRun: FrameRunState | null;
+  worldId: string;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -174,6 +181,9 @@ export function StoryboardRows({
                   }
                 }}
                 refusalVersion={refusalVersion}
+                runState={frameRunShotState(frameRun, shot.id)}
+                run={frameRun}
+                worldId={worldId}
               />
             </li>
           );
@@ -366,6 +376,9 @@ function Row({
   onDragEnd,
   onDrop,
   refusalVersion,
+  runState,
+  run,
+  worldId,
 }: {
   shot: Shot;
   production: ProductionBundle;
@@ -388,6 +401,9 @@ function Row({
   onDragEnd: () => void;
   onDrop: () => void;
   refusalVersion: number;
+  runState: ReturnType<typeof frameRunShotState>;
+  run: FrameRunState | null;
+  worldId: string;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const restored = useRef(false);
@@ -419,6 +435,7 @@ function Row({
     shot.framing?.size === undefined ? null : `${shot.framing.size} override`,
     shot.framing?.movement === undefined ? null : `${shot.framing.movement} override`,
   ].filter((label): label is string => label !== null);
+  const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
 
   useEffect(() => {
     if (!selected) {
@@ -481,13 +498,19 @@ function Row({
         <span className="fy-swrow__chipmeta">
           {aspect} · {(shot.durationSec ?? 0).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
         </span>
+        {runState === null ? null : (
+          <FrameState
+            state={runState}
+            onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)}
+          />
+        )}
       </div>
       <div className="fy-swrow__body">
         <div className="fy-swrow__titleline">
           <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}>{CHIP[state]}</span>
         </div>
-        {coverage === "changed" ? <div className="fy-swrow__stale"><span className="fy-swrow__stalelabel">script changed</span></div> : null}
+        {coverage === "changed" || runScriptChanged ? <div className="fy-swrow__stale"><span className="fy-swrow__stalelabel">script changed</span></div> : null}
         <div
           className="fy-swrow__script"
           contentEditable={!disabled}
@@ -546,4 +569,54 @@ function Row({
       </div>
     </div>
   );
+}
+
+function sceneVersionMoved(run: FrameRunState, production: ProductionBundle, shotId: string): boolean {
+  const scene = production.scenes.find((candidate) => candidate.id === run.run.sceneId);
+  return scene !== undefined && scene.version !== run.run.sceneVersion && run.run.steps.some((step) => step.updateShotIds.includes(shotId));
+}
+
+function failureCopy(state: { failureClass: "transient" | "terminal" | "provider-fault" | "offline" | null; error: string | null }): string {
+  if (state.failureClass === "provider-fault") return state.error === null ? "provider fault · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
+  if (state.failureClass === "offline") return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  return state.error ?? "came back dark";
+}
+
+function retryForShot(
+  run: FrameRunState,
+  state: NonNullable<ReturnType<typeof frameRunShotState>>,
+  shotId: string,
+  worldId: string,
+  productionId: string,
+): (() => boolean) | null {
+  if (run.run.mode === "board") {
+    // A failed initial board has no immutable parent sheet. Its retry belongs to the durable
+    // board strip; cells become retryable only when the backend says that parent context exists.
+    if (!state.canRetryCell || (state.grain === "initial" && state.status === "failed")) return null;
+    return () => frameRunCommand({ kind: "frame-run-retry-cell", worldId, productionId, runId: run.run.id, stepIndex: state.stepIndex, shotId });
+  }
+  if (!state.stepCanRetry) return null;
+  return () => frameRunCommand({ kind: "frame-run-retry-step", worldId, productionId, runId: run.run.id, stepIndex: state.stepIndex });
+}
+
+function FrameState({ state, onRetry }: { state: NonNullable<ReturnType<typeof frameRunShotState>>; onRetry: (() => boolean) | null }) {
+  if (state.status === "queued" || state.status === "not-enqueued" || state.status === "submitting") {
+    const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
+    return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : "queued"}</div>;
+  }
+  if (state.status === "running") {
+    const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
+    return <div className="fy-swrow__run" data-state={held ? "failed" : "running"}>{held ? failureCopy(state) : "generating frame..."}</div>;
+  }
+  if (state.status === "failed" || state.status === "missing" || state.status === "needs-reconciliation") {
+    return (
+      <div className="fy-swrow__run" data-state="failed" role="status">
+        <span>{failureCopy(state)}</span>
+        {onRetry === null ? null : <button type="button" onClick={onRetry}>Retry</button>}
+      </div>
+    );
+  }
+  if (onRetry !== null) return <div className="fy-swrow__run" data-state="retry"><span>{state.status === "superseded" ? "overtaken" : "frame added"}</span><button type="button" onClick={onRetry}>Retry</button></div>;
+  return null;
 }

@@ -65,6 +65,7 @@ export class ReadModel {
       // Always empty here, and filled on the way out by the coordinator, which is the only thing
       // holding the running sessions (issue 239).
       authoringRuns: [],
+      frameRuns: [],
     };
   }
 
@@ -143,13 +144,19 @@ export class ReadModel {
      * never runs again and nothing re-asks.
      */
     const settled = world !== null && this.state.worldOpenFailure?.worldId === world.meta.worldId;
+    const sameWorld = world !== null && this.state.world?.meta.worldId === world.meta.worldId;
     this.state = {
       ...this.state,
       world,
       worldOpenFailure: settled ? null : this.state.worldOpenFailure,
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
+      frameRuns: sameWorld ? this.state.frameRuns : [],
     };
+  }
+
+  setFrameRuns(frameRuns: ClientState["frameRuns"]): void {
+    this.state = { ...this.state, frameRuns };
   }
 
   /**
@@ -351,6 +358,16 @@ export class ReadModel {
       case "queue.reconciled":
       case "queue.enqueue-result":
         // A report, not state: the Activity screen shows it transiently; jobs carry the truth.
+        return;
+      case "production.frame-run": {
+        if (this.state.world?.meta.worldId !== event.worldId) return;
+        const frameRuns = this.state.frameRuns.filter((state) => state.run.id !== event.runId);
+        if (event.state !== null) frameRuns.push(event.state);
+        this.state = { ...this.state, frameRuns };
+        return;
+      }
+      case "production.frame-run-quote":
+      case "production.frame-run-start-result":
         return;
       case "entity.changed": {
         const world = this.state.world;

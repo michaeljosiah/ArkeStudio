@@ -32,6 +32,10 @@ export const JobStatusSchema = z.enum([
 ]);
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 
+/** SPEC-009's retry vocabulary, retained on a job so every consumer reaches the same decision. */
+export const JobFailureClassSchema = z.enum(["transient", "terminal", "provider-fault", "offline"]);
+export type JobFailureClass = z.infer<typeof JobFailureClassSchema>;
+
 export const JobTargetSchema = z
   .object({
     /** What the job produces for: "shot" | "scene-pass" | "model-sheet" | "voice-line" | "extraction" | … */
@@ -84,7 +88,7 @@ export function isReplayableFinalization(job: {
   params: Record<string, unknown>;
 }): boolean {
   if (REPLAYABLE_FINALIZATION_TARGETS.has(job.target.kind)) return true;
-  return job.target.kind === "shot" && job.params["landing"] === "frame-slot";
+  return (job.target.kind === "shot" || job.target.kind === "board-sheet") && job.params["landing"] === "frame-slot";
 }
 
 export const JobFinalizationSchema = z
@@ -156,6 +160,10 @@ export const JobSchema = z
     /** Domain follow-on after provider success, durable and retryable without another charge. */
     finalization: JobFinalizationSchema.optional(),
     error: z.string().nullable().default(null),
+    /** The last classified failure, durable even when its handling puts the job back in a queue. */
+    failureClass: JobFailureClassSchema.nullable().optional(),
+    /** Exact provider-reported terminal charge, persisted across the terminal-row/ledger window. */
+    providerCostMicroUsd: z.number().int().min(0).optional(),
     /**
      * The user removed this job from Activity's history. A deletion is a record like any other
      * transition — the journal stays append-only, and the fold drops the id rather than the file

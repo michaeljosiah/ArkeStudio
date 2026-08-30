@@ -327,6 +327,20 @@ describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
       /is a still/,
     );
   });
+
+  it("refuses explicit acceptance of a durable board-sheet parent", async () => {
+    const store = await open();
+    const take = { ...await still(store, "tk_board_parent", "sh_13"), boardSheetParent: true as const };
+    const fresh = { ...production(store), takes: [...production(store).takes, take] };
+    await assert.rejects(
+      () => acceptStill(store, fresh, { takeId: take.id, shotId: "sh_13", by: "user" }),
+      /board-sheet parent/,
+    );
+    await assert.rejects(
+      () => acceptTake(store, fresh, { takeId: take.id, shotId: "sh_13", by: "user" }),
+      /board-sheet parent/,
+    );
+  });
 });
 
 describe("a non-PNG still normalises to PNG at filing", () => {
@@ -507,5 +521,24 @@ describe("an auto-filed frame is already decided", () => {
     assert.match(reviews, /tk_auto02/);
     assert.match(reviews, /tk_auto03/, "the second append chained on the first");
     assert.ok(!reviews.includes("tk_auto04"), "no decision for a frame that was never installed");
+  });
+
+  it("replay after filing recognizes the same job's artifact instead of calling it superseded", async () => {
+    const store = await open();
+    const take = await still(store, "tk_auto05", "sh_13");
+    const first = filedOk(await fileDrawnFrame(store, production(store), {
+      take,
+      shotId: "sh_13",
+      producedBy: "frame-run:jb_replay",
+      expectedArtifactId: null,
+    }));
+    const replayed = await fileDrawnFrame(store, production(store), {
+      take,
+      shotId: "sh_13",
+      producedBy: "frame-run:jb_replay",
+      expectedArtifactId: null,
+    });
+    assert.ok(replayed.ok && !("superseded" in replayed));
+    assert.equal("artifactId" in replayed ? replayed.artifactId : null, first.artifactId);
   });
 });

@@ -41,7 +41,7 @@ export function takeDecisions(production: ProductionBundle): Record<string, Take
 }
 
 export function takesForShot(production: ProductionBundle, shotId: string) {
-  return production.takes.filter((t) => t.coversShots.includes(shotId));
+  return production.takes.filter((t) => t.boardSheetParent !== true && t.coversShots.includes(shotId));
 }
 
 export function acceptedTakeId(production: ProductionBundle, shotId: string): string | null {

@@ -52,6 +52,7 @@ import {
   type ConversationId,
   type WorldChatCheckReceipt,
   type Job,
+  type FrameRunQuote,
   voiceJobFormat,
   voiceJobReadIdentity,
   voiceJobIsCandidatePreview,
@@ -129,6 +130,25 @@ import {
   planState,
   type PlanDriverDeps,
 } from "./productions/plans.js";
+import {
+  advanceFrameRun,
+  abortFrameRunStart,
+  cancelFrameRun,
+  dismissFrameRun,
+  frameRunState,
+  listFrameRuns,
+  pauseFrameRun,
+  quoteFrameRun,
+  readFrameRun,
+  recordBoardSheetFromJob,
+  recordFrameLandingOutcome,
+  resumeFrameRun,
+  retryFrameCell,
+  retryFrameStep,
+  startFrameRun,
+  type FrameRunDriverDeps,
+  type CompileFrameRunInput,
+} from "./productions/frame-run.js";
 import {
   appendTraversal,
   exportInteractive,
@@ -735,6 +755,7 @@ function worldOpenFailureKind(err: unknown): string {
 
 export class Coordinator {
   private readonly readModel: ReadModel;
+  private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
   private readonly transport: Transport;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
@@ -1277,6 +1298,7 @@ export class Coordinator {
               ) {
                 if (event.job.status !== "needs-reconciliation") {
                   void this.advancePlansForJob(event.job).catch(() => {});
+                  void this.advanceFrameRunForJob(event.job).catch(() => {});
                 }
                 // A founding build waiting on this job wakes without waiting out its tick —
                 // needs-reconciliation included, because that is build-terminal (SPEC-031 R-23).
@@ -1399,6 +1421,7 @@ export class Coordinator {
                 worldId: job.worldId,
                 targetKind: job.target.kind,
               });
+              void this.emitFrameRunForJob(job).catch(() => {});
             },
             // Enqueue admission (SPEC-021 R-16): a recipe whose readiness is not ready is
             // refused with the readiness reason before anything is journalled. `unknown`
@@ -2152,6 +2175,7 @@ export class Coordinator {
     this.readModel.setWorld(bundle);
     // Before the rows are broadcast, not after: recovery changes what several of them say.
     const store = this.opts.provider.openStore?.();
+    if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
     }
@@ -2710,6 +2734,34 @@ export class Coordinator {
         }
       }
       if (
+        job.target.kind === "board-sheet" &&
+        job.landedFiles?.[0] !== undefined &&
+        job.productionId !== undefined
+      ) {
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === job.productionId);
+        if (production === undefined) throw new Error("board sheet production is unavailable");
+        const ledgerEntry = this.ledger
+          ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+          : undefined;
+        const takes = await recordBoardSheetFromJob(
+          store,
+          production,
+          job,
+          ledgerEntry?.actualMicroUsd ?? null,
+          ledgerEntry?.actualSource ?? "manifest-derived",
+          this.opts.boundaryFrameMaker,
+        );
+        for (const take of takes) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "take.recorded",
+            worldId: job.worldId,
+            productionId: job.productionId,
+            take,
+          });
+        }
+      }
+      if (
         (job.target.kind === "shot" ||
           job.target.kind === "scene-pass" ||
           job.target.kind === "voice-line") &&
@@ -2795,6 +2847,7 @@ export class Coordinator {
               ...(expected !== undefined ? { expectedArtifactId: expected } : {}),
             });
             if (filed.ok && "superseded" in filed) {
+              await recordFrameLandingOutcome(store, job.productionId, job, shotId, "superseded");
               // Not a failure: the newer choice won and this take stays history (T-18).
               void this.appLog?.append({
                 kind: "drawn-frame.superseded",
@@ -2818,6 +2871,7 @@ export class Coordinator {
               });
               throw new Error(`the frame for ${shotId} could not be filed: ${filed.reason}`);
             }
+            await recordFrameLandingOutcome(store, job.productionId, job, shotId, "filed");
           }
         }
         for (const take of takes) {
@@ -5653,6 +5707,248 @@ export class Coordinator {
           fail(err instanceof Error ? err.message : String(err));
         } finally {
           this.creatingPlans.delete(msg.requestId);
+        }
+        return;
+      }
+      case "frame-run-quote":
+      case "frame-run-start": {
+        let startResultEmitted = false;
+        const emitStartResult = (
+          result: { disposition: "accepted"; runId: string } | { disposition: "refused"; reason: string },
+        ): void => {
+          if (msg.kind !== "frame-run-start" || startResultEmitted) return;
+          startResultEmitted = true;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "production.frame-run-start-result",
+            requestId: msg.requestId,
+            quoteId: msg.quoteId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...result,
+          });
+        };
+        const store = this.frameRunStore(msg.worldId);
+        const manifest = this.opts.manifest;
+        const emitBlockedQuote = (reason: string): void => {
+          if (msg.kind !== "frame-run-quote") return;
+          const quote: FrameRunQuote = {
+            requestId: msg.requestId,
+            quoteId: ulid(),
+            signature: null,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneId: msg.sceneId,
+            sceneVersion: null,
+            mode: msg.mode,
+            modelId: msg.modelId,
+            scope: msg.scope,
+            includedCount: 0,
+            steps: [],
+            estimatedMicroUsd: null,
+            blockedReason: reason,
+            quotedAt: new Date().toISOString(),
+          };
+          this.frameRunQuotes.set(quote.quoteId, quote);
+          this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
+        };
+        if (!store || !manifest) {
+          const reason = "The frame run cannot be quoted while its world or model catalogue is unavailable.";
+          emitBlockedQuote(reason);
+          emitStartResult({ disposition: "refused", reason });
+          return;
+        }
+        const model = manifest.models.find((candidate) => candidate.id === msg.modelId);
+        if (!model) {
+          emitBlockedQuote("The production, scene, or selected model is no longer available.");
+          emitStartResult({ disposition: "refused", reason: "The selected model is no longer available." });
+          return;
+        }
+        try {
+          const settings = this.appSettings ? await this.appSettings.load() : null;
+          const app = this.readModel.getState().app;
+          const compile = (): CompileFrameRunInput => {
+            const bundle = store.getBundle();
+            const production = bundle.productions.find((candidate) => candidate.meta.id === msg.productionId);
+            const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
+            if (!production || !scene) throw new Error("The production or scene is no longer available.");
+            const videoModelId = production.meta.models?.video ?? modelForCapability(manifest, settings?.routing, "video")?.id;
+            const videoModel = manifest.models.find((candidate) => candidate.id === videoModelId);
+            const localIdentity = this.freezeLocalIdentity({
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              target: { kind: "shot", id: scene.id },
+              capability: "image",
+              provider: model.provider,
+              model: model.id,
+              params: {},
+              estimatedMicroUsd: 0,
+            });
+            return {
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              scene,
+              production,
+              world: bundle,
+              model,
+              mode: msg.mode,
+              scope: msg.scope,
+              boardCapSec: videoModel?.limits.maxDurationSec ?? 10,
+              boardPanelCap: videoModel?.limits.storyboardPanels,
+              eligible: modelEligible(model, {
+                providers: app.providers,
+                disabled: app.models.disabled,
+                recipes: app.comfyui?.recipes ?? [],
+                comfyUiLocality: app.comfyui?.engine.locality,
+                gated: app.runtime?.models ?? [],
+              }),
+              ...(localIdentity.recipe !== undefined ? { recipe: localIdentity.recipe } : {}),
+              ...(localIdentity.engine !== undefined ? { engine: localIdentity.engine } : {}),
+              clock: () => new Date().toISOString(),
+            };
+          };
+          if (msg.kind === "frame-run-quote") {
+            const quote = await quoteFrameRun(store, {
+              requestId: msg.requestId,
+              quoteId: ulid(),
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              sceneId: msg.sceneId,
+              mode: msg.mode,
+              modelId: msg.modelId,
+              scope: msg.scope,
+              clock: () => new Date().toISOString(),
+              compile,
+            });
+            this.frameRunQuotes.set(quote.quoteId, quote);
+            this.emit({ at: new Date().toISOString(), type: "production.frame-run-quote", quote });
+            return;
+          }
+          const run = await startFrameRun(store, {
+            quotedMicroUsd: msg.quotedMicroUsd,
+            quoteSignature: msg.quoteSignature,
+            jobs: () => this.jobQueue?.listJobs() ?? [],
+            consumeQuote: () => {
+              const quote = this.frameRunQuotes.get(msg.quoteId);
+              if (quote?.requestId !== msg.requestId) return undefined;
+              this.frameRunQuotes.delete(msg.quoteId);
+              return quote;
+            },
+            compile,
+          });
+          try {
+            const advanced = await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps());
+            if (advanced?.steps[0]?.jobId === null || advanced?.steps[0]?.jobId === undefined) {
+              throw new Error("the first frame-run step was not accepted by the queue");
+            }
+          } catch (error) {
+            const jobId = await abortFrameRunStart(
+              store,
+              msg.productionId,
+              run.id,
+              () => this.jobQueue?.listJobs() ?? [],
+            );
+            if (jobId !== null) await this.jobQueue?.cancel(jobId).catch(() => {});
+            throw error;
+          }
+          emitStartResult({ disposition: "accepted", runId: run.id });
+          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id).catch((error) => {
+            void this.appLog?.append({
+              kind: "frame-run.state-emit-failed",
+              runId: run.id,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          });
+          return;
+        } catch (err) {
+          emitStartResult({ disposition: "refused", reason: err instanceof Error ? err.message : String(err) });
+          void this.appLog?.append({
+            kind: "frame-run.refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { productionId: msg.productionId, sceneId: msg.sceneId },
+          });
+        }
+        return;
+      }
+      case "frame-run-pause": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        await pauseFrameRun(store, msg.productionId, msg.runId);
+        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
+        return;
+      }
+      case "frame-run-resume": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        await resumeFrameRun(store, msg.productionId, msg.runId);
+        await advanceFrameRun(store, msg.productionId, msg.runId, this.frameRunDriverDeps());
+        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
+        return;
+      }
+      case "frame-run-cancel": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        const deps = this.frameRunDriverDeps();
+        await cancelFrameRun(store, msg.productionId, msg.runId, {
+          jobById: deps.jobById,
+          cancel: async (jobId) => { await this.jobQueue?.cancel(jobId); },
+        });
+        await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
+        return;
+      }
+      case "frame-run-retry-step":
+      case "frame-run-retry-cell": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+        if (!production) return;
+        const deps = this.frameRunDriverDeps();
+        try {
+          if (msg.kind === "frame-run-retry-step") {
+            await retryFrameStep(store, msg.productionId, msg.runId, msg.stepIndex, production, deps.jobById);
+          } else {
+            await retryFrameCell(store, msg.productionId, msg.runId, msg.stepIndex, msg.shotId, production, deps.jobById);
+          }
+          await advanceFrameRun(store, msg.productionId, msg.runId, deps);
+          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "frame-run.retry-refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { runId: msg.runId, stepIndex: msg.stepIndex },
+          });
+        }
+        return;
+      }
+      case "frame-run-list": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        for (const run of await listFrameRuns(store, msg.productionId)) {
+          await advanceFrameRun(store, msg.productionId, run.id, this.frameRunDriverDeps()).catch(() => {});
+          await this.emitFrameRun(store, msg.worldId, msg.productionId, run.id);
+        }
+        return;
+      }
+      case "frame-run-dismiss": {
+        const store = this.frameRunStore(msg.worldId);
+        if (!store) return;
+        try {
+          if (await dismissFrameRun(store, msg.productionId, msg.runId, this.jobQueue?.listJobs() ?? [])) {
+            this.emit({
+              at: new Date().toISOString(),
+              type: "production.frame-run",
+              worldId: msg.worldId,
+              productionId: msg.productionId,
+              runId: msg.runId,
+              state: null,
+            });
+          }
+        } catch (err) {
+          void this.appLog?.append({
+            kind: "frame-run.dismiss-refused",
+            reason: err instanceof Error ? err.message : String(err),
+            detail: { runId: msg.runId },
+          });
         }
         return;
       }
@@ -9566,6 +9862,70 @@ export class Coordinator {
     };
   }
 
+  private frameRunStore(worldId: string): WorldStore | null {
+    const store = this.opts.provider.openStore?.() ?? null;
+    return store?.worldId === worldId ? store : null;
+  }
+
+  private async recoverFrameRuns(store: WorldStore, bundle: NonNullable<ClientState["world"]>): Promise<void> {
+    const states = [];
+    for (const production of bundle.productions) {
+      for (const run of await listFrameRuns(store, production.meta.id)) {
+        await advanceFrameRun(store, production.meta.id, run.id, this.frameRunDriverDeps()).catch(() => {});
+        const current = await readFrameRun(store, production.meta.id, run.id);
+        if (current !== null) {
+          states.push(await frameRunState(store, production.meta.id, current, this.jobQueue?.listJobs() ?? []));
+        }
+      }
+    }
+    this.readModel.setFrameRuns(states);
+  }
+
+  private frameRunDriverDeps(): FrameRunDriverDeps {
+    return {
+      enqueue: (input) => {
+        if (!this.jobQueue) throw new Error("the queue is not available");
+        return this.jobQueue.enqueue(input);
+      },
+      jobById: (id) => this.jobQueue?.listJobs().find((candidate) => candidate.id === id),
+    };
+  }
+
+  private async emitFrameRun(
+    store: WorldStore,
+    worldId: string,
+    productionId: string,
+    runId: string,
+  ): Promise<void> {
+    const run = await readFrameRun(store, productionId, runId);
+    if (run === null) return;
+    this.emit({
+      at: new Date().toISOString(),
+      type: "production.frame-run",
+      worldId,
+      productionId,
+      runId: run.id,
+      state: await frameRunState(store, productionId, run, this.jobQueue?.listJobs() ?? []),
+    });
+  }
+
+  private async advanceFrameRunForJob(job: Job): Promise<void> {
+    const runId = job.params["frameRun"];
+    if (typeof runId !== "string" || job.productionId === undefined) return;
+    const store = this.frameRunStore(job.worldId);
+    if (!store) return;
+    await advanceFrameRun(store, job.productionId, runId, this.frameRunDriverDeps());
+    await this.emitFrameRun(store, job.worldId, job.productionId, runId);
+  }
+
+  private async emitFrameRunForJob(job: Job): Promise<void> {
+    const runId = job.params["frameRun"];
+    if (typeof runId !== "string" || job.productionId === undefined) return;
+    const store = this.frameRunStore(job.worldId);
+    if (!store) return;
+    await this.emitFrameRun(store, job.worldId, job.productionId, runId);
+  }
+
   /** The named routing findings, pushed as one event (epic 401, brief §4) — never a score. */
   private async emitRoutingFindings(store: WorldStore, worldId: string, productionId: string): Promise<void> {
     const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
@@ -10334,4 +10694,3 @@ export class Coordinator {
     }
   }
 }
-

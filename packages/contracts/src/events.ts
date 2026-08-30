@@ -8,11 +8,13 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { DiagnosticsSnapshotSchema } from "./diagnostics.js";
 import { BuildReviewSchema, FoundingBuildStateSchema } from "./founding-build.js";
 import { GenesisBlueprintSchema } from "./genesis.js";
+import { FrameRunQuoteSchema, FrameRunStateSchema } from "./frame-run.js";
 import { HarnessStatusSchema } from "./harness.js";
 import {
   IsoDateTimeSchema,
   CandidateIdSchema,
   ConversationIdSchema,
+  FrameRunIdSchema,
   JobIdSchema,
   ProposalIdSchema,
   ShotIdSchema,
@@ -189,6 +191,42 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       states: z.array(z.custom<import("./dispatch-plan.js").PlanState>()),
+    })
+    .strict(),
+
+  /** One frame run's folded record and queue facts; null removes a dismissed run. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.frame-run-quote"),
+      quote: FrameRunQuoteSchema,
+    })
+    .strict(),
+
+  /** Correlated authorization result; clients keep the dialog open until this arrives. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.frame-run-start-result"),
+      requestId: UlidSchema,
+      quoteId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["accepted", "refused"]),
+      runId: FrameRunIdSchema.optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /** One frame run's folded record and queue facts; null removes a dismissed run. */
+  z
+    .object({
+      ...base,
+      type: z.literal("production.frame-run"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+      state: FrameRunStateSchema.nullable(),
     })
     .strict(),
 

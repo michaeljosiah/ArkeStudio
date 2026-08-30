@@ -507,6 +507,7 @@ const state: ClientState = {
   worldChat: null,
   bench: null,
   authoringRuns: [],
+  frameRuns: [],
 };
 
 /** Runtime-validated on import so a drifted fixture fails the suite immediately. */

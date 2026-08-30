@@ -6,7 +6,7 @@ import type { ClientState, Episode, StagedProposal } from "@arke-studio/contract
 import { App } from "../src/App.js";
 import { ProductionChatScreen, SceneChatScreen, StoryScreen } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
-import { isDayOne } from "../src/lib/selectors.js";
+import { isDayOne, takesForShot } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -98,6 +98,22 @@ function renderApp(state: ClientState, path: string): string {
 
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
+
+describe("shot take selection", () => {
+  it("excludes a reviewed board-sheet parent that covers the whole board", () => {
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const frame = production.takes.find((take) => take.kind === "frame")!;
+    const parent = {
+      ...frame,
+      id: "tk_01J8E0000000000000000000BP" as typeof frame.id,
+      coversShots: ["sh_12", "sh_13"] as typeof frame.coversShots,
+      boardSheetParent: true as const,
+    };
+    const visible = takesForShot({ ...production, takes: [...production.takes, parent] }, "sh_12");
+    assert.ok(visible.every((take) => take.id !== parent.id));
+    assert.ok(visible.some((take) => take.id === frame.id), "ordinary shot frames remain selectable");
+  });
+});
 
 describe("the season page (design turn 91)", () => {
   const seasonPage = (episodes: Episode[]) =>
