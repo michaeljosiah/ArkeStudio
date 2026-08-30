@@ -430,6 +430,12 @@ export const ClientStateSchema = z
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
+        /**
+         * Surfaces built but not yet the way anyone works (SPEC-029 §3.3 step 5). Defaulted, so
+         * a client talking to a coordinator that has never heard of one reads it as off rather
+         * than as absent — the flag is a fact about this installation, not a nullable feature.
+         */
+        internal: z.object({ sceneWorkspace: z.boolean() }).strict().default({ sceneWorkspace: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),

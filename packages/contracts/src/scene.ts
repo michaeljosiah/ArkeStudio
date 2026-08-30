@@ -410,6 +410,38 @@ export type Selections = z.infer<typeof SelectionsSchema>;
  * carries `boundaryExtraction` naming the take it was cut from, and a drawn frame does not.
  * Nothing stored can disagree with where the picture came from.
  */
+/**
+ * What a shot IS, in one word (SPEC-036 R-7, §2.5).
+ *
+ * Five states, derived and never stored: `needs attention` (nothing written to generate from),
+ * `rendered` (a clip exists), `story` (written, unframed — a legitimate state and not an error),
+ * `storyboard` (framed, but the script has moved on), `production-ready`. The precedence is
+ * exhaustive and the order matters, so every surface that shows a chip — rows, completion, the
+ * episode rollup — answers from this one function rather than inventing its own reading.
+ *
+ * `hasFrame` is deliberately the DISPATCHABLE question and not "is there a picture somewhere":
+ * only a pinned image artifact resolves, because that is what the frame route can send. A
+ * `startFrameTakeId` is continuity steering, not this shot's own frame, and offering
+ * `production-ready` over something the dispatch cannot carry is the lie this exists to stop.
+ *
+ * A run failure never appears here: a failed attempt does not change what a shot HAS, so it
+ * lives on the run strip and the report card instead.
+ */
+export type ShotCardState = "needs attention" | "story" | "storyboard" | "production-ready" | "rendered";
+
+export function shotCardState(input: {
+  blankScript: boolean;
+  clipAccepted: boolean;
+  hasFrame: boolean;
+  coverage: ShotCoverage;
+}): ShotCardState {
+  if (input.blankScript) return "needs attention";
+  if (input.clipAccepted) return "rendered";
+  if (!input.hasFrame) return "story";
+  if (input.coverage !== "fresh") return "storyboard";
+  return "production-ready";
+}
+
 export function hasOwnFrame(
   selection: ShotSelection | undefined,
   artifacts: readonly { id: string; kind: string; boundaryExtraction?: unknown }[],

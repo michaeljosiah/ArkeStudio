@@ -2450,7 +2450,7 @@ export class Coordinator {
       ...(settings ? { presets: settings.presets } : {}),
       ...(seededSpend ? { spend: seededSpend } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
-      ...(settings ? { research: settings.research } : {}),
+      ...(settings ? { research: settings.research, internal: settings.internal } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
@@ -4812,7 +4812,7 @@ export class Coordinator {
         // turning research on and being refused anyway, which is the failure this setting has
         // already had once. The MCP tool asks settings per call and needs no equivalent.
         this.researchWeb = settings.research.web;
-        this.readModel.seedAppConfig({ research: settings.research });
+        this.readModel.seedAppConfig({ research: settings.research, internal: settings.internal });
         this.transport.broadcastSnapshot();
         return;
       }
