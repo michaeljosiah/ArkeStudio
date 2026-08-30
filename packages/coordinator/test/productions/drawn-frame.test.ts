@@ -327,6 +327,20 @@ describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
       /is a still/,
     );
   });
+
+  it("refuses explicit acceptance of a durable board-sheet parent", async () => {
+    const store = await open();
+    const take = { ...await still(store, "tk_board_parent", "sh_13"), boardSheetParent: true as const };
+    const fresh = { ...production(store), takes: [...production(store).takes, take] };
+    await assert.rejects(
+      () => acceptStill(store, fresh, { takeId: take.id, shotId: "sh_13", by: "user" }),
+      /board-sheet parent/,
+    );
+    await assert.rejects(
+      () => acceptTake(store, fresh, { takeId: take.id, shotId: "sh_13", by: "user" }),
+      /board-sheet parent/,
+    );
+  });
 });
 
 describe("a non-PNG still normalises to PNG at filing", () => {

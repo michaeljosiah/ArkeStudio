@@ -123,6 +123,8 @@ export const TakeSchema = z
     completedAt: IsoDateTimeSchema.optional(),
     /** Media filename within the take directory, e.g. "clip.mp4". */
     media: z.string().optional(),
+    /** Durable provider sheet retained for review/context, never a shot-selectable frame. */
+    boardSheetParent: z.literal(true).optional(),
     /**
      * A pass segment references the pass's media with an in/out range — a range, not a file
      * (SPEC-013 R-3, D2). Boundaries come from the pre-dispatch shot plan, never from
@@ -174,7 +176,12 @@ export const TakeSchema = z
      */
     qc: TakeQcSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((take, ctx) => {
+    if (take.boardSheetParent === true && (take.kind !== "frame" || take.jobId === undefined || take.coversShots.length === 0 || take.panel !== undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["boardSheetParent"], message: "a board-sheet parent must be a generated frame covering shots, not a panel crop" });
+    }
+  });
 export type Take = z.infer<typeof TakeSchema>;
 
 // ---------------------------------------------------------------------------

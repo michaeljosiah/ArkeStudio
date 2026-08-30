@@ -5816,7 +5816,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-sw__actions { display: flex; gap: 7px; flex: none; }
 .fy-sw__title { font-size: 26px; font-weight: 600; margin: 0; }
 .fy-sw__metrics { color: var(--muted-fg); font-size: 13px; margin: 4px 0 0; }
-.fy-sw__tabs { display: flex; align-items: center; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-sw__toolbar { display: flex; align-items: center; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.fy-sw__tabs { display: flex; align-items: center; gap: 6px; }
 .fy-sw__tab {
   border: 1px solid transparent; background: transparent; cursor: pointer;
   padding: 5px 12px; border-radius: var(--radius-control); font-size: 13px; color: var(--muted-fg);
@@ -5834,6 +5835,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swrun__rule { flex: 1; min-width: 4px; }
 .fy-swrun button { border: 0; background: transparent; color: var(--fg); cursor: pointer; font-size: 11px; flex: none; padding: 5px 7px; }
 .fy-swrun--complete strong { font-family: var(--font-mono, ui-monospace, monospace); font-weight: 500; }
+.fy-sw__toolbar > .fy-swrun { flex: 1; min-width: 0; min-height: 31px; margin-left: auto; padding: 0; border-bottom: 0; }
 .fy-sw__dock { border-left: 1px solid var(--border); padding: 18px 16px; }
 .fy-sw__subject { font-size: 13px; font-weight: 500; margin: 0; }
 .fy-swproposal__removes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; padding: 8px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-size: 11px; }

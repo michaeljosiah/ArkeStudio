@@ -45,6 +45,15 @@ const IMAGE: ManifestModel = {
   limits: { storyboardPanels: 6 },
   pricing: { kind: "perImage", microUsdPerImage: 1000, microUsdPerReferenceImage: 10 },
 };
+const ENUMERATED_IMAGE: ManifestModel = {
+  id: "enumerated-frame-image",
+  provider: "openai",
+  capability: "image",
+  displayName: "Enumerated Frame Image",
+  accepts: { referenceImages: 8, startFrame: false, endFrame: false },
+  limits: { storyboardPanels: 6, aspects: ["16:9"] },
+  pricing: { kind: "perMegapixel", microUsdPerMegapixel: 1000 },
+};
 
 async function fixture() {
   const dir = await makeTempWorld();
@@ -105,6 +114,7 @@ async function start(
   scope: "missing" | "all" = "all",
   production: ProductionBundle = value.production,
   world: WorldBundle = value.world,
+  model: ManifestModel = IMAGE,
 ) {
   const compile = {
     worldId: WORLD_ID,
@@ -112,7 +122,7 @@ async function start(
     scene: value.scene as SceneRecord,
     production,
     world,
-    model: IMAGE,
+    model,
     mode,
     scope,
     boardCapSec: 30,
@@ -127,7 +137,7 @@ async function start(
     productionId: production.meta.id,
     sceneId: value.scene.id,
     mode,
-    modelId: IMAGE.id,
+    modelId: model.id,
     scope,
     clock: CLOCK,
     compile: () => compile,
@@ -378,6 +388,8 @@ describe("frame-run coordinator service", () => {
     assert.equal(layout.regions.length, 4);
     assert.ok(layout.regions.every((region) => region.width * 9 === region.height * 16));
     assert.equal(run.steps[0]!.dispatch.output.aspect, "16:9", "the route-valid canvas aspect is unchanged");
+    assert.deepEqual(run.steps[0]!.dispatch.routeOutput, { width: 1536, height: 864, aspect: "16:9" });
+    assert.notDeepEqual(run.steps[0]!.dispatch.cellOutput, run.steps[0]!.dispatch.routeOutput, "crop geometry is not a provider output");
     assert.ok(layout.regions.some((region) => region.x > 0 || region.y > 0), "blank canvas margins are explicit");
     assert.deepEqual(run.steps[0]!.requestShotIds, shots.map((shot) => shot.id));
     assert.deepEqual(run.steps[0]!.updateShotIds, shots.filter((shot) => shot.id !== framed.id).map((shot) => shot.id));
@@ -444,7 +456,63 @@ describe("frame-run coordinator service", () => {
     assert.equal(step.request.layout?.canvasWidth, step.dispatch.output.width);
     assert.equal(step.request.layout?.canvasHeight, step.dispatch.output.height);
     assert.ok(step.request.layout!.regions.every((region) => region.width * 9 === region.height * 16));
+    assert.deepEqual(step.dispatch.routeOutput, { width: 1536, height: 864, aspect: "16:9" });
     assert.equal(step.dispatch.cellOutput.aspect, "16:9");
+  });
+
+  it("freezes an enumerated provider size for cell retry and prices that size", async () => {
+    const f = await fixture();
+    const run = await start(f, "board", "all", f.production, f.world, ENUMERATED_IMAGE);
+    const step = run.steps[0]!;
+    const accepted = [
+      { width: 1024, height: 1024 },
+      { width: 1536, height: 1024 },
+      { width: 1024, height: 1536 },
+    ];
+    assert.ok(accepted.some((size) => size.width === step.dispatch.routeOutput.width && size.height === step.dispatch.routeOutput.height));
+    assert.notDeepEqual(step.dispatch.routeOutput, step.dispatch.cellOutput);
+    assert.equal(
+      step.dispatch.cellEstimatedMicroUsd,
+      Math.ceil((step.dispatch.routeOutput.width * step.dispatch.routeOutput.height) / 1000),
+      "the retry quote uses route output megapixels, not crop area",
+    );
+
+    const q = queue();
+    const attempted = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    const sourceJobId = attempted.steps[0]!.jobId!;
+    q.settle(sourceJobId, "succeeded");
+    const parentId = "tk_01J8E0000000000000000000PE";
+    const parentDir = join(f.dir, "productions", f.production.meta.id, "takes", parentId);
+    await mkdir(parentDir, { recursive: true });
+    await writeFile(join(parentDir, "board.png"), encodePng(solidImage(16, 9, [1, 2, 3, 255])));
+    const parent = {
+      id: parentId,
+      jobId: sourceJobId,
+      boardSheetParent: true as const,
+      coversShots: step.requestShotIds,
+      kind: "frame" as const,
+      provider: ENUMERATED_IMAGE.provider,
+      model: ENUMERATED_IMAGE.id,
+      provenance: { canonRevision: f.world.meta.canonRevision, sheets: {} },
+      references: [],
+      params: {},
+      cost: { estimatedMicroUsd: step.dispatch.estimatedMicroUsd, actualMicroUsd: null },
+      dispatchedAt: CLOCK(),
+      media: "board.png",
+    };
+    const production = { ...f.production, takes: [...f.production.takes, parent] };
+    const retried = (await retryFrameCell(
+      f.store,
+      f.production.meta.id,
+      run.id,
+      0,
+      step.updateShotIds[0]!,
+      production,
+      q.deps.jobById,
+    ))!.steps.at(-1)!;
+    assert.deepEqual(retried.dispatch.output, step.dispatch.routeOutput);
+    assert.deepEqual(retried.dispatch.params["output"], step.dispatch.routeOutput);
+    assert.equal(retried.dispatch.estimatedMicroUsd, step.dispatch.cellEstimatedMicroUsd);
   });
 
   it("preserves the board parent and extracts only update panels as deterministic child takes", async () => {
@@ -523,7 +591,9 @@ describe("frame-run coordinator service", () => {
     assert.equal(takes.length, 4, "one parent plus three update children; the fixed panel lands nothing");
     const [parent, ...children] = takes;
     assert.deepEqual(parent!.coversShots, shots.map((shot) => shot.id));
+    assert.equal(parent!.boardSheetParent, true);
     assert.equal(parent!.panel, undefined);
+    assert.ok(children.every((take) => take.boardSheetParent === undefined));
     assert.deepEqual(children.map((take) => take.coversShots[0]), [shots[0]!.id, shots[2]!.id, shots[3]!.id]);
     assert.deepEqual(children.map((take) => take.panel?.index), [1, 3, 4]);
     assert.ok(children.every((take) => take.panel?.parentTakeId === parent!.id));
@@ -615,6 +685,7 @@ describe("frame-run coordinator service", () => {
     const parent = {
       id: parentId,
       jobId: sourceJobId,
+      boardSheetParent: true as const,
       coversShots: attempted.steps[0]!.requestShotIds,
       kind: "frame" as const,
       provider: IMAGE.provider,
@@ -631,6 +702,8 @@ describe("frame-run coordinator service", () => {
     const first = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[0]!, production, q.deps.jobById))!;
     const firstRetry = first.steps.at(-1)!;
     assert.equal(firstRetry.grain, "cell-retry");
+    assert.deepEqual(firstRetry.dispatch.output, attempted.steps[0]!.dispatch.routeOutput, "retry uses a supported single-image output");
+    assert.notDeepEqual(firstRetry.dispatch.output, attempted.steps[0]!.dispatch.cellOutput, "retry never submits crop dimensions");
     assert.equal(firstRetry.dispatch.references.at(-1), `productions/${f.production.meta.id}/takes/${parentId}/board.png`);
     assert.ok(firstRetry.dispatch.references.length <= firstRetry.dispatch.referenceCapacity);
     const second = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[1]!, production, q.deps.jobById))!;
@@ -713,6 +786,7 @@ describe("frame-run coordinator service", () => {
     const retryParent = {
       id: retryParentId,
       jobId: retryJobId,
+      boardSheetParent: true as const,
       coversShots: current.steps[1]!.requestShotIds,
       kind: "frame" as const,
       provider: IMAGE.provider,
@@ -766,7 +840,7 @@ describe("frame-run coordinator service", () => {
       dispatch: {
         ...siblingBoard.dispatch,
         target: { kind: "shot", id: shotId, coversShots: [shotId] },
-        output: siblingBoard.dispatch.cellOutput,
+        output: siblingBoard.dispatch.routeOutput,
         references: siblingBoard.request.references.map((reference) => reference.path),
         params: {},
         idempotencyKey: "01J8E0000000000000000000B1",
@@ -813,6 +887,7 @@ describe("frame-run coordinator service", () => {
       takes: [...f.production.takes, {
         id: parentId,
         jobId: siblingJobId,
+        boardSheetParent: true as const,
         coversShots: siblingBoard.requestShotIds,
         kind: "frame" as const,
         provider: IMAGE.provider,

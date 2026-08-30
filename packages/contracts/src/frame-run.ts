@@ -128,6 +128,8 @@ export const FrameStepDispatchSchema = z
     references: z.array(z.string().min(1)),
     referenceCapacity: z.number().int().min(0),
     output: ImageOutputSchema,
+    /** Provider-supported single-image output frozen for any cell retry. */
+    routeOutput: ImageOutputSchema,
     /** Production-aspect output for one panel; board `output` is the whole sheet. */
     cellOutput: ImageOutputSchema,
     estimatedMicroUsd: z.number().int().min(0),
@@ -201,8 +203,11 @@ export const FrameRunStepSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["request", "layout", "regions"], message: "every panel region must preserve production aspect" });
       }
     }
+    if (step.dispatch.routeOutput.aspect !== step.request.aspect) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dispatch", "routeOutput", "aspect"], message: "route output must preserve production aspect" });
+    }
     if (step.dispatch.cellOutput.aspect !== step.request.aspect) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dispatch", "cellOutput", "aspect"], message: "cell output must preserve production aspect" });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dispatch", "cellOutput", "aspect"], message: "cell crop must preserve production aspect" });
     }
     if (step.request.layout !== undefined) {
       const layout = step.request.layout;
@@ -214,6 +219,12 @@ export const FrameRunStepSchema = z
       ) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dispatch", "output"], message: "dispatch canvas and panel regions must match frozen layout geometry" });
       }
+    }
+    if (
+      step.dispatch.target.kind === "shot" &&
+      JSON.stringify(step.dispatch.output) !== JSON.stringify(step.dispatch.routeOutput)
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["dispatch", "output"], message: "a shot dispatch must use the frozen provider route output" });
     }
     const requestPaths = [
       ...step.request.panels.flatMap((panel) => panel.fixedImage === undefined ? [] : [panel.fixedImage.path]),
@@ -435,6 +446,18 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       const status = baseStatus(step.jobId === null ? undefined : jobById.get(step.jobId));
       return step.jobId === null || !["failed", "cancelled", "missing"].includes(status);
     });
+  const inheritedLandingOutcome = (index: number, shotId: string): "filed" | "superseded" | undefined => {
+    let at = run.steps[index]?.retryOf;
+    while (at !== undefined) {
+      const ancestor = run.steps[at];
+      if (ancestor === undefined) return undefined;
+      const job = ancestor.jobId === null ? undefined : jobById.get(ancestor.jobId);
+      const outcome = ancestor.landingOutcomes[shotId as never];
+      if (succeeded(job) && outcome !== undefined) return outcome;
+      at = ancestor.retryOf;
+    }
+    return undefined;
+  };
   const steps: FrameRunStepState[] = run.steps.map((step, index) => {
     if (step.jobId === null) {
       return {
@@ -478,15 +501,6 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       };
     }
     const failureClass = job.failureClass ?? null;
-    const landed = step.updateShotIds.map((shotId) => step.landingOutcomes[shotId]);
-    const allSuperseded = landed.length > 0 && landed.every((outcome) => outcome === "superseded");
-    const landingOutcome = landed.every((outcome) => outcome === "filed")
-      ? "filed"
-      : allSuperseded
-        ? "superseded"
-        : landed.some((outcome) => outcome !== undefined)
-          ? "partial"
-          : null;
     const rawStatus = baseStatus(job);
     const shots = step.updateShotIds.map((shotId) => {
       const later = laterAttempts(index, shotId);
@@ -515,10 +529,19 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
         status: shotStatus,
         failureClass,
         error: job.finalization === "failed" ? (job.finalizationError ?? job.error ?? null) : (job.error ?? null),
-        landingOutcome: step.landingOutcomes[shotId] ?? null,
+        landingOutcome: (succeeded(job) ? step.landingOutcomes[shotId] : undefined) ?? inheritedLandingOutcome(index, shotId) ?? null,
         canRetryCell,
       };
     });
+    const landed = shots.map((shot) => shot.landingOutcome);
+    const allSuperseded = landed.length > 0 && landed.every((outcome) => outcome === "superseded");
+    const landingOutcome = landed.every((outcome) => outcome === "filed")
+      ? "filed"
+      : allSuperseded
+        ? "superseded"
+        : landed.some((outcome) => outcome !== null)
+          ? "partial"
+          : null;
     const status: FrameRunStepStatus = shots.every((shot) => shot.status === "reconciled")
       ? "reconciled"
       : shots.every((shot) => shot.status === "superseded")

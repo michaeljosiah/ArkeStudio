@@ -204,41 +204,44 @@ export function SceneWorkspace({
             must not take the address bar with it or the browser Back button becomes an undo
             for something nobody did.
           */}
-          {frameRun !== null ? (
-            <>
+          <div className="fy-sw__toolbar">
+            <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
+              {(["storyboard", "flow"] as const).map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === candidate}
+                  className="fy-sw__tab"
+                  data-on={view === candidate ? "true" : undefined}
+                  onClick={() => setView(candidate)}
+                >
+                  {candidate === "storyboard" ? "Storyboard" : "Flow"}
+                </button>
+              ))}
+            </div>
+            {frameRun !== null ? (
               <FrameRunBar
                 run={frameRun}
                 worldId={world.meta.worldId}
                 productionId={production.meta.id}
                 onReview={() => setReviewOpen(true)}
               />
-              <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />
-            </>
-          ) : <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-            {(["storyboard", "flow"] as const).map((candidate) => (
-              <button
-                key={candidate}
-                type="button"
-                role="radio"
-                aria-checked={view === candidate}
-                className="fy-sw__tab"
-                data-on={view === candidate ? "true" : undefined}
-                onClick={() => setView(candidate)}
-              >
-                {candidate === "storyboard" ? "Storyboard" : "Flow"}
-              </button>
-            ))}
-            <span className="fy-sw__coverage">
-              {shots.length - framed} of {shots.length} without a frame
-            </span>
-            <button
-              type="button"
-              className="fy-sw__boards-toggle"
-              aria-pressed={showBoards}
-              onClick={() => setShowBoards((shown) => !shown)}
-            >
-              {showBoards ? "Hide boards" : "Show boards"}
-            </button>
+            ) : (
+              <>
+                <span className="fy-sw__coverage">
+                  {shots.length - framed} of {shots.length} without a frame
+                </span>
+                <button
+                  type="button"
+                  className="fy-sw__boards-toggle"
+                  aria-pressed={showBoards}
+                  onClick={() => setShowBoards((shown) => !shown)}
+                >
+                  {showBoards ? "Hide boards" : "Show boards"}
+                </button>
+              </>
+            )}
             <button
               type="button"
               className="fy-sw__put"
@@ -247,7 +250,8 @@ export function SceneWorkspace({
             >
               {dock ? "Hide Arke" : "Show Arke"}
             </button>
-          </div>}
+          </div>
+          {frameRun === null ? null : <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />}
 
           {view === "storyboard" ? (
             <StoryboardRows

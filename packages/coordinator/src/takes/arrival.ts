@@ -270,6 +270,7 @@ export async function recordTakesFromJob(
       ...base,
       coversShots: (job.target.coversShots ?? (job.target.id !== undefined ? [job.target.id] : [])) as Take["coversShots"],
       kind: takeKindFor(job),
+      ...(job.target.kind === "board-sheet" ? { boardSheetParent: true as const } : {}),
       ...(continuedFrom !== undefined ? { continuedFrom } : {}),
       cost: {
         estimatedMicroUsd: job.estimatedMicroUsd,

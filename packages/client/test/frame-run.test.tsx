@@ -105,6 +105,7 @@ function step(index: number, mode: "per-shot" | "board", shotIds: string[], jobI
       references: [],
       referenceCapacity: 4,
       output,
+      routeOutput: { width: 1536, height: 864, aspect: "16:9" },
       cellOutput: { width: mode === "board" ? 768 : 1536, height: mode === "board" ? 432 : 864, aspect: "16:9" },
       estimatedMicroUsd: 37_000,
       cellEstimatedMicroUsd: 37_000,
@@ -179,7 +180,7 @@ function quoteFor(message: Extract<ClientMessage, { kind: "frame-run-quote" }>, 
     worldId: message.worldId,
     productionId: message.productionId,
     sceneId: message.sceneId,
-    sceneVersion: 2,
+    sceneVersion: blockedReason === null ? 2 : null,
     mode: message.mode,
     modelId: message.modelId,
     scope: message.scope,
@@ -302,6 +303,7 @@ describe("frame-run quote authorization", () => {
     assert.equal([...one(item, ".fy-swgen")!.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "Starting...").length, 1);
     await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
     assert.equal(one(item, ".fy-swgen"), null, "the matching acceptance closes it");
+    assert.equal(__stateForTest().frameRunStartResults[`${request.requestId}:${QUOTE_ID}`], undefined, "accepted result is consumed");
   });
 
   it("ignores an unrelated start result", async () => {
@@ -332,6 +334,7 @@ describe("frame-run quote authorization", () => {
     assert.ok(one(item, ".fy-swgen"));
     assert.match(dialog.textContent ?? "", /the frame-run quote is stale; request a new quote/);
     assert.equal(__stateForTest().frameRunQuotes[first.requestId], undefined);
+    assert.equal(__stateForTest().frameRunStartResults[`${first.requestId}:${QUOTE_ID}`], undefined, "refused result is consumed");
     const quotes = sent.filter((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote");
     assert.equal(quotes.length, 2);
     assert.notEqual(quotes[1]!.requestId, first.requestId);
@@ -375,6 +378,7 @@ describe("frame-run quote authorization", () => {
     assert.match(dialog.textContent ?? "", /has not been replaced by another model/);
     assert.match(dialog.textContent ?? "", /Frame image is not currently eligible to run/);
     const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.equal(__stateForTest().frameRunQuotes[request.requestId]?.sceneVersion, null, "a blocked quote with no readable scene still matches its option identity");
     assert.equal(request.modelId, IMAGE_MODEL.id, "the stored unavailable choice is quoted, not a fallback");
     assert.equal([...dialog.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Generate frames"), false);
   });
@@ -455,6 +459,22 @@ describe("durable run projections", () => {
     assert.ok(retry);
     await click(retry);
     assert.deepEqual(sent.at(-1), { kind: "frame-run-retry-cell", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", runId: RUN_ID, stepIndex: 0, shotId: "sh_12" });
+  });
+
+  it("keeps view tabs available so a failed run can move from Flow to Storyboard", async () => {
+    const sent: ClientMessage[] = [];
+    const failed = frameState({ mode: "board", first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null } });
+    const item = await mount(stateWith(), sent);
+    await click(all(item, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    await act(async () => __setStateForTest(stateWith({ runs: [failed] })));
+    assert.ok(one(item, '[data-testid="workspace-flow"]'));
+    assert.ok(one(item, '[data-testid="frame-run-bar"]'));
+    assert.ok(one(item, ".fy-swrunboards"), "durable board retry remains visible in Flow");
+    await click(all(item, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
+    assert.ok(one(item, '[data-testid="workspace-rows"]'));
+    const retry = [...one(item, ".fy-swrunboards")!.querySelectorAll("button")].find((button) => button.textContent === "Retry board") as HTMLElement;
+    await click(retry);
+    assert.equal(sent.at(-1)?.kind, "frame-run-retry-step");
   });
 
   it("names held lanes, hides terminal retry, and marks edits newer than the frozen run", async () => {

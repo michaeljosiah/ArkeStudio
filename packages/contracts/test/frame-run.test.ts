@@ -59,7 +59,8 @@ const dispatch = {
   references: ["artifacts/sh-2.png", "characters/maren-kest.md"],
   referenceCapacity: 8,
   output: { width: 3072, height: 1024, aspect: "3:1" },
-  cellOutput: { width: 1536, height: 864, aspect: "16:9" },
+  routeOutput: { width: 1536, height: 864, aspect: "16:9" },
+  cellOutput: { width: 768, height: 432, aspect: "16:9" },
   estimatedMicroUsd: 2000,
   cellEstimatedMicroUsd: 1000,
   params: {
@@ -465,11 +466,11 @@ describe("frame-run fold", () => {
       dispatch: {
         ...run.steps[0]!.dispatch,
         target: { kind: "shot", id: "sh_1", coversShots: ["sh_1"] },
-        output: run.steps[0]!.dispatch.cellOutput,
+        output: run.steps[0]!.dispatch.routeOutput,
         references: ["characters/maren-kest.md"],
         params: {
           ...run.steps[0]!.dispatch.params,
-          output: run.steps[0]!.dispatch.cellOutput,
+          output: run.steps[0]!.dispatch.routeOutput,
           references: ["characters/maren-kest.md"],
           request: {
             ...run.steps[0]!.request,
@@ -486,6 +487,21 @@ describe("frame-run fold", () => {
       jobId: JOB_2,
       landingOutcomes: { sh_1: "filed" },
     };
+    assert.throws(
+      () => FrameRunSchema.parse({
+        ...run,
+        steps: [run.steps[0]!, {
+          ...firstShotRetry,
+          dispatch: {
+            ...firstShotRetry.dispatch,
+            output: run.steps[0]!.dispatch.cellOutput,
+            params: { ...firstShotRetry.dispatch.params, output: run.steps[0]!.dispatch.cellOutput },
+          },
+        }],
+        cursor: 2,
+      }),
+      /frozen provider route output/,
+    );
     const partial = foldFrameRun(
       { ...boardFailed, steps: [...boardFailed.steps, firstShotRetry], cursor: 2 },
       [
@@ -505,6 +521,43 @@ describe("frame-run fold", () => {
       ],
     );
     assert.equal(laterFailure.failedShots, 1, "an older success never hides a later regeneration failure");
+    assert.equal(laterFailure.filedShots, 0);
+
+    const priorFiled = foldFrameRun(
+      {
+        ...run,
+        steps: [
+          { ...run.steps[0]!, landingOutcomes: { sh_1: "filed" } },
+          { ...firstShotRetry, jobId: JOB_2, landingOutcomes: {} },
+        ],
+        cursor: 2,
+      },
+      [
+        { id: JOB_1, status: "succeeded", finalization: "complete" },
+        { id: JOB_2, status: "failed", failureClass: "transient", error: "later failed" },
+      ],
+    );
+    assert.equal(priorFiled.steps[1]!.shots[0]!.status, "failed", "the newest attempt remains the current state");
+    assert.equal(priorFiled.steps[1]!.shots[0]!.landingOutcome, "filed", "its latest successful ancestor supplies the landing");
+    assert.equal(priorFiled.failedShots, 1);
+    assert.equal(priorFiled.filedShots, 1);
+
+    const priorSuperseded = foldFrameRun(
+      {
+        ...run,
+        steps: [
+          { ...run.steps[0]!, landingOutcomes: { sh_1: "superseded" } },
+          { ...firstShotRetry, jobId: JOB_2, landingOutcomes: {} },
+        ],
+        cursor: 2,
+      },
+      [
+        { id: JOB_1, status: "succeeded", finalization: "complete" },
+        { id: JOB_2, status: "failed", failureClass: "transient", error: "later failed" },
+      ],
+    );
+    assert.equal(priorSuperseded.failedShots, 1);
+    assert.equal(priorSuperseded.supersededShots, 1);
   });
 
   it("does not offer a cell retry when the frozen model accepts no parent image", () => {

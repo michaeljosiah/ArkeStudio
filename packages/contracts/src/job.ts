@@ -162,6 +162,8 @@ export const JobSchema = z
     error: z.string().nullable().default(null),
     /** The last classified failure, durable even when its handling puts the job back in a queue. */
     failureClass: JobFailureClassSchema.nullable().optional(),
+    /** Exact provider-reported terminal charge, persisted across the terminal-row/ledger window. */
+    providerCostMicroUsd: z.number().int().min(0).optional(),
     /**
      * The user removed this job from Activity's history. A deletion is a record like any other
      * transition — the journal stays append-only, and the fold drops the id rather than the file

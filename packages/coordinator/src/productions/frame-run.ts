@@ -192,6 +192,7 @@ function frozenDispatch(input: {
   request: FrameStepRequest;
   target: EnqueueInput["target"];
   output: ReturnType<typeof sceneImageOutput>;
+  routeOutput: ReturnType<typeof sceneImageOutput>;
   cellOutput: ReturnType<typeof sceneImageOutput>;
   references: string[];
   estimatedMicroUsd: number;
@@ -210,6 +211,7 @@ function frozenDispatch(input: {
     references: input.references,
     referenceCapacity: input.model.accepts.referenceImages,
     output: input.output,
+    routeOutput: input.routeOutput,
     cellOutput: input.cellOutput,
     estimatedMicroUsd: input.estimatedMicroUsd,
     cellEstimatedMicroUsd: input.cellEstimatedMicroUsd,
@@ -367,6 +369,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
           request,
           target: { kind: "shot", id: shot.id, coversShots: [shot.id] },
           output: routeOutput,
+          routeOutput,
           cellOutput: routeOutput,
           references: referencePaths,
           estimatedMicroUsd: estimateMicroUsd(input.model, {
@@ -491,6 +494,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
           request,
           target: { kind: "board-sheet", coversShots: [...board.memberShotIds] },
           output,
+          routeOutput,
           cellOutput,
           references,
           estimatedMicroUsd: estimateMicroUsd(input.model, {
@@ -502,8 +506,8 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
           cellEstimatedMicroUsd: estimateMicroUsd(input.model, {
             images: 1,
             referenceImages: request.references.length + 1,
-            megapixels: (cellOutput.width * cellOutput.height) / 1_000_000,
-            ...(cellOutput.resolution !== undefined ? { resolution: cellOutput.resolution } : {}),
+            megapixels: (routeOutput.width * routeOutput.height) / 1_000_000,
+            ...(routeOutput.resolution !== undefined ? { resolution: routeOutput.resolution } : {}),
           }),
           ...(input.recipe !== undefined ? { recipe: input.recipe } : {}),
           ...(input.engine !== undefined ? { engine: input.engine } : {}),
@@ -558,6 +562,7 @@ function quoteProjection(run: FrameRun, input: CompileFrameRunInput) {
           references: step.dispatch.references,
           referenceCapacity: step.dispatch.referenceCapacity,
           output: step.dispatch.output,
+          routeOutput: step.dispatch.routeOutput,
           cellOutput: step.dispatch.cellOutput,
           estimatedMicroUsd: step.dispatch.estimatedMicroUsd,
           cellEstimatedMicroUsd: step.dispatch.cellEstimatedMicroUsd,
@@ -955,7 +960,7 @@ export async function retryFrameCell(
     .sort((a, b) => b.index - a.index)[0]?.step;
   if (boardAttempt === undefined) throw new Error("a cell retry requires a successful board-sheet attempt for that shot");
   const sourceJob = boardAttempt.jobId === null ? undefined : jobById(boardAttempt.jobId);
-  const parent = production.takes.find((take) => take.jobId === sourceJob?.id && take.panel === undefined);
+  const parent = production.takes.find((take) => take.jobId === sourceJob?.id && take.boardSheetParent === true);
   if (sourceJob === undefined || parent?.media === undefined) throw new Error("the board sheet for this cell is unavailable");
   const path = `productions/${productionId}/takes/${parent.id}/${parent.media}`;
   const bytes = await readFile(toExtendedLength(join(store.dir, path)));
@@ -1000,7 +1005,7 @@ export async function retryFrameCell(
           appendedIndex,
           { kind: "shot", id: shotId, coversShots: [shotId] },
           references,
-          boardAttempt.dispatch.cellOutput,
+          boardAttempt.dispatch.routeOutput,
           boardAttempt.dispatch.cellEstimatedMicroUsd,
         ),
         sourceStepIndex: source.sourceStepIndex,
@@ -1154,8 +1159,9 @@ export async function recordBoardSheetFromJob(
           : Math.floor(actualMicroUsd / updatePanels.length);
       allocatedEstimated += estimated;
       allocatedActual += actual ?? 0;
+      const { boardSheetParent: _boardSheetParent, ...childBase } = parent;
       child = {
-        ...parent,
+        ...childBase,
         id: childId,
         coversShots: [panel.shotId],
         media: `panel-${panel.panel}.png`,

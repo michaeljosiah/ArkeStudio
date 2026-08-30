@@ -897,16 +897,10 @@ export class JobQueue {
         const message = poll.error ?? "the provider reported failure";
         const klass = classifyError(message);
         if (klass === "provider-fault") {
-          current = {
-            ...current,
-            status: "queued",
-            providerJobId: null,
-            failureClass: klass,
-            error: message,
-            updatedAt: this.clock(),
-          };
-          await this.transition(current);
+          // This is a terminal verdict for remote work that actually ran, not submit uncertainty.
+          // Reusing the job would discard a reported charge and later ledger only the replacement.
           this.pauseLane(job.provider, "fault", message);
+          await this.terminalize(current, "failed", message, poll.costMicroUsd, klass);
           return;
         }
         await this.terminalize(current, "failed", message, poll.costMicroUsd);
@@ -1142,6 +1136,7 @@ export class JobQueue {
       status: outcome,
       error,
       failureClass: outcome === "failed" ? (failureClass ?? classifyError(error ?? "terminal failure")) : null,
+      ...(costMicroUsd !== undefined ? { providerCostMicroUsd: Math.round(costMicroUsd) } : {}),
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
@@ -1178,7 +1173,7 @@ export class JobQueue {
   ): Promise<boolean> {
     try {
       if (startupJobIds ? startupJobIds.has(job.id) : await this.opts.ledger.has(job.id)) return false;
-      await this.appendLedgerEntry(job, costMicroUsd);
+      await this.appendLedgerEntry(job, costMicroUsd ?? job.providerCostMicroUsd);
       startupJobIds?.add(job.id);
       return true;
     } catch {

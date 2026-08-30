@@ -312,6 +312,7 @@ export type JobAction = "watch" | "cancel" | "retry" | "resolve" | "delete";
  */
 export function canDeleteJob(job: Job): boolean {
   if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;
+  if (typeof job.params["frameRun"] === "string") return false;
   return job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
 }
 

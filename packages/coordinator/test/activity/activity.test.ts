@@ -352,11 +352,11 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
       },
     });
     assert.equal(jobOrigin(frameRun)?.path, `/w/${WORLD}/p/saltlight/scenes/sc_04`);
-    assert.deepEqual(jobActions(frameRun), ["retry", "delete"]);
+    assert.deepEqual(jobActions(frameRun), ["retry"]);
     for (const failureClass of ["terminal", "provider-fault", "offline", null] as const) {
       assert.deepEqual(
         jobActions({ ...frameRun, failureClass }),
-        ["delete"],
+        [],
         `frame-run ${failureClass ?? "unclassified"} failures do not offer paid retry`,
       );
     }
@@ -417,6 +417,12 @@ describe("actions offered only where the state permits (R-13, D10, §3.2)", () =
     });
     assert.ok(!canDeleteJob(unprepared));
     assert.equal(computeNeedsYou(baseState({ jobs: [unprepared] })).length, 1, "it is still on the queue");
+
+    for (const status of ["succeeded", "failed", "cancelled"] as const) {
+      const frameRun = job({ status, params: { frameRun: "fr_01J8E0000000000000000000R1" } });
+      assert.equal(canDeleteJob(frameRun), false, `${status} frame-run history remains available to its durable run`);
+      assert.ok(!jobActions(frameRun).includes("delete"));
+    }
   });
 });
 

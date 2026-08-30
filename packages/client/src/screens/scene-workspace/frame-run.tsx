@@ -226,17 +226,20 @@ function GenerateFramesDialogOpen({
     setStartReason("The studio refreshed before the frame run was confirmed.");
   }, [requestEpoch]);
 
-  const matchingQuote = quote !== null &&
+  const matchingOptions = quote !== null &&
     quote.requestId === currentRequest.current &&
     quote.worldId === options.worldId &&
     quote.productionId === options.productionId &&
     quote.sceneId === options.sceneId &&
-    quote.sceneVersion === scene.version &&
     quote.mode === mode &&
     quote.modelId === modelId &&
     quote.scope === scope;
-  const canStart = matchingQuote && quote.blockedReason === null && quote.signature !== null && quote.estimatedMicroUsd !== null;
-  const blockedReason = matchingQuote ? quote.blockedReason : deliveryReason;
+  const canStart = matchingOptions &&
+    quote.sceneVersion === scene.version &&
+    quote.blockedReason === null &&
+    quote.signature !== null &&
+    quote.estimatedMicroUsd !== null;
+  const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
 
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
@@ -292,7 +295,7 @@ function GenerateFramesDialogOpen({
         <header className="fy-swgen__head">
           <div>
             <span className="fy-swgen__eyebrow">Scene {scene.number} · frames</span>
-            <h2 id={titleId}>Generate {matchingQuote ? quote.includedCount : included.length} frame{(matchingQuote ? quote.includedCount : included.length) === 1 ? "" : "s"}</h2>
+            <h2 id={titleId}>Generate {matchingOptions ? quote.includedCount : included.length} frame{(matchingOptions ? quote.includedCount : included.length) === 1 ? "" : "s"}</h2>
           </div>
           <button type="button" aria-label="Close generate frames" onClick={onClose}><X size={18} /></button>
         </header>
@@ -380,7 +383,7 @@ function GenerateFramesDialogOpen({
           <div className="fy-swgen__estimate">
             {startPending !== null
               ? "Starting frame run..."
-              : matchingQuote
+              : matchingOptions
                 ? `${quote.includedCount} frame${quote.includedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
                 : quotePending
                   ? "Checking current price..."

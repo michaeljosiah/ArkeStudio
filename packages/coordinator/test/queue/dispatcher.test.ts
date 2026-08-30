@@ -462,6 +462,33 @@ describe("an unreadable ledger parks reconciliation instead of answering 'never 
     assert.equal(h.ledger.entries.length, 1);
     h.queue.dispose();
   });
+
+  it("recovers the exact charged provider-fault amount after the terminal-row ledger window", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true, reportsCost: true });
+    fake.pollState = "failed";
+    fake.pollFailureMessage = "HTTP 402 quota exhausted";
+    fake.costMicroUsd = 7654;
+    const h = await makeHarness({ fake });
+    h.ledger.onAppend = () => {
+      h.queue.dispose();
+      throw new Error("killed before ledger append");
+    };
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the charged terminal row to persist", FOLD_MS);
+    await h.queue.drain();
+    assert.equal(foldedJob(h, job.id)?.providerCostMicroUsd, 7654);
+    assert.equal(h.ledger.entries.length, 0);
+
+    h.ledger.onAppend = null;
+    const recovered = h.revive();
+    const report = await recovered.queue.start();
+    assert.equal(report.find((entry) => entry.jobId === job.id)?.action, "ledger-completed");
+    assert.equal(recovered.ledger.entries.length, 1);
+    assert.equal(recovered.ledger.entries[0]!.actualMicroUsd, 7654);
+    assert.equal(recovered.ledger.entries[0]!.actualSource, "provider-reported");
+    recovered.queue.dispose();
+  });
 });
 
 describe("the happy path writes exactly one ledger entry and lands artifacts atomically", () => {
@@ -1552,24 +1579,30 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
     h.queue.dispose();
   });
 
-  it("a witnessed poll provider-fault verdict queues the job for explicit safe resubmit", async () => {
-    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+  it("a charged provider-fault poll terminalizes and ledgers the witnessed attempt exactly once", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true, reportsCost: true });
     fake.pollState = "failed";
     fake.pollFailureMessage = "HTTP 401 credential was rejected by the provider";
+    fake.costMicroUsd = 4312;
     const h = await makeHarness({ fake });
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
     await until(
-      () => foldedJob(h, job.id)?.status === "queued" && foldedJob(h, job.id)?.failureClass === "provider-fault",
-      "the witnessed verdict to queue behind the paused lane",
+      () => foldedJob(h, job.id)?.status === "failed" && foldedJob(h, job.id)?.failureClass === "provider-fault",
+      "the charged witnessed verdict to terminalize",
       FOLD_MS,
     );
     assert.equal(h.queue.queueStatus("fake").paused, true);
-    fake.pollState = "succeeded";
+    assert.equal(fake.submitCount, 1);
+    assert.deepEqual(h.ledger.entries.map((entry) => ({
+      outcome: entry.outcome,
+      actualMicroUsd: entry.actualMicroUsd,
+      actualSource: entry.actualSource,
+    })), [{ outcome: "failed", actualMicroUsd: 4312, actualSource: "provider-reported" }]);
     h.queue.resume("fake");
-    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the same authorized job to resubmit", FOLD_MS);
-    assert.equal(fake.submitCount, 2);
-    assert.equal(new Set(fake.submittedKeys).size, 1, "resubmit retains the durable idempotency key");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(fake.submitCount, 1, "resuming the lane cannot reuse a charged terminal job");
+    assert.equal(h.ledger.entries.length, 1);
     h.queue.dispose();
   });
 

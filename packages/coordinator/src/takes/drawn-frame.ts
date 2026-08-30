@@ -323,6 +323,7 @@ export async function acceptStill(
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
+  if (take.boardSheetParent === true) throw new Error(`take ${input.takeId} is a board-sheet parent and cannot be accepted for a shot`);
   if (!take.coversShots.includes(input.shotId)) {
     throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
   }

@@ -864,6 +864,10 @@ function handleFrame(json: string): void {
       if (listeners !== undefined) {
         frameRunStartResults = { ...frameRunStartResults, [key]: event };
         for (const listener of listeners) listener(event);
+        // The listener consumes this one-shot result. Remove it from the pending fold rather
+        // than relying on clearFrameRunStartResult, whose emit happens before this frame's final
+        // emit and would otherwise be overwritten by the cached local value below.
+        delete frameRunStartResults[key];
       }
     }
     if (event.type === "production.routing-findings") {
