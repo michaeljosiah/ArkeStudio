@@ -157,6 +157,27 @@ export {
   type PlanDriverDeps,
 } from "./productions/plans.js";
 export {
+  abortFrameRunStart,
+  advanceFrameRun,
+  cancelFrameRun,
+  dismissFrameRun,
+  frameRunState,
+  listFrameRuns,
+  pauseFrameRun,
+  quoteFrameRun,
+  readFrameRun,
+  recordBoardSheetFromJob,
+  recordFrameLandingOutcome,
+  resumeFrameRun,
+  retryFrameCell,
+  retryFrameStep,
+  startFrameRun,
+  type FrameRunDriverDeps,
+  type CompileFrameRunInput,
+  type QuoteFrameRunInput,
+  type StartFrameRunInput,
+} from "./productions/frame-run.js";
+export {
   boundaryFrameArgs,
   chainBoundaryFrame,
   createBoundaryFrameMaker,

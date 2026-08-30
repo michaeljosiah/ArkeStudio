@@ -136,6 +136,29 @@ export const TakeSchema = z
       })
       .strict()
       .optional(),
+    /** A deterministic image crop derived from an immutable multi-panel parent sheet. */
+    panel: z
+      .object({
+        parentTakeId: TakeIdSchema,
+        sourceJobId: JobIdSchema,
+        index: z.number().int().min(1),
+        shotId: ShotIdSchema,
+        crop: z
+          .object({
+            x: z.number().int().min(0),
+            y: z.number().int().min(0),
+            width: z.number().int().min(1),
+            height: z.number().int().min(1),
+          })
+          .strict(),
+        /** Hash of the immutable provider result retained by the parent take. */
+        parentHash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+        /** Hash of the normalized PNG bytes whose pixels the crop geometry addresses. */
+        cropSourceHash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+        hash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+      })
+      .strict()
+      .optional(),
     /**
      * The take this one was produced by extending (SPEC-019 R-53, D34).
      *

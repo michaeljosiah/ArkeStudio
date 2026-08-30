@@ -11,14 +11,16 @@ import {
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { seconds } from "../../lib/format.js";
-import { sceneCommand, subscribeSceneRefusals, useClientState } from "../../lib/store.js";
+import { frameRunCommand, sceneCommand, subscribeSceneRefusals, useClientState } from "../../lib/store.js";
 import { StagedDecision } from "../../components/conversation.js";
-import { useBlockDigests } from "../storyboard.js";
+import { SceneReview, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows } from "./rows.js";
 import { SceneIndex } from "./scene-index.js";
 import { SelectionProvider, selectedShotId, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
+import { FrameRunBar, FrameRunBoardFailures, FrameRunReview, GenerateFramesDialog } from "./frame-run.js";
+import { Button } from "../../components/ui.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -49,9 +51,13 @@ export function SceneWorkspace({
   const digests = useBlockDigests(writerSceneView(scene));
   const [view, setView] = useState<"storyboard" | "flow">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [refusalVersion, setRefusalVersion] = useState(0);
   const [commandPending, setCommandPending] = useState(false);
   const pendingCommand = useRef(false);
+  const generateButton = useRef<HTMLButtonElement>(null);
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useState(true);
@@ -95,14 +101,16 @@ export function SceneWorkspace({
   );
   // A stranded choice is still the model this production names; substituting another cap would
   // make the board move before dispatch has asked the creator to repair that choice.
-  const capSec = (resolvedModel.stranded ?? resolvedModel.model)?.limits.maxDurationSec ?? 10;
+  const videoModel = resolvedModel.stranded ?? resolvedModel.model;
+  const capSec = videoModel?.limits.maxDurationSec ?? 10;
+  const panelCap = videoModel?.limits.storyboardPanels;
   const acceptedBoardPack = useMemo(
-    () => boardsForScene({ scene, production, artifacts, sheets: world.sheets, capSec }),
-    [scene, production, artifacts, world.sheets, capSec],
+    () => boardsForScene({ scene, production, artifacts, sheets: world.sheets, capSec, ...(panelCap !== undefined ? { panelCap } : {}) }),
+    [scene, production, artifacts, world.sheets, capSec, panelCap],
   );
   const boardPack = useMemo(
-    () => boardsForScene({ scene: workingScene, production, artifacts, sheets: world.sheets, capSec, stagedShotIds: newShotIds }),
-    [workingScene, production, artifacts, world.sheets, capSec, newShotIds],
+    () => boardsForScene({ scene: workingScene, production, artifacts, sheets: world.sheets, capSec, ...(panelCap !== undefined ? { panelCap } : {}), stagedShotIds: newShotIds }),
+    [workingScene, production, artifacts, world.sheets, capSec, panelCap, newShotIds],
   );
   const stagedBoards =
     JSON.stringify(scene.boards) !== JSON.stringify(workingScene.boards) ||
@@ -111,6 +119,14 @@ export function SceneWorkspace({
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : shots.find((shot) => shot.id === focus);
+  const sceneRuns = [...(state?.frameRuns ?? [])]
+    .filter((candidate) =>
+      candidate.worldId === world.meta.worldId &&
+      candidate.productionId === production.meta.id &&
+      candidate.run.sceneId === scene.id)
+    .sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt));
+  const frameRun = sceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused") ?? sceneRuns[0] ?? null;
+  const boardsVisible = showBoards || frameRun?.run.mode === "board";
   const write = (command: Command): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
@@ -149,6 +165,9 @@ export function SceneWorkspace({
     pendingCommand.current = false;
     setCommandPending(false);
   }, [scene.id, sceneFile, scene.version]);
+  useEffect(() => {
+    frameRunCommand({ kind: "frame-run-list", worldId: world.meta.worldId, productionId: production.meta.id });
+  }, [world.meta.worldId, production.meta.id]);
 
   return (
     <SelectionProvider value={selection}>
@@ -162,12 +181,21 @@ export function SceneWorkspace({
 
         <main className="fy-sw__centre">
           <header className="fy-sw__head">
-            <h1 className="fy-sw__title">
-              Scene {scene.number} · {scene.title}
-            </h1>
-            <p className="fy-sw__metrics">
-              {shots.length} shots · {seconds(totalSec)} · {framed} frames filed
-            </p>
+            <div className="fy-sw__headline">
+              <div>
+                <h1 className="fy-sw__title">
+                  Scene {scene.number} · {scene.title}
+                </h1>
+                <p className="fy-sw__metrics">
+                  {shots.length} shots · {seconds(totalSec)} · {framed} frames filed
+                </p>
+              </div>
+              <div className="fy-sw__actions">
+                <Button variant="outline" onClick={() => setSceneReviewOpen((open) => !open)}>Review scene</Button>
+                <Button ref={generateButton} variant="primary" disabled={frameRun?.status === "active" || frameRun?.status === "paused"} onClick={() => setGenerateOpen(true)}>Generate frames</Button>
+              </div>
+            </div>
+            {sceneReviewOpen ? <SceneReview scene={writerSceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
           </header>
 
           {/*
@@ -176,7 +204,17 @@ export function SceneWorkspace({
             must not take the address bar with it or the browser Back button becomes an undo
             for something nobody did.
           */}
-          <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
+          {frameRun !== null ? (
+            <>
+              <FrameRunBar
+                run={frameRun}
+                worldId={world.meta.worldId}
+                productionId={production.meta.id}
+                onReview={() => setReviewOpen(true)}
+              />
+              <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />
+            </>
+          ) : <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
             {(["storyboard", "flow"] as const).map((candidate) => (
               <button
                 key={candidate}
@@ -209,7 +247,7 @@ export function SceneWorkspace({
             >
               {dock ? "Hide Arke" : "Show Arke"}
             </button>
-          </div>
+          </div>}
 
           {view === "storyboard" ? (
             <StoryboardRows
@@ -224,13 +262,15 @@ export function SceneWorkspace({
               aspect={aspect}
               capSec={capSec}
               boardPack={boardPack}
-              showBoards={showBoards}
+              showBoards={boardsVisible}
               stagedShotIds={stagedShotIds}
               newShotIds={newShotIds}
               stagedBoards={stagedBoards}
               locked={staged !== undefined || sceneFile === undefined || commandPending}
               onCommand={write}
               refusalVersion={refusalVersion}
+              frameRun={frameRun}
+              worldId={world.meta.worldId}
             />
           ) : (
             <SceneFlow
@@ -277,6 +317,27 @@ export function SceneWorkspace({
           )}
         </aside>
         ) : null}
+        <GenerateFramesDialog
+          open={generateOpen}
+          state={state}
+          world={world}
+          production={production}
+          scene={scene}
+          aspect={aspect}
+          videoModel={videoModel}
+          returnFocus={generateButton}
+          onClose={() => setGenerateOpen(false)}
+        />
+        {frameRun === null ? null : (
+          <FrameRunReview
+            run={frameRun}
+            scene={scene}
+            artifacts={artifacts}
+            worldSlug={world.meta.slug}
+            open={reviewOpen}
+            onClose={() => setReviewOpen(false)}
+          />
+        )}
       </div>
     </SelectionProvider>
   );

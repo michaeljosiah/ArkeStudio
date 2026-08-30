@@ -13,6 +13,7 @@ export * from "./artifact.js";
 export * from "./reference.js";
 export * from "./proposal.js";
 export * from "./job.js";
+export * from "./frame-run.js";
 export * from "./change.js";
 export * from "./genesis.js";
 export * from "./founding-build.js";

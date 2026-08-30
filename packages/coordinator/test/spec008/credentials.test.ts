@@ -276,6 +276,7 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
       worldChat: null,
       bench: null,
       authoringRuns: [],
+      frameRuns: [],
     };
     const registry = new SecretRegistry();
     registry.register(KEY);

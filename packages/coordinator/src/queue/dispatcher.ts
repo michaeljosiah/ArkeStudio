@@ -240,10 +240,16 @@ const FOLLOW_ON_TARGETS = new Set([
   ...REFERENCE_FINALIZATION_TARGETS,
   "reference-tile",
   "shot",
+  "board-sheet",
   "scene-pass",
   "voice-line",
   "voice-preview",
 ]);
+const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request"]);
+
+function providerParams(params: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key)));
+}
 
 /**
  * Fold current state, prior state, and durable submission count in one history pass. A job whose
@@ -545,6 +551,8 @@ export class JobQueue {
       const run = this.runJob(job).finally(() => {
         lane.inFlight.delete(runKey);
         this.retiredEngineRuns.delete(this.engineRunKey(job));
+        const current = this.jobs.get(job.id);
+        if (current?.status === "queued" && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
         this.pump(provider);
         this.activeRuns.delete(run);
       });
@@ -601,6 +609,20 @@ export class JobQueue {
     this.rebuildFifo(provider);
     this.emitQueueStatus(provider);
     this.pump(provider);
+    for (const job of this.jobs.values()) {
+      if (job.provider !== provider || job.status !== "running" || job.failureClass !== "provider-fault") continue;
+      this.trackRun(this.resumeProviderHeldPolling(job));
+    }
+  }
+
+  private async resumeProviderHeldPolling(job: Job): Promise<void> {
+    const lane = this.lane(job.provider);
+    while (lane.inFlight.has(this.engineRunKey(job)) && !this.disposed) await this.sleep(1);
+    const current = this.jobs.get(job.id);
+    if (current?.status !== "running" || current.failureClass !== "provider-fault" || lane.paused) return;
+    const resumed = { ...current, failureClass: null, error: null, updatedAt: this.clock() };
+    await this.transition(resumed);
+    await this.resumePolling(resumed);
   }
 
   private rebuildFifo(provider: string): void {
@@ -730,7 +752,7 @@ export class JobQueue {
           model: job.model,
           capability: job.capability,
           signal: submitAbort.signal,
-          params: job.params,
+          params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
@@ -794,18 +816,22 @@ export class JobQueue {
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
     if (typeof err === "object" && err !== null && "submissionRejected" in err) {
-      await this.terminalize(job, "failed", message);
+      // Witnessed rejection is terminal for this attempt. Credential/quota/billing rejection also
+      // poisons the lane: pause before terminalization returns to runJob's finally, or that finally
+      // can pump the queued sibling immediately through the same known-bad provider state.
+      if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
+      await this.terminalize(job, "failed", message, undefined, klass);
       return;
     }
     if (!local && !client.declarations.supportsIdempotencyKey) {
-      await this.holdForUser(job);
+      await this.holdForUser(job, klass);
       if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
       return;
     }
     switch (klass) {
       case "provider-fault": {
         // The job was never wrong — the credential was (R-8). Back to queued, lane paused.
-        await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
+        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "fault", message);
         return;
@@ -815,7 +841,7 @@ export class JobQueue {
           await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
           return;
         }
-        await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
+        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "offline", "offline — jobs stay queued and resume with connectivity");
         return;
@@ -825,7 +851,7 @@ export class JobQueue {
           await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
           return;
         }
-        await this.transition({ ...job, status: "queued", updatedAt: this.clock() });
+        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
         const lane = this.lane(job.provider);
         lane.fifo.push(job.id);
         this.schedule(lane, backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
@@ -851,7 +877,10 @@ export class JobQueue {
         const klass = classifyError(err);
         if (klass === "provider-fault") {
           // Keep the job running (the remote work exists); pause the lane for new work.
-          this.pauseLane(job.provider, "fault", err instanceof Error ? err.message : String(err));
+          const message = err instanceof Error ? err.message : String(err);
+          current = { ...current, failureClass: klass, error: message, updatedAt: this.clock() };
+          await this.transition(current);
+          this.pauseLane(job.provider, "fault", message);
           return;
         }
         // Transient/offline/unknown poll noise: keep polling — never resubmit (R-5).
@@ -865,7 +894,22 @@ export class JobQueue {
         return;
       }
       if (poll.state === "failed") {
-        await this.terminalize(current, "failed", poll.error ?? "the provider reported failure", poll.costMicroUsd);
+        const message = poll.error ?? "the provider reported failure";
+        const klass = classifyError(message);
+        if (klass === "provider-fault") {
+          current = {
+            ...current,
+            status: "queued",
+            providerJobId: null,
+            failureClass: klass,
+            error: message,
+            updatedAt: this.clock(),
+          };
+          await this.transition(current);
+          this.pauseLane(job.provider, "fault", message);
+          return;
+        }
+        await this.terminalize(current, "failed", message, poll.costMicroUsd);
         return;
       }
       if (poll.state === "cancelled") {
@@ -1002,7 +1046,7 @@ export class JobQueue {
         for (const artifact of artifacts) {
           const result = this.opts.prepareArtifact(job, artifact);
           if (!result.ok) {
-            await this.terminalize(job, "failed", `artifact "${artifact.name}" was refused: ${result.reason}`);
+            await this.terminalize(job, "failed", `artifact "${artifact.name}" was refused: ${result.reason}`, undefined, "transient");
             return;
           }
           prepared.push(result.artifact);
@@ -1018,7 +1062,7 @@ export class JobQueue {
             ? "not a supported PNG, JPEG, or WebP image"
             : null);
         if (problem !== null) {
-          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`);
+          await this.terminalize(job, "failed", `artifact "${artifact.name}" failed verification: ${problem}`, undefined, "transient");
           return;
         }
       }
@@ -1087,9 +1131,19 @@ export class JobQueue {
     outcome: "succeeded" | "failed" | "cancelled",
     error: string | null,
     costMicroUsd?: number,
+    failureClass?: FailureClass,
   ): Promise<void> {
     if (this.retiredEngineRuns.has(this.engineRunKey(job))) return;
-    const terminal: Job = { ...job, status: outcome, error, updatedAt: this.clock() };
+    // Every failed row carries the decision the retry surfaces consume. Centralising it here
+    // covers provider verdicts, local preparation, recovery, verification and exhausted retries;
+    // a caller cannot add a new terminal failure path and accidentally leave the class transient.
+    const terminal: Job = {
+      ...job,
+      status: outcome,
+      error,
+      failureClass: outcome === "failed" ? (failureClass ?? classifyError(error ?? "terminal failure")) : null,
+      updatedAt: this.clock(),
+    };
     await this.transition(terminal);
     if (this.disposed) return;
     // An append that landed this pass is proof enough; asking the file again could only be
@@ -1347,6 +1401,11 @@ export class JobQueue {
         continue;
       }
       if (job.status === "queued") {
+        if (job.failureClass === "provider-fault") {
+          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
+          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
+          continue;
+        }
         const client = this.opts.clients[job.provider];
         const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
         if (!local && !client?.declarations.supportsIdempotencyKey && prior?.status === "submitting") {
@@ -1359,6 +1418,11 @@ export class JobQueue {
         continue;
       }
       if (job.status === "running") {
+        if (job.failureClass === "provider-fault") {
+          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
+          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
+          continue;
+        }
         // A local engine's job first consults the per-source policy (SPEC-021 §2.11): a spawned
         // engine's old prompt id means nothing, and an old id is never polled against a
         // different engine. Cloud jobs keep the standing behaviour untouched.
@@ -1512,7 +1576,7 @@ export class JobQueue {
     return this.holdForUser(job);
   }
 
-  private async holdForUser(job: Job): Promise<ReconcileAction> {
+  private async holdForUser(job: Job, failureClass?: FailureClass): Promise<ReconcileAction> {
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
     // A duplicate on a local engine costs this machine's own GPU time and nothing else (R-12) —
     // wording that said "charge" here would be a hold nobody can price honestly.
@@ -1524,6 +1588,7 @@ export class JobQueue {
     const held: Job = {
       ...job,
       status: "needs-reconciliation",
+      ...(failureClass !== undefined ? { failureClass } : {}),
       error: local
         ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,

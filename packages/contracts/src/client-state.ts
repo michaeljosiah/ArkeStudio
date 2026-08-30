@@ -12,6 +12,7 @@ import { EMPTY_BIBLE, WorldBibleSchema } from "./bible.js";
 import { ChangeRecordSchema } from "./change.js";
 import { ComfyUiStatusSchema } from "./comfyui.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
+import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
@@ -538,6 +539,8 @@ export const ClientStateSchema = z
      * "finished", and offers Accept and Discard over a half-written proposal.
      */
     authoringRuns: z.array(ProposalIdSchema).default([]),
+    /** Active and completed-but-undismissed frame runs survive navigation and reconnects. */
+    frameRuns: z.array(FrameRunStateSchema).default([]),
   })
   .strict();
 export type ClientState = z.infer<typeof ClientStateSchema>;

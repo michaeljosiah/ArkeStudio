@@ -33,6 +33,7 @@ export function boardsForScene(input: {
   artifacts: readonly ArtifactSidecar[];
   sheets: readonly Sheet[];
   capSec: number;
+  panelCap?: number;
   stagedShotIds?: ReadonlySet<string>;
 }): WorkspaceBoardPack {
   const shots = orderedShots(input.scene);
@@ -54,6 +55,7 @@ export function boardsForScene(input: {
     new Set(input.scene.boards?.splits ?? []),
     new Set(input.scene.boards?.merges ?? []),
     (shotId) => shotHasFrame(input.production, input.artifacts, shotId, input.stagedShotIds),
+    input.panelCap,
   );
   return packed.ok
     ? packed

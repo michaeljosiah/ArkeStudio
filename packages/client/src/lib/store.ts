@@ -267,6 +267,12 @@ interface StoreState {
   } | null;
   diagnosticsBundle: string | null;
   providerCallsByJob: Record<string, ProviderCallRecord[]>;
+  /** Ephemeral frame-run quotes by request id; option cleanup removes stale authorization. */
+  frameRunQuotes: Record<string, import("@arke-studio/contracts").FrameRunQuote>;
+  /** Correlated frame-run authorization outcomes; retained only while their dialog listens. */
+  frameRunStartResults: Record<string, FrameRunStartResultEvent>;
+  /** Bumped on snapshots so open quote dialogs abandon pre-refresh authorization. */
+  frameRunRequestEpoch: number;
 }
 
 export interface VoiceCandidatesState {
@@ -319,6 +325,9 @@ let current: StoreState = {
   envCheck: null,
   diagnosticsBundle: null,
   providerCallsByJob: {},
+  frameRunQuotes: {},
+  frameRunStartResults: {},
+  frameRunRequestEpoch: 0,
 };
 
 export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-result" }> & {
@@ -424,6 +433,56 @@ export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state
 const planResultListeners = new Set<(result: PlanResult) => void>();
 const planStateListeners = new Set<(event: PlanStateEvent) => void>();
 
+export type FrameRunQuoteEvent = Extract<DomainEvent, { type: "production.frame-run-quote" }>;
+const frameRunQuoteListeners = new Map<string, Set<(event: FrameRunQuoteEvent) => void>>();
+export type FrameRunStartResultEvent = Extract<DomainEvent, { type: "production.frame-run-start-result" }>;
+const frameRunStartResultListeners = new Map<string, Set<(event: FrameRunStartResultEvent) => void>>();
+const frameRunStartKey = (requestId: string, quoteId: string): string => `${requestId}:${quoteId}`;
+
+/** A quote is a one-shot answer to one option set; changing options abandons its request id. */
+export function subscribeFrameRunQuote(
+  requestId: string,
+  listener: (event: FrameRunQuoteEvent) => void,
+): () => void {
+  const listeners = frameRunQuoteListeners.get(requestId) ?? new Set();
+  listeners.add(listener);
+  frameRunQuoteListeners.set(requestId, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) frameRunQuoteListeners.delete(requestId);
+  };
+}
+
+export function clearFrameRunQuote(requestId: string): void {
+  if (!(requestId in current.frameRunQuotes)) return;
+  const frameRunQuotes = { ...current.frameRunQuotes };
+  delete frameRunQuotes[requestId];
+  emitChange({ ...current, frameRunQuotes });
+}
+
+export function subscribeFrameRunStartResult(
+  requestId: string,
+  quoteId: string,
+  listener: (event: FrameRunStartResultEvent) => void,
+): () => void {
+  const key = frameRunStartKey(requestId, quoteId);
+  const listeners = frameRunStartResultListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  frameRunStartResultListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) frameRunStartResultListeners.delete(key);
+  };
+}
+
+export function clearFrameRunStartResult(requestId: string, quoteId: string): void {
+  const key = frameRunStartKey(requestId, quoteId);
+  if (!(key in current.frameRunStartResults)) return;
+  const frameRunStartResults = { ...current.frameRunStartResults };
+  delete frameRunStartResults[key];
+  emitChange({ ...current, frameRunStartResults });
+}
+
 export type RoutingFindingsEvent = Extract<DomainEvent, { type: "production.routing-findings" }>;
 export type InteractiveExportEvent = Extract<DomainEvent, { type: "production.interactive-export-result" }>;
 const routingFindingsListeners = new Set<(event: RoutingFindingsEvent) => void>();
@@ -507,6 +566,11 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
     case "job.deleted":
       // The row leaves Activity; its ledger entry stays, so spend does not move.
       return { ...state, app: { ...state.app, jobs: state.app.jobs.filter((j) => j.id !== event.jobId) } };
+    case "production.frame-run": {
+      const frameRuns = state.frameRuns.filter((run) => run.run.id !== event.runId);
+      if (event.state !== null) frameRuns.push(event.state);
+      return { ...state, frameRuns };
+    }
     case "ledger.appended":
       return { ...state, app: { ...state.app, ledger: [...state.app.ledger, event.entry] } };
     case "provider.status":
@@ -639,6 +703,8 @@ function handleFrame(json: string): void {
   }
   lastSeq = frame.seq;
   if (frame.kind === "snapshot") {
+    frameRunQuoteListeners.clear();
+    frameRunStartResultListeners.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
     // drafting" for any run the snapshot says has since ended. That refusal describes the run
     // rather than the proposal, so unlike its siblings it must not wait for a resolution to
@@ -727,6 +793,11 @@ function handleFrame(json: string): void {
       mainPhotoAcceptance: changedWorld ? {} : current.mainPhotoAcceptance,
       characterSheetAcceptance: changedWorld ? {} : current.characterSheetAcceptance,
       locationViewUpload: changedWorld ? {} : current.locationViewUpload,
+      // Quotes authorize the exact snapshot used to compile them. A snapshot supersedes that
+      // read even in the same world, so no quote survives reconnect or refresh.
+      frameRunQuotes: {},
+      frameRunStartResults: {},
+      frameRunRequestEpoch: current.frameRunRequestEpoch + 1,
     });
   } else if (current.state) {
     let gateNotices = current.gateNotices;
@@ -740,6 +811,8 @@ function handleFrame(json: string): void {
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
+    let frameRunQuotes = current.frameRunQuotes;
+    let frameRunStartResults = current.frameRunStartResults;
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
       if (expected?.command === event.command) {
@@ -775,6 +848,23 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.plan-state") {
       for (const listener of planStateListeners) listener(event);
+    }
+    if (event.type === "production.frame-run-quote") {
+      const listeners = frameRunQuoteListeners.get(event.quote.requestId);
+      frameRunQuoteListeners.delete(event.quote.requestId);
+      if (listeners !== undefined) {
+        frameRunQuotes = { ...frameRunQuotes, [event.quote.requestId]: event.quote };
+        for (const listener of listeners) listener(event);
+      }
+    }
+    if (event.type === "production.frame-run-start-result") {
+      const key = frameRunStartKey(event.requestId, event.quoteId);
+      const listeners = frameRunStartResultListeners.get(key);
+      frameRunStartResultListeners.delete(key);
+      if (listeners !== undefined) {
+        frameRunStartResults = { ...frameRunStartResults, [key]: event };
+        for (const listener of listeners) listener(event);
+      }
     }
     if (event.type === "production.routing-findings") {
       for (const listener of routingFindingsListeners) listener(event);
@@ -1233,6 +1323,8 @@ function handleFrame(json: string): void {
       diagnosticsBundle,
       diagnostics,
       providerCallsByJob,
+      frameRunQuotes,
+      frameRunStartResults,
     });
   }
 }
@@ -2699,6 +2791,12 @@ export function sceneCommand(input: Omit<SceneCommandMessage, "kind">): boolean 
   return send({ kind: "scene-command", ...input });
 }
 
+type FrameRunMessage = Extract<ClientMessage, { kind: `frame-run-${string}` }>;
+
+export function frameRunCommand(input: FrameRunMessage): boolean {
+  return send(input);
+}
+
 /**
  * Save a scene where it stands (turn 97) — the storyboard's card edits. No proposal, no accept;
  * the version and its history snapshot stand in for both. `baseVersion` is what this screen
@@ -3294,6 +3392,9 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     envCheck: null,
     diagnosticsBundle: null,
     providerCallsByJob: {},
+    frameRunQuotes: {},
+    frameRunStartResults: {},
+    frameRunRequestEpoch: 0,
     ...extra,
   });
 }

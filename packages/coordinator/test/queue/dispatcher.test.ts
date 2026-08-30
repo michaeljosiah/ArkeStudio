@@ -1535,6 +1535,65 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
+  it("a witnessed provider-fault submission rejection pauses before queued siblings can submit", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 402 payment required: quota exhausted");
+    fake.submissionRejected = true;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    const siblings = await Promise.all(Array.from({ length: 4 }, () => h.queue.enqueue(INPUT)));
+    await until(() => foldedJob(h, first.id)?.status === "failed", "the witnessed rejection to terminalize", FOLD_MS);
+    assert.equal(foldedJob(h, first.id)?.failureClass, "provider-fault");
+    assert.equal(h.queue.queueStatus("fake").paused, true);
+    assert.equal(h.faults.length, 1);
+    assert.equal(fake.submitCount, 1, "the lane pauses before runJob's finally can pump a sibling");
+    assert.ok(siblings.every((job) => foldedJob(h, job.id)?.status === "queued"));
+    h.queue.dispose();
+  });
+
+  it("a witnessed poll provider-fault verdict queues the job for explicit safe resubmit", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.pollState = "failed";
+    fake.pollFailureMessage = "HTTP 401 credential was rejected by the provider";
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, job.id)?.status === "queued" && foldedJob(h, job.id)?.failureClass === "provider-fault",
+      "the witnessed verdict to queue behind the paused lane",
+      FOLD_MS,
+    );
+    assert.equal(h.queue.queueStatus("fake").paused, true);
+    fake.pollState = "succeeded";
+    h.queue.resume("fake");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the same authorized job to resubmit", FOLD_MS);
+    assert.equal(fake.submitCount, 2);
+    assert.equal(new Set(fake.submittedKeys).size, 1, "resubmit retains the durable idempotency key");
+    h.queue.dispose();
+  });
+
+  it("a poll-time provider fault durably holds the running job and resumes polling without resubmit", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.pollError = new Error("HTTP 401 credential was rejected while polling");
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, job.id)?.status === "running" && foldedJob(h, job.id)?.failureClass === "provider-fault",
+      "the running job to persist its provider hold",
+      FOLD_MS,
+    );
+    assert.equal(h.queue.queueStatus("fake").paused, true);
+    assert.equal(fake.submitCount, 1);
+    fake.pollError = null;
+    h.queue.resume("fake");
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "polling to resume to success", FOLD_MS);
+    assert.equal(fake.submitCount, 1, "a poll fault never resubmits paid work");
+    assert.equal(foldedJob(h, job.id)?.failureClass, null);
+    h.queue.dispose();
+  });
+
   it("a 401 with forty queued jobs: paused, told once, zero failed, others keep running", async () => {
     const bad = new FakeProvider({ supportsIdempotencyKey: true });
     bad.submitError = new Error("HTTP 401 the credential was rejected");
@@ -1583,6 +1642,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     await h.queue.start();
     const job = await h.queue.enqueue(INPUT);
     await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.failureClass, "terminal", "the class is durable on every failed row");
     assert.equal(fake.submitCount, 1);
     assert.equal(foldedJob(h, job.id)?.attempt, 1);
     assert.doesNotMatch(foldedJob(h, job.id)?.error ?? "", /outcome was not witnessed/);
@@ -1759,6 +1819,7 @@ describe("artifact verification (R-12, R-13, D12)", () => {
     await h.queue.start();
     const job = await h.queue.enqueue({ ...INPUT, landing: { dir: "takes/tk_z" } });
     await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.failureClass, "transient", "invalid provider output remains retryable");
     assert.match(foldedJob(h, job.id)!.error!, /truncated/);
     const entries = await readdir(h.worldDir, { recursive: true }).catch(() => []);
     assert.ok(!entries.some((e) => String(e).includes("frame.png")));

@@ -323,6 +323,10 @@ export function jobActions(job: Job): JobAction[] {
     case "running":
       return ["watch", "cancel"];
     case "failed":
+      if (typeof job.params["frameRun"] === "string") {
+        const retry = job.failureClass === "transient" ? ["retry" as const] : [];
+        return canDeleteJob(job) ? [...retry, "delete"] : retry;
+      }
       return canDeleteJob(job) ? ["retry", "delete"] : ["retry"];
     case "needs-reconciliation":
       return ["resolve"];
@@ -397,6 +401,16 @@ export function jobOrigin(job: Job): JobOrigin | null {
     const sessionId = job.target.id?.split("/")[0] ?? "";
     if (sessionId.length === 0) return null;
     return { path: `/w/${job.worldId}/artifacts/bench/${sessionId}`, label: "Bench", where: "its bench session" };
+  }
+  if (job.productionId !== undefined && typeof job.params["frameRun"] === "string") {
+    const provenance = job.params["provenance"] as { sceneId?: unknown } | undefined;
+    const sceneId = provenance?.sceneId;
+    if (typeof sceneId !== "string" || sceneId.length === 0) return null;
+    return {
+      path: `/w/${job.worldId}/p/${job.productionId}/scenes/${sceneId}`,
+      label: "Scene workspace",
+      where: "the scene workspace",
+    };
   }
   // Shots, scene passes, storyboards and lines are the production's. A line is the exception
   // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or

@@ -4,7 +4,7 @@ import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
 
 /**
@@ -1767,6 +1767,94 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       capability: CapabilitySchema,
       modelId: z.string().min(1).nullable(),
+    })
+    .strict(),
+  /** Compile the exact server-side price and option identity before authorization. */
+  z
+    .object({
+      kind: z.literal("frame-run-quote"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      mode: z.enum(["per-shot", "board"]),
+      modelId: z.string().min(1),
+      scope: z.enum(["missing", "all"]),
+    })
+    .strict(),
+  /** SPEC-036 §2.7: authorize the exact quote; the coordinator recompiles before spending. */
+  z
+    .object({
+      kind: z.literal("frame-run-start"),
+      requestId: UlidSchema,
+      quoteId: UlidSchema,
+      quoteSignature: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      quotedMicroUsd: z.number().int().min(0),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      mode: z.enum(["per-shot", "board"]),
+      modelId: z.string().min(1),
+      scope: z.enum(["missing", "all"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-pause"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-resume"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-cancel"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-retry-step"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+      stepIndex: z.number().int().min(0),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-retry-cell"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
+      stepIndex: z.number().int().min(0),
+      shotId: ShotIdSchema,
+    })
+    .strict(),
+  /** Refresh a production's active and completed-but-undismissed runs. */
+  z
+    .object({
+      kind: z.literal("frame-run-list"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("frame-run-dismiss"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      runId: FrameRunIdSchema,
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */

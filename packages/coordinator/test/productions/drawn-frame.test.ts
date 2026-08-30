@@ -508,4 +508,23 @@ describe("an auto-filed frame is already decided", () => {
     assert.match(reviews, /tk_auto03/, "the second append chained on the first");
     assert.ok(!reviews.includes("tk_auto04"), "no decision for a frame that was never installed");
   });
+
+  it("replay after filing recognizes the same job's artifact instead of calling it superseded", async () => {
+    const store = await open();
+    const take = await still(store, "tk_auto05", "sh_13");
+    const first = filedOk(await fileDrawnFrame(store, production(store), {
+      take,
+      shotId: "sh_13",
+      producedBy: "frame-run:jb_replay",
+      expectedArtifactId: null,
+    }));
+    const replayed = await fileDrawnFrame(store, production(store), {
+      take,
+      shotId: "sh_13",
+      producedBy: "frame-run:jb_replay",
+      expectedArtifactId: null,
+    });
+    assert.ok(replayed.ok && !("superseded" in replayed));
+    assert.equal("artifactId" in replayed ? replayed.artifactId : null, first.artifactId);
+  });
 });
