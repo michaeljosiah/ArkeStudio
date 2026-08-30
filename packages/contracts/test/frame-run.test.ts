@@ -424,6 +424,50 @@ describe("frame-run fold", () => {
     assert.equal(state.failedSteps, 0);
   });
 
+  it("offers a completed board pass for an intentional whole-board retry", () => {
+    const state = foldFrameRun(
+      { ...run, steps: [run.steps[0]!] },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(state.steps[0]!.canRetry, true);
+    const cancelled = foldFrameRun(
+      { ...run, cancelled: true, steps: [run.steps[0]!] },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(cancelled.steps[0]!.canRetry, false);
+    assert.equal(cancelled.steps[0]!.canRetryCell, false);
+  });
+
+  it("offers only the newest whole-board attempt after a terminal refusal", () => {
+    const initial = run.steps[0]!;
+    const retry = {
+      ...initial,
+      label: "Board A retry",
+      sourceStepIndex: 0,
+      grain: "step-retry" as const,
+      retryOf: 0,
+      jobId: JOB_2,
+      dispatch: { ...initial.dispatch, idempotencyKey: "01J8E0000000000000000000K9" },
+    };
+    const state = foldFrameRun(
+      { ...run, steps: [initial, retry], cursor: 2 },
+      [
+        { id: JOB_1, status: "succeeded", finalization: "complete" },
+        { id: JOB_2, status: "failed", failureClass: "terminal", error: "content policy" },
+      ],
+    );
+    assert.equal(state.steps[0]!.canRetry, false, "a stale ancestor cannot bypass the latest refusal");
+    assert.equal(state.steps[1]!.canRetry, false);
+    const failedSource = foldFrameRun(
+      { ...run, steps: [initial, retry], cursor: 2 },
+      [
+        { id: JOB_1, status: "failed", failureClass: "transient", error: "timeout" },
+        { id: JOB_2, status: "failed", failureClass: "terminal", error: "content policy" },
+      ],
+    );
+    assert.equal(failedSource.steps[0]!.canRetry, false, "the original transient failure is stale too");
+  });
+
   it("uses the latest attempt per shot, and a cell success reconciles only that cell", () => {
     const twoUpdateRequest = {
       ...run.steps[0]!.request,
@@ -522,6 +566,12 @@ describe("frame-run fold", () => {
     );
     assert.equal(laterFailure.failedShots, 1, "an older success never hides a later regeneration failure");
     assert.equal(laterFailure.filedShots, 0);
+
+    const pendingCell = foldFrameRun(
+      { ...run, steps: [run.steps[0]!, { ...firstShotRetry, jobId: null }], cursor: 1 },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(pendingCell.steps[0]!.canRetry, false, "an unadmitted cell retry blocks a competing whole-board pass");
 
     const priorFiled = foldFrameRun(
       {

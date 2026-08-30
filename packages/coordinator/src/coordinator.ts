@@ -5900,18 +5900,18 @@ export class Coordinator {
       case "frame-run-retry-cell": {
         const store = this.frameRunStore(msg.worldId);
         if (!store) return;
-        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
-        if (!production) return;
         const deps = this.frameRunDriverDeps();
         try {
+          const getProduction = () => store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
           if (msg.kind === "frame-run-retry-step") {
-            await retryFrameStep(store, msg.productionId, msg.runId, msg.stepIndex, production, deps.jobById);
+            await retryFrameStep(store, msg.productionId, msg.runId, msg.stepIndex, getProduction, deps.jobById);
           } else {
-            await retryFrameCell(store, msg.productionId, msg.runId, msg.stepIndex, msg.shotId, production, deps.jobById);
+            await retryFrameCell(store, msg.productionId, msg.runId, msg.stepIndex, msg.shotId, getProduction, deps.jobById);
           }
           await advanceFrameRun(store, msg.productionId, msg.runId, deps);
           await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
         } catch (err) {
+          await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId).catch(() => {});
           void this.appLog?.append({
             kind: "frame-run.retry-refused",
             reason: err instanceof Error ? err.message : String(err),
@@ -5933,15 +5933,8 @@ export class Coordinator {
         const store = this.frameRunStore(msg.worldId);
         if (!store) return;
         try {
-          if (await dismissFrameRun(store, msg.productionId, msg.runId, this.jobQueue?.listJobs() ?? [])) {
-            this.emit({
-              at: new Date().toISOString(),
-              type: "production.frame-run",
-              worldId: msg.worldId,
-              productionId: msg.productionId,
-              runId: msg.runId,
-              state: null,
-            });
+          if (await dismissFrameRun(store, msg.productionId, msg.runId, () => this.jobQueue?.listJobs() ?? [])) {
+            await this.emitFrameRun(store, msg.worldId, msg.productionId, msg.runId);
           }
         } catch (err) {
           void this.appLog?.append({

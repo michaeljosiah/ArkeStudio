@@ -507,7 +507,7 @@ describe("frame-run coordinator service", () => {
       run.id,
       0,
       step.updateShotIds[0]!,
-      production,
+      () => production,
       q.deps.jobById,
     ))!.steps.at(-1)!;
     assert.deepEqual(retried.dispatch.output, step.dispatch.routeOutput);
@@ -648,25 +648,27 @@ describe("frame-run coordinator service", () => {
     const retryQueue = queue();
     const attempted = (await advanceFrameRun(f.store, f.production.meta.id, retryRun.id, retryQueue.deps))!;
     retryQueue.settle(attempted.steps[0]!.jobId!, "failed", "transient");
+    await pauseFrameRun(f.store, f.production.meta.id, retryRun.id);
     const retried = (await retryFrameStep(
       f.store,
       f.production.meta.id,
       retryRun.id,
       0,
-      f.production,
+      () => f.production,
       retryQueue.deps.jobById,
     ))!;
     assert.equal(retried.steps.length, retryRun.steps.length + 1);
     assert.equal(retried.steps.at(-1)!.jobId, null);
     assert.equal(retried.steps.at(-1)!.retryOf, 0);
     assert.equal(retried.steps.at(-1)!.sourceStepIndex, 0);
+    assert.equal(retried.paused, false, "the Retry press resumes a settled paused run so its appended step can enqueue");
     await assert.rejects(
-      () => retryFrameStep(f.store, f.production.meta.id, retryRun.id, 0, f.production, retryQueue.deps.jobById),
-      /already has a pending or successful retry/,
+      () => retryFrameStep(f.store, f.production.meta.id, retryRun.id, 0, () => f.production, retryQueue.deps.jobById),
+      /already has a newer retry attempt/,
     );
     retryQueue.settle(attempted.steps[0]!.jobId!, "failed", "terminal");
     await assert.rejects(
-      () => retryFrameStep(f.store, f.production.meta.id, retryRun.id, 0, f.production, retryQueue.deps.jobById),
+      () => retryFrameStep(f.store, f.production.meta.id, retryRun.id, 0, () => f.production, retryQueue.deps.jobById),
       /terminal failure/,
     );
   });
@@ -699,19 +701,39 @@ describe("frame-run coordinator service", () => {
     };
     const production = { ...f.production, takes: [...f.production.takes, parent] };
     const shotIds = attempted.steps[0]!.updateShotIds;
-    const first = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[0]!, production, q.deps.jobById))!;
+    const first = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[0]!, () => production, q.deps.jobById))!;
     const firstRetry = first.steps.at(-1)!;
     assert.equal(firstRetry.grain, "cell-retry");
     assert.deepEqual(firstRetry.dispatch.output, attempted.steps[0]!.dispatch.routeOutput, "retry uses a supported single-image output");
     assert.notDeepEqual(firstRetry.dispatch.output, attempted.steps[0]!.dispatch.cellOutput, "retry never submits crop dimensions");
     assert.equal(firstRetry.dispatch.references.at(-1), `productions/${f.production.meta.id}/takes/${parentId}/board.png`);
     assert.ok(firstRetry.dispatch.references.length <= firstRetry.dispatch.referenceCapacity);
-    const second = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[1]!, production, q.deps.jobById))!;
+    const second = (await retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[1]!, () => production, q.deps.jobById))!;
     assert.equal(second.steps.at(-1)!.updateShotIds[0], shotIds[1], "another cell remains independently retryable");
-    await assert.rejects(
-      () => retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[0]!, production, q.deps.jobById),
-      /pending or successful retry/,
+    const cellJobIds = ["jb_01J8E0000000000000000000C1", "jb_01J8E0000000000000000000C2"];
+    const withSettledCells = {
+      ...second,
+      steps: second.steps.map((step, index) => index === 1 || index === 2 ? { ...step, jobId: cellJobIds[index - 1]! } : step),
+    };
+    await writeFile(
+      join(f.dir, "productions", f.production.meta.id, "runs", `${run.id}.json`),
+      JSON.stringify(withSettledCells, null, 2) + "\n",
     );
+    for (const [index, jobId] of cellJobIds.entries()) {
+      q.jobs.set(jobId, {
+        ...q.jobs.get(sourceJobId)!,
+        id: jobId,
+        status: "succeeded",
+        target: withSettledCells.steps[index + 1]!.dispatch.target,
+      });
+    }
+    await assert.rejects(
+      () => retryFrameCell(f.store, f.production.meta.id, run.id, 0, shotIds[0]!, () => production, q.deps.jobById),
+      /newer retry attempt/,
+    );
+    const wholeRetry = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => production, q.deps.jobById))!;
+    assert.equal(wholeRetry.steps.at(-1)!.grain, "step-retry", "settled cell retries do not prevent a later whole-board pass");
+    await cancelFrameRun(f.store, f.production.meta.id, run.id, { jobById: q.deps.jobById, cancel: async () => {} });
 
     const zeroRun = {
       ...attempted,
@@ -732,12 +754,121 @@ describe("frame-run coordinator service", () => {
       JSON.stringify(zeroRun, null, 2) + "\n",
     );
     await assert.rejects(
-      () => retryFrameCell(f.store, f.production.meta.id, zeroRun.id, 0, shotIds[0]!, production, q.deps.jobById),
+      () => retryFrameCell(f.store, f.production.meta.id, zeroRun.id, 0, shotIds[0]!, () => production, q.deps.jobById),
       /accepts no image references/,
     );
   });
 
-  it("refuses a crafted retry for a fixed board member without changing the run", async () => {
+  it("refuses a retained-run retry while another run owns the scene", async () => {
+    const f = await fixture();
+    const active = await start(f, "board");
+    const q = queue();
+    const activeRun = (await advanceFrameRun(f.store, f.production.meta.id, active.id, q.deps))!;
+    const retainedJobId = "jb_01J8E0000000000000000000RT";
+    const retained = {
+      ...activeRun,
+      id: "fr_01J8E0000000000000000000RT",
+      dismissed: true as const,
+      steps: activeRun.steps.map((step) => ({ ...step, jobId: retainedJobId })),
+    };
+    q.jobs.set(retainedJobId, { ...q.jobs.get(activeRun.steps[0]!.jobId!)!, id: retainedJobId, status: "succeeded" });
+    await writeFile(
+      join(f.dir, "productions", f.production.meta.id, "runs", `${retained.id}.json`),
+      JSON.stringify(retained, null, 2) + "\n",
+    );
+    await assert.rejects(
+      () => retryFrameStep(f.store, f.production.meta.id, retained.id, 0, () => f.production, q.deps.jobById),
+      /scene already has an active frame run/,
+    );
+    assert.equal((await readFrameRun(f.store, f.production.meta.id, retained.id))!.dismissed, true);
+  });
+
+  it("refuses a stale board ancestor after its newest retry is terminal", async () => {
+    const f = await fixture();
+    const run = await start(f, "board");
+    const q = queue();
+    let current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    q.settle(current.steps[0]!.jobId!, "succeeded");
+    current = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => f.production, q.deps.jobById))!;
+    current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    q.settle(current.steps[1]!.jobId!, "failed", "terminal");
+    await assert.rejects(
+      () => retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => f.production, q.deps.jobById),
+      /already has a newer retry attempt/,
+    );
+    await assert.rejects(
+      () => retryFrameStep(f.store, f.production.meta.id, run.id, 1, () => f.production, q.deps.jobById),
+      /terminal failure/,
+    );
+  });
+
+  it("refuses a stale cell ancestor after its newest retry is terminal", async () => {
+    const f = await fixture();
+    const run = await start(f, "board");
+    const q = queue();
+    const attempted = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    const sourceJobId = attempted.steps[0]!.jobId!;
+    q.settle(sourceJobId, "succeeded");
+    const parentId = "tk_01J8E0000000000000000000CT";
+    const parentDir = join(f.dir, "productions", f.production.meta.id, "takes", parentId);
+    await mkdir(parentDir, { recursive: true });
+    await writeFile(join(parentDir, "board.png"), encodePng(solidImage(16, 9, [1, 2, 3, 255])));
+    const production = {
+      ...f.production,
+      takes: [...f.production.takes, {
+        id: parentId,
+        jobId: sourceJobId,
+        boardSheetParent: true as const,
+        coversShots: attempted.steps[0]!.requestShotIds,
+        kind: "frame" as const,
+        provider: IMAGE.provider,
+        model: IMAGE.id,
+        provenance: { canonRevision: f.world.meta.canonRevision, sheets: {} },
+        references: [],
+        params: {},
+        cost: { estimatedMicroUsd: 1000, actualMicroUsd: null },
+        dispatchedAt: CLOCK(),
+        media: "board.png",
+      }],
+    };
+    let current = (await retryFrameCell(
+      f.store,
+      f.production.meta.id,
+      run.id,
+      0,
+      attempted.steps[0]!.updateShotIds[0]!,
+      () => production,
+      q.deps.jobById,
+    ))!;
+    current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    q.settle(current.steps[1]!.jobId!, "failed", "terminal");
+    await assert.rejects(
+      () => retryFrameCell(
+        f.store,
+        f.production.meta.id,
+        run.id,
+        0,
+        attempted.steps[0]!.updateShotIds[0]!,
+        () => production,
+        q.deps.jobById,
+      ),
+      /already has a newer retry attempt/,
+    );
+    await assert.rejects(
+      () => retryFrameCell(
+        f.store,
+        f.production.meta.id,
+        run.id,
+        1,
+        attempted.steps[0]!.updateShotIds[0]!,
+        () => production,
+        q.deps.jobById,
+      ),
+      /terminal failure/,
+    );
+  });
+
+  it("requires the immutable parent before retrying a fixed board cell", async () => {
     const f = await fixture();
     const shots = orderedShots(f.scene);
     const framed = shots[1]!;
@@ -760,12 +891,37 @@ describe("frame-run coordinator service", () => {
     q.settle(attempted.steps[0]!.jobId!, "succeeded");
     const before = await readFile(join(f.dir, "productions", production.meta.id, "runs", `${run.id}.json`), "utf8");
     await assert.rejects(
-      () => retryFrameCell(f.store, production.meta.id, run.id, 0, framed.id, production, q.deps.jobById),
-      /not authorized for update/,
+      () => retryFrameCell(f.store, production.meta.id, run.id, 0, framed.id, () => production, q.deps.jobById),
+      /board sheet for this cell is unavailable/,
     );
     const after = await readFile(join(f.dir, "productions", production.meta.id, "runs", `${run.id}.json`), "utf8");
     assert.equal(after, before);
     assert.equal(q.inputs.length, 1, "the stale crafted command creates no paid job");
+
+    const parentId = "tk_01J8E0000000000000000000PF";
+    const parentDir = join(f.dir, "productions", production.meta.id, "takes", parentId);
+    await mkdir(parentDir, { recursive: true });
+    await writeFile(join(parentDir, "board.png"), encodePng(solidImage(16, 9, [1, 2, 3, 255])));
+    const withParent = {
+      ...production,
+      takes: [...production.takes, {
+        id: parentId,
+        jobId: attempted.steps[0]!.jobId!,
+        boardSheetParent: true as const,
+        coversShots: attempted.steps[0]!.requestShotIds,
+        kind: "frame" as const,
+        provider: IMAGE.provider,
+        model: IMAGE.id,
+        provenance: { canonRevision: f.world.meta.canonRevision, sheets: {} },
+        references: [],
+        params: {},
+        cost: { estimatedMicroUsd: 1000, actualMicroUsd: null },
+        dispatchedAt: CLOCK(),
+        media: "board.png",
+      }],
+    };
+    const retried = (await retryFrameCell(f.store, production.meta.id, run.id, 0, framed.id, () => withParent, q.deps.jobById))!;
+    assert.deepEqual(retried.steps.at(-1)!.updateShotIds, [framed.id], "the Retry press is fresh authorization for this fixed cell");
   });
 
   it("uses the latest successful whole-board retry as cell context", async () => {
@@ -775,7 +931,7 @@ describe("frame-run coordinator service", () => {
     let current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
     const initialJobId = current.steps[0]!.jobId!;
     q.settle(initialJobId, "failed", "transient");
-    current = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, f.production, q.deps.jobById))!;
+    current = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => f.production, q.deps.jobById))!;
     current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
     const retryJobId = current.steps[1]!.jobId!;
     q.settle(retryJobId, "succeeded");
@@ -805,7 +961,7 @@ describe("frame-run coordinator service", () => {
       run.id,
       1,
       current.steps[1]!.updateShotIds[0]!,
-      production,
+      () => production,
       q.deps.jobById,
     ))!.steps.at(-1)!;
     assert.equal(
@@ -821,7 +977,7 @@ describe("frame-run coordinator service", () => {
     let current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
     const initialJobId = current.steps[0]!.jobId!;
     q.settle(initialJobId, "failed", "transient");
-    current = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, f.production, q.deps.jobById))!;
+    current = (await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => f.production, q.deps.jobById))!;
     const siblingBoard = current.steps[1]!;
     const siblingJobId = "jb_00000000000000000000000091";
     const namedCellJobId = "jb_00000000000000000000000092";
@@ -901,7 +1057,7 @@ describe("frame-run coordinator service", () => {
       }],
     };
     await assert.rejects(
-      () => retryFrameCell(f.store, f.production.meta.id, run.id, 2, shotId, production, q.deps.jobById),
+      () => retryFrameCell(f.store, f.production.meta.id, run.id, 2, shotId, () => production, q.deps.jobById),
       /successful board-sheet attempt/,
     );
   });
@@ -924,18 +1080,19 @@ describe("frame-run coordinator service", () => {
       state,
     });
     assert.equal(model.getState().frameRuns[0]!.steps[0]!.canRetry, true);
-    await assert.rejects(() => dismissFrameRun(f.store, f.production.meta.id, run.id, [...q.jobs.values()]), /active/);
+    await assert.rejects(() => dismissFrameRun(f.store, f.production.meta.id, run.id, () => [...q.jobs.values()]), /active/);
     await cancelFrameRun(f.store, f.production.meta.id, run.id, { jobById: q.deps.jobById, cancel: async () => {} });
-    assert.equal(await dismissFrameRun(f.store, f.production.meta.id, run.id, [...q.jobs.values()]), true);
-    assert.equal(await readFrameRun(f.store, f.production.meta.id, run.id), null);
+    assert.equal(await dismissFrameRun(f.store, f.production.meta.id, run.id, () => [...q.jobs.values()]), true);
+    const dismissed = await readFrameRun(f.store, f.production.meta.id, run.id);
+    assert.equal(dismissed?.dismissed, true, "dismissal hides the report but retains its retry lineage");
     model.apply({
       at: CLOCK(),
       type: "production.frame-run",
       worldId: WORLD_ID,
       productionId: f.production.meta.id,
       runId: run.id,
-      state: null,
+      state: await frameRunState(f.store, f.production.meta.id, dismissed!, [...q.jobs.values()]),
     });
-    assert.deepEqual(model.getState().frameRuns, []);
+    assert.equal(model.getState().frameRuns[0]!.run.dismissed, true, "recovery retains hidden retry lineage");
   });
 });

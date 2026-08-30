@@ -54,6 +54,7 @@ export function StoryboardRows({
   refusalVersion,
   frameRun,
   worldId,
+  onViewBoardSheet,
 }: {
   scene: SceneRecord;
   acceptedScene: SceneRecord;
@@ -75,6 +76,7 @@ export function StoryboardRows({
   refusalVersion: number;
   frameRun: FrameRunState | null;
   worldId: string;
+  onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -152,6 +154,7 @@ export function StoryboardRows({
                   onCommand={onCommand}
                   onDragStart={() => setDragBoundary(shot.id)}
                   onDragEnd={() => setDragBoundary(null)}
+                  onViewBoardSheet={onViewBoardSheet}
                 />
               ) : null}
               <Row
@@ -250,6 +253,7 @@ function BoardBand({
   onCommand,
   onDragStart,
   onDragEnd,
+  onViewBoardSheet,
 }: {
   board: PackedBoard;
   scene: SceneRecord;
@@ -264,6 +268,7 @@ function BoardBand({
   onCommand: (command: Command) => boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const members = board.memberShotIds.map((id) => shots.find((shot) => shot.id === id)!).filter(Boolean);
@@ -300,7 +305,15 @@ function BoardBand({
         {board.reason === null ? null : <span>split · {board.reason}</span>}
         <span>{board.durationSec}s / {capSec}s</span>
         <button type="button" title="Consolidated prompt" disabled={locked} onClick={() => setPromptOpen((open) => !open)}>P</button>
-        <button type="button" title="View board image" disabled>B</button>
+        <button
+          type="button"
+          className="fy-swboard__sheet"
+          title="View board sheet"
+          aria-label={`View board sheet ${board.letter}`}
+          onClick={(event) => onViewBoardSheet(board, event.currentTarget)}
+        >
+          <span aria-hidden="true" />
+        </button>
         {board.reason === null ? null : (
           <button
             type="button"
