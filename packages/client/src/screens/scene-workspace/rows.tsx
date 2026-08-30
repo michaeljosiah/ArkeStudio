@@ -332,7 +332,9 @@ function BoardBand({
               if (text.length === 0) {
                 event.currentTarget.value = stored ?? assembled;
               } else if (text !== (stored ?? assembled)) {
-                onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text });
+                if (!onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text })) {
+                  event.currentTarget.value = stored ?? assembled;
+                }
               }
             }}
           />

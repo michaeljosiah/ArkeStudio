@@ -368,6 +368,7 @@ export function assembleBoardPrompt(input: {
       scene: input.scene,
       shot,
       ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
+      capability: "video",
     }),
   );
   const context = [
@@ -376,7 +377,7 @@ export function assembleBoardPrompt(input: {
     input.scene.inherits?.timeOfDay,
     input.scene.defaults?.lighting,
     input.aspect,
-    ...contexts.flatMap((blocks) => [blocks.standing, blocks.persistent]),
+    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing, blocks.persistent]),
   ].filter((part, index, all): part is string =>
     typeof part === "string" && part.trim().length > 0 && all.indexOf(part) === index,
   );

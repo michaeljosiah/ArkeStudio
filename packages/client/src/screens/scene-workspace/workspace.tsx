@@ -148,7 +148,7 @@ export function SceneWorkspace({
   useEffect(() => {
     pendingCommand.current = false;
     setCommandPending(false);
-  }, [scene.version]);
+  }, [scene.id, sceneFile, scene.version]);
 
   return (
     <SelectionProvider value={selection}>
