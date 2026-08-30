@@ -291,8 +291,8 @@ describe("frame readiness names only a current dispatchable image", () => {
       { id: "ar_old", kind: "image" },
       { id: "ar_new", kind: "image", supersedes: "ar_old" },
     ];
-    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_old" }, artifacts), false);
-    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_new" }, artifacts), true);
+    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_old", trimInSec: 0 }, artifacts), false);
+    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_new", trimInSec: 0 }, artifacts), true);
   });
 });
 

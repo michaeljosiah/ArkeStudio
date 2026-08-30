@@ -243,7 +243,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     const state = structuredClone(stateWith(true)) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const still = production.takes.find((take) => take.kind === "frame")!;
-    production.selections[still.coversShots[0]!] = { acceptedTakeId: still.id };
+    production.selections[still.coversShots[0]!] = { acceptedTakeId: still.id, trimInSec: 0 };
     const mounted = await mountState(state);
     const row = q(mounted, `[data-testid="workspace-row-${still.coversShots[0]}"] .fy-swrow__band`)!;
     assert.notEqual(row.getAttribute("data-state"), "story");
