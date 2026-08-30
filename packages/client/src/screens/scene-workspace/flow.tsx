@@ -81,6 +81,7 @@ export function SceneFlow({
   slug,
   boardPack,
   stagedShotIds,
+  newShotIds,
   stagedBoards,
   locked,
   onCommand,
@@ -92,6 +93,7 @@ export function SceneFlow({
   slug: string | undefined;
   boardPack: WorkspaceBoardPack;
   stagedShotIds: ReadonlySet<string>;
+  newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
   locked: boolean;
   onCommand: (command: Command) => boolean;
@@ -114,8 +116,8 @@ export function SceneFlow({
     [scene],
   );
   const graph = useMemo(
-    () => buildGraph({ shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, stagedBoards }),
-    [shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, stagedBoards],
+    () => buildGraph({ shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards }),
+    [shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards],
   );
 
   /** Fit the graph to the viewport — what opening Flow does, and what `Fit` returns to. */
@@ -212,6 +214,10 @@ export function SceneFlow({
   }
 
   const current = subject.kind === "shot" ? subject.shotId : null;
+  useEffect(() => {
+    if (activeShotId !== null && shots.some((shot) => shot.id === activeShotId)) return;
+    setActiveShotId(shots[0]?.id ?? null);
+  }, [activeShotId, shots]);
   const focusShot = (shotId: string) => {
     setActiveShotId(shotId);
     select({ kind: "shot", shotId });
@@ -283,9 +289,11 @@ export function SceneFlow({
             style={{ left: node.x, top: node.y, width: NODE[node.kind].w, height: NODE[node.kind].h }}
             role="button"
             tabIndex={
-              node.staged || node.kind !== "shot"
+              node.staged
                 ? -1
-                : activeShotId === node.shotId || (activeShotId === null && node.shotId === shots[0]?.id)
+                : node.kind !== "shot"
+                  ? 0
+                  : activeShotId === node.shotId || (activeShotId === null && node.shotId === shots[0]?.id)
                   ? 0
                   : -1
             }
@@ -453,9 +461,10 @@ function buildGraph(input: {
   boardPack: WorkspaceBoardPack;
   moved: Record<string, { x: number; y: number }>;
   stagedShotIds: ReadonlySet<string>;
+  newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
 }): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const { shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, stagedBoards } = input;
+  const { shots, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards } = input;
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
   const at = (id: string, x: number, y: number) => moved[id] ?? { x, y };
@@ -501,7 +510,7 @@ function buildGraph(input: {
       meta: shot.title,
       shotId: shot.id,
       staged: stagedShotIds.has(shot.id),
-      ...(!stagedShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
+      ...(!newShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
         ? { thumb: mediaUrl(slug, `artifacts/${artifact.file}`) }
         : {}),
     });
@@ -579,7 +588,7 @@ function buildGraph(input: {
         });
       }
       const rendered = board.memberShotIds.some((shotId: string) => {
-        if (stagedShotIds.has(shotId)) return false;
+        if (newShotIds.has(shotId)) return false;
         const accepted = acceptedTakeId(production, shotId);
         return accepted !== null && production.takes.find((take) => take.id === accepted)?.kind === "clip";
       });

@@ -199,6 +199,14 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
       command: { kind: "move-shot", shotId: shots[1]!.id, to: { before: shots[0]!.id } },
     });
 
+    const advance = async (version: number) => {
+      const next = structuredClone(stateWith(true)) as ClientState;
+      next.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+        .scenes.find((candidate) => candidate.id === "sc_04")!.version = version;
+      await act(async () => __setStateForTest(next));
+    };
+    await advance(scene.version + 1);
+
     const divider = all(mounted, ".fy-swdivider")[0]!;
     await click(divider.querySelector("button") as HTMLElement);
     const insert = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
@@ -208,6 +216,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
       shot: { title: "Untitled shot", description: "" },
     });
     assert.equal(sent.some((message) => message.kind === "save-scene"), false);
+    await advance(scene.version + 2);
 
     const script = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"] .fy-swrow__script`)!;
     script.textContent = "The rewritten beat.";
@@ -401,6 +410,7 @@ describe("a scene the workspace cannot read is named, never guessed (R-29, R-60)
           slug={FIXTURE_STATE.world!.meta.slug}
           boardPack={{ ok: true, boards: [] }}
           stagedShotIds={new Set()}
+          newShotIds={new Set()}
           stagedBoards={false}
           locked={false}
           onCommand={() => true}

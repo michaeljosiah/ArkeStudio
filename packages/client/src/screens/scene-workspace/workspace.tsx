@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   orderedShots,
@@ -50,6 +50,8 @@ export function SceneWorkspace({
   const [view, setView] = useState<"storyboard" | "flow">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
   const [refusalVersion, setRefusalVersion] = useState(0);
+  const [commandPending, setCommandPending] = useState(false);
+  const pendingCommand = useRef(false);
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useState(true);
@@ -59,8 +61,11 @@ export function SceneWorkspace({
   const sceneFile = production.sceneFiles[scene.id];
   const scenePath = sceneFile === undefined ? null : `productions/${production.meta.id}/scenes/${sceneFile}.json`;
   const staged = [...world.proposals]
-    .reverse()
-    .find((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined);
+    .filter((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined)
+    .sort((left, right) =>
+      left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
+    )
+    .at(-1);
   const workingScene = scenePath === null ? scene : (staged?.scenes?.[scenePath] ?? scene);
   const shots = orderedShots(scene);
   const workingShots = orderedShots(workingScene);
@@ -75,6 +80,7 @@ export function SceneWorkspace({
       })
       .map((shot) => shot.id),
   );
+  const newShotIds = new Set(workingShots.filter((shot) => !acceptedById.has(shot.id)).map((shot) => shot.id));
   const workingIds = new Set(workingShots.map((shot) => shot.id));
   const removedShots = shots.filter((shot) => !workingIds.has(shot.id));
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
@@ -95,8 +101,8 @@ export function SceneWorkspace({
     [scene, production, artifacts, world.sheets, capSec],
   );
   const boardPack = useMemo(
-    () => boardsForScene({ scene: workingScene, production, artifacts, sheets: world.sheets, capSec, stagedShotIds }),
-    [workingScene, production, artifacts, world.sheets, capSec, stagedShotIds],
+    () => boardsForScene({ scene: workingScene, production, artifacts, sheets: world.sheets, capSec, stagedShotIds: newShotIds }),
+    [workingScene, production, artifacts, world.sheets, capSec, newShotIds],
   );
   const stagedBoards =
     JSON.stringify(scene.boards) !== JSON.stringify(workingScene.boards) ||
@@ -105,17 +111,22 @@ export function SceneWorkspace({
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : shots.find((shot) => shot.id === focus);
-  const write = (command: Command): boolean =>
-    sceneFile !== undefined && staged === undefined
-      ? sceneCommand({
+  const write = (command: Command): boolean => {
+    if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
+    const sent = sceneCommand({
           worldId: world.meta.worldId,
           productionId: production.meta.id,
           sceneFile,
           sceneId: scene.id,
           baseVersion: scene.version,
           command,
-        })
-      : false;
+        });
+    if (sent) {
+      pendingCommand.current = true;
+      setCommandPending(true);
+    }
+    return sent;
+  };
   const subjectLine =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
@@ -127,11 +138,17 @@ export function SceneWorkspace({
     () =>
       subscribeSceneRefusals((event) => {
         if (event.productionId === production.meta.id && event.sceneFile === sceneFile) {
+          pendingCommand.current = false;
+          setCommandPending(false);
           setRefusalVersion((version) => version + 1);
         }
       }),
     [production.meta.id, sceneFile],
   );
+  useEffect(() => {
+    pendingCommand.current = false;
+    setCommandPending(false);
+  }, [scene.version]);
 
   return (
     <SelectionProvider value={selection}>
@@ -209,8 +226,9 @@ export function SceneWorkspace({
               boardPack={boardPack}
               showBoards={showBoards}
               stagedShotIds={stagedShotIds}
+              newShotIds={newShotIds}
               stagedBoards={stagedBoards}
-              locked={staged !== undefined || sceneFile === undefined}
+              locked={staged !== undefined || sceneFile === undefined || commandPending}
               onCommand={write}
               refusalVersion={refusalVersion}
             />
@@ -223,8 +241,9 @@ export function SceneWorkspace({
               slug={world.meta.slug}
               boardPack={boardPack}
               stagedShotIds={stagedShotIds}
+              newShotIds={newShotIds}
               stagedBoards={stagedBoards}
-              locked={staged !== undefined || sceneFile === undefined}
+              locked={staged !== undefined || sceneFile === undefined || commandPending}
               onCommand={write}
             />
           )}

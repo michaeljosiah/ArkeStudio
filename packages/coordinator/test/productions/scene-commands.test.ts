@@ -278,7 +278,7 @@ describe("board overrides are keyed by shot id and versioned like every other co
     const moved = await sceneOnDisk(store);
     assert.equal(moved.version, split.version + 1, "one gesture made one version");
     assert.deepEqual(moved.boards?.splits, [ids[2]!]);
-    assert.deepEqual(moved.boards?.merges, []);
+    assert.deepEqual(moved.boards?.merges, [ids[1]!]);
 
     await applySceneCommand(store, {
       productionId: PRODUCTION,

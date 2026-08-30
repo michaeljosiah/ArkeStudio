@@ -261,7 +261,7 @@ describe("board boundary and prompt edits are whole named operations", () => {
       boards: { splits: ["sh_2"], merges: [] },
     };
     const after = moveBoardBoundary(before, { fromShotId: "sh_2", toShotId: "sh_3" });
-    assert.deepEqual(after.boards, { splits: ["sh_3"], merges: [] });
+    assert.deepEqual(after.boards, { splits: ["sh_3"], merges: ["sh_2"] });
     assert.throws(
       () => moveBoardBoundary(before, { fromShotId: "sh_2", toShotId: "sh_1" }),
       /divide nothing/,

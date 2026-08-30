@@ -452,12 +452,10 @@ export function moveBoardBoundary(
   const boards: Boards = record.boards ?? { splits: [], merges: [] };
   const splits = new Set(boards.splits);
   const merges = new Set(boards.merges);
-  const wasAuthored = splits.has(input.fromShotId);
   splits.delete(input.fromShotId);
-  // A hand split has no automatic seam beneath it to suppress. Automatic boundaries do, while
-  // hard cap boundaries are refused by the interaction before this command is composed.
-  if (wasAuthored) merges.delete(input.fromShotId);
-  else merges.add(input.fromShotId);
+  // The visible hand split may sit on top of an automatic continuity seam. Suppress the old
+  // position in the same command or moving one boundary can reveal another beneath it.
+  merges.add(input.fromShotId);
   merges.delete(input.toShotId);
   splits.add(input.toShotId);
   return withBoards(complete(record, shots), {

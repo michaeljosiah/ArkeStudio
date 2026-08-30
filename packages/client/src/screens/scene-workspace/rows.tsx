@@ -44,6 +44,7 @@ export function StoryboardRows({
   boardPack,
   showBoards,
   stagedShotIds,
+  newShotIds,
   stagedBoards,
   locked,
   onCommand,
@@ -62,6 +63,7 @@ export function StoryboardRows({
   boardPack: WorkspaceBoardPack;
   showBoards: boolean;
   stagedShotIds: ReadonlySet<string>;
+  newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
   locked: boolean;
   onCommand: (command: Command) => boolean;
@@ -138,6 +140,7 @@ export function StoryboardRows({
                   aspect={aspect}
                   locked={locked}
                   staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
+                  movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
                   refusalVersion={refusalVersion}
                   onCommand={onCommand}
                   onDragStart={() => setDragBoundary(shot.id)}
@@ -154,6 +157,7 @@ export function StoryboardRows({
                 aspect={aspect}
                 selected={shot.id === current}
                 staged={stagedShotIds.has(shot.id)}
+                newShot={newShotIds.has(shot.id)}
                 locked={locked}
                 canMoveUp={index > 0}
                 canMoveDown={index < shots.length - 1}
@@ -231,6 +235,7 @@ function BoardBand({
   aspect,
   locked,
   staged,
+  movable,
   refusalVersion,
   onCommand,
   onDragStart,
@@ -244,6 +249,7 @@ function BoardBand({
   aspect: string;
   locked: boolean;
   staged: boolean;
+  movable: boolean;
   refusalVersion: number;
   onCommand: (command: Command) => boolean;
   onDragStart: () => void;
@@ -269,8 +275,8 @@ function BoardBand({
         <button
           type="button"
           className="fy-swboard__handle"
-          draggable={!locked && board.reason !== "clip limit" && board.reason !== "panel limit"}
-          disabled={locked || board.reason === "clip limit" || board.reason === "panel limit"}
+          draggable={!locked && movable}
+          disabled={locked || !movable}
           aria-label={`Move board ${board.letter} boundary`}
           onClick={onDragStart}
           onDragStart={onDragStart}
@@ -292,9 +298,7 @@ function BoardBand({
             title={board.reason === "clip limit" || board.reason === "panel limit" ? `Cannot merge across the ${board.reason}` : undefined}
             onClick={() =>
               onCommand(
-                scene.boards?.splits.includes(startId)
-                  ? { kind: "clear-board-override", shotId: startId, override: "split" }
-                  : { kind: "set-board-override", shotId: startId, override: "merge" },
+                { kind: "set-board-override", shotId: startId, override: "merge" },
               )
             }
           >
@@ -325,7 +329,9 @@ function BoardBand({
             aria-label={`Consolidated prompt for board ${board.letter}`}
             onBlur={(event) => {
               const text = event.currentTarget.value.trim();
-              if (text.length > 0 && text !== (stored ?? assembled)) {
+              if (text.length === 0) {
+                event.currentTarget.value = stored ?? assembled;
+              } else if (text !== (stored ?? assembled)) {
                 onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text });
               }
             }}
@@ -346,6 +352,7 @@ function Row({
   aspect,
   selected,
   staged,
+  newShot,
   locked,
   canMoveUp,
   canMoveDown,
@@ -367,6 +374,7 @@ function Row({
   aspect: string;
   selected: boolean;
   staged: boolean;
+  newShot: boolean;
   locked: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
@@ -383,7 +391,7 @@ function Row({
   const restored = useRef(false);
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const accepted = staged ? null : acceptedTakeId(production, shot.id);
+  const accepted = newShot ? null : acceptedTakeId(production, shot.id);
   const acceptedTake = accepted === null ? undefined : takesForShot(production, shot.id).find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
   const hasFrame = shotHasFrame(production, artifacts, shot.id);
