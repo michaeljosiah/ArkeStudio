@@ -5873,6 +5873,9 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swboard__line { display: flex; align-items: center; gap: 8px; min-height: 26px; font-size: 10px; color: var(--muted-fg); }
 .fy-swboard__line button { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 2px 4px; text-decoration: underline; text-underline-offset: 2px; }
 .fy-swboard__line button:disabled { cursor: default; opacity: .45; text-decoration: none; }
+.fy-swboard__sheet { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: 7px !important; padding: 0 !important; text-decoration: none !important; }
+.fy-swboard__sheet:hover, .fy-swboard__sheet:focus-visible { background: var(--accent) !important; color: var(--fg) !important; }
+.fy-swboard__sheet > span { width: 13px; height: 13px; border: 1.5px solid currentColor; border-radius: 2px; background: linear-gradient(90deg, transparent 45%, currentColor 45% 55%, transparent 55%), linear-gradient(transparent 45%, currentColor 45% 55%, transparent 55%); }
 .fy-swboard__handle { color: var(--fg) !important; font-weight: 600; text-decoration: none !important; cursor: grab !important; }
 .fy-swboard__staged { color: var(--warning); font-family: var(--font-mono, ui-monospace, monospace); }
 .fy-swboard__rule { flex: 1; height: 1px; background: var(--border); }
@@ -5936,8 +5939,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swrow__run button { border: 0; background: transparent; color: inherit; cursor: pointer; text-decoration: underline; font: inherit; }
 
 /* Generate frames keeps the prototype's paper cards and restrained mono annotations. */
-.fy-swgen, .fy-swreview { border: 0; padding: 0; background: transparent; color: var(--fg); max-width: none; max-height: none; }
-.fy-swgen::backdrop, .fy-swreview::backdrop { background: var(--media-overlay-bg); opacity: .74; }
+.fy-swgen, .fy-swreview, .fy-swboard-sheet { border: 0; padding: 0; background: transparent; color: var(--fg); max-width: none; max-height: none; }
+.fy-swgen::backdrop, .fy-swreview::backdrop, .fy-swboard-sheet::backdrop { background: var(--media-overlay-bg); opacity: .74; }
 .fy-swgen__panel { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--bg); box-shadow: var(--shadow-lg); }
 .fy-swgen__head { display: flex; align-items: flex-start; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
 .fy-swgen__head > div { flex: 1; }
@@ -5975,6 +5978,30 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swreview__close { position: absolute; z-index: 2; right: 10px; top: 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--fg); width: 34px; height: 34px; cursor: pointer; }
 .fy-swreview footer { display: flex; align-items: center; justify-content: center; gap: 18px; min-height: 48px; font: 500 10px var(--font-mono, ui-monospace, monospace); }
 .fy-swreview footer button { border: 0; background: transparent; color: var(--fg); cursor: pointer; }
+.fy-swboard-sheet__panel { width: min(820px, calc(100vw - 68px)); max-height: calc(100vh - 68px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; color: var(--media-overlay-fg); }
+.fy-swboard-sheet__head { display: flex; align-items: center; gap: 10px; }
+.fy-swboard-sheet__head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+.fy-swboard-sheet__head span { color: color-mix(in srgb, var(--media-overlay-fg) 60%, transparent); font: 400 10.5px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard-sheet__head span:first-of-type { flex: 1; }
+.fy-swboard-sheet__head button { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: color-mix(in srgb, var(--media-overlay-fg) 75%, transparent); cursor: pointer; }
+.fy-swboard-sheet__head button:hover, .fy-swboard-sheet__head button:focus-visible { background: color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); color: var(--media-overlay-fg); }
+.fy-swboard-sheet__grid { display: grid; gap: 2px; padding: 2px; background: color-mix(in srgb, var(--media-overlay-fg) 14%, transparent); border-radius: 12px; box-shadow: var(--shadow-xl); overflow: hidden; }
+.fy-swboard-sheet__grid[data-columns="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fy-swboard-sheet__grid[data-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.fy-swboard-sheet__cell { position: relative; min-width: 0; overflow: hidden; background: var(--neutral-900); }
+.fy-swboard-sheet__cell > img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.fy-swboard-sheet__empty { box-sizing: border-box; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--media-overlay-fg) 5%, transparent) 0 10px, color-mix(in srgb, var(--media-overlay-fg) 2%, transparent) 10px 20px); color: color-mix(in srgb, var(--media-overlay-fg) 50%, transparent); font: 400 9.5px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard-sheet__busy { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--media-overlay-bg) 66%, transparent); color: var(--media-overlay-fg); font: 400 9.5px var(--font-mono, ui-monospace, monospace); animation: pulseDot 1.6s ease-in-out infinite; }
+.fy-swboard-sheet__number { position: absolute; top: 7px; left: 8px; border-radius: 4px; padding: 1px 5px; background: color-mix(in srgb, var(--media-overlay-fg) 92%, transparent); color: var(--neutral-900); font: 500 9.5px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard-sheet__meta { position: absolute; bottom: 7px; left: 8px; max-width: calc(100% - 76px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; padding: 1px 5px; background: color-mix(in srgb, var(--media-overlay-bg) 60%, transparent); color: var(--media-overlay-fg); font: 400 9px var(--font-mono, ui-monospace, monospace); }
+.fy-swboard-sheet__retry-cell { position: absolute; right: 8px; bottom: 7px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 30%, transparent); border-radius: 6px; padding: 2px 7px; background: color-mix(in srgb, var(--media-overlay-fg) 18%, transparent); color: var(--media-overlay-fg); font-size: 9.5px; font-weight: 500; cursor: pointer; }
+.fy-swboard-sheet__retry-cell:hover, .fy-swboard-sheet__retry-cell:focus-visible { background: color-mix(in srgb, var(--media-overlay-fg) 36%, transparent); }
+.fy-swboard-sheet__retry-cell:disabled { cursor: default; opacity: .45; }
+.fy-swboard-sheet__foot { display: flex; align-items: center; gap: 12px; }
+.fy-swboard-sheet__foot p { flex: 1; margin: 0; color: color-mix(in srgb, var(--media-overlay-fg) 68%, transparent); font-size: 10.5px; line-height: 1.6; text-wrap: pretty; }
+.fy-swboard-sheet__foot button { flex: none; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 30%, transparent); border-radius: 8px; padding: 6px 12px; background: color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); color: var(--media-overlay-fg); font-size: 11px; font-weight: 500; cursor: pointer; }
+.fy-swboard-sheet__foot button:hover, .fy-swboard-sheet__foot button:focus-visible { background: color-mix(in srgb, var(--media-overlay-fg) 30%, transparent); }
+.fy-swboard-sheet__foot button:disabled { cursor: default; opacity: .45; }
 
 .fy-swrow__body { flex: 1; min-width: 0; padding: 12px 16px 13px; display: flex; flex-direction: column; gap: 8px; }
 .fy-swrow__titleline { display: flex; align-items: center; gap: 7px; }
@@ -6086,6 +6113,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   .fy-swgen__methods { grid-template-columns: 1fr; }
   .fy-swgen__foot { align-items: stretch; flex-wrap: wrap; }
   .fy-swgen__context { flex-basis: 100%; }
+  .fy-swboard-sheet__panel { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
+  .fy-swboard-sheet__foot { align-items: stretch; flex-direction: column; }
   .fy-swindex { border-right: 0; border-bottom: 1px solid var(--border); padding: 10px; }
   .fy-swindex__list { flex-direction: row; overflow-x: auto; }
   .fy-swindex__scene { width: auto; min-width: 148px; }
@@ -6093,6 +6122,11 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   .fy-swrow__band { flex-direction: column; }
   .fy-swrow__frame { width: 100%; min-height: 158px; }
   .fy-swrow__actions { width: auto; border-left: 0; border-top: 1px solid var(--border); }
+}
+
+@media (pointer: coarse) {
+  .fy-swboard__sheet, .fy-swboard-sheet__head button { width: 44px; height: 44px; }
+  .fy-swboard-sheet__retry-cell, .fy-swboard-sheet__foot button { min-width: 44px; min-height: 44px; }
 }
 
 /* Reduced motion disables the layout transitions, per R-67. */

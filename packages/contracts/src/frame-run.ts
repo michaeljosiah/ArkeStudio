@@ -270,6 +270,8 @@ export const FrameRunSchema = z
     cursor: z.number().int().min(0),
     paused: z.boolean(),
     cancelled: z.boolean(),
+    /** Hidden from the run bar but retained because the board sheet remains a retry source. */
+    dismissed: z.literal(true).optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict()
@@ -439,12 +441,20 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       .filter(({ step, candidateIndex }) =>
         candidateIndex > index && step.updateShotIds.includes(shotId as never) && descendsFrom(candidateIndex, index))
       .sort((a, b) => b.candidateIndex - a.candidateIndex);
-  const blockedByDescendant = (index: number, shotIds: readonly string[]) =>
+  const blockedByDescendant = (index: number, shotIds: readonly string[], retryingWholeBoard = false) =>
     run.steps.some((step, candidateIndex) => {
       if (candidateIndex <= index || !descendsFrom(candidateIndex, index)) return false;
       if (!step.updateShotIds.some((shotId) => shotIds.includes(shotId))) return false;
       const status = baseStatus(step.jobId === null ? undefined : jobById.get(step.jobId));
-      return step.jobId === null || !["failed", "cancelled", "missing"].includes(status);
+      if (
+        retryingWholeBoard &&
+        step.grain === "cell-retry" &&
+        step.jobId !== null &&
+        ["succeeded", "failed", "cancelled"].includes(status)
+      ) {
+        return false;
+      }
+      return true;
     });
   const inheritedLandingOutcome = (index: number, shotId: string): "filed" | "superseded" | undefined => {
     let at = run.steps[index]?.retryOf;
@@ -514,6 +524,7 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
           ? "superseded"
           : rawStatus;
       const canRetryCell =
+        !run.cancelled &&
         run.mode === "board" &&
         run.steps[step.sourceStepIndex]?.dispatch.target.kind === "board-sheet" &&
         step.dispatch.referenceCapacity > 0 &&
@@ -551,10 +562,14 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
           : shots.some((shot) => shot.status === "needs-reconciliation")
             ? "needs-reconciliation"
             : rawStatus;
+    const wholeBoardRetry =
+      run.mode === "board" &&
+      step.dispatch.target.kind === "board-sheet" &&
+      ["succeeded", "reconciled", "superseded"].includes(status);
     const canRetry =
-      status === "failed" &&
-      failureClass === "transient" &&
-      !blockedByDescendant(index, step.updateShotIds);
+      !run.cancelled &&
+      ((status === "failed" && failureClass === "transient") || wholeBoardRetry) &&
+      !blockedByDescendant(index, step.updateShotIds, wholeBoardRetry);
     return {
       index,
       status,

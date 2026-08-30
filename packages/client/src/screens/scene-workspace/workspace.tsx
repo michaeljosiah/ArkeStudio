@@ -5,6 +5,7 @@ import {
   writerSceneView,
   type ClientMessage,
   type ArtifactSidecar,
+  type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
   type WorldBundle,
@@ -21,6 +22,7 @@ import { SelectionProvider, selectedShotId, type WorkspaceSubject } from "./sele
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, FrameRunReview, GenerateFramesDialog } from "./frame-run.js";
 import { Button } from "../../components/ui.js";
+import { BoardSheet } from "./board-sheet.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -54,6 +56,8 @@ export function SceneWorkspace({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(false);
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
+  const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
+  const [boardSheetTrigger, setBoardSheetTrigger] = useState<HTMLElement | null>(null);
   const [refusalVersion, setRefusalVersion] = useState(0);
   const [commandPending, setCommandPending] = useState(false);
   const pendingCommand = useRef(false);
@@ -125,8 +129,12 @@ export function SceneWorkspace({
       candidate.productionId === production.meta.id &&
       candidate.run.sceneId === scene.id)
     .sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt));
-  const frameRun = sceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused") ?? sceneRuns[0] ?? null;
+  const visibleSceneRuns = sceneRuns.filter((candidate) => candidate.run.dismissed !== true);
+  const frameRun = visibleSceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused") ?? visibleSceneRuns[0] ?? null;
   const boardsVisible = showBoards || frameRun?.run.mode === "board";
+  const selectedBoard = boardSheetKey === null || !boardPack.ok
+    ? null
+    : boardPack.boards.find((board) => JSON.stringify(board.memberShotIds) === boardSheetKey) ?? null;
   const write = (command: Command): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
@@ -275,6 +283,10 @@ export function SceneWorkspace({
               refusalVersion={refusalVersion}
               frameRun={frameRun}
               worldId={world.meta.worldId}
+              onViewBoardSheet={(board: PackedBoard, trigger) => {
+                setBoardSheetTrigger(trigger);
+                setBoardSheetKey(JSON.stringify(board.memberShotIds));
+              }}
             />
           ) : (
             <SceneFlow
@@ -342,6 +354,18 @@ export function SceneWorkspace({
             onClose={() => setReviewOpen(false)}
           />
         )}
+        <BoardSheet
+          board={selectedBoard}
+          scene={workingScene}
+          production={production}
+          artifacts={artifacts}
+          runs={sceneRuns}
+          aspect={aspect}
+          worldId={world.meta.worldId}
+          worldSlug={world.meta.slug}
+          returnFocus={boardSheetTrigger}
+          onClose={() => setBoardSheetKey(null)}
+        />
       </div>
     </SelectionProvider>
   );

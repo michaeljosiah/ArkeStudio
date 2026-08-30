@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import {
+  DEFAULT_SHOT_SEC,
   FrameRunSchema,
   FrameRunStateSchema,
   foldFrameRun,
@@ -168,6 +169,72 @@ function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noSho
   if (options.allFramed) {
     const frameTake = production.takes.find((take) => take.kind === "frame")!;
     for (const shot of orderedShots(scene)) production.selections[shot.id] = { acceptedTakeId: frameTake.id, trimInSec: 0 };
+  }
+  return state;
+}
+
+function stateWithBoardSheet(dismissed = false, fixedSecond = false): ClientState {
+  let complete = frameState({
+    mode: "board",
+    first: { status: "succeeded", finalization: "complete", etaSec: null },
+    firstLanding: "filed",
+  });
+  if (fixedSecond) {
+    const run = structuredClone(complete.run);
+    const step = run.steps[0]!;
+    step.updateShotIds = ["sh_12"];
+    step.landingOutcomes = { sh_12: "filed" };
+    step.request.panels[1] = {
+      panel: 2,
+      shotId: "sh_13",
+      role: "fixed",
+      fixedImage: { source: "artifact", id: "ar_01J8E0000000000000000000A2", path: "artifacts/shot-13-existing.png" },
+    };
+    step.request.slotAtAuthorization = { sh_12: null };
+    step.dispatch.references = ["artifacts/shot-13-existing.png"];
+    step.dispatch.params = { ...step.dispatch.params, references: step.dispatch.references, request: step.request };
+    complete = FrameRunStateSchema.parse(foldFrameRun(run, [
+      { id: JOB_1, status: "succeeded", finalization: "complete" },
+    ]));
+  }
+  if (dismissed) complete.run.dismissed = true;
+  const state = stateWith({ runs: [complete] });
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+  const source = production.takes.find((take) => take.kind === "frame")!;
+  production.takes.push({
+    ...source,
+    id: "tk_01J8E0000000000000000000P1",
+    jobId: JOB_1,
+    coversShots: ["sh_12", "sh_13"],
+    boardSheetParent: true,
+    dispatchedAt: "2026-08-30T12:00:00Z",
+    completedAt: "2026-08-30T12:01:00Z",
+    media: "board.png",
+  });
+  const firstArtifact = {
+    id: "ar_01J8E0000000000000000000A1",
+    kind: "image" as const,
+    file: "shot-12-board.png",
+    hash: "sha256:0123456789abcdef" as const,
+    origin: { by: "system" as const, producedBy: `frame-run:${JOB_1}` },
+    links: ["saltlight", "sh_12", "tk_01J8E0000000000000000000P1"],
+    production: "saltlight",
+    created: "2026-08-30T12:01:00Z",
+  };
+  state.world!.artifacts.push(firstArtifact);
+  production.selections.sh_12 = { ...production.selections.sh_12, trimInSec: 0, startFrameArtifactId: firstArtifact.id };
+  if (fixedSecond) {
+    state.world!.artifacts.push({
+      id: "ar_01J8E0000000000000000000A2",
+      kind: "image",
+      file: "shot-13-existing.png",
+      hash: "sha256:fedcba9876543210",
+      origin: { by: "user" },
+      links: ["saltlight", "sh_13"],
+      production: "saltlight",
+      created: "2026-08-30T11:00:00Z",
+    });
+    production.selections.sh_13 = { trimInSec: 0, startFrameArtifactId: "ar_01J8E0000000000000000000A2" };
   }
   return state;
 }
@@ -511,6 +578,160 @@ describe("durable run projections", () => {
     await click(one(item, '[aria-label="Close generated frames"]')!);
     await click(one(item, '[aria-label="Dismiss frame run"]')!);
     assert.equal(sent.at(-1)?.kind, "frame-run-dismiss");
+  });
+});
+
+describe("board sheet review", () => {
+  it("matches the prototype grid and sends board and cell retry through the durable run", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWithBoardSheet(), sent);
+    const open = one(item, '[aria-label="View board sheet A"]')!;
+    await click(open);
+
+    const sheet = one(item, ".fy-swboard-sheet")!;
+    assert.equal(sheet.parentElement?.classList.contains("fy-sw"), true, "the overlay mounts on the whole app frame");
+    assert.match(sheet.textContent ?? "", /Board A.*shots 12–13 · 2 cells · one pass.*10s/);
+    assert.match(sheet.textContent ?? "", /One image, one pass .* cast, light and grade are shared/);
+    assert.equal(one(item, ".fy-swboard-sheet__grid")?.getAttribute("data-columns"), "2");
+    assert.equal(one(item, '[data-testid="board-sheet-cell-sh_12"]')?.getAttribute("style"), "aspect-ratio:16 / 9");
+    assert.match(one(item, '[data-testid="board-sheet-cell-sh_12"] img')?.getAttribute("src") ?? "", /artifacts\/shot-12-board\.png$/);
+    assert.match(one(item, '[data-testid="board-sheet-cell-sh_13"]')?.textContent ?? "", /no frame yet/);
+    assert.match(one(item, '[data-testid="board-sheet-cell-sh_12"]')?.textContent ?? "", /shot 12.*4\.0s/);
+
+    await click(one(item, '[aria-label="Retry shot 12 against board A"]')!);
+    assert.deepEqual(sent.at(-1), {
+      kind: "frame-run-retry-cell",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      runId: RUN_ID,
+      stepIndex: 0,
+      shotId: "sh_12",
+    });
+    await click([...sheet.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Retry board") as HTMLElement);
+    assert.deepEqual(sent.at(-1), {
+      kind: "frame-run-retry-step",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      runId: RUN_ID,
+      stepIndex: 0,
+    });
+    await click(sheet);
+    assert.equal(one(item, ".fy-swboard-sheet"), null);
+  });
+
+  it("keeps dismissed run lineage available without putting its bar back", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWithBoardSheet(true), sent);
+    assert.equal(one(item, '[data-testid="frame-run-bar"]'), null);
+    await click(named(item, "Show boards"));
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    assert.equal((one(item, '[aria-label="Retry shot 12 against board A"]') as HTMLButtonElement).disabled, false);
+    await click(one(item, '[aria-label="Retry shot 12 against board A"]')!);
+    assert.equal(sent.at(-1)?.kind, "frame-run-retry-cell");
+  });
+
+  it("retries a failed first board pass before any parent sheet exists", async () => {
+    const failed = frameState({
+      mode: "board",
+      first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
+    });
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWith({ runs: [failed] }), sent);
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    const retry = [...one(item, ".fy-swboard-sheet")!.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Retry board") as HTMLButtonElement;
+    assert.equal(retry.disabled, false);
+    await click(retry);
+    assert.deepEqual(sent.at(-1), {
+      kind: "frame-run-retry-step",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      runId: RUN_ID,
+      stepIndex: 0,
+    });
+  });
+
+  it("offers Retry for a fixed reference cell once the board parent exists", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWithBoardSheet(false, true), sent);
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    const fixedRetry = one(item, '[aria-label="Retry shot 13 against board A"]') as HTMLButtonElement;
+    assert.equal(fixedRetry.disabled, false);
+    await click(fixedRetry);
+    assert.deepEqual(sent.at(-1), {
+      kind: "frame-run-retry-cell",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      runId: RUN_ID,
+      stepIndex: 0,
+      shotId: "sh_13",
+    });
+  });
+
+  it("uses three columns beyond four members and keeps portrait production cells", async () => {
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta.aspect = "9:16";
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shots = orderedShots(scene);
+    shots[0]!.description = "@maren-kest watches.";
+    shots[1]!.description = "@maren-kest waits.";
+    for (let number = 14; number <= 16; number += 1) {
+      shots.push({ id: `sh_${number}`, number, title: `Beat ${number}`, description: "@maren-kest waits.", durationSec: 1 });
+    }
+    (scene as unknown as { shots: typeof shots }).shots = shots;
+    const item = await mount(state);
+    await click(named(item, "Show boards"));
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    assert.equal(one(item, ".fy-swboard-sheet__grid")?.getAttribute("data-columns"), "3");
+    assert.equal(all(item, ".fy-swboard-sheet__cell").length, 5);
+    assert.equal(one(item, ".fy-swboard-sheet__cell")?.getAttribute("style"), "aspect-ratio:9 / 16");
+  });
+
+  it("keeps the normative two-column board geometry for one member", async () => {
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    (scene as unknown as { shots: unknown[] }).shots = [orderedShots(scene)[0]!];
+    const item = await mount(state);
+    await click(named(item, "Show boards"));
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    assert.equal(one(item, ".fy-swboard-sheet__grid")?.getAttribute("data-columns"), "2");
+  });
+
+  it("disables retained board retries while another run owns the scene", async () => {
+    const state = stateWithBoardSheet(true);
+    const active = frameState({ mode: "board" });
+    active.run.id = "fr_01J8E0000000000000000000R2";
+    active.run.createdAt = "2026-08-30T12:02:00Z";
+    state.frameRuns.push(active);
+    const item = await mount(state);
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    assert.equal((one(item, '[aria-label="Retry shot 12 against board A"]') as HTMLButtonElement).disabled, true);
+    const retryBoard = [...one(item, ".fy-swboard-sheet")!.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Retry board") as HTMLButtonElement;
+    assert.equal(retryBoard.disabled, true);
+  });
+
+  it("does not present an inherited boundary as a board frame and uses the effective duration", async () => {
+    const state = stateWithBoardSheet();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene)[0]!;
+    delete shot.durationSec;
+    delete production.selections.sh_12!.acceptedTakeId;
+    const artifact = state.world!.artifacts.find((candidate) => candidate.id === production.selections.sh_12!.startFrameArtifactId)!;
+    artifact.boundaryExtraction = {
+      sourceTakeId: "tk_01J8E0000000000000000000T1",
+      mediaTakeId: "tk_01J8E0000000000000000000T1",
+      atSec: null,
+      method: "ffmpeg-frame/1",
+    };
+    const item = await mount(state);
+    await click(one(item, '[aria-label="View board sheet A"]')!);
+    const cell = one(item, '[data-testid="board-sheet-cell-sh_12"]')!;
+    assert.match(cell.textContent ?? "", /no frame yet/);
+    assert.match(cell.textContent ?? "", new RegExp(`${DEFAULT_SHOT_SEC.toFixed(1)}s`));
   });
 });
 

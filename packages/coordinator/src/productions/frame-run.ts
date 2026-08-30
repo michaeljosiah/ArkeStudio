@@ -831,13 +831,39 @@ function retrySource(
     if (!candidate.updateShotIds.some((candidateShot) => requestedShots.includes(candidateShot))) return false;
     if (candidate.jobId === null) return true;
     const descendant = jobById(candidate.jobId);
-    return descendant === undefined || descendant.status === "queued" || descendant.status === "submitting" ||
-      descendant.status === "running" || descendant.status === "needs-reconciliation" || descendant.status === "succeeded";
+    if (
+      grain === "step-retry" &&
+      candidate.grain === "cell-retry" &&
+      descendant !== undefined &&
+      descendant.finalization?.status !== "pending" &&
+      descendant.finalization?.status !== "failed" &&
+      TERMINAL.has(descendant.status)
+    ) return false;
+    return true;
   });
   if (blocking !== undefined) {
-    throw new Error(`${grain === "cell-retry" ? shotId : `frame-run source ${step.sourceStepIndex}`} already has a pending or successful retry`);
+    throw new Error(`${grain === "cell-retry" ? shotId : `frame-run source ${step.sourceStepIndex}`} already has a newer retry attempt`);
   }
   return step;
+}
+
+async function refuseRetryWhileAnotherRunOwnsScene(
+  store: WorldStore,
+  productionId: string,
+  run: FrameRun,
+  jobById: (id: string) => Job | undefined,
+): Promise<void> {
+  for (const candidate of await listFrameRuns(store, productionId)) {
+    if (candidate.id === run.id || candidate.sceneId !== run.sceneId) continue;
+    const jobs = candidate.steps.flatMap((step) => {
+      const job = step.jobId === null ? undefined : jobById(step.jobId);
+      return job === undefined ? [] : [job];
+    });
+    const state = await frameRunState(store, productionId, candidate, jobs);
+    if (state.status === "active" || state.status === "paused") {
+      throw new Error("this scene already has an active frame run");
+    }
+  }
 }
 
 function retryDispatch(
@@ -886,37 +912,47 @@ export async function retryFrameStep(
   productionId: string,
   runId: string,
   stepIndex: number,
-  production: ProductionBundle,
+  getProduction: () => ProductionBundle | undefined,
   jobById: (id: string) => Job | undefined,
 ): Promise<FrameRun | null> {
-  return mutateRun(store, productionId, runId, (run) => {
-    const source = retrySource(run, stepIndex, jobById, "step-retry");
-    const appendedIndex = run.steps.length;
-    const request = { ...source.request, slotAtAuthorization: currentSlots(production, source.updateShotIds) };
-    return {
-      ...run,
-      steps: [...run.steps, {
-        ...source,
-        label: `${source.label} retry`,
-        request,
-        dispatch: retryDispatch(
-          run,
-          productionId,
-          source,
+  return store.gateOp(async () => {
+    const existing = await readFrameRun(store, productionId, runId);
+    if (existing === null) return null;
+    await refuseRetryWhileAnotherRunOwnsScene(store, productionId, existing, jobById);
+    const production = getProduction();
+    if (production === undefined) throw new Error(`production ${productionId} is no longer available`);
+    return mutateRun(store, productionId, runId, (run) => {
+      const source = retrySource(run, stepIndex, jobById, "step-retry");
+      const appendedIndex = run.steps.length;
+      const request = { ...source.request, slotAtAuthorization: currentSlots(production, source.updateShotIds) };
+      const next: FrameRun = {
+        ...run,
+        paused: false,
+        steps: [...run.steps, {
+          ...source,
+          label: `${source.label} retry`,
           request,
-          appendedIndex,
-          source.dispatch.target,
-          source.dispatch.references,
-          source.dispatch.output,
-          source.dispatch.estimatedMicroUsd,
-        ),
-        sourceStepIndex: source.sourceStepIndex,
-        grain: "step-retry",
-        retryOf: stepIndex,
-        jobId: null,
-        landingOutcomes: {},
-      }],
-    };
+          dispatch: retryDispatch(
+            run,
+            productionId,
+            source,
+            request,
+            appendedIndex,
+            source.dispatch.target,
+            source.dispatch.references,
+            source.dispatch.output,
+            source.dispatch.estimatedMicroUsd,
+          ),
+          sourceStepIndex: source.sourceStepIndex,
+          grain: "step-retry",
+          retryOf: stepIndex,
+          jobId: null,
+          landingOutcomes: {},
+        }],
+      };
+      delete next.dismissed;
+      return next;
+    });
   });
 }
 
@@ -934,14 +970,37 @@ export async function retryFrameCell(
   runId: string,
   stepIndex: number,
   shotId: string,
-  production: ProductionBundle,
+  getProduction: () => ProductionBundle | undefined,
+  jobById: (id: string) => Job | undefined,
+): Promise<FrameRun | null> {
+  return store.gateOp(() => retryFrameCellUnderGate(
+    store,
+    productionId,
+    runId,
+    stepIndex,
+    shotId,
+    getProduction,
+    jobById,
+  ));
+}
+
+async function retryFrameCellUnderGate(
+  store: WorldStore,
+  productionId: string,
+  runId: string,
+  stepIndex: number,
+  shotId: string,
+  getProduction: () => ProductionBundle | undefined,
   jobById: (id: string) => Job | undefined,
 ): Promise<FrameRun | null> {
   const existing = await readFrameRun(store, productionId, runId);
   if (existing === null) return null;
+  await refuseRetryWhileAnotherRunOwnsScene(store, productionId, existing, jobById);
+  const production = getProduction();
+  if (production === undefined) throw new Error(`production ${productionId} is no longer available`);
   const source = retrySource(existing, stepIndex, jobById, "cell-retry", shotId);
-  if (!source.updateShotIds.includes(shotId as never)) {
-    throw new Error(`${shotId} was not authorized for update by frame-run step ${stepIndex}`);
+  if (!source.requestShotIds.includes(shotId as never)) {
+    throw new Error(`${shotId} is not a panel in frame-run step ${stepIndex}`);
   }
   const ancestors = new Set<number>();
   let ancestor: number | undefined = stepIndex;
@@ -953,7 +1012,7 @@ export async function retryFrameCell(
     .map((step, index) => ({ step, index }))
     .filter(({ step, index }) => {
       if (!ancestors.has(index) || step.dispatch.target.kind !== "board-sheet") return false;
-      if (!step.updateShotIds.includes(shotId as never) || step.jobId === null) return false;
+      if (!step.requestShotIds.includes(shotId as never) || step.jobId === null) return false;
       const job = jobById(step.jobId);
       return job?.status === "succeeded" && job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
     })
@@ -990,8 +1049,9 @@ export async function retryFrameCell(
       slotAtAuthorization: currentSlots(production, [shotId]),
     });
     const references = [...request.references.map((reference) => reference.path), path];
-    return {
+    const next: FrameRun = {
       ...run,
+      paused: false,
       steps: [...run.steps, {
         label: `${source.label} - ${shotId} retry`,
         requestShotIds: [shotId],
@@ -1015,6 +1075,8 @@ export async function retryFrameCell(
         landingOutcomes: {},
       }],
     };
+    delete next.dismissed;
+    return next;
   });
 }
 
@@ -1043,14 +1105,14 @@ export async function dismissFrameRun(
   store: WorldStore,
   productionId: string,
   runId: string,
-  jobs: readonly Job[],
+  jobs: () => readonly Job[],
 ): Promise<boolean> {
   return serializeFileMutation(runPath(store, productionId, runId), async () => {
     const run = await readFrameRun(store, productionId, runId);
     if (run === null) return false;
-    const state = await frameRunState(store, productionId, run, jobs);
+    const state = await frameRunState(store, productionId, run, jobs());
     if (state.status === "active" || state.status === "paused") throw new Error("an active frame run cannot be dismissed");
-    await rm(toExtendedLength(runPath(store, productionId, runId)), { force: true });
+    await writeRun(store, productionId, { ...run, dismissed: true });
     return true;
   });
 }
