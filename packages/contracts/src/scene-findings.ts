@@ -142,3 +142,49 @@ export function sceneDeleteBlockers(production: ProductionBundle, scene: SceneRe
   }
   return reasons;
 }
+
+/**
+ * What a shot deletion would take with it, in the words of what stands in the way (R-39).
+ *
+ * The scene-level twin above is the precedent, and the discipline is the same: a person told
+ * "cannot delete" learns nothing, and a person told "shot 3 has an accepted take" knows exactly
+ * what to do next. Every blocker is named individually rather than folded into a count.
+ *
+ * `activePlans` is the caller's — plan state is folded from a journal on disk, not carried on
+ * the bundle — and it names the scenes with a nonterminal plan. Everything else is derivable
+ * here: the accepted selection, the spine anchor, and the storyboard panel currently drawn.
+ *
+ * What is deliberately NOT a blocker: takes, reviews, ledger rows and completed plans. Those
+ * are immutable paid history that keeps the shot id and stays explainable as `shot deleted from
+ * scene` — refusing on them would make paid work permanently un-editable.
+ */
+export function shotDeleteBlockers(
+  production: ProductionBundle,
+  scene: SceneRecord,
+  shotId: string,
+  activePlans: readonly { planId: string; sceneId: string; status: string }[] = [],
+): string[] {
+  const reasons: string[] = [];
+  const shot = orderedShots(scene).find((candidate) => candidate.id === shotId);
+  if (shot === undefined) return [`shot ${shotId} is not in this scene`];
+  const named = `shot ${shot.number}`;
+
+  if (production.selections[shotId]?.acceptedTakeId != null) {
+    reasons.push(
+      `${named} has an accepted take — reject it first, or the footage is left belonging to nothing`,
+    );
+  }
+  if (production.spine?.anchors?.[shotId] !== undefined) {
+    reasons.push(`${named} is anchored to the track — move or clear the anchor first`);
+  }
+  if (scene.storyboard?.panels.includes(shotId) === true) {
+    reasons.push(
+      `${named} is a panel in the storyboard drawn for this scene — redraw the storyboard first`,
+    );
+  }
+  for (const plan of activePlans) {
+    if (plan.sceneId !== scene.id) continue;
+    reasons.push(`a dispatch for this scene is still running (${plan.planId}) — let it finish or cancel it`);
+  }
+  return reasons;
+}

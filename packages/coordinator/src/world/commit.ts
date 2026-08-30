@@ -11,6 +11,7 @@ import {
   newId,
   SceneRecordSchema,
   WorldMetaSchema,
+  canonicalSceneFlow,
   type SceneRecord,
 } from "@arke-studio/contracts";
 import {
@@ -264,7 +265,17 @@ export function changesAnything(path: string, live: string, proposed: string): b
         : graphSceneFor(liveRecord, proposedRecord);
       const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
       keys.delete("version");
-      return [...keys].some((k) => JSON.stringify(asFields(before)[k]) !== JSON.stringify(asFields(after)[k]));
+      /*
+       * The flow is compared as a TOPOLOGY, not as two arrays (R-18).
+       *
+       * Node and edge storage order carries no meaning — permuting it changes nothing any
+       * consumer answers — so comparing the raw arrays reports a change where there is none:
+       * a needless version for a reordering proposal, and worse, a staleness refusal when the
+       * live file was reordered after staging and says exactly what the proposal says.
+       */
+      const fieldsBefore: Record<string, unknown> = { ...asFields(before), flow: canonicalSceneFlow(before.flow) };
+      const fieldsAfter: Record<string, unknown> = { ...asFields(after), flow: canonicalSceneFlow(after.flow) };
+      return [...keys].some((k) => JSON.stringify(fieldsBefore[k]) !== JSON.stringify(fieldsAfter[k]));
     }
     if (
       track === "story" ||

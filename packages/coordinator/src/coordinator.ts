@@ -176,6 +176,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
+import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -5233,6 +5234,60 @@ export class Coordinator {
             productionId: msg.productionId,
             sceneFile: msg.sceneFile,
             reason: err instanceof Error ? err.message : "the save could not be applied",
+          });
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      /*
+       * One named scene edit (SPEC-029 R-36). `save-scene` above rewrites the document; this
+       * says what changed, refuses against a moved version, and commits one validated record
+       * or nothing at all — including the deleted shot's selection, in the same commit.
+       */
+      case "scene-command": {
+        const store = this.opts.provider.openStore?.();
+        /*
+         * The open store must BE the world the command was composed for. A command still in
+         * flight while another world opens would otherwise edit whichever world is open now —
+         * two worlds can hold the same production id, scene stem and version — while the
+         * refusal and snapshot bookkeeping still named the old one.
+         */
+        if (!store || store.worldId !== msg.worldId) return;
+        await applySceneCommand(
+          store,
+          {
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            sceneId: msg.sceneId,
+            baseVersion: msg.baseVersion,
+            command: sceneCommandFrom(msg.command),
+          },
+          {
+            // Plan status is folded from the journal joined with live queue facts, so the probe
+            // comes from here rather than from the write path reaching for the dispatcher.
+            activePlans: async (productionId) => {
+              const plans = await listPlans(store, productionId).catch(() => []);
+              const active: Array<{ planId: string; sceneId: string; status: string }> = [];
+              for (const plan of plans) {
+                const state = await planState(store, plan, this.planDriverDeps()).catch(() => null);
+                if (state === null) continue;
+                if (state.status === "authorized" || state.status === "active") {
+                  active.push({ planId: plan.planId, sceneId: plan.sceneId, status: state.status });
+                }
+              }
+              return active;
+            },
+          },
+        ).catch((err: unknown) => {
+          // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
+          // throws away the edit with nothing to show for it (the save-scene lesson).
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason: err instanceof Error ? err.message : "the edit could not be applied",
           });
         });
         await this.refreshWorldSnapshot(msg.worldId);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SheetSchema } from "@arke-studio/contracts";
-import { applyResolution, mergeMarkdown } from "../../src/gate/merge.js";
+import { SceneRecordSchema, SheetSchema } from "@arke-studio/contracts";
+import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "../../src/gate/merge.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { splitSections } from "../../src/frontmatter.js";
 
@@ -138,5 +138,275 @@ describe("field-level three-way merge (R-6, D3, D4)", () => {
     const resolved = applyResolution("characters/maren-kest.md", merged, conflicts[0]!, "theirs");
     assert.equal(sectionsOf(resolved).get("Appearance"), "White braids.");
     assertValidSheet(resolved);
+  });
+});
+
+describe("a scene's structure is ONE field, however it is spelled (SPEC-029 R-1, issue 601)", () => {
+  /*
+   * The failure this closes: Arke stages a shot amendment against a legacy scene, somebody
+   * saves the same scene in the storyboard (which migrates it), and the rebase merges the
+   * proposal's `shots` beside the live `flow`. The union then refuses the target, and no
+   * resolution of the `shots` conflict can save it — the proposal is stranded.
+   */
+  const shot = (id: string, number: number, description: string) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description,
+  });
+  const legacy = (shots: ReturnType<typeof shot>[], version = 3) =>
+    JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      shots,
+    });
+  const migrated = (raw: string, version = 4): string => {
+    const scene = JSON.parse(raw) as { shots: ReturnType<typeof shot>[] };
+    const { shots, ...base } = scene;
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: `sfn_${s.id.replace("_", "-")}`, kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const edges = nodes.slice(1).map((to, index) => {
+      const from = nodes[index]!;
+      const token = (n: (typeof nodes)[number]) =>
+        n.kind === "shot" ? (n as { shot: { id: string } }).shot.id.replace("_", "-") : n.kind;
+      return {
+        id: `sfe_${token(from)}-${token(to)}`,
+        kind: "sequence",
+        from: { nodeId: from.id, port: "out" },
+        to: { nodeId: to.id, port: "in" },
+      };
+    });
+    return JSON.stringify({
+      ...base,
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+      },
+    });
+  };
+
+  const A = shot("sh_1", 1, "The tide turns.");
+  const B = shot("sh_2", 2, "The verse rises.");
+
+  it("carries a legacy amendment across a live migration without producing both fields", () => {
+    const base = legacy([A, B]);
+    const mine = legacy([A, { ...B, description: "The verse rises, and the room answers." }]);
+    const theirs = migrated(base);
+
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, mine, theirs).merged) as Record<
+      string,
+      unknown
+    >;
+    assert.equal("flow" in merged && "shots" in merged, false, "one structural field, never both");
+    assert.ok("shots" in merged, "the proposal's answer is the array the gate re-derives at accept");
+    const shots = merged["shots"] as ReturnType<typeof shot>[];
+    assert.equal(shots[1]?.description, "The verse rises, and the room answers.");
+  });
+
+  it("keeps the live migration when the proposal changed nothing structural", () => {
+    const base = legacy([A, B]);
+    const theirs = migrated(base);
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, base, theirs).merged) as Record<
+      string,
+      unknown
+    >;
+    assert.ok("flow" in merged, "a migration nobody contradicted stands");
+    assert.equal("shots" in merged, false);
+  });
+
+  it("raises ONE conflict when both sides changed the shots, not two half-answers", () => {
+    const base = legacy([A, B]);
+    const mine = legacy([A, { ...B, description: "mine" }]);
+    const theirs = migrated(legacy([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const structural = result.conflicts.filter((c) => c.field === "shots" || c.field === "flow");
+    assert.equal(structural.length, 1, "one field, one conflict");
+    const merged = JSON.parse(result.merged) as Record<string, unknown>;
+    assert.equal("flow" in merged && "shots" in merged, false);
+  });
+});
+
+describe("a change that lives only in the graph survives a rebase (codex round 2 on #653)", () => {
+  /*
+   * The mirror of the case above, and the one comparing ordered shots alone gets wrong: a
+   * proposal can change nothing but the graph — an authored beat, a node identity — and shot
+   * payloads then say "mine is the base", so the merge takes the live flow and the approved
+   * edit is discarded with no conflict to show for it.
+   */
+  const shot = (id: string, number: number) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description: `Beat ${number}.`,
+  });
+  const nodeId = (id: string) => `sfn_${id.replace("_", "-")}`;
+  const graphScene = (over: Record<string, unknown> = {}, version = 4) => {
+    const shots = [shot("sh_1", 1), shot("sh_2", 2)];
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: nodeId(s.id), kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const token = (n: { kind: string; shot?: { id: string } }) =>
+      n.kind === "shot" ? n.shot!.id.replace("_", "-") : n.kind;
+    const edges = nodes.slice(1).map((to, index) => ({
+      id: `sfe_${token(nodes[index]!)}-${token(to)}`,
+      kind: "sequence",
+      from: { nodeId: nodes[index]!.id, port: "out" },
+      to: { nodeId: to.id, port: "in" },
+    }));
+    return JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+        ...over,
+      },
+    });
+  };
+
+  it("keeps an authored beat the proposal added, when the live scene only moved elsewhere", () => {
+    const base = graphScene();
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [nodeId("sh_1")] };
+    const mine = graphScene({ storyboardGroups: [beat] });
+    // Something unrelated moved live, which is what triggers a rebase at all.
+    const theirs = JSON.stringify({ ...(JSON.parse(base) as object), title: "The verse, again", version: 5 });
+
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, mine, theirs).merged) as {
+      flow?: { storyboardGroups?: unknown[] };
+      title?: string;
+    };
+    assert.deepEqual(merged.flow?.storyboardGroups, [beat], "the authored beat is not discarded");
+    assert.equal(merged.title, "The verse, again", "and the live edit it rebased onto still lands");
+  });
+
+  it("treats a permutation of the live arrays as no change at all (R-18)", () => {
+    const base = graphScene();
+    const parsed = JSON.parse(base) as { flow: { nodes: unknown[]; edges: unknown[] } };
+    const theirs = JSON.stringify({
+      ...parsed,
+      version: 5,
+      flow: { ...parsed.flow, nodes: [...parsed.flow.nodes].reverse(), edges: [...parsed.flow.edges].reverse() },
+    });
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [nodeId("sh_1")] };
+    const mine = graphScene({ storyboardGroups: [beat] });
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    assert.deepEqual(
+      result.conflicts.filter((c) => c.field === "shots"),
+      [],
+      "a reordering is not a competing structural change",
+    );
+    const merged = JSON.parse(result.merged) as { flow?: { storyboardGroups?: unknown[] } };
+    assert.deepEqual(merged.flow?.storyboardGroups, [beat]);
+  });
+});
+
+describe("a structural conflict can actually be resolved (codex round 3 on #653)", () => {
+  /*
+   * The conflict is raised under one field name, but the two sides may spell the structure
+   * differently. Restoring a choice therefore has to write the CHOSEN side's own key and remove
+   * the other — assigning a flow object to `shots`, or leaving a stale `flow` beside a restored
+   * array, produces a record neither arm of the union reads, and a conflict nobody can accept
+   * their way out of.
+   */
+  const shot = (id: string, number: number, description: string) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description,
+  });
+  const legacyScene = (shots: ReturnType<typeof shot>[], version = 3) =>
+    JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      shots,
+    });
+  const migratedFrom = (raw: string, version = 4): string => {
+    const scene = JSON.parse(raw) as { shots: ReturnType<typeof shot>[] };
+    const { shots, ...base } = scene;
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: `sfn_${s.id.replace("_", "-")}`, kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const token = (n: { kind: string; shot?: { id: string } }) =>
+      n.kind === "shot" ? n.shot!.id.replace("_", "-") : n.kind;
+    const edges = nodes.slice(1).map((to, index) => ({
+      id: `sfe_${token(nodes[index]!)}-${token(to)}`,
+      kind: "sequence",
+      from: { nodeId: nodes[index]!.id, port: "out" },
+      to: { nodeId: to.id, port: "in" },
+    }));
+    return JSON.stringify({
+      ...base,
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+      },
+    });
+  };
+
+  const A = shot("sh_1", 1, "The tide turns.");
+  const B = shot("sh_2", 2, "The verse rises.");
+
+  it("choosing mine restores the array and leaves no flow beside it", () => {
+    const base = legacyScene([A, B]);
+    const mine = legacyScene([A, { ...B, description: "mine" }]);
+    const theirs = migratedFrom(legacyScene([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const conflict = result.conflicts.find((c) => c.field === "shots")!;
+    assert.ok(conflict, "both sides changed the structure, so there is one conflict");
+
+    const resolved = JSON.parse(applyJsonResolution(result.merged, conflict, "mine")) as Record<string, unknown>;
+    assert.equal("flow" in resolved, false, "no stale spelling is left behind");
+    assert.ok(Array.isArray(resolved["shots"]));
+    assert.equal((resolved["shots"] as ReturnType<typeof shot>[])[1]?.description, "mine");
+  });
+
+  it("choosing theirs restores the flow under its own key, not under shots", () => {
+    const base = legacyScene([A, B]);
+    const mine = legacyScene([A, { ...B, description: "mine" }]);
+    const theirs = migratedFrom(legacyScene([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const conflict = result.conflicts.find((c) => c.field === "shots")!;
+    const resolved = JSON.parse(applyJsonResolution(result.merged, conflict, "theirs")) as Record<string, unknown>;
+    assert.equal("shots" in resolved, false, "a flow object never lands under the array key");
+    assert.ok(resolved["flow"], "the graph the live scene holds is what came back");
+    // And the result is a record the union can actually read, which is the whole point.
+    assert.equal(SceneRecordSchema.safeParse(resolved).success, true);
   });
 });

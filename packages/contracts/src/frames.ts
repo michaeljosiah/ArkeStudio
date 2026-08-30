@@ -5,6 +5,25 @@ import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ShotSchema } from "./scene.js";
+
+/**
+ * The shot fields an edit may clear (SPEC-029 R-36). Identity and the required text are absent
+ * deliberately: a shot with no id, number, title or description is not a shot, and clearing one
+ * would be a deletion wearing an edit's name.
+ */
+export const CLEARABLE_SHOT_FIELDS = [
+  "camera",
+  "audio",
+  "durationSec",
+  "intent",
+  "beats",
+  "framing",
+  "continuity",
+  "covers",
+  "promptOverride",
+] as const;
+import { ShotAnchorSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1556,6 +1575,76 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       /** The same stem-only rule as save-scene, for the same reason. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+    })
+    .strict(),
+  /**
+   * One scene edit, named (SPEC-029 R-36).
+   *
+   * `save-scene` above writes a whole document and lets the writer work out what happened; these
+   * say what happened. Every one carries the scene version it was composed against, so a scene
+   * that moved refuses the command rather than merging edges by array position (R-62), and the
+   * coordinator commits exactly one validated record or writes nothing at all (R-61).
+   *
+   * The payload is shot ids and shot fields — never nodes and edges. There is deliberately no
+   * "save graph" command: arbitrary graph JSON is what these exist to replace.
+   */
+  z
+    .object({
+      kind: z.literal("scene-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /** The same stem-only rule as save-scene, for the same reason. */
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      /**
+       * The scene this was composed against, by id — the stem alone cannot say which scene it
+       * is. Deleting a scene frees its id and its stem for a new one drafted at the same path,
+       * and a delayed command would otherwise pass a version check into a different scene.
+       */
+      sceneId: SceneIdSchema,
+      baseVersion: z.number().int().min(1),
+      command: z.discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("insert-shot"),
+            at: ShotAnchorSchema,
+            /** The beat, without identity: the coordinator mints the id past the whole production. */
+            shot: ShotSchema.omit({ id: true, number: true }),
+          })
+          .strict(),
+        z.object({ kind: z.literal("move-shot"), shotId: ShotIdSchema, to: ShotAnchorSchema }).strict(),
+        z.object({ kind: z.literal("duplicate-shot"), shotId: ShotIdSchema }).strict(),
+        z
+          .object({
+            kind: z.literal("edit-shot"),
+            shotId: ShotIdSchema,
+            /** A patch: a field the change omits is left exactly as the shot has it. */
+            change: ShotSchema.omit({ id: true, number: true }).partial(),
+            /**
+             * Fields to remove, named rather than sent as a value.
+             *
+             * JSON cannot carry `undefined`, and an omitted key means "leave it" — so without
+             * this there is no way to clear an optional field at all: no way to drop a hand-
+             * tuned prompt override, a camera line, or a continuity flag once written.
+             */
+            clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
+          })
+          .strict(),
+        z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),
+        z
+          .object({
+            kind: z.literal("set-board-override"),
+            shotId: ShotIdSchema,
+            override: z.enum(["split", "merge"]),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("clear-board-override"),
+            shotId: ShotIdSchema,
+            override: z.enum(["split", "merge"]),
+          })
+          .strict(),
+      ]),
     })
     .strict(),
   z
