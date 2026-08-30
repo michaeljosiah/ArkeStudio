@@ -2692,6 +2692,13 @@ export function stageSceneEdit(
   send({ kind: "stage-scene-edit", worldId, productionId, sceneFile, summary, scene });
 }
 
+type SceneCommandMessage = Extract<ClientMessage, { kind: "scene-command" }>;
+
+/** Send one named, version-fenced scene edit; snapshots remain the success acknowledgement. */
+export function sceneCommand(input: Omit<SceneCommandMessage, "kind">): boolean {
+  return send({ kind: "scene-command", ...input });
+}
+
 /**
  * Save a scene where it stands (turn 97) — the storyboard's card edits. No proposal, no accept;
  * the version and its history snapshot stand in for both. `baseVersion` is what this screen

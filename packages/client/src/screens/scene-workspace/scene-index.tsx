@@ -1,5 +1,4 @@
 import {
-  hasOwnFrame,
   orderedShots,
   sortScenes,
   type ArtifactSidecar,
@@ -7,6 +6,7 @@ import {
   type SceneRecord,
 } from "@arke-studio/contracts";
 import { acceptedTakeId } from "../../lib/selectors.js";
+import { shotHasFrame } from "./boards.js";
 
 /**
  * The scene index (SPEC-029 R-22): every scene in the production, switchable without a trip
@@ -97,8 +97,9 @@ function coverageOf(
   let rendered = 0;
   let needsAttention = 0;
   for (const shot of shots) {
-    if (hasOwnFrame(production.selections[shot.id], artifacts)) framed += 1;
-    if (acceptedTakeId(production, shot.id) !== null) rendered += 1;
+    if (shotHasFrame(production, artifacts, shot.id)) framed += 1;
+    const accepted = acceptedTakeId(production, shot.id);
+    if (accepted !== null && production.takes.find((take) => take.id === accepted)?.kind === "clip") rendered += 1;
     if (shot.description.trim() === "") needsAttention += 1;
   }
   return { shots: shots.length, framed, rendered, needsAttention };

@@ -255,6 +255,42 @@ describe("board overrides are keyed by shot id and versioned like every other co
       "the break is still before the same shot, not before whatever is third now",
     );
   });
+
+  it("moves a boundary and its suppression in one scene version, then stores the exact board prompt", async () => {
+    const { store } = await open();
+    const first = await sceneOnDisk(store);
+    const ids = shotIds(first);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: first.version,
+      command: { kind: "set-board-override", shotId: ids[1]!, override: "split" },
+    });
+    const split = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: split.version,
+      command: { kind: "move-board-boundary", fromShotId: ids[1]!, toShotId: ids[2]! },
+    });
+    const moved = await sceneOnDisk(store);
+    assert.equal(moved.version, split.version + 1, "one gesture made one version");
+    assert.deepEqual(moved.boards?.splits, [ids[2]!]);
+    assert.deepEqual(moved.boards?.merges, []);
+
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: moved.version,
+      command: { kind: "set-board-prompt", members: ids.slice(0, 2), text: "One light across both." },
+    });
+    assert.deepEqual((await sceneOnDisk(store)).boards?.prompts, [
+      { members: ids.slice(0, 2), text: "One light across both." },
+    ]);
+  });
 });
 
 describe("deletion names every blocker and cleans up atomically (T-11)", () => {

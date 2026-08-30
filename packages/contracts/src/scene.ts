@@ -444,10 +444,15 @@ export function shotCardState(input: {
 
 export function hasOwnFrame(
   selection: ShotSelection | undefined,
-  artifacts: readonly { id: string; kind: string; boundaryExtraction?: unknown }[],
+  artifacts: readonly { id: string; kind: string; boundaryExtraction?: unknown; supersedes?: string }[],
 ): boolean {
   const artifactId = selection?.startFrameArtifactId ?? null;
   if (artifactId === null) return false;
   const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-  return artifact !== undefined && artifact.kind === "image" && artifact.boundaryExtraction === undefined;
+  return (
+    artifact !== undefined &&
+    artifact.kind === "image" &&
+    artifact.boundaryExtraction === undefined &&
+    !artifacts.some((candidate) => candidate.supersedes === artifactId)
+  );
 }

@@ -430,6 +430,91 @@ export function clearBoardOverride(
   );
 }
 
+/** Move one authored board seam as one scene version (SPEC-035 R-12, T-18). */
+export function moveBoardBoundary(
+  record: SceneRecord,
+  input: { fromShotId: string; toShotId: string },
+): GraphScene {
+  const shots = shotsOf(record);
+  if (input.fromShotId === input.toShotId) {
+    throw new SceneOperationRefused(["the board boundary is already at that shot"]);
+  }
+  for (const id of [input.fromShotId, input.toShotId]) {
+    if (!shots.some((shot) => shot.id === id)) {
+      throw new SceneOperationRefused([`shot ${id} is not in this scene`]);
+    }
+    if (shots[0]?.id === id) {
+      throw new SceneOperationRefused([
+        "the first shot already opens a board — a break before it would divide nothing",
+      ]);
+    }
+  }
+  const boards: Boards = record.boards ?? { splits: [], merges: [] };
+  const splits = new Set(boards.splits);
+  const merges = new Set(boards.merges);
+  const wasAuthored = splits.has(input.fromShotId);
+  splits.delete(input.fromShotId);
+  // A hand split has no automatic seam beneath it to suppress. Automatic boundaries do, while
+  // hard cap boundaries are refused by the interaction before this command is composed.
+  if (wasAuthored) merges.delete(input.fromShotId);
+  else merges.add(input.fromShotId);
+  merges.delete(input.toShotId);
+  splits.add(input.toShotId);
+  return withBoards(complete(record, shots), {
+    ...boards,
+    splits: ordered(shots, splits),
+    merges: ordered(shots, merges),
+  });
+}
+
+/** Store a consolidated prompt against the exact board membership that authored it. */
+export function setBoardPrompt(
+  record: SceneRecord,
+  input: { members: readonly string[]; text: string },
+): GraphScene {
+  const shots = shotsOf(record);
+  const text = input.text.trim();
+  if (text.length === 0) throw new SceneOperationRefused(["a board prompt cannot be empty"]);
+  const members = [...input.members];
+  if (members.length === 0) throw new SceneOperationRefused(["a board prompt must name its shots"]);
+  if (new Set(members).size !== members.length) {
+    throw new SceneOperationRefused(["a board prompt names the same shot more than once"]);
+  }
+  const positions = members.map((id) => shots.findIndex((shot) => shot.id === id));
+  const missing = members.find((_, index) => positions[index] === -1);
+  if (missing !== undefined) throw new SceneOperationRefused([`shot ${missing} is not in this scene`]);
+  if (positions.some((position, index) => index > 0 && position !== positions[index - 1]! + 1)) {
+    throw new SceneOperationRefused(["a board prompt's shots must be contiguous and in scene order"]);
+  }
+  const boards: Boards = record.boards ?? { splits: [], merges: [] };
+  const prompts = (boards.prompts ?? []).filter((prompt) => !sameMembers(prompt.members, members));
+  prompts.push({ members, text });
+  return withBoards(complete(record, shots), { ...boards, prompts });
+}
+
+export function clearBoardPrompt(
+  record: SceneRecord,
+  input: { members: readonly string[] },
+): GraphScene {
+  const shots = shotsOf(record);
+  const boards = record.boards;
+  const found = boards?.prompts?.some((prompt) => sameMembers(prompt.members, input.members)) ?? false;
+  if (!found || boards === undefined) {
+    throw new SceneOperationRefused(["this board carries no consolidated prompt"]);
+  }
+  return withBoards(
+    complete(record, shots),
+    normalise({
+      ...boards,
+      prompts: boards.prompts?.filter((prompt) => !sameMembers(prompt.members, input.members)),
+    }),
+  );
+}
+
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
 /** Override lists in scene order, so the file reads the way the scene runs and diffs stay small. */
 function ordered(shots: readonly Shot[], ids: ReadonlySet<string>): string[] {
   return shots.filter((shot) => ids.has(shot.id)).map((shot) => shot.id);

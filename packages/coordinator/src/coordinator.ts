@@ -47,7 +47,8 @@ import {
   PROVIDERS,
   planScene,
   previewLineFor,
-  SceneSchema,
+  SceneRecordSchema,
+  linearizeSceneFlow,
   type ConversationId,
   type WorldChatCheckReceipt,
   type Job,
@@ -177,6 +178,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
+import { SceneFlowRefused } from "./productions/scene-record.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -5195,7 +5197,9 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
         try {
-          const scene = SceneSchema.parse(msg.scene);
+          const scene = SceneRecordSchema.parse(msg.scene);
+          const sequence = linearizeSceneFlow(scene);
+          if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
           await gate.stage({
             kind: "scene-edit",
             summary: msg.summary,

@@ -2,15 +2,18 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clearBoardOverride,
+  clearBoardPrompt,
   deleteShot,
   duplicateShot,
   editShot,
   insertShot,
   moveShot,
+  moveBoardBoundary,
   nextShotIdIn,
   orderedShots,
   SceneOperationRefused,
   setBoardOverride,
+  setBoardPrompt,
   shotDeleteBlockers,
   type GraphScene,
   type SceneRecord,
@@ -44,7 +47,10 @@ export type SceneCommand =
   | { kind: "edit-shot"; shotId: string; change: Partial<Shot> }
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
-  | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" };
+  | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" }
+  | { kind: "move-board-boundary"; fromShotId: string; toShotId: string }
+  | { kind: "set-board-prompt"; members: string[]; text: string }
+  | { kind: "clear-board-prompt"; members: string[] };
 
 /**
  * The wire command as the operations take it: `clear` becomes the explicit `undefined` that
@@ -276,6 +282,12 @@ async function candidateFor(
       return setBoardOverride(record, { shotId: command.shotId, override: command.override });
     case "clear-board-override":
       return clearBoardOverride(record, { shotId: command.shotId, override: command.override });
+    case "move-board-boundary":
+      return moveBoardBoundary(record, command);
+    case "set-board-prompt":
+      return setBoardPrompt(record, command);
+    case "clear-board-prompt":
+      return clearBoardPrompt(record, command);
   }
 }
 

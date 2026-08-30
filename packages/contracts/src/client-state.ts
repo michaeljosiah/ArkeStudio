@@ -170,6 +170,8 @@ export const StagedProposalSchema = z
     ripple: RipplePreviewSchema.nullable(),
     /** Present for art-direction proposals so review renders the proposed record, not a guess. */
     artDirection: ArtDirectionRecordSchema.optional(),
+    /** Complete staged scene candidates, keyed by their world-relative target path (SPEC-029 R-37). */
+    scenes: z.record(z.string().min(1), SceneRecordSchema).optional(),
     /**
      * What this proposal would change, field by field (#70 §11.5).
      *

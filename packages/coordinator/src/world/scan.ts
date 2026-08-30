@@ -730,11 +730,31 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       proposed: (path) => proposedByPath.get(path) ?? null,
       base: (path) => baseByPath.get(path) ?? null,
     });
+    const proposedScenes: Record<string, SceneRecord> = {};
+    if (proposal.kind === "scene-edit") {
+      for (const target of proposal.targets) {
+        if (!/^productions\/[^/]+\/scenes\/[^/]+\.json$/.test(target.path)) continue;
+        const raw = proposedByPath.get(target.path);
+        if (raw === null || raw === undefined) continue;
+        try {
+          const candidate = parseSceneRecord(raw);
+          const sequence = linearizeSceneFlow(candidate);
+          if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
+          proposedScenes[target.path] = candidate;
+        } catch (error) {
+          problems.push({
+            path: `.proposals/${pid}/${target.path}`,
+            message: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          });
+        }
+      }
+    }
 
     proposals.push({
       proposal,
       ripple,
       ...(proposedArtDirection ? { artDirection: proposedArtDirection } : {}),
+      ...(Object.keys(proposedScenes).length > 0 ? { scenes: proposedScenes } : {}),
       ...(review.targets.length > 0 ? { review } : {}),
     });
   }

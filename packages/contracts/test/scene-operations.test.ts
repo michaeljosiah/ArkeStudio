@@ -4,14 +4,18 @@ import {
   deleteShot,
   duplicateShot,
   editShot,
+  hasOwnFrame,
   insertShot,
   linearizeSceneFlow,
   migrateLegacyScene,
   moveShot,
+  moveBoardBoundary,
   nextShotIdIn,
   orderedShots,
   SceneOperationRefused,
   setBoardOverride,
+  setBoardPrompt,
+  clearBoardPrompt,
   type GraphScene,
   type Scene,
   type SceneRecord,
@@ -247,6 +251,48 @@ describe("ids are minted past everything already taken", () => {
 
   it("ignores anything that is not a plain sh_<n>", () => {
     assert.equal(nextShotIdIn(["sh_2", "sh_x", "shot_9"]), "sh_3");
+  });
+});
+
+describe("board boundary and prompt edits are whole named operations", () => {
+  it("moves a seam by suppressing the old boundary and setting the new one", () => {
+    const before: SceneRecord = {
+      ...graph(["sh_1", "sh_2", "sh_3", "sh_4"]),
+      boards: { splits: ["sh_2"], merges: [] },
+    };
+    const after = moveBoardBoundary(before, { fromShotId: "sh_2", toShotId: "sh_3" });
+    assert.deepEqual(after.boards, { splits: ["sh_3"], merges: [] });
+    assert.throws(
+      () => moveBoardBoundary(before, { fromShotId: "sh_2", toShotId: "sh_1" }),
+      /divide nothing/,
+    );
+  });
+
+  it("keys prompts to one contiguous ordered membership and clears that exact prompt", () => {
+    const before = graph(["sh_1", "sh_2", "sh_3"]);
+    const written = setBoardPrompt(before, {
+      members: ["sh_1", "sh_2"],
+      text: "  One light across both.  ",
+    });
+    assert.deepEqual(written.boards?.prompts, [
+      { members: ["sh_1", "sh_2"], text: "One light across both." },
+    ]);
+    assert.throws(
+      () => setBoardPrompt(before, { members: ["sh_1", "sh_3"], text: "A skipped beat." }),
+      /contiguous/,
+    );
+    assert.equal(clearBoardPrompt(written, { members: ["sh_1", "sh_2"] }).boards, undefined);
+  });
+});
+
+describe("frame readiness names only a current dispatchable image", () => {
+  it("rejects a superseded frame artifact", () => {
+    const artifacts = [
+      { id: "ar_old", kind: "image" },
+      { id: "ar_new", kind: "image", supersedes: "ar_old" },
+    ];
+    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_old" }, artifacts), false);
+    assert.equal(hasOwnFrame({ startFrameArtifactId: "ar_new" }, artifacts), true);
   });
 });
 

@@ -1644,6 +1644,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
             override: z.enum(["split", "merge"]),
           })
           .strict(),
+        z
+          .object({
+            kind: z.literal("move-board-boundary"),
+            fromShotId: ShotIdSchema,
+            toShotId: ShotIdSchema,
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("set-board-prompt"),
+            members: z.array(ShotIdSchema).min(1),
+            text: z.string().min(1),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("clear-board-prompt"),
+            members: z.array(ShotIdSchema).min(1),
+          })
+          .strict(),
       ]),
     })
     .strict(),
