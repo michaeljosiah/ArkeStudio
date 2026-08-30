@@ -316,6 +316,24 @@ describe("a 200-shot scene renders in both views (T-20, R-69)", () => {
   });
 });
 
+describe("Flow is a canvas at every width, and never the only way in (R-24, R-28 as amended)", () => {
+  it("keeps the canvas narrow as well as wide, with the graph still in words", async () => {
+    /*
+     * The amendment: below 900px Flow is not replaced by a list. What must hold is that nothing
+     * REQUIRES the canvas — every node is a control and every edge is offered in words, which
+     * is the half the old narrow-width substitution never addressed at any width.
+     */
+    const mounted = await mount(true);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    assert.ok(q(mounted, '[data-testid="workspace-flow-layer"]'), "still a transformed canvas");
+    const words = all(mounted, '[data-testid="workspace-flow-alt"] button');
+    assert.ok(words.length > 0, "and the same graph, said");
+    for (const edge of words) {
+      assert.match(edge.textContent ?? "", /goes to|is cited by/, "each edge names its endpoints");
+    }
+  });
+});
+
 describe("Flow is a canvas (the prototype's §11)", () => {
   const openFlow = async (): Promise<Mounted> => {
     const mounted = await mount(true);
