@@ -664,6 +664,39 @@ export function orderedShots(scene: SceneRecord): Shot[] {
 }
 
 /**
+ * A flow in an order that cannot disagree with itself: nodes, edges and groups sorted by id.
+ *
+ * Storage order carries no meaning (R-18) — permuting the arrays changes nothing any consumer
+ * answers — so anything COMPARING two flows must canonicalise first, or it reports a change
+ * where there is none: a needless version, or a staleness refusal against a proposal that says
+ * exactly what the live file says.
+ */
+export function canonicalSceneFlow(flow: SceneFlow): SceneFlow {
+  const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return {
+    ...flow,
+    nodes: [...flow.nodes].sort(byId),
+    edges: [...flow.edges].sort(byId),
+    storyboardGroups: [...flow.storyboardGroups].sort(byId),
+  };
+}
+
+/**
+ * What a scene record MEANS structurally, as one comparable value.
+ *
+ * The whole flow, not just the ordered shots: a change can live entirely in the graph — an
+ * authored group, a node identity — and comparing shot payloads alone reports those as no
+ * change at all, which is how an approved graph edit gets silently discarded. A legacy record
+ * is migrated first, so both arms answer in the same vocabulary and a migration on its own
+ * reads as what it is: a re-spelling, not a change.
+ */
+export function structuralMeaning(record: SceneRecord): string | null {
+  if (linearizeSceneFlow(record).kind === "invalid") return null;
+  const flow = isGraphScene(record) ? record.flow : migrateLegacyScene(record).flow;
+  return JSON.stringify(canonicalSceneFlow(flow));
+}
+
+/**
  * The legacy-shaped working copy a WRITE surface edits (SPEC-029 §3.3: writers keep building
  * legacy `Scene` values until step 4's semantic commands). The storyboard editor and the shot
  * sheet mutate a whole scene and save it back; the commit path re-derives the graph through

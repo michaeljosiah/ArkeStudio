@@ -1,7 +1,7 @@
 import {
   isGraphScene,
-  linearizeSceneFlow,
   SceneRecordSchema,
+  structuralMeaning,
   type ProposalConflict,
   type SceneRecord,
 } from "@arke-studio/contracts";
@@ -163,16 +163,7 @@ export function mergeMarkdown(path: string, baseRaw: string, mineRaw: string, th
   return { merged: doc.serialize(), conflicts, tookTheirs };
 }
 
-/**
- * The JSON lane of the same merge (SPEC-023 R-18, issue #385): three-way at top-level-field
- * granularity, arrays and nested objects atomic. JSON never passes through the Markdown merge —
- * mergeMarkdown re-serialises with frontmatter fences and destroys a JSON document, which is
- * the exact failure the art-direction restatement branch was built to avoid; this lane is the
- * general answer for every JSON track (story, scene, season, series).
- *
- * Conflict values are carried as JSON text (`JSON.stringify`), so resolution can round-trip a
- * chosen value without guessing whether "1747" was a number or a title.
- */
+/** Stamped by the committer, so the live value is carried and the plan verifies cleanly. */
 const JSON_MACHINE_FIELDS = new Set(["version"]);
 
 /**
@@ -189,13 +180,19 @@ const JSON_MACHINE_FIELDS = new Set(["version"]);
  */
 const STRUCTURAL_FIELDS = ["shots", "flow"] as const;
 
-/** The ordered shots of a partial JSON document, or null when it is not a scene record at all. */
-function structureOf(value: Record<string, unknown>): { record: SceneRecord; shots: string } | null {
+/**
+ * What a partial JSON document means structurally, or null when it is not a scene record.
+ *
+ * The WHOLE flow, not the ordered shots. A graph proposal can change nothing but the graph —
+ * an authored group, a node identity — and comparing shot payloads reports that as no change,
+ * so the merge would replace the proposal's flow with the live one and discard an approved
+ * edit without ever raising a conflict.
+ */
+function structureOf(value: Record<string, unknown>): { record: SceneRecord; meaning: string } | null {
   const parsed = SceneRecordSchema.safeParse(value);
   if (!parsed.success) return null;
-  const sequence = linearizeSceneFlow(parsed.data);
-  if (sequence.kind === "invalid") return null;
-  return { record: parsed.data, shots: JSON.stringify(sequence.shots.map((pair) => pair.shot)) };
+  const meaning = structuralMeaning(parsed.data);
+  return meaning === null ? null : { record: parsed.data, meaning };
 }
 
 /** The structural field as the winning side spells it — one key, never both. */
@@ -214,35 +211,33 @@ function mergeStructure(
   const t = structureOf(theirs);
   if (b === null || m === null || t === null) return null;
 
-  // Nobody moved a shot: the live spelling stands, and a migration alone is theirs to keep.
-  if (m.shots === b.shots) {
-    return { assign: structuralValue(t.record), tookTheirs: m.shots !== t.shots };
+  // The proposal says what the base said: the live answer stands, migration included.
+  if (m.meaning === b.meaning) {
+    return { assign: structuralValue(t.record), tookTheirs: m.meaning !== t.meaning };
   }
-  if (t.shots === b.shots || t.shots === m.shots) {
-    // Only the proposal moved anything — carry its shots, in the shape the live file uses, so
-    // accepting does not silently un-migrate a scene somebody already migrated.
-    return { assign: proposalShots(m.record), tookTheirs: false };
+  if (t.meaning === b.meaning || t.meaning === m.meaning) {
+    // Only the proposal changed the structure — carry ITS answer, in its own spelling. A legacy
+    // amendment travels as shots and the gate re-derives the graph at accept; a graph proposal
+    // travels as its flow, because that flow IS the change and re-deriving would erase it.
+    return { assign: structuralValue(m.record), tookTheirs: false };
   }
   return {
-    assign: proposalShots(m.record),
-    conflict: { path, field: "shots", base: b.shots, mine: m.shots, theirs: t.shots },
+    assign: structuralValue(m.record),
+    conflict: { path, field: "shots", base: b.meaning, mine: m.meaning, theirs: t.meaning },
     tookTheirs: false,
   };
 }
 
 /**
- * The proposal's shots, as the array arm — deliberately, whichever arm the live file is.
+ * The JSON lane of the same merge (SPEC-023 R-18, issue #385): three-way at top-level-field
+ * granularity, arrays and nested objects atomic. JSON never passes through the Markdown merge —
+ * mergeMarkdown re-serialises with frontmatter fences and destroys a JSON document, which is
+ * the exact failure the art-direction restatement branch was built to avoid; this lane is the
+ * general answer for every JSON track (story, scene, season, series).
  *
- * A proposal is not the world: it is a candidate the gate re-derives at accept, and
- * `graphSceneFor` is what turns an array into the live scene's graph with deterministic node
- * identity. Carrying a hand-built `flow` here would mean minting edges in the merge, which is
- * the one place with no validation and no version to refuse against.
+ * Conflict values are carried as JSON text (`JSON.stringify`), so resolution can round-trip a
+ * chosen value without guessing whether "1747" was a number or a title.
  */
-function proposalShots(mine: SceneRecord): { key: "shots" | "flow"; value: unknown } {
-  const sequence = linearizeSceneFlow(mine);
-  return { key: "shots", value: sequence.kind === "linear" ? sequence.shots.map((pair) => pair.shot) : [] };
-}
-
 export function mergeJson(path: string, baseRaw: string, mineRaw: string, theirsRaw: string): MergeResult {
   const base = JSON.parse(baseRaw) as Record<string, unknown>;
   const mine = JSON.parse(mineRaw) as Record<string, unknown>;

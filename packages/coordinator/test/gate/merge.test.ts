@@ -238,3 +238,88 @@ describe("a scene's structure is ONE field, however it is spelled (SPEC-029 R-1,
     assert.equal("flow" in merged && "shots" in merged, false);
   });
 });
+
+describe("a change that lives only in the graph survives a rebase (codex round 2 on #653)", () => {
+  /*
+   * The mirror of the case above, and the one comparing ordered shots alone gets wrong: a
+   * proposal can change nothing but the graph — an authored beat, a node identity — and shot
+   * payloads then say "mine is the base", so the merge takes the live flow and the approved
+   * edit is discarded with no conflict to show for it.
+   */
+  const shot = (id: string, number: number) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description: `Beat ${number}.`,
+  });
+  const nodeId = (id: string) => `sfn_${id.replace("_", "-")}`;
+  const graphScene = (over: Record<string, unknown> = {}, version = 4) => {
+    const shots = [shot("sh_1", 1), shot("sh_2", 2)];
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: nodeId(s.id), kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const token = (n: { kind: string; shot?: { id: string } }) =>
+      n.kind === "shot" ? n.shot!.id.replace("_", "-") : n.kind;
+    const edges = nodes.slice(1).map((to, index) => ({
+      id: `sfe_${token(nodes[index]!)}-${token(to)}`,
+      kind: "sequence",
+      from: { nodeId: nodes[index]!.id, port: "out" },
+      to: { nodeId: to.id, port: "in" },
+    }));
+    return JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+        ...over,
+      },
+    });
+  };
+
+  it("keeps an authored beat the proposal added, when the live scene only moved elsewhere", () => {
+    const base = graphScene();
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [nodeId("sh_1")] };
+    const mine = graphScene({ storyboardGroups: [beat] });
+    // Something unrelated moved live, which is what triggers a rebase at all.
+    const theirs = JSON.stringify({ ...(JSON.parse(base) as object), title: "The verse, again", version: 5 });
+
+    const merged = JSON.parse(mergeJson("productions/p/scenes/01.json", base, mine, theirs).merged) as {
+      flow?: { storyboardGroups?: unknown[] };
+      title?: string;
+    };
+    assert.deepEqual(merged.flow?.storyboardGroups, [beat], "the authored beat is not discarded");
+    assert.equal(merged.title, "The verse, again", "and the live edit it rebased onto still lands");
+  });
+
+  it("treats a permutation of the live arrays as no change at all (R-18)", () => {
+    const base = graphScene();
+    const parsed = JSON.parse(base) as { flow: { nodes: unknown[]; edges: unknown[] } };
+    const theirs = JSON.stringify({
+      ...parsed,
+      version: 5,
+      flow: { ...parsed.flow, nodes: [...parsed.flow.nodes].reverse(), edges: [...parsed.flow.edges].reverse() },
+    });
+    const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [nodeId("sh_1")] };
+    const mine = graphScene({ storyboardGroups: [beat] });
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    assert.deepEqual(
+      result.conflicts.filter((c) => c.field === "shots"),
+      [],
+      "a reordering is not a competing structural change",
+    );
+    const merged = JSON.parse(result.merged) as { flow?: { storyboardGroups?: unknown[] } };
+    assert.deepEqual(merged.flow?.storyboardGroups, [beat]);
+  });
+});
