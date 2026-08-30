@@ -12,6 +12,7 @@ import {
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { sha256 } from "../../src/world/text-files.js";
 
 /**
  * The semantic scene commands (SPEC-029 R-36, R-39, R-61, R-62; T-9, T-10, T-11).
@@ -519,5 +520,72 @@ describe("shot ids are minted under the same lock that writes them", () => {
       ...shotIds(await sceneOnDisk(store, other)),
     ];
     assert.equal(new Set(ids).size, ids.length, `ids must be unique across the production: ${ids.join(", ")}`);
+  });
+});
+
+describe("the blockers are checked under the same lock that writes", () => {
+  it("an accept that lands while the command waits for the gate refuses the deletion", async () => {
+    /*
+     * The window a version fence cannot close: accepting a take does not touch the SCENE's
+     * version, so blockers derived before the gate and a write made inside it can disagree with
+     * nothing to catch the difference — and the deletion would remove the very selection the
+     * accept had just written, leaving paid footage belonging to no shot.
+     *
+     * Staged deterministically: something else holds the gate, the delete command queues behind
+     * it having already read the scene, and the accept commits before the gate is released. The
+     * command therefore enters the gate with its outside-the-gate view already stale.
+     */
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const target = shotIds(before).at(-1)!;
+    const selectionsPath = `productions/${PRODUCTION}/selections.json`;
+
+    let releaseHolder = (): void => {};
+    let queued = (): void => {};
+    const holderMayFinish = new Promise<void>((resolve) => (releaseHolder = resolve));
+    const commandQueued = new Promise<void>((resolve) => (queued = resolve));
+
+    const holding = store.gateOp(async () => {
+      await commandQueued;
+      // A real accept, committed through the store so the bundle sees it, exactly as the
+      // accept-take handler would land it.
+      const raw = await readFile(join(store.dir, "productions", PRODUCTION, "selections.json"), "utf8");
+      const selections = JSON.parse(raw) as Record<string, Record<string, unknown>>;
+      selections[target] = { ...selections[target], acceptedTakeId: "tk_01J8F0000000000000000000B2" };
+      await store.commitUnserialised({
+        kind: "accept-take",
+        source: "test",
+        files: [
+          {
+            path: selectionsPath,
+            action: "replace",
+            content: `${JSON.stringify(selections, null, 2)}
+`,
+            baseHash: sha256(raw),
+          },
+        ],
+      });
+      await holderMayFinish;
+    });
+
+    // The command reads the scene, finds it current, and queues behind the holder.
+    const deleting = applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: { kind: "delete-shot", shotId: target },
+    });
+    queued();
+    releaseHolder();
+    await holding;
+
+    await assert.rejects(() => deleting, /accepted take/);
+    const after = await sceneOnDisk(store);
+    assert.ok(shotIds(after).includes(target), "the shot the footage belongs to is still there");
+    const selections = JSON.parse(
+      await readFile(join(store.dir, "productions", PRODUCTION, "selections.json"), "utf8"),
+    ) as Record<string, Record<string, unknown>>;
+    assert.equal(selections[target]?.["acceptedTakeId"], "tk_01J8F0000000000000000000B2");
   });
 });

@@ -21,6 +21,7 @@ import {
   type GraphScene,
   type Scene,
   type SceneFlowFinding,
+  canonicalSceneFlow,
 } from "../src/index.js";
 
 /**
@@ -396,6 +397,31 @@ describe("storage order is not playback order (R-18; T-3)", () => {
       const sequence = linearizeSceneFlow(permuted);
       assert.deepEqual(sequence, canonical, "same edges, same sequence — bytes moved, meaning did not");
     }
+  });
+
+  it("canonicalises what a comparison must read as equal: arrays, and group membership", () => {
+    /*
+     * Everything that COMPARES two flows — the gate's rebase, the committer's "did anything
+     * change" — goes through this, so anything it treats as significant becomes a needless
+     * version or a phantom conflict. Membership is a set: validation reads `shotNodeIds` that
+     * way, and the run's order comes from the walk, never from the array.
+     */
+    const scene = graph([1, 2, 3]);
+    scene.flow.storyboardGroups = [
+      { id: "sbg_b", title: "Second", shotNodeIds: ["sfn_sh-2"] },
+      { id: "sbg_a", title: "First", shotNodeIds: ["sfn_sh-1", "sfn_sh-3"] },
+    ];
+    const shuffled = structuredClone(scene);
+    shuffled.flow.nodes.reverse();
+    shuffled.flow.edges.reverse();
+    shuffled.flow.storyboardGroups.reverse();
+    shuffled.flow.storyboardGroups.find((g) => g.id === "sbg_a")!.shotNodeIds.reverse();
+
+    assert.deepEqual(
+      canonicalSceneFlow(shuffled.flow),
+      canonicalSceneFlow(scene.flow),
+      "two spellings of one graph canonicalise to the same bytes",
+    );
   });
 });
 

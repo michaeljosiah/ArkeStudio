@@ -677,7 +677,11 @@ export function canonicalSceneFlow(flow: SceneFlow): SceneFlow {
     ...flow,
     nodes: [...flow.nodes].sort(byId),
     edges: [...flow.edges].sort(byId),
-    storyboardGroups: [...flow.storyboardGroups].sort(byId),
+    // Membership too: validation reads `shotNodeIds` as a SET — the run's order comes from the
+    // walk, never from this array — so two spellings of the same beat must compare equal.
+    storyboardGroups: [...flow.storyboardGroups]
+      .map((group) => ({ ...group, shotNodeIds: [...group.shotNodeIds].sort() }))
+      .sort(byId),
   };
 }
 

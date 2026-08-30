@@ -121,10 +121,9 @@ export interface SceneCommandInput {
 /**
  * Apply one command: read, check the version, construct, validate, commit once (R-61).
  *
- * Every failure path here leaves the world byte-identical. Nothing is written before the
- * candidate has been built and validated in full, and the deletion blockers are derived before
- * any of that — so a refusal costs a read and nothing else: no version, no selection cleanup,
- * no schema raise, no plan, no job, no spend.
+ * Every failure path leaves the world byte-identical: nothing is written before the candidate
+ * has been built and validated in full, so a refusal costs reads and nothing else — no version,
+ * no selection cleanup, no schema raise, no plan, no job, no spend.
  */
 export async function applySceneCommand(
   store: WorldStore,
@@ -135,25 +134,12 @@ export async function applySceneCommand(
   const path = `productions/${input.productionId}/scenes/${stem}.json`;
 
   /*
-   * The fence answers first, twice, for two different reasons.
-   *
-   * Here, because a command composed against a scene that has since moved should say so rather
-   * than report on a world it was never looking at — deriving blockers for a stale edit reads
-   * the wrong scene and names the wrong reasons. Again inside the gate below, because this
-   * check can go stale between here and the write, and only the one inside the lock cannot.
+   * A cheap first look, so a command composed against a scene that has since moved says so
+   * rather than reporting on a world it was never looking at. The authoritative fence is the
+   * one inside the gate; this one only saves the work.
    */
   const opening = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   fenceOrThrow(input, parseSceneRecord(opening), stem);
-
-  // Blockers are derived OUTSIDE the gate deliberately: reading plan journals is I/O with
-  // nothing to do with this scene's bytes, and holding the write lock across it would put every
-  // other writer behind it. Anything that could race it edits this same scene, and that is what
-  // the fence inside the gate catches.
-  const blockers =
-    input.command.kind === "delete-shot"
-      ? await deletionBlockers(store, input, input.command.shotId, deps)
-      : [];
-  if (blockers.length > 0) throw new SceneCommandRefused(blockers);
 
   /*
    * Read, mint, validate and commit inside ONE serialised region.
@@ -168,6 +154,20 @@ export async function applySceneCommand(
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
     const record = parseSceneRecord(raw);
     fenceOrThrow(input, record, stem);
+
+    /*
+     * Blockers are derived INSIDE the gate, immediately before the commit is built.
+     *
+     * The version fence cannot stand in for them: accepting a take does not touch the scene's
+     * version, so an accept landing between an out-of-gate check and this write would sail
+     * through the fence — and the deletion would then remove the selection that accept had just
+     * written, leaving paid footage with no shot to belong to. Reading a plan journal under the
+     * lock costs a little; orphaning footage is not a thing to be a little fast about.
+     */
+    if (input.command.kind === "delete-shot") {
+      const blockers = await deletionBlockers(store, input, input.command.shotId, deps);
+      if (blockers.length > 0) throw new SceneCommandRefused(blockers);
+    }
 
     const files: CommitFileInput[] = [];
     const next = await candidateFor(store, input, record, files);

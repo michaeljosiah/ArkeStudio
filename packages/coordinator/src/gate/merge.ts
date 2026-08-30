@@ -181,6 +181,15 @@ const JSON_MACHINE_FIELDS = new Set(["version"]);
 const STRUCTURAL_FIELDS = ["shots", "flow"] as const;
 
 /**
+ * The one name a structural conflict is raised under, whichever arm either side is.
+ *
+ * A person choosing "mine" or "theirs" is choosing a scene's shape, not a key — so it is one
+ * field with one decision, and `applyJsonResolution` restores whichever spelling the chosen
+ * side actually used.
+ */
+const STRUCTURAL_CONFLICT_FIELD = "shots";
+
+/**
  * What a partial JSON document means structurally, or null when it is not a scene record.
  *
  * The WHOLE flow, not the ordered shots. A graph proposal can change nothing but the graph —
@@ -221,9 +230,21 @@ function mergeStructure(
     // travels as its flow, because that flow IS the change and re-deriving would erase it.
     return { assign: structuralValue(m.record), tookTheirs: false };
   }
+  /*
+   * The conflict carries each side's own structural VALUE — the array or the flow, as that side
+   * spells it — not the canonical form the comparison used. Resolution has to be able to put the
+   * chosen answer back on disk, and a canonical flow assigned to `shots` is a scene that parses
+   * as neither arm.
+   */
   return {
     assign: structuralValue(m.record),
-    conflict: { path, field: "shots", base: b.meaning, mine: m.meaning, theirs: t.meaning },
+    conflict: {
+      path,
+      field: STRUCTURAL_CONFLICT_FIELD,
+      base: JSON.stringify(structuralValue(b.record).value),
+      mine: JSON.stringify(structuralValue(m.record).value),
+      theirs: JSON.stringify(structuralValue(t.record).value),
+    },
     tookTheirs: false,
   };
 }
@@ -297,6 +318,21 @@ export function applyJsonResolution(
 ): string {
   const doc = JSON.parse(mergedRaw) as Record<string, unknown>;
   const value = choice === "mine" ? conflict.mine : conflict.theirs;
+  if (conflict.field === STRUCTURAL_CONFLICT_FIELD && ("shots" in doc || "flow" in doc)) {
+    /*
+     * A scene's structure is one field with two spellings (SPEC-029 R-1), so restoring a choice
+     * means writing the chosen side's OWN key and removing the other. Assigning it blindly to
+     * `shots` would put a flow object under the array key, or leave a stale `flow` beside a
+     * restored array — either way a record neither arm of the union can read, and a conflict
+     * nobody can accept their way out of.
+     */
+    for (const key of STRUCTURAL_FIELDS) delete doc[key];
+    if (value !== null) {
+      const chosen = JSON.parse(value) as unknown;
+      doc[Array.isArray(chosen) ? "shots" : "flow"] = chosen;
+    }
+    return JSON.stringify(doc, null, 2) + "\n";
+  }
   if (value === null) delete doc[conflict.field];
   else doc[conflict.field] = JSON.parse(value) as unknown;
   return JSON.stringify(doc, null, 2) + "\n";

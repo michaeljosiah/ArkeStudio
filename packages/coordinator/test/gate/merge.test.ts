@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SheetSchema } from "@arke-studio/contracts";
-import { applyResolution, mergeJson, mergeMarkdown } from "../../src/gate/merge.js";
+import { SceneRecordSchema, SheetSchema } from "@arke-studio/contracts";
+import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "../../src/gate/merge.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { splitSections } from "../../src/frontmatter.js";
 
@@ -321,5 +321,92 @@ describe("a change that lives only in the graph survives a rebase (codex round 2
     );
     const merged = JSON.parse(result.merged) as { flow?: { storyboardGroups?: unknown[] } };
     assert.deepEqual(merged.flow?.storyboardGroups, [beat]);
+  });
+});
+
+describe("a structural conflict can actually be resolved (codex round 3 on #653)", () => {
+  /*
+   * The conflict is raised under one field name, but the two sides may spell the structure
+   * differently. Restoring a choice therefore has to write the CHOSEN side's own key and remove
+   * the other — assigning a flow object to `shots`, or leaving a stale `flow` beside a restored
+   * array, produces a record neither arm of the union reads, and a conflict nobody can accept
+   * their way out of.
+   */
+  const shot = (id: string, number: number, description: string) => ({
+    id,
+    number,
+    title: `Shot ${number}`,
+    description,
+  });
+  const legacyScene = (shots: ReturnType<typeof shot>[], version = 3) =>
+    JSON.stringify({
+      id: "sc_01",
+      slug: "the-verse",
+      number: 1,
+      title: "The verse",
+      status: "draft",
+      version,
+      shots,
+    });
+  const migratedFrom = (raw: string, version = 4): string => {
+    const scene = JSON.parse(raw) as { shots: ReturnType<typeof shot>[] };
+    const { shots, ...base } = scene;
+    const nodes = [
+      { id: "sfn_sc-01-entry", kind: "entry" },
+      ...shots.map((s) => ({ id: `sfn_${s.id.replace("_", "-")}`, kind: "shot", shot: s })),
+      { id: "sfn_sc-01-exit", kind: "exit" },
+    ];
+    const token = (n: { kind: string; shot?: { id: string } }) =>
+      n.kind === "shot" ? n.shot!.id.replace("_", "-") : n.kind;
+    const edges = nodes.slice(1).map((to, index) => ({
+      id: `sfe_${token(nodes[index]!)}-${token(to)}`,
+      kind: "sequence",
+      from: { nodeId: nodes[index]!.id, port: "out" },
+      to: { nodeId: to.id, port: "in" },
+    }));
+    return JSON.stringify({
+      ...base,
+      version,
+      flow: {
+        schemaVersion: 1,
+        entryNodeId: "sfn_sc-01-entry",
+        exitNodeId: "sfn_sc-01-exit",
+        nodes,
+        edges,
+        storyboardGroups: [],
+      },
+    });
+  };
+
+  const A = shot("sh_1", 1, "The tide turns.");
+  const B = shot("sh_2", 2, "The verse rises.");
+
+  it("choosing mine restores the array and leaves no flow beside it", () => {
+    const base = legacyScene([A, B]);
+    const mine = legacyScene([A, { ...B, description: "mine" }]);
+    const theirs = migratedFrom(legacyScene([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const conflict = result.conflicts.find((c) => c.field === "shots")!;
+    assert.ok(conflict, "both sides changed the structure, so there is one conflict");
+
+    const resolved = JSON.parse(applyJsonResolution(result.merged, conflict, "mine")) as Record<string, unknown>;
+    assert.equal("flow" in resolved, false, "no stale spelling is left behind");
+    assert.ok(Array.isArray(resolved["shots"]));
+    assert.equal((resolved["shots"] as ReturnType<typeof shot>[])[1]?.description, "mine");
+  });
+
+  it("choosing theirs restores the flow under its own key, not under shots", () => {
+    const base = legacyScene([A, B]);
+    const mine = legacyScene([A, { ...B, description: "mine" }]);
+    const theirs = migratedFrom(legacyScene([A, { ...B, description: "theirs" }]));
+
+    const result = mergeJson("productions/p/scenes/01.json", base, mine, theirs);
+    const conflict = result.conflicts.find((c) => c.field === "shots")!;
+    const resolved = JSON.parse(applyJsonResolution(result.merged, conflict, "theirs")) as Record<string, unknown>;
+    assert.equal("shots" in resolved, false, "a flow object never lands under the array key");
+    assert.ok(resolved["flow"], "the graph the live scene holds is what came back");
+    // And the result is a record the union can actually read, which is the whole point.
+    assert.equal(SceneRecordSchema.safeParse(resolved).success, true);
   });
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   deleteShot,
+  duplicateShot,
   editShot,
   insertShot,
   linearizeSceneFlow,
@@ -99,6 +100,72 @@ describe("every operation keeps the node ids the scene already had", () => {
     const after = moveShot(before, { shotId: "sh_3", to: { atStart: true } });
     assert.equal(nodeIdOf(after, "sh_1"), AUTHORED);
     assert.deepEqual(after.flow.storyboardGroups, [beat], "which is what the re-mint used to break");
+  });
+});
+
+describe("an edge id survives as long as its connection does", () => {
+  it("a payload edit re-mints no edge at all", () => {
+    const before = graph(["sh_1", "sh_2", "sh_3"]);
+    const after = editShot(before, { shotId: "sh_2", change: { intent: "Held." } });
+    assert.deepEqual(
+      after.flow.edges.map((edge) => edge.id).sort(),
+      before.flow.edges.map((edge) => edge.id).sort(),
+      "nothing about what follows what changed, so no id should have",
+    );
+  });
+
+  it("keeps authored edge ids whose endpoints still join, and mints only the new connections", () => {
+    const base = graph(["sh_1", "sh_2"]);
+    const authoredEdge = "sfe_authored-by-hand";
+    const target = base.flow.edges.find(
+      (edge) => edge.from.nodeId === "sfn_sh-1" && edge.to.nodeId === "sfn_sh-2",
+    )!;
+    const before: GraphScene = {
+      ...base,
+      flow: {
+        ...base.flow,
+        edges: base.flow.edges.map((edge) => (edge.id === target.id ? { ...edge, id: authoredEdge } : edge)),
+      },
+    };
+
+    // An insert at the END touches nothing about sh_1 → sh_2.
+    const after = insertShot(before, {
+      shot: { ...shot("sh_9", 0), number: undefined } as never,
+      at: { after: "sh_2" },
+    });
+    assert.ok(
+      after.flow.edges.some((edge) => edge.id === authoredEdge),
+      "the untouched connection kept the id somebody gave it",
+    );
+    assert.ok(
+      after.flow.edges.some((edge) => edge.from.nodeId === "sfn_sh-2" && edge.to.nodeId === "sfn_sh-9"),
+      "and the connection that is genuinely new was minted",
+    );
+  });
+});
+
+describe("a duplicate is the whole authored beat", () => {
+  it("keeps script coverage, which is authorship and not output", () => {
+    /*
+     * `covers` is block ids and their digests (SPEC-023 R-13), not footage — dropping it made a
+     * duplicated scripted beat read as covering nothing, and silenced the changed/uncovered
+     * diagnostics the original still gets. What actually leaves the output behind is the fresh
+     * id: takes and selections key by shot id.
+     */
+    const base = graph(["sh_1"]);
+    const covers = [{ blockId: "b_1", textDigest: `sha256:${"a".repeat(64)}` }];
+    const before: SceneRecord = {
+      ...base,
+      flow: {
+        ...base.flow,
+        nodes: base.flow.nodes.map((node) =>
+          node.kind === "shot" ? { ...node, shot: { ...node.shot, covers } } : node,
+        ),
+      },
+    };
+    const after = duplicateShot(before, { shotId: "sh_1", newShotId: "sh_2" });
+    const copy = orderedShots(after).find((s) => s.id === "sh_2")!;
+    assert.deepEqual(copy.covers, covers);
   });
 });
 

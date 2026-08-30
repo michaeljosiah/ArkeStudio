@@ -106,12 +106,22 @@ function complete(record: SceneRecord, shots: readonly Shot[]): GraphScene {
     base.flow.nodes.flatMap((node, index) => (node.id === nodes[index]!.id ? [] : [[node.id, nodes[index]!.id] as const])),
   );
   const byNode = new Map(nodes.map((node) => [node.id, node] as const));
+  /*
+   * An edge id survives as long as its CONNECTION survives. Re-deriving every id would re-mint
+   * an authored one on an unrelated payload edit — and after an insert it would re-mint every
+   * untouched connection in the scene besides. Only a pair nothing joined before is named here.
+   */
+  const heldEdgeIds = new Map(
+    (isGraphScene(record) ? record.flow.edges : []).map(
+      (edge) => [`${edge.from.nodeId}|${edge.to.nodeId}`, edge.id] as const,
+    ),
+  );
   const edges = base.flow.edges.map((edge) => {
     const from = byNode.get(renamed.get(edge.from.nodeId) ?? edge.from.nodeId)!;
     const to = byNode.get(renamed.get(edge.to.nodeId) ?? edge.to.nodeId)!;
     return {
       ...edge,
-      id: sequenceEdgeIdFor(from, to),
+      id: heldEdgeIds.get(`${from.id}|${to.id}`) ?? sequenceEdgeIdFor(from, to),
       from: { ...edge.from, nodeId: from.id },
       to: { ...edge.to, nodeId: to.id },
     };
@@ -213,9 +223,11 @@ export function moveShot(record: SceneRecord, input: { shotId: string; to: ShotA
 /**
  * Duplicate a shot: the authored beat again, never its output.
  *
- * The copy takes a fresh id and drops `covers` — a duplicate that carried the original's covers
- * would claim footage it has no relationship to, and takes and selections key by shot id, so
- * nothing else follows the copy either.
+ * The fresh id is what leaves the output behind — takes and selections key by shot id, so
+ * nothing generated follows the copy. Everything AUTHORED comes with it, `covers` included:
+ * that is script coverage (SPEC-023 R-13, block ids and their digests), not footage, and
+ * dropping it would make a duplicated scripted beat read as covering nothing and silence the
+ * changed/uncovered diagnostics the original still gets.
  */
 export function duplicateShot(
   record: SceneRecord,
@@ -228,7 +240,6 @@ export function duplicateShot(
     throw new SceneOperationRefused([`shot ${input.newShotId} is already in this scene`]);
   }
   const copy: Shot = { ...source, id: input.newShotId, number: 0 };
-  delete (copy as Partial<Shot>).covers;
   const next = [...shots];
   next.splice(shots.indexOf(source) + 1, 0, copy);
   return complete(record, renumbered(next));
