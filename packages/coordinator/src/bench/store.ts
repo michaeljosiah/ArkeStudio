@@ -9,6 +9,7 @@ import {
   type BenchEventEnvelope,
   type BenchSession,
   type BenchSessionMeta,
+  type BenchSubject,
   type SessionId,
 } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
@@ -94,8 +95,8 @@ export class BenchStore {
   }
 
   /** Create the directory and its immutable header. Safe to call twice. */
-  async create(id: SessionId, createdAt: string): Promise<BenchSessionMeta> {
-    const meta = BenchSessionMetaSchema.parse({ schemaVersion: 1, id, createdAt });
+  async create(id: SessionId, createdAt: string, subject?: BenchSubject): Promise<BenchSessionMeta> {
+    const meta = BenchSessionMetaSchema.parse({ schemaVersion: 1, id, createdAt, ...(subject ? { subject } : {}) });
     await mkdir(toExtendedLength(this.dir), { recursive: true });
     // wx: a second create must not silently rewrite the identity of an existing session.
     await writeFile(toExtendedLength(this.metaPath), JSON.stringify(meta, null, 2), {

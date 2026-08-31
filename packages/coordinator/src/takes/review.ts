@@ -37,58 +37,33 @@ async function readOr(store: WorldStore, path: string, fallback: string): Promis
   }
 }
 
-/** Accept: record the decision AND set the selection in one commit (R-9); chain continuity (R-12). */
-export async function acceptTake(
-  store: WorldStore,
+/** The ordinary clip-selection rules, factored so a board can apply every member in one commit. */
+export function applyTakeAcceptance(
   production: ProductionBundle,
-  input: { takeId: string; shotId: string; by: string },
-): Promise<ReviewDecision> {
-  const take = production.takes.find((t) => t.id === input.takeId);
+  artifacts: Parameters<typeof hasOwnFrame>[1],
+  selections: Selections,
+  input: { takeId: string; shotId: string; by: string; at: string },
+): { decision: ReviewDecision; selections: Selections } {
+  const take = production.takes.find((candidate) => candidate.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
   if (take.boardSheetParent === true) throw new Error(`take ${input.takeId} is a board-sheet parent and cannot be accepted for a shot`);
+  if (take.kind === "clip" && take.segment === undefined && take.coversShots.length > 1) {
+    throw new Error(`take ${input.takeId} is a backing pass and cannot be accepted for one shot`);
+  }
   if (!take.coversShots.includes(input.shotId)) {
     throw new Error(`take ${input.takeId} does not cover shot ${input.shotId}`);
   }
-  const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
-  const selectionsPath = `productions/${production.meta.id}/selections.json`;
-  const reviews = await readOr(store, reviewsPath, "");
-  const selections = await readOr(store, selectionsPath, "{}");
-
+  if (take.kind === "frame" || take.kind === "still") {
+    throw new Error(`take ${input.takeId} is a still — accept it as this shot's frame, not as footage`);
+  }
   const decision: ReviewDecision = {
-    ts: store.now(),
+    ts: input.at,
     takeId: input.takeId as ReviewDecision["takeId"],
     shotId: input.shotId as ReviewDecision["shotId"],
     decision: "accept",
     by: input.by,
   };
-
-  /*
-   * A still is not footage, and the clip slot is for footage (SPEC-036 R-21).
-   *
-   * The contact sheet used to file an accepted still into `acceptedTakeId`, where it sat in the
-   * slot the cut reads and collided with clip acceptance. Stills now go through `acceptStill`,
-   * which lands the decision, the artifact and the frame slot in one commit — so a still reaching
-   * this function is a routing bug upstream, and refusing it loudly beats running the cut's
-   * continuity and supersession machinery over a take that was never footage.
-   */
-  if (take.kind === "frame" || take.kind === "still") {
-    throw new Error(`take ${input.takeId} is a still — accept it as this shot's frame, not as footage`);
-  }
-
-  const map = JSON.parse(selections.raw) as Selections;
-  /*
-   * A trim belongs to the footage it was measured against (#253).
-   *
-   * Accepting a *different* take resets it to zero: 4.2 seconds into one clip is not 4.2 seconds
-   * into another, and carrying the number over starts the cut at an unrelated moment — with the
-   * coordinator's own selection.changed event reporting a zero trim it did not write.
-   *
-   * The reset therefore comes *after* the spread, not before it. Written the other way round the
-   * copied selection silently overwrote the reset, which is the same bug wearing a comment that
-   * claimed otherwise. Re-accepting the take already selected leaves the trim alone, because
-   * nothing about the footage changed.
-   */
-  const previous = map[input.shotId];
+  const previous = selections[input.shotId];
   const takeChanged = previous?.acceptedTakeId !== decision.takeId;
   const targetScene = sortScenes(production.scenes).find((scene) =>
     orderedShots(scene).some((shot) => shot.id === input.shotId),
@@ -105,13 +80,12 @@ export async function acceptTake(
     if (predecessorTake.continuedFrom !== undefined) {
       throw new Error("that continuation would extend footage that was itself continued");
     }
-    const selectedPredecessor = predecessor ? map[predecessor.id]?.acceptedTakeId : null;
-    if (selectedPredecessor !== take.continuedFrom) {
+    if (selections[predecessor.id]?.acceptedTakeId !== take.continuedFrom) {
       throw new Error("that continuation was made from footage no longer selected — restore its predecessor first");
     }
   }
   let next: Selections = {
-    ...map,
+    ...selections,
     [input.shotId]: {
       trimInSec: 0,
       ...previous,
@@ -119,35 +93,39 @@ export async function acceptTake(
       ...(takeChanged ? { trimInSec: 0 } : {}),
     },
   };
-
-  // SPEC-019 R-54, D36: anything built by extending the take this shot was using is no longer
-  // describing the cut. Marking it is not enough — the cut is derived from selections, so a take
-  // that is only flagged stays in the picture while the record says it does not. Clearing the
-  // selection makes SPEC-013 R-15 render a labelled gap for free. Nothing is deleted: the take
-  // keeps its media, its provenance and its own review decisions, because a reselection is one
-  // the user may undo a minute later and paid-for footage should not die for it.
   if (takeChanged) {
-    for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections: map, takes: production.takes })) {
+    for (const { shotId } of supersededBy({ changedShotId: input.shotId, selections, takes: production.takes })) {
       next = { ...next, [shotId]: { ...next[shotId], acceptedTakeId: null, trimInSec: 0 } };
     }
   }
-
-  /*
-   * Continuity (R-12, D8): the accepted take's final frame seeds the FOLLOWING shot. For a pass
-   * segment the frame source is the pass, not the segment — a coinciding boundary must not
-   * chain the same frame twice.
-   *
-   * Unless that shot already opens on a picture it was given (SPEC-036 R-20). Drawing every
-   * shot and then accepting takes one by one would otherwise replace each following shot's
-   * drawn frame with its predecessor's footage — silently, and precisely where the point of
-   * drawing first was to choose what the shot opens on. A shot that wants the predecessor's
-   * footage asks for it with `continuity.continuesPrevious` (SPEC-019 R-50).
-   */
   const following = index >= 0 ? ordered[index + 1] : undefined;
-  if (following && !hasOwnFrame(next[following.id], store.getBundle().artifacts)) {
+  if (following && !hasOwnFrame(next[following.id], artifacts)) {
     const frameSourceTakeId = take.segment?.passTakeId ?? take.id;
     next[following.id] = { trimInSec: 0, ...next[following.id], startFrameTakeId: frameSourceTakeId as never };
   }
+  return { decision, selections: next };
+}
+
+/** Accept: record the decision AND set the selection in one commit (R-9); chain continuity (R-12). */
+export async function acceptTake(
+  store: WorldStore,
+  production: ProductionBundle,
+  input: { takeId: string; shotId: string; by: string },
+): Promise<ReviewDecision> {
+  const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
+  const selectionsPath = `productions/${production.meta.id}/selections.json`;
+  const reviews = await readOr(store, reviewsPath, "");
+  const selections = await readOr(store, selectionsPath, "{}");
+
+  const applied = applyTakeAcceptance(
+    production,
+    store.getBundle().artifacts,
+    JSON.parse(selections.raw) as Selections,
+    { ...input, at: store.now() },
+  );
+  const decision = applied.decision;
+
+  const next = applied.selections;
 
   await store.commit({
     kind: "take-review",

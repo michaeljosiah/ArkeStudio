@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import {
   orderedShots,
   writerSceneView,
@@ -12,7 +12,15 @@ import {
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { seconds } from "../../lib/format.js";
-import { frameRunCommand, sceneCommand, subscribeSceneRefusals, useClientState } from "../../lib/store.js";
+import {
+  frameRunCommand,
+  sceneCommand,
+  sendBenchOpenSubject,
+  subscribeBenchSubjectOpened,
+  subscribeSceneRefusals,
+  useClientState,
+  useStore,
+} from "../../lib/store.js";
 import { StagedDecision } from "../../components/conversation.js";
 import { SceneReview, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
@@ -27,7 +35,8 @@ import { BoardSheet } from "./board-sheet.js";
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 /**
- * The scene authoring shell (SPEC-029 R-21..R-29), behind `settings.internal.sceneWorkspace`.
+ * The scene authoring shell (SPEC-029 R-21..R-29). The rollout setting mounts it for the whole
+ * scene; retired generation links can opt into it directly while that rollout is still staged.
  *
  * `scene index | Storyboard or Flow | Arke` — the three columns turn 103 binds, with Storyboard
  * the default. Read-only at this step: it lands where it can be walked before it replaces the
@@ -47,9 +56,11 @@ export function SceneWorkspace({
   scene: SceneRecord;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   // The same digests the strip compares citations against — one hook, cached on the blocks
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
+  const connection = useStore().connection;
   const digests = useBlockDigests(writerSceneView(scene));
   const [view, setView] = useState<"storyboard" | "flow">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
@@ -60,13 +71,29 @@ export function SceneWorkspace({
   const [boardSheetTrigger, setBoardSheetTrigger] = useState<HTMLElement | null>(null);
   const [refusalVersion, setRefusalVersion] = useState(0);
   const [commandPending, setCommandPending] = useState(false);
+  const [generatorPending, setGeneratorPending] = useState(false);
+  const [generatorError, setGeneratorError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
+  const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
+  const currentSceneKey = useRef(sceneKey);
+  currentSceneKey.current = sceneKey;
+  const pendingGenerator = useRef<{ requestId: string; sceneKey: string } | null>(null);
   const generateButton = useRef<HTMLButtonElement>(null);
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useState(true);
-  const [subject, setSubject] = useState<WorkspaceSubject>({ kind: "scene" });
+  const linkedShotId = searchParams.get("shot");
+  const [subject, setSubject] = useState<WorkspaceSubject>(() =>
+    linkedShotId !== null && orderedShots(scene).some((shot) => shot.id === linkedShotId)
+      ? { kind: "shot", shotId: linkedShotId as never }
+      : { kind: "scene" },
+  );
   const selection = useMemo(() => ({ subject, select: setSubject }), [subject]);
+  useEffect(() => {
+    if (linkedShotId !== null && orderedShots(scene).some((shot) => shot.id === linkedShotId)) {
+      setSubject({ kind: "shot", shotId: linkedShotId as never });
+    }
+  }, [linkedShotId, scene]);
 
   const sceneFile = production.sceneFiles[scene.id];
   const scenePath = sceneFile === undefined ? null : `productions/${production.meta.id}/scenes/${sceneFile}.json`;
@@ -173,6 +200,58 @@ export function SceneWorkspace({
     pendingCommand.current = false;
     setCommandPending(false);
   }, [scene.id, sceneFile, scene.version]);
+  useEffect(
+    () =>
+      subscribeBenchSubjectOpened((event) => {
+        const pending = pendingGenerator.current;
+        if (
+          pending === null ||
+          pending.sceneKey !== currentSceneKey.current ||
+          event.worldId !== world.meta.worldId ||
+          event.requestId !== pending.requestId
+        ) {
+          return;
+        }
+        pendingGenerator.current = null;
+        setGeneratorPending(false);
+        if (event.sessionId === null) {
+          setGeneratorError(event.reason ?? "The generator session could not be prepared.");
+          return;
+        }
+        setGeneratorError(null);
+        void navigate(`/w/${world.meta.worldId}/artifacts/bench/${event.sessionId}`);
+      }),
+    [navigate, world.meta.worldId],
+  );
+  useEffect(() => {
+    if (connection === "open" || pendingGenerator.current === null) return;
+    pendingGenerator.current = null;
+    setGeneratorPending(false);
+    setGeneratorError("Connection lost - try again.");
+  }, [connection]);
+  const openGenerator = (subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"]) => {
+    if (pendingGenerator.current !== null) return;
+    const requestId = sendBenchOpenSubject({
+      worldId: world.meta.worldId,
+      productionId: production.meta.id,
+      sceneId: scene.id,
+      subject,
+    });
+    if (requestId !== null) {
+      pendingGenerator.current = { requestId, sceneKey };
+      setGeneratorPending(true);
+      setGeneratorError(null);
+    } else {
+      setGeneratorError("Not connected - try again.");
+    }
+  };
+  useEffect(() => {
+    // Scene Index reuses this component. A response belongs to the scene that sent it and must
+    // not navigate back from a newer scene or leave that newer scene's actions blocked.
+    pendingGenerator.current = null;
+    setGeneratorPending(false);
+    setGeneratorError(null);
+  }, [world.meta.worldId, production.meta.id, scene.id]);
   useEffect(() => {
     frameRunCommand({ kind: "frame-run-list", worldId: world.meta.worldId, productionId: production.meta.id });
   }, [world.meta.worldId, production.meta.id]);
@@ -204,6 +283,7 @@ export function SceneWorkspace({
               </div>
             </div>
             {sceneReviewOpen ? <SceneReview scene={writerSceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
+            {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
 
           {/*
@@ -279,6 +359,7 @@ export function SceneWorkspace({
               newShotIds={newShotIds}
               stagedBoards={stagedBoards}
               locked={staged !== undefined || sceneFile === undefined || commandPending}
+              generatorPending={generatorPending}
               onCommand={write}
               refusalVersion={refusalVersion}
               frameRun={frameRun}
@@ -287,6 +368,8 @@ export function SceneWorkspace({
                 setBoardSheetTrigger(trigger);
                 setBoardSheetKey(JSON.stringify(board.memberShotIds));
               }}
+              onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
           ) : (
             <SceneFlow
@@ -301,6 +384,9 @@ export function SceneWorkspace({
               stagedBoards={stagedBoards}
               locked={staged !== undefined || sceneFile === undefined || commandPending}
               onCommand={write}
+              generatorPending={generatorPending}
+              onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
           )}
         </main>

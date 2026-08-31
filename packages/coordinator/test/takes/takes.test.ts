@@ -147,8 +147,11 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     const takes = await recordTakesFromJob(store, passJob(landed), null);
     let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
 
-    await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
-    // Inject the legacy backing-pass state this regression protects; setTrim no longer offers it.
+    await assert.rejects(
+      () => acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" }),
+      /backing pass/,
+    );
+    await acceptTake(store, production, { takeId: takes[1]!.id, shotId: "sh_12", by: "user" });
     await store.ownedWrite(async () => {
       const path = join(dir, "productions/saltlight/selections.json");
       const withTrim = JSON.parse(await readFile(path, "utf8")) as Record<
@@ -161,7 +164,7 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
 
     // Re-accepting the same take changes nothing about the footage, so the in-point stands.
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, production, { takeId: takes[0]!.id, shotId: "sh_12", by: "user" });
+    await acceptTake(store, production, { takeId: takes[1]!.id, shotId: "sh_12", by: "user" });
     assert.equal(
       store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
       4.25,
@@ -169,10 +172,21 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     );
 
     // A different take is different footage: 4.25s into one clip is not 4.25s into another.
+    const secondLanding = await landPass(dir);
+    const secondTakes = await recordTakesFromJob(
+      store,
+      {
+        ...passJob(secondLanding),
+        id: "jb_01J8E0000000000000000000P2",
+        idempotencyKey: "01J8E1000000000000000000P2",
+        providerJobId: "fal_p2",
+      },
+      null,
+    );
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, production, { takeId: takes[1]!.id, shotId: "sh_12", by: "user" });
+    await acceptTake(store, production, { takeId: secondTakes[1]!.id, shotId: "sh_12", by: "user" });
     const after = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"];
-    assert.equal(after?.acceptedTakeId, takes[1]!.id);
+    assert.equal(after?.acceptedTakeId, secondTakes[1]!.id);
     assert.equal(after?.trimInSec, 0, "the in-point is reset, not carried onto unrelated footage");
     await store.close();
   });
@@ -219,17 +233,23 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     await store.close();
   });
 
-  it("set-trim refuses material the cut refuses, with the cut's own reason", async () => {
-    // Accepting the backing pass for one shot is possible; trimming into it is not, and the
-    // refusal is the same one deriveSpineCut gives rather than a second opinion.
+  it("accept refuses a backing pass the cut cannot use for one shot", async () => {
     const { dir, store } = await open();
     const landed = await landPass(dir);
     const [pass] = await recordTakesFromJob(store, passJob(landed), null);
-    let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, production, { takeId: pass!.id, shotId: "sh_12", by: "user" });
-
-    production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await assert.rejects(() => setTrim(store, production, { shotId: "sh_12", trimInSec: 1 }), /backing-pass/);
+    const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    await assert.rejects(
+      () => acceptTake(store, production, { takeId: pass!.id, shotId: "sh_12", by: "user" }),
+      /backing pass/,
+    );
+    assert.notEqual(production.selections["sh_12"]?.acceptedTakeId, pass!.id);
+    const legacy = structuredClone(production);
+    legacy.selections["sh_12"] = { acceptedTakeId: pass!.id, trimInSec: 0 };
+    assert.equal(
+      deriveCut(legacy).entries.find((entry) => entry.shot.id === "sh_12")?.takeId,
+      null,
+      "a persisted backing selection is a cut gap rather than playable footage",
+    );
     await store.close();
   });
 
@@ -264,15 +284,26 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
   it("a trim set through the real writer still resets when the take changes (#253)", async () => {
     const { dir, store } = await open();
     const landed = await landPass(dir);
-    const [pass, seg12] = await recordTakesFromJob(store, passJob(landed), null);
+    const [, seg12] = await recordTakesFromJob(store, passJob(landed), null);
     let production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
     await acceptTake(store, production, { takeId: seg12!.id, shotId: "sh_12", by: "user" });
 
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
     await setTrim(store, production, { shotId: "sh_12", trimInSec: 4.25 });
 
+    const secondLanding = await landPass(dir);
+    const [, secondSeg12] = await recordTakesFromJob(
+      store,
+      {
+        ...passJob(secondLanding),
+        id: "jb_01J8E0000000000000000000P3",
+        idempotencyKey: "01J8E1000000000000000000P3",
+        providerJobId: "fal_p3",
+      },
+      null,
+    );
     production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, production, { takeId: pass!.id, shotId: "sh_12", by: "user" });
+    await acceptTake(store, production, { takeId: secondSeg12!.id, shotId: "sh_12", by: "user" });
     assert.equal(
       store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.selections["sh_12"]?.trimInSec,
       0,

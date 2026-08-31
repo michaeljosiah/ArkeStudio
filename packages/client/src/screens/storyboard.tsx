@@ -34,8 +34,8 @@ import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
  * derived — never a stored status. A hand edit saves where it stands (the bible's model,
  * master §4.5): every save cuts a version, and a save against a scene that moved is refused by
  * the coordinator, which this screen learns from the snapshot's version rather than a reply.
- * The docked assistant and per-shot dispatch are later phases (turn 97's dv-next); until they
- * land, Generate frame and Regenerate go where those actions already live.
+ * The scene workspace owns generation. Legacy cards keep their editing surface while their
+ * generation links return to that owner rather than the retired takes/dispatch route.
  */
 
 // ---------------------------------------------------------------------------
@@ -398,13 +398,13 @@ export function StoryboardStrip({
                 </div>
                 <div className="fy-sbactions">
                   {takes.length > 0 ? (
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
+                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}>
                       Regenerate
                     </Button>
                   ) : (
                     <Button
                       variant="primary"
-                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}
+                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}
                     >
                       Generate frame
                     </Button>
@@ -1121,7 +1121,7 @@ export function ShotSheetScreen() {
         <Button variant="ghost" onClick={() => navigate(back)}>
           Back to the storyboard
         </Button>
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
+        <Button variant="primary" onClick={() => navigate(`${back}?workspace=1&shot=${shot.id}`)}>
           Generate frame
         </Button>
       </div>

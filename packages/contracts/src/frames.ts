@@ -2299,6 +2299,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("bench-open"), worldId: UlidSchema, sessionId: SessionIdSchema.optional() })
     .strict(),
+  /** Prepare a fresh production-bound session from authoritative scene state. Nothing is spent. */
+  z
+    .object({
+      kind: z.literal("bench-open-subject"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: SceneIdSchema,
+      subject: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("shot"), shotId: ShotIdSchema }).strict(),
+        z.object({ kind: z.literal("board"), memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
+      ]),
+    })
+    .strict(),
+  /** Reassemble a subject session's words from the current production and script. */
+  z
+    .object({
+      kind: z.literal("bench-rebuild-subject"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+    })
+    .strict(),
   /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
   z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
@@ -2479,6 +2502,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,
+      /** The exact draft this press reviewed; persisted before the coordinator plans the job. */
+      composer: z
+        .object({
+          mode: BenchModeSchema,
+          provider: z.string(),
+          model: z.string(),
+          params: BenchParamsSchema,
+          brief: z.string().max(100_000),
+        })
+        .strict(),
       /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
@@ -2498,6 +2531,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("bench-keep"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      requestId: UlidSchema,
+      takeId: TakeIdSchema,
+    })
+    .strict(),
+  /** Subject sessions file into production; the world-scoped bench keeps using bench-keep. */
+  z
+    .object({
+      kind: z.literal("bench-accept"),
       worldId: UlidSchema,
       sessionId: SessionIdSchema,
       requestId: UlidSchema,

@@ -1718,6 +1718,7 @@ export function SceneChatScreen() {
 
 export function SceneDetailScreen() {
   const { worldId, prodId, sceneId } = useParams();
+  const [searchParams] = useSearchParams();
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
@@ -1733,7 +1734,7 @@ export function SceneDetailScreen() {
    * untouched — not hidden by CSS but never mounted, so a regression here cannot reach anyone
    * who has not turned it on.
    */
-  if (state?.app.internal.sceneWorkspace === true && world && production && record) {
+  if ((state?.app.internal.sceneWorkspace === true || searchParams.get("workspace") === "1") && world && production && record) {
     return <SceneWorkspace world={world} production={production} scene={record} />;
   }
   if (!production || !scene) {

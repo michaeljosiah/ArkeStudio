@@ -52,6 +52,7 @@ function benchSession(): BenchSession {
         source: { source: "artifact", artifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6HF", hash: "sha256:deadbeef" },
       },
     ],
+    subjectTokens: [],
     nextToken: { image: 2 },
     nextTake: 2,
     selectedTakeId: TAKE_ID,

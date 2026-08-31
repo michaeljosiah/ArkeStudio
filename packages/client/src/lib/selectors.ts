@@ -41,11 +41,19 @@ export function takeDecisions(production: ProductionBundle): Record<string, Take
 }
 
 export function takesForShot(production: ProductionBundle, shotId: string) {
-  return production.takes.filter((t) => t.boardSheetParent !== true && t.coversShots.includes(shotId));
+  return production.takes.filter(
+    (take) =>
+      take.boardSheetParent !== true &&
+      !(take.kind === "clip" && take.segment === undefined && take.coversShots.length > 1) &&
+      take.coversShots.includes(shotId),
+  );
 }
 
 export function acceptedTakeId(production: ProductionBundle, shotId: string): string | null {
-  return production.selections[shotId]?.acceptedTakeId ?? null;
+  const accepted = production.selections[shotId]?.acceptedTakeId ?? null;
+  return accepted !== null && takesForShot(production, shotId).some((take) => take.id === accepted)
+    ? accepted
+    : null;
 }
 
 /** The day-one/established split the production dashboard renders (§8.2). */

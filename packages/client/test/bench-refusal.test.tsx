@@ -16,6 +16,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { enqueueNote, queueNoteId } from "../src/components/queue-note.js";
 import {
   __applyEventForTest,
+  __connectionStatusForTest,
   __setBridgeForTest,
   __setStateForTest,
   type QueueEnqueueResult,
@@ -62,6 +63,36 @@ const IMAGE_MODEL: ManifestModel = {
   pricing: { kind: "perImage", microUsdPerImage: 60000 },
 };
 
+const VIDEO_MODEL: ManifestModel = {
+  id: "test-video",
+  provider: "fal",
+  capability: "video",
+  displayName: "Test Video",
+  accepts: { referenceImages: 2, referenceRoles: false, startFrame: false, endFrame: false },
+  limits: {
+    maxPromptChars: 500,
+    maxDurationSec: 12,
+    aspects: ["16:9"],
+    soundChoice: true,
+    durations: { "10": "10", "12": "12" },
+  },
+  pricing: { kind: "perSecond", microUsdPerSecond: 100000 },
+};
+
+const DEFAULT_DURATION_VIDEO_MODEL: ManifestModel = {
+  ...VIDEO_MODEL,
+  id: "default-duration-video",
+  displayName: "Default Duration Video",
+  limits: { maxPromptChars: 500, maxDurationSec: 12, aspects: ["16:9"], soundChoice: true },
+};
+
+const SQUARE_IMAGE_MODEL: ManifestModel = {
+  ...IMAGE_MODEL,
+  id: "square-image",
+  displayName: "Square Image",
+  limits: { ...IMAGE_MODEL.limits, aspects: ["1:1"] },
+};
+
 /** The session as step 2 of the reproduction leaves it: the brief cites a reference nothing carries. */
 function benchSession(brief: string, activeTokens: readonly string[]): BenchSession {
   return {
@@ -88,6 +119,7 @@ function benchSession(brief: string, activeTokens: readonly string[]): BenchSess
         },
       },
     ],
+    subjectTokens: [],
     nextToken: { image: 2 },
     nextTake: 1,
     selectedTakeId: null,
@@ -103,10 +135,156 @@ function stateWith(session: BenchSession): ClientState {
     ...base,
     app: {
       ...base.app,
-      manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, IMAGE_MODEL] },
+      manifest: {
+        ...base.app.manifest!,
+        models: [
+          ...base.app.manifest!.models,
+          IMAGE_MODEL,
+          VIDEO_MODEL,
+          DEFAULT_DURATION_VIDEO_MODEL,
+          SQUARE_IMAGE_MODEL,
+        ],
+      },
     },
     bench: { worldId: FIXTURE_WORLD_ID, session },
   } as ClientState;
+}
+
+function subjectSession(kind: "shot" | "board", brief = "Maren listens at the rail."): BenchSession {
+  const base = benchSession(brief, ["Image 1"]);
+  const board = kind === "board";
+  const productionTakeId = "tk_01J8F3K2QW9VZX4N7M0RTYB6HJ";
+  const childOne = "tk_01J8F3K2QW9VZX4N7M0RTYB6HK";
+  const childTwo = "tk_01J8F3K2QW9VZX4N7M0RTYB6HM";
+  const takeId = "tk_01J8F3K2QW9VZX4N7M0RTYB6HN";
+  return {
+    ...base,
+    title: board
+      ? "Saltlight · Scene 4 · The verse rises · Board A · 2 shots · 10s · one pass"
+      : "Saltlight · Scene 4 · The verse rises · Shot 12",
+    subject: board
+      ? {
+          kind: "board",
+          productionId: "saltlight",
+          productionTitle: "Saltlight",
+          sceneId: "sc_04",
+          sceneNumber: 4,
+          sceneTitle: "The verse rises",
+          letter: "A",
+          durationSec: 10,
+          aspect: "16:9",
+          packing: { maxDurationSec: 20 },
+          members: [
+            { shotId: "sh_12", number: 12, title: "Maren at the rail", durationSec: 4 },
+            { shotId: "sh_13", number: 13, title: "The lamps answer", durationSec: 6 },
+          ],
+        }
+      : {
+          kind: "shot",
+          productionId: "saltlight",
+          productionTitle: "Saltlight",
+          sceneId: "sc_04",
+          sceneNumber: 4,
+          sceneTitle: "The verse rises",
+          shotId: "sh_12",
+          shotNumber: 12,
+          shotTitle: "Maren at the rail",
+          durationSec: 4,
+          aspect: "16:9",
+        },
+    composer: {
+      mode: board ? "video" : "image",
+      provider: "fal",
+      model: board ? "test-video" : "test-image",
+      params: board
+        ? { kind: "video", aspect: "16:9", durationSec: 10, sound: true }
+        : { kind: "image", aspect: "16:9", count: 1 },
+      brief,
+      activeTokens: ["Image 1"],
+      keyframeTokens: [],
+    },
+    tokenRegistry: [
+      {
+        token: "Image 1",
+        kind: "image",
+        source: {
+          source: "world-file",
+          path: "references/maren-kest/model-sheet-v4.png",
+          hash: "sha256:deadbeef",
+        },
+        label: "Maren Kest · v4",
+        detail: "@maren-kest · character reference",
+        sheetId: "maren-kest",
+        sheetVersion: 4,
+        ride: "when-supported",
+      },
+      {
+        token: "Audio 1",
+        kind: "audio",
+        source: {
+          source: "world-file",
+          path: "references/maren-kest/voice-sample.wav",
+          hash: "sha256:feedface",
+        },
+        label: "voice sample · @maren-kest",
+        detail: "Maren Kest · 9.0s",
+        sheetId: "maren-kest",
+        sheetVersion: 4,
+        durationSec: 9,
+        ride: "when-supported",
+      },
+    ],
+    subjectTokens: ["Image 1", "Audio 1"],
+    nextToken: { image: 2, audio: 2 },
+    nextTake: 2,
+    selectedTakeId: takeId,
+    takes: [
+      {
+        id: takeId,
+        n: 1,
+        requestId: "subject-dispatch",
+        status: "succeeded",
+        request: {
+          mode: board ? "video" : "image",
+          brief,
+          references: [],
+          keyframes: [],
+          provider: "fal",
+          model: board ? "test-video" : "test-image",
+          params: board
+            ? { kind: "video", aspect: "16:9", durationSec: 10, sound: true }
+            : { kind: "image", aspect: "16:9", count: 1 },
+          filing: board
+            ? {
+                kind: "board",
+                productionId: "saltlight",
+                sceneId: "sc_04",
+                productionTakeId,
+                members: [
+                  { shotId: "sh_12", number: 12, startSec: 0, endSec: 4, takeId: childOne },
+                  { shotId: "sh_13", number: 13, startSec: 4, endSec: 10, takeId: childTwo },
+                ],
+              }
+            : {
+                kind: "shot",
+                productionId: "saltlight",
+                sceneId: "sc_04",
+                shotId: "sh_12",
+                productionTakeId,
+                frameArtifactId: "ar_01J8F3K2QW9VZX4N7M0RTYB6HP",
+              },
+        },
+        media: {
+          file: board ? "take.mp4" : "take.png",
+          hash: "sha256:cafebabe",
+          ...(board ? { info: { durationSec: 10 } } : {}),
+        },
+        disposition: "open",
+        createdAt: "2026-08-16T10:00:00.000Z",
+        completedAt: "2026-08-16T10:01:00.000Z",
+      },
+    ],
+  } as unknown as BenchSession;
 }
 
 interface Bench {
@@ -321,5 +499,100 @@ describe("the notification raised for a request", () => {
       null,
     );
     assert.equal(note?.id, queueNoteId(requestId));
+  });
+});
+
+describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
+  it("names and locks a shot while keeping unsupported production references visible", async () => {
+    const bench = await openBench(subjectSession("shot"));
+    assert.match(bench.container.textContent ?? "", /Saltlight · Scene 4 · The verse rises · Shot 12/);
+    assert.match(bench.container.textContent ?? "", /aspect · 16:9/);
+    assert.match(bench.container.textContent ?? "", /duration · 4s/);
+    assert.match(bench.container.textContent ?? "", /seed · auto/);
+    assert.match(bench.container.textContent ?? "", /Maren Kest · v4/);
+    assert.match(bench.container.textContent ?? "", /voice sample · @maren-kest/);
+    assert.match(bench.container.textContent ?? "", /Maren Kest · 9\.0s/);
+    assert.match(bench.container.textContent ?? "", /not riding/);
+    assert.ok(bench.container.querySelector(".fy-bench__wave"));
+    const modes = [...bench.container.querySelectorAll<HTMLButtonElement>('[aria-label="What to make"] button')];
+    assert.equal(modes.find((button) => button.textContent === "Image")?.disabled, false);
+    assert.ok(modes.filter((button) => button.textContent !== "Image").every((button) => button.disabled));
+    const square = bench.container.querySelector<HTMLOptionElement>('option[value="fal/square-image"]');
+    assert.equal(square?.hasAttribute("disabled"), true, "a locked 16:9 subject cannot spend on a square-only model");
+    assert.equal(bench.container.querySelector('[data-testid="bench-keep"]'), null);
+    assert.ok(bench.container.querySelector('[data-testid="bench-accept"]'));
+    assert.match(bench.container.textContent ?? "", /accepting files the frame onto shot 12/);
+    await close(bench);
+  });
+
+  it("rebuilds the same session draft and sends Accept rather than Keep", async () => {
+    const bench = await openBench(subjectSession("shot"));
+    await press(bench, "bench-accept");
+    assert.equal(bench.sent.at(-1)?.kind, "bench-accept");
+    assert.equal(bench.sent.some((message) => message.kind === "bench-keep"), false);
+    const acceptRequestId = requestIdOf(bench, "bench-accept");
+    await apply({
+      at: "2026-08-16T10:01:30.000Z",
+      type: "bench.subject-accepted",
+      worldId: FIXTURE_WORLD_ID,
+      sessionId: SESSION_ID,
+      takeId: subjectSession("shot").selectedTakeId,
+      requestId: acceptRequestId,
+      accepted: false,
+      reason: "The subject shot is no longer available.",
+    } as DomainEvent);
+    assert.match(bench.container.textContent ?? "", /subject shot is no longer available/i);
+    await pressLabelled(bench, "Discard");
+    assert.equal(bench.sent.at(-1)?.kind, "bench-discard");
+
+    await press(bench, "bench-rebuild");
+    const requestId = requestIdOf(bench, "bench-rebuild-subject");
+    const rebuilt = subjectSession("shot", "The current script, assembled again.");
+    await act(async () => __setStateForTest(stateWith(rebuilt)));
+    await apply({
+      at: "2026-08-16T10:02:00.000Z",
+      type: "bench.subject-opened",
+      worldId: FIXTURE_WORLD_ID,
+      requestId,
+      sessionId: SESSION_ID,
+    } as DomainEvent);
+    const brief = bench.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Brief"]');
+    assert.equal(brief?.value, "The current script, assembled again.");
+    await close(bench);
+  });
+
+  it("releases one-shot subject controls when their answer is lost with the connection", async () => {
+    const bench = await openBench(subjectSession("shot"));
+    await press(bench, "bench-rebuild");
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.equal(bench.container.querySelector<HTMLButtonElement>('[data-testid="bench-rebuild"]')?.disabled, false);
+    assert.match(bench.container.textContent ?? "", /Connection lost - try again/);
+
+    await act(async () => __connectionStatusForTest("open"));
+    await press(bench, "bench-accept");
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.equal(bench.container.querySelector<HTMLButtonElement>('[data-testid="bench-accept"]')?.disabled, false);
+    assert.match(bench.container.textContent ?? "", /Connection lost - check production before trying again/);
+    await act(async () => __connectionStatusForTest("open"));
+    await close(bench);
+  });
+
+  it("states one board pass and files its accepted clip onto every member", async () => {
+    const bench = await openBench(subjectSession("board"));
+    assert.match(bench.container.textContent ?? "", /Board A · 2 shots · 10s · one pass/);
+    assert.match(bench.container.textContent ?? "", /sound · on/);
+    assert.match(bench.container.textContent ?? "", /accepting files the clip onto 2 shots/);
+    const video = [...bench.container.querySelectorAll<HTMLButtonElement>('[aria-label="What to make"] button')]
+      .find((button) => button.textContent === "Video");
+    assert.equal(video?.getAttribute("aria-pressed"), "true");
+    assert.equal(
+      bench.container
+        .querySelector<HTMLOptionElement>('option[value="fal/default-duration-video"]')
+        ?.hasAttribute("disabled"),
+      true,
+      "a board cannot use a route that leaves its duration to the provider",
+    );
+    assert.match(bench.container.querySelector('[data-testid="bench-generate"]')?.textContent ?? "", /Generate · ~\$/);
+    await close(bench);
   });
 });

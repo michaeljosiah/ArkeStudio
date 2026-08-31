@@ -111,6 +111,35 @@ describe("episode cuts and refusals (issue 396)", () => {
     assert.equal(plan.items[0]!.type, "slate", "the gap exports as a labelled slate, production parity");
   });
 
+  it("treats legacy stills misfiled in the clip slot as gaps", () => {
+    for (const kind of ["frame", "still"] as const) {
+      const takeId = "tk_01J8E0000000000000000000T1";
+      const p = production({
+        scenes: [scene("sc_1", 1, 1, ["sh_1"])],
+        takes: [
+          {
+            id: takeId,
+            coversShots: ["sh_1"],
+            kind,
+            provider: "fal",
+            model: "test-image",
+            provenance: { canonRevision: 1, sheets: {} },
+            prompt: "a frame",
+            references: [],
+            params: {},
+            cost: { estimatedMicroUsd: 1000, actualMicroUsd: null },
+            dispatchedAt: AT,
+            media: "frame.png",
+          },
+        ],
+        selections: { sh_1: { acceptedTakeId: takeId, trimInSec: 0 } },
+      });
+      const cut = deriveCut(p);
+      assert.equal(cut.entries[0]?.media, null, `${kind} media never enters the linear cut`);
+      assert.equal(cut.gaps, 1);
+    }
+  });
+
   it("refusals are named: unknown episode, empty episode, dangling scene, double-owned scene", () => {
     const p = production({
       scenes: [scene("sc_1", 1, 1, ["sh_1"])],

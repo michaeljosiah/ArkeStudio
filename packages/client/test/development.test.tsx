@@ -6,7 +6,7 @@ import type { ClientState, Episode, StagedProposal } from "@arke-studio/contract
 import { App } from "../src/App.js";
 import { ProductionChatScreen, SceneChatScreen, StoryScreen } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
-import { isDayOne, takesForShot } from "../src/lib/selectors.js";
+import { acceptedTakeId, isDayOne, takesForShot } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -112,6 +112,28 @@ describe("shot take selection", () => {
     const visible = takesForShot({ ...production, takes: [...production.takes, parent] }, "sh_12");
     assert.ok(visible.every((take) => take.id !== parent.id));
     assert.ok(visible.some((take) => take.id === frame.id), "ordinary shot frames remain selectable");
+  });
+
+  it("excludes an unsegmented backing pass that covers several shots", () => {
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clip = production.takes.find((take) => take.kind === "clip")!;
+    const parent = {
+      ...clip,
+      id: "tk_01J8E0000000000000000000BQ" as typeof clip.id,
+      coversShots: ["sh_12", "sh_13"] as typeof clip.coversShots,
+      segment: undefined,
+    };
+    const withLegacySelection = {
+      ...production,
+      takes: [...production.takes, parent],
+      selections: {
+        ...production.selections,
+        sh_12: { acceptedTakeId: parent.id, trimInSec: 0 },
+      },
+    };
+    const visible = takesForShot(withLegacySelection, "sh_12");
+    assert.ok(visible.every((take) => take.id !== parent.id));
+    assert.equal(acceptedTakeId(withLegacySelection, "sh_12"), null);
   });
 });
 

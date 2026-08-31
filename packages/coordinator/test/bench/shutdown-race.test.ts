@@ -114,6 +114,13 @@ describe("Bench dispatch racing coordinator shutdown", () => {
           worldId: WORLD_ID,
           sessionId,
           requestId: "01J8E10000000000000000SD01",
+          composer: {
+            mode: "image",
+            provider: "comfyui",
+            model: "comfyui-draft-image",
+            params: { kind: "image", count: 1 },
+            brief: "The exact priced tide-clock draft.",
+          },
         }),
       );
       await inAdmission;
@@ -131,6 +138,7 @@ describe("Bench dispatch racing coordinator shutdown", () => {
           .map((line) => (JSON.parse(line) as { id: string }).id),
       );
       assert.equal(session?.takes.length, 1);
+      assert.equal(session?.takes[0]?.request.brief, "The exact priced tide-clock draft.");
       assert.equal(session?.takes[0]?.status, "failed");
       assert.equal(session?.takes[0]?.jobId, undefined);
       assert.equal(

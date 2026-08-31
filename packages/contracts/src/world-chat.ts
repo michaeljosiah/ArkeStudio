@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  ArtifactIdSchema,
   CandidateGroupIdSchema,
   CandidateIdSchema,
   CanonIdSchema,
@@ -17,6 +18,7 @@ import {
   Sha256Schema,
   ShotIdSchema,
   SlugSchema,
+  TakeIdSchema,
   TurnIdSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
@@ -955,6 +957,26 @@ export const WorldChatNotCarriedSchema = z
   .strict();
 export type WorldChatNotCarried = z.infer<typeof WorldChatNotCarriedSchema>;
 
+export const BenchOutcomeReportSchema = z
+  .object({
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    rows: z
+      .array(
+        z
+          .object({
+            shotId: ShotIdSchema,
+            shotNumber: z.number().int().min(1),
+            productionTakeId: TakeIdSchema,
+            artifactId: ArtifactIdSchema.optional(),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+export type BenchOutcomeReport = z.infer<typeof BenchOutcomeReportSchema>;
+
 /**
  * `turn.completed` carries the reply, its receipts and every proposition it changed in one
  * record. Splitting them would let a crash persist a reply that refers to propositions which
@@ -1029,6 +1051,16 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
        * or undo. The file itself is already committed by then — this is the pointer to it.
        */
       bibleEdit: BibleEditRecordSchema.optional(),
+    })
+    .strict(),
+  /** A filing outcome narrated by Arke without pretending a model turn produced it. */
+  z
+    .object({
+      type: z.literal("bench.outcome-recorded"),
+      message: WorldChatMessageSchema,
+      sessionId: SessionIdSchema,
+      takeId: TakeIdSchema,
+      report: BenchOutcomeReportSchema,
     })
     .strict(),
   z
@@ -1280,6 +1312,8 @@ export const WorldChatLoadedSchema = z
      * what did NOT happen, and it belongs beside the sentence that may claim otherwise.
      */
     refusals: z.record(MessageIdSchema, RefusedToolsSchema).default({}),
+    /** Production filing rows, by the narration message they sit beside. */
+    benchOutcomes: z.record(MessageIdSchema, BenchOutcomeReportSchema).default({}),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
@@ -1541,6 +1575,7 @@ export const WorldChatTranscriptMessageSchema = z
      * same kind of offer, and only one of them is an offer at all.
      */
     bibleEdit: BibleEditRecordSchema.optional(),
+    benchOutcome: BenchOutcomeReportSchema.optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();

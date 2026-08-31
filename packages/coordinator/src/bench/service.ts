@@ -6,6 +6,7 @@ import {
   deliveryParams,
   benchSourceKey,
   benchTokenFor,
+  bindingPreamble,
   briefForProvider,
   dispatchDuration,
   estimateMicroUsd,
@@ -17,6 +18,7 @@ import {
   modeCapability,
   MUSIC_DURATION_SEC,
   newId,
+  orderedShots,
   pricedDuration,
   routeFor,
   sizeParamsFor,
@@ -26,12 +28,15 @@ import {
   type ArtifactSidecar,
   type BenchReferenceSource,
   type BenchReferenceToken,
+  type BenchComposer,
   type BenchRequestSnapshot,
   type BenchReservedTake,
   type BenchSession,
   type BenchSessionSummary,
+  type BenchSubject,
   type BenchMode,
   type BenchTake,
+  type BoundReference,
   type Capability,
   type Delivery,
   type ManifestModel,
@@ -40,11 +45,13 @@ import {
   type ReferenceKind,
   type SessionId,
   type TaskMode,
+  type Provenance,
   type WorldBundle,
   voiceSourceFor,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { BenchStore, sessionDir, sessionMediaDir, sessionsDir } from "./store.js";
+import { boardSubjectIsCurrent } from "./subject.js";
 
 /**
  * The bench's commands (issue 305 §6): everything between a client message and the session log.
@@ -87,6 +94,38 @@ export interface OpenedBench {
   session: BenchSession;
 }
 
+/** Create or rejoin the exact subject session a correlated open command names. */
+export async function openSubjectBenchSession(
+  worldDir: string,
+  sessionId: SessionId,
+  at: string,
+  prefill: {
+    subject: BenchSubject;
+    title: string;
+    composer: BenchComposer;
+    references: BenchReferenceToken[];
+  },
+): Promise<OpenedBench> {
+  const store = new BenchStore(sessionDir(worldDir, sessionId));
+  // The event can safely exist without metadata: discovery ignores it, and a retry deduplicates
+  // it before creating the header. Writing the header first left a discoverable board session in
+  // the fold's image baseline if the process stopped between these two durable writes.
+  await store.append(
+    {
+      type: "subject-prefill-set",
+      subject: prefill.subject,
+      title: prefill.title,
+      composer: prefill.composer,
+      references: prefill.references,
+    },
+    { at, requestId: `subject-prefill:${sessionId}` },
+  );
+  await store.create(sessionId, at, prefill.subject);
+  const session = await store.fold();
+  if (session === null || session.subject === undefined) throw new Error("the subject bench session could not be created");
+  return { store, session };
+}
+
 /**
  * By id from a durable URL, or with none — which resumes the most recently updated session and
  * creates one only when the world has none. Creation seeds the composer with the routed image
@@ -113,7 +152,9 @@ export async function openBenchSession(
   }
   if (options.fresh !== true) {
     const summaries = await discoverBenchSessions(worldDir);
-    const latest = summaries[0];
+    // The id-less Artifacts route is the subjectless Bench. A production-bound session is
+    // reopened only by its durable id or by another scene handoff, never by Generate elsewhere.
+    const latest = summaries.find((summary) => summary.subject === undefined);
     if (latest) {
       const store = new BenchStore(sessionDir(worldDir, latest.id));
       const session = await store.fold();
@@ -419,6 +460,135 @@ export type BenchDispatchPlan =
   | { ok: false; reason: string }
   | { ok: true; reserved: BenchReservedTake[]; inputs: BenchEnqueueInput[] };
 
+function productionProvenanceFor(
+  session: BenchSession,
+  bundle: WorldBundle,
+  references: readonly BenchReferenceToken[],
+  fromTake: BenchTake | undefined,
+): Provenance | undefined {
+  if (session.subject === undefined) return undefined;
+  if (fromTake?.request.productionProvenance !== undefined) return fromTake.request.productionProvenance;
+  const sheets: Record<string, number> = {};
+  for (const reference of references) {
+    if (reference.sheetId === undefined) continue;
+    const version = reference.sheetVersion ?? bundle.sheets.find((sheet) => sheet.id === reference.sheetId)?.version;
+    if (version !== undefined) sheets[reference.sheetId] = version;
+  }
+  return {
+    canonRevision: bundle.meta.canonRevision,
+    sheets,
+    artDirectionVersion: bundle.artDirection.version,
+  };
+}
+
+function productionFilingFor(
+  session: BenchSession,
+  bundle: WorldBundle,
+): { ok: true; make: (coveredDurationSec?: number) => NonNullable<BenchRequestSnapshot["filing"]> } | { ok: false; reason: string } {
+  const subject = session.subject;
+  if (subject === undefined) return { ok: false, reason: "this session has no production subject" };
+  const production = bundle.productions.find((candidate) => candidate.meta.id === subject.productionId);
+  const scene = production?.scenes.find((candidate) => candidate.id === subject.sceneId);
+  if (production === undefined || scene === undefined) {
+    return { ok: false, reason: "The production subject is no longer available." };
+  }
+  const shots = orderedShots(scene);
+  if (subject.kind === "shot") {
+    if (!shots.some((shot) => shot.id === subject.shotId)) {
+      return { ok: false, reason: "The subject shot is no longer in this scene." };
+    }
+    return {
+      ok: true,
+      make: () => ({
+        kind: "shot",
+        productionId: subject.productionId,
+        sceneId: subject.sceneId,
+        shotId: subject.shotId,
+        productionTakeId: newId("tk"),
+        frameArtifactId: newId("ar"),
+      }),
+    };
+  }
+  const memberIds = subject.members.map((member) => member.shotId);
+  const first = shots.findIndex((shot) => shot.id === memberIds[0]);
+  const current = first < 0 ? [] : shots.slice(first, first + memberIds.length);
+  if (current.map((shot) => shot.id).join("\n") !== memberIds.join("\n")) {
+    return { ok: false, reason: "The board members are no longer contiguous in this scene. Rebuild the session." };
+  }
+  if (
+    current.some(
+      (shot, index) => (shot.durationSec ?? 4) !== subject.members[index]?.durationSec,
+    )
+  ) {
+    return { ok: false, reason: "The board timing changed in this scene. Rebuild the session." };
+  }
+  if (!boardSubjectIsCurrent(bundle, subject)) {
+    return { ok: false, reason: "The board boundaries changed in this scene. Rebuild the session." };
+  }
+  return {
+    ok: true,
+    make: (coveredDurationSec) => {
+      let cursor = 0;
+      const members = subject.members.map((member) => {
+        const startSec = cursor;
+        cursor += member.durationSec;
+        return {
+          shotId: member.shotId,
+          number: member.number,
+          startSec,
+          endSec: cursor,
+          takeId: newId("tk"),
+        };
+      });
+      // Discrete provider durations round up. The ordinary pass compiler gives that paid tail
+      // to the final member; filing must use the same boundary or part of the clip and charge has
+      // no shot that can review it.
+      if (coveredDurationSec !== undefined && coveredDurationSec > cursor && members.length > 0) {
+        members[members.length - 1]!.endSec = coveredDurationSec;
+      }
+      return {
+        kind: "board",
+        productionId: subject.productionId,
+        sceneId: subject.sceneId,
+        productionTakeId: newId("tk"),
+        members,
+      };
+    },
+  };
+}
+
+function filingMatchesCurrentSubject(
+  filing: BenchRequestSnapshot["filing"],
+  subject: NonNullable<BenchSession["subject"]>,
+  coveredDurationSec?: number,
+): boolean {
+  if (
+    filing === undefined ||
+    filing.kind !== subject.kind ||
+    filing.productionId !== subject.productionId ||
+    filing.sceneId !== subject.sceneId
+  ) {
+    return false;
+  }
+  if (filing.kind === "shot" && subject.kind === "shot") return filing.shotId === subject.shotId;
+  if (filing.kind !== "board" || subject.kind !== "board" || filing.members.length !== subject.members.length) {
+    return false;
+  }
+  let cursor = 0;
+  return filing.members.every((member, index) => {
+    const current = subject.members[index]!;
+    const startSec = cursor;
+    cursor += current.durationSec;
+    const endSec = index === subject.members.length - 1 ? Math.max(cursor, coveredDurationSec ?? cursor) : cursor;
+    return (
+      member.shotId === current.shotId &&
+      member.number === current.number &&
+      member.startSec === startSec &&
+      member.endSec === endSec
+    );
+  });
+}
+
 /**
  * The gate before enqueue (§9): capability, prompt, duration, duplicate, output and
  * unverified-model validation, repeated here whatever the renderer said. Returns the reserved
@@ -455,9 +625,34 @@ export function planBenchDispatch(
     : session.composer;
   const model = manifest?.models.find((m) => m.id === composer.model && m.provider === composer.provider) ?? null;
   if (!model) return { ok: false, reason: "No model is chosen, or the chosen model is no longer in the manifest." };
+  const params = composer.params;
   // Through the map, not compared: `voice` dispatches against `voice-tts` (design 70).
   if (model.capability !== modeCapability(composer.mode)) {
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model; this is a ${composer.mode} request.` };
+  }
+  if (params.kind !== composer.mode) return { ok: false, reason: "The controls do not match the mode." };
+  if (session.subject?.kind === "shot") {
+    if (composer.mode !== "image" || params.kind !== "image") {
+      return { ok: false, reason: "A shot subject must generate an image." };
+    }
+    if (params.aspect !== session.subject.aspect) {
+      return { ok: false, reason: `This shot must use the production aspect ${session.subject.aspect}.` };
+    }
+  }
+  if (session.subject?.kind === "board") {
+    if (composer.mode !== "video" || params.kind !== "video") {
+      return { ok: false, reason: "A board subject must generate video." };
+    }
+    if (params.aspect !== session.subject.aspect) {
+      return { ok: false, reason: `This board must use the production aspect ${session.subject.aspect}.` };
+    }
+    if (params.durationSec !== session.subject.durationSec) {
+      return { ok: false, reason: `This board must keep its ${session.subject.durationSec}s authored duration.` };
+    }
+    if (params.sound !== true) return { ok: false, reason: "A board subject must keep sound on." };
+  }
+  if (session.subject !== undefined && !aspectSupport(model, session.subject.aspect).ok) {
+    return { ok: false, reason: `${model.displayName} cannot make the production aspect ${session.subject.aspect}.` };
   }
   if (composer.brief.trim().length === 0) return { ok: false, reason: "An empty brief is not a brief." };
 
@@ -508,8 +703,8 @@ export function planBenchDispatch(
   }
   const referencePaths = resolvedRefs.map(({ resolved }) => resolved.path);
 
-  const params = composer.params;
-  if (params.kind !== composer.mode) return { ok: false, reason: "The controls do not match the mode." };
+  const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle);
+  if (filingPlan !== null && !filingPlan.ok) return filingPlan;
 
   // The Keyframe lane (issue 305 §3): resolve the snapshot's own frames (re-run) or the live
   // lane, derive the task mode from the count, and honor the model's route for that mode —
@@ -570,7 +765,27 @@ export function planBenchDispatch(
   // the words the model reads and the pictures it is given cannot drift apart once a reference
   // has been removed or restored in another order (raised on review, issue 476). The snapshot
   // keeps the author's own words, which is what makes a re-run reproduce this same arithmetic.
-  const wirePrompt = briefForProvider(composer.brief, frame !== null ? keyframes : references);
+  const body = briefForProvider(composer.brief, frame !== null ? keyframes : references);
+  let imageIndex = 0;
+  const bound: BoundReference[] = [];
+  for (const { entry, resolved } of resolvedRefs) {
+    if (entry.kind !== "image") continue;
+    imageIndex += 1;
+    if (entry.productionBinding === undefined || entry.sheetId === undefined) continue;
+    const first = bound.find((candidate) => candidate.sheetId === entry.sheetId);
+    bound.push({
+      index: imageIndex,
+      sheetId: entry.sheetId,
+      subject: entry.productionBinding.subject,
+      file: resolved.path,
+      kind: "image",
+      rolePhrase: entry.productionBinding.rolePhrase,
+      mode: entry.productionBinding.mode,
+      sameSubjectAs: first?.index ?? null,
+    });
+  }
+  const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
+  const wirePrompt = preamble === null ? body : `${preamble}\n\n${body}`;
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
@@ -583,6 +798,16 @@ export function planBenchDispatch(
     provider: model.provider,
     model: model.id,
     ...(recipeVersion !== undefined ? { recipeVersion } : {}),
+    ...(session.subject !== undefined
+      ? {
+          productionProvenance: productionProvenanceFor(
+            session,
+            bundle,
+            [...references, ...keyframes],
+            options.fromTake,
+          )!,
+        }
+      : {}),
   };
 
   // A delivery this provider cannot express refuses here rather than being dropped on the way
@@ -620,6 +845,43 @@ export function planBenchDispatch(
     return { ok: false, reason: "There are no lyrics yet — write them, or ask for a draft." };
   }
 
+  const videoDuration =
+    params.kind === "video" && (params.durationSec ?? 0) > 0
+      ? dispatchDuration(model, params.durationSec!, {
+          withReferences: referencePaths.length > 0 || frame !== null,
+        })
+      : params.kind === "video"
+        ? { kind: "provider-default" as const }
+         : null;
+  if (session.subject?.kind === "board" && videoDuration?.kind === "provider-default") {
+    return {
+      ok: false,
+      reason: `${model.displayName} does not offer a fixed duration for this board.`,
+    };
+  }
+  if (videoDuration?.kind === "over-cap") {
+    return {
+      ok: false,
+      reason: videoDuration.becauseReferences
+        ? `${model.displayName} runs at most ${videoDuration.longest}s with references — remove them, or shorten the shot.`
+        : `${model.displayName} runs at most ${videoDuration.longest}s.`,
+    };
+  }
+  if (
+    options.fromTake !== undefined &&
+    session.subject !== undefined &&
+    !filingMatchesCurrentSubject(
+      options.fromTake.request.filing,
+      session.subject,
+      videoDuration?.kind === "asked" ? videoDuration.seconds : undefined,
+    )
+  ) {
+    return {
+      ok: false,
+      reason: "This take belongs to older production timing. Generate a current take instead.",
+    };
+  }
+
   const reserved: BenchReservedTake[] = [];
   const inputs: BenchEnqueueInput[] = [];
   const count = params.kind === "video" ? 1 : options.fromTake ? 1 : params.count;
@@ -630,6 +892,9 @@ export function planBenchDispatch(
     const snapshot: BenchRequestSnapshot = {
       ...snapshotBase,
       params: params.kind === "video" ? { ...params } : { ...params, count: 1 },
+      ...(filingPlan?.ok
+        ? { filing: filingPlan.make(videoDuration?.kind === "asked" ? videoDuration.seconds : undefined) }
+        : {}),
     };
     reserved.push({
       id: takeId as BenchReservedTake["id"],
@@ -668,19 +933,8 @@ export function planBenchDispatch(
       const requestedSec = params.durationSec ?? 0;
       // The route this job lands on is the one whose ceiling applies: references send it to a
       // different endpoint, and wan's makes 10s where its text route makes 15.
-      const withReferences = referencePaths.length > 0;
-      const choice =
-        requestedSec > 0
-          ? dispatchDuration(model, requestedSec, { withReferences })
-          : { kind: "provider-default" as const };
-      if (choice.kind === "over-cap") {
-        return {
-          ok: false,
-          reason: choice.becauseReferences
-            ? `${model.displayName} runs at most ${choice.longest}s with references — remove them, or shorten the shot.`
-            : `${model.displayName} runs at most ${choice.longest}s.`,
-        };
-      }
+      const withReferences = referencePaths.length > 0 || frame !== null;
+      const choice = videoDuration!;
       inputs.push({
         worldId: options.worldId,
         target: { kind: "bench-take", id: `${session.id}/${takeId}` },
