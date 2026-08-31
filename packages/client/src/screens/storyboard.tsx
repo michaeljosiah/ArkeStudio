@@ -23,7 +23,7 @@ import { Button, Callout, Textarea, cx } from "../components/ui.js";
 import { Plus, X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
-import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
+import { acceptedTakeId, mediaTakeFor, takesForShot, useProduction } from "../lib/selectors.js";
 import { deleteScene, restoreScene, saveScene, setPromptOverride } from "../lib/store.js";
 import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
 
@@ -301,9 +301,10 @@ export function StoryboardStrip({
         // the pixels live on the pass's primary take covering the same shot. The frame follows
         // the media, newest first, accepted preferred.
         const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : undefined;
-        const mediaTake =
-          acceptedTake?.media !== undefined ? acceptedTake : [...takes].reverse().find((t) => t.media !== undefined);
-        const media = mediaTake ? takeMediaPath(production.meta.id, mediaTake) : null;
+        const mediaTake = acceptedTake !== undefined && mediaTakeFor(production, acceptedTake) !== null
+          ? acceptedTake
+          : [...takes].reverse().find((take) => mediaTakeFor(production, take) !== null);
+        const media = mediaTake ? takeMediaPath(production, mediaTake) : null;
         const framing = effectiveFraming(scene, shot);
         const mentioned = parseMentions(shot.description);
         const refs = world.sheets.filter((s) => mentioned.some((m) => s.id === m || s.id.includes(m)));

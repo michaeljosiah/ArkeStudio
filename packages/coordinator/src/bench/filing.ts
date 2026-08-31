@@ -13,7 +13,8 @@ import {
   orderedShots,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
-import type { BoundaryFrameMaker } from "../takes/boundary.js";
+import { chainBoundaryFrame, type BoundaryChainResult, type BoundaryFrameMaker } from "../takes/boundary.js";
+import { posterNameFor } from "../takes/poster.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -27,6 +28,7 @@ export interface SubjectFilingOutcome {
   artifactId?: string;
   takes: Take[];
   decisions: ReviewDecision[];
+  boundaryFrame?: BoundaryChainResult;
 }
 
 async function readOr(store: WorldStore, path: string, fallback: string): Promise<{ raw: string; existed: boolean }> {
@@ -159,6 +161,31 @@ async function writeIfMissing(path: string, bytes: Buffer): Promise<void> {
   if (!exists) await atomicWriteFile(path, bytes);
 }
 
+/** Repair the durable copy after a late Bench poster backfill; absence remains best-effort. */
+export async function copyBenchSubjectPoster(
+  store: WorldStore,
+  session: BenchSession,
+  take: BenchTake,
+): Promise<void> {
+  const filing = take.request.filing;
+  const media = take.media?.file;
+  if (filing === undefined || media === undefined) return;
+  const posterName = posterNameFor(basename(media));
+  if (posterName === basename(media)) return;
+  try {
+    const posterBytes = await readFile(
+      toExtendedLength(join(store.dir, sessionMediaDir(session.id, take.id), posterName)),
+    );
+    if (posterBytes.byteLength === 0) return;
+    await writeIfMissing(
+      join(store.dir, "productions", filing.productionId, "takes", filing.productionTakeId, posterName),
+      posterBytes,
+    );
+  } catch {
+    // Posters are best-effort in both Bench and production; a later open retries this copy.
+  }
+}
+
 function mediaInfoFile(take: BenchTake, fullHash: string): string | null {
   return take.media?.info === undefined
     ? null
@@ -178,7 +205,54 @@ export async function fileBenchSubjectTake(
 ): Promise<SubjectFilingOutcome> {
   // Validation, media copies and metadata share the world's mutation gate. Otherwise a scene
   // edit can move a board boundary after validation and before its stale segments are selected.
-  return store.ownedWrite(() => fileBenchSubjectTakeUnserialised(store, session, take, options));
+  const filed = await store.ownedWrite(() => fileBenchSubjectTakeUnserialised(store, session, take, options));
+  const boundaryFrame = await chainBenchSubjectBoundary(store, take, options.toPng);
+  return boundaryFrame === undefined ? filed : { ...filed, boundaryFrame };
+}
+
+/** Retryable continuity work that must run outside subject filing's non-reentrant world gate. */
+export async function chainBenchSubjectBoundary(
+  store: WorldStore,
+  take: BenchTake,
+  maker: BoundaryFrameMaker | undefined,
+): Promise<BoundaryChainResult | undefined> {
+  const filing = take.request.filing;
+  if (filing?.kind !== "board") return undefined;
+
+  /*
+   * Extraction enters the world gate to install its artifact, so it must run after ownedWrite
+   * releases. The final child is the accepted source fence while its parent owns the footage.
+   */
+  const last = filing.members.at(-1);
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === filing.productionId);
+  const scene = production?.scenes.find((candidate) => candidate.id === filing.sceneId);
+  const shots = scene === undefined ? [] : orderedShots(scene);
+  const index = last === undefined ? -1 : shots.findIndex((shot) => shot.id === last.shotId);
+  const following = index >= 0 ? shots[index + 1] : undefined;
+  const sourceTake = last === undefined ? undefined : production?.takes.find((candidate) => candidate.id === last.takeId);
+  if (production === undefined || last === undefined || following === undefined || sourceTake === undefined) return undefined;
+  if (production.selections[last.shotId]?.acceptedTakeId !== sourceTake.id) return undefined;
+  const boundaryArtifactId = production.selections[following.id]?.startFrameArtifactId;
+  const boundaryArtifact = boundaryArtifactId === undefined
+    ? undefined
+    : store.getBundle().artifacts.find((candidate) => candidate.id === boundaryArtifactId);
+  if (
+    boundaryArtifact?.boundaryExtraction?.sourceTakeId === sourceTake.id &&
+    boundaryArtifact.boundaryExtraction.mediaTakeId === sourceTake.segment?.passTakeId
+  ) {
+    return { ok: true, artifactId: boundaryArtifact.id, followingShotId: following.id };
+  }
+
+  return chainBoundaryFrame(store, production, {
+    take: sourceTake,
+    sourceShotId: last.shotId,
+    followingShotId: following.id,
+    maker,
+    clock: () => store.now(),
+  }).catch((error): BoundaryChainResult => ({
+    ok: false,
+    reason: error instanceof Error ? error.message : String(error),
+  }));
 }
 
 async function fileBenchSubjectTakeUnserialised(
@@ -248,7 +322,10 @@ async function fileBenchSubjectTakeUnserialised(
       ? [filing.productionTakeId]
       : [filing.productionTakeId, ...filing.members.map((member) => member.takeId)];
   const recovered = existingBenchSubjectFiling(store, session, take);
-  if (recovered !== null) return recovered;
+  if (recovered !== null) {
+    await copyBenchSubjectPoster(store, session, take);
+    return recovered;
+  }
   const existing = plannedIds.map((id) => production.takes.find((candidate) => candidate.id === id));
   if (existing.some((candidate) => candidate !== undefined)) {
     throw new Error("the production filing is incomplete; reopen the world so its commit can recover");
@@ -261,6 +338,7 @@ async function fileBenchSubjectTakeUnserialised(
   const mediaName = basename(take.media.file);
   const parentMediaPath = join(store.dir, "productions", filing.productionId, "takes", filing.productionTakeId, mediaName);
   await writeIfMissing(parentMediaPath, sourceBytes);
+  await copyBenchSubjectPoster(store, session, take);
   const referencePaths = await productionReferencePaths(
     store,
     session,

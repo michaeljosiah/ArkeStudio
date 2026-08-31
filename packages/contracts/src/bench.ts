@@ -581,6 +581,8 @@ const BenchSubjectContextShape = {
   sceneId: SceneIdSchema,
   sceneNumber: z.number().int().min(1),
   sceneTitle: z.string().min(1),
+  /** Sheet versions whose words were assembled into the subject's prompt at prefill time. */
+  promptSheetVersions: z.record(SlugSchema, z.number().int().min(1)).optional(),
 } as const;
 
 /** Stable production identity and current display/timing snapshots carried by a subject session. */

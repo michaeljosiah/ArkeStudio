@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -12,7 +12,13 @@ import {
   type ModelManifest,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { fileBenchSubjectTake, type SubjectFilingOutcome } from "../../src/bench/filing.js";
+import {
+  chainBenchSubjectBoundary,
+  copyBenchSubjectPoster,
+  fileBenchSubjectTake,
+  type SubjectFilingOutcome,
+} from "../../src/bench/filing.js";
+import { BOUNDARY_METHOD } from "../../src/takes/boundary.js";
 import { recordBenchOutcome } from "../../src/bench/outcome.js";
 import { openBenchSession, openSubjectBenchSession, planBenchDispatch } from "../../src/bench/service.js";
 import { sessionMediaDir } from "../../src/bench/store.js";
@@ -87,6 +93,16 @@ const sourceReader = {
   durationSec: async () => 9,
 };
 
+function sourcesWithout(...sheetIds: string[]) {
+  return {
+    read: async (path: string) =>
+      sheetIds.some((sheetId) => path.includes(sheetId))
+        ? ({ refused: "fixture intentionally has no readable attachment" } as const)
+        : sourceReader.read(),
+    durationSec: sourceReader.durationSec,
+  };
+}
+
 function sessionWithTake(input: {
   subject: BenchSession["subject"];
   takeId: BenchTake["id"];
@@ -148,13 +164,20 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       acceptedAt: CLOCK(),
       attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
     });
+    const scene = world.productions
+      .find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.description = "@maren-kest and @bray-half-hitch listen without looking toward the water.";
+    const brayVersion = world.sheets.find((sheet) => sheet.id === "bray-half-hitch")!.version;
+    const locationVersion = world.sheets.find((sheet) => sheet.id === "the-vigil")!.version;
     const prepared = await prepareBenchSubject(world, {
       productionId: "saltlight",
       sceneId: "sc_04",
       subject: { kind: "shot", shotId: "sh_12" },
       settings: null,
       manifest: MANIFEST,
-      sources: sourceReader,
+      sources: sourcesWithout("bray-half-hitch"),
     });
     assert.ok(prepared.ok);
     if (!prepared.ok) return;
@@ -167,12 +190,21 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     const maren = prepared.prefill.references.find((reference) => reference.sheetId === "maren-kest");
     assert.equal(maren?.label, "Maren Kest · v5");
     assert.equal(maren?.sheetVersion, 5);
+    assert.equal(prepared.prefill.references.some((reference) => reference.sheetId === "bray-half-hitch"), false);
+    assert.equal(prepared.prefill.references.some((reference) => reference.sheetId === "the-vigil"), false);
+    assert.deepEqual(prepared.prefill.subject.promptSheetVersions, {
+      "maren-kest": 5,
+      "bray-half-hitch": brayVersion,
+      "the-vigil": locationVersion,
+    });
     assert.equal(
       maren?.source.source === "world-file" ? maren.source.path : null,
       "references/maren-kest/looks/storm-coat.png",
       "the production-scoped attachment resolver chooses the current look",
     );
 
+    store.getBundle().sheets.find((sheet) => sheet.id === "bray-half-hitch")!.version += 10;
+    store.getBundle().sheets.find((sheet) => sheet.id === "the-vigil")!.version += 10;
     const session = {
       schemaVersion: 1,
       id: newId("sess"),
@@ -197,6 +229,8 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     assert.equal(snapshot.filing?.kind === "shot" ? snapshot.filing.shotId : null, "sh_12");
     assert.equal(snapshot.productionProvenance?.canonRevision, world.meta.canonRevision);
     assert.equal(snapshot.productionProvenance?.sheets["maren-kest"], 5);
+    assert.equal(snapshot.productionProvenance?.sheets["bray-half-hitch"], brayVersion);
+    assert.equal(snapshot.productionProvenance?.sheets["the-vigil"], locationVersion);
     assert.match(String(plan.inputs[0]!.params.prompt), /Reference assets, by upload order:/);
     assert.match(String(plan.inputs[0]!.params.prompt), /Image 1: Maren Kest/);
 
@@ -268,7 +302,10 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       sources: sourceReader,
     });
     assert.ok(rebuilt.ok);
-    if (rebuilt.ok) assert.equal(rebuilt.prefill.composer.brief, authored);
+    if (rebuilt.ok) {
+      assert.equal(rebuilt.prefill.composer.brief, authored);
+      assert.deepEqual(rebuilt.prefill.subject.promptSheetVersions, {});
+    }
   });
 
   it("carries a legacy accepted still into the board's visual references", async () => {
@@ -390,11 +427,13 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       subject: { kind: "board", memberShotIds: ["sh_12", "sh_13", "sh_14", "sh_15"] },
       settings: null,
       manifest,
-      sources: sourceReader,
+      sources: sourcesWithout("bray-half-hitch", "the-saltmarket"),
     });
     assert.ok(prepared.ok);
     if (!prepared.ok || prepared.prefill.subject.kind !== "board") return;
     assert.equal(prepared.prefill.subject.durationSec, 19.5);
+    assert.equal(prepared.prefill.references.some((reference) => reference.sheetId === "bray-half-hitch"), false);
+    assert.equal(prepared.prefill.references.some((reference) => reference.sheetId === "the-saltmarket"), false);
     const session = {
       schemaVersion: 1,
       id: newId("sess"),
@@ -414,6 +453,12 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     });
     assert.ok(plan.ok);
     if (!plan.ok) return;
+    for (const sheetId of ["maren-kest", "the-vigil", "bray-half-hitch", "the-saltmarket"]) {
+      assert.equal(
+        plan.reserved[0]!.request.productionProvenance?.sheets[sheetId],
+        world.sheets.find((sheet) => sheet.id === sheetId)!.version,
+      );
+    }
     const filing = plan.reserved[0]!.request.filing;
     assert.equal(filing?.kind, "board");
     if (filing?.kind !== "board") return;
@@ -819,6 +864,7 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
     const source = join(dir, sessionMediaDir(session.id, take.id), take.media!.file);
     await mkdir(join(dir, sessionMediaDir(session.id, take.id)), { recursive: true });
     await writeFile(source, "video bytes");
+    await writeFile(join(dir, sessionMediaDir(session.id, take.id), "frame.png"), "poster bytes");
 
     const currentScene = store
       .getBundle()
@@ -875,7 +921,16 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
       ],
     };
 
-    const filed = await fileBenchSubjectTake(store, session, take);
+    const extractions: Array<{ input: string; atSec: number | null }> = [];
+    const filed = await fileBenchSubjectTake(store, session, take, {
+      toPng: {
+        write: async (input, output, atSec) => {
+          extractions.push({ input, atSec });
+          await writeFile(output, "boundary bytes");
+          return { ok: true };
+        },
+      },
+    });
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const parent = production.takes.find((candidate) => candidate.id === parentId)!;
     const first = production.takes.find((candidate) => candidate.id === firstId)!;
@@ -899,6 +954,34 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
       "the backing parent is reviewed without pretending it belongs to one shot",
     );
     assert.ok(production.takes.some((candidate) => candidate.id === "tk_01J8F0000000000000000000B2"));
+    assert.equal(filed.boundaryFrame?.ok, true);
+    assert.equal(extractions.length, 1);
+    assert.match(extractions[0]!.input, new RegExp(`${parentId}[/\\\\]take\\.mp4$`));
+    assert.equal(extractions[0]!.atSec, 10);
+    assert.equal(production.selections["sh_14"]?.startFrameTakeId, parentId);
+    assert.equal(
+      await readFile(join(dir, "productions", "saltlight", "takes", parentId, "frame.png"), "utf8"),
+      "poster bytes",
+    );
+    const boundaryArtifact = store
+      .getBundle()
+      .artifacts.find((candidate) => candidate.id === production.selections["sh_14"]?.startFrameArtifactId);
+    assert.deepEqual(boundaryArtifact?.boundaryExtraction, {
+      sourceTakeId: secondId,
+      mediaTakeId: parentId,
+      atSec: 10,
+      method: BOUNDARY_METHOD,
+    });
+    const recoveredBoundary = await chainBenchSubjectBoundary(store, take, {
+      write: async () => {
+        assert.fail("an installed boundary must not be extracted again during recovery");
+      },
+    });
+    assert.equal(recoveredBoundary?.ok, true);
+    const productionPoster = join(dir, "productions", "saltlight", "takes", parentId, "frame.png");
+    await rm(productionPoster);
+    await copyBenchSubjectPoster(store, session, take);
+    assert.equal(await readFile(productionPoster, "utf8"), "poster bytes");
     assert.equal(await readFile(source, "utf8"), "video bytes");
   });
 

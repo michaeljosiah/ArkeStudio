@@ -49,6 +49,20 @@ export function takesForShot(production: ProductionBundle, shotId: string) {
   );
 }
 
+/** The take that owns the bytes for a selectable take; pass segments own only a time range. */
+export function mediaTakeFor(
+  production: Pick<ProductionBundle, "takes">,
+  take: ProductionBundle["takes"][number],
+): (ProductionBundle["takes"][number] & { media: string }) | null {
+  const passTakeId = take.segment?.passTakeId;
+  const mediaTake = passTakeId === undefined
+    ? take
+    : production.takes.find((candidate) => candidate.id === passTakeId);
+  return mediaTake?.media === undefined
+    ? null
+    : mediaTake as ProductionBundle["takes"][number] & { media: string };
+}
+
 export function acceptedTakeId(production: ProductionBundle, shotId: string): string | null {
   const accepted = production.selections[shotId]?.acceptedTakeId ?? null;
   return accepted !== null && takesForShot(production, shotId).some((take) => take.id === accepted)

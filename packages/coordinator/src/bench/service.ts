@@ -468,7 +468,7 @@ function productionProvenanceFor(
 ): Provenance | undefined {
   if (session.subject === undefined) return undefined;
   if (fromTake?.request.productionProvenance !== undefined) return fromTake.request.productionProvenance;
-  const sheets: Record<string, number> = {};
+  const sheets: Record<string, number> = { ...session.subject.promptSheetVersions };
   for (const reference of references) {
     if (reference.sheetId === undefined) continue;
     const version = reference.sheetVersion ?? bundle.sheets.find((sheet) => sheet.id === reference.sheetId)?.version;

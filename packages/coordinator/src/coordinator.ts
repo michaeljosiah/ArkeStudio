@@ -93,7 +93,12 @@ import {
   type OpenedBench,
 } from "./bench/service.js";
 import { prepareBenchSubject, subjectSessionReferenceRouting } from "./bench/subject.js";
-import { existingBenchSubjectFiling, fileBenchSubjectTake } from "./bench/filing.js";
+import {
+  chainBenchSubjectBoundary,
+  copyBenchSubjectPoster,
+  existingBenchSubjectFiling,
+  fileBenchSubjectTake,
+} from "./bench/filing.js";
 import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
 import { AppLog } from "./app-log.js";
 import { AppSettingsFile, routingFaults } from "./app-settings.js";
@@ -7301,6 +7306,13 @@ export class Coordinator {
             take,
             this.opts.boundaryFrameMaker !== undefined ? { toPng: this.opts.boundaryFrameMaker } : {},
           );
+          if (filed.boundaryFrame !== undefined && !filed.boundaryFrame.ok) {
+            void this.appLog?.append({
+              kind: "boundary-frame.unavailable",
+              reason: filed.boundaryFrame.reason,
+              detail: { takeId: filed.productionTakeIds.at(-1) },
+            });
+          }
           await bench.store.append(
             {
               type: "take-subject-filed",
@@ -10331,6 +10343,13 @@ export class Coordinator {
     const filingTouched = await this.recoverBenchSubjectFilings(store, opened).catch(() => false);
     const session = touched || filingTouched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
     await this.backfillBenchPosters(store, session);
+    await store.ownedWrite(async () => {
+      for (const take of session.takes) {
+        if (existingBenchSubjectFiling(store, session, take) !== null) {
+          await copyBenchSubjectPoster(store, session, take);
+        }
+      }
+    });
     this.readModel.setBench({ worldId: store.worldId, session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
@@ -10344,6 +10363,16 @@ export class Coordinator {
       if (take.disposition === "discarded") continue;
       const filed = existingBenchSubjectFiling(store, opened.session, take);
       if (filed === null) continue;
+      if (this.opts.boundaryFrameMaker !== undefined) {
+        const boundaryFrame = await chainBenchSubjectBoundary(store, take, this.opts.boundaryFrameMaker);
+        if (boundaryFrame !== undefined && !boundaryFrame.ok) {
+          void this.appLog?.append({
+            kind: "boundary-frame.unavailable",
+            reason: boundaryFrame.reason,
+            detail: { takeId: filed.productionTakeIds.at(-1) },
+          });
+        }
+      }
       if (take.disposition === "open") {
         await opened.store.append(
           {

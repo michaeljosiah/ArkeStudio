@@ -4,9 +4,9 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { ProductionChatScreen, SceneChatScreen, StoryScreen } from "../src/screens/production.js";
+import { ProductionChatScreen, SceneChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
-import { acceptedTakeId, isDayOne, takesForShot } from "../src/lib/selectors.js";
+import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -134,6 +134,31 @@ describe("shot take selection", () => {
     const visible = takesForShot(withLegacySelection, "sh_12");
     assert.ok(visible.every((take) => take.id !== parent.id));
     assert.equal(acceptedTakeId(withLegacySelection, "sh_12"), null);
+  });
+
+  it("resolves a filed segment's poster through its hidden backing pass", () => {
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clip = production.takes.find((take) => take.kind === "clip")!;
+    const parent = {
+      ...clip,
+      id: "tk_01J8E0000000000000000000BQ" as typeof clip.id,
+      coversShots: ["sh_12", "sh_13"] as typeof clip.coversShots,
+      segment: undefined,
+    };
+    const child = {
+      ...clip,
+      id: "tk_01J8E0000000000000000000BR" as typeof clip.id,
+      coversShots: ["sh_12"] as typeof clip.coversShots,
+      media: undefined,
+      segment: { passTakeId: parent.id, inSec: 0, outSec: 4 },
+    };
+    const withBoard = { ...production, takes: [...production.takes, parent, child] };
+    const visible = takesForShot(withBoard, "sh_12");
+
+    assert.ok(visible.some((take) => take.id === child.id));
+    assert.ok(visible.every((take) => take.id !== parent.id));
+    assert.equal(mediaTakeFor(withBoard, child)?.id, parent.id);
+    assert.match(takeMediaPath(withBoard, child)!, new RegExp(`/takes/${parent.id}/`));
   });
 });
 

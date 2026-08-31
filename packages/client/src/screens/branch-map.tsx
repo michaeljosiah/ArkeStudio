@@ -9,7 +9,7 @@ import { orderedShots,
 } from "@arke-studio/contracts";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Callout } from "../components/ui.js";
-import { useProduction } from "../lib/selectors.js";
+import { mediaTakeFor, useProduction } from "../lib/selectors.js";
 import {
   exportInteractive,
   listRoutingFindings,
@@ -145,8 +145,9 @@ export function BranchMapScreen() {
       .map((shot) => production.selections[shot.id]?.acceptedTakeId ?? null)
       .find((id) => id !== null);
     const take = takeId != null ? production.takes.find((t) => t.id === takeId) : undefined;
-    return take?.media !== undefined
-      ? mediaUrl(world.meta.slug, `productions/${production.meta.id}/takes/${take.id}/${take.media}`)
+    const mediaTake = take === undefined ? null : mediaTakeFor(production, take);
+    return mediaTake !== null
+      ? mediaUrl(world.meta.slug, `productions/${production.meta.id}/takes/${mediaTake.id}/${mediaTake.media}`)
       : null;
   })();
 

@@ -104,6 +104,20 @@ function sheetOrder(shots: readonly Shot[], world: WorldBundle) {
   return [...found.values()];
 }
 
+function assembledPromptSheetVersions(
+  shots: readonly Shot[],
+  scene: SceneRecord,
+  world: WorldBundle,
+): Record<string, number> {
+  const versions: Record<string, number> = {};
+  for (const { sheet } of sheetOrder(shots, world)) versions[sheet.id] = sheet.version;
+  const location = scene.inherits?.location === undefined
+    ? undefined
+    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
+  if (location !== undefined) versions[location.id] = location.version;
+  return versions;
+}
+
 async function sourceToken(
   path: string,
   kind: ReferenceKind,
@@ -342,9 +356,13 @@ export async function prepareBenchSubject(
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
     const model = subjectModelFor(production, "image", input.settings, input.manifest);
     const references = await sheetTokens([shot], world, production, scene, input.sources);
+    const promptSheetVersions = shot.promptOverride === undefined
+      ? assembledPromptSheetVersions([shot], scene, world)
+      : { ...shot.promptOverride.sheetVersions };
     const subject: BenchSubject = {
       kind: "shot",
       ...subjectContext(production, scene),
+      promptSheetVersions,
       shotId: shot.id,
       shotNumber: shot.number,
       shotTitle: shot.title,
@@ -431,9 +449,11 @@ export async function prepareBenchSubject(
   }
   const voices = await voiceTokens(members, world, input.sources);
   const ordinary = [...sheets, ...voices];
+  const authoredPrompt = boardPromptFor(scene, board.memberShotIds);
   const subject: BenchSubject = {
     kind: "board",
     ...subjectContext(production, scene),
+    promptSheetVersions: authoredPrompt === null ? assembledPromptSheetVersions(members, scene, world) : {},
     letter: board.letter,
     durationSec: board.durationSec,
     aspect,
@@ -463,7 +483,7 @@ export async function prepareBenchSubject(
             sound: true,
           },
         brief:
-          boardPromptFor(scene, board.memberShotIds) ??
+          authoredPrompt ??
           assembleBoardPrompt({
             world: world.meta,
             sheets: world.sheets,
