@@ -40,7 +40,6 @@ export class ReadModel {
         spend: null,
         backgroundNotifications: "issues-only",
         research: { web: false },
-        internal: { sceneWorkspace: false },
         narrator: null,
         appearance: { theme: "system" },
         runtime: null,
@@ -83,7 +82,6 @@ export class ReadModel {
         | "spend"
         | "backgroundNotifications"
         | "research"
-        | "internal"
         | "appearance"
         | "narrator"
         | "runtime"

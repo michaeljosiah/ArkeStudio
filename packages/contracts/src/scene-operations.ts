@@ -16,10 +16,11 @@ import {
 /**
  * The semantic vocabulary a scene is edited in (SPEC-029 R-36, §2.4).
  *
- * Before this, the only way to change a scene was to hand the writer a whole legacy-shaped
- * `Scene` and let `graphSceneFor` work out what happened. That is a migration, not authorship:
- * it cannot say *which* shot moved, so it cannot preserve identity through a structural edit,
- * and every caller had to assemble the whole document to change one field.
+ * Before this, the only way to change a scene was to hand an adapter a whole legacy-shaped
+ * `Scene` and let `upgradeLegacySceneCandidate` work out what happened. That migration path is
+ * retained only for legacy snapshots and persisted pre-retirement proposals, not authorship: it
+ * cannot say *which* shot moved, and every caller had to assemble the whole document to change
+ * one field.
  *
  * Each operation here takes the record as it stands, applies ONE named change, and returns a
  * complete `GraphScene` that has already been validated (R-61). Nothing partial is returned and
@@ -87,21 +88,20 @@ function complete(record: SceneRecord, shots: readonly Shot[]): GraphScene {
   const held = isGraphScene(record) ? record.flow.storyboardGroups : [];
   const base = migrateLegacyScene({ ...stripFlow(record), shots: [...shots] });
   /*
-   * A shot that survives keeps the node id the scene gave it, even when that id is not one the
-   * projection would mint. Rebuilding from the projection alone re-mints every id — invisible
-   * while every id in the world came from that same rule, and a silent corruption the moment
-   * anything authors one it would not have chosen: a payload edit changes stable identity, and
-   * a group naming the old id no longer resolves, so the edit is refused for a shot that never
-   * moved. Edges follow the nodes, because their ids are named from the pair they join.
+   * Every node that survives keeps the id the scene gave it, even when that id is not one the
+   * projection would mint. Rebuilding from the projection alone re-mints custom terminal ids as
+   * well as shot ids, changing stable identity on a prose-only edit. Edges follow the nodes,
+   * because their ids are named from the pair they join.
    */
   const heldNodeIds = isGraphScene(record)
-    ? new Map(record.flow.nodes.flatMap((node) => (node.kind === "shot" ? [[node.shot.id, node.id] as const] : [])))
+    ? new Map(
+        record.flow.nodes.map((node) => [node.kind === "shot" ? `shot:${node.shot.id}` : node.kind, node.id]),
+      )
     : new Map<string, string>();
-  const nodes = base.flow.nodes.map((node) =>
-    node.kind === "shot" && heldNodeIds.has(node.shot.id)
-      ? { ...node, id: heldNodeIds.get(node.shot.id)! }
-      : node,
-  );
+  const nodes = base.flow.nodes.map((node) => {
+    const held = heldNodeIds.get(node.kind === "shot" ? `shot:${node.shot.id}` : node.kind);
+    return held === undefined ? node : { ...node, id: held };
+  });
   const renamed = new Map(
     base.flow.nodes.flatMap((node, index) => (node.id === nodes[index]!.id ? [] : [[node.id, nodes[index]!.id] as const])),
   );
@@ -126,7 +126,14 @@ function complete(record: SceneRecord, shots: readonly Shot[]): GraphScene {
       to: { ...edge.to, nodeId: to.id },
     };
   });
-  const flow = { ...base.flow, nodes, edges, storyboardGroups: held };
+  const flow = {
+    ...base.flow,
+    entryNodeId: nodes.find((node) => node.kind === "entry")!.id,
+    exitNodeId: nodes.find((node) => node.kind === "exit")!.id,
+    nodes,
+    edges,
+    storyboardGroups: held,
+  };
   const findings = validateSceneFlow(flow);
   if (findings.length > 0) {
     throw new SceneOperationRefused(
@@ -276,6 +283,14 @@ export function editShot(record: SceneRecord, input: { shotId: string; change: P
   const next = [...shots];
   next[at] = { ...merged, id: input.shotId, number: shots[at]!.number };
   return complete(record, next);
+}
+
+/** Edit scene prose without sending a legacy-shaped shots array back through the writer. */
+export function editScene(record: SceneRecord, input: { synopsis: string | undefined }): GraphScene {
+  const next = complete(record, shotsOf(record));
+  if (input.synopsis !== undefined) return { ...next, synopsis: input.synopsis };
+  const { synopsis: _synopsis, ...withoutSynopsis } = next;
+  return withoutSynopsis;
 }
 
 /**

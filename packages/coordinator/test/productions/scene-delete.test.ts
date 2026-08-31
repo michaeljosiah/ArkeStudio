@@ -3,13 +3,14 @@ import { describe, it } from "node:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { EpisodeSchema, type Routing } from "@arke-studio/contracts";
-import { deleteScene, SceneDeleteRefused, saveScene } from "../../src/productions/ops.js";
+import { deleteScene, SceneDeleteRefused } from "../../src/productions/ops.js";
+import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { saveRouting } from "../../src/productions/interactive.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
-import { writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView } from "@arke-studio/contracts";
 
 /**
  * Removing a scene, and refusing to when something still needs it.
@@ -36,14 +37,15 @@ describe("deleting a scene (round 3's other gap)", () => {
   it("takes the file, and history keeps it", async () => {
     const { dir, store } = await open();
     const before = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    const scene = writerSceneView(before.scenes.find((s) => s.id === "sc_04")!);
+    const scene = legacySceneView(before.scenes.find((s) => s.id === "sc_04")!);
     // The fixture's shot carries an accepted take; reject it by clearing the selection first,
     // which is exactly what the refusal below tells a person to do.
-    await saveScene(store, {
+    await applySceneCommand(store, {
       productionId: "saltlight",
       sceneFile: STEM,
-      scene: { ...scene, shots: scene.shots.map((s) => ({ ...s })) },
+      sceneId: scene.id,
       baseVersion: scene.version,
+      command: { kind: "edit-scene", synopsis: scene.synopsis ?? null },
     });
     const cleared = await clearSelections(store, dir);
     assert.ok(cleared, "the fixture's selections were cleared for this test");

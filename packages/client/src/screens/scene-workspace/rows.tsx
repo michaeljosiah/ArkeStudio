@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   assembleBoardPrompt,
   boardPromptFor,
+  DEFAULT_SHOT_SEC,
   orderedShots,
   resolveCast,
   shotCardState,
@@ -20,7 +21,7 @@ import {
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
-import { selectedShotId, useWorkspaceSelection } from "./selection.js";
+import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./selection.js";
 import { frameRunCommand } from "../../lib/store.js";
 import { frameRunShotState } from "./frame-run.js";
 
@@ -56,7 +57,10 @@ export function StoryboardRows({
   frameRun,
   worldId,
   onViewBoardSheet,
+  onGenerateFrame,
+  onEditShot,
   onOpenShotInGenerator,
+  onPlanVideo,
   onRenderBoard,
 }: {
   scene: SceneRecord;
@@ -81,7 +85,10 @@ export function StoryboardRows({
   frameRun: FrameRunState | null;
   worldId: string;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
+  onGenerateFrame: (shotId: string, trigger: HTMLButtonElement) => void;
+  onEditShot: (shotId: string) => void;
   onOpenShotInGenerator: (shotId: string) => void;
+  onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
 }) {
   const shots = orderedShots(scene);
@@ -158,11 +165,14 @@ export function StoryboardRows({
                   staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
                   movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
                   refusalVersion={refusalVersion}
+                  selected={subjectMatchesBoard(subject, board.memberShotIds)}
+                  onSelect={() => select({ kind: "board", memberShotIds: [...board.memberShotIds] })}
                   onCommand={onCommand}
                   onDragStart={() => setDragBoundary(shot.id)}
                   onDragEnd={() => setDragBoundary(null)}
                   onViewBoardSheet={onViewBoardSheet}
                   onRender={() => onRenderBoard([...board.memberShotIds])}
+                  onPlanVideo={onPlanVideo}
                 />
               ) : null}
               <Row
@@ -196,6 +206,8 @@ export function StoryboardRows({
                 runState={frameRunShotState(frameRun, shot.id)}
                 run={frameRun}
                 worldId={worldId}
+                onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
+                onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
               />
             </li>
@@ -261,11 +273,14 @@ function BoardBand({
   staged,
   movable,
   refusalVersion,
+  selected,
+  onSelect,
   onCommand,
   onDragStart,
   onDragEnd,
   onViewBoardSheet,
   onRender,
+  onPlanVideo,
 }: {
   board: PackedBoard;
   scene: SceneRecord;
@@ -278,11 +293,14 @@ function BoardBand({
   staged: boolean;
   movable: boolean;
   refusalVersion: number;
+  selected: boolean;
+  onSelect: () => void;
   onCommand: (command: Command) => boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
   onRender: () => void;
+  onPlanVideo: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const members = board.memberShotIds.map((id) => shots.find((shot) => shot.id === id)!).filter(Boolean);
@@ -299,7 +317,14 @@ function BoardBand({
   const last = members.at(-1)?.number;
   const startId = board.memberShotIds[0]!;
   return (
-    <div className="fy-swboard" data-testid={`workspace-board-${board.letter}`} data-staged={staged ? "true" : undefined}>
+    <div
+      className="fy-swboard"
+      data-testid={`workspace-board-${board.letter}`}
+      data-selected={selected ? "true" : undefined}
+      data-staged={staged ? "true" : undefined}
+      onClick={onSelect}
+      onFocus={onSelect}
+    >
       <div className="fy-swboard__line">
         <button
           type="button"
@@ -321,6 +346,7 @@ function BoardBand({
         <button type="button" disabled={locked || staged || generatorPending} onClick={onRender}>
           {generatorPending ? "Opening…" : "Render board"}
         </button>
+        <button type="button" disabled={locked || staged} onClick={onPlanVideo}>Plan video</button>
         <button type="button" title="Consolidated prompt" disabled={locked} onClick={() => setPromptOpen((open) => !open)}>P</button>
         <button
           type="button"
@@ -410,6 +436,8 @@ function Row({
   runState,
   run,
   worldId,
+  onGenerateFrame,
+  onEdit,
   onOpenInGenerator,
 }: {
   shot: Shot;
@@ -437,6 +465,8 @@ function Row({
   runState: ReturnType<typeof frameRunShotState>;
   run: FrameRunState | null;
   worldId: string;
+  onGenerateFrame: (trigger: HTMLButtonElement) => void;
+  onEdit: () => void;
   onOpenInGenerator: () => void;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
@@ -530,7 +560,7 @@ function Row({
         )}
         <span className="fy-swrow__label">shot {shot.number}</span>
         <span className="fy-swrow__chipmeta">
-          {aspect} · {(shot.durationSec ?? 0).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
+          {aspect} · {(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
         </span>
         {runState === null ? null : (
           <FrameState
@@ -578,6 +608,14 @@ function Row({
       <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
+          className="fy-swrow__generate"
+          disabled={disabled || run?.status === "active" || run?.status === "paused"}
+          onClick={(event) => onGenerateFrame(event.currentTarget)}
+        >
+          {hasFrame ? "Regenerate" : "Generate frame"}
+        </button>
+        <button
+          type="button"
           className="fy-swedit"
           disabled={disabled}
           aria-label={`Actions for shot ${shot.number}`}
@@ -589,6 +627,7 @@ function Row({
         </button>
         {menu ? (
           <div className="fy-swrow__menu" role="menu">
+            <button type="button" role="menuitem" disabled={disabled} onClick={onEdit}>Edit shot</button>
             <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
               {generatorPending ? "Opening…" : "Open in generator"}
             </button>

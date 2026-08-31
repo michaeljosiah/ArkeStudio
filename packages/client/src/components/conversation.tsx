@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, type NavigateFunction } from "react-router";
 import type {
+  FrameRunState,
   StagedProposal,
   WorldChatContext,
   WorldChatPoint,
@@ -13,6 +14,7 @@ import {
   cancelWorldChat,
   createWorldChat,
   discardProposal,
+  frameRunCommand,
   rejectWorldChatPoint,
   restoreBible,
   saveWorldChatPoint,
@@ -53,6 +55,8 @@ export function ConversationTranscript({
   onStop,
   onRetry,
   onUndoBible,
+  frameRuns = [],
+  onSelectShot,
   empty,
 }: {
   workspace: WorldChatWorkspace | null;
@@ -64,6 +68,8 @@ export function ConversationTranscript({
   onStop?: () => void;
   onRetry?: (turnId: string) => void;
   onUndoBible?: (fromVersion: number) => void;
+  frameRuns?: readonly FrameRunState[];
+  onSelectShot?: (shotId: string) => void;
   /** What stands in for the transcript before anything has been said. */
   empty?: React.ReactNode;
 }) {
@@ -122,7 +128,7 @@ export function ConversationTranscript({
                   onClick={() => {
                     if (worldId === undefined) return;
                     void navigate(
-                      `/w/${worldId}/p/${m.benchOutcome!.productionId}/scenes/${m.benchOutcome!.sceneId}?workspace=1&shot=${row.shotId}`,
+                      `/w/${worldId}/p/${m.benchOutcome!.productionId}/scenes/${m.benchOutcome!.sceneId}?shot=${row.shotId}`,
                     );
                   }}
                 >
@@ -133,6 +139,20 @@ export function ConversationTranscript({
                 </button>
               ))}
             </div>
+          )}
+          {m.frameRunOutcome && (
+            <FrameRunReport
+              run={frameRuns.find((candidate) =>
+                candidate.run.id === m.frameRunOutcome!.runId &&
+                candidate.productionId === m.frameRunOutcome!.productionId &&
+                candidate.run.sceneId === m.frameRunOutcome!.sceneId,
+              ) ?? null}
+              worldId={worldId}
+              productionId={m.frameRunOutcome.productionId}
+              sceneId={m.frameRunOutcome.sceneId}
+              navigate={navigate}
+              onSelectShot={onSelectShot}
+            />
           )}
         </div>
       ))}
@@ -159,6 +179,86 @@ export function ConversationTranscript({
       )}
     </div>
   );
+}
+
+const REPORT_FAILURE_STATUSES = new Set(["failed", "missing", "needs-reconciliation"]);
+
+function FrameRunReport({
+  run,
+  worldId,
+  productionId,
+  sceneId,
+  navigate,
+  onSelectShot,
+}: {
+  run: FrameRunState | null;
+  worldId: string | undefined;
+  productionId: string;
+  sceneId: string;
+  navigate: NavigateFunction;
+  onSelectShot?: (shotId: string) => void;
+}) {
+  if (run === null) {
+    return <div className="fy-chat__runreport" data-state="loading">Loading run report…</div>;
+  }
+  const selectShot = (shotId: string) => {
+    if (onSelectShot !== undefined) {
+      onSelectShot(shotId);
+    } else if (worldId !== undefined) {
+      void navigate(`/w/${worldId}/p/${productionId}/scenes/${sceneId}?shot=${shotId}`);
+    }
+  };
+  return (
+    <div className="fy-chat__runreport" aria-label="Frame run report">
+      {run.run.steps.flatMap((step, index) => {
+        const state = run.steps[index];
+        if (state === undefined) return [];
+        const failed = REPORT_FAILURE_STATUSES.has(state.status);
+        const pending = ["not-enqueued", "queued", "submitting", "running"].includes(state.status);
+        const stepCopy = run.run.mode === "board" && step.dispatch.target.kind === "board-sheet"
+          ? `${step.label} · ${step.updateShotIds.length} frame${step.updateShotIds.length === 1 ? "" : "s"} · one pass`
+          : `${step.label} · one frame${step.grain === "initial" ? "" : " · retry"}`;
+        const rows: React.ReactNode[] = [
+          <div key={`step:${index}`} className="fy-chat__runreport-row" data-kind="step" data-state={failed ? "failed" : pending ? "pending" : "complete"}>
+            <button type="button" onClick={() => selectShot(step.updateShotIds[0]!)}>
+              <span className="fy-chat__runreport-dot" aria-hidden="true" />
+              <span>{stepCopy}</span>
+            </button>
+          </div>,
+        ];
+        for (const shot of state.shots) {
+          const historicalFailure = shot.status === "reconciled" && shot.failureClass !== null;
+          if (!historicalFailure && !REPORT_FAILURE_STATUSES.has(shot.status)) continue;
+          const retried = shot.status === "reconciled";
+          const retry = retried || run.run.cancelled
+            ? null
+            : state.canRetry
+              ? () => frameRunCommand({ kind: "frame-run-retry-step", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index })
+              : shot.canRetryCell
+                ? () => frameRunCommand({ kind: "frame-run-retry-cell", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index, shotId: shot.shotId })
+                : null;
+          const words = `${frameRunFailureCopy(shot)}${retried ? " · retried" : ""}`;
+          rows.push(
+            <div key={`failure:${index}:${shot.shotId}`} className="fy-chat__runreport-row" data-kind="failure" data-state={retried ? "complete" : "failed"}>
+              <button type="button" onClick={() => selectShot(shot.shotId)}>
+                <span className="fy-chat__runreport-dot" aria-hidden="true" />
+                <span>{words}</span>
+              </button>
+              {retry === null ? null : <button type="button" className="fy-chat__runreport-retry" onClick={retry}>Retry</button>}
+            </div>,
+          );
+        }
+        return rows;
+      })}
+    </div>
+  );
+}
+
+function frameRunFailureCopy(state: { failureClass: string | null; error: string | null }): string {
+  if (state.failureClass === "provider-fault") return state.error === null ? "provider fault · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "offline") return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
+  return state.error ?? "came back dark";
 }
 
 /**
@@ -239,6 +339,7 @@ export function ProductionConversation({
   side,
   openWith,
   dock,
+  onSelectShot,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -278,7 +379,8 @@ export function ProductionConversation({
    * the composer. There is no room for a rail beside a 360px column, and no need for one: the
    * change a proposal makes is drawn on the page beside it.
    */
-  dock?: { title: string; subject: string };
+  dock?: { title: string; subject: string; thumbnail?: { src: string; alt: string } };
+  onSelectShot?: (shotId: string) => void;
 }) {
   const { state } = useStore();
   const navigate = useNavigate();
@@ -460,6 +562,8 @@ export function ProductionConversation({
       progress={progress}
       failure={failure && !running ? failure : null}
       canRetry={!wrapping}
+      frameRuns={state?.frameRuns ?? []}
+      onSelectShot={onSelectShot}
       {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
       {...(worldId && conversationId
         ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
@@ -489,6 +593,7 @@ export function ProductionConversation({
     return (
       <aside className="fy-arke" data-dock="conversation">
         <div className="fy-arke__head">
+          {dock.thumbnail === undefined ? null : <img className="fy-arke__thumb" src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
           <span className="fy-arke__who">
             <span className="fy-arke__name">{dock.title}</span>
             <span className="fy-mono">{dock.subject}</span>

@@ -15,6 +15,7 @@ import { createContext, useContext } from "react";
 export type WorkspaceSubject =
   | { kind: "scene" }
   | { kind: "shot"; shotId: string }
+  | { kind: "board"; memberShotIds: readonly string[] }
   | { kind: "edge"; fromShotId: string | null; toShotId: string | null };
 
 export interface WorkspaceSelection {
@@ -40,4 +41,10 @@ export function selectedShotId(subject: WorkspaceSubject): string | null {
   // the seam after shot 3 keeps shot 3 the row in view, rather than jumping to the next one.
   if (subject.kind === "edge") return subject.fromShotId ?? subject.toShotId;
   return null;
+}
+
+export function subjectMatchesBoard(subject: WorkspaceSubject, memberShotIds: readonly string[]): boolean {
+  return subject.kind === "board" &&
+    subject.memberShotIds.length === memberShotIds.length &&
+    subject.memberShotIds.every((shotId, index) => shotId === memberShotIds[index]);
 }

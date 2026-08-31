@@ -16,10 +16,10 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { SceneFlow } from "../src/screens/scene-workspace/flow.js";
+import { scenePreviewSpans } from "../src/screens/scene-workspace/preview.js";
 
 /**
- * The scene workspace (SPEC-029 R-21..R-29; T-18, T-19, T-20), behind
- * `internal.sceneWorkspace`.
+ * The scene workspace (SPEC-029 R-21..R-29; T-18, T-19, T-20).
  *
  * The one that matters most is T-18: the selection lives above the tabs, so switching views
  * keeps it. A per-view selection is unmounted with its view, and no amount of care inside
@@ -29,6 +29,10 @@ import { SceneFlow } from "../src/screens/scene-workspace/flow.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 // linkedom has no layout and no frame loop; the app-wide toaster asks for both before it draws.
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
+  pause() {},
+  play: () => Promise.resolve(),
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -41,13 +45,6 @@ Object.assign(globalThis, {
 
 const SCENE_PATH = `/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/sc_04`;
 
-function stateWith(sceneWorkspace: boolean): ClientState {
-  return {
-    ...FIXTURE_STATE,
-    app: { ...FIXTURE_STATE.app, internal: { sceneWorkspace } },
-  } as ClientState;
-}
-
 interface Mounted {
   container: HTMLElement;
   root: Root;
@@ -55,16 +52,16 @@ interface Mounted {
 
 const open: Mounted[] = [];
 
-async function mount(sceneWorkspace: boolean, path = SCENE_PATH): Promise<Mounted> {
-  return mountState(stateWith(sceneWorkspace), path);
+async function mount(path = SCENE_PATH): Promise<Mounted> {
+  return mountState(FIXTURE_STATE, path);
 }
 
 async function mountState(state: ClientState, path = SCENE_PATH): Promise<Mounted> {
-  __setStateForTest(state);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
+    __setStateForTest(state);
     root.render(
       <MemoryRouter initialEntries={[path]}>
         <App />
@@ -107,47 +104,137 @@ const apply = async (event: Parameters<typeof __applyEventForTest>[0]): Promise<
   await act(async () => __applyEventForTest(event));
 };
 
-describe("the flag decides whether the workspace exists at all", () => {
-  it("with it off, the scene screen is the one that was always there", async () => {
-    const mounted = await mount(false);
-    assert.equal(q(mounted, '[data-testid="scene-workspace"]'), null);
-    assert.ok(q(mounted, '[data-screen="scene-detail"]'), "the existing screen still mounts");
-  });
-
-  it("with it on, the workspace replaces it — index, views and the dock", async () => {
-    const mounted = await mount(true);
+describe("scene detail owns the workspace", () => {
+  it("mounts the workspace and compact production rail by default", async () => {
+    const mounted = await mount();
     assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
-    assert.ok(q(mounted, '[data-testid="workspace-index"]'), "the scene index (R-22)");
+    assert.ok(q(mounted, ".fy-prodrail--folded"), "the production rail keeps its compact main-menu form");
+    assert.equal(q(mounted, '[data-testid="workspace-index"]'), null, "the retired scene index is not mounted");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "Storyboard is the default (R-21)");
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
+    assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
+    assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
   });
 
-  it("a retired generation link reaches the workspace even before the rollout flag is on", async () => {
-    const mounted = await mount(false, `${SCENE_PATH}?workspace=1`);
-    assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
+  it("keeps durable video plans and their Generation options with the scene owner", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(FIXTURE_STATE);
+    await click(all(mounted, "button").find((button) => button.textContent?.trim() === "Show boards")!);
+    await click(all(mounted, "button").find((button) => button.textContent?.trim() === "Plan video")!);
+    const create = sent.find((message) => message.kind === "dispatch-scene-planned");
+    assert.ok(create && create.kind === "dispatch-scene-planned");
+    assert.equal(create.sceneFile, "04-the-verse-rises");
+    assert.equal(create.mode, "whole-scene");
+    assert.equal(create.policy, "review-gated");
+    await apply({
+      at: "2026-08-31T12:00:00Z",
+      type: "production.plan-state",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      states: [
+        {
+          planId: "dp_scene-plan",
+          productionId: "saltlight",
+          sceneId: "sc_04",
+          mode: "whole-scene",
+          policy: "review-gated",
+          capMicroUsd: 120_000,
+          status: "authorized",
+          passes: [{ passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000 }],
+          spentEstimateMicroUsd: 80_000,
+          next: { kind: "await-continue", passIndex: 0 },
+        },
+        {
+          planId: "dp_other-scene",
+          productionId: "saltlight",
+          sceneId: "sc_elsewhere",
+          mode: "whole-scene",
+          policy: "review-gated",
+          capMicroUsd: 10_000,
+          status: "authorized",
+          passes: [],
+          spentEstimateMicroUsd: 0,
+          next: { kind: "none" },
+        },
+      ],
+    });
+
+    const optionButtons = all(mounted, "button").filter((button) => button.textContent?.trim() === "Generation options");
+    assert.equal(optionButtons.length, 1, "another scene's plan is not actionable here");
+    const options = optionButtons[0];
+    assert.ok(options, "the retired dispatch contents remain reachable from the scene");
+    await click(options);
+    assert.match(q(mounted, '[data-testid="generation-options-dp_scene-plan"]')?.textContent ?? "", /Strategy.*pass 1.*\$0\.08/);
+    assert.ok(all(mounted, "button").some((button) => button.textContent?.includes("Continue · pass 1")));
+  });
+});
+
+describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
+  it("offers Done only when every shot has an accepted clip and reports the same state on the episode", async () => {
+    const episodeId = "ep_the-verse-rises";
+    const episodePath = `/w/${FIXTURE_WORLD_ID}/p/saltlight/episodes/${episodeId}`;
+    const withEpisode = (complete: boolean): ClientState => {
+      const state = structuredClone(FIXTURE_STATE) as ClientState;
+      const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+      const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+      production.episodes = [{ id: episodeId, version: 1, order: 1, title: "The verse rises", scenes: [scene.id] }];
+      production.episodeFiles = { [episodeId]: "01-the-verse-rises" };
+      if (!complete) return state;
+
+      const source = production.takes.find((take) => take.kind === "clip")!;
+      const takeIds = ["tk_01J8F0000000000000000000C1", "tk_01J8F0000000000000000000C2"];
+      const jobIds = ["jb_01J8F0000000000000000000C1", "jb_01J8F0000000000000000000C2"];
+      for (const [index, shot] of orderedShots(scene).entries()) {
+        const take = {
+          ...structuredClone(source),
+          id: takeIds[index]!,
+          jobId: jobIds[index]!,
+          coversShots: [shot.id],
+        };
+        production.takes.push(take);
+        production.selections[shot.id] = { ...production.selections[shot.id], acceptedTakeId: take.id, trimInSec: 0 };
+      }
+      return state;
+    };
+
+    const incomplete = await mountState(withEpisode(false), episodePath);
+    const incompleteCard = all(incomplete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
+    assert.match(incompleteCard.textContent ?? "", /sc_04 · in progress/);
+    await click(incompleteCard.querySelector("button") as HTMLElement);
+    assert.ok(q(incomplete, '[data-testid="scene-workspace"]'));
+    assert.equal(q(incomplete, ".fy-sw__done"), null, "the incomplete workspace has no Done control");
+
+    const complete = await mountState(withEpisode(true));
+    const done = q(complete, ".fy-sw__done")!;
+    assert.equal(done.textContent?.trim(), "Done · back to the episode");
+    await click(done);
+    assert.ok(q(complete, '[data-screen="episode-detail"]'), "Done navigates back to the owning episode");
+    const completeCard = all(complete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
+    assert.match(completeCard.textContent ?? "", /sc_04 · done/);
   });
 });
 
 describe("the shell collapses rather than demanding the width (R-28)", () => {
   it("Arke can be put away and brought back, and the work keeps the room", async () => {
-    const mounted = await mount(true);
-    assert.ok(q(mounted, '[data-testid="workspace-subject"]'), "the dock starts open");
+    const mounted = await mount();
+    assert.ok(q(mounted, ".fy-arke"), "the dock starts open");
     const put = q(mounted, ".fy-sw__put")!;
     assert.equal(put.getAttribute("aria-pressed"), "false");
 
     await click(put);
-    assert.equal(q(mounted, '[data-testid="workspace-subject"]'), null, "put away, not merely hidden");
+    assert.equal(q(mounted, ".fy-arke"), null, "put away, not merely hidden");
     assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "false");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and the rows are still there");
 
     await click(q(mounted, ".fy-sw__put")!);
-    assert.ok(q(mounted, '[data-testid="workspace-subject"]'), "and back again");
+    assert.ok(q(mounted, ".fy-arke"), "and back again");
   });
 });
 
 describe("selection survives a view switch (T-18)", () => {
   it("a shot chosen in Storyboard is the node current in Flow, and back again", async () => {
-    const mounted = await mount(true);
+    const mounted = await mount();
     const rows = all(mounted, '[data-testid^="workspace-row-"]');
     assert.ok(rows.length >= 2, "the fixture scene has rows to choose between");
 
@@ -171,15 +258,19 @@ describe("selection survives a view switch (T-18)", () => {
   });
 
   it("Arke's subject follows the selection without being asked", async () => {
-    const mounted = await mount(true);
-    assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", /Scene /);
+    const mounted = await mount();
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Scene /);
     const row = all(mounted, '[data-testid^="workspace-row-"]')[0]!;
     await click(row.querySelector(".fy-swrow__band") as unknown as HTMLElement);
-    assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", /Shot /);
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot /);
+
+    await click(q(mounted, ".fy-sw__boards-toggle")!);
+    await click(q(mounted, ".fy-swboard")!);
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Board /);
   });
 
   it("a node chosen in Flow is the row Storyboard shows as current", async () => {
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     const nodes = all(mounted, '.fy-swnode[data-kind="shot"]');
     assert.ok(nodes.length >= 2);
@@ -190,11 +281,46 @@ describe("selection survives a view switch (T-18)", () => {
   });
 });
 
+describe("Preview plays the accepted scene on its authored clock (R-28)", () => {
+  it("derives proportional spans, accepted media, own-frame state, and board seams", () => {
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const spans = scenePreviewSpans(production, scene, FIXTURE_STATE.world!.artifacts, [
+      { memberShotIds: ["sh_12"] },
+      { memberShotIds: ["sh_13"] },
+    ] as never);
+
+    assert.deepEqual(spans.map((span) => [span.startSec, span.endSec]), [[0, 4], [4, 10]]);
+    assert.match(spans[0]!.clipPath ?? "", /tk_01J8F0000000000000000000B2.*clip\.mp4/);
+    assert.equal(spans[0]!.framed, false, "a continuity steering take is not this shot's own filed frame");
+    assert.equal(spans[1]!.framed, false);
+    assert.equal(spans[1]!.boardStart, true);
+  });
+
+  it("shows every shot, seeks through the filmstrip, and shares that selection with Arke", async () => {
+    const mounted = await mount();
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+
+    assert.ok(q(mounted, '[data-testid="workspace-preview"]'));
+    const shots = all(mounted, ".fy-swpreview__filmstrip button");
+    assert.equal(shots.length, 2);
+    assert.match(shots[0]!.getAttribute("style") ?? "", /flex-grow:\s*4/);
+    assert.match(shots[1]!.getAttribute("style") ?? "", /flex-grow:\s*6/);
+    assert.equal(shots[1]!.getAttribute("data-frameless"), "true");
+    assert.match(q(mounted, ".fy-swpreview__stage")?.textContent ?? "", /shot 12/);
+
+    await click(shots[1]!);
+    assert.match(q(mounted, ".fy-swpreview__stage")?.textContent ?? "", /shot 13/);
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, ".fy-swpreview__transport")?.textContent ?? "", /4\.0s \/ 10\.0s/);
+  });
+});
+
 describe("the workspace writes only named, versioned scene commands (#606)", () => {
   it("edits, reorders and inserts with stable shot ids rather than replacing scene JSON", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shots = orderedShots(scene);
@@ -213,7 +339,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     });
 
     const advance = async (version: number) => {
-      const next = structuredClone(stateWith(true)) as ClientState;
+      const next = structuredClone(FIXTURE_STATE) as ClientState;
       next.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
         .scenes.find((candidate) => candidate.id === "sc_04")!.version = version;
       await act(async () => __setStateForTest(next));
@@ -228,7 +354,6 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
       at: { before: shots[1]!.id },
       shot: { title: "Untitled shot", description: "" },
     });
-    assert.equal(sent.some((message) => message.kind === "save-scene"), false);
     await advance(scene.version + 2);
 
     const script = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"] .fy-swrow__script`)!;
@@ -250,7 +375,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
   it("shows prototype board bands and maps split/merge to the board override commands", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     assert.ok(all(mounted, '[data-testid^="workspace-board-"]').length > 0);
     const split = all(mounted, ".fy-swdivider button").find((button) => button.textContent === "Split board here");
@@ -262,7 +387,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
   });
 
   it("reads a legacy still in the clip slot as framed, never rendered", async () => {
-    const state = structuredClone(stateWith(true)) as ClientState;
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const still = production.takes.find((take) => take.kind === "frame")!;
     production.selections[still.coversShots[0]!] = { acceptedTakeId: still.id, trimInSec: 0 };
@@ -275,7 +400,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
   it("reconnects Flow through one move command and keeps an edge as Arke's subject", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     const shots = all(mounted, '.fy-swnode[data-kind="shot"]');
     const ports = all(mounted, ".fy-swnode__port");
@@ -285,7 +410,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     assert.equal(command.command.kind, "move-shot");
 
     await click(all(mounted, '[data-testid="workspace-flow-alt"] button')[0]!);
-    assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", /Edge /);
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Edge /);
   });
 });
 
@@ -294,14 +419,14 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
     const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shot = orderedShots(scene)[1]!;
-    const mounted = await mount(true, `${SCENE_PATH}?shot=${shot.id}`);
-    assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
+    const mounted = await mount(`${SCENE_PATH}?shot=${shot.id}`);
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
   });
 
   it("opens the chosen shot and navigates only for its matching answer", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shot = orderedShots(scene)[0]!;
@@ -340,7 +465,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
   it("passes an ordered board identity and leaves a matching refusal on the workspace", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const render = all(mounted, ".fy-swboard button").find((button) => button.textContent === "Render board");
     assert.ok(render);
@@ -367,7 +492,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
   it("releases the handoff actions when their answer is lost with the connection", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     const row = q(mounted, ".fy-swrow")!;
     await click(row.querySelector(".fy-swedit") as HTMLElement);
     await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Open in generator")!);
@@ -382,7 +507,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
   it("links Flow shot and board nodes to the same subject handoff", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     const links = all(mounted, ".fy-swnode__generate");
     assert.ok(links.some((button) => button.textContent === "Open in generator"));
@@ -397,7 +522,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
   it("does not let the previous scene's delayed answer navigate back from the current scene", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
-    const state = structuredClone(stateWith(true)) as ClientState;
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const firstScene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     production.scenes.push({
@@ -415,9 +540,10 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
     const command = sent.findLast((message) => message.kind === "bench-open-subject");
     assert.ok(command && command.kind === "bench-open-subject");
 
-    const nextScene = all(mounted, ".fy-swindex__scene").find((button) => !button.hasAttribute("data-current"));
+    await click(q(mounted, `.fy-prodrail__item[href="/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes"]`)!);
+    const nextScene = all(mounted, ".fy-row").find((button) => (button.textContent ?? "").includes("The next scene"));
     assert.ok(nextScene);
-    await click(nextScene);
+    await click(nextScene!);
     const currentTitle = q(mounted, ".fy-sw__title")?.textContent;
     assert.ok(currentTitle && !currentTitle.includes("Scene 4"));
 
@@ -435,7 +561,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
 
 describe("staged scene changes stay in place but inert until applied (T-12)", () => {
   it("draws a proposed shot in both views, excludes it from metrics, and keeps it after Keep discussing", async () => {
-    const state = structuredClone(stateWith(true)) as ClientState;
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const proposed = insertShot(accepted, {
@@ -470,9 +596,10 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     assert.equal(q(mounted, '[data-testid="flow-node-s:sh_999"]')?.getAttribute("data-staged"), "true");
+    const sentBeforeKeepDiscussing = sent.length;
     await click(all(mounted, "button").find((button) => button.textContent === "Keep discussing")!);
     assert.ok(q(mounted, '[data-testid="flow-node-s:sh_999"]'), "folding the decision does not drop the proposal");
-    assert.deepEqual(sent.map((message) => message.kind), ["frame-run-list"], "Keep discussing is not a write or a discard");
+    assert.equal(sent.length, sentBeforeKeepDiscussing, "Keep discussing is not a write or a discard");
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
     await click(q(mounted, ".fy-madeaside")!);
@@ -483,7 +610,7 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
 
 describe("every read-side operation is reachable by keyboard (T-19)", () => {
   it("rows, nodes, edges and tabs are all real controls, and each announces itself", async () => {
-    const mounted = await mount(true);
+    const mounted = await mount();
     // A row's whole hit area is one button, so a shot is one focus stop rather than a stack.
     for (const row of all(mounted, ".fy-swrow__band")) {
       assert.equal(row.getAttribute("role"), "group");
@@ -515,11 +642,12 @@ describe("every read-side operation is reachable by keyboard (T-19)", () => {
   });
 
   it("the lists are semantic, so a screen reader gets the structure for free", async () => {
-    const mounted = await mount(true);
+    const mounted = await mount();
     const rows = q(mounted, '[data-testid="workspace-rows"]');
     assert.equal(rows?.tagName, "OL", "shots are an ordered list because their order is meaning");
     assert.ok(rows?.getAttribute("aria-label"));
-    assert.ok(q(mounted, '[data-testid="workspace-index"]')?.getAttribute("aria-label"));
+    assert.equal(q(mounted, ".fy-arke")?.tagName, "ASIDE", "the conversation is complementary to the work");
+    assert.equal(q(mounted, ".fy-arke__log")?.getAttribute("aria-live"), "polite");
   });
 });
 
@@ -610,8 +738,6 @@ describe("a 200-shot scene renders in both views (T-20, R-69)", () => {
     }));
     production.scenes[at] = { ...(base as object), shots } as never;
     delete (production.scenes[at] as { flow?: unknown }).flow;
-    state.app = { ...state.app, internal: { sceneWorkspace: true } };
-
     __setStateForTest(state);
     const container = dom.document.createElement("div") as unknown as HTMLElement;
     dom.document.body.append(container);
@@ -652,7 +778,7 @@ describe("Flow is a canvas at every width, and never the only way in (R-24, R-28
      * REQUIRES the canvas — every node is a control and every edge is offered in words, which
      * is the half the old narrow-width substitution never addressed at any width.
      */
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     assert.ok(q(mounted, '[data-testid="workspace-flow-layer"]'), "still a transformed canvas");
     const words = all(mounted, '[data-testid="workspace-flow-alt"] button');
@@ -665,7 +791,7 @@ describe("Flow is a canvas at every width, and never the only way in (R-24, R-28
 
 describe("Flow is a canvas (the prototype's §11)", () => {
   const openFlow = async (): Promise<Mounted> => {
-    const mounted = await mount(true);
+    const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     return mounted;
   };

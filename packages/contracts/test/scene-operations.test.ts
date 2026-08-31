@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   deleteShot,
   duplicateShot,
+  editScene,
   editShot,
   hasOwnFrame,
   insertShot,
@@ -145,6 +146,34 @@ describe("an edge id survives as long as its connection does", () => {
       after.flow.edges.some((edge) => edge.from.nodeId === "sfn_sh-2" && edge.to.nodeId === "sfn_sh-9"),
       "and the connection that is genuinely new was minted",
     );
+  });
+});
+
+describe("a scene prose edit preserves the graph exactly", () => {
+  it("keeps custom terminal, shot-node, and edge identities", () => {
+    const base = graph(["sh_1", "sh_2"]);
+    const nodeIds = new Map(
+      base.flow.nodes.map((node, index) => [node.id, `sfn_custom-${node.kind}-${index + 1}`]),
+    );
+    const before: GraphScene = {
+      ...base,
+      flow: {
+        ...base.flow,
+        entryNodeId: nodeIds.get(base.flow.entryNodeId)!,
+        exitNodeId: nodeIds.get(base.flow.exitNodeId)!,
+        nodes: base.flow.nodes.map((node) => ({ ...node, id: nodeIds.get(node.id)! })),
+        edges: base.flow.edges.map((edge, index) => ({
+          ...edge,
+          id: `sfe_custom-${index + 1}`,
+          from: { ...edge.from, nodeId: nodeIds.get(edge.from.nodeId)! },
+          to: { ...edge.to, nodeId: nodeIds.get(edge.to.nodeId)! },
+        })),
+      },
+    };
+
+    const after = editScene(before, { synopsis: "The light changes." });
+    assert.equal(after.synopsis, "The light changes.");
+    assert.deepEqual(after.flow, before.flow);
   });
 });
 

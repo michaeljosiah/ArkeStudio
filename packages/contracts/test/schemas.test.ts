@@ -96,35 +96,28 @@ describe("appearance settings", () => {
 
 describe("scene write frames name a file stem, never a path (review 2026-08-22)", () => {
   const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
-  const save = (sceneFile: string) => ({
-    kind: "save-scene",
+  const restore = (sceneFile: string) => ({
+    kind: "restore-scene",
     worldId: WORLD,
     productionId: "saltlight",
     sceneFile,
-    scene: {},
-    baseVersion: 1,
+    version: 1,
   });
 
   it("accepts the scanner's own naming", () => {
     for (const stem of ["04-the-verse-rises", "a", "A.b_c-9"]) {
-      assert.equal(ClientMessageSchema.parse(save(stem)).kind, "save-scene");
+      assert.equal(ClientMessageSchema.parse(restore(stem)).kind, "restore-scene");
     }
   });
 
+  it("rejects the retired arbitrary-document scene writers", () => {
+    assert.throws(() => ClientMessageSchema.parse({ kind: "save-scene", worldId: WORLD, productionId: "saltlight", sceneFile: "scene", scene: {} }));
+    assert.throws(() => ClientMessageSchema.parse({ kind: "stage-scene-edit", worldId: WORLD, productionId: "saltlight", sceneFile: "scene", summary: "replace it", scene: {} }));
+  });
+
   it("refuses anything that walks: dot-dot, separators, hidden files, emptiness", () => {
-    // These frames write directly with no accept step, over a loopback socket any local
-    // process can reach — the schema is the first wall, the coordinator's stem guard the second.
     for (const stem of ["../meta", "..\\bible", "a/b", "a\\b", "..", ".hidden", "", " "]) {
-      assert.throws(() => ClientMessageSchema.parse(save(stem)), `admitted "${stem}"`);
-      assert.throws(() =>
-        ClientMessageSchema.parse({
-          kind: "restore-scene",
-          worldId: WORLD,
-          productionId: "saltlight",
-          sceneFile: stem,
-          version: 1,
-        }),
-      );
+      assert.throws(() => ClientMessageSchema.parse(restore(stem)), `admitted "${stem}"`);
     }
   });
 });

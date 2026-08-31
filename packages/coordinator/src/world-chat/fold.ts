@@ -69,6 +69,8 @@ export function foldConversation(
   const refusals = new Map<string, readonly string[]>();
   /** Production filing rows, by the narration message they belong beneath. */
   const benchOutcomes = new Map<string, WorldChatLoaded["benchOutcomes"][string]>();
+  /** Durable anchors only; the client joins each one to the live frame-run fold. */
+  const frameRunOutcomes = new Map<string, WorldChatLoaded["frameRunOutcomes"][string]>();
   /** The log sequence each message arrived at, so paging can use a real cursor. */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
@@ -178,6 +180,10 @@ export function foldConversation(
       case "bench.outcome-recorded":
         addMessage(e.message, envelope.seq);
         benchOutcomes.set(e.message.id, e.report);
+        break;
+      case "frame-run.outcome-recorded":
+        addMessage(e.message, envelope.seq);
+        frameRunOutcomes.set(e.message.id, e.report);
         break;
       case "candidate.status-changed": {
         const c = candidates.get(e.candidateId);
@@ -349,6 +355,12 @@ export function foldConversation(
     benchOutcomes: Object.fromEntries(
       shown.flatMap((message) => {
         const report = benchOutcomes.get(message.id);
+        return report ? [[message.id, report] as const] : [];
+      }),
+    ),
+    frameRunOutcomes: Object.fromEntries(
+      shown.flatMap((message) => {
+        const report = frameRunOutcomes.get(message.id);
         return report ? [[message.id, report] as const] : [];
       }),
     ),

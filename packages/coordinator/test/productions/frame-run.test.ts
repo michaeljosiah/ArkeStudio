@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  newId,
   type Job,
+  type ConversationId,
   type ManifestModel,
   type ProductionBundle,
   type SceneRecord,
@@ -19,6 +21,7 @@ import {
   listFrameRuns,
   pauseFrameRun,
   quoteFrameRun,
+  recordFrameLandingOutcome,
   readFrameRun,
   resumeFrameRun,
   retryFrameStep,
@@ -28,10 +31,16 @@ import {
   startFrameRun,
   type FrameRunDriverDeps,
 } from "../../src/productions/frame-run.js";
+import { recordFrameRunOutcome } from "../../src/productions/frame-run-outcome.js";
+import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
+import type { WorldProvider } from "../../src/world-provider.js";
 import { ReadModel } from "../../src/read-model.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
+import { readWorldMeta, WorldOpenError } from "../../src/world/scan.js";
+import { discoverConversations } from "../../src/world-chat/discover.js";
+import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -115,6 +124,8 @@ async function start(
   production: ProductionBundle = value.production,
   world: WorldBundle = value.world,
   model: ManifestModel = IMAGE,
+  shotId?: string,
+  onQuote?: (quote: Awaited<ReturnType<typeof quoteFrameRun>>) => void,
 ) {
   const compile = {
     worldId: WORLD_ID,
@@ -125,6 +136,7 @@ async function start(
     model,
     mode,
     scope,
+    ...(shotId !== undefined ? { shotId } : {}),
     boardCapSec: 30,
     boardPanelCap: 6,
     eligible: true,
@@ -139,9 +151,11 @@ async function start(
     mode,
     modelId: model.id,
     scope,
+    ...(shotId !== undefined ? { shotId } : {}),
     clock: CLOCK,
     compile: () => compile,
   });
+  onQuote?.(quote);
   return startFrameRun(value.store, {
     quotedMicroUsd: quote.estimatedMicroUsd!,
     quoteSignature: quote.signature!,
@@ -149,6 +163,29 @@ async function start(
     consumeQuote: () => quote,
     compile: () => compile,
   });
+}
+
+async function finishRun(
+  value: Awaited<ReturnType<typeof fixture>>,
+  status: "succeeded" | "failed",
+) {
+  const q = queue();
+  const started = await start(value, "per-shot");
+  let current = (await advanceFrameRun(value.store, value.production.meta.id, started.id, q.deps))!;
+  while (true) {
+    const unsettled = current.steps.find((step) => {
+      if (step.jobId === null) return false;
+      return !["succeeded", "failed", "cancelled"].includes(q.jobs.get(step.jobId)?.status ?? "");
+    });
+    if (unsettled === undefined) break;
+    q.settle(unsettled.jobId!, status, status === "failed" ? "terminal" : undefined);
+    current = (await advanceFrameRun(value.store, value.production.meta.id, started.id, q.deps))!;
+  }
+  return {
+    q,
+    run: current,
+    state: await frameRunState(value.store, value.production.meta.id, current, [...q.jobs.values()]),
+  };
 }
 
 describe("frame-run coordinator service", () => {
@@ -213,6 +250,52 @@ describe("frame-run coordinator service", () => {
         compile: () => ({ ...compile, scene: { ...compile.scene, version: compile.scene.version + 1 } }),
       }),
       /stale/,
+    );
+    assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
+  });
+
+  it("refuses a quote for shot A when start asks for shot B", async () => {
+    const f = await fixture();
+    const [shotA, shotB] = orderedShots(f.scene);
+    assert.ok(shotA && shotB);
+    const compile = {
+      worldId: WORLD_ID,
+      productionId: f.production.meta.id,
+      scene: f.scene as SceneRecord,
+      production: f.production,
+      world: f.world,
+      model: IMAGE,
+      mode: "per-shot" as const,
+      scope: "all" as const,
+      shotId: shotA.id,
+      boardCapSec: 30,
+      boardPanelCap: 6,
+      eligible: true,
+      clock: CLOCK,
+    };
+    const quote = await quoteFrameRun(f.store, {
+      requestId: "01J8E0000000000000000000QB",
+      quoteId: "01J8E0000000000000000000QC",
+      worldId: WORLD_ID,
+      productionId: f.production.meta.id,
+      sceneId: f.scene.id,
+      mode: "per-shot",
+      modelId: IMAGE.id,
+      scope: "all",
+      shotId: shotA.id,
+      clock: CLOCK,
+      compile: () => compile,
+    });
+
+    await assert.rejects(
+      () => startFrameRun(f.store, {
+        quotedMicroUsd: quote.estimatedMicroUsd!,
+        quoteSignature: quote.signature!,
+        jobs: () => [],
+        consumeQuote: () => quote,
+        compile: () => ({ ...compile, shotId: shotB.id }),
+      }),
+      /options do not match the quote/,
     );
     assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
   });
@@ -359,6 +442,57 @@ describe("frame-run coordinator service", () => {
     q.settle(first.steps[0]!.jobId!, "succeeded");
     await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps);
     assert.equal(q.inputs.length, 2, "one terminal wakeup enqueues one next shot");
+  });
+
+  it("quotes and persists a targeted one-shot run, and refuses a shot outside the scene", async () => {
+    const f = await fixture();
+    const shot = orderedShots(f.scene)[1]!;
+    let quote: Awaited<ReturnType<typeof quoteFrameRun>> | undefined;
+    const run = await start(
+      f,
+      "per-shot",
+      "all",
+      f.production,
+      f.world,
+      IMAGE,
+      shot.id,
+      (value) => { quote = value; },
+    );
+
+    assert.ok(quote);
+    assert.equal(quote.shotId, shot.id);
+    assert.equal(quote.includedCount, 1);
+    assert.equal(quote.steps.length, 1);
+    assert.deepEqual(quote.steps[0]!.requestShotIds, [shot.id]);
+    assert.deepEqual(quote.steps[0]!.updateShotIds, [shot.id]);
+
+    const persisted = await listFrameRuns(f.store, f.production.meta.id);
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0]!.id, run.id);
+    assert.equal(persisted[0]!.mode, "per-shot");
+    assert.equal(persisted[0]!.steps.length, 1);
+    assert.deepEqual(persisted[0]!.steps[0]!.requestShotIds, [shot.id]);
+    assert.deepEqual(persisted[0]!.steps[0]!.updateShotIds, [shot.id]);
+    assert.deepEqual(persisted[0]!.steps[0]!.dispatch.target, {
+      kind: "shot",
+      id: shot.id,
+      coversShots: [shot.id],
+    });
+
+    const outside = await fixture();
+    await assert.rejects(
+      () => start(
+        outside,
+        "per-shot",
+        "all",
+        outside.production,
+        outside.world,
+        IMAGE,
+        "sh_999",
+      ),
+      /shot sh_999 is not in this scene/,
+    );
+    assert.deepEqual(await listFrameRuns(outside.store, outside.production.meta.id), []);
   });
 
   it("board mode enqueues one sheet for all members and freezes fixed/update roles", async () => {
@@ -1094,5 +1228,260 @@ describe("frame-run coordinator service", () => {
       state: await frameRunState(f.store, f.production.meta.id, dismissed!, [...q.jobs.values()]),
     });
     assert.equal(model.getState().frameRuns[0]!.run.dismissed, true, "recovery retains hidden retry lineage");
+  });
+});
+
+describe("frame-run Arke outcomes", () => {
+  it("raises schema 4 before appending to an existing scene conversation", async () => {
+    const f = await fixture();
+    const conversationId = newId("cv") as ConversationId;
+    await f.store.ensureSchemaVersion(2, "world-chat");
+    await f.store.ownedWrite(async () => {
+      const log = new WorldChatStore(conversationDir(f.dir, conversationId));
+      await log.create(conversationId, CLOCK());
+      await log.append(
+        {
+          type: "conversation.created",
+          title: "Existing scene thread",
+          entryContext: { kind: "scene", productionId: f.production.meta.id, sceneId: f.scene.id },
+        },
+        { at: CLOCK(), requestId: "existing-scene-thread" },
+      );
+    });
+    const completed = await finishRun(f, "succeeded");
+
+    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.equal((await readWorldMeta(f.dir)).schemaVersion, 4);
+    await assert.rejects(
+      () => readWorldMeta(f.dir, { supports: 3 }),
+      (error: unknown) => error instanceof WorldOpenError && error.reason === "schema-newer",
+    );
+  });
+
+  it("refuses direct conversation writes when the world closes between schema and ownership", async () => {
+    const f = await fixture();
+    await f.store.ensureSchemaVersion(4, "test");
+    const completed = await finishRun(f, "succeeded");
+    const ensure = f.store.ensureSchemaVersion.bind(f.store);
+    f.store.ensureSchemaVersion = async (version, source) => {
+      await ensure(version, source);
+      await f.store.close();
+    };
+
+    await assert.rejects(() => recordFrameRunOutcome(f.store, completed.state), /world is closed/);
+    assert.equal(
+      (await discoverConversations(f.dir)).summaries.filter(
+        (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
+      ).length,
+      0,
+    );
+  });
+
+  it("records completion, failure, and cancellation once in one scene thread", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    assert.equal(completed.state.status, "completed");
+    const [first, duplicate] = await Promise.all([
+      recordFrameRunOutcome(f.store, completed.state),
+      recordFrameRunOutcome(f.store, completed.state),
+    ]);
+    assert.equal(duplicate, first);
+
+    const failed = await finishRun(f, "failed");
+    assert.equal(failed.state.status, "completed");
+    assert.ok(failed.state.failedShots > 0);
+    assert.equal(await recordFrameRunOutcome(f.store, failed.state), first);
+
+    const cancelledQueue = queue();
+    const cancelledRun = await start(f, "per-shot");
+    const live = (await advanceFrameRun(f.store, f.production.meta.id, cancelledRun.id, cancelledQueue.deps))!;
+    await cancelFrameRun(f.store, f.production.meta.id, live.id, {
+      jobById: cancelledQueue.deps.jobById,
+      cancel: async (jobId) => { cancelledQueue.settle(jobId, "cancelled"); },
+    });
+    const cancelled = (await readFrameRun(f.store, f.production.meta.id, live.id))!;
+    const cancelledState = await frameRunState(
+      f.store,
+      f.production.meta.id,
+      cancelled,
+      [...cancelledQueue.jobs.values()],
+    );
+    assert.equal(cancelledState.status, "cancelled");
+    assert.equal(await recordFrameRunOutcome(f.store, cancelledState), first);
+
+    const summaries = (await discoverConversations(f.store.dir)).summaries.filter(
+      (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
+    );
+    assert.deepEqual(summaries.map((summary) => summary.id), [first]);
+    const { events } = await new WorldChatStore(conversationDir(f.store.dir, first)).read();
+    const outcomes = events.filter((envelope) => envelope.event.type === "frame-run.outcome-recorded");
+    assert.equal(outcomes.length, 3);
+    assert.equal(new Set(outcomes.map((envelope) => envelope.requestId)).size, 3);
+    const messages = outcomes.map((envelope) => {
+      assert.equal(envelope.event.type, "frame-run.outcome-recorded");
+      return envelope.event.message.text;
+    });
+    assert.match(messages[0]!, /^The frame run finished .+\.$/);
+    assert.match(messages[1]!, /still needing another try\.$/);
+    assert.match(messages[2]!, /^The frame run was cancelled .+\.$/);
+  });
+
+  it("waits for assigned finalization before narrating a cancelled run", async () => {
+    const f = await fixture();
+    const run = await start(f, "per-shot");
+    const q = queue();
+    const assigned = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    const first = assigned.steps[0]!;
+    q.settle(first.jobId!, "succeeded");
+    q.jobs.set(first.jobId!, {
+      ...q.jobs.get(first.jobId!)!,
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+    });
+    await cancelFrameRun(f.store, f.production.meta.id, run.id, {
+      jobById: q.deps.jobById,
+      cancel: async () => {},
+    });
+    const cancelled = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    const pending = await frameRunState(f.store, f.production.meta.id, cancelled, [...q.jobs.values()]);
+    assert.equal(pending.status, "cancelled");
+    assert.equal(pending.steps[0]!.status, "running");
+    assert.ok(pending.steps.slice(1).every((step) => step.status === "not-enqueued"));
+
+    const provider: WorldProvider = {
+      listWorlds: async () => [],
+      loadWorld: async () => f.store.getBundle(),
+      openStore: () => f.store,
+    };
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      appVersion: "test",
+      changeLogPath: join(f.dir, "changes.jsonl"),
+    });
+    const record = (coordinator as unknown as {
+      recordTerminalFrameRunOutcome(store: WorldStore, state: typeof pending): Promise<void>;
+    }).recordTerminalFrameRunOutcome.bind(coordinator);
+    await record(f.store, pending);
+    assert.equal(
+      (await discoverConversations(f.dir)).summaries.filter(
+        (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
+      ).length,
+      0,
+    );
+
+    await recordFrameLandingOutcome(
+      f.store,
+      f.production.meta.id,
+      q.jobs.get(first.jobId!)!,
+      first.updateShotIds[0]!,
+      "filed",
+    );
+    q.jobs.set(first.jobId!, {
+      ...q.jobs.get(first.jobId!)!,
+      finalization: { status: "complete", error: null, updatedAt: CLOCK() },
+    });
+    const finalizedRun = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    const finalized = await frameRunState(f.store, f.production.meta.id, finalizedRun, [...q.jobs.values()]);
+    await Promise.all([record(f.store, finalized), record(f.store, finalized)]);
+
+    const summaries = (await discoverConversations(f.dir)).summaries.filter(
+      (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
+    );
+    assert.equal(summaries.length, 1);
+    const { events } = await new WorldChatStore(conversationDir(f.dir, summaries[0]!.id)).read();
+    const outcomes = events.filter((event) => event.event.type === "frame-run.outcome-recorded");
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0]!.event.type, "frame-run.outcome-recorded");
+    assert.match(outcomes[0]!.event.message.text, /cancelled after filing frames for 1 shot\.$/);
+    await coordinator.stop();
+  });
+
+  it("does not publish a recorded outcome after the open world switches during discovery", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    let openChecks = 0;
+    const provider: WorldProvider = {
+      listWorlds: async () => [],
+      loadWorld: async () => f.store.getBundle(),
+      openStore: () => ++openChecks === 1 ? f.store : null,
+    };
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      appVersion: "test",
+      changeLogPath: join(f.dir, "changes.jsonl"),
+    });
+    const internals = coordinator as unknown as {
+      readModel: ReadModel;
+      transport: { broadcastSnapshot(): void };
+      recordTerminalFrameRunOutcome(store: WorldStore, state: typeof completed.state): Promise<void>;
+    };
+    const initial = f.store.getBundle();
+    internals.readModel.setWorld(initial);
+    let broadcasts = 0;
+    internals.transport.broadcastSnapshot = () => { broadcasts += 1; };
+
+    await internals.recordTerminalFrameRunOutcome(f.store, completed.state);
+
+    assert.equal(openChecks, 2, "the store is rechecked after recording and after discovery");
+    assert.deepEqual(coordinator.getState().world?.conversations, initial.conversations);
+    assert.equal(coordinator.getState().worldChat, null);
+    assert.equal(broadcasts, 0);
+    assert.equal(
+      (await discoverConversations(f.dir)).summaries.filter(
+        (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
+      ).length,
+      1,
+      "the durable outcome still landed",
+    );
+    await coordinator.stop();
+  });
+
+  it("records from folded emission and backfills a different terminal run during recovery", async () => {
+    const f = await fixture();
+    const emitted = await finishRun(f, "succeeded");
+    const provider: WorldProvider = {
+      listWorlds: async () => [],
+      loadWorld: async () => f.store.getBundle(),
+      openStore: () => f.store,
+    };
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      appVersion: "test",
+      changeLogPath: join(f.dir, "changes.jsonl"),
+    });
+    const hooks = coordinator as unknown as {
+      jobQueue: { listJobs(): Job[] } | null;
+      emitFrameRun(
+        store: WorldStore,
+        worldId: string,
+        productionId: string,
+        runId: string,
+      ): Promise<void>;
+      recoverFrameRuns(store: WorldStore, bundle: WorldBundle): Promise<void>;
+    };
+    hooks.jobQueue = { listJobs: () => [...emitted.q.jobs.values()] };
+    await Promise.all([
+      hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
+      hooks.emitFrameRun(f.store, WORLD_ID, f.production.meta.id, emitted.run.id),
+    ]);
+
+    const recovered = await finishRun(f, "failed");
+    hooks.jobQueue = { listJobs: () => [...recovered.q.jobs.values()] };
+    await hooks.recoverFrameRuns(f.store, f.store.getBundle());
+
+    const summary = (await discoverConversations(f.store.dir)).summaries.find(
+      (candidate) => candidate.entryContext?.kind === "scene" && candidate.entryContext.sceneId === f.scene.id,
+    );
+    assert.ok(summary);
+    const { events } = await new WorldChatStore(conversationDir(f.store.dir, summary.id)).read();
+    const runIds = events.flatMap((envelope) =>
+      envelope.event.type === "frame-run.outcome-recorded" ? [envelope.event.report.runId] : [],
+    );
+    assert.equal(runIds.filter((runId) => runId === emitted.run.id).length, 1, "concurrent emits deduplicate");
+    assert.equal(runIds.filter((runId) => runId === recovered.run.id).length, 1, "recovery records the missing outcome");
+    hooks.jobQueue = null;
+    await coordinator.stop();
   });
 });

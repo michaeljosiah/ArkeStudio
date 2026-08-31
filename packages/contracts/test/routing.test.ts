@@ -60,6 +60,37 @@ describe("routing contracts (epic 401)", () => {
     assert.equal(RoutingSchema.parse(routing()).choices.length, 2);
   });
 
+  it("SPEC-029 R-55: scene-flow node ids cannot cross into routing start or edges", () => {
+    const cases = [
+      { path: "start", value: { ...routing(), start: "sfn_sc-1-entry" } },
+      {
+        path: "choices.0.from",
+        value: {
+          ...routing(),
+          choices: [{ ...routing().choices[0]!, from: "sfn_sh-1" }, routing().choices[1]!],
+        },
+      },
+      {
+        path: "choices.0.to",
+        value: {
+          ...routing(),
+          choices: [{ ...routing().choices[0]!, to: "sfn_sh-2" }, routing().choices[1]!],
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const parsed = RoutingSchema.safeParse(testCase.value);
+      assert.equal(parsed.success, false, `${testCase.path} must remain a scene id`);
+      if (!parsed.success) {
+        assert.ok(
+          parsed.error.issues.some((issue) => issue.path.join(".") === testCase.path),
+          `${testCase.path} names the rejected routing field`,
+        );
+      }
+    }
+  });
+
   it("IV-C2: every finding is named with evidence and its publication severity — never a score", () => {
     const tangled = routing({
       choices: [

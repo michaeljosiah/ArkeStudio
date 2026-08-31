@@ -6,7 +6,7 @@ import {
   migrateLegacyScene,
   orderedShots,
   planScene,
-  writerSceneView,
+  legacySceneView,
   type GraphScene,
   type ManifestModel,
   type ProductionBundle,
@@ -48,7 +48,7 @@ async function forms(): Promise<{
   closeOnCleanup(() => store.close());
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === "saltlight")!;
-  const legacy = writerSceneView(production.scenes.find((s) => s.id === "sc_04")!);
+  const legacy = legacySceneView(production.scenes.find((s) => s.id === "sc_04")!);
   const graph = migrateLegacyScene(legacy);
   // The same scene with its arrays shuffled: storage order carries no meaning (R-18).
   const permuted: GraphScene = {

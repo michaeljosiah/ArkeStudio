@@ -203,7 +203,6 @@ export {
   landBoard,
   reorderChapters,
   saveChapter,
-  setPromptOverride,
   type SceneDraft,
 } from "./productions/ops.js";
 export {

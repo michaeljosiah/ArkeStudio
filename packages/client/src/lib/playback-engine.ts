@@ -27,7 +27,7 @@
  *     the DOM node is not mutated and a detached element cannot leak its state.
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
 
 /** Upstream's throttle: the transport advances every frame, React hears about it four times a second. */
 export const STATE_UPDATE_INTERVAL_MS = 250;
@@ -59,33 +59,42 @@ export function useTransport(opts: {
   timeRef: MutableRefObject<number>;
   onTime: (seconds: number) => void;
   onEnded?: () => void;
-}): void {
+}): (seconds: number) => void {
   const { playing, durationSec, timeRef, onTime, onEnded } = opts;
   const lastReport = useRef(0);
   const wasPlaying = useRef(playing);
+  const started = useRef<{ atMs: number; positionSec: number } | null>(null);
   const latest = useRef({ onTime, onEnded });
   latest.current = { onTime, onEnded };
+  const setPosition = useCallback((seconds: number) => {
+    const positionSec = Math.min(Math.max(0, seconds), durationSec);
+    timeRef.current = positionSec;
+    if (playing) started.current = { atMs: Date.now(), positionSec };
+  }, [playing, durationSec, timeRef]);
 
   // Flush on stop before paint, or the paused UI shows a stale time for one frame.
   useLayoutEffect(() => {
     const stopping = wasPlaying.current && !playing;
     wasPlaying.current = playing;
-    if (stopping) latest.current.onTime(timeRef.current);
-  }, [playing, timeRef]);
+    if (stopping) {
+      const origin = started.current;
+      if (origin !== null) timeRef.current = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
+      started.current = null;
+      latest.current.onTime(timeRef.current);
+    }
+  }, [playing, durationSec, timeRef]);
 
   useEffect(() => {
     if (!playing || typeof requestAnimationFrame !== "function") return;
-    let last: number | null = null;
     let frame = 0;
     lastReport.current = 0;
+    started.current = { atMs: Date.now(), positionSec: timeRef.current };
 
     const tick = (timestamp: number) => {
-      if (last === null) {
-        last = timestamp;
-        lastReport.current = timestamp;
-      }
-      const next = timeRef.current + (timestamp - last) / 1000;
-      last = timestamp;
+      if (lastReport.current === 0) lastReport.current = timestamp;
+      const origin = started.current;
+      if (origin === null) return;
+      const next = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
 
       if (next >= durationSec) {
         timeRef.current = durationSec;
@@ -104,9 +113,18 @@ export function useTransport(opts: {
     frame = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(frame);
+      const origin = started.current;
+      if (origin !== null) timeRef.current = transportPosition(origin.positionSec, origin.atMs, Date.now(), durationSec);
+      started.current = null;
       latest.current.onTime(timeRef.current);
     };
   }, [playing, durationSec, timeRef]);
+  return setPosition;
+}
+
+/** Position from one playback epoch; delayed frames cannot slow this clock down. */
+export function transportPosition(positionSec: number, startedAtMs: number, nowMs: number, durationSec: number): number {
+  return Math.min(durationSec, Math.max(0, positionSec + (nowMs - startedAtMs) / 1000));
 }
 
 /** Per-element bookkeeping, off the DOM node so a detached element takes its state with it. */

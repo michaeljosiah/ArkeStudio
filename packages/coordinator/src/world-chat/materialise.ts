@@ -2,25 +2,31 @@ import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
+  editShot,
   EpisodeSchema,
-  SceneSchema,
+  GraphSceneSchema,
+  insertShot,
+  isGraphScene,
+  migrateLegacyScene,
+  nextShotIdIn,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
   StoryOverviewSchema,
+  orderedShots,
+  type GraphScene,
+  type SceneRecord,
   type Sheet,
   type Shot,
   type WorldBundle,
   type WorldChangeCandidate,
   type WorldChatLinkRef,
-  orderedShots,
 } from "@arke-studio/contracts";
 import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
 import { buildSheetContent, editSheetContent } from "../sheets/authoring.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { MarkdownFile } from "../world/text-files.js";
-import { sceneFrom } from "../productions/scene-record.js";
 
 /**
  * Turning a proposition into the files a proposal is made of (#70 §11.2).
@@ -132,6 +138,11 @@ function requireSheet(bundle: WorldBundle, sheetId: string, candidateId: string)
   const sheet = bundle.sheets.find((s) => s.id === sheetId);
   if (!sheet) throw new MaterialiseError(candidateId, `sheet ${sheetId} is not in this world`);
   return sheet;
+}
+
+/** World Chat writes only graph scenes, migrating a legacy record at the read boundary. */
+function graphSceneAtBoundary(record: SceneRecord): GraphScene {
+  return isGraphScene(record) ? record : migrateLegacyScene(record);
 }
 
 /** Parse what was built through the schema the world reads it with, before it is written. */
@@ -280,25 +291,22 @@ export function developmentAmendment(
       return live ? { live, next: { ...live, ...draft } } : null;
     }
     case "development.scene-script": {
-      const scene = production?.scenes.find((s) => s.id === target["sceneId"]) as
-        | Record<string, unknown>
-        | undefined;
-      if (!scene) return null;
+      const record = production?.scenes.find((scene) => scene.id === target["sceneId"]);
+      if (!record) return null;
+      const scene = graphSceneAtBoundary(record) as unknown as Record<string, unknown>;
       return { live: scene, next: { ...scene, script: { blocks: draft["blocks"] } } };
     }
     case "development.shot": {
       // A shot has no file of its own, so the record being amended is the whole scene with one
       // shot changed inside it — and an amendment is a patch: every field the draft omits is left
       // exactly as the shot has it, including the ones a conversation may not touch at all.
-      const scene = production?.scenes.find((s) => s.id === target["sceneId"]) as
-        | (Record<string, unknown> & { shots: Array<Record<string, unknown>> })
-        | undefined;
+      const record = production?.scenes.find((scene) => scene.id === target["sceneId"]);
       const shotId = target["shotId"];
-      if (!scene || shotId === undefined) return null; // absent shotId adds a shot
-      if (!scene.shots.some((s) => s["id"] === shotId)) return null;
+      if (!record || typeof shotId !== "string") return null; // absent shotId adds a shot
+      if (!orderedShots(record).some((shot) => shot.id === shotId)) return null;
       return {
-        live: scene,
-        next: { ...scene, shots: scene.shots.map((s) => (s["id"] === shotId ? { ...s, ...draft } : s)) },
+        live: graphSceneAtBoundary(record) as unknown as Record<string, unknown>,
+        next: editShot(record, { shotId, change: candidate.draft }) as unknown as Record<string, unknown>,
       };
     }
     case "development.series": {
@@ -660,7 +668,7 @@ export function materialiseCandidate(
       if (!scene || stem === undefined) {
         throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
       }
-      const content = jsonContent(candidate.id, SceneSchema, requireAmendment(candidate, bundle).next);
+      const content = jsonContent(candidate.id, GraphSceneSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
@@ -688,18 +696,12 @@ export function materialiseCandidate(
       if (!record || stem === undefined) {
         throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
       }
-      /*
-       * This is a writer, and writers still speak the legacy shape (SPEC-029 §3.3: semantic
-       * commands are step 4): the whole scene goes back out with one shot changed inside it,
-       * and the commit path re-derives the graph through `graphSceneFor`. The legacy view is
-       * the writer's privilege — read-path consumers use `linearizeSceneFlow` instead.
-       */
-      const scene = sceneFrom(record);
+      const existingShots = orderedShots(record);
       const draft = candidate.draft;
       const shotId = candidate.target.shotId;
-      let shots: Shot[];
+      let next: GraphScene;
       if (shotId !== undefined) {
-        const live = scene.shots.find((s) => s.id === shotId);
+        const live = existingShots.find((shot) => shot.id === shotId);
         if (!live) {
           throw new MaterialiseError(
             candidate.id,
@@ -708,7 +710,7 @@ export function materialiseCandidate(
         }
         // Through the shared merge, so the patch semantics above are stated exactly once: what
         // readiness compares against is what this writes.
-        shots = requireAmendment(candidate, bundle).next["shots"] as Shot[];
+        next = requireAmendment(candidate, bundle).next as unknown as GraphScene;
       } else {
         // A new shot needs enough to be one. The storyboard already has a button for a blank.
         if (draft.title === undefined || draft.description === undefined) {
@@ -719,25 +721,26 @@ export function materialiseCandidate(
         }
         /*
          * Identity is minted here, never by the model: the id clears every shot in the whole
-         * production (takes and selections key by bare shot id), and the number is this scene's
-         * next. The same rule the storyboard's Add shot follows, and the gate refuses a
-         * collision either way.
+         * production because takes and selections key by bare shot id. The semantic operation
+         * owns the insertion anchor and display numbers, as it does for the storyboard command.
          */
-        const highestId = production.scenes
-          .flatMap((s) => orderedShots(s))
-          .reduce((a, shot) => Math.max(a, Number(shot.id.replace(/^sh_0*/, "")) || 0), 0);
         const claimedIds = claimed?.shotIds ?? new Set<string>();
-        let n = highestId + 1;
-        while (claimedIds.has(`sh_${n}`)) n += 1;
-        claimedIds.add(`sh_${n}`);
-        const number = scene.shots.reduce((a, s) => Math.max(a, s.number), 0) + 1;
-        shots = [...scene.shots, { ...draft, id: `sh_${n}`, number, title: draft.title, description: draft.description }];
+        const id = nextShotIdIn([
+          ...production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)),
+          ...claimedIds,
+        ]);
+        claimedIds.add(id);
+        const last = existingShots[existingShots.length - 1];
+        next = insertShot(record, {
+          shot: { ...draft, id, title: draft.title, description: draft.description } as Omit<Shot, "number">,
+          at: last === undefined ? { atStart: true } : { after: last.id },
+        });
       }
-      const content = jsonContent(candidate.id, SceneSchema, { ...scene, shots });
+      const content = jsonContent(candidate.id, GraphSceneSchema, next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
-        fields: shotId === undefined ? ["shots"] : Object.keys(draft),
+        fields: shotId === undefined ? ["flow"] : Object.keys(draft),
         reservedCanonIds: [],
       };
     }

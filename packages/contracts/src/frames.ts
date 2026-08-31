@@ -1520,45 +1520,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       brief: z.string().min(1).max(2000),
     })
     .strict(),
-  /** SPEC-012 R-10: shot edits, reordering and insertion go through the gate and version. */
-  z
-    .object({
-      kind: z.literal("stage-scene-edit"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      sceneFile: z.string().min(1),
-      summary: z.string().min(1).max(300),
-      scene: z.unknown(),
-    })
-    .strict(),
-  /**
-   * Turn 97: a hand edit saves where it stands — the Bible's model (master §4.5) applied to
-   * scenes. Every save cuts a version with a `.history/` snapshot, and `baseVersion` is what
-   * the storyboard had loaded: a save against a scene that has since moved is refused, not
-   * merged. Assistant and gate writes keep their own paths; this one is the typing hand's.
-   */
-  z
-    .object({
-      kind: z.literal("save-scene"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      /*
-       * A file stem, never a path (review 2026-08-22): this frame writes directly with no
-       * accept step, and an unconstrained string joined into the world directory admitted
-       * `..` and backslashes. The pattern is the scanner's own naming for scene files.
-       */
-      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-      scene: z.unknown(),
-      baseVersion: z.number().int().min(1).optional(),
-    })
-    .strict(),
   /** Turn 97: undo. v<n> comes back as a new version; nothing between it and now is lost. */
   z
     .object({
       kind: z.literal("restore-scene"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      /** The same stem-only rule as save-scene, for the same reason. */
+      /** A scanner-compatible stem, never a path. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       version: z.number().int().min(1),
     })
@@ -1573,15 +1541,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("delete-scene"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      /** The same stem-only rule as save-scene, for the same reason. */
+      /** A scanner-compatible stem, never a path. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
     })
     .strict(),
   /**
    * One scene edit, named (SPEC-029 R-36).
    *
-   * `save-scene` above writes a whole document and lets the writer work out what happened; these
-   * say what happened. Every one carries the scene version it was composed against, so a scene
+   * Every command says what happened and carries the scene version it was composed against, so a scene
    * that moved refuses the command rather than merging edges by array position (R-62), and the
    * coordinator commits exactly one validated record or writes nothing at all (R-61).
    *
@@ -1593,7 +1560,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("scene-command"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      /** The same stem-only rule as save-scene, for the same reason. */
+      /** A scanner-compatible stem, never a path. */
       sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
       /**
        * The scene this was composed against, by id — the stem alone cannot say which scene it
@@ -1603,6 +1570,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sceneId: SceneIdSchema,
       baseVersion: z.number().int().min(1),
       command: z.discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("edit-scene"),
+            /** Null explicitly clears the optional synopsis; omission is not a command. */
+            synopsis: z.string().min(1).nullable(),
+          })
+          .strict(),
         z
           .object({
             kind: z.literal("insert-shot"),
@@ -1627,6 +1601,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
              * tuned prompt override, a camera line, or a continuity flag once written.
              */
             clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("set-prompt-override"),
+            shotId: ShotIdSchema,
+            text: z.string().max(4000).nullable(),
           })
           .strict(),
         z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),
@@ -1780,6 +1761,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       mode: z.enum(["per-shot", "board"]),
       modelId: z.string().min(1),
       scope: z.enum(["missing", "all"]),
+      /** A singular row action quotes only this shot; absent means scene scope. */
+      shotId: ShotIdSchema.optional(),
     })
     .strict(),
   /** SPEC-036 §2.7: authorize the exact quote; the coordinator recompiles before spending. */
@@ -1796,6 +1779,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       mode: z.enum(["per-shot", "board"]),
       modelId: z.string().min(1),
       scope: z.enum(["missing", "all"]),
+      shotId: ShotIdSchema.optional(),
     })
     .strict(),
   z
@@ -1956,17 +1940,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("export-interactive"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-    })
-    .strict(),
-  /** SPEC-012 R-15/R-16: an edited prompt is an override on the shot; null resets. */
-  z
-    .object({
-      kind: z.literal("set-prompt-override"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      sceneFile: z.string().min(1),
-      shotId: ShotIdSchema,
-      text: z.string().max(4000).nullable(),
     })
     .strict(),
   /** SPEC-012 R-11/R-12: compile the board — local, free, scene-version stamped. */

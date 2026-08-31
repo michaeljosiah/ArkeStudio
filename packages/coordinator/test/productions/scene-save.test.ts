@@ -2,21 +2,27 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { projectSceneRecord, SceneRecordSchema } from "@arke-studio/contracts";
-import { restoreScene, saveScene, SceneStaleError } from "../../src/productions/ops.js";
+import { isGraphScene, orderedShots, SceneRecordSchema, type SceneRecord } from "@arke-studio/contracts";
+import { restoreScene } from "../../src/productions/ops.js";
+import {
+  applySceneCommand,
+  SceneVersionMoved,
+  type SceneCommand,
+} from "../../src/productions/scene-commands.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
- * Turn 97: a hand edit saves where it stands — the Bible's model (master §4.5) applied to scenes.
- * Every save cuts a version with a history snapshot; a save against a moved base is refused,
- * not merged; and v<n> can come back as a new version with nothing between lost.
+ * Semantic scene commands replace the retired whole-scene writer. They still persist one
+ * complete record atomically, cut history, fence stale edits, and leave restore as a new version.
  */
 
 const CLOCK = () => "2026-08-21T12:00:00.000Z";
+const PRODUCTION = "saltlight";
+const SCENE_ID = "sc_04";
 const STEM = "04-the-verse-rises";
-const PATH = `productions/saltlight/scenes/${STEM}.json`;
+const PATH = `productions/${PRODUCTION}/scenes/${STEM}.json`;
 
 async function open() {
   const dir = await makeTempWorld();
@@ -25,150 +31,106 @@ async function open() {
   return { dir, store };
 }
 
-/**
- * The file as the app reads it: the R-1 union, projected to the legacy shape (SPEC-029).
- *
- * Every save below now lands a graph scene, so reading with the legacy schema alone would fail
- * on the shape rather than on anything these tests are about. What they are about — the version,
- * the snapshot, the pinned identity, the cleared field — is the authored content, and the
- * projection is where that content is the same either side of the migration.
- */
-async function readSceneFile(dir: string) {
-  const raw = JSON.parse(await readFile(join(dir, ...PATH.split("/")), "utf8")) as unknown;
-  const projection = projectSceneRecord(SceneRecordSchema.parse(raw));
-  if (projection.kind !== "scene") throw new Error(projection.findings.map((f) => f.message).join(" "));
-  return projection.scene;
+async function readSceneFile(dir: string): Promise<SceneRecord> {
+  return SceneRecordSchema.parse(JSON.parse(await readFile(join(dir, ...PATH.split("/")), "utf8")));
 }
 
-describe("scene direct save (turn 97)", () => {
-  it("a save cuts a version, snapshots history, and keeps the widened fields", async () => {
+async function apply(store: WorldStore, record: SceneRecord, command: SceneCommand): Promise<void> {
+  await applySceneCommand(store, {
+    productionId: PRODUCTION,
+    sceneFile: STEM,
+    sceneId: record.id,
+    baseVersion: record.version,
+    command,
+  });
+}
+
+describe("semantic scene persistence", () => {
+  it("a command writes one complete graph record, cuts a version, and snapshots history", async () => {
     const { dir, store } = await open();
     const before = await readSceneFile(dir);
-    const edited = {
-      ...before,
-      synopsis: "Maren hears the verse under the harbour.",
-      defaults: { size: "Medium", lighting: "Blue hour" },
-      shots: before.shots.map((s, i) =>
-        i === 0 ? { ...s, description: "She grips the rail and does not move.", framing: { size: "Close-up" } } : s,
-      ),
-    };
-    await saveScene(store, { productionId: "saltlight", sceneFile: STEM, scene: edited, baseVersion: before.version });
+    const target = orderedShots(before)[0]!;
+
+    await apply(store, before, {
+      kind: "edit-shot",
+      shotId: target.id,
+      change: {
+        description: "She grips the rail and does not move.",
+        framing: { size: "Close-up" },
+      },
+    });
 
     const after = await readSceneFile(dir);
-    assert.equal(after.version, before.version + 1, "the committer stamps the next version");
-    assert.equal(after.synopsis, "Maren hears the verse under the harbour.");
-    assert.equal(after.defaults?.size, "Medium");
-    assert.equal(after.shots[0]!.framing?.size, "Close-up");
-    await access(join(dir, ".history", "productions", "saltlight", "scenes", STEM, `v${after.version}.json`));
+    assert.ok(isGraphScene(after), "the whole persisted record has one graph authority");
+    assert.equal(after.version, before.version + 1);
+    assert.equal(orderedShots(after)[0]!.framing?.size, "Close-up");
+    assert.deepEqual(orderedShots(after).slice(1), orderedShots(before).slice(1), "unnamed shots stay byte-for-field intact");
+    await access(join(dir, ".history", "productions", PRODUCTION, "scenes", STEM, `v${after.version}.json`));
   });
 
-  it("a save against a moved base is refused, not merged — and says so in versions", async () => {
+  it("a command against a moved base is refused, not merged, and says so in versions", async () => {
     const { dir, store } = await open();
     const before = await readSceneFile(dir);
+
     await assert.rejects(
-      saveScene(store, {
-        productionId: "saltlight",
+      applySceneCommand(store, {
+        productionId: PRODUCTION,
         sceneFile: STEM,
-        scene: { ...before, synopsis: "written against yesterday" },
+        sceneId: SCENE_ID,
         baseVersion: before.version - 1,
+        command: { kind: "edit-scene", synopsis: "written against yesterday" },
       }),
-      (e: unknown) => e instanceof SceneStaleError && e.expected === before.version - 1 && e.found === before.version,
+      (error: unknown) =>
+        error instanceof SceneVersionMoved &&
+        error.expected === before.version - 1 &&
+        error.found === before.version,
     );
     const after = await readSceneFile(dir);
     assert.equal(after.version, before.version, "nothing was written");
     assert.equal(after.synopsis, undefined);
   });
 
-  it("identity is not the editor's to change: id, number and slug stay pinned to the file", async () => {
+  it("restore brings a prior command version back as a new version and keeps later history", async () => {
     const { dir, store } = await open();
-    const before = await readSceneFile(dir);
-    await saveScene(store, {
-      productionId: "saltlight",
-      sceneFile: STEM,
-      scene: { ...before, id: "sc_99", number: 99, slug: "hijacked", title: "Renamed fine" },
-      baseVersion: before.version,
-    });
-    const after = await readSceneFile(dir);
-    assert.equal(after.id, before.id);
-    assert.equal(after.number, before.number);
-    assert.equal(after.slug, before.slug);
-    assert.equal(after.title, "Renamed fine", "everything that is the editor's to change still lands");
-  });
-
-  it("restore brings v<n> back as a new version; the versions between stay in history", async () => {
-    const { dir, store } = await open();
-    const v = (await readSceneFile(dir)).version;
     const base = await readSceneFile(dir);
-    await saveScene(store, {
-      productionId: "saltlight",
-      sceneFile: STEM,
-      scene: { ...base, synopsis: "the keeper" },
-      baseVersion: v,
-    });
+    await apply(store, base, { kind: "edit-scene", synopsis: "the keeper" });
     const kept = await readSceneFile(dir);
-    await saveScene(store, {
-      productionId: "saltlight",
-      sceneFile: STEM,
-      scene: { ...kept, synopsis: "the regretted" },
-      baseVersion: kept.version,
-    });
+    await apply(store, kept, { kind: "edit-scene", synopsis: "the regretted" });
 
-    await restoreScene(store, { productionId: "saltlight", sceneFile: STEM, version: kept.version });
+    await restoreScene(store, { productionId: PRODUCTION, sceneFile: STEM, version: kept.version });
+
     const after = await readSceneFile(dir);
     assert.equal(after.version, kept.version + 2, "restore is a new version, not a rewind");
     assert.equal(after.synopsis, "the keeper");
-    await access(join(dir, ".history", "productions", "saltlight", "scenes", STEM, `v${kept.version + 1}.json`));
+    await access(join(dir, ".history", "productions", PRODUCTION, "scenes", STEM, `v${kept.version + 1}.json`));
   });
 
-  it("a payload that fails the scene schema is refused whole", async () => {
-    const { dir, store } = await open();
-    const before = await readSceneFile(dir);
-    await assert.rejects(
-      saveScene(store, {
-        productionId: "saltlight",
-        sceneFile: STEM,
-        scene: { ...before, shots: [{ id: "sh_1" }] },
-        baseVersion: before.version,
-      }),
-    );
-    assert.equal((await readSceneFile(dir)).version, before.version);
-  });
-
-  it("a save is a replacement, not a merge: a cleared field stays cleared (review 2026-08-22)", async () => {
-    // JsonFile.set is a shallow merge, so a save that REMOVED a field resurrected it from the
-    // old document — clearing the synopsis put the old sentence straight back, forever.
+  it("an explicit semantic clear removes the field rather than merging the old value back", async () => {
     const { dir, store } = await open();
     const base = await readSceneFile(dir);
-    await saveScene(store, {
-      productionId: "saltlight",
-      sceneFile: STEM,
-      scene: { ...base, synopsis: "a line to be regretted" },
-      baseVersion: base.version,
-    });
+    await apply(store, base, { kind: "edit-scene", synopsis: "a line to be regretted" });
     const withSynopsis = await readSceneFile(dir);
-    const { synopsis: _cleared, ...cleared } = withSynopsis;
-    await saveScene(store, {
-      productionId: "saltlight",
-      sceneFile: STEM,
-      scene: cleared,
-      baseVersion: withSynopsis.version,
-    });
+    await apply(store, withSynopsis, { kind: "edit-scene", synopsis: null });
+
     const after = await readSceneFile(dir);
-    assert.equal(after.synopsis, undefined, "what the person deleted stays deleted");
+    assert.equal(after.synopsis, undefined);
     assert.equal(after.version, withSynopsis.version + 1);
   });
 
   it("a scene file name that walks out of the scenes directory is refused by name", async () => {
-    // The stem lands in a path join on a loopback socket any local process can reach — so
-    // "..\\..\\meta" was a world-wide write primitive until the guard (review 2026-08-22).
-    const { dir, store } = await open();
-    const before = await readSceneFile(dir);
+    const { store } = await open();
     for (const stem of ["../meta", "..\\..\\bible", "a/b", "a\\b", ".hidden", ""]) {
       await assert.rejects(
-        saveScene(store, { productionId: "saltlight", sceneFile: stem, scene: before, baseVersion: before.version }),
-        /scene file|refused|not a scene file/i,
+        applySceneCommand(store, {
+          productionId: PRODUCTION,
+          sceneFile: stem,
+          sceneId: SCENE_ID,
+          baseVersion: 1,
+          command: { kind: "edit-scene", synopsis: null },
+        }),
+        /scene file/i,
       );
-      await assert.rejects(restoreScene(store, { productionId: "saltlight", sceneFile: stem, version: 1 }));
+      await assert.rejects(restoreScene(store, { productionId: PRODUCTION, sceneFile: stem, version: 1 }));
     }
   });
 });

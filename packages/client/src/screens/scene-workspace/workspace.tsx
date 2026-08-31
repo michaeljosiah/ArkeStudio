@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
+  DEFAULT_SHOT_SEC,
   orderedShots,
-  writerSceneView,
+  legacySceneView,
   type ClientMessage,
   type ArtifactSidecar,
   type PackedBoard,
@@ -12,31 +13,36 @@ import {
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { seconds } from "../../lib/format.js";
+import { mediaUrl } from "../../lib/media.js";
+import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
   frameRunCommand,
+  dispatchScenePlanned,
   sceneCommand,
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
+  subscribePlanResults,
   subscribeSceneRefusals,
   useClientState,
   useStore,
 } from "../../lib/store.js";
-import { StagedDecision } from "../../components/conversation.js";
-import { SceneReview, useBlockDigests } from "../storyboard.js";
+import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
+import { SceneReview, SceneSynopsis, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows } from "./rows.js";
-import { SceneIndex } from "./scene-index.js";
-import { SelectionProvider, selectedShotId, type WorkspaceSubject } from "./selection.js";
+import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, FrameRunReview, GenerateFramesDialog } from "./frame-run.js";
 import { Button } from "../../components/ui.js";
 import { BoardSheet } from "./board-sheet.js";
+import { ScenePreview } from "./preview.js";
+import { sceneIsComplete } from "./completion.js";
+import { PlansPanel } from "./plans.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 /**
- * The scene authoring shell (SPEC-029 R-21..R-29). The rollout setting mounts it for the whole
- * scene; retired generation links can opt into it directly while that rollout is still staged.
+ * The scene authoring shell (SPEC-029 R-21..R-29), mounted for every scene detail route.
  *
  * `scene index | Storyboard or Flow | Arke` — the three columns turn 103 binds, with Storyboard
  * the default. Read-only at this step: it lands where it can be walked before it replaces the
@@ -61,11 +67,11 @@ export function SceneWorkspace({
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
   const connection = useStore().connection;
-  const digests = useBlockDigests(writerSceneView(scene));
-  const [view, setView] = useState<"storyboard" | "flow">("storyboard");
+  const digests = useBlockDigests(legacySceneView(scene));
+  const [view, setView] = useState<"storyboard" | "flow" | "preview">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateTarget, setGenerateTarget] = useState<{ shotId?: string } | null>(null);
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
   const [boardSheetTrigger, setBoardSheetTrigger] = useState<HTMLElement | null>(null);
@@ -73,12 +79,14 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
   currentSceneKey.current = sceneKey;
   const pendingGenerator = useRef<{ requestId: string; sceneKey: string } | null>(null);
-  const generateButton = useRef<HTMLButtonElement>(null);
+  const pendingPlan = useRef<string | null>(null);
+  const generateReturnFocus = useRef<HTMLElement>(null);
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useState(true);
@@ -146,10 +154,10 @@ export function SceneWorkspace({
   const stagedBoards =
     JSON.stringify(scene.boards) !== JSON.stringify(workingScene.boards) ||
     JSON.stringify(acceptedBoardPack) !== JSON.stringify(boardPack);
-  const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? 0), 0);
+  const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
-  const focused = focus === null ? undefined : shots.find((shot) => shot.id === focus);
+  const focused = focus === null ? undefined : workingShots.find((shot) => shot.id === focus);
   const sceneRuns = [...(state?.frameRuns ?? [])]
     .filter((candidate) =>
       candidate.worldId === world.meta.worldId &&
@@ -162,6 +170,14 @@ export function SceneWorkspace({
   const selectedBoard = boardSheetKey === null || !boardPack.ok
     ? null
     : boardPack.boards.find((board) => JSON.stringify(board.memberShotIds) === boardSheetKey) ?? null;
+  const subjectBoard = subject.kind !== "board" || !boardPack.ok
+    ? null
+    : boardPack.boards.find((board) => subjectMatchesBoard(subject, board.memberShotIds)) ?? null;
+  const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
+  const complete = sceneIsComplete(scene, production, artifacts, digests);
+  const locationName = scene.inherits?.location === undefined
+    ? null
+    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
   const write = (command: Command): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
@@ -178,12 +194,40 @@ export function SceneWorkspace({
     }
     return sent;
   };
-  const subjectLine =
+  const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
+      : subject.kind === "board"
+        ? `Arke · ${subjectBoard === null ? "Board" : `Board ${subjectBoard.letter}`}`
+        : focused === undefined
+          ? `Arke · Scene ${scene.number}`
+          : `Arke · Shot ${focused.number}`;
+  const dockSubject = subject.kind === "edge"
+    ? "scene flow"
+    : subject.kind === "board"
+      ? subjectBoard === null
+        ? `${subject.memberShotIds.length} shots`
+        : `shots ${workingShots.find((shot) => shot.id === subjectBoard.memberShotIds[0])?.number ?? "?"}–${workingShots.find((shot) => shot.id === subjectBoard.memberShotIds.at(-1))?.number ?? "?"} · ${subjectBoard.durationSec}s`
       : focused === undefined
-        ? `Arke · Scene ${scene.number}`
-        : `Arke · Shot ${focused.number}`;
+        ? `${scene.title} · v${scene.version}`
+        : `${focused.title} · ${shotHasFrame(production, artifacts, focused.id) ? "frame filed" : "no frame"}`;
+  const focusedFrameId = focused === undefined ? undefined : production.selections[focused.id]?.startFrameArtifactId;
+  const focusedArtifact = focusedFrameId === undefined || focused === undefined || !shotHasFrame(production, artifacts, focused.id)
+    ? undefined
+    : artifacts.find((artifact) => artifact.id === focusedFrameId);
+  const focusedAccepted = focused === undefined ? null : acceptedTakeId(production, focused.id);
+  const focusedLegacyFrame = focused === undefined || focusedAccepted === null
+    ? undefined
+    : takesForShot(production, focused.id).find((take) =>
+        take.id === focusedAccepted && (take.kind === "frame" || take.kind === "still"),
+      );
+  const thumbnailSrc = world.meta.slug === undefined
+    ? null
+    : focusedArtifact !== undefined
+      ? mediaUrl(world.meta.slug, `artifacts/${focusedArtifact.file}`)
+      : focusedLegacyFrame?.media === undefined
+        ? null
+        : mediaUrl(world.meta.slug, `productions/${production.meta.id}/takes/${focusedLegacyFrame.id}/${focusedLegacyFrame.media}`);
 
   useEffect(
     () =>
@@ -195,6 +239,21 @@ export function SceneWorkspace({
         }
       }),
     [production.meta.id, sceneFile],
+  );
+  useEffect(
+    () =>
+      subscribePlanResults((event) => {
+        if (
+          event.worldId !== world.meta.worldId ||
+          event.productionId !== production.meta.id ||
+          event.requestId !== pendingPlan.current
+        ) {
+          return;
+        }
+        pendingPlan.current = null;
+        setPlanError(event.disposition === "failed" ? (event.reason ?? "The plan could not be created.") : null);
+      }),
+    [world.meta.worldId, production.meta.id],
   );
   useEffect(() => {
     pendingCommand.current = false;
@@ -229,6 +288,11 @@ export function SceneWorkspace({
     setGeneratorPending(false);
     setGeneratorError("Connection lost - try again.");
   }, [connection]);
+  useEffect(() => {
+    if (connection === "open" || pendingPlan.current === null) return;
+    pendingPlan.current = null;
+    setPlanError("Connection lost - try again.");
+  }, [connection]);
   const openGenerator = (subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"]) => {
     if (pendingGenerator.current !== null) return;
     const requestId = sendBenchOpenSubject({
@@ -245,12 +309,26 @@ export function SceneWorkspace({
       setGeneratorError("Not connected - try again.");
     }
   };
+  const planVideo = () => {
+    if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
+    pendingPlan.current = dispatchScenePlanned(
+      world.meta.worldId,
+      production.meta.id,
+      sceneFile,
+      "whole-scene",
+      videoModel.id,
+      "review-gated",
+    );
+    setPlanError(null);
+  };
   useEffect(() => {
-    // Scene Index reuses this component. A response belongs to the scene that sent it and must
+    // The scene route reuses this component. A response belongs to the scene that sent it and must
     // not navigate back from a newer scene or leave that newer scene's actions blocked.
     pendingGenerator.current = null;
+    pendingPlan.current = null;
     setGeneratorPending(false);
     setGeneratorError(null);
+    setPlanError(null);
   }, [world.meta.worldId, production.meta.id, scene.id]);
   useEffect(() => {
     frameRunCommand({ kind: "frame-run-list", worldId: world.meta.worldId, productionId: production.meta.id });
@@ -259,30 +337,42 @@ export function SceneWorkspace({
   return (
     <SelectionProvider value={selection}>
       <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"}>
-        <SceneIndex
-          production={production}
-          artifacts={artifacts}
-          currentSceneId={scene.id}
-          onOpen={(sceneId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${sceneId}`)}
-        />
-
         <main className="fy-sw__centre">
           <header className="fy-sw__head">
+            <p className="fy-sw__breadcrumb">
+              {production.meta.title}
+              {episode === undefined ? ` · scene ${scene.number}` : ` · episode ${episode.order} · ${episode.title}`}
+            </p>
             <div className="fy-sw__headline">
-              <div>
-                <h1 className="fy-sw__title">
-                  Scene {scene.number} · {scene.title}
-                </h1>
-                <p className="fy-sw__metrics">
-                  {shots.length} shots · {seconds(totalSec)} · {framed} frames filed
-                </p>
-              </div>
+              <h1 className="fy-sw__title">
+                Scene {scene.number} · {scene.title}
+              </h1>
               <div className="fy-sw__actions">
                 <Button variant="outline" onClick={() => setSceneReviewOpen((open) => !open)}>Review scene</Button>
-                <Button ref={generateButton} variant="primary" disabled={frameRun?.status === "active" || frameRun?.status === "paused"} onClick={() => setGenerateOpen(true)}>Generate frames</Button>
+                <Button
+                  variant="primary"
+                  disabled={frameRun?.status === "active" || frameRun?.status === "paused"}
+                  onClick={(event) => {
+                    generateReturnFocus.current = event.currentTarget;
+                    setGenerateTarget({});
+                  }}
+                >
+                  Generate frames
+                </Button>
               </div>
             </div>
-            {sceneReviewOpen ? <SceneReview scene={writerSceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
+            <SceneSynopsis
+              scene={legacySceneView(scene)}
+              onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
+            />
+            <div className="fy-sw__context" aria-label="Scene context">
+              {locationName === null ? null : <span>{locationName}</span>}
+              {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
+              {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
+              <span>{aspect}</span>
+              <span className="fy-sw__metrics">{shots.length} shots · {seconds(totalSec)} · {framed} frames filed</span>
+            </div>
+            {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
 
@@ -294,7 +384,7 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow"] as const).map((candidate) => (
+              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -304,7 +394,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : "Flow"}
+                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
                 </button>
               ))}
             </div>
@@ -368,10 +458,16 @@ export function SceneWorkspace({
                 setBoardSheetTrigger(trigger);
                 setBoardSheetKey(JSON.stringify(board.memberShotIds));
               }}
+              onGenerateFrame={(shotId, trigger) => {
+                generateReturnFocus.current = trigger;
+                setGenerateTarget({ shotId });
+              }}
+              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onPlanVideo={planVideo}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
-          ) : (
+          ) : view === "flow" ? (
             <SceneFlow
               scene={workingScene}
               production={production}
@@ -388,47 +484,83 @@ export function SceneWorkspace({
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
+          ) : (
+            <ScenePreview
+              key={`${production.meta.id}/${scene.id}`}
+              production={production}
+              scene={scene}
+              artifacts={artifacts}
+              boards={acceptedBoardPack.ok ? acceptedBoardPack.boards : []}
+              worldSlug={world.meta.slug}
+              aspect={aspect}
+            />
           )}
+          <PlansPanel
+            worldId={world.meta.worldId}
+            prodId={production.meta.id}
+            sceneId={scene.id}
+            refused={planError}
+          />
+          {complete && episode !== undefined ? (
+            <button
+              type="button"
+              className="fy-sw__done"
+              onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}
+            >
+              Done · back to the episode
+            </button>
+          ) : null}
         </main>
 
-        {/*
-          Arke's dock follows the selection and nothing else — there is no "ask Arke to look at
-          this" action, because the thing being looked at is the thing that is selected. The
-          thread itself arrives with the dock's own step; this is the subject line it will read.
-        */}
         {dock ? (
-        <aside className="fy-sw__dock" aria-label="Arke">
-          <p className="fy-sw__subject" data-testid="workspace-subject">
-            {subjectLine}
-          </p>
-          {staged === undefined ? null : (
-            <>
-              {removedShots.length === 0 ? null : (
-                <div className="fy-swproposal__removes">
-                  <span>Removes</span>
-                  {removedShots.map((shot) => <span key={shot.id}>Shot {shot.number} · {shot.title}</span>)}
-                </div>
-              )}
-              <StagedDecision
-                worldId={world.meta.worldId}
-                subject={`scene ${scene.number}`}
-                staged={staged}
-                writes="Updates this scene and its board boundaries."
-              />
-            </>
-          )}
-        </aside>
+          <ProductionConversation
+            worldId={world.meta.worldId}
+            productionId={production.meta.id}
+            entry={{ kind: "scene", productionId: production.meta.id, sceneId: scene.id }}
+            dock={{
+              title: dockTitle,
+              subject: dockSubject,
+              ...(thumbnailSrc === null || focused === undefined
+                ? {}
+                : { thumbnail: { src: thumbnailSrc, alt: `Frame for shot ${focused.number}` } }),
+            }}
+            openingNote="opening…"
+            emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
+            placeholder="Ask about this scene · @ to reference"
+            onSelectShot={(shotId) => setSubject({ kind: "shot", shotId })}
+            {...(staged === undefined
+              ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }
+              : {
+                  side: (
+                    <>
+                      {removedShots.length === 0 ? null : (
+                        <div className="fy-swproposal__removes">
+                          <span>Removes</span>
+                          {removedShots.map((shot) => <span key={shot.id}>Shot {shot.number} · {shot.title}</span>)}
+                        </div>
+                      )}
+                      <StagedDecision
+                        worldId={world.meta.worldId}
+                        subject={`scene ${scene.number}`}
+                        staged={staged}
+                        writes="Updates this scene and its board boundaries."
+                      />
+                    </>
+                  ),
+                })}
+          />
         ) : null}
         <GenerateFramesDialog
-          open={generateOpen}
+          open={generateTarget !== null}
           state={state}
           world={world}
           production={production}
           scene={scene}
           aspect={aspect}
           videoModel={videoModel}
-          returnFocus={generateButton}
-          onClose={() => setGenerateOpen(false)}
+          {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
+          returnFocus={generateReturnFocus}
+          onClose={() => setGenerateTarget(null)}
         />
         {frameRun === null ? null : (
           <FrameRunReview

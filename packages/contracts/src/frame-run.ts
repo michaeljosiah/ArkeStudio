@@ -392,6 +392,7 @@ export const FrameRunQuoteSchema = z.object({
   mode: z.enum(["per-shot", "board"]),
   modelId: z.string().min(1),
   scope: z.enum(["missing", "all"]),
+  shotId: ShotIdSchema.optional(),
   includedCount: z.number().int().min(0),
   steps: z.array(z.object({
     label: z.string().min(1),

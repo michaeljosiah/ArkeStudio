@@ -12,7 +12,7 @@ import {
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
 import type { WorkspaceBoardPack } from "./boards.js";
-import { useWorkspaceSelection } from "./selection.js";
+import { subjectMatchesBoard, useWorkspaceSelection, type WorkspaceSubject } from "./selection.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -68,6 +68,21 @@ interface FlowEdge {
   fromShotId: string | null;
   toShotId: string | null;
   staged: boolean;
+}
+
+function subjectForNode(node: FlowNode): WorkspaceSubject {
+  if (node.shotId !== undefined) return { kind: "shot", shotId: node.shotId };
+  if (node.kind === "board" && node.memberShotIds !== undefined) {
+    return { kind: "board", memberShotIds: [...node.memberShotIds] };
+  }
+  return { kind: "scene" };
+}
+
+function subjectSelectsNode(subject: WorkspaceSubject, node: FlowNode, currentShotId: string | null): boolean {
+  if (node.shotId !== undefined) return node.shotId === currentShotId;
+  return node.kind === "board" &&
+    node.memberShotIds !== undefined &&
+    subjectMatchesBoard(subject, node.memberShotIds);
 }
 
 const ZOOM_MIN = 0.5;
@@ -184,7 +199,7 @@ export function SceneFlow({
   const dragNode = (node: FlowNode, event: React.MouseEvent) => {
     if (event.button !== 0) return;
     event.stopPropagation();
-    select(node.shotId === undefined ? { kind: "scene" } : { kind: "shot", shotId: node.shotId });
+    select(subjectForNode(node));
     const sx = event.clientX;
     const sy = event.clientY;
     const origin = { x: node.x, y: node.y };
@@ -291,7 +306,7 @@ export function SceneFlow({
             className="fy-swnode"
             data-kind={node.kind}
             data-testid={`flow-node-${node.id}`}
-            data-selected={node.shotId !== undefined && node.shotId === current ? "true" : undefined}
+            data-selected={subjectSelectsNode(subject, node, current) ? "true" : undefined}
             data-staged={node.staged ? "true" : undefined}
             style={{ left: node.x, top: node.y, width: NODE[node.kind].w, height: NODE[node.kind].h }}
             role="button"
@@ -306,7 +321,7 @@ export function SceneFlow({
             }
             aria-label={ariaFor(node)}
             aria-disabled={node.staged ? "true" : undefined}
-            aria-current={node.shotId !== undefined && node.shotId === current ? "true" : undefined}
+            aria-current={subjectSelectsNode(subject, node, current) ? "true" : undefined}
             onMouseDown={(event) => !node.staged && dragNode(node, event)}
             onDragOver={(event) => {
               if (node.shotId !== undefined && linkSource !== null) event.preventDefault();
@@ -322,7 +337,7 @@ export function SceneFlow({
                 reconnect(node.shotId);
                 return;
               }
-              if (node.shotId === undefined) select({ kind: "scene" });
+              if (node.shotId === undefined) select(subjectForNode(node));
               else focusShot(node.shotId);
             }}
             onKeyDown={(event) => {
@@ -346,7 +361,7 @@ export function SceneFlow({
                 reconnect(node.shotId);
                 return;
               }
-              select(node.shotId === undefined ? { kind: "scene" } : { kind: "shot", shotId: node.shotId });
+              select(subjectForNode(node));
             }}
           >
             {node.thumb === undefined ? null : (

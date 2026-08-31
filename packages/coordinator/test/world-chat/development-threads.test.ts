@@ -3,13 +3,17 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  GraphSceneSchema,
   isGraphScene,
   linearizeSceneFlow,
+  migrateLegacyScene,
   newId,
-  SceneRecordSchema,
+  orderedShots,
   StoryOverviewSchema,
+  legacySceneView,
   type CandidateId,
   type ConversationId,
+  type GraphScene,
   type MessageId,
   type WorldChangeCandidate,
 } from "@arke-studio/contracts";
@@ -22,7 +26,6 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
-import { orderedShots, writerSceneView } from "@arke-studio/contracts";
 
 /**
  * Production-scoped threads (SPEC-023 R-20, issue #400): the same durable conversation, entered
@@ -122,6 +125,69 @@ async function withCandidates(log: WorldChatStore, candidates: WorldChangeCandid
   );
   const { events } = await log.read();
   return events[events.length - 1]!.seq;
+}
+
+/** A valid graph whose stable identities cannot be mistaken for deterministic projections. */
+function withAuthoredSceneIdentities(scene: GraphScene): GraphScene {
+  const nodeIds = new Map(
+    scene.flow.nodes.map((node, index) => [node.id, `sfn_authored-${node.kind}-${index + 1}`]),
+  );
+  const grouped = scene.flow.nodes.filter((node) => node.kind === "shot")[1]!;
+  return GraphSceneSchema.parse({
+    ...scene,
+    boards: {
+      splits: [grouped.shot.id],
+      merges: [],
+      prompts: [{ members: [grouped.shot.id], text: "Keep the lamps together." }],
+    },
+    flow: {
+      ...scene.flow,
+      entryNodeId: nodeIds.get(scene.flow.entryNodeId)!,
+      exitNodeId: nodeIds.get(scene.flow.exitNodeId)!,
+      nodes: scene.flow.nodes.map((node) => ({ ...node, id: nodeIds.get(node.id)! })).reverse(),
+      edges: scene.flow.edges.map((edge, index) => ({
+        ...edge,
+        id: `sfe_authored-${index + 1}`,
+        from: { ...edge.from, nodeId: nodeIds.get(edge.from.nodeId)! },
+        to: { ...edge.to, nodeId: nodeIds.get(edge.to.nodeId)! },
+      })).reverse(),
+      storyboardGroups: [{
+        id: "sbg_authored-lamps",
+        title: "The lamps",
+        shotNodeIds: [nodeIds.get(grouped.id)!],
+      }],
+    },
+  });
+}
+
+type TestWorld = Awaited<ReturnType<typeof world>>;
+
+async function installAuthoredVerse(w: TestWorld): Promise<void> {
+  const production = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+  const legacy = legacySceneView(production.scenes.find((scene) => scene.id === "sc_04")!);
+  const authored = withAuthoredSceneIdentities(migrateLegacyScene(legacy));
+  const setup = await w.gate.stage({
+    kind: "scene-edit",
+    summary: "Author the scene flow",
+    source: "test",
+    targets: [{
+      path: "productions/saltlight/scenes/04-the-verse-rises.json",
+      content: `${JSON.stringify(authored, null, 2)}\n`,
+    }],
+  });
+  assert.equal(accepted(await w.gate.accept(setup.id)), "accepted");
+}
+
+async function readStagedGraphScene(
+  dir: string,
+  proposal: { id: string; targets: Array<{ path: string }> },
+): Promise<GraphScene> {
+  const target = proposal.targets.find((candidate) => candidate.path.includes("/scenes/"));
+  assert.ok(target, "the proposal stages a scene target");
+  const raw = await readFile(join(dir, ".proposals", proposal.id, ...target.path.split("/")), "utf8");
+  const scene = GraphSceneSchema.parse(JSON.parse(raw));
+  assert.equal("shots" in scene, false, "staged scene content has one graph authority and no top-level shots[]");
+  return scene;
 }
 
 describe("production-scoped threads (issue 400)", () => {
@@ -225,6 +291,10 @@ describe("production-scoped threads (issue 400)", () => {
       });
       const staged = (await w.gate.listOpen()).find((p) => p.kind === "scene-edit");
       assert.ok(staged, "a shot rides the scene-edit kind — it lives in the scene's file");
+      const proposed = await readStagedGraphScene(w.dir, staged);
+      const proposedShot = orderedShots(proposed).find((shot) => shot.id === "sh_12")!;
+      assert.equal(proposedShot.durationSec, 6, "the staged graph already carries the amendment");
+      assert.equal(proposedShot.camera, live.camera, "semantic editing carries fields the draft omitted");
       assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
 
       const after = await scanWorld(w.dir);
@@ -239,13 +309,95 @@ describe("production-scoped threads (issue 400)", () => {
       assert.equal(shot.id, live.id);
     });
 
+    it("amends a graph-backed shot through canonical order without replacing flow identities", async () => {
+      const w = await world();
+      const production = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+      const legacy = legacySceneView(production.scenes.find((scene) => scene.id === "sc_04")!);
+      const targetShot = legacy.shots[1]!;
+      await installAuthoredVerse(w);
+
+      const before = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!
+        .scenes.find((scene) => scene.id === "sc_04")!;
+      assert.ok(isGraphScene(before));
+      const beforeSequence = linearizeSceneFlow(before);
+      assert.ok(beforeSequence.kind === "linear");
+      assert.deepEqual(
+        beforeSequence.shots.map((pair) => pair.shot.id),
+        legacy.shots.map((shot) => shot.id),
+        "edge order, not reversed node storage order, is canonical",
+      );
+      const authoredNodeId = beforeSequence.shots[1]!.nodeId;
+      assert.match(authoredNodeId, /^sfn_authored-/, "the fixture carries a custom shot-node identity");
+
+      const seq = await withCandidates(w.log, [
+        candidate({
+          classification: "development.shot",
+          target: {
+            kind: "shot",
+            productionId: "saltlight",
+            sceneId: "sc_04",
+            shotId: targetShot.id,
+          },
+          title: "The lamps hold",
+          draft: { camera: "CU · locked to the last lamp" },
+        } as Partial<WorldChangeCandidate>),
+      ]);
+      await wrapUp({
+        store: w.store,
+        gate: w.gate,
+        conversationId: w.conversationId,
+        requestId: "req-graph-shot",
+        expectedConversationSeq: seq,
+        now: NOW,
+      });
+      const staged = (await w.gate.listOpen()).find((proposal) => proposal.kind === "scene-edit");
+      assert.ok(staged, "materialisation accepts the graph instead of requiring shots[] on the record");
+      const proposed = await readStagedGraphScene(w.dir, staged);
+      const proposedSequence = linearizeSceneFlow(proposed);
+      assert.ok(proposedSequence.kind === "linear");
+      assert.equal(proposedSequence.shots[1]!.shot.camera, "CU · locked to the last lamp");
+      assert.equal(proposedSequence.shots[1]!.nodeId, authoredNodeId);
+      assert.equal(proposed.flow.entryNodeId, before.flow.entryNodeId);
+      assert.equal(proposed.flow.exitNodeId, before.flow.exitNodeId);
+      assert.deepEqual(
+        proposed.flow.nodes.map((node) => node.id).sort(),
+        before.flow.nodes.map((node) => node.id).sort(),
+        "every existing node keeps its identity",
+      );
+      assert.deepEqual(
+        [...proposed.flow.edges].sort((left, right) => left.id.localeCompare(right.id)),
+        [...before.flow.edges].sort((left, right) => left.id.localeCompare(right.id)),
+        "an amendment keeps every existing edge and its authored id",
+      );
+      assert.deepEqual(proposed.flow.storyboardGroups, before.flow.storyboardGroups);
+      assert.deepEqual(proposed.boards, before.boards, "authored board identity is carried unchanged");
+      assert.deepEqual(proposed.board, before.board, "the compiled board reference is not part of the shot edit");
+      assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
+
+      const raw = await readFile(
+        join(w.dir, "productions", "saltlight", "scenes", "04-the-verse-rises.json"),
+        "utf8",
+      );
+      const after = GraphSceneSchema.parse(JSON.parse(raw));
+      const afterSequence = linearizeSceneFlow(after);
+      assert.ok(afterSequence.kind === "linear");
+      assert.deepEqual(
+        afterSequence.shots.map((pair) => pair.shot.id),
+        beforeSequence.shots.map((pair) => pair.shot.id),
+      );
+      assert.equal(afterSequence.shots[1]!.shot.camera, "CU · locked to the last lamp");
+      assert.equal(afterSequence.shots[1]!.nodeId, authoredNodeId);
+      assert.deepEqual(after.flow, proposed.flow, "acceptance lands the graph that was staged");
+      assert.deepEqual(after.boards, proposed.boards);
+    });
+
     it("adds a shot at the end, with an id minted past every scene in the production", async () => {
       const w = await world();
       const production = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
       const highest = production.scenes
         .flatMap((s) => orderedShots(s))
         .reduce((a, s) => Math.max(a, Number(s.id.replace(/^sh_0*/, "")) || 0), 0);
-      const sceneBefore = writerSceneView(production.scenes.find((s) => s.id === "sc_04")!);
+      const sceneBefore = legacySceneView(production.scenes.find((s) => s.id === "sc_04")!);
 
       const seq = await withCandidates(w.log, [
         candidate({
@@ -268,10 +420,24 @@ describe("production-scoped threads (issue 400)", () => {
         now: NOW,
       });
       const staged = (await w.gate.listOpen()).find((p) => p.kind === "scene-edit")!;
+      const proposed = await readStagedGraphScene(w.dir, staged);
+      const proposedShots = orderedShots(proposed);
+      assert.deepEqual(
+        proposedShots.slice(0, -1).map((shot) => shot.id),
+        sceneBefore.shots.map((shot) => shot.id),
+        "insertion preserves every existing shot identity and order",
+      );
+      const proposedShot = proposedShots[proposedShots.length - 1]!;
+      assert.equal(proposedShot.title, "The water answers");
+      assert.equal(
+        Number(proposedShot.id.replace(/^sh_0*/, "")),
+        highest + 1,
+        "the staged id clears every shot in the production",
+      );
       assert.equal(accepted(await w.gate.accept(staged.id)), "accepted");
 
       const after = await scanWorld(w.dir);
-      const scene = writerSceneView(
+      const scene = legacySceneView(
         after.bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!,
       );
       assert.equal(scene.shots.length, sceneBefore.shots.length + 1, "it went on the end");
@@ -282,10 +448,11 @@ describe("production-scoped threads (issue 400)", () => {
         highest + 1,
         "the id clears every shot in the production — takes key by bare shot id",
       );
-      // The same rule the storyboard's Add shot follows: one past the highest number the scene
-      // holds, not the array's length — a shot's number is its birth name, not its index.
-      const highestNumber = sceneBefore.shots.reduce((a, s) => Math.max(a, s.number), 0);
-      assert.equal(added.number, highestNumber + 1, "and the number is this scene's next");
+      assert.deepEqual(
+        scene.shots.map((shot) => shot.number),
+        scene.shots.map((_shot, index) => index + 1),
+        "semantic insertion derives display numbers from graph order",
+      );
     });
 
     it("refuses a new shot with nothing in it, and one naming a shot the scene does not have", async () => {
@@ -333,8 +500,12 @@ describe("production-scoped threads (issue 400)", () => {
     });
   });
 
-  it("a scene-script candidate rewrites the whole scene with its blocks, gated as scene-edit", async () => {
+  it("a scene-script candidate stages a graph and edits only its script", async () => {
     const w = await world();
+    await installAuthoredVerse(w);
+    const before = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!
+      .scenes.find((scene) => scene.id === "sc_04")!;
+    assert.ok(isGraphScene(before));
     const seq = await withCandidates(w.log, [
       candidate({
         classification: "development.scene-script",
@@ -358,19 +529,23 @@ describe("production-scoped threads (issue 400)", () => {
     });
     const staged = (await w.gate.listOpen()).find((p) => p.kind === "scene-edit");
     assert.ok(staged, "script proposals ride the scene-edit kind");
+    const proposed = await readStagedGraphScene(w.dir, staged);
+    assert.equal(proposed.script?.blocks.length, 2);
+    assert.deepEqual(
+      proposed,
+      { ...before, script: proposed.script },
+      "script materialisation preserves graph, node, edge, board, and scene identity",
+    );
     const accepted = await w.gate.accept(staged.id);
     assert.equal(accepted.status, "accepted");
     const raw = await readFile(
       join(w.dir, "productions", "saltlight", "scenes", "04-the-verse-rises.json"),
       "utf8",
     );
-    // Accepting a proposal is an authored write, so the scene lands graph-backed (SPEC-029 R-11).
-    const scene = SceneRecordSchema.parse(JSON.parse(raw));
-    assert.ok(isGraphScene(scene), "an accepted scene target lands as the graph shape");
+    const scene = GraphSceneSchema.parse(JSON.parse(raw));
     assert.equal(scene.script?.blocks.length, 2, "the blocks landed inside the scene file");
-    const sequence = linearizeSceneFlow(scene);
-    assert.ok(sequence.kind === "linear");
-    assert.equal(sequence.shots.length > 0, true, "the shots the scene already had are untouched");
+    assert.deepEqual(scene.flow, before.flow, "the accepted script edit keeps every flow identity");
+    assert.deepEqual(scene.boards, before.boards);
   });
 
   it("an episode candidate creates a stem-stable episode file through the episode-edit kind", async () => {
@@ -548,7 +723,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("holds back a shot amendment that restates the shot", async () => {
     const w = await world();
-    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const scene = legacySceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const shot = scene.shots[0]!;
     const restated = candidate({
       classification: "development.shot",
@@ -563,7 +738,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("carries a shot amendment that moves the camera, leaving the rest of the shot alone", async () => {
     const w = await world();
-    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const scene = legacySceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const shot = scene.shots[0]!;
     const moved = candidate({
       classification: "development.shot",
@@ -575,7 +750,7 @@ describe("production-scoped threads (issue 400)", () => {
 
   it("never holds back a new shot or a new episode — a creation always writes", async () => {
     const w = await world();
-    const scene = writerSceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const scene = legacySceneView(w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const added = candidate({
       classification: "development.shot",
       target: { kind: "shot", productionId: "saltlight", sceneId: scene.id },

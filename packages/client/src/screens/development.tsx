@@ -3,7 +3,11 @@ import { NavLink, useNavigate, useParams } from "react-router";
 import {
   seasonFindings,
   sortScenes,
+  legacySceneView,
+  type ArtifactSidecar,
   type Episode,
+  type ProductionBundle,
+  type SceneRecord,
   type SeasonFinding,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
@@ -11,6 +15,8 @@ import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
+import { useBlockDigests } from "./storyboard.js";
+import { sceneIsComplete } from "./scene-workspace/completion.js";
 
 /**
  * The season page (design turn 91; supersedes turn 48's four-view strip).
@@ -549,7 +555,7 @@ export function EpisodeChatScreen() {
  */
 export function EpisodeDetailScreen() {
   const { worldId, prodId, episodeId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
   if (!production || !episode) {
@@ -601,24 +607,20 @@ export function EpisodeDetailScreen() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
         {episode.scenes.map((sceneId, index) => {
           const scene = scenesById.get(sceneId);
-          return (
+          return scene === undefined || world === null ? (
             <div key={sceneId} className="fy-draftcard">
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                <span className="fy-mono">{pad(index + 1)}</span>
-                <button
-                  type="button"
-                  className="fy-linkbtn"
-                  style={{ font: "600 13px var(--font-sans)", textAlign: "left" }}
-                  disabled={!scene}
-                  onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${sceneId}`)}
-                >
-                  {scene ? scene.title : "not a scene in this production"}
-                </button>
-              </div>
-              <div className="fy-mono" style={{ marginTop: 8 }}>
-                {scene ? sceneId : "MISSING"}
-              </div>
+              <span className="fy-mono">{pad(index + 1)} · MISSING</span>
+              <div>not a scene in this production</div>
             </div>
+          ) : (
+            <EpisodeSceneCard
+              key={sceneId}
+              scene={scene}
+              production={production}
+              artifacts={world.artifacts}
+              ordinal={index + 1}
+              onOpen={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${sceneId}`)}
+            />
           );
         })}
       </div>
@@ -653,6 +655,41 @@ export function EpisodeDetailScreen() {
       )}
     </div>
       <EpisodeDock episode={episode} />
+    </div>
+  );
+}
+
+function EpisodeSceneCard({
+  scene,
+  production,
+  artifacts,
+  ordinal,
+  onOpen,
+}: {
+  scene: SceneRecord;
+  production: ProductionBundle;
+  artifacts: readonly ArtifactSidecar[];
+  ordinal: number;
+  onOpen: () => void;
+}) {
+  const digests = useBlockDigests(legacySceneView(scene));
+  const complete = sceneIsComplete(scene, production, artifacts, digests);
+  return (
+    <div className="fy-draftcard" data-complete={complete ? "true" : undefined}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span className="fy-mono">{pad(ordinal)}</span>
+        <button
+          type="button"
+          className="fy-linkbtn"
+          style={{ font: "600 13px var(--font-sans)", textAlign: "left" }}
+          onClick={onOpen}
+        >
+          {scene.title}
+        </button>
+      </div>
+      <div className="fy-mono" style={{ marginTop: 8 }}>
+        {scene.id} · {complete ? "done" : "in progress"}
+      </div>
     </div>
   );
 }

@@ -18,7 +18,7 @@ import {
   validateSceneFlow,
   RoutingSchema,
   StoryOverviewSchema,
-  type Scene,
+  type SceneRecord,
   type Proposal,
   type ProposalConflict,
   type ProposalOpenChoice,
@@ -35,10 +35,9 @@ import { changesAnything, classify, type CommitFileInput, type CommitResult } fr
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
 import {
-  graphSceneContent,
+  legacySceneCandidateContent,
   parseSceneRecord,
   readSceneRecord,
-  sceneFrom,
 } from "../productions/scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import {
@@ -781,14 +780,12 @@ export class ProposalManager {
         return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story";
       });
       /*
-       * An accepted scene lands graph-backed (SPEC-029 R-11): an accepted proposal is an
-       * authored write, and every authored write produces the one shape (§3.3). The migration
-       * happens here rather than at staging so that what a person reviewed, what the record
-       * checks above read, and what the drafting agent may still repair all stay in the shape
-       * they were written in; what changes is the bytes the one commit lands.
+       * New draft and World Chat proposals are graph scenes. A persisted proposal can predate
+       * that retirement and still carry a legacy `shots[]` scene, so acceptance upgrades that
+       * compatibility input immediately before the one commit lands it (SPEC-029 R-11).
        *
-       * A target authored as a graph is left exactly as it was reviewed. Its node ids, edges
-       * and authored groups are the proposal — not decoration on one — and projecting it to
+       * A graph target is left exactly as it was reviewed. Its node ids, edges and authored
+       * groups are the proposal — not decoration on one — and projecting it to
        * `shots[]` in order to rebuild a flow would silently discard every graph edit somebody
        * had just approved. Its topology was validated with the rest of the record above.
        *
@@ -810,11 +807,11 @@ export class ProposalManager {
         if (classify(file.path).track !== "scene" || file.content === undefined) continue;
         try {
           const live = liveByPath.get(file.path) ?? null;
-          // `readSceneRecord` projects as well as parses, and the projection is the graph check.
+          // The read-only projection also validates that a live graph has one readable path.
           const current = live !== null ? readSceneRecord(live).record : null;
           const proposedScene = parseSceneRecord(file.content);
           if (isGraphScene(proposedScene)) continue;
-          file.content = graphSceneContent(current, proposedScene);
+          file.content = legacySceneCandidateContent(current, proposedScene);
         } catch (err) {
           refusals.push({
             path: file.path,
@@ -946,13 +943,13 @@ export class ProposalManager {
     const [, productionId, stem] = match;
     // Through the union's projection (SPEC-029): a target may be authored in either shape, and
     // an id collision is about the shots the scene holds, not about which field holds them.
-    let scene: Scene;
+    let scene: SceneRecord;
     try {
-      scene = sceneFrom(parseSceneRecord(content));
+      scene = parseSceneRecord(content);
     } catch {
       return null; // the schema check above already said so
     }
-    const mine = scene.shots.map((s) => String(s.id)).filter((id) => id !== "undefined");
+    const mine = orderedShots(scene).map((shot) => String(shot.id)).filter((id) => id !== "undefined");
     if (mine.length === 0) return null;
     const production = this.store.getBundle().productions.find((p) => p.meta.id === productionId);
     if (!production) return null;

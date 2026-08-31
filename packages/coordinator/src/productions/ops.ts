@@ -4,14 +4,13 @@ import { join } from "node:path";
 import {
   compilePasses,
   normalizeAspect,
-  parseMentions,
   legacyFormatFor,
+  migrateLegacyScene,
   planScene,
   pickableSheets,
   productionShape,
   sceneDeleteBlockers,
   resolveMedium,
-  SceneSchema,
   ulid,
   type ArtifactSidecar,
   type ManifestModel,
@@ -29,7 +28,6 @@ import {
   type Series,
   type StoryOverview,
   type SceneRecord,
-  type Shot,
   type WorldBundle,
   type Capability,
   orderedShots,
@@ -42,7 +40,7 @@ import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
 import { CommitStaleError, type CommitFileInput } from "../world/commit.js";
-import { graphSceneContent, readSceneRecord } from "./scene-record.js";
+import { readSceneRecord } from "./scene-record.js";
 import type { WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
@@ -468,12 +466,6 @@ export async function reorderChapters(
  * skipped rather than failing the rest; the spine is untouched because it never reads scene
  * order (anchors order the spine).
  *
- * The version-free write leaves a stated race (review 2026-08-22): a save built from the
- * pre-reorder scene passes the version check and puts the old `order` back. Accepted — the
- * spec's trade is deliberate, an order is one drag to redo, and cutting a version per scene
- * per drag would bury the history the versions exist for. The override case, which loses
- * authored text, bumps instead (see setPromptOverride).
- *
  * It is also the one authored write that leaves a legacy scene legacy (SPEC-029). `order` is
  * where a scene sits among its siblings, which R-19 keeps outside the scene graph entirely —
  * nothing about the scene's internal structure is touched here. Migrating anyway would take the
@@ -502,14 +494,8 @@ export async function reorderScenes(store: WorldStore, productionId: string, ord
 }
 
 // ---------------------------------------------------------------------------
-// Scene drafting (R-7, D4): a proposal skeleton the agent fills; accepting
+// Scene drafting (R-7, D4): a complete graph proposal the agent fills; accepting
 // creates shots and dispatches nothing
-//
-// The skeleton and the agent's instruction stay in the legacy shape on purpose (SPEC-029): a
-// drafting agent writes its target with raw file tools, and asking it to author a node graph
-// with deterministic ids and edges would be asking it to hand-write the one thing the migration
-// computes. The gate migrates the accepted target instead, so a scene created by this build is
-// born graph-backed the moment it lands (R-11) without the agent knowing a graph exists.
 // ---------------------------------------------------------------------------
 
 export interface SceneDraft {
@@ -584,7 +570,7 @@ export async function draftSceneSkeleton(
   }
   const path = `productions/${input.productionId}/scenes/${file}.json`;
   const skill = input.skill ?? null;
-  const skeleton: Scene = {
+  const skeleton = migrateLegacyScene({
     id,
     number,
     order: number,
@@ -608,7 +594,7 @@ export async function draftSceneSkeleton(
         }
       : {}),
     shots: [],
-  };
+  });
   const proposal = await gate.stage({
     kind: "scene-draft",
     summary: `Scene ${number}: ${skeleton.title}`,
@@ -644,12 +630,12 @@ export async function draftSceneSkeleton(
       const n = Number(shot.id.replace(/^sh_0*/, ""));
       return Number.isFinite(n) ? Math.max(a, n) : a;
     }, 0) + 1;
-  const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Fill the shots array: each shot needs id, number, title, description with @mentions for every character and the location, camera, audio, durationSec. Shot ids are unique across the WHOLE production, not per scene: number this scene's shots sh_${shotBase}, sh_${shotBase + 1}, and so on upward, while each shot's own \`number\` field starts at 1 for this scene. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Write audio as an object, never a sentence: {"kind": "vo" | "dialogue" | "sfx" | "silence"} with optional "speaker" (a sheet slug) and "line"; a texture like a hum is {"kind": "sfx", "line": "light click and focus hum"}. Propose an inherits block (location, timeOfDay, tone) where location is a lowercase-kebab slug such as "rehearsal-hall", never prose. The file must stay a valid scene record — the gate refuses anything else at accept. Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
+  const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Populate \`flow\` as one complete Entry -> shot nodes -> Exit path. Keep the staged entry and exit nodes and their ids stable. Each shot node needs \`kind: "shot"\`, an id derived from its shot id (for example \`sh_40\` uses \`sfn_sh-40\`), and a \`shot\` with id, number, title, description with @mentions for every character and the location, camera, audio, durationSec. Replace the direct Entry -> Exit edge with sequence edges through every shot; each edge needs \`kind: "sequence"\`, \`out\` and \`in\` ports, and an id derived from its adjacent endpoints (for example \`sfe_entry-sh-40\`). Keep \`schemaVersion\`, \`entryNodeId\`, \`exitNodeId\`, and \`storyboardGroups\` intact. Shot ids are unique across the WHOLE production, not per scene: number this scene's shots sh_${shotBase}, sh_${shotBase + 1}, and so on upward, while each shot's own \`number\` field starts at 1 for this scene. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Write audio as an object, never a sentence: {"kind": "vo" | "dialogue" | "sfx" | "silence"} with optional "speaker" (a sheet slug) and "line"; a texture like a hum is {"kind": "sfx", "line": "light click and focus hum"}. Propose an inherits block (location, timeOfDay, tone) where location is a lowercase-kebab slug such as "rehearsal-hall", never prose. The file must stay a valid scene record — the gate refuses anything else at accept. Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
   return { proposalId: proposal.id, path, scope, instruction, skill };
 }
 
 // ---------------------------------------------------------------------------
-// Shots and prompt overrides (R-10, R-15, D6)
+// Scene file operations
 // ---------------------------------------------------------------------------
 
 /**
@@ -668,60 +654,17 @@ function sceneStemOrThrow(sceneFile: string): string {
 /**
  * One scene file, read through the R-1 union (SPEC-029).
  *
- * `scene` is the legacy-shaped projection every caller here still works in; `record` is which
- * arm the file actually is, and an authored write needs it — a legacy scene migrates, and a
- * graph scene keeps the graph it already has (see `graphSceneFor`).
+ * The projection supplies shared metadata while the shape-preserving caller writes the original
+ * bytes, so reading a legacy scene here never migrates it.
  */
 async function readScene(
   store: WorldStore,
   productionId: string,
   sceneFile: string,
-): Promise<{ scene: Scene; record: SceneRecord; raw: string; path: string }> {
+): Promise<{ scene: Scene; raw: string; path: string }> {
   const path = `productions/${productionId}/scenes/${sceneStemOrThrow(sceneFile)}.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  return { ...readSceneRecord(raw), raw, path };
-}
-
-/**
- * Write a scene whole — what the storyboard's card edits call (turn 97).
- *
- * The Bible's model (master §4.5) applied to scenes: no proposal, no accept. What replaces the
- * gate is the version — the committer cuts one per save with a full `.history/` snapshot, so
- * an edit nobody wanted is one restore away. `baseVersion` is the version the storyboard had
- * loaded; a save against a scene that has since moved is refused, not merged, in words a
- * person can act on. Identity is not the editor's to change: id, number and slug are pinned
- * to the file on disk, so a stray payload cannot re-key a scene through a text box.
- *
- * This is an authored write, so it is also where a legacy scene becomes graph-backed and the
- * world crosses schema 3 (SPEC-029 R-11): one commit, one version, and the outgoing legacy file
- * snapshotted into the scene's ordinary history track on the way past (R-13). The boundary is
- * not asked for here — the committer raises it from the bytes it is about to land, so no writer
- * can produce a graph scene and forget to fence it.
- */
-export async function saveScene(
-  store: WorldStore,
-  input: { productionId: string; sceneFile: string; scene: unknown; baseVersion?: number },
-): Promise<void> {
-  const proposed = SceneSchema.parse(input.scene);
-  const { scene: current, record, raw, path } = await readScene(store, input.productionId, input.sceneFile);
-  if (input.baseVersion !== undefined && input.baseVersion !== current.version) {
-    throw new SceneStaleError(input.baseVersion, current.version);
-  }
-  const next = { ...proposed, id: current.id, number: current.number, slug: current.slug };
-  /*
-   * Replace, never merge (review 2026-08-22). `JsonFile.set` spreads updates over the existing
-   * document, so a field the payload omitted — a cleared synopsis, a removed defaults block —
-   * survived on disk while the version bumped and the snapshot showed the deletion undone.
-   * "Write a scene whole" means the payload is the document; the parse above already proved it
-   * is a complete scene, and identity is pinned on the line before this one. `graphSceneContent`
-   * serialises the whole record for the same reason, which is also what leaves no `shots[]`
-   * beside the `flow` it writes (R-1).
-   */
-  await store.commit({
-    kind: "scene-save",
-    source: "editor",
-    files: [{ path, action: "replace", content: graphSceneContent(record, next), baseHash: sha256(raw) }],
-  });
+  return { scene: readSceneRecord(raw).scene, raw, path };
 }
 
 /**
@@ -755,7 +698,7 @@ export async function deleteScene(
   if (!production) throw new Error(`production ${input.productionId} is not in this world`);
   const path = `productions/${input.productionId}/scenes/${stem}.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  const { scene } = readSceneRecord(raw);
+  const { record, scene } = readSceneRecord(raw);
 
   const blockers = sceneDeleteBlockers(production, scene);
   if (blockers.length > 0) throw new SceneDeleteRefused(blockers);
@@ -773,7 +716,7 @@ export async function deleteScene(
     files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
   }
 
-  const shotIds = new Set(scene.shots.map((shot) => shot.id));
+  const shotIds = new Set(orderedShots(record).map((shot) => shot.id));
   const remaining = Object.fromEntries(
     Object.entries(production.selections).filter(([shotId]) => !shotIds.has(shotId)),
   );
@@ -801,57 +744,6 @@ export async function restoreScene(
     input.version,
     "editor",
   );
-}
-
-export class SceneStaleError extends Error {
-  constructor(
-    readonly expected: number,
-    readonly found: number,
-  ) {
-    super(`the scene moved from v${expected} to v${found} while this edit was being made — it was not overwritten`);
-    this.name = "SceneStaleError";
-  }
-}
-
-/**
- * Store or clear a prompt override. This wrote with `preserveVersion` citing R-15, but R-15's
- * "production output" is the board — a compiled picture — not a paragraph a person typed into
- * the sheet (review 2026-08-22). Preserving the version meant the scene's stale-token did not
- * move, so a concurrent save built from the pre-override scene passed the version check and
- * silently wiped the override. Authored text bumps the version like any other authored text;
- * the recorded sheet versions still make staleness computable (R-16).
- *
- * Authored text is also an authored write, so this migrates a legacy scene and crosses the
- * schema-3 boundary exactly as a whole-scene save does (SPEC-029 R-11). On a scene that is
- * already graph-backed the edited shot goes back into its own node: the graph's ids, edges and
- * authored groups are untouched by a change of wording.
- */
-export async function setPromptOverride(
-  store: WorldStore,
-  bundle: WorldBundle,
-  input: { productionId: string; sceneFile: string; shotId: string; text: string | null },
-): Promise<void> {
-  const { scene, record, raw, path } = await readScene(store, input.productionId, input.sceneFile);
-  const shots: Shot[] = scene.shots.map((shot) => {
-    if (shot.id !== input.shotId) return shot;
-    if (input.text === null) {
-      const { promptOverride: _dropped, ...rest } = shot;
-      return rest as Shot;
-    }
-    const sheetVersions: Record<string, number> = {};
-    for (const slug of parseMentions(shot.description)) {
-      const sheet = bundle.sheets.find((s) => s.id === slug);
-      if (sheet) sheetVersions[slug] = sheet.version;
-    }
-    return { ...shot, promptOverride: { text: input.text, sheetVersions } };
-  });
-  await store.commit({
-    kind: "prompt-override",
-    source: "editor",
-    files: [
-      { path, action: "replace", content: graphSceneContent(record, { ...scene, shots }), baseHash: sha256(raw) },
-    ],
-  });
 }
 
 // ---------------------------------------------------------------------------

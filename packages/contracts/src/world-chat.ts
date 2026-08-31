@@ -9,6 +9,7 @@ import {
   CheckReceiptIdSchema,
   ConversationIdSchema,
   EpisodeIdSchema,
+  FrameRunIdSchema,
   IsoDateTimeSchema,
   MessageIdSchema,
   ProposalIdSchema,
@@ -977,6 +978,16 @@ export const BenchOutcomeReportSchema = z
   .strict();
 export type BenchOutcomeReport = z.infer<typeof BenchOutcomeReportSchema>;
 
+/** The durable join from an Arke narration to the frame run whose live fold supplies its rows. */
+export const FrameRunOutcomeReportSchema = z
+  .object({
+    runId: FrameRunIdSchema,
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+  })
+  .strict();
+export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
+
 /**
  * `turn.completed` carries the reply, its receipts and every proposition it changed in one
  * record. Splitting them would let a crash persist a reply that refers to propositions which
@@ -1061,6 +1072,13 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       sessionId: SessionIdSchema,
       takeId: TakeIdSchema,
       report: BenchOutcomeReportSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("frame-run.outcome-recorded"),
+      message: WorldChatMessageSchema,
+      report: FrameRunOutcomeReportSchema,
     })
     .strict(),
   z
@@ -1314,6 +1332,8 @@ export const WorldChatLoadedSchema = z
     refusals: z.record(MessageIdSchema, RefusedToolsSchema).default({}),
     /** Production filing rows, by the narration message they sit beside. */
     benchOutcomes: z.record(MessageIdSchema, BenchOutcomeReportSchema).default({}),
+    /** Frame-run anchors, by narration message; report rows are joined from live frameRuns. */
+    frameRunOutcomes: z.record(MessageIdSchema, FrameRunOutcomeReportSchema).default({}),
     summary: z.string().max(8000).optional(),
     proposalIds: z.array(ProposalIdSchema),
     /** What its wrap-up could not carry; empty until one has happened. */
@@ -1576,6 +1596,7 @@ export const WorldChatTranscriptMessageSchema = z
      */
     bibleEdit: BibleEditRecordSchema.optional(),
     benchOutcome: BenchOutcomeReportSchema.optional(),
+    frameRunOutcome: FrameRunOutcomeReportSchema.optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();

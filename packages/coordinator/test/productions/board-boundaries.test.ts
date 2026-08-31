@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { planScene, writerSceneView, type ManifestModel, type Scene } from "@arke-studio/contracts";
+import { legacySceneView, planScene, type ManifestModel, type Scene } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -33,7 +33,7 @@ async function sceneOf(): Promise<{
   closeOnCleanup(() => store.close());
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === "saltlight")!;
-  const scene = writerSceneView(production.scenes.find((s) => s.id === "sc_04")!);
+  const scene = legacySceneView(production.scenes.find((s) => s.id === "sc_04")!);
   return {
     store,
     scene,

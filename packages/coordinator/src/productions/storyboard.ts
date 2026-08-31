@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   imageConstraintSuffix,
   estimateMicroUsd,
+  orderedShots,
   planStoryboard,
   sceneImageOutput,
   storyboardUsable,
@@ -79,7 +80,7 @@ export function storyboardRequest(
   drawnBy: ManifestModel,
   target: ManifestModel,
 ): StoryboardRequest {
-  if (scene.shots.length === 0) {
+  if (orderedShots(scene).length === 0) {
     throw new Error(`scene ${scene.number} has no shots to draw`);
   }
   if (drawnBy.capability !== "image") {

@@ -30,7 +30,6 @@ const STATE: ClientState = {
     spend: null,
     backgroundNotifications: "issues-only",
     research: { web: false },
-    internal: { sceneWorkspace: false },
   narrator: null,
     appearance: { theme: "system" },
     runtime: null,
