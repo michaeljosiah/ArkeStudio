@@ -9,7 +9,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { __setStateForTest } from "../src/lib/store.js";
 import { CutScreen, ExportsScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import { orderedShots, writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, {
@@ -288,10 +288,10 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
   it("keeps the rendered client preview anchor-ordered when scenes are reordered", async () => {
     const before = spineState("audio", true);
     const beforeProduction = before.world!.productions[0]!;
-    const sceneA = writerSceneView(beforeProduction.scenes[0]!);
+    const sceneA = legacySceneView(beforeProduction.scenes[0]!);
     sceneA.shots = sceneA.shots.filter((shot) => shot.id !== "sh_13");
     beforeProduction.scenes[0] = sceneA;
-    const sceneB = writerSceneView(beforeProduction.scenes[1]!);
+    const sceneB = legacySceneView(beforeProduction.scenes[1]!);
     sceneB.shots[0] = {
       id: "sh_13",
       number: 13,

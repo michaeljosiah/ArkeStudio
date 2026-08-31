@@ -86,6 +86,7 @@ export function GenerateFramesDialog({
   scene,
   aspect,
   videoModel,
+  shotId,
   returnFocus,
   onClose,
 }: {
@@ -96,7 +97,8 @@ export function GenerateFramesDialog({
   scene: SceneRecord;
   aspect: string;
   videoModel: ManifestModel | null;
-  returnFocus: RefObject<HTMLButtonElement | null>;
+  shotId?: string;
+  returnFocus: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
   if (!open) return null;
@@ -108,6 +110,7 @@ export function GenerateFramesDialog({
       scene={scene}
       aspect={aspect}
       videoModel={videoModel}
+      {...(shotId === undefined ? {} : { shotId })}
       returnFocus={returnFocus}
       onClose={onClose}
     />
@@ -121,15 +124,17 @@ function GenerateFramesDialogOpen({
   scene,
   aspect,
   videoModel,
+  shotId,
   returnFocus,
   onClose,
 }: Omit<Parameters<typeof GenerateFramesDialog>[0], "open">) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const shots = orderedShots(scene);
+  const sceneShots = orderedShots(scene);
+  const shots = shotId === undefined ? sceneShots : sceneShots.filter((shot) => shot.id === shotId);
   const missing = shots.filter((shot) => !shotHasFrame(production, world.artifacts, shot.id));
-  const [mode, setMode] = useState<"per-shot" | "board">("board");
-  const [scope, setScope] = useState<"missing" | "all">(missing.length > 0 ? "missing" : "all");
+  const [mode, setMode] = useState<"per-shot" | "board">(shotId === undefined ? "board" : "per-shot");
+  const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");
   const remembered = productionModel(state, production.meta.id, "image");
   const resolved = resolveModel(state, "image", undefined, remembered);
   const [modelId, setModelId] = useState(remembered ?? resolved.model?.id ?? "");
@@ -163,7 +168,15 @@ function GenerateFramesDialogOpen({
   const startSubscription = useRef<(() => void) | null>(null);
   const requestEpoch = useStore().frameRunRequestEpoch;
   const seenRequestEpoch = useRef(requestEpoch);
-  const options = { worldId: world.meta.worldId, productionId: production.meta.id, sceneId: scene.id, mode, modelId, scope };
+  const options = {
+    worldId: world.meta.worldId,
+    productionId: production.meta.id,
+    sceneId: scene.id,
+    mode,
+    modelId,
+    scope,
+    ...(shotId === undefined ? {} : { shotId }),
+  };
 
   useEffect(() => {
     const node = dialog.current;
@@ -195,7 +208,8 @@ function GenerateFramesDialogOpen({
         answer.sceneId !== options.sceneId ||
         answer.mode !== options.mode ||
         answer.modelId !== options.modelId ||
-        answer.scope !== options.scope
+        answer.scope !== options.scope ||
+        answer.shotId !== options.shotId
       ) return;
       setQuote(answer);
       setQuotePending(false);
@@ -233,7 +247,8 @@ function GenerateFramesDialogOpen({
     quote.sceneId === options.sceneId &&
     quote.mode === mode &&
     quote.modelId === modelId &&
-    quote.scope === scope;
+    quote.scope === scope &&
+    quote.shotId === shotId;
   const canStart = matchingOptions &&
     quote.sceneVersion === scene.version &&
     quote.blockedReason === null &&
@@ -300,7 +315,7 @@ function GenerateFramesDialogOpen({
           <button type="button" aria-label="Close generate frames" onClick={onClose}><X size={18} /></button>
         </header>
 
-        <section className="fy-swgen__section">
+        {shotId === undefined ? <section className="fy-swgen__section">
           <h3>Method</h3>
           <div className="fy-swgen__methods" role="radiogroup" aria-label="Frame generation method">
             {(["per-shot", "board"] as const).map((candidate) => (
@@ -320,11 +335,11 @@ function GenerateFramesDialogOpen({
               </button>
             ))}
           </div>
-        </section>
+        </section> : null}
 
-        {mode === "board" ? <PackingPreview shots={shots} pack={pack} cap={cap} /> : null}
+        {shotId === undefined && mode === "board" ? <PackingPreview shots={shots} pack={pack} cap={cap} /> : null}
 
-        <section className="fy-swgen__section">
+        {shotId === undefined ? <section className="fy-swgen__section">
           <h3>Include</h3>
           <div className="fy-swgen__scope" role="radiogroup" aria-label="Frames to include">
             {(["missing", "all"] as const).map((candidate) => (
@@ -343,7 +358,7 @@ function GenerateFramesDialogOpen({
               </button>
             ))}
           </div>
-        </section>
+        </section> : null}
 
         <section className="fy-swgen__section">
           <h3>Image model</h3>

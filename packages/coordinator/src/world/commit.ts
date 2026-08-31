@@ -16,7 +16,7 @@ import {
 } from "@arke-studio/contracts";
 import {
   carriesSceneFlow,
-  graphSceneFor,
+  upgradeLegacySceneCandidate,
   GRAPH_SCENE_SCHEMA_VERSION,
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
@@ -241,20 +241,18 @@ export function changesAnything(path: string, live: string, proposed: string): b
       return [...keys].some((k) => JSON.stringify(before.data[k]) !== JSON.stringify(after.data[k]));
     }
     /*
-     * A scene is compared as the graph scene each side means (SPEC-029 §3.3 step 2).
+     * A scene is compared as the graph scene each side means (SPEC-029).
      *
-     * Two shapes reach this question now, and the honest comparison is not between the files as
-     * written but between what each one says once it is a graph: the live scene as it stands or
-     * as it would deterministically migrate, and the proposal as itself if it carries a flow, or
-     * as the record accepting it would land if it does not.
+     * Persisted proposals from before direct whole-scene authorship retired can still reach this
+     * comparison in the legacy shape. The honest comparison is not between file spellings but
+     * between what each record means once it is a graph: the live scene as it stands or as it
+     * would deterministically migrate, and the proposal as itself if it carries a flow, or as the
+     * compatibility acceptance path would land it if it does not.
      *
-     * Both halves matter, and both were got wrong before landing here. A legacy amendment — all
-     * Arke and the storyboard can still author — over a scene that is already graph-backed must
-     * come out equal when it says what the world already says, or it reads as a change forever
-     * and can never be settled: the trap the note above records for sheets. And a proposal that
-     * carries a flow must be compared with its flow, or a beat, an edge or a node identity that
-     * nothing else could have expressed vanishes into the projection and the proposal is retired
-     * as a no-op — reviewed, approved, and silently thrown away.
+     * A persisted legacy proposal over an existing graph must compare equal when it says what the
+     * world already says, or it can never be settled. A graph proposal must be compared with its
+     * flow, or a beat, edge or node identity vanishes into the projection and the proposal is
+     * retired as a no-op — reviewed, approved, and silently thrown away.
      */
     if (track === "scene") {
       const liveRecord = SceneRecordSchema.parse(JSON.parse(live));
@@ -262,7 +260,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       const before = isGraphScene(liveRecord) ? liveRecord : migrateLegacyScene(liveRecord);
       const after = isGraphScene(proposedRecord)
         ? proposedRecord
-        : graphSceneFor(liveRecord, proposedRecord);
+        : upgradeLegacySceneCandidate(liveRecord, proposedRecord);
       const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
       keys.delete("version");
       /*
@@ -580,9 +578,9 @@ export class Committer {
      * Derived from the bytes rather than taken from the caller, because the boundary is not an
      * intention — it is a fact about what is now on disk. A build that knows only `shots[]`
      * reads a `flow` scene as a parse failure and opens the world one scene short of itself, so
-     * every route by which such a file can appear has to fence it: the migration writer, an
-     * accepted proposal, a restore, and the two that would never have thought to — adopting a
-     * hand-written graph scene through closed-world reconciliation, and landing a board on a
+     * every route by which such a file can appear has to fence it: semantic scene operations, a
+     * compatibility proposal upgrade, a restore, and the two that would never have thought to —
+     * adopting a hand-written graph scene through closed-world reconciliation, and landing a board on a
      * scene that is already one. One rule at the funnel every write passes through beats five
      * callers each remembering.
      */

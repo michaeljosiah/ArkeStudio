@@ -404,6 +404,7 @@ export function projectWorkspace(
       refusals: wordRefusals(loaded.refusals[m.id] ?? []),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
+      ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),
       createdAt: m.createdAt,
     })),
     hasMore: loaded.hasMore,

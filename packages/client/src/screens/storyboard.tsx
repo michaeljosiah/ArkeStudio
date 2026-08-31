@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
-  effectiveFraming,
+  orderedShots,
   overrideStaleAgainst,
   parseMentions,
   productionAspect,
@@ -11,21 +11,25 @@ import {
   promptFor,
   sceneDeleteBlockers,
   sceneFindings,
+  shotCardState,
   shotCoverage,
+  type ClientMessage,
   type Scene,
   type Shot,
   type ShotFraming,
-  orderedShots,
-  writerSceneView,
+  legacySceneView,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, Callout, Textarea, cx } from "../components/ui.js";
-import { Plus, X } from "../components/icons.js";
+import { X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { seconds } from "../lib/format.js";
-import { acceptedTakeId, mediaTakeFor, takesForShot, useProduction } from "../lib/selectors.js";
-import { deleteScene, restoreScene, saveScene, setPromptOverride } from "../lib/store.js";
-import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
+import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
+import { deleteScene, restoreScene, sceneCommand } from "../lib/store.js";
+import { Mentions, sceneFileOf } from "./production.js";
+import { shotHasFrame } from "./scene-workspace/boards.js";
+
+type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
+type EditShotCommand = Extract<Command, { kind: "edit-shot" }>;
 
 /**
  * The storyboard (design turn 97, frame 14c) and the full shot behind each card (14d).
@@ -66,27 +70,6 @@ const RECIPES: Array<{ name: string; set: ShotFraming }> = [
 // Derivations — the maturity ladder and coverage, computed and never stored
 // ---------------------------------------------------------------------------
 
-type CardState = "blank" | "story" | "board" | "ready";
-
-const STATE_LABEL: Record<CardState, string> = {
-  blank: "needs attention",
-  story: "story",
-  board: "storyboard",
-  ready: "production-ready",
-};
-const STATE_TONE: Record<CardState, string> = {
-  blank: "var(--destructive)",
-  story: "var(--neutral-300)",
-  board: "var(--warning)",
-  ready: "var(--success)",
-};
-
-function cardState(shot: Shot, takeCount: number, accepted: boolean): CardState {
-  if (shot.description.trim() === "") return "blank";
-  if (takeCount === 0) return "story";
-  return accepted ? "ready" : "board";
-}
-
 /**
  * sha256 of every script block's current text, keyed by block id — what the Re-read chip
  * compares a shot's citations against. WebCrypto is async, so the map arrives a beat after
@@ -118,9 +101,9 @@ function digestBlocks(blocks: readonly { id: string; text: string }[]): Promise<
   return hit;
 }
 
-export function useBlockDigests(scene: Scene): Map<string, string> {
+export function useBlockDigests(scene: Pick<Scene, "script"> | undefined): Map<string, string> {
   const [digests, setDigests] = useState<Map<string, string>>(() => new Map());
-  const blocks = scene.script?.blocks;
+  const blocks = scene?.script?.blocks;
   useEffect(() => {
     if (!blocks || blocks.length === 0 || !globalThis.crypto?.subtle) {
       setDigests(new Map());
@@ -135,28 +118,6 @@ export function useBlockDigests(scene: Scene): Map<string, string> {
     };
   }, [blocks]);
   return digests;
-}
-
-/**
- * The next free shot id, minted against the whole production (review 2026-08-22). Takes,
- * selections and the Generate workspace all key by bare shot id with no scene, so an id reused
- * across two scenes makes one scene's takes render on the other's card and one accept mark
- * both. The number stays scene-local — it is the card's label — but the id must not collide.
- */
-function nextShotId(scene: Scene, allShots: readonly Shot[]): { id: string; number: number } {
-  let maxId = 0;
-  for (const shot of allShots) {
-    const n = Number(shot.id.replace(/^sh_0*/, ""));
-    if (Number.isFinite(n)) maxId = Math.max(maxId, n);
-  }
-  let maxNumber = 0;
-  for (const shot of scene.shots) maxNumber = Math.max(maxNumber, shot.number);
-  return { id: `sh_${maxId + 1}`, number: maxNumber + 1 };
-}
-
-function blankShot(scene: Scene, allShots: readonly Shot[]): Shot {
-  const { id, number } = nextShotId(scene, allShots);
-  return { id, number, title: "Untitled shot", description: "" };
 }
 
 const shotNo = (shot: Shot) => shot.id.replace(/^sh_0*/, "");
@@ -210,259 +171,6 @@ function EditableText({
   );
 }
 
-// ---------------------------------------------------------------------------
-// The strip (14c)
-// ---------------------------------------------------------------------------
-
-export function StoryboardStrip({
-  worldId,
-  prodId,
-  scene,
-}: {
-  worldId: string;
-  prodId: string;
-  scene: Scene;
-}) {
-  const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [dragFrom, setDragFrom] = useState<string | null>(null);
-  const digests = useBlockDigests(scene);
-
-  if (!world || !production) return null;
-  const stem = sceneFileOf(production, scene);
-
-  const commit = (mutate: (s: Scene) => Scene) => {
-    if (!stem) return;
-    saveScene(worldId, prodId, stem, mutate(scene), scene.version);
-    setMenuFor(null);
-  };
-  const mutateShots = (fn: (shots: Shot[]) => Shot[]) => commit((s) => ({ ...s, shots: fn([...s.shots]) }));
-
-  const insertAt = (index: number) =>
-    mutateShots((shots) => {
-      shots.splice(index, 0, blankShot(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots));
-      return shots;
-    });
-  const duplicate = (shot: Shot) =>
-    mutateShots((shots) => {
-      const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots);
-      const at = shots.findIndex((s) => s.id === shot.id);
-      // A duplicate is the authored shot again, not its output: no takes ride along, and a
-      // fresh id means no selections or covers point at it by accident.
-      const copy: Shot = { ...shot, id, number };
-      delete (copy as Partial<Shot>).covers;
-      shots.splice(at + 1, 0, copy);
-      return shots;
-    });
-  const remove = (shot: Shot) => mutateShots((shots) => shots.filter((s) => s.id !== shot.id));
-  const reorder = (fromId: string, toId: string) =>
-    mutateShots((shots) => {
-      const from = shots.findIndex((s) => s.id === fromId);
-      const to = shots.findIndex((s) => s.id === toId);
-      if (from < 0 || to < 0 || from === to) return shots;
-      const [moved] = shots.splice(from, 1);
-      shots.splice(to, 0, moved!);
-      return shots;
-    });
-  const reread = (shot: Shot) =>
-    mutateShots((shots) =>
-      shots.map((s) =>
-        s.id === shot.id && s.covers
-          ? { ...s, covers: s.covers.map((c) => ({ ...c, textDigest: (digests.get(c.blockId) ?? c.textDigest) as typeof c.textDigest })) }
-          : s,
-      ),
-    );
-
-  // 14e: an empty scene offers both doors. Nothing here needs the assistant.
-  if (scene.shots.length === 0) {
-    return (
-      <div className="fy-sbempty" data-testid="storyboard-empty">
-        <h2>Build this scene</h2>
-        <p>Tell Arke what happens, or add shots yourself.</p>
-        <div className="fy-sbempty__doors">
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/scenes/${scene.id}`)}>
-            Talk to Arke
-          </Button>
-          <Button onClick={() => insertAt(0)}>Add first shot</Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fy-sbstrip" data-testid="storyboard-strip">
-      {scene.shots.map((shot, index) => {
-        const takes = takesForShot(production, shot.id);
-        const accepted = acceptedTakeId(production, shot.id);
-        const state = cardState(shot, takes.length, accepted !== null);
-        const coverage = shotCoverage(shot, digests);
-        // The accepted take can be a per-shot charge-split record with no media of its own —
-        // the pixels live on the pass's primary take covering the same shot. The frame follows
-        // the media, newest first, accepted preferred.
-        const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : undefined;
-        const mediaTake = acceptedTake !== undefined && mediaTakeFor(production, acceptedTake) !== null
-          ? acceptedTake
-          : [...takes].reverse().find((take) => mediaTakeFor(production, take) !== null);
-        const media = mediaTake ? takeMediaPath(production, mediaTake) : null;
-        const framing = effectiveFraming(scene, shot);
-        const mentioned = parseMentions(shot.description);
-        const refs = world.sheets.filter((s) => mentioned.some((m) => s.id === m || s.id.includes(m)));
-        const overrides = Object.keys(shot.framing ?? {}) as Array<keyof ShotFraming>;
-        return (
-          <div key={shot.id} style={{ display: "flex", alignItems: "stretch" }}>
-            <button type="button" className="fy-sbins" title="Insert a shot" onClick={() => insertAt(index)}>
-              <Plus size={13} />
-            </button>
-            <div
-              className="fy-sbcard"
-              data-testid={`shot-card-${shot.id}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                if (dragFrom && dragFrom !== shot.id) reorder(dragFrom, shot.id);
-                setDragFrom(null);
-              }}
-            >
-              <div className="fy-sbcard__frame">
-                {media ? (
-                  <Portrait worldSlug={world.meta.slug} path={media} label={`Shot ${shotNo(shot)} frame`} radius={0} />
-                ) : (
-                  <div className="fy-sbcard__noframe">no frame yet</div>
-                )}
-                <span
-                  className="fy-sbcard__tag"
-                  title="Drag to reorder"
-                  draggable
-                  onDragStart={() => setDragFrom(shot.id)}
-                >
-                  shot {shotNo(shot)}
-                </span>
-                <span className="fy-sbcard__chip">
-                  {productionAspect(production.meta)}
-                  {shot.durationSec !== undefined ? ` · ${seconds(shot.durationSec)}` : ""}
-                </span>
-              </div>
-              <div className="fy-sbcard__body">
-                <div className="fy-sbcard__head">
-                  <span className="fy-sbcard__titleline">
-                    Shot {shotNo(shot)}{framing.size ? ` · ${framing.size}` : ""}
-                  </span>
-                  <span className="fy-sbcard__state">{STATE_LABEL[state]}</span>
-                  <span className="fy-sbdot" style={{ background: STATE_TONE[state] }} />
-                </div>
-                {coverage === "changed" && (
-                  <div className="fy-sbstale">
-                    <span className="fy-sbstale__note">script changed</span>
-                    <button type="button" className="fy-sblink" onClick={() => reread(shot)}>
-                      Re-read
-                    </button>
-                  </div>
-                )}
-                <EditableText
-                  value={shot.description}
-                  placeholder="Write what happens, or ask Arke."
-                  onCommit={(next) =>
-                    mutateShots((shots) => shots.map((s) => (s.id === shot.id ? { ...s, description: next } : s)))
-                  }
-                />
-                {refs.length > 0 && (
-                  <div className="fy-sbrefs">
-                    {refs.map((r) => (
-                      <span key={r.id} className="fy-sbref" title={`${r.type} · v${r.version}`}>
-                        <span className="fy-sbref__thumb">
-                          <Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(r.id)} label={r.name} radius={99} />
-                        </span>
-                        {r.name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {overrides.length > 0 && (
-                  <div className="fy-sbover" title="overrides the scene">
-                    {overrides.map((k) => (
-                      <span key={k}>{String(shot.framing?.[k]).toLowerCase()} override</span>
-                    ))}
-                  </div>
-                )}
-                <div className="fy-sbprompt">
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    {shot.promptOverride ? "prompt · edited by you" : "prompt · auto"}
-                  </span>
-                  <button
-                    type="button"
-                    className="fy-sblink"
-                    onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}/shots/${shot.id}`)}
-                  >
-                    Edit
-                  </button>
-                </div>
-                <div className="fy-sbactions">
-                  {takes.length > 0 ? (
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}>
-                      Regenerate
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}
-                    >
-                      Generate frame
-                    </Button>
-                  )}
-                  <span style={{ flex: 1 }} />
-                  <button
-                    type="button"
-                    className="fy-sbmore"
-                    aria-label={`More · shot ${shotNo(shot)}`}
-                    onClick={() => setMenuFor(menuFor === shot.id ? null : shot.id)}
-                  >
-                    ⋯
-                  </button>
-                </div>
-              </div>
-              {menuFor === shot.id && (
-                <div className="fy-sbmenu" data-testid="shot-menu">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}/shots/${shot.id}`)}
-                  >
-                    Advanced
-                  </button>
-                  <button type="button" onClick={() => duplicate(shot)}>
-                    Duplicate
-                  </button>
-                  <button type="button" onClick={() => insertAt(index + 1)}>
-                    Add shot after
-                  </button>
-                  <button
-                    type="button"
-                    className="fy-sbmenu--danger"
-                    disabled={scene.shots.length < 2}
-                    onClick={() => remove(shot)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      <div style={{ display: "flex", alignItems: "stretch" }}>
-        <span style={{ width: 22, flex: "none" }} />
-        <button type="button" className="fy-sbadd" onClick={() => insertAt(scene.shots.length)}>
-          <span className="fy-sbadd__ring">
-            <Plus size={16} />
-          </span>
-          <span style={{ font: "500 12px var(--font-sans)" }}>Add shot</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** The strip's footer line: what needs a look, and the way back through versions. */
 /**
  * The scene's own review, above the shots it is about (design turn 102).
  *
@@ -476,7 +184,7 @@ export function StoryboardStrip({
  */
 export function SceneReview({ scene, onClose }: { scene: Scene; onClose: () => void }) {
   const digests = useBlockDigests(scene);
-  const stale = (scene.shots ?? []).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
+  const stale = orderedShots(scene).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
   const found = sceneFindings(scene, stale);
   return (
     <div className="fy-review" data-review="scene">
@@ -534,7 +242,7 @@ export function StoryboardFoot({
    * empty description or stale, promptOverride ignored — so the foot could say "1 to review"
    * over a review strip saying "nothing to flag". One place decides what needs a look.
    */
-  const stale = scene.shots.filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
+  const stale = orderedShots(scene).filter((s) => shotCoverage(s, digests) === "changed").map((s) => s.id);
   const attention = sceneFindings(scene, stale).length;
   return (
     <div className="fy-sbfoot" data-testid="storyboard-foot">
@@ -606,16 +314,12 @@ export function StoryboardFoot({
 
 /** The line under the title (14c): the synopsis, edited in place. */
 export function SceneSynopsis({
-  worldId,
-  prodId,
   scene,
+  onCommit,
 }: {
-  worldId: string;
-  prodId: string;
   scene: Scene;
+  onCommit: (synopsis: string | null) => void;
 }) {
-  const { production } = useProduction(worldId, prodId);
-  const stem = production ? sceneFileOf(production, scene) : null;
   return (
     <EditableText
       value={scene.synopsis ?? ""}
@@ -623,15 +327,8 @@ export function SceneSynopsis({
       className="fy-sbsynopsis"
       rows={2}
       onCommit={(next) => {
-        if (!stem) return;
         const scrubbed = next.trim();
-        saveScene(
-          worldId,
-          prodId,
-          stem,
-          scrubbed === "" ? { ...scene, synopsis: undefined } : { ...scene, synopsis: scrubbed },
-          scene.version,
-        );
+        onCommit(scrubbed === "" ? null : scrubbed);
       }}
     />
   );
@@ -648,8 +345,9 @@ export function ShotSheetScreen() {
   const record = production?.scenes.find((s) => s.id === sceneId);
   // The shot sheet edits and saves the whole scene, so it works in the writer's view; the
   // order inside it comes through the one boundary (`orderedShots`).
-  const scene = record === undefined ? undefined : writerSceneView(record);
-  const shot = scene?.shots.find((s) => s.id === shotId);
+  const scene = record === undefined ? undefined : legacySceneView(record);
+  const shot = record === undefined ? undefined : orderedShots(record).find((candidate) => candidate.id === shotId);
+  const digests = useBlockDigests(scene);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [addingRef, setAddingRef] = useState(false);
 
@@ -657,16 +355,29 @@ export function ShotSheetScreen() {
   const stem = production && scene ? sceneFileOf(production, scene) : null;
 
   // One save for every field on this sheet — the same direct write the cards use.
-  const patch = (change: Partial<Shot>) => {
-    if (!scene || !shot || !stem || !worldId || !prodId) return;
-    const shots = scene.shots.map((s) => {
-      if (s.id !== shot.id) return s;
-      const next = { ...s, ...change };
-      // An explicit undefined clears the key rather than writing the word "undefined" to disk.
-      for (const [k, v] of Object.entries(change)) if (v === undefined) delete (next as Record<string, unknown>)[k];
-      return next;
+  const send = (command: Command) => {
+    if (!record || !stem || !worldId || !prodId) return false;
+    return sceneCommand({
+      worldId,
+      productionId: prodId,
+      sceneFile: stem,
+      sceneId: record.id,
+      baseVersion: record.version,
+      command,
     });
-    saveScene(worldId, prodId, stem, { ...scene, shots }, scene.version);
+  };
+  const patch = (patch: Partial<Shot>) => {
+    if (!shot) return;
+    const change = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as EditShotCommand["change"];
+    const clear = Object.entries(patch)
+      .filter(([, value]) => value === undefined)
+      .map(([field]) => field) as NonNullable<EditShotCommand["clear"]>;
+    send({
+      kind: "edit-shot",
+      shotId: shot.id,
+      change,
+      ...(clear.length === 0 ? {} : { clear }),
+    });
   };
 
   /*
@@ -695,7 +406,7 @@ export function ShotSheetScreen() {
     patch({ framing: Object.keys(framing).length > 0 ? framing : undefined });
   };
 
-  if (!world || !production || !scene || !shot || !worldId || !prodId) {
+  if (!world || !production || !record || !scene || !shot || !worldId || !prodId) {
     return (
       <div className="fy-prodmain" data-screen="shot-sheet">
         <EmptyState title="Opening the shot…" />
@@ -705,7 +416,13 @@ export function ShotSheetScreen() {
 
   const takes = takesForShot(production, shot.id);
   const accepted = acceptedTakeId(production, shot.id);
-  const state = cardState(shot, takes.length, accepted !== null);
+  const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
+  const state = shotCardState({
+    blankScript: shot.description.trim() === "",
+    clipAccepted: acceptedTake?.kind === "clip",
+    hasFrame: shotHasFrame(production, world.artifacts, shot.id),
+    coverage: shotCoverage(shot, digests),
+  });
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
   // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
   // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
@@ -718,8 +435,9 @@ export function ShotSheetScreen() {
   const refs = world.sheets.filter((s) => mentioned.some((m) => s.id === m || s.id.includes(m)));
   const addable = world.sheets.filter((s) => !refs.some((r) => r.id === s.id));
   const prev = (() => {
-    const i = scene.shots.findIndex((s) => s.id === shot.id);
-    return i > 0 ? scene.shots[i - 1]! : null;
+    const ordered = orderedShots(record);
+    const i = ordered.findIndex((s) => s.id === shot.id);
+    return i > 0 ? ordered[i - 1]! : null;
   })();
 
   return (
@@ -735,29 +453,22 @@ export function ShotSheetScreen() {
             if (next !== "" && next !== shot.title) patch({ title: next });
           }}
         />
-        <span className="fy-mono">{STATE_LABEL[state]}</span>
+        <span className="fy-mono">{state}</span>
         <span style={{ flex: 1 }} />
         <Button
           variant="ghost"
           onClick={() => {
-            const { id, number } = nextShotId(scene, production?.scenes.flatMap((x) => orderedShots(x)) ?? scene.shots);
-            const at = scene.shots.findIndex((s) => s.id === shot.id);
-            const shots = [...scene.shots];
-            const copy = { ...shot, id, number };
-            delete (copy as Partial<Shot>).covers;
-            shots.splice(at + 1, 0, copy);
-            if (stem) saveScene(worldId, prodId, stem, { ...scene, shots }, scene.version);
-            navigate(`${back}/shots/${id}`);
+            send({ kind: "duplicate-shot", shotId: shot.id });
+            navigate(back);
           }}
         >
           Duplicate
         </Button>
         <Button
           variant="ghost"
-          disabled={scene.shots.length < 2}
+          disabled={orderedShots(record).length < 2}
           onClick={() => {
-            if (stem)
-              saveScene(worldId, prodId, stem, { ...scene, shots: scene.shots.filter((s) => s.id !== shot.id) }, scene.version);
+            send({ kind: "delete-shot", shotId: shot.id });
             navigate(back);
           }}
         >
@@ -789,7 +500,7 @@ export function ShotSheetScreen() {
                   type="button"
                   className="fy-sblink"
                   onClick={() => {
-                    if (stem) setPromptOverride(worldId, prodId, stem, shot.id, null);
+                    send({ kind: "set-prompt-override", shotId: shot.id, text: null });
                     setPromptDraft(null);
                   }}
                 >
@@ -809,8 +520,12 @@ export function ShotSheetScreen() {
               onChange={(e) => setPromptDraft(e.target.value)}
               onBlur={() => {
                 const next = promptValue.trim();
-                if (!stem || next === current.text.trim()) return;
-                setPromptOverride(worldId, prodId, stem, shot.id, next === assembled.trim() || next === "" ? null : next);
+                if (next === current.text.trim()) return;
+                send({
+                  kind: "set-prompt-override",
+                  shotId: shot.id,
+                  text: next === assembled.trim() || next === "" ? null : next,
+                });
                 setPromptDraft(null);
               }}
             />
@@ -1122,13 +837,10 @@ export function ShotSheetScreen() {
         <Button variant="ghost" onClick={() => navigate(back)}>
           Back to the storyboard
         </Button>
-        <Button variant="primary" onClick={() => navigate(`${back}?workspace=1&shot=${shot.id}`)}>
-          Generate frame
+        <Button variant="primary" onClick={() => navigate(`${back}?shot=${shot.id}`)}>
+          Back to shot
         </Button>
       </div>
     </div>
   );
 }
-
-// Named exports so tests derive the ladder and ids exactly as the cards do.
-export { blankShot, cardState, nextShotId, STATE_LABEL };

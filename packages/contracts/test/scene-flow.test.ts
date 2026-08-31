@@ -517,7 +517,7 @@ describe("the legacy projection is the future migration, byte for byte (R-10, R-
   });
 });
 
-describe("the writer's record and the reader's projection (R-11, R-12; rollout step 2)", () => {
+describe("legacy migration and its read-only compatibility projection (R-11, R-12)", () => {
   it("migration is the projection plus dropping the array it came from", () => {
     const scene = legacy([1, 2, 3]);
     const migrated = migrateLegacyScene(scene);
@@ -533,7 +533,7 @@ describe("the writer's record and the reader's projection (R-11, R-12; rollout s
     const scene = legacy([7, 8]);
     const once = JSON.stringify(migrateLegacyScene(scene));
     assert.equal(once, JSON.stringify(migrateLegacyScene(scene)));
-    // And migrating what a migration produced, by way of its own projection, lands the same file.
+    // A compatibility round trip through the read-only projection remains deterministic.
     const projected = projectSceneRecord(migrateLegacyScene(scene));
     assert.ok(projected.kind === "scene");
     assert.equal(JSON.stringify(migrateLegacyScene(projected.scene)), once);
@@ -547,7 +547,7 @@ describe("the writer's record and the reader's projection (R-11, R-12; rollout s
     assert.deepEqual(projected.scene.shots, []);
   });
 
-  it("projects a graph scene back to the shape every consumer still reads", () => {
+  it("projects a graph scene for a legacy-shaped compatibility consumer", () => {
     const scene = graph([4, 5, 6]);
     const projected = projectSceneRecord(scene);
     assert.ok(projected.kind === "scene");

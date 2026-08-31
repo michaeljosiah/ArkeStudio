@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type BenchSession,
   type BenchTake,
+  type FrameRunState,
   type ManifestModel,
   type ModelManifest,
   type WorldBundle,
@@ -20,6 +21,7 @@ import {
 } from "../../src/bench/filing.js";
 import { BOUNDARY_METHOD } from "../../src/takes/boundary.js";
 import { recordBenchOutcome } from "../../src/bench/outcome.js";
+import { recordFrameRunOutcome } from "../../src/productions/frame-run-outcome.js";
 import { openBenchSession, openSubjectBenchSession, planBenchDispatch } from "../../src/bench/service.js";
 import { sessionMediaDir } from "../../src/bench/store.js";
 import {
@@ -1114,24 +1116,47 @@ describe("the Arke filing outcome", () => {
       id: newId("tk") as BenchTake["id"],
       requestId: "other-subject-dispatch",
     };
-    const [first, concurrent] = await Promise.all([
+    const frameRunId = newId("fr") as FrameRunState["run"]["id"];
+    const frameState = {
+      status: "completed",
+      productionId: "saltlight",
+      filedShots: 1,
+      failedShots: 0,
+      supersededShots: 0,
+      run: { id: frameRunId, sceneId: "sc_04" },
+    } as FrameRunState;
+    const [first, concurrent, frameConversation] = await Promise.all([
       recordBenchOutcome(store, session, take, filing),
       recordBenchOutcome(store, otherSession, otherTake, filing),
+      recordFrameRunOutcome(store, frameState),
     ]);
     assert.equal(concurrent, first, "one scene gets one live Arke thread");
+    assert.equal(frameConversation, first, "Bench and frame runs share that scene's Arke thread");
     const second = await recordBenchOutcome(store, session, take, filing);
     assert.equal(second, first);
     assert.equal(first, `cv_${session.id.slice(5)}`);
     const { events } = await new WorldChatStore(conversationDir(store.dir, first)).read();
     assert.equal(events.filter(({ event }) => event.type === "conversation.created").length, 1);
     assert.equal(events.filter(({ event }) => event.type === "bench.outcome-recorded").length, 2);
+    assert.equal(events.filter(({ event }) => event.type === "frame-run.outcome-recorded").length, 1);
     const loaded = foldConversation(first, CLOCK(), events).view;
-    const message = loaded.messages.at(-1)!;
+    const message = loaded.messages.find((candidate) => loaded.benchOutcomes[candidate.id] !== undefined)!;
     assert.deepEqual(loaded.benchOutcomes[message.id]?.rows, [
       { shotId: "sh_13", shotNumber: 13, productionTakeId, artifactId },
     ]);
-    assert.deepEqual(projectWorkspace(loaded, new Map()).messages.at(-1)?.benchOutcome?.rows, [
+    assert.deepEqual(
+      projectWorkspace(loaded, new Map()).messages.find((candidate) => candidate.id === message.id)?.benchOutcome?.rows,
+      [
       { shotId: "sh_13", shotNumber: 13, productionTakeId, artifactId },
-    ]);
+      ],
+    );
+    const projectedFrame = projectWorkspace(loaded, new Map()).messages.find(
+      (candidate) => candidate.frameRunOutcome !== undefined,
+    );
+    assert.deepEqual(projectedFrame?.frameRunOutcome, {
+      runId: frameRunId,
+      productionId: "saltlight",
+      sceneId: "sc_04",
+    });
   });
 });

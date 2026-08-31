@@ -5,12 +5,14 @@ import {
   clearBoardPrompt,
   deleteShot,
   duplicateShot,
+  editScene,
   editShot,
   insertShot,
   moveShot,
   moveBoardBoundary,
   nextShotIdIn,
   orderedShots,
+  parseMentions,
   SceneOperationRefused,
   setBoardOverride,
   setBoardPrompt,
@@ -29,9 +31,7 @@ import type { WorldStore } from "./../world/store.js";
 /**
  * The one way a scene's structure changes (SPEC-029 R-36, R-61, R-62).
  *
- * `saveScene` writes a whole document and works out the difference; that is how a migration
- * behaves, and it is why a structural edit could not say what happened. These commands each name
- * ONE change, carry the scene version they were composed against, and commit exactly one
+ * These commands each name ONE change, carry the scene version they were composed against, and commit exactly one
  * validated record — or write nothing at all.
  *
  * The layering is deliberate: `scene-operations.ts` in contracts owns the graph (pure, no disk,
@@ -41,10 +41,12 @@ import type { WorldStore } from "./../world/store.js";
  */
 
 export type SceneCommand =
+  | { kind: "edit-scene"; synopsis: string | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
   | { kind: "edit-shot"; shotId: string; change: Partial<Shot> }
+  | { kind: "set-prompt-override"; shotId: string; text: string | null }
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
   | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" }
@@ -109,7 +111,7 @@ export interface SceneCommandDeps {
 
 export interface SceneCommandInput {
   productionId: string;
-  /** A file stem, never a path — the same rule `save-scene` follows, for the same reason. */
+  /** A file stem, never a path. */
   sceneFile: string;
   /**
    * The scene the caller composed against, by id.
@@ -252,6 +254,8 @@ async function candidateFor(
 ): Promise<GraphScene> {
   const command = input.command;
   switch (command.kind) {
+    case "edit-scene":
+      return editScene(record, { synopsis: command.synopsis ?? undefined });
     case "insert-shot": {
       const production = productionOrThrow(store, input.productionId);
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare
@@ -271,6 +275,22 @@ async function candidateFor(
     }
     case "edit-shot":
       return editShot(record, { shotId: command.shotId, change: command.change });
+    case "set-prompt-override": {
+      const shot = orderedShots(record).find((candidate) => candidate.id === command.shotId);
+      if (shot === undefined) throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
+      if (command.text === null) {
+        return editShot(record, { shotId: command.shotId, change: { promptOverride: undefined } });
+      }
+      const sheetVersions: Record<string, number> = {};
+      for (const slug of parseMentions(shot.description)) {
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === slug);
+        if (sheet !== undefined) sheetVersions[slug] = sheet.version;
+      }
+      return editShot(record, {
+        shotId: command.shotId,
+        change: { promptOverride: { text: command.text, sheetVersions } },
+      });
+    }
     case "delete-shot": {
       // The live-dependency blockers were derived before the gate opened; what is left is the
       // graph's own refusal and the selection that must ride this commit.

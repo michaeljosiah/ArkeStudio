@@ -8,7 +8,7 @@ import { App } from "../src/App.js";
 import { __applyForTest, __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
-import { orderedShots, writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots } from "@arke-studio/contracts";
 
 /**
  * The voice-line dialog (built 2026-08-17). Everything around it already existed — the Audio
@@ -38,7 +38,7 @@ describe("the voice-line dialog", () => {
     const first = spokenShots()[0]!;
     const secondLine = "the ledger is not the tide, and the tide does not read";
     const second = { ...first, id: "sh_99", number: 99, audio: { ...first.audio!, line: secondLine } };
-    const scenes = prod.scenes.map((record) => writerSceneView(record)).map((scene, i) => (i === 0 ? { ...scene, shots: [...scene.shots, second] } : scene));
+    const scenes = prod.scenes.map((record) => legacySceneView(record)).map((scene, i) => (i === 0 ? { ...scene, shots: [...scene.shots, second] } : scene));
     return {
       state: {
         ...FIXTURE_STATE,

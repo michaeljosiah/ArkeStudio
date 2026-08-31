@@ -137,10 +137,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
-   * A direct scene write was refused (review 2026-08-22). The storyboard's editors are
-   * uncontrolled, so a swallowed refusal threw the typed text away and repainted the old scene
-   * with nothing said — the exact silence `SceneStaleError`'s own message was written to
-   * prevent. The reason is the error's message, already worded for a person.
+   * A version-fenced scene command was refused. The reason is already worded for a person.
    */
   z
     .object({

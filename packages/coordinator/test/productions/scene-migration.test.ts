@@ -5,6 +5,7 @@ import { access, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import {
   isGraphScene,
+  insertShot,
   linearizeSceneFlow,
   migrateLegacyScene,
   SceneRecordSchema,
@@ -19,16 +20,15 @@ import {
   landBoard,
   reorderScenes,
   restoreScene,
-  saveScene,
-  setPromptOverride,
 } from "../../src/productions/ops.js";
+import { applySceneCommand, type SceneCommand } from "../../src/productions/scene-commands.js";
 import { readWorldMeta, scanWorld, WorldOpenError } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { orderedShots } from "@arke-studio/contracts";
-import { graphSceneFor } from "../../src/productions/scene-record.js";
+import { upgradeLegacySceneCandidate } from "../../src/productions/scene-record.js";
 
 /**
  * World schema 3 and lazy per-scene migration (SPEC-029 R-9..R-15, T-5..T-8; issue 583).
@@ -69,6 +69,25 @@ async function readScene(dir: string, stem: string): Promise<Scene | GraphScene>
 
 async function schemaVersion(dir: string): Promise<number> {
   return (await readJson(dir, "world.json"))["schemaVersion"] as number;
+}
+
+async function apply(
+  store: WorldStore,
+  stem: string,
+  record: Scene | GraphScene,
+  command: SceneCommand,
+): Promise<void> {
+  await applySceneCommand(store, {
+    productionId: PRODUCTION,
+    sceneFile: stem,
+    sceneId: record.id,
+    baseVersion: record.version,
+    command,
+  });
+}
+
+async function migrate(store: WorldStore, stem: string, record: Scene | GraphScene): Promise<void> {
+  await apply(store, stem, record, { kind: "edit-scene", synopsis: record.synopsis ?? null });
 }
 
 /** Ordered shots however the file happens to hold them, so both arms answer the same question. */
@@ -116,7 +135,7 @@ async function fingerprint(dir: string): Promise<Map<string, string>> {
   return seen;
 }
 
-/** A graph scene in the shape every writer still hands in: ordered `shots[]`, no `flow`. */
+/** A graph scene projected into the legacy fixture shape: ordered `shots[]`, no `flow`. */
 function shotsBack(scene: GraphScene): Scene {
   const { flow: _flow, ...base } = scene;
   return { ...base, shots: shotsOf(scene) };
@@ -164,11 +183,9 @@ describe("the first authored write migrates one scene and fences the world (T-5)
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
     const before = await fingerprint(dir);
 
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: { ...legacy, synopsis: "Maren hears the verse under the harbour." },
-      baseVersion: legacy.version,
+    await apply(store, VERSE, legacy, {
+      kind: "edit-scene",
+      synopsis: "Maren hears the verse under the harbour.",
     });
 
     const migrated = await readScene(dir, VERSE);
@@ -232,12 +249,7 @@ describe("the first authored write migrates one scene and fences the world (T-5)
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
 
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: legacy,
-      baseVersion: legacy.version,
-    });
+    await migrate(store, VERSE, legacy);
     const written = (await readScene(dir, VERSE)) as GraphScene;
 
     // The same scene through the same projection, computed twice: byte-identical means the ids
@@ -254,9 +266,9 @@ describe("the first authored write migrates one scene and fences the world (T-5)
 
   it("a shot's prompt override migrates the scene too, and then leaves its ids alone", async () => {
     const { dir, store } = await open();
-    await setPromptOverride(store, store.getBundle(), {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
+    const legacy = await readScene(dir, VERSE);
+    await apply(store, VERSE, legacy, {
+      kind: "set-prompt-override",
       shotId: "sh_13",
       text: "The lamps flare in sequence, not together.",
     });
@@ -267,12 +279,7 @@ describe("the first authored write migrates one scene and fences the world (T-5)
     await assertOneStructuralAuthority(dir);
     assert.equal(shotsOf(first)[1]!.promptOverride?.text, "The lamps flare in sequence, not together.");
 
-    await setPromptOverride(store, store.getBundle(), {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      shotId: "sh_13",
-      text: null,
-    });
+    await apply(store, VERSE, first, { kind: "set-prompt-override", shotId: "sh_13", text: null });
     const second = (await readScene(dir, VERSE)) as GraphScene;
     assert.deepEqual(
       second.flow.nodes.map((node) => node.id),
@@ -289,24 +296,20 @@ describe("the first authored write migrates one scene and fences the world (T-5)
       productionId: PRODUCTION,
       brief: "The lamps hold their line.",
     });
-    // The drafting agent authors `shots[]`, exactly as its instruction says; the gate is what
-    // turns the accepted target into the one shape a write may produce.
     const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
-    const staged = SceneSchema.parse(JSON.parse(await readFile(target, "utf8")));
+    const staged = SceneRecordSchema.parse(JSON.parse(await readFile(target, "utf8")));
+    assert.ok(isGraphScene(staged), "a new proposal stages a complete graph before the agent edits it");
+    const authored = insertShot(staged, {
+      at: { atStart: true },
+      shot: { id: "sh_40", title: "The line", description: "The lamps stay where they are." },
+    });
     await writeFile(
       target,
-      JSON.stringify(
-        {
-          ...staged,
-          shots: [{ id: "sh_40", number: 1, title: "The line", description: "The lamps stay where they are." }],
-        },
-        null,
-        2,
-      ),
+      JSON.stringify(authored, null, 2),
       "utf8",
     );
 
-    assert.deepEqual(await gate.recordProblems(draft.proposalId), [], "a legacy target is legible to the gate");
+    assert.deepEqual(await gate.recordProblems(draft.proposalId), [], "the completed graph is legible to the gate");
     const outcome = await gate.accept(draft.proposalId);
     assert.equal(outcome.status, "accepted");
 
@@ -319,13 +322,40 @@ describe("the first authored write migrates one scene and fences the world (T-5)
       ["sh_40"],
     );
   });
+
+  it("still accepts a legacy scene draft proposal persisted by an older build", async () => {
+    const { dir, gate } = await open();
+    const path = scenePath("old-persisted-draft");
+    const legacy = SceneSchema.parse({
+      id: "sc_old-persisted-draft",
+      number: 8,
+      order: 8,
+      slug: "old-persisted-draft",
+      title: "Old persisted draft",
+      status: "draft",
+      version: 1,
+      shots: [{ id: "sh_40", number: 1, title: "The line", description: "The lamps stay where they are." }],
+    });
+    const proposal = await gate.stage({
+      kind: "scene-draft",
+      summary: "An old persisted draft",
+      source: "chat:studio",
+      targets: [{ path, content: `${JSON.stringify(legacy, null, 2)}\n` }],
+    });
+
+    assert.deepEqual(await gate.recordProblems(proposal.id), [], "the old target remains reviewable");
+    assert.equal((await gate.accept(proposal.id)).status, "accepted");
+    const born = await readScene(dir, "old-persisted-draft");
+    assert.ok(isGraphScene(born), "acceptance migrates the persisted legacy proposal");
+    assert.deepEqual(shotsOf(born), legacy.shots);
+  });
 });
 
 describe("an older build refuses a schema-3 world before it reads a scene (T-6)", () => {
   it("refuses by name, reads no scene file, and modifies nothing", async () => {
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     await store.close();
     assert.equal(await schemaVersion(dir), 3);
     const before = await fingerprint(dir);
@@ -350,7 +380,7 @@ describe("an older build refuses a schema-3 world before it reads a scene (T-6)"
   it("this build opens the world it just wrote", async () => {
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
 
     const scan = await scanWorld(dir);
     assert.deepEqual(scan.problems, [], "the writer's own build reads what it wrote");
@@ -368,12 +398,7 @@ describe("a schema-3 world holds both shapes at once (T-7)", () => {
     const verse = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
     const before = await fingerprint(dir);
 
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: { ...verse, title: "The verse rises again" },
-      baseVersion: verse.version,
-    });
+    await apply(store, VERSE, verse, { kind: "edit-scene", synopsis: "The verse rises again" });
 
     assert.ok(
       !touched(before, await fingerprint(dir)).some((path) => path === scenePath(TABLES) || path === scenePath(SLACK)),
@@ -392,16 +417,14 @@ describe("a schema-3 world holds both shapes at once (T-7)", () => {
       ["sc_02", "sc_04", "sc_06"],
       "every scene is present and in order",
     );
-    assert.equal(scenes.find((s) => s.id === "sc_04")!.title, "The verse rises again");
+    assert.equal(scenes.find((s) => s.id === "sc_04")!.synopsis, "The verse rises again");
 
     // And the second scene migrates on its own first write, without disturbing the first.
     const verseAfter = await readRaw(dir, scenePath(VERSE));
     const tables = SceneSchema.parse(await readJson(dir, scenePath(TABLES)));
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: TABLES,
-      scene: { ...tables, synopsis: "The tables and the water disagree." },
-      baseVersion: tables.version,
+    await apply(store, TABLES, tables, {
+      kind: "edit-scene",
+      synopsis: "The tables and the water disagree.",
     });
     assert.ok(isGraphScene(await readScene(dir, TABLES)));
     assert.ok(!isGraphScene(await readScene(dir, SLACK)), "the third scene is still nobody's business");
@@ -429,12 +452,7 @@ describe("restore passes a legacy snapshot through the same migration (T-8)", ()
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
 
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: { ...legacy, title: "A title to be regretted" },
-      baseVersion: legacy.version,
-    });
+    await apply(store, VERSE, legacy, { kind: "edit-scene", synopsis: "A synopsis to be regretted" });
     assert.equal(await schemaVersion(dir), 3);
 
     // v2 is the legacy snapshot the migration replaced: a schema-2 record inside a schema-3 world.
@@ -480,13 +498,9 @@ describe("restore passes a legacy snapshot through the same migration (T-8)", ()
      */
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: { ...legacy, version: legacy.version + 1, title: "Later" },
-      baseVersion: legacy.version + 1,
-    });
+    await migrate(store, VERSE, legacy);
+    const migrated = await readScene(dir, VERSE);
+    await apply(store, VERSE, migrated, { kind: "edit-scene", synopsis: "Later" });
     const live = await readRaw(dir, scenePath(VERSE));
 
     // Break the graph snapshot the way a hand edit would: one connection short of a path.
@@ -570,16 +584,16 @@ describe("the boundary follows the bytes, not the caller (R-9)", () => {
   });
 });
 
-describe("a graph scene keeps its own structure through a writer that has none (R-2, R-61)", () => {
+describe("semantic commands preserve graph structure and old persisted groups (R-2, R-61)", () => {
   /**
    * The scene migrated, then given one authored beat by hand — the only way to have one before
-   * step 6 ships group editing, and the case that decides whether the whole-scene writer can be
+   * step 6 ships group editing, and the case that decides whether a semantic command can be
    * trusted with a graph it did not build. Written as an outside editor would write it, version
    * and all, so the history track stays consistent with what is on disk.
    */
   async function withGroup(dir: string, store: WorldStore) {
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     const migrated = (await readScene(dir, VERSE)) as GraphScene;
     migrated.version += 1;
     migrated.flow.storyboardGroups = [
@@ -594,51 +608,40 @@ describe("a graph scene keeps its own structure through a writer that has none (
     const withBeat = await withGroup(dir, store);
     const scene = (await readScene(dir, VERSE)) as GraphScene;
 
-    await saveScene(store, {
-      productionId: PRODUCTION,
-      sceneFile: VERSE,
-      scene: { ...shotsBack(scene), title: "The verse rises, still" },
-      baseVersion: scene.version,
-    });
+    await apply(store, VERSE, scene, { kind: "edit-scene", synopsis: "The verse rises, still" });
 
     const after = (await readScene(dir, VERSE)) as GraphScene;
     assert.deepEqual(after.flow.storyboardGroups, withBeat.flow.storyboardGroups, "the beat somebody wrote survives");
     assert.deepEqual(after.flow.nodes.map((n) => n.id), scene.flow.nodes.map((n) => n.id), "and so do the ids it names");
-    assert.equal(after.title, "The verse rises, still");
+    assert.equal(after.synopsis, "The verse rises, still");
   });
 
-  it("refuses a save that would leave an authored group naming shots the scene no longer holds", async () => {
+  it("a structural command keeps the surviving members of an old persisted group", async () => {
     const { dir, store } = await open();
     await withGroup(dir, store);
     const scene = (await readScene(dir, VERSE)) as GraphScene;
-    const raw = await readRaw(dir, scenePath(VERSE));
-    const legacyShape = shotsBack(scene);
 
-    await assert.rejects(
-      saveScene(store, {
-        productionId: PRODUCTION,
-        sceneFile: VERSE,
-        scene: { ...legacyShape, shots: legacyShape.shots.filter((shot) => shot.id !== "sh_13") },
-        baseVersion: scene.version,
-      }),
-      /At the rail/,
-      "a beat is authored work; dropping it silently is not a repair",
-    );
-    assert.equal(await readRaw(dir, scenePath(VERSE)), raw, "and nothing was written");
+    await apply(store, VERSE, scene, { kind: "delete-shot", shotId: "sh_13" });
+
+    const after = (await readScene(dir, VERSE)) as GraphScene;
+    assert.deepEqual(after.flow.storyboardGroups, [
+      { id: "sbg_the-rail", title: "At the rail", shotNodeIds: ["sfn_sh-12"] },
+    ]);
+    assert.ok(!shotsOf(after).some((shot) => shot.id === "sh_13"));
   });
 });
 
-describe("a proposal that says what a graph scene already says is a no-op (R-3)", () => {
+describe("a persisted legacy proposal that says what a graph scene already says is a no-op (R-3)", () => {
   it("is retired rather than committed, so it can be settled at all", async () => {
     /*
-     * Arke amends scenes in the legacy shape, and the file it is amending may already be a
-     * graph. Compared key by key, `flow` and `shots` never match — so an accepted proposal would
-     * read as a change forever, cut a version that changed nothing, and, worse, read as stale on
-     * every later attempt. The gate compares through the projection for exactly this.
+     * A proposal persisted before direct whole-scene authorship retired can be legacy-shaped
+     * while its live scene is already a graph. Compared key by key, `flow` and `shots` never
+     * match, so it would read as a change forever and become impossible to settle. Compatibility
+     * comparison upgrades that candidate into the live graph vocabulary.
      */
     const { dir, store, gate } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     const graph = (await readScene(dir, VERSE)) as GraphScene;
     const raw = await readRaw(dir, scenePath(VERSE));
 
@@ -664,7 +667,7 @@ describe("a proposal that says what a graph scene already says is a no-op (R-3)"
      */
     const { dir, store, gate } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     const graph = (await readScene(dir, VERSE)) as GraphScene;
     const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: ["sfn_sh-12", "sfn_sh-13"] };
 
@@ -814,7 +817,7 @@ describe("a malformed graph is named, and takes nothing else down with it (R-60)
   it("reports the scene as a per-file problem and opens the rest of the world", async () => {
     const { dir, store } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     await store.close();
 
     const broken = (await readJson(dir, scenePath(VERSE))) as unknown as GraphScene;
@@ -843,7 +846,7 @@ describe("storage order carries no meaning to the gate either (R-18, issue 601)"
      */
     const { dir, store, gate } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
-    await saveScene(store, { productionId: PRODUCTION, sceneFile: VERSE, scene: legacy, baseVersion: legacy.version });
+    await migrate(store, VERSE, legacy);
     const graph = (await readScene(dir, VERSE)) as GraphScene;
     const raw = await readRaw(dir, scenePath(VERSE));
 
@@ -869,16 +872,17 @@ describe("storage order carries no meaning to the gate either (R-18, issue 601)"
   });
 });
 
-describe("a structural edit keeps the node identity the scene already had (issue 601)", () => {
-  it("a surviving shot keeps its node id when a writer adds one beside it", async () => {
+describe("a legacy candidate upgrade keeps the node identity the scene already had (issue 601)", () => {
+  it("a surviving shot keeps its node id when a persisted candidate adds one beside it", async () => {
     /*
      * Rebuilding the flow from the legacy projection re-mints every id. Harmless while every id
      * in the world came from that same rule — and a silent corruption the moment a command or a
      * group edit authors one it would not have chosen: the shot survives, its node id changes,
      * and the groups naming it no longer resolve.
      *
-     * Driven against `graphSceneFor` itself rather than through a store, because the authored
-     * id has to be planted by hand and a hand-edited world refuses every later write.
+     * Driven against `upgradeLegacySceneCandidate` itself rather than through a store, because
+     * the authored id has to be planted by hand and a hand-edited world refuses every later
+     * write.
      */
     const { dir } = await open();
     const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
@@ -902,10 +906,10 @@ describe("a structural edit keeps the node identity the scene already had (issue
     const beat = { id: "sbg_the-rail", title: "At the rail", shotNodeIds: [authored] };
     const held: GraphScene = { ...renamed, flow: { ...renamed.flow, storyboardGroups: [beat] } };
 
-    // A structural edit through the whole-scene writer: one shot added at the end.
+    // A persisted pre-retirement candidate with one shot added at the end.
     const shots = orderedShots(held);
     const added = { ...shots[0]!, id: "sh_900", number: shots.length + 1, title: "A held breath" };
-    const after = graphSceneFor(held, { ...legacy, shots: [...shots, added] });
+    const after = upgradeLegacySceneCandidate(held, { ...legacy, shots: [...shots, added] });
 
     const survivor = after.flow.nodes.find(
       (node) => node.kind === "shot" && node.shot.id === shots[0]!.id,

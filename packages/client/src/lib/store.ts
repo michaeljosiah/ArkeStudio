@@ -2798,16 +2798,6 @@ export function draftScene(worldId: string, productionId: string, brief: string)
   send({ kind: "draft-scene", worldId, productionId, brief });
 }
 
-export function stageSceneEdit(
-  worldId: string,
-  productionId: string,
-  sceneFile: string,
-  summary: string,
-  scene: unknown,
-): void {
-  send({ kind: "stage-scene-edit", worldId, productionId, sceneFile, summary, scene });
-}
-
 type SceneCommandMessage = Extract<ClientMessage, { kind: "scene-command" }>;
 
 /** Send one named, version-fenced scene edit; snapshots remain the success acknowledgement. */
@@ -2819,28 +2809,6 @@ type FrameRunMessage = Extract<ClientMessage, { kind: `frame-run-${string}` }>;
 
 export function frameRunCommand(input: FrameRunMessage): boolean {
   return send(input);
-}
-
-/**
- * Save a scene where it stands (turn 97) — the storyboard's card edits. No proposal, no accept;
- * the version and its history snapshot stand in for both. `baseVersion` is what this screen
- * loaded: a save against a scene that has since moved is refused, not merged.
- */
-export function saveScene(
-  worldId: string,
-  productionId: string,
-  sceneFile: string,
-  scene: unknown,
-  baseVersion?: number,
-): void {
-  send({
-    kind: "save-scene",
-    worldId,
-    productionId,
-    sceneFile,
-    scene,
-    ...(baseVersion !== undefined ? { baseVersion } : {}),
-  });
 }
 
 /** Undo, at whatever depth: v<n> returns as a new version (turn 97). */
@@ -3016,16 +2984,6 @@ export function proposeBranchCanon(
 /** Export the self-hostable package (brief §6); refused while blocking findings stand. */
 export function exportInteractive(worldId: string, productionId: string): void {
   send({ kind: "export-interactive", worldId, productionId });
-}
-
-export function setPromptOverride(
-  worldId: string,
-  productionId: string,
-  sceneFile: string,
-  shotId: string,
-  text: string | null,
-): void {
-  send({ kind: "set-prompt-override", worldId, productionId, sceneFile, shotId, text });
 }
 
 export function compileSceneBoard(worldId: string, productionId: string, sceneFile: string): void {

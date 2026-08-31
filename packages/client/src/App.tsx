@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
@@ -64,7 +64,6 @@ import {
   ProductionCastScreen,
   ProductionHomeScreen,
   ProductionLayout,
-  SceneChatScreen,
   SceneDetailScreen,
   ScenesScreen,
   ProductionChatScreen,
@@ -129,12 +128,25 @@ export function UpdateTransition() {
 }
 
 export function retiredDispatchPath(sceneId: string | null): string {
-  return sceneId === null ? "../generate" : `../scenes/${encodeURIComponent(sceneId)}?workspace=1`;
+  return sceneId === null ? "../generate" : `../scenes/${encodeURIComponent(sceneId)}`;
 }
 
 function RetiredDispatchRoute() {
   const [searchParams] = useSearchParams();
   return <Navigate to={retiredDispatchPath(searchParams.get("scene"))} replace />;
+}
+
+export function retiredSceneChatPath(worldId: string, productionId: string, sceneId: string, shotId: string | null = null): string {
+  return `/w/${encodeURIComponent(worldId)}/p/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}${
+    shotId === null ? "" : `?shot=${encodeURIComponent(shotId)}`
+  }`;
+}
+
+function RetiredSceneChatRoute() {
+  const { worldId, prodId, sceneId } = useParams();
+  const [searchParams] = useSearchParams();
+  if (worldId === undefined || prodId === undefined || sceneId === undefined) return <Navigate to="../scenes" replace />;
+  return <Navigate to={retiredSceneChatPath(worldId, prodId, sceneId, searchParams.get("shot"))} replace />;
 }
 
 export function App() {
@@ -251,8 +263,8 @@ export function App() {
               beside the production's own, and the page it lands on sits at production level. */}
           <Route path="story/episodes/:episodeId" element={<EpisodeChatScreen />} />
           <Route path="episodes/:episodeId" element={<EpisodeDetailScreen />} />
-          {/* And once more for a scene (turn 94), the level the writing happens at. */}
-          <Route path="story/scenes/:sceneId" element={<SceneChatScreen />} />
+          {/* Scene Chat moved into the scene workspace; old bookmarks retain their subject. */}
+          <Route path="story/scenes/:sceneId" element={<RetiredSceneChatRoute />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item
               (turn 99): a season is its episodes. */}

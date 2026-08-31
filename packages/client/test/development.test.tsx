@@ -4,7 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { ProductionChatScreen, SceneChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
+import { ProductionChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -509,50 +509,6 @@ describe("what counts as day one (design turn 93)", () => {
   it("and a season record carrying only its defaults still is", () => {
     // Defaults come from the create form, not from anybody deciding anything (SPEC-023 R-16).
     assert.equal(isDayOne({ ...empty, season: { version: 1, defaults: { episodeCount: 7 } } }), true);
-  });
-});
-
-describe("the pattern reaches the scene (design turn 94)", () => {
-  /** The fixture's own video production has scenes; scene chat needs nothing else. */
-  const prod = FIXTURE_STATE.world!.productions.find((p) => p.scenes.length > 0)!;
-  const scene = prod.scenes[0]!;
-  const CHAT = `/w/${FIXTURE_WORLD_ID}/p/${prod.meta.id}/story/scenes/${scene.id}`;
-
-  it("a scene is talked through in place, not on World Chat", () => {
-    // Every level above this one had already stopped sending people to another screen; this was
-    // the level where the writing happens, and the one that gets used most.
-    const html = render(FIXTURE_STATE, CHAT, <SceneChatScreen />, "/w/:worldId/p/:prodId/story/scenes/:sceneId");
-    assert.match(html, /data-screen="scene-chat"/);
-    assert.match(html, new RegExp(`SCENE CHAT · ${scene.number}`));
-    assert.match(html, /role="textbox"/, "the conversation is here");
-    assert.match(html, /How does this one go\?/);
-  });
-
-  it("its rail is the same two states as every level above", () => {
-    const html = render(FIXTURE_STATE, CHAT, <SceneChatScreen />, "/w/:worldId/p/:prodId/story/scenes/:sceneId");
-    assert.match(html, /What it understood/, "points while nothing is staged");
-    assert.match(html, /Wrap up · write what is settled/, "and the wrap-up that ends it");
-    assert.doesNotMatch(html, /Apply changes/, "nothing staged, so nothing to apply");
-  });
-
-  it("a staged scene becomes the accept, and says it creates no shots", () => {
-    const stem = prod.sceneFiles[scene.id]!;
-    const staged = stagedAgainst(
-      `productions/${prod.meta.id}/scenes/${stem}.json`,
-      [["Title", "The verse rises"]],
-      "Scene · the verse rises",
-    );
-    const html = render(
-      { ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, proposals: [staged] } },
-      CHAT,
-      <SceneChatScreen />,
-      "/w/:worldId/p/:prodId/story/scenes/:sceneId",
-    );
-    assert.match(html, /Apply changes/);
-    // A script belongs to a scene and creates nothing below it (turn 53), said without naming
-    // the gate that does it (turn 101).
-    assert.match(html, /no shots are made · nothing else changes/);
-    assert.doesNotMatch(html, /What it understood/, "one rail, one state at a time");
   });
 });
 

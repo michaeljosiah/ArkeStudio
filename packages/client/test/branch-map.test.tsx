@@ -125,6 +125,40 @@ describe("the branch map at the keyboard (IV-M2)", () => {
     assert.match(html, /aria-label="Branch map"/);
     for (const o of options(html)) assert.ok(o.selected === "true" || o.selected === "false", "each option states selection");
   });
+
+  it("renders a 500-scene, 1,000-choice routing graph within the T-20 budget", () => {
+    const sceneIds = Array.from({ length: 500 }, (_, index) => `sc_route-${String(index + 1).padStart(3, "0")}`);
+    const scenes = sceneIds.map((id, index) => scene(id, `Route scene ${index + 1}`));
+    const choices: Routing["choices"] = Array.from({ length: 1_000 }, (_, index) => {
+      const fromIndex = index % (sceneIds.length - 1);
+      const stride = index < sceneIds.length - 1 ? 1 : index < (sceneIds.length - 1) * 2 ? 2 : sceneIds.length;
+      return {
+        id: `ch_route-${String(index + 1).padStart(4, "0")}`,
+        from: sceneIds[fromIndex]!,
+        label: `Choice ${index + 1}`,
+        to: sceneIds[Math.min(sceneIds.length - 1, fromIndex + stride)]!,
+      };
+    });
+    const routing: Routing = {
+      version: 1,
+      start: sceneIds[0]!,
+      choices,
+      endings: [{ sceneId: sceneIds.at(-1)!, title: "Route ending" }],
+      excluded: [],
+      groups: [],
+    };
+
+    const started = Date.now();
+    const html = render(interactiveState({ scenes, routing }), "the-answer");
+    const elapsed = Date.now() - started;
+    const opts = options(html);
+    const expectedIds = new Set(sceneIds);
+    assert.equal(opts.length, 500, "every scene remains an option");
+    assert.ok(elapsed < 8_000, `branch map rendered 500 scenes and 1,000 choices in ${elapsed}ms`);
+    assert.ok(opts.every((option) => expectedIds.has(option.scene)), "routing options use scene ids");
+    assert.doesNotMatch(html, /sfn_/, "scene-flow node ids never leak into routing");
+    assert.equal(opts.filter((option) => option.tabIndex === "0").length, 1, "the large map remains one roving tab stop");
+  });
 });
 
 describe("what a node says about itself (IV-M3)", () => {

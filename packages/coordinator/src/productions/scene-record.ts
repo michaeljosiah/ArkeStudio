@@ -13,28 +13,21 @@ import {
 } from "@arke-studio/contracts";
 
 /**
- * Scene files on the way in and on the way out (SPEC-029 §3.3 step 2; issue 583).
+ * Compatibility boundaries for scene files (SPEC-029; issue 583).
  *
  * Two rules, and everything here is one of them:
  *
- *   Read is pure (R-10). A scene file parses as the R-1 union and is handed on as the legacy
- *   shape, because no consumer has moved onto `linearizeSceneFlow` yet — that is step 3. Opening,
- *   scanning, drawing a board and exporting a legacy scene write nothing and raise nothing.
+ *   Read is pure (R-10). A scene file parses as the R-1 union. The legacy-shaped projection is
+ *   retained only for read-only compatibility with legacy APIs and fixtures; it writes nothing
+ *   and is never stored authority.
  *
- *   Every authored write lands the graph shape (R-11). The first one to touch a legacy scene
- *   materialises its `flow`; there is no phase in which a file carries both, and no write that
- *   puts `shots[]` back.
+ *   Canonical scene authorship uses graph operations. The legacy-candidate upgrader remains only
+ *   to restore legacy snapshots and accept or compare legacy proposals persisted before direct
+ *   whole-scene authorship retired. It never puts `shots[]` back.
  *
- * Which writes count as authored is decided by the callers, not here. The storyboard's save, a
- * shot's prompt override, an accepted proposal and a restore do. Three do not, each for its own
- * stated reason: the compiled board and the landed storyboard are production output and ride
- * `preserveVersion` (R-10); scene reorder writes `order`, which R-19 keeps outside the scene
- * graph; and adopting an outside edit writes back the bytes a person typed, unchanged, because
- * that is what adoption is (R-62). All three leave whichever shape they found in place.
- *
- * The boundary itself is nobody's decision here. It follows the bytes, inside the commit — see
- * `carriesSceneFlow` and its use in `commit.ts` — so a graph scene that reached the disk by a
- * route none of this anticipated still fences the world it landed in.
+ * Whole-document persistence remains atomic. The schema boundary follows the bytes inside the
+ * commit — see `carriesSceneFlow` and its use in `commit.ts` — so a graph scene that reached disk
+ * by any route still fences the world it landed in.
  */
 
 /**
@@ -66,11 +59,8 @@ export function parseSceneRecord(raw: string): SceneRecord {
 }
 
 /**
- * The legacy-shaped view the WRITERS still work in (R-10; §3.3 step 3 moved every reader onto
- * `linearizeSceneFlow`, so only the write side reaches for this until step 4).
- *
- * A malformed graph throws instead of projecting a guess — in a writer that refuses the write
- * by name.
+ * A read-only legacy-shaped projection for compatibility APIs and fixtures (R-10).
+ * A malformed graph throws instead of projecting a guessed order.
  */
 export function sceneFrom(record: SceneRecord): Scene {
   const projection = projectSceneRecord(record);
@@ -78,40 +68,31 @@ export function sceneFrom(record: SceneRecord): Scene {
   return projection.scene;
 }
 
-/** Both halves at once, for the writers that need the record beside their working copy. */
+/** Parse a record and return its read-only legacy projection for compatibility callers. */
 export function readSceneRecord(raw: string): { record: SceneRecord; scene: Scene } {
   const record = parseSceneRecord(raw);
   return { record, scene: sceneFrom(record) };
 }
 
 /**
- * What an authored write puts on disk (R-11, R-12, R-14).
+ * Upgrade a persisted legacy-shaped candidate to a graph scene (R-11, R-12, R-14).
  *
- * `next` is the authored scene in the shape every writer still builds — whole record, ordered
- * `shots[]` — and `current` is what the file says now, so the two cases can be told apart:
+ * This adapter exists only to restore legacy snapshots and to accept or compare legacy proposals
+ * persisted before direct whole-scene authorship retired. New drafts and World Chat proposals are
+ * already `GraphScene` values and must not pass through it.
  *
- *   A legacy scene migrates, and migration is `migrateLegacyScene` and nothing else. What Flow
- *   would have shown before the write is what the file says after it, and repeating it is
- *   byte-identical (R-12).
- *
- *   A scene already graph-backed keeps its graph. A payload edit — new wording, a prompt
- *   override — replaces the shot inside its node and leaves node ids, edges and authored groups
- *   untouched, because ids are stable across labels (R-2) and re-minting them would silently
- *   re-point every group and every stored reference at nothing.
- *
- * A write that changes which shots the scene holds, or the order they run in, still has to
- * rebuild: the whole-scene writer's payload carries an array and no graph, which is exactly what
- * step 4's semantic commands exist to replace. Authored groups are carried across that rebuild
- * rather than dropped, and if they no longer describe the scene the write is refused by name —
- * losing a beat somebody wrote is not a repair.
+ * A legacy current record migrates deterministically. When comparing or accepting a legacy
+ * candidate over an existing graph, unchanged structure keeps node ids, edges and authored
+ * groups. A structural difference rebuilds the sequence while preserving surviving node ids and
+ * groups, and refuses the result if those groups no longer describe a valid scene.
  */
-export function graphSceneFor(current: SceneRecord | null, next: Scene): GraphScene {
+export function upgradeLegacySceneCandidate(current: SceneRecord | null, next: Scene): GraphScene {
   const migrated = migrateLegacyScene(next);
   if (current === null || !isGraphScene(current)) return refuseUnlessOnePath(migrated);
 
   const held = linearizeSceneFlow(current);
   // A malformed graph is not quietly rewritten into a valid one (R-59): the file on disk says
-  // something nobody can read as an order, and a save that silently replaced it would destroy
+  // something nobody can read as an order, and upgrading a legacy candidate over it would destroy
   // the evidence of what went wrong along with any chance of restoring it.
   if (held.kind === "invalid") throw new SceneFlowRefused(held.findings);
 
@@ -120,7 +101,8 @@ export function graphSceneFor(current: SceneRecord | null, next: Scene): GraphSc
     held.shots.every((pair, index) => pair.shot.id === next.shots[index]!.id);
   if (!structureHeld) {
     /*
-     * A structural edit keeps the node identity the scene already had (#601 round 2).
+     * A structurally different legacy candidate keeps the node identity the scene already had
+     * (#601 round 2).
      *
      * Rebuilding from `migrateLegacyScene` alone re-mints every node and edge id from the
      * projection's own rule. That is harmless while every id in the world came from that same
@@ -128,7 +110,7 @@ export function graphSceneFor(current: SceneRecord | null, next: Scene): GraphSc
      * have chosen, and then a surviving shot silently changes node id while the groups that
      * name it do not, so a grouped scene is refused even though all its shots are still there.
      * So: a shot that survives keeps the node id the live flow gave it, and only a shot the
-     * edit introduced gets a freshly minted one. Edges are re-derived either way — the
+     * candidate introduced gets a freshly minted one. Edges are re-derived either way — the
      * adjacency is exactly what changed.
      */
     const heldNodeIds = new Map(
@@ -140,7 +122,7 @@ export function graphSceneFor(current: SceneRecord | null, next: Scene): GraphSc
         : node,
     );
     // Only shot nodes can be renamed here — the terminals are named from the scene id, which a
-    // structural edit does not touch — so the edge rewrite reads its endpoints off the same map.
+    // legacy candidate does not touch — so the edge rewrite reads its endpoints off the same map.
     const renamed = new Map(
       migrated.flow.nodes.flatMap((node, index) =>
         node.id === nodes[index]!.id ? [] : [[node.id, nodes[index]!.id] as const],
@@ -182,25 +164,25 @@ function refuseUnlessOnePath(scene: GraphScene): GraphScene {
   return scene;
 }
 
-/** The same, as the bytes a commit takes. Two spaces and a trailing newline, like every record. */
-export function graphSceneContent(current: SceneRecord | null, next: Scene): string {
-  return `${JSON.stringify(graphSceneFor(current, next), null, 2)}\n`;
+/** Serialize a persisted legacy proposal or snapshot after its compatibility upgrade. */
+export function legacySceneCandidateContent(current: SceneRecord | null, next: Scene): string {
+  return `${JSON.stringify(upgradeLegacySceneCandidate(current, next), null, 2)}\n`;
 }
 
 /**
  * The bytes a restore lands (R-15).
  *
  * A schema-2 snapshot is a legacy scene, and putting it back as it stands would write `shots[]`
- * into a world that has moved past that shape. It goes through the same deterministic migration
- * the first authored write used, so what comes back is the snapshot's authored content and
- * nothing else. A snapshot already graph-backed comes back verbatim — node ids and authored
+ * into a world that has moved past that shape. It goes through the deterministic legacy-candidate
+ * upgrade, so what comes back is the snapshot's authored content and nothing else. A snapshot
+ * already graph-backed comes back verbatim — node ids and authored
  * groups intact — but only once its topology has been checked: restoring a graph the scan would
  * then drop replaces a scene somebody can open with one nobody can, which is the opposite of
  * what undo is for (R-59, R-61).
  */
 export function restoredSceneContent(snapshot: string): string {
   const record = parseSceneRecord(snapshot);
-  if (!isGraphScene(record)) return graphSceneContent(null, record);
+  if (!isGraphScene(record)) return legacySceneCandidateContent(null, record);
   const findings = validateSceneFlow(record.flow);
   if (findings.length > 0) throw new SceneFlowRefused(findings);
   return snapshot;

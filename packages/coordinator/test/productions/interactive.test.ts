@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
+import { migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import {
   appendTraversal,
   exportInteractive,
@@ -206,6 +206,52 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.ok(player.includes('"start":"sc_i1"') || player.includes('"start": "sc_i1"'), "the manifest is embedded, so file:// playback works offline");
     assert.ok(!/https?:\/\//.test(player), "self-contained: the player calls no network");
     assert.ok(player.includes("localStorage"), "playback state stays with the viewer");
+  });
+
+  it("T-13: Interactive export ships equivalent media for legacy and permuted migrated scenes", async () => {
+    const { dir, store, bundle } = await open();
+    const legacy = await interactiveProduction(dir, bundle.productions[0]!, ROUTING);
+    await appendTraversal(store, legacy.meta.id, {
+      ts: CLOCK(),
+      routingVersion: 1,
+      choiceId: "ch_on",
+      from: "sc_i1",
+      to: "sc_i2",
+      route: ["sc_i1"],
+    });
+    const migrated = {
+      ...legacy,
+      scenes: legacy.scenes.map((scene) => {
+        if ("flow" in scene) throw new Error("the parity fixture must begin as a legacy scene");
+        const graph = migrateLegacyScene(scene);
+        return {
+          ...graph,
+          flow: {
+            ...graph.flow,
+            nodes: [...graph.flow.nodes].reverse(),
+            edges: [...graph.flow.edges].reverse(),
+          },
+        };
+      }),
+    };
+    const shippedMedia = async (production: ProductionBundle, clock: () => string) => {
+      const result = await exportInteractive(store, production, clock);
+      assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
+      const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
+        media: Array<{ sceneId: string; file: string; hash: string }>;
+      };
+      return Promise.all(
+        manifest.media
+          .sort((left, right) => left.sceneId.localeCompare(right.sceneId))
+          .map(async (entry) => ({ ...entry, bytes: await readFile(join(dir, result.dir, entry.file)) })),
+      );
+    };
+
+    assert.deepEqual(
+      await shippedMedia(migrated, () => "2026-08-01T12:00:01.000Z"),
+      await shippedMedia(legacy, CLOCK),
+      "graph storage order changes neither manifest media nor the files it names",
+    );
   });
 
   /**

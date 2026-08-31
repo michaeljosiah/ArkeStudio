@@ -16,10 +16,10 @@ import { SceneBaseShape, SceneSchema, ShotSchema, type Scene, type Shot } from "
  *
  * Rollout steps 1–3 (§3.3) live here: the shapes, pure validation and linearisation, and the
  * one ordered-shot boundary every consumer now derives through — `linearizeSceneFlow`, with
- * `orderedShots` as its guaranteed-valid narrowing. Nothing in this file touches a disk. What
- * remains of the legacy projection (`projectSceneRecord`, `writerSceneView`) serves the WRITE
- * side only: whole-scene writers still build legacy payloads until step 4's semantic commands,
- * and their working copy is derived read-side state, never stored.
+ * `orderedShots` as its guaranteed-valid narrowing. Nothing in this file touches a disk. The
+ * remaining legacy projections (`projectSceneRecord`, `legacySceneView`) are read-only
+ * compatibility helpers for legacy-shaped APIs and fixtures. They derive views and are never
+ * write surfaces or stored authority.
  */
 
 // ---------------------------------------------------------------------------
@@ -701,14 +701,11 @@ export function structuralMeaning(record: SceneRecord): string | null {
 }
 
 /**
- * The legacy-shaped working copy a WRITE surface edits (SPEC-029 §3.3: writers keep building
- * legacy `Scene` values until step 4's semantic commands). The storyboard editor and the shot
- * sheet mutate a whole scene and save it back; the commit path re-derives the graph through
- * `graphSceneFor`, so the view is an input format, never a stored authority. Its shot order
- * comes through `orderedShots` — the one boundary — and read-path consumers must not reach for
- * this: they take the sequence itself.
+ * A read-only legacy-shaped compatibility view for APIs and fixtures that still consume
+ * `Scene`. It derives shot order through `orderedShots` and is never a write surface or stored
+ * authority. New code should consume the `SceneRecord` or its ordered sequence directly.
  */
-export function writerSceneView(record: SceneRecord): LegacyScene {
+export function legacySceneView(record: SceneRecord): LegacyScene {
   if (!isGraphScene(record)) return record;
   const { flow: _flow, ...base } = record;
   return { ...base, shots: orderedShots(record) };
@@ -720,14 +717,11 @@ export type SceneProjection =
   | { kind: "invalid"; findings: SceneFlowFinding[] };
 
 /**
- * Either arm as the legacy shape — the WRITERS' remaining scaffolding (§3.3 step 3).
+ * Either record arm as a read-only legacy-shaped compatibility projection.
  *
- * The read path no longer touches this: the scan carries the record forward and every consumer
- * derives order through `linearizeSceneFlow`. What remains is the write side — whole-scene
- * writers still build legacy `Scene` payloads until step 4's semantic commands — and the
- * projection is how a writer gets its working copy (`writerSceneView`, `sceneFrom`). Still a
- * *derivation*, never written back: `flow` remains the only thing on disk that says what
- * follows what (R-14). Nothing new should be built on it, and step 4 deletes it.
+ * This exists for legacy-shaped APIs and fixtures, not for authorship. It is a derivation that
+ * must never be written back: `flow` remains the only stored authority for sequence (R-14), and
+ * new code should use `SceneRecord` and `linearizeSceneFlow` instead.
  *
  * A malformed graph projects to nothing at all rather than to a guessed array (R-7, R-59) — the
  * caller reports the findings as the per-file problem they are and leaves the rest of the world

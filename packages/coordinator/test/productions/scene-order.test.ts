@@ -3,14 +3,23 @@ import { describe, it } from "node:test";
 import { createHash } from "node:crypto";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deriveCut, deriveSpineCut, SceneSchema, skillFor, type ProductionSpine } from "@arke-studio/contracts";
+import {
+  deriveCut,
+  deriveSpineCut,
+  insertShot,
+  isGraphScene,
+  SceneRecordSchema,
+  SceneSchema,
+  skillFor,
+  type ProductionSpine,
+} from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { draftSceneSkeleton, reorderScenes } from "../../src/productions/ops.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
-import { orderedShots, writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots } from "@arke-studio/contracts";
 
 /**
  * Scene identity, order, and path become separate authorities (issue #387): identity is stable
@@ -77,15 +86,16 @@ describe("scene identity and explicit order (issue 387)", () => {
 
     // An agent that numbers from one anyway is refused in words it can act on.
     const target = join(dir, ".proposals", draft.proposalId, ...draft.path.split("/"));
-    const staged = SceneSchema.parse(JSON.parse(await readFile(target, "utf8")));
+    const staged = SceneRecordSchema.parse(JSON.parse(await readFile(target, "utf8")));
+    assert.ok(isGraphScene(staged));
     const taken = orderedShots(onDisk.scenes[0]!)[0]!.id;
+    const colliding = insertShot(staged, {
+      at: { atStart: true },
+      shot: { id: taken, title: "Collides", description: "Something happens." },
+    });
     await writeFile(
       target,
-      JSON.stringify(
-        { ...staged, shots: [{ id: taken, number: 1, title: "Collides", description: "Something happens." }] },
-        null,
-        2,
-      ),
+      JSON.stringify(colliding, null, 2),
       "utf8",
     );
     const problems = await gate.recordProblems(draft.proposalId);
@@ -107,8 +117,8 @@ describe("scene identity and explicit order (issue 387)", () => {
      */
     const { dir, store, gate } = await open();
     const production = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    const first = writerSceneView(production.scenes[0]!);
-    const second = writerSceneView(production.scenes[1]!);
+    const first = legacySceneView(production.scenes[0]!);
+    const second = legacySceneView(production.scenes[1]!);
     const shared = first.shots[0]!.id;
 
     // Put the overlap on disk, the way concurrent drafting once did.
@@ -134,7 +144,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     });
 
     // Now edit that scene for a reason that has nothing to do with ids.
-    const live = writerSceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === second.id)!);
+    const live = legacySceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === second.id)!);
     const staged = await gate.stage({
       kind: "scene-edit",
       summary: "A synopsis, nothing to do with shot ids",
@@ -150,7 +160,7 @@ describe("scene identity and explicit order (issue 387)", () => {
     );
 
     // A NEW collision is still refused.
-    const other = writerSceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === first.id)!);
+    const other = legacySceneView(store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === first.id)!);
     const introduces = await gate.stage({
       kind: "scene-edit",
       summary: "This one takes an id it never had",

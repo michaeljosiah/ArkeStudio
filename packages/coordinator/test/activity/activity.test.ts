@@ -64,7 +64,6 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       spend: null,
       backgroundNotifications: "issues-only",
       research: { web: false },
-      internal: { sceneWorkspace: false },
         narrator: null,
       appearance: { theme: "system" },
       runtime: null,

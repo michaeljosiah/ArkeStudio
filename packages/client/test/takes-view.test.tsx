@@ -54,7 +54,7 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(html.includes('data-screen="generate-workspace"'));
     assert.ok(html.includes("Take 1") && html.includes("Take 2"), "takes side by side");
     assert.ok(html.includes("✓ SELECTED"), "the accepted take is marked");
-    assert.ok(html.includes("Generate"), "the workspace can spend");
+    assert.ok(html.includes("Open in generator"), "the workspace reaches the generation owner");
     assert.ok(html.includes("Accept take"), "and accept");
     assert.ok(html.includes("Reject"), "and teach");
     assert.ok(html.includes("Contact sheet") && html.includes("Advanced"), "the other lenses are doors, not tabs");

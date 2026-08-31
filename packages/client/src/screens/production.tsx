@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
-  assemblePrompt,
   deriveCut,
   deriveEpisodeCut,
   deriveSpineCut,
@@ -19,15 +18,10 @@ import {
   pendingSheets,
   frameDispatchFor,
   modelCapabilityCopy,
-  nativeResolution,
-  overrideStaleAgainst,
   pickableSheets,
-  compilePasses,
-  DEFAULT_SHOT_SEC,
   PRESETS,
   productionAspect,
   productionShape,
-  promptFor,
   STANDARD_ASPECTS,
   DELIVERIES,
   legacyVoiceModel,
@@ -35,7 +29,6 @@ import {
   type CompiledPass,
   type CompiledReference,
   type Delivery,
-  type PlanState,
   worldSheets,
   attachmentFor,
   lookHoldingScope,
@@ -48,14 +41,12 @@ import {
   MAX_CLIP_LANE,
   type CutEntry,
   type CutOverlay,
-  type Shot,
   type SpineCutSegment,
-  type SizeTier,
   orderedShots,
-  writerSceneView,
+  legacySceneView,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
-import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Card, Input, Textarea, cx } from "../components/ui.js";
 import {
   Archive,
   Book,
@@ -80,18 +71,16 @@ import { AppChrome } from "../components/chrome.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
-import { DispatchBar, productionModel, useResolvedModel } from "../components/dispatch-bar.js";
+import { productionModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { ClipPlayButton, clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
-import { planForScene } from "../lib/scene-plan.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
-import { SceneReview, SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -108,15 +97,12 @@ import {
   acceptTake,
   attachCharacterLook,
   cancelExport,
-  compileSceneBoard,
   createSheetFromSentence,
   attachHostFiles,
   attachHostText,
   hostCanAttach,
-  dispatchScene,
   draftScene,
   exportCut,
-  exportSceneBoard,
   exportWorld,
   rejectTake,
   placeOverlay,
@@ -125,20 +111,14 @@ import {
   rejoinOverlayAudio,
   splitOverlayAudio,
   uploadArtifacts,
-  dispatchScenePlanned,
-  listPlans,
-  planCancel,
-  planContinue,
-  planReconfirm,
   setProductionAspect,
-  setPromptOverride,
   setShotTrim,
-  subscribePlanResults,
-  subscribePlanStates,
   useExports,
   useStore,
   useWorld,
   requestVoiceLine,
+  sendBenchOpenSubject,
+  subscribeBenchSubjectOpened,
   subscribeQueueResults,
   subscribeVoiceUploadConfirmations,
 } from "../lib/store.js";
@@ -217,26 +197,6 @@ export function sceneFileOf(
   return production?.sceneFiles[scene.id] ?? null;
 }
 
-/**
- * The dispatch dialog's address, with the scene the press was about (issue 634).
- *
- * Every way in goes through here so no door can forget: five controls reached this screen and
- * none of them said which scene, so it opened on the first one and its priced button spent
- * there — pressing `Generate scene` on scene 7 could dispatch scene 1. A caller with no scene
- * in hand omits it and the dialog falls back as it always did.
- */
-export function dispatchPath(
-  worldId: string | undefined,
-  prodId: string | undefined,
-  sceneId?: string | null,
-): string {
-  const base = `/w/${worldId}/p/${prodId}/generate/dispatch`;
-  // encodeURIComponent, because a scene id is data going into a query string. Ids are minted
-  // as `sc_<slug>` today and would survive raw; the escape is here so that stays an accident
-  // of the format rather than something this function depends on.
-  return sceneId ? `${base}?scene=${encodeURIComponent(sceneId)}` : base;
-}
-
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
   if (decision === "accepted") return "ok";
   if (decision === "rejected") return "sketch";
@@ -290,9 +250,10 @@ export function ProductionLayout() {
    * is a control now, remembered for the session — the module variable behind useRailCollapsed
    * says why it is not longer-lived; the Cut is only what it does before anybody has said
    * otherwise. `null` is "never asked", which is why this is not a plain boolean.
-   */
+  */
   const [railChoice, setRailChoice] = useRailCollapsed();
-  const folded = railChoice ?? location.pathname.endsWith("/cut");
+  const sceneDetailDefault = /\/scenes\/[^/]+\/?$/.test(location.pathname);
+  const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
   /*
    * A mark for every destination, without exception (turn 101). Folded, the label is the tooltip
    * and the mark is the whole item, so a rail entry with no mark is an entry that disappears —
@@ -1660,260 +1621,17 @@ export function ScenesScreen() {
 
 // ---- Scene detail (14a) ----------------------------------------------------
 
-/**
- * Scene Chat, and the proposal it ends in (design turn 94; the shape of turns 91 and 92, one
- * level further down).
- *
- * The last of the three. A scene's conversation used to open World Chat on another screen, so the
- * pattern a person had just learned twice — talk here, accept here, land on the thing — stopped
- * working at exactly the level where the writing happens. Same component, same two rail states,
- * smaller subject.
- */
-export function SceneChatScreen() {
-  const { worldId, prodId, sceneId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
-  const record = production?.scenes.find((s) => s.id === sceneId);
-  const scene = record === undefined ? undefined : writerSceneView(record);
-  if (!production || !scene || !prodId || !sceneId) {
-    return (
-      <div className="fy-story" data-screen="scene-chat">
-        <EmptyState title="Opening the scene…" />
-      </div>
-    );
-  }
-  const stem = sceneFileOf(production, scene);
-  const staged = stem
-    ? ((world?.proposals ?? []).find((sp) =>
-        sp.proposal.targets.some((t) => t.path === `productions/${prodId}/scenes/${stem}.json`),
-      ) ?? null)
-    : null;
-  return (
-    <div className="fy-story" data-screen="scene-chat">
-      <ProductionConversation
-        worldId={worldId}
-        productionId={prodId}
-        entry={{ kind: "scene", productionId: prodId, sceneId }}
-        openingNote={`Scene Chat · ${scene.number} · opening…`}
-        eyebrow={`SCENE CHAT · ${scene.number}`}
-        heading="How does this one go?"
-        emptyLine={`Nothing written for ${scene.title} yet. Say what happens in it — the script comes back in blocks that keep their ids.`}
-        placeholder="Keep shaping the scene…"
-        {...(staged
-          ? {
-              side: (
-                <StagedDecision
-                  worldId={worldId}
-                  subject={`scene ${scene.number}`}
-                  staged={staged}
-                  writes="no shots are made · nothing else changes"
-                  onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}`)}
-                />
-              ),
-            }
-          : {
-              pointsEmpty:
-                "Nothing understood yet. As you talk, what the studio takes from it appears here — what happens, who is in it, what it has to establish — so you can see it thinking rather than wait for the end.",
-            })}
-      />
-    </div>
-  );
-}
-
 export function SceneDetailScreen() {
   const { worldId, prodId, sceneId } = useParams();
-  const [searchParams] = useSearchParams();
   const { world, production } = useProduction(worldId, prodId);
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const [tab, setTab] = useState<"shots" | "board">("shots");
-  /* Turn 102: a review is consulted and put away, and spending is a drawer over the work. */
-  const [reviewing, setReviewing] = useState(false);
-  const [generating, setGenerating] = useState(false);
   const record = production?.scenes.find((s) => s.id === sceneId);
-  const scene = record === undefined ? undefined : writerSceneView(record);
-  /*
-   * The rollout step's shell, where it can be walked before it replaces anything (SPEC-029
-   * §3.3 step 5). With the flag off this branch is never taken and the screen below is
-   * untouched — not hidden by CSS but never mounted, so a regression here cannot reach anyone
-   * who has not turned it on.
-   */
-  if ((state?.app.internal.sceneWorkspace === true || searchParams.get("workspace") === "1") && world && production && record) {
-    return <SceneWorkspace world={world} production={production} scene={record} />;
+  if (world && production && record) {
+    return <SceneWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}`} world={world} production={production} scene={record} />;
   }
-  if (!production || !scene) {
-    return (
-      <Screen id="scene-detail">
-        <EmptyState title="Opening scene…" />
-      </Screen>
-    );
-  }
-  const slug = world?.meta.slug;
-  const totalSec = scene.shots.reduce((s, x) => s + (x.durationSec ?? 0), 0);
-  const model =
-    (state?.app.manifest?.models ?? []).find(
-      // The production's own choice first, then the installation's default — the same order
-      // the picker opens on, so a scene row cannot name a model the dispatch will not use.
-      (m) => m.id === (productionModel(state, prodId, "video") ?? state?.app.routing.defaults["video"]) && m.capability === "video",
-    ) ??
-    (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
-    null;
-  const boardStale = scene.board !== undefined && scene.board.version < scene.version;
   return (
-    <div className="fy-prodmain" data-screen="scene-detail" style={{ minHeight: "100%" }}>
-      <div>
-        <div className="fy-h1row">
-          <h1 className="fy-h1" style={{ fontSize: 32 }}>
-            Scene {scene.number} · {scene.title}
-          </h1>
-          <span className="fy-h1row__meta">
-            {scene.shots.length} shots · {seconds(totalSec)}
-          </span>
-          <span className="fy-h1row__push" />
-          {/* The durable scene thread (SPEC-023 R-20, issue 400): script blocks are proposed
-              there and land through the same gate as everything else. It opens in place now
-              rather than on World Chat (turn 94) — a pattern a person has learned twice already
-              should not stop working at the level where the writing happens. */}
-          <Button
-            variant="ghost"
-            onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/scenes/${scene.id}`)}
-          >
-            Talk it through
-          </Button>
-          <span className="fy-seg">
-            <button
-              type="button"
-              className={cx("fy-seg__item", tab === "shots" && "fy-seg__item--active")}
-              onClick={() => setTab("shots")}
-            >
-              Shots
-            </button>
-            <button
-              type="button"
-              className={cx("fy-seg__item", tab === "board" && "fy-seg__item--active")}
-              onClick={() => setTab("board")}
-            >
-              Board
-            </button>
-          </span>
-          {/*
-            Review, then generate, both where the shots are (turn 102). The plan was a screen for
-            two turns, and a costing screen reached from the creative surface is layer three
-            standing in front of layer one — the test turn 102 states. `Generation options` in the
-            drawer is where the old screen went; it is the Advanced door, not the way through.
-          */}
-          <Button variant="ghost" onClick={() => setReviewing((on) => !on)}>
-            {reviewing ? "Hide review" : "Review scene"}
-          </Button>
-          <Button onClick={() => setGenerating(true)}>Generate scene</Button>
-        </div>
-        {/* The line under the title (turn 97, 14c): the synopsis, edited where it reads. */}
-        <div style={{ marginTop: 10, maxWidth: 660 }}>
-          <SceneSynopsis worldId={worldId!} prodId={prodId!} scene={scene} />
-        </div>
-        <div className="fy-inherits" style={{ marginTop: 8 }} title="Shots inherit these">
-          {scene.inherits?.location && (
-            <span className="fy-pill">
-              @{scene.inherits.location}
-              {scene.inherits.timeOfDay ? `, ${scene.inherits.timeOfDay}` : ""}
-            </span>
-          )}
-          {!scene.inherits?.location && scene.inherits?.timeOfDay && (
-            <span className="fy-pill">{scene.inherits.timeOfDay}</span>
-          )}
-          {scene.inherits?.tone && <span className="fy-pill">Tone · {scene.inherits.tone}</span>}
-          <span className="fy-pill">{productionAspect(production.meta)} · from the production</span>
-          {model && (
-            <span className="fy-mono">
-              {model.displayName} · max {model.limits.maxDurationSec ?? "∞"}s / clip
-            </span>
-          )}
-        </div>
-      </div>
-      {tab === "shots" ? (
-        <>
-          {/* Turn 97: the storyboard is the editor — 14a's read-only cards are superseded. */}
-          {/* Above the shots, because that is what it is about (turn 102). */}
-          {reviewing && <SceneReview scene={scene} onClose={() => setReviewing(false)} />}
-          <StoryboardStrip worldId={worldId!} prodId={prodId!} scene={scene} />
-          <StoryboardFoot worldId={worldId!} prodId={prodId!} scene={scene} />
-          {generating && (
-            <GenerateDrawer
-              worldId={worldId!}
-              prodId={prodId!}
-              scene={scene}
-              onClose={() => setGenerating(false)}
-            />
-          )}
-        </>
-      ) : (
-        <div className="fy-boardsplit">
-          <div className="fy-boardsheet">
-            {scene.board ? (
-              <Portrait
-                worldSlug={slug}
-                path={`productions/${production.meta.id}/${scene.board.image}`}
-                label={`Scene ${scene.number}, compiled board sheet`}
-                radius={0}
-              />
-            ) : (
-              <EmptyState title="No board yet" hint="A board compiles from the scene at a point in time." />
-            )}
-          </div>
-          <div className="fy-boardrail">
-            <div className="fy-boardcard">
-              <div className="fy-boardcard__head">
-                {scene.board ? `Board v${scene.board.version}` : "No board"}
-                <span
-                  className="fy-boardcard__state"
-                  style={{ color: boardStale ? "var(--warning)" : "var(--success)" }}
-                >
-                  {scene.board
-                    ? boardStale
-                      ? `stale — scene is at v${scene.version}`
-                      : "in step with shots"
-                    : ""}
-                </span>
-              </div>
-              <div className="fy-boardcard__body">Frames, order, timings and labels, ready for dispatch.</div>
-              <div className="fy-boardcard__mono">
-                {scene.shots.length} shots · {seconds(totalSec)}
-                {scene.board ? `\ncompiled ${scene.board.compiledAt}` : ""}
-              </div>
-            </div>
-            <div className="fy-boardcard fy-boardcard--quiet">
-              <div className="fy-boardcard__head">Where it goes</div>
-              <div className="fy-boardcard__body">
-                In one-pass dispatch this sheet rides along as the scene reference. Per-shot dispatch sends
-                each frame instead.
-              </div>
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              <Button
-                onClick={() => {
-                  const stem = sceneFileOf(production, scene);
-                  if (worldId && prodId && stem) compileSceneBoard(worldId, prodId, stem);
-                }}
-              >
-                Recompile · free, local
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={!scene.board}
-                onClick={() => {
-                  const stem = sceneFileOf(production, scene);
-                  if (worldId && prodId && stem) exportSceneBoard(worldId, prodId, stem);
-                }}
-              >
-                Export sheet · PNG
-              </Button>
-            </div>
-            <div style={{ flex: 1 }} />
-            <span className="fy-mono">lands in artifacts on every compile</span>
-          </div>
-        </div>
-      )}
-    </div>
+    <Screen id="scene-detail">
+      <EmptyState title="Opening scene…" />
+    </Screen>
   );
 }
 
@@ -1982,6 +1700,8 @@ function TakesView({
   worldId,
   prodId,
   askedFor,
+  generating,
+  onGenerate,
   onAdvanced,
   onContact,
 }: {
@@ -1989,13 +1709,14 @@ function TakesView({
   prodId: string | undefined;
   /** The shot the press was about, carried in the address (`?shot=`). */
   askedFor: string | null;
+  generating: boolean;
+  onGenerate: (shotId: string) => void;
   /* Both doors carry the shot with them (review 2026-08-22): pressing Advanced used to replace
      the whole query string, losing the shot one click after the address recovered it. */
   onAdvanced: (shotId: string | null) => void;
   onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
   const all = production?.scenes.flatMap((s) => orderedShots(s)) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   /*
@@ -2007,14 +1728,14 @@ function TakesView({
   const shotId = selectedShotId ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : writerSceneView(found);
+  const scene = found === null ? null : legacySceneView(found);
   /*
    * The chips are this scene's shots, not the production's (found by driving: a production with
    * two scenes drew three chips, two of them reading "Shot 1", because a shot's number is
    * scene-local and flattening the production makes it ambiguous). "Every shot" means every shot
    * of the thing you are looking at, which is what the frame draws.
    */
-  const shots = scene?.shots ?? [];
+  const shots = found === null ? [] : orderedShots(found);
   /* Every scene, one chip away (review 2026-08-22): the first cut could only reach the first
      scene's shots from the rail, and a three-scene production had no way to its second. */
   const scenes = production?.scenes ?? [];
@@ -2042,7 +1763,7 @@ function TakesView({
     takes.find((t) => t.id === accepted) ??
     takes[takes.length - 1] ??
     null;
-  const acceptedCount = (scene?.shots ?? []).filter(
+  const acceptedCount = shots.filter(
     (s) => production && acceptedTakeId(production, s.id) !== null,
   ).length;
   /* One pass over the takes for the chip dots, not one filter per chip (review 2026-08-22). */
@@ -2121,6 +1842,7 @@ function TakesView({
                 <button
                   key={sc.id}
                   type="button"
+                  disabled={generating}
                   className={cx("fy-takechip", sc.id === scene.id && "fy-takechip--on")}
                   onClick={() => {
                     setSelectedShotId(orderedShots(sc)[0]?.id ?? null);
@@ -2145,6 +1867,7 @@ function TakesView({
               <button
                 key={s.id}
                 type="button"
+                disabled={generating}
                 className={cx("fy-takechip", s.id === shotId && "fy-takechip--on")}
                 onClick={() => {
                   setSelectedShotId(s.id);
@@ -2169,9 +1892,10 @@ function TakesView({
               press, and a drifted take could only be ignored — never taught from. */}
           <Button
             variant="primary"
-            onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
+            disabled={generating || shotId === null}
+            onClick={() => shotId !== null && onGenerate(shotId)}
           >
-            Generate
+            {generating ? "Opening…" : "Open in generator"}
           </Button>
           <Button
             disabled={!picked || picked.id === accepted}
@@ -2208,7 +1932,7 @@ function TakesView({
           <button type="button" className="fy-linkbtn" onClick={() => onContact(shotId)}>
             Contact sheet
           </button>
-          <button type="button" className="fy-linkbtn" onClick={() => onAdvanced(shotId)}>
+          <button type="button" className="fy-linkbtn" disabled={generating} onClick={() => onAdvanced(shotId)}>
             Advanced
           </button>
         </div>
@@ -2234,8 +1958,14 @@ function TakesView({
 export function GenerateScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const { state } = useStore();
+  const { connection, state } = useStore();
   const navigate = useNavigate();
+  const ownerKey = `${worldId ?? ""}/${prodId ?? ""}`;
+  const currentOwnerKey = useRef(ownerKey);
+  currentOwnerKey.current = ownerKey;
+  const pendingGenerator = useRef<{ requestId: string; ownerKey: string } | null>(null);
+  const [generatorPending, setGeneratorPending] = useState(false);
+  const [generatorError, setGeneratorError] = useState<string | null>(null);
   // The workspace's second lens (design 55a): the same frame/still takes, seen as a set.
   // Deep-linkable — the retired /stills address redirects here with the lens on.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2252,7 +1982,7 @@ export function GenerateScreen() {
     null;
   const shot = shots.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
-  const scene = found === null ? null : writerSceneView(found);
+  const scene = found === null ? null : legacySceneView(found);
   const takes = production && shotId ? takesForShot(production, shotId) : [];
   const decisions = production ? takeDecisions(production) : {};
   const accepted = production && shotId ? acceptedTakeId(production, shotId) : null;
@@ -2268,6 +1998,61 @@ export function GenerateScreen() {
     ) ??
     (state?.app.manifest?.models ?? []).find((m) => m.capability === "video") ??
     null;
+
+  useEffect(
+    () =>
+      subscribeBenchSubjectOpened((event) => {
+        const pending = pendingGenerator.current;
+        if (
+          pending === null ||
+          pending.ownerKey !== currentOwnerKey.current ||
+          event.requestId !== pending.requestId ||
+          event.worldId !== worldId
+        ) {
+          return;
+        }
+        pendingGenerator.current = null;
+        setGeneratorPending(false);
+        if (event.sessionId === null) {
+          setGeneratorError(event.reason ?? "The generator session could not be prepared.");
+          return;
+        }
+        setGeneratorError(null);
+        void navigate(`/w/${worldId}/artifacts/bench/${event.sessionId}`);
+      }),
+    [navigate, worldId],
+  );
+  useEffect(() => {
+    if (connection === "open" || pendingGenerator.current === null) return;
+    pendingGenerator.current = null;
+    setGeneratorPending(false);
+    setGeneratorError("Connection lost - try again.");
+  }, [connection]);
+  useEffect(() => {
+    const pending = pendingGenerator.current;
+    if (pending === null || pending.ownerKey === ownerKey) return;
+    pendingGenerator.current = null;
+    setGeneratorPending(false);
+    setGeneratorError(null);
+  }, [ownerKey]);
+  const openGenerator = (targetShotId: string) => {
+    if (!worldId || !prodId || pendingGenerator.current !== null) return;
+    const targetScene = production?.scenes.find((candidate) => orderedShots(candidate).some((candidate) => candidate.id === targetShotId));
+    if (targetScene === undefined) return;
+    const requestId = sendBenchOpenSubject({
+      worldId,
+      productionId: prodId,
+      sceneId: targetScene.id,
+      subject: { kind: "shot", shotId: targetShotId },
+    });
+    if (requestId === null) {
+      setGeneratorError("Not connected - try again.");
+      return;
+    }
+    pendingGenerator.current = { requestId, ownerKey };
+    setGeneratorPending(true);
+    setGeneratorError(null);
+  };
 
   /*
    * Which lens the workspace opens on (turn 102). Takes are the thing here: once something has
@@ -2285,7 +2070,6 @@ export function GenerateScreen() {
         worldId={worldId}
         prodId={prodId}
         onShotLens={() => setSearchParams({}, { replace: true })}
-        onScene={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
       />
     );
   }
@@ -2295,9 +2079,9 @@ export function GenerateScreen() {
         worldId={worldId}
         prodId={prodId}
         askedFor={searchParams.get("shot")}
-        onAdvanced={(shotId) =>
-          setSearchParams(shotId ? { view: "bench", shot: shotId } : { view: "bench" }, { replace: true })
-        }
+        generating={generatorPending}
+        onGenerate={openGenerator}
+        onAdvanced={(targetShotId) => targetShotId !== null && openGenerator(targetShotId)}
         onContact={(shotId) =>
           setSearchParams(shotId ? { view: "stills", shot: shotId } : { view: "stills" }, { replace: true })
         }
@@ -2312,9 +2096,10 @@ export function GenerateScreen() {
    * looking at. Plain consts, so they may sit under the returns; the hooks stay above.
    */
   const prevShot = (() => {
-    if (!scene || !shot) return null;
-    const i = scene.shots.findIndex((s) => s.id === shot.id);
-    return i > 0 ? scene.shots[i - 1]! : null;
+    if (!found || !shot) return null;
+    const ordered = orderedShots(found);
+    const i = ordered.findIndex((s) => s.id === shot.id);
+    return i > 0 ? ordered[i - 1]! : null;
   })();
   const prevAccepted =
     prevShot && production
@@ -2349,13 +2134,6 @@ export function GenerateScreen() {
             <button
               type="button"
               className="fy-seg__item"
-              onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
-            >
-              Scene
-            </button>
-            <button
-              type="button"
-              className="fy-seg__item"
               onClick={() => setSearchParams({ view: "stills" }, { replace: true })}
             >
               Contact sheet
@@ -2363,6 +2141,7 @@ export function GenerateScreen() {
           </span>
           <select
             value={shotId ?? ""}
+            disabled={generatorPending}
             onChange={(e) => {
               setSelectedShotId(e.target.value);
               setSelectedTakeId(null);
@@ -2464,16 +2243,6 @@ export function GenerateScreen() {
           )}
           <div className="fy-frame fy-frame--empty">END · OPTIONAL</div>
         </div>
-        {shot && production && world && scene && (
-          <GeneratePromptEditor
-            world={world}
-            production={production}
-            scene={scene}
-            shot={shot}
-            worldId={worldId!}
-            prodId={prodId!}
-          />
-        )}
         <div className="fy-paramrow">
           {/* The production's delivery aspect (issue 389), never a hard-coded landscape. */}
           <span className="fy-param">{production ? productionAspect(production.meta) : "16:9"}</span>
@@ -2493,10 +2262,12 @@ export function GenerateScreen() {
           <span className="fy-h1row__push" />
           <Button
             variant="primary"
-            onClick={() => navigate(dispatchPath(worldId, prodId, scene?.id))}
+            disabled={generatorPending || shotId === null}
+            onClick={() => shotId !== null && openGenerator(shotId)}
           >
-            Generate…
+            {generatorPending ? "Opening…" : "Open generation session"}
           </Button>
+          {generatorError === null ? null : <span role="alert" className="fy-mono">{generatorError}</span>}
         </div>
       </div>
       <div className="fy-gen__center">
@@ -2601,301 +2372,6 @@ export function GenerateScreen() {
   );
 }
 
-function GeneratePromptEditor({
-  world,
-  production,
-  scene,
-  shot,
-  worldId,
-  prodId,
-}: {
-  world: NonNullable<ReturnType<typeof useProduction>["world"]>;
-  production: NonNullable<ReturnType<typeof useProduction>["production"]>;
-  scene: Scene;
-  shot: Shot;
-  worldId: string;
-  prodId: string;
-}) {
-  const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
-  // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
-  const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
-  const current = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
-  const stale = overrideStaleAgainst(shot, world.sheets);
-  const [draft, setDraft] = useState<string | null>(null);
-  const value = draft ?? current.text;
-  return (
-    <>
-      <div className="fy-gen__label" style={{ marginTop: 16 }}>
-        Prompt{" "}
-        <span className="fy-mono">
-          {shot.promptOverride
-            ? "edited for this shot"
-            : `assembled from ${production.meta.styleOverride?.trim() ? "the production and world" : "the world"}, edit freely`}
-        </span>
-        <span
-          style={{
-            marginLeft: "auto",
-            font: "400 11px var(--font-sans)",
-            color: "var(--muted-foreground)",
-            cursor: "pointer",
-          }}
-          onClick={() => {
-            const stem = sceneFileOf(production, scene);
-            if (!stem) return;
-            setPromptOverride(worldId, prodId, stem, shot.id, null);
-            setDraft(null);
-          }}
-        >
-          Reset
-        </span>
-      </div>
-      {stale.length > 0 && (
-        <Callout tone="warning" title="This override no longer reflects the world">
-          {stale.map((s) => `${s.sheetId} moved v${s.from} → v${s.to}`).join(" · ")}
-        </Callout>
-      )}
-      <Textarea
-        key={shot.id}
-        value={value}
-        onChange={(e) => setDraft(e.target.value)}
-        style={{ minHeight: 120, font: "400 12.5px/1.65 var(--font-sans)" }}
-      />
-      {/* What the planner composes, the planner keeps (SPEC-019 R-3, R-13, D3/D4). An override
-          replaces the body above and nothing else: the binding preamble and the negatives are
-          added at dispatch, and a user debugging drifted identity or burned-in titles needs to
-          see that they exist. The preamble's real text needs a chosen model — it names the
-          images that model's budget actually carries — so it is described here and shown in
-          full where the plan exists. */}
-      <div
-        style={{
-          marginTop: 8,
-          padding: "8px 10px",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-          font: "400 11.5px/1.6 var(--font-sans)",
-          color: "var(--muted-foreground)",
-        }}
-      >
-        Added at dispatch, not editable here: a numbered line per reference image naming its subject and what
-        it references, and — for video — <span className="fy-mono">no subtitles</span>
-        {shot.audio?.kind === "silence" ? (
-          <>
-            {" "}
-            and <span className="fy-mono">no audio</span>
-          </>
-        ) : (
-          <>
-            {" "}
-            (plus <span className="fy-mono">no background music</span> where the cut carries its own score)
-          </>
-        )}
-        .
-      </div>
-      {/* "Save override" says the edit is this shot's alone — the legend that repeated it is gone (design 54). */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-        <span className="fy-h1row__push" />
-        <Button
-          disabled={value.trim() === assembled || value.trim().length === 0}
-          onClick={() => {
-            const stem = sceneFileOf(production, scene);
-            if (!stem) return;
-            setPromptOverride(worldId, prodId, stem, shot.id, value.trim());
-            setDraft(null);
-          }}
-        >
-          Save override
-        </Button>
-      </div>
-    </>
-  );
-}
-
-// ---- Dispatch + voice-line dialogs ----------------------------------------
-
-/**
- * The production's durable dispatch plans (SPEC-024): folded server-side from disk and the
- * queue, requested on mount and refreshed by push — never a timer. Blocked and awaiting states
- * are named, and the awaits are buttons, because they are the user's acts by definition.
- */
-function PlansPanel({ worldId, prodId }: { worldId: string; prodId: string }) {
-  const [states, setStates] = useState<PlanState[] | null>(null);
-  const [refused, setRefused] = useState<string | null>(null);
-  useEffect(() => {
-    // A fresh production starts from nothing — keeping the previous production's states showed
-    // A's plans gating B until B's first event arrived.
-    setStates(null);
-    setRefused(null);
-    const offStates = subscribePlanStates((event) => {
-      if (event.productionId === prodId) setStates(event.states);
-    });
-    // A refused plan creation must be visible where the buttons live: the coordinator answers
-    // with production.plan-result, and a failure nobody renders is a button that fails silently.
-    const offResults = subscribePlanResults((event) => {
-      if (event.productionId !== prodId) return;
-      // A later successful creation clears the warning — a refusal callout standing over a
-      // live, healthy plan asserts two contradictory things at once.
-      setRefused(event.disposition === "failed" ? (event.reason ?? "the plan could not be created") : null);
-    });
-    listPlans(worldId, prodId);
-    return () => {
-      offStates();
-      offResults();
-    };
-  }, [worldId, prodId]);
-  if ((!states || states.length === 0) && refused === null) return null;
-  const passLine = (state: PlanState, pass: PlanState["passes"][number]): string => {
-    const label = `pass ${pass.passIndex}`;
-    if (pass.state === "blocked") return `${label} · blocked — ${pass.reason ?? "extraction failed"}`;
-    if (pass.state === "failed") return `${label} · failed — ${pass.reason ?? "the job failed"}`;
-    if (pass.state === "halted") return `${label} · will not run — ${pass.reason ?? state.haltReason ?? ""}`;
-    return `${label} · ${pass.state}`;
-  };
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div className="fy-listhead">Plans</div>
-      {refused !== null && (
-        <Callout tone="warning" title="Plan refused">
-          {refused}
-        </Callout>
-      )}
-      {(states ?? []).map((state) => (
-        <div key={state.planId} className="fy-boardcard" style={{ marginTop: 8 }}>
-          <div className="fy-boardcard__head">
-            {state.policy === "review-gated" ? "Review-gated" : "Pre-authorized"} · {state.status} · cap{" "}
-            {usd(state.capMicroUsd)}
-          </div>
-          <div className="fy-boardcard__mono">
-            {state.passes.map((pass) => (
-              <span key={pass.passIndex}>
-                {passLine(state, pass)}
-                {"\n"}
-              </span>
-            ))}
-            {state.haltReason !== undefined && `halted: ${state.haltReason}`}
-          </div>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            {state.next.kind === "await-continue" && (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  planContinue(worldId, prodId, state.planId, (state.next as { passIndex: number }).passIndex)
-                }
-              >
-                Continue · pass {state.next.passIndex} ·{" "}
-                {usd(state.passes[state.next.passIndex]?.estimatedMicroUsd ?? 0)}
-              </Button>
-            )}
-            {state.next.kind === "await-reconfirm" && (
-              <Button
-                variant="primary"
-                onClick={() =>
-                  planReconfirm(
-                    worldId,
-                    prodId,
-                    state.planId,
-                    (state.next as { passIndex: number }).passIndex,
-                  )
-                }
-              >
-                Reconfirm · pass {state.next.passIndex} runs past the {usd(state.capMicroUsd)} cap
-              </Button>
-            )}
-            {state.status !== "completed" && state.status !== "cancelled" && (
-              <Button variant="ghost" onClick={() => planCancel(worldId, prodId, state.planId)}>
-                Cancel plan
-              </Button>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/**
- * Generate scene, as a drawer over the work (design turn 102).
- *
- * The model and what it will cost, one button, and one way into everything else. The scene stays
- * behind it: spending is a moment in the middle of the work rather than a place you travel to,
- * which is what the plan screen made it for two turns. `Generation options` opens the dispatch
- * dialog — every strategy, every route, every retry unit — which is now the Advanced door rather
- * than the way through.
- */
-function GenerateDrawer({
-  worldId,
-  prodId,
-  scene,
-  onClose,
-}: {
-  worldId: string;
-  prodId: string;
-  scene: Scene;
-  onClose: () => void;
-}) {
-  const { world, production } = useProduction(worldId, prodId);
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const capability = production ? productionShape(production.meta).dispatchCapability : "video";
-  const resolved = useResolvedModel(state, capability);
-  const model = resolved.stranded === null ? resolved.model : null;
-  // The same function the coordinator executes, on the same inputs (issue 244) — so the number
-  // under the button is the number that will be spent, not a summary of one.
-  const plan = useMemo(
-    () =>
-      world && production && model ? planForScene({ world, production, scene, model }, "whole-scene") : null,
-    [world, production, scene, model],
-  );
-  const shots = scene.shots.length;
-  const totalSec = scene.shots.reduce((sum, sh) => sum + (sh.durationSec ?? DEFAULT_SHOT_SEC), 0);
-  return (
-    <aside className="fy-gendrawer" data-drawer="generate">
-      <div className="fy-gendrawer__head">
-        <span className="fy-gendrawer__title">Generate scene</span>
-        <span style={{ flex: 1 }} />
-        <button type="button" className="fy-linkbtn" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <div className="fy-gendrawer__body">
-        <div className="fy-gendrawer__card">
-          <div className="fy-gendrawer__model">{model?.displayName ?? "No model available"}</div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 10 }}>
-            <span className="fy-mono">ESTIMATED</span>
-            <span className="fy-gendrawer__cost">
-              {plan ? usd(plan.wholeScene.totalEstimatedMicroUsd) : "—"}
-            </span>
-          </div>
-          <div className="fy-mono" style={{ marginTop: 6 }}>
-            {shots} shot{shots === 1 ? "" : "s"} · {seconds(totalSec)} · attempt one
-          </div>
-        </div>
-        <Button
-          variant="primary"
-          disabled={!plan}
-          onClick={() => navigate(dispatchPath(worldId, prodId, scene.id))}
-        >
-          Generate
-        </Button>
-        {/* Layer three, behind its own door. Until the drawer can dispatch on its own, this is
-            also where Generate goes — the dialog is the thing that spends, and sending somebody
-            to a button they have already pressed would be worse than one more press. */}
-        <button
-          type="button"
-          className="fy-gendrawer__more"
-          onClick={() => navigate(dispatchPath(worldId, prodId, scene.id))}
-        >
-          Generation options
-          <ChevronRight size={13} />
-        </button>
-        <span style={{ flex: 1 }} />
-        <div className="fy-mono">retakes bill separately</div>
-      </div>
-    </aside>
-  );
-}
-
 /**
  * Who rides, and who rides in a look (design 67).
  *
@@ -2939,485 +2415,6 @@ export function passRow(pass: CompiledPass): string {
         : "text route";
   const length = pass.askedSec !== undefined ? ` · ${seconds(pass.askedSec)}` : "";
   return `${route}${length} · ${usd(pass.estimatedMicroUsd)}`;
-}
-
-export function DispatchDialogScreen() {
-  const { worldId, prodId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
-  const { state } = useStore();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const capability = production ? productionShape(production.meta).dispatchCapability : "video";
-  /*
-   * The scene the press was about, carried in the address (`?scene=`) — the same shape the
-   * takes view uses for `?shot=`, and for the same reason. This held an index starting at 0,
-   * so `Generate scene` on scene 7 opened a dialog priced for scene 1 and its priced button
-   * spent on scene 1: nothing carried which scene had sent you.
-   *
-   * By id, never by index. `production.scenes` is a mutable ordered array — a reorder moves
-   * every position — and an index that survives a reorder points at a different scene than
-   * the one the person was looking at. The same rule the board overrides keep (SPEC-034 D2).
-   *
-   * Derived every render rather than seeded into state: the production arrives a beat after
-   * the route, and an initialiser would have run against an empty scene list. A chip pressed
-   * here still wins — the address is where you arrived, not a lock.
-   */
-  const [pickedSceneId, setPickedSceneId] = useState<string | null>(null);
-  const asked = searchParams.get("scene");
-  const sceneId =
-    pickedSceneId ??
-    (asked !== null && production?.scenes.some((s) => s.id === asked) ? asked : null) ??
-    production?.scenes[0]?.id ??
-    null;
-  const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier; resolution?: string }>({});
-  const sceneRecord = production?.scenes.find((s) => s.id === sceneId) ?? null;
-  const scene = sceneRecord === null ? null : writerSceneView(sceneRecord);
-  // One resolver for the bar and its host, so the dialog cannot show one model and dispatch
-  // another. Planning from every manifest row let a switched-off model be enqueued from the mode
-  // buttons while the bar said UNAVAILABLE; stranded now means the cards stay away entirely,
-  // because spending on a model the user never chose is worse than not dispatching.
-  const resolved = useResolvedModel(state, capability, choice.modelId);
-  const model = resolved.stranded === null ? resolved.model : null;
-  // Video dispatch is sized by the provider's own word; stills by real dimensions, which the
-  // plan derives from the tier. Both travel from here so the dialog and the job agree.
-  const resolution =
-    choice.resolution ??
-    (model && choice.tier !== undefined ? nativeResolution(model, choice.tier) : undefined);
-
-  // The whole plan, computed live from the world — the same function the coordinator executes.
-  const plans = useMemo(() => {
-    if (!world || !production || !scene || !model) return null;
-    // The assembly moved to `planForScene` (turn 102): turn 102's drawer needs the same number
-    // under a much smaller button, and two copies of it would be two answers to what this costs.
-    return planForScene({
-      world,
-      production,
-      scene,
-      model,
-      ...(resolution !== undefined ? { resolution } : {}),
-      ...(choice.tier !== undefined ? { tier: choice.tier } : {}),
-    });
-  }, [world, production, scene, model, resolution, choice.tier]);
-
-  // The compiled passes (issue 398): the same object the coordinator maps into queue requests,
-  // so the rows below ARE the dispatch — route, length, references, estimate — not a summary
-  // that can drift from it. Compilation refuses what dispatch would refuse; the warning rows
-  // already say why, so a refusal here just leaves no rows to show.
-  const compiled = useMemo(() => {
-    if (!world || !production || !scene || !model || !plans) return null;
-    const compile = (plan: typeof plans.perShot, chainWholeSceneFrames = false) => {
-      try {
-        return compilePasses({
-          productionId: production.meta.id,
-          scene,
-          plan,
-          model,
-          world,
-          chainWholeSceneFrames,
-        });
-      } catch {
-        return null;
-      }
-    };
-    return {
-      perShot: compile(plans.perShot),
-      wholeScene: compile(plans.wholeScene),
-      // What the durable plan will actually authorize (SPEC-024): the server compiles the
-      // continuity chain, so the plan buttons must price the chained passes, not the plain ones.
-      chained: compile(plans.wholeScene, true),
-    };
-  }, [world, production, scene, model, plans]);
-  const sceneFile = scene ? sceneFileOf(production, scene) : null;
-  const warnings = plans?.perShot.warnings ?? null;
-  // A shot no route can cover blocks rather than warns: the dispatch would be refused anyway,
-  // and finding that out after pressing a priced button is the failure this dialog exists to
-  // prevent. Named per shot, with the length that would fit.
-  const overlong = plans?.perShot.warnings.overlongShots ?? [];
-  const overlongPasses = plans?.wholeScene.warnings.overlongPasses ?? [];
-  const warningRows: Array<{ key: string; text: string }> = [];
-  if (warnings) {
-    for (const s of warnings.shotsWithoutFrame)
-      warningRows.push({ key: `nf-${s.shotId}`, text: `shot ${s.number} has no accepted frame` });
-    // Issue 154: strict frame behaviour is promised exactly where the route receives it — the
-    // shot opens on its durable boundary still, and the references that stepped aside are named.
-    for (const f of warnings.framedShots)
-      warningRows.push({
-        key: `bf-${f.shotId}`,
-        text: `shot ${f.number} opens on its boundary frame${
-          f.setAside.length > 0
-            ? ` — ${f.setAside.join(", ")} step aside, the frame route takes one image`
-            : ""
-        }`,
-      });
-    for (const f of warnings.staleFrames)
-      warningRows.push({
-        key: `sf-${f.shotId}`,
-        text: `shot ${f.number}'s start frame is unusable: ${f.detail} — this blocks dispatch`,
-      });
-    // SPEC-019 R-50: the shot extends the previous take instead of opening on a still cut out of
-    // it, and what stepped aside is named for the reason a framed shot's is.
-    for (const c of warnings.continuedShots)
-      warningRows.push({
-        key: `cn-${c.shotId}`,
-        text: `shot ${c.number} continues the previous shot's take${
-          c.setAside.length > 0
-            ? ` — ${c.setAside.join(", ")} step aside, the extend route takes one video`
-            : ""
-        }`,
-      });
-    // R-51, R-52: it asked and cannot. Named rather than quietly generating from scratch, which
-    // is paid-for footage that does not cut against what came before it.
-    for (const c of warnings.continuationUnavailable)
-      warningRows.push({ key: `cu-${c.shotId}`, text: `shot ${c.number} cannot continue: ${c.reason}` });
-    // Issue 389: an impossible delivery shape refuses, consistently — composition throws the
-    // same refusal server-side, so this row is the dialog saying it first.
-    if (warnings.aspectUnsupported) {
-      const a = warnings.aspectUnsupported;
-      warningRows.push({
-        key: "aspect",
-        text: `${a.model} cannot deliver ${a.aspect} — it offers ${a.supported.join(", ")} — this blocks dispatch`,
-      });
-    }
-    for (const name of warnings.sketchCitations)
-      warningRows.push({ key: `sk-${name}`, text: `${name} is a sketch — dispatch cites an unlocked sheet` });
-    for (const d of warnings.droppedReferences) {
-      warningRows.push({
-        key: `dr-${d.sheetId}-${d.referenceRole ?? "primary"}`,
-        text:
-          d.referenceRole === "secondary"
-            ? `${d.sheetId}'s main photo is dropped — its character sheet still travels`
-            : `${d.sheetId}'s reference is dropped — over the model's cap`,
-      });
-    }
-    for (const g of warnings.staleModelSheets) warningRows.push({ key: `st-${g}`, text: g });
-    for (const name of warnings.retiredCitations)
-      warningRows.push({ key: `re-${name}`, text: `${name} is retired and still cited here` });
-    for (const u of warnings.unknownMentions)
-      warningRows.push({ key: `un-${u}`, text: `@${u} resolves to nothing — check the description` });
-    // SPEC-020 R-6: the mention resolved, and the sheet belongs to another production. Named,
-    // never blocked — borrowing somebody else's one-off is unusual, not wrong.
-    for (const g of warnings.foreignGuests)
-      warningRows.push({
-        key: `fg-${g.name}`,
-        text: `${g.name} belongs to ${g.owner}, not to this production`,
-      });
-    for (const o of warnings.overriddenStale)
-      warningRows.push({
-        key: `ov-${o.shotId}`,
-        text: `shot ${o.number}'s prompt is overridden and ${o.against.map((a) => `${a.sheetId} moved v${a.from}→v${a.to}`).join(", ")} — the override will not pick that up`,
-      });
-    // SPEC-019 R-42: subjects past the model's reliable range are carried anyway and said so —
-    // dropping a character the user wrote into the shot is the worse failure.
-    if (warnings.subjectsOverRange) {
-      warningRows.push({
-        key: "subjects",
-        text: `${warnings.subjectsOverRange.carried} subjects is past the ${warnings.subjectsOverRange.reliableTo} this model holds apart reliably — all are carried, and the take may be less stable`,
-      });
-    }
-    // SPEC-019 R-21: the routed model can be overridden per dispatch, long after the scene was
-    // drafted. Named rather than blocking — the shots are still shots, they were just written to
-    // another family's conventions, and only the user knows whether that matters here.
-    if (warnings.skillFamilyMismatch) {
-      const { draftedFor, dispatchingTo } = warnings.skillFamilyMismatch;
-      warningRows.push({
-        key: "skill-family",
-        text:
-          dispatchingTo === null
-            ? `these shots were drafted for ${draftedFor}; ${model?.displayName ?? "this model"} declares no family, so that guidance may not apply`
-            : `these shots were drafted for ${draftedFor} and this dispatch goes to ${dispatchingTo}`,
-      });
-    }
-  }
-
-  return (
-    <div className="fy-dialogwrap" data-screen="dispatch-dialog">
-      <div className="fy-dialog">
-        <div className="fy-h1row">
-          <h1 className="fy-h1" style={{ fontSize: 22 }}>
-            Dispatch
-          </h1>
-          {scene && (
-            <span className="fy-h1row__meta">
-              {scene.title} · {scene.shots.length} shots ·{" "}
-              {seconds(scene.shots.reduce((s, x) => s + (x.durationSec ?? 4), 0))}
-            </span>
-          )}
-          <span className="fy-h1row__push" />
-          <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate`)}>
-            Close
-          </Button>
-        </div>
-        <div className="fy-choicerow">
-          {(production?.scenes ?? []).map((s) => (
-            <Button
-              key={s.id}
-              variant={s.id === sceneId ? "primary" : "secondary"}
-              onClick={() => setPickedSceneId(s.id)}
-            >
-              {s.title}
-            </Button>
-          ))}
-        </div>
-        {/* SPEC-019 R-43, D37: the one condition here that is not merely named. A payload over
-            the transport's ceiling is a request the client already refuses, so committing it
-            would buy a certain failure — the dispatch buttons go away rather than warn. */}
-        {plans?.perShot.warnings.payloadOverflow && (
-          <Callout tone="danger" title="Too much to send">
-            {plans.perShot.warnings.payloadOverflow.notice}
-          </Callout>
-        )}
-        {/* SPEC-019 R-26: which pictures steer this dispatch, and why. Stated, never offered as a
-            choice — storyboard input is loose where keyframe input aligns, and knowing which is
-            stricter should not be a prerequisite for getting the better one. When neither is
-            available the statement carries both reasons, including a stale board's redraw (R-27). */}
-        {plans && (
-          <Callout
-            tone={plans.perShot.steering.mode === "none" ? "warning" : undefined}
-            title={
-              plans.perShot.steering.mode === "keyframes"
-                ? "Steered by keyframes"
-                : plans.perShot.steering.mode === "storyboard"
-                  ? "Steered by the storyboard"
-                  : "No reference images steer this scene"
-            }
-          >
-            {plans.perShot.steering.statement}
-          </Callout>
-        )}
-        {world && production && model && (
-          <Callout
-            title={
-              production.meta.styleOverride?.trim()
-                ? "Production look"
-                : `World look · v${world.artDirection.version}`
-            }
-          >
-            {production.meta.styleOverride?.trim()
-              ? `This production overrides the world look with “${production.meta.styleOverride.trim()}”. It is carried by assembled prompts; a full shot prompt override keeps its own text. `
-              : "Inherited from this world and carried in the prompt. "}
-            {model.accepts.referenceImages === 0
-              ? `${model.displayName} accepts no reference images. Those images are omitted; only existing sheet descriptions and art-direction text remain.`
-              : "Identity references remain distinct from the visual style treatment."}
-          </Callout>
-        )}
-        {/* Controls only: the two mode cards below each carry their own estimate, computed from
-            the same plan the coordinator executes, and one figure up here could disagree with
-            them. Size speaks the video vocabulary — 720p is what this surface means. */}
-        <DispatchBar
-          variant="controls"
-          capability={capability}
-          workflow="main-photo"
-          choice={choice}
-          onChoice={setChoice}
-        />
-        {(overlong.length > 0 || overlongPasses.length > 0) && (
-          <Callout tone="warning" title="Too long for this model">
-            <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
-              {overlong.map((shot) => (
-                <li key={shot.shotId}>
-                  shot {shot.number} runs {seconds(shot.durationSec)} — {model?.displayName ?? "this model"}{" "}
-                  makes at most {seconds(shot.longestSec)}
-                  {shot.becauseReferences ? " on the reference route this shot will take" : ""}. Shorten the
-                  shot, split it, or pick another model.
-                </li>
-              ))}
-              {overlongPasses.map((pass) => (
-                <li key={`pass-${pass.passIndex}`}>
-                  scene pass {pass.passIndex} runs {seconds(pass.durationSec)} — the longest this route makes
-                  is {seconds(pass.longestSec)}
-                  {pass.becauseReferences ? ", because the pass carries references" : ""}.
-                </li>
-              ))}
-            </ul>
-          </Callout>
-        )}
-        {warningRows.length > 0 ? (
-          <Callout
-            tone="warning"
-            title={`${warningRows.length} thing${warningRows.length === 1 ? "" : "s"} worth knowing — none blocks`}
-          >
-            <ul style={{ margin: 0, paddingLeft: "1.2em" }}>
-              {warningRows.map((w) => (
-                <li key={w.key}>{w.text}</li>
-              ))}
-            </ul>
-          </Callout>
-        ) : (
-          plans && (
-            <Callout title="Clean dispatch">
-              Every cited sheet is locked and current; every reference rides.
-            </Callout>
-          )
-        )}
-        {/* The bar says which model and why it cannot run; this says what that costs you here,
-            rather than leaving the two dispatch cards to vanish without explanation. */}
-        {!model && (
-          <Callout tone="warning" title="Nothing to dispatch with">
-            The model this production is set to cannot run. Pick one above, or fix it in Settings — nothing is
-            re-routed for you.
-          </Callout>
-        )}
-        {plans && overlong.length === 0 && !plans.perShot.warnings.payloadOverflow && (
-          <div style={{ display: "flex", gap: 14 }}>
-            <div className="fy-boardcard" style={{ flex: 1 }}>
-              <div className="fy-boardcard__head">Per shot</div>
-              <div className="fy-boardcard__body">
-                One clip per shot, each seeded by its own frame. Any shot retries alone; cast stays pinned per
-                shot.
-              </div>
-              <div className="fy-boardcard__mono">
-                est. {usd(plans.perShot.totalEstimatedMicroUsd)}
-                {compiled?.perShot?.map((pass) => (
-                  <span key={pass.target.coversShots.join("-")}>
-                    {"\n"}
-                    {pass.target.kind === "shot"
-                      ? `shot ${pass.target.coversShots[0]!.replace("sh_", "")}`
-                      : "pass"}{" "}
-                    · {passRow(pass)}
-                  </span>
-                ))}
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    if (worldId && prodId && sceneFile && model) {
-                      dispatchScene(
-                        worldId,
-                        prodId,
-                        sceneFile,
-                        "per-shot",
-                        model.id,
-                        resolution,
-                        choice.tier,
-                      );
-                      navigate(`/w/${worldId}/p/${prodId}/generate`);
-                    }
-                  }}
-                >
-                  Dispatch per shot · {usd(plans.perShot.totalEstimatedMicroUsd)}
-                </Button>
-              </div>
-            </div>
-            <div className="fy-boardcard" style={{ flex: 1 }}>
-              <div className="fy-boardcard__head">Whole scene</div>
-              <div className="fy-boardcard__body">
-                Best motion continuity — but a retry re-runs its whole pass.
-              </div>
-              {plans.wholeScene.pack.ok && overlongPasses.length > 0 ? (
-                <div className="fy-boardcard__body" style={{ color: "var(--destructive)" }}>
-                  pass {overlongPasses[0]!.passIndex} runs {seconds(overlongPasses[0]!.durationSec)} — the
-                  longest this route makes is {seconds(overlongPasses[0]!.longestSec)}
-                  {overlongPasses[0]!.becauseReferences ? ", because the pass carries references" : ""}.
-                  Shorten a shot or pick another model.
-                </div>
-              ) : plans.wholeScene.pack.ok ? (
-                <>
-                  <div className="fy-boardcard__mono">
-                    {plans.wholeScene.pack.passes.length} pass
-                    {plans.wholeScene.pack.passes.length === 1 ? "" : "es"} under the{" "}
-                    {model!.limits.maxDurationSec ?? "∞"}s cap
-                    {plans.wholeScene.pack.passes.map((p, i) => (
-                      <span key={p.index}>
-                        {"\n"}pass {p.index} · shots {p.plan.map((e) => e.number).join(", ")}
-                        {compiled?.wholeScene?.[i]
-                          ? ` · ${passRow(compiled.wholeScene[i]!)}`
-                          : ` · ${seconds(p.durationSec)}`}
-                      </span>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                    <Button
-                      variant="primary"
-                      onClick={() => {
-                        if (worldId && prodId && sceneFile && model) {
-                          dispatchScene(
-                            worldId,
-                            prodId,
-                            sceneFile,
-                            "whole-scene",
-                            model.id,
-                            resolution,
-                            choice.tier,
-                          );
-                          navigate(`/w/${worldId}/p/${prodId}/generate`);
-                        }
-                      }}
-                    >
-                      Dispatch whole scene · {usd(plans.wholeScene.totalEstimatedMicroUsd)}
-                    </Button>
-                    {/* SPEC-024: a plan chains each pass behind the previous pass's boundary
-                        frame — offered exactly where a route exists to receive one, priced from
-                        the CHAINED compile, because that is what the plan authorizes. */}
-                    {model &&
-                      frameDispatchFor(model, 1) !== null &&
-                      plans.wholeScene.pack.passes.length > 1 &&
-                      compiled?.chained && (
-                        <>
-                          <div className="fy-boardcard__mono">
-                            {compiled.chained.map((pass, i) => (
-                              <span key={pass.target.coversShots.join("-")}>
-                                {"\n"}plan pass {i} · {passRow(pass)}
-                              </span>
-                            ))}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              if (worldId && prodId && sceneFile && model) {
-                                dispatchScenePlanned(
-                                  worldId,
-                                  prodId,
-                                  sceneFile,
-                                  "whole-scene",
-                                  model.id,
-                                  "review-gated",
-                                  resolution,
-                                  choice.tier,
-                                );
-                              }
-                            }}
-                          >
-                            Plan · continuity chain · ask before each pass
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              if (worldId && prodId && sceneFile && model) {
-                                dispatchScenePlanned(
-                                  worldId,
-                                  prodId,
-                                  sceneFile,
-                                  "whole-scene",
-                                  model.id,
-                                  "pre-authorized",
-                                  resolution,
-                                  choice.tier,
-                                );
-                              }
-                            }}
-                          >
-                            Plan · continuity chain · pre-authorize{" "}
-                            {usd(compiled.chained.reduce((sum, pass) => sum + pass.estimatedMicroUsd, 0))}
-                          </Button>
-                        </>
-                      )}
-                  </div>
-                </>
-              ) : (
-                <Callout tone="warning" title="Whole-scene unavailable">
-                  shot {plans.wholeScene.pack.oversizeShot.number} runs{" "}
-                  {plans.wholeScene.pack.oversizeShot.durationSec}s — longer than the{" "}
-                  {plans.wholeScene.pack.oversizeShot.capSec}s cap, and half a shot cannot be reviewed.
-                </Callout>
-              )}
-            </div>
-          </div>
-        )}
-        {worldId && prodId && <PlansPanel worldId={worldId} prodId={prodId} />}
-      </div>
-    </div>
-  );
 }
 
 export function VoiceLineDialogScreen() {
@@ -4119,7 +3116,7 @@ function useCutTransport(totalSec: number): Transport {
     timeRef.current = totalSec;
     setTime(totalSec);
   }, [totalSec]);
-  useTransport({
+  const setPosition = useTransport({
     playing,
     durationSec: totalSec,
     timeRef,
@@ -4129,10 +3126,10 @@ function useCutTransport(totalSec: number): Transport {
   const seek = useCallback(
     (seconds: number) => {
       const at = Math.min(Math.max(0, seconds), totalSec);
-      timeRef.current = at;
+      setPosition(at);
       setTime(at);
     },
-    [totalSec],
+    [totalSec, setPosition],
   );
   return { playing, time, timeRef, setPlaying, seek };
 }
@@ -5374,14 +4371,12 @@ function ContactSheet({
   worldId,
   prodId,
   onShotLens,
-  onScene,
 }: {
   production: ReturnType<typeof useProduction>["production"];
   worldSlug: string | undefined;
   worldId: string | undefined;
   prodId: string | undefined;
   onShotLens: () => void;
-  onScene: () => void;
 }) {
   const stills = useMemo(
     () => production?.takes.filter((t) => t.kind === "frame" || t.kind === "still") ?? [],
@@ -5394,9 +4389,6 @@ function ContactSheet({
         <span className="fy-seg">
           <button type="button" className="fy-seg__item" onClick={onShotLens}>
             Shot
-          </button>
-          <button type="button" className="fy-seg__item" onClick={onScene}>
-            Scene
           </button>
           <span className="fy-seg__item fy-seg__item--active">Contact sheet</span>
         </span>

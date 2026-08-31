@@ -47,12 +47,11 @@ import {
   PROVIDERS,
   planScene,
   previewLineFor,
-  SceneRecordSchema,
-  linearizeSceneFlow,
   type ConversationId,
   type WorldChatCheckReceipt,
   type Job,
   type FrameRunQuote,
+  type FrameRunState,
   voiceJobFormat,
   voiceJobReadIdentity,
   voiceJobIsCandidatePreview,
@@ -125,10 +124,8 @@ import {
   deleteScene,
   restoreScene,
   saveChapter,
-  saveScene,
   setProductionAspect,
   setProductionModel,
-  setPromptOverride,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -158,6 +155,7 @@ import {
   type FrameRunDriverDeps,
   type CompileFrameRunInput,
 } from "./productions/frame-run.js";
+import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import {
   appendTraversal,
   exportInteractive,
@@ -207,7 +205,6 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
-import { SceneFlowRefused } from "./productions/scene-record.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -2523,7 +2520,7 @@ export class Coordinator {
       ...(settings ? { presets: settings.presets } : {}),
       ...(seededSpend ? { spend: seededSpend } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
-      ...(settings ? { research: settings.research, internal: settings.internal } : {}),
+      ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
       // restart showed the shipped local voice while a cloud one was actually stored.
@@ -4946,7 +4943,7 @@ export class Coordinator {
         // turning research on and being refused anyway, which is the failure this setting has
         // already had once. The MCP tool asks settings per call and needs no equivalent.
         this.researchWeb = settings.research.web;
-        this.readModel.seedAppConfig({ research: settings.research, internal: settings.internal });
+        this.readModel.seedAppConfig({ research: settings.research });
         this.transport.broadcastSnapshot();
         return;
       }
@@ -5324,60 +5321,8 @@ export class Coordinator {
         }
         return;
       }
-      case "stage-scene-edit": {
-        const gate = this.opts.provider.gate?.();
-        const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        try {
-          const scene = SceneRecordSchema.parse(msg.scene);
-          const sequence = linearizeSceneFlow(scene);
-          if (sequence.kind === "invalid") throw new SceneFlowRefused(sequence.findings);
-          await gate.stage({
-            kind: "scene-edit",
-            summary: msg.summary,
-            source: "form",
-            targets: [
-              {
-                path: `productions/${msg.productionId}/scenes/${msg.sceneFile}.json`,
-                content: JSON.stringify(scene, null, 2) + "\n",
-              },
-            ],
-          });
-          await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "save-scene": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        /*
-         * A refusal is said, not swallowed (review 2026-08-22). The bible's editor keeps its
-         * text on a refused save; the storyboard's editors are uncontrolled and repaint from
-         * the snapshot, so a swallowed refusal threw the typed text away with nothing said.
-         */
-        await saveScene(store, {
-          productionId: msg.productionId,
-          sceneFile: msg.sceneFile,
-          scene: msg.scene,
-          ...(msg.baseVersion !== undefined ? { baseVersion: msg.baseVersion } : {}),
-        }).catch((err: unknown) => {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "scene.write-refused",
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            sceneFile: msg.sceneFile,
-            reason: err instanceof Error ? err.message : "the save could not be applied",
-          });
-        });
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
       /*
-       * One named scene edit (SPEC-029 R-36). `save-scene` above rewrites the document; this
-       * says what changed, refuses against a moved version, and commits one validated record
+       * One named scene edit (SPEC-029 R-36). It says what changed, refuses against a moved version, and commits one validated record
        * or nothing at all — including the deleted shot's selection, in the same commit.
        */
       case "scene-command": {
@@ -5821,6 +5766,7 @@ export class Coordinator {
             mode: msg.mode,
             modelId: msg.modelId,
             scope: msg.scope,
+            ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
             includedCount: 0,
             steps: [],
             estimatedMicroUsd: null,
@@ -5871,6 +5817,7 @@ export class Coordinator {
               model,
               mode: msg.mode,
               scope: msg.scope,
+              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
               boardCapSec: videoModel?.limits.maxDurationSec ?? 10,
               boardPanelCap: videoModel?.limits.storyboardPanels,
               eligible: modelEligible(model, {
@@ -5895,6 +5842,7 @@ export class Coordinator {
               mode: msg.mode,
               modelId: msg.modelId,
               scope: msg.scope,
+              ...(msg.shotId !== undefined ? { shotId: msg.shotId } : {}),
               clock: () => new Date().toISOString(),
               compile,
             });
@@ -6188,18 +6136,6 @@ export class Coordinator {
             detail: { productionId: msg.productionId, capability: msg.capability, modelId: msg.modelId },
           });
         }
-        await this.refreshWorldSnapshot(msg.worldId);
-        return;
-      }
-      case "set-prompt-override": {
-        const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await setPromptOverride(store, store.getBundle(), {
-          productionId: msg.productionId,
-          sceneFile: msg.sceneFile,
-          shotId: msg.shotId,
-          text: msg.text,
-        }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -7333,7 +7269,7 @@ export class Coordinator {
             });
             return null;
           });
-          if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+          if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
           await this.refreshWorldSnapshot(msg.worldId);
           await this.refreshBench(msg.worldId, msg.sessionId);
           answer(true);
@@ -7359,7 +7295,7 @@ export class Coordinator {
               { at: this.nowIso(), requestId: msg.requestId },
             ).catch(() => {});
             const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch(() => null);
-            if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+            if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
             await this.refreshWorldSnapshot(msg.worldId);
             await this.refreshBench(msg.worldId, msg.sessionId);
             answer(true);
@@ -10198,7 +10134,9 @@ export class Coordinator {
         await advanceFrameRun(store, production.meta.id, run.id, this.frameRunDriverDeps()).catch(() => {});
         const current = await readFrameRun(store, production.meta.id, run.id);
         if (current !== null) {
-          states.push(await frameRunState(store, production.meta.id, current, this.jobQueue?.listJobs() ?? []));
+          const state = await frameRunState(store, production.meta.id, current, this.jobQueue?.listJobs() ?? []);
+          states.push(state);
+          await this.recordTerminalFrameRunOutcome(store, state);
         }
       }
     }
@@ -10223,14 +10161,43 @@ export class Coordinator {
   ): Promise<void> {
     const run = await readFrameRun(store, productionId, runId);
     if (run === null) return;
+    const state = await frameRunState(store, productionId, run, this.jobQueue?.listJobs() ?? []);
     this.emit({
       at: new Date().toISOString(),
       type: "production.frame-run",
       worldId,
       productionId,
       runId: run.id,
-      state: await frameRunState(store, productionId, run, this.jobQueue?.listJobs() ?? []),
+      state,
     });
+    await this.recordTerminalFrameRunOutcome(store, state);
+  }
+
+  private async recordTerminalFrameRunOutcome(store: WorldStore, state: FrameRunState): Promise<void> {
+    if (state.status !== "completed" && state.status !== "cancelled") return;
+    if (
+      state.status === "cancelled" &&
+      state.steps.some((step, index) =>
+        state.run.steps[index]?.jobId !== null &&
+        !["succeeded", "failed", "cancelled", "missing", "reconciled", "superseded"].includes(step.status),
+      )
+    ) {
+      // Provider success is not local success until finalization files the frame. Future steps
+      // that cancellation never enqueued do not owe anything and therefore do not hold narration.
+      return;
+    }
+    try {
+      const conversationId = await recordFrameRunOutcome(store, state);
+      if (!this.stillOpen(store)) return;
+      await this.refreshConversationOutcome(store, conversationId);
+    } catch (error) {
+      // The folded run remains authoritative and recovery retries this deterministic request.
+      void this.appLog?.append({
+        kind: "frame-run.outcome-failed",
+        runId: state.run.id,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   private async advanceFrameRunForJob(job: Job): Promise<void> {
@@ -10394,7 +10361,7 @@ export class Coordinator {
         });
         return null;
       });
-      if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+      if (conversationId !== null) await this.refreshConversationOutcome(store, conversationId);
       touched = true;
     }
     return touched;
@@ -10775,10 +10742,16 @@ export class Coordinator {
     this.readModel.setConversations(summaries);
   }
 
-  private async refreshBenchOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
-    await this.refreshConversations(store);
+  private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
+    const { summaries } = await discoverConversations(store.dir);
+    if (!this.stillOpen(store)) return;
+    this.readModel.setConversations(summaries);
     if (this.getState().worldChat?.conversationId === conversationId) {
       await this.openWorldChat(store, conversationId);
+    } else {
+      // A terminal run can create the scene's first thread. Publishing the new summary lets the
+      // mounted dock discover and open it instead of waiting for unrelated navigation.
+      this.transport.broadcastSnapshot();
     }
   }
 

@@ -251,6 +251,7 @@ export interface CompileFrameRunInput {
   model: ManifestModel;
   mode: "per-shot" | "board";
   scope: "missing" | "all";
+  shotId?: string;
   boardCapSec: number;
   boardPanelCap?: number;
   /** Local recipe/engine identities resolved at authorization, never at delayed enqueue. */
@@ -269,6 +270,7 @@ export interface QuoteFrameRunInput {
   mode: "per-shot" | "board";
   modelId: string;
   scope: "missing" | "all";
+  shotId?: string;
   clock: () => string;
   compile: () => CompileFrameRunInput;
 }
@@ -287,7 +289,9 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
   if (!input.eligible) throw new Error(`${input.model.displayName} is not currently eligible to run`);
   const shots = orderedShots(input.scene);
   const frameByShot = new Map(shots.map((shot) => [shot.id, selectedFrame(input.production, input.world, shot.id)]));
-  const included = shots.filter((shot) => input.scope === "all" || frameByShot.get(shot.id) === null);
+  const requested = input.shotId === undefined ? shots : shots.filter((shot) => shot.id === input.shotId);
+  if (input.shotId !== undefined && requested.length === 0) throw new Error(`shot ${input.shotId} is not in this scene`);
+  const included = requested.filter((shot) => input.scope === "all" || frameByShot.get(shot.id) === null);
   if (included.length === 0) throw new Error("nothing to generate - this scope contains zero shots");
 
   const aspect = productionAspect(input.production.meta);
@@ -545,6 +549,7 @@ function quoteProjection(run: FrameRun, input: CompileFrameRunInput) {
     mode: input.mode,
     modelId: input.model.id,
     scope: input.scope,
+    ...(input.shotId !== undefined ? { shotId: input.shotId } : {}),
     steps: run.steps.map((step) => {
       const { frameRun: _frameRun, frameRunStep: _frameRunStep, ...stableParams } = step.dispatch.params;
       return {
@@ -595,6 +600,7 @@ export async function quoteFrameRun(store: WorldStore, input: QuoteFrameRunInput
         mode: current.mode,
         modelId: current.model.id,
         scope: current.scope,
+        ...(current.shotId !== undefined ? { shotId: current.shotId } : {}),
         includedCount: new Set(run.steps.flatMap((step) => step.updateShotIds)).size,
         steps: run.steps.map((step) => ({
           label: step.label,
@@ -618,6 +624,7 @@ export async function quoteFrameRun(store: WorldStore, input: QuoteFrameRunInput
         mode: input.mode,
         modelId: input.modelId,
         scope: input.scope,
+        ...(input.shotId !== undefined ? { shotId: input.shotId } : {}),
         includedCount: 0,
         steps: [],
         estimatedMicroUsd: null,
@@ -642,7 +649,8 @@ export async function startFrameRun(store: WorldStore, input: StartFrameRunInput
       quote.sceneId !== current.scene.id ||
       quote.mode !== current.mode ||
       quote.modelId !== current.model.id ||
-      quote.scope !== current.scope
+      quote.scope !== current.scope ||
+      quote.shotId !== current.shotId
     ) throw new Error("the frame-run options do not match the quote");
     const run = await compileFrameRun(current);
     const signature = quoteSignature(run, current);

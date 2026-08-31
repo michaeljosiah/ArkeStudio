@@ -8,6 +8,7 @@ import {
   deriveCut,
   type ExportPlan,
   type Job,
+  type ProductionBundle,
 } from "@arke-studio/contracts";
 import { closeOnCleanup, tempDir } from "../tmp.js";
 import { readChanges } from "../../src/world/change-writer.js";
@@ -16,7 +17,7 @@ import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/expor
 import { acceptTake, rejectTake, setTrim } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
-import { orderedShots, writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots, routingFindings } from "@arke-studio/contracts";
 
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -407,7 +408,7 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
       "re-accepting the same predecessor invalidates nothing",
     );
     const reordered = productionWithEdge();
-    reordered.scenes = reordered.scenes.map((record) => writerSceneView(record)).map((scene) =>
+    reordered.scenes = reordered.scenes.map((record) => legacySceneView(record)).map((scene) =>
       scene.shots.some((shot) => shot.id === "sh_13")
         ? {
             ...scene,
@@ -462,34 +463,74 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     await store.close();
   });
 
-  it("does not treat the previous scene's last shot as a continuation predecessor", async () => {
+  it("does not treat either Interactive route into a scene as its first shot's predecessor", async () => {
     const { store } = await open();
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
-    const predecessor = "tk_01J8F0000000000000000000B2";
-    const continuation = "tk_01J8D0000000000000000000D4";
-    const firstScene = production.scenes[0]!;
-    const allShots = production.scenes.flatMap((scene) => orderedShots(scene));
-    const firstShot = allShots.find((shot) => shot.id === "sh_12")!;
-    const secondShot = allShots.find((shot) => shot.id === "sh_13")!;
-    const split = {
+    const leftTakeId = "tk_01J8F0000000000000000000B2";
+    const rightTakeId = "tk_01J8D0000000000000000000D4";
+    const joinTakeId = "tk_01J8E0000000000000000000E5";
+    const source = legacySceneView(
+      production.scenes.find((scene) => orderedShots(scene).some((shot) => shot.id === "sh_12"))!,
+    );
+    const shot = (id: string) => source.shots.find((candidate) => candidate.id === id)!;
+    const scenes = [
+      { ...source, id: "sc_start", number: 1, slug: "start", shots: [shot("sh_15")] },
+      { ...source, id: "sc_left", number: 2, slug: "left", shots: [shot("sh_12")] },
+      { ...source, id: "sc_right", number: 3, slug: "right", shots: [shot("sh_13")] },
+      { ...source, id: "sc_join", number: 4, slug: "join", shots: [shot("sh_14")] },
+    ];
+    const routed = (continuedFrom: string): ProductionBundle => ({
       ...production,
-      scenes: [
-        { ...firstScene, shots: [firstShot] },
+      meta: { ...production.meta, medium: "interactive-video", kind: "interactive" },
+      scenes,
+      routing: {
+        version: 1,
+        start: "sc_start",
+        choices: [
+          { id: "ch_left", from: "sc_start", label: "Left", to: "sc_left" },
+          { id: "ch_right", from: "sc_start", label: "Right", to: "sc_right" },
+          { id: "ch_left-join", from: "sc_left", label: "Join", to: "sc_join" },
+          { id: "ch_right-join", from: "sc_right", label: "Join", to: "sc_join" },
+        ],
+        endings: [{ sceneId: "sc_join", title: "Joined" }],
+        excluded: [],
+        groups: [],
+      },
+      takes: [
+        ...production.takes,
         {
-          ...firstScene,
-          id: "sc_cross",
-          number: firstScene.number + 1,
-          slug: "cross-scene",
-          shots: [secondShot],
+          ...production.takes.find((take) => take.id === rightTakeId)!,
+          id: joinTakeId,
+          coversShots: ["sh_14"],
+          continuedFrom: continuedFrom as never,
         },
       ],
-      takes: production.takes.map((take) =>
-        take.id === continuation ? { ...take, continuedFrom: predecessor as never } : take,
+    });
+
+    await acceptTake(store, routed(leftTakeId), { takeId: rightTakeId, shotId: "sh_13", by: "user" });
+    const selected = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections;
+    assert.equal(selected["sh_12"]?.acceptedTakeId, leftTakeId);
+    assert.equal(selected["sh_13"]?.acceptedTakeId, rightTakeId);
+    const reconverged = routed(leftTakeId);
+    assert.ok(
+      routingFindings(reconverged.routing!, reconverged.scenes).some(
+        (finding) => finding.kind === "reconvergence" && finding.sceneIds.includes("sc_join"),
       ),
-    };
-    await assert.rejects(
-      () => acceptTake(store, split, { takeId: continuation, shotId: "sh_13", by: "user" }),
-      /in this scene/,
+      "the target scene is reached from both predecessor scenes",
+    );
+    assert.equal(orderedShots(scenes[3]!).at(0)?.id, "sh_14", "the continuation target is the scene's first shot");
+
+    for (const predecessor of [leftTakeId, rightTakeId]) {
+      await assert.rejects(
+        () => acceptTake(store, routed(predecessor), { takeId: joinTakeId, shotId: "sh_14", by: "user" }),
+        /in this scene/,
+        `${predecessor} belongs to an inbound route, not the target scene`,
+      );
+    }
+    assert.equal(
+      store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections["sh_14"],
+      undefined,
+      "neither route selects continuation footage for the join scene",
     );
     await store.close();
   });

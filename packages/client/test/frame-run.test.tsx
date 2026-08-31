@@ -16,8 +16,10 @@ import {
   type FrameRunQuote,
   type FrameRunState,
   type ManifestModel,
+  type WorldChatWorkspace,
 } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { ConversationTranscript } from "../src/components/conversation.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import {
   __applyEventForTest,
@@ -47,6 +49,7 @@ const PATH = `/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/sc_04`;
 const RUN_ID = "fr_01J8E0000000000000000000R1";
 const JOB_1 = "jb_01J8E0000000000000000000R1";
 const JOB_2 = "jb_01J8E0000000000000000000R2";
+const JOB_3 = "jb_01J8E0000000000000000000R3";
 const QUOTE_ID = "01J8E0000000000000000000Q2";
 const SIGNATURE = `sha256:${"a".repeat(64)}`;
 
@@ -158,7 +161,6 @@ function frameState(options: {
 
 function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noShots?: boolean; imageModels?: ManifestModel[] } = {}): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
-  state.app.internal.sceneWorkspace = true;
   const video = state.app.manifest!.models.find((model) => model.capability === "video")!;
   video.limits.storyboardPanels = 6;
   state.app.manifest!.models.push(...(options.imageModels ?? [IMAGE_MODEL]));
@@ -171,6 +173,52 @@ function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noSho
     for (const shot of orderedShots(scene)) production.selections[shot.id] = { acceptedTakeId: frameTake.id, trimInSec: 0 };
   }
   return state;
+}
+
+function retriedFrameState(): FrameRunState {
+  const failed = frameState({
+    first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
+    second: { status: "succeeded", finalization: "complete", etaSec: null },
+    secondLanding: "filed",
+  });
+  const run = structuredClone(failed.run);
+  run.steps.push({
+    ...step(2, "per-shot", ["sh_12"], JOB_3),
+    sourceStepIndex: 0,
+    grain: "step-retry",
+    retryOf: 0,
+    landingOutcomes: { sh_12: "filed" },
+  });
+  run.cursor = run.steps.length;
+  return FrameRunStateSchema.parse(foldFrameRun(run, [
+    { id: JOB_1, status: "failed", failureClass: "transient", error: "provider timed out" },
+    { id: JOB_2, status: "succeeded", finalization: "complete" },
+    { id: JOB_3, status: "succeeded", finalization: "complete" },
+  ]));
+}
+
+function reportWorkspace(runId = RUN_ID): WorldChatWorkspace {
+  return {
+    conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+    status: "open",
+    initiative: "collaborate",
+    hasMore: false,
+    runStatus: null,
+    runStartedAt: null,
+    retrievalUnavailable: false,
+    attachments: [],
+    seq: 1,
+    points: [],
+    messages: [{
+      id: "msg_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      role: "studio",
+      text: "I finished the frame run.",
+      receipts: [],
+      refusals: [],
+      frameRunOutcome: { runId, productionId: "saltlight", sceneId: "sc_04" },
+      createdAt: "2026-08-30T12:02:00Z",
+    }],
+  };
 }
 
 function stateWithBoardSheet(dismissed = false, fixedSecond = false): ClientState {
@@ -240,6 +288,8 @@ function stateWithBoardSheet(dismissed = false, fixedSecond = false): ClientStat
 }
 
 function quoteFor(message: Extract<ClientMessage, { kind: "frame-run-quote" }>, blockedReason: string | null = null): FrameRunQuote {
+  const shotIds = message.shotId === undefined ? ["sh_12", "sh_13"] : [message.shotId];
+  const estimatedMicroUsd = message.shotId === undefined ? 81_234 : 37_000;
   return {
     requestId: message.requestId,
     quoteId: QUOTE_ID,
@@ -251,9 +301,15 @@ function quoteFor(message: Extract<ClientMessage, { kind: "frame-run-quote" }>, 
     mode: message.mode,
     modelId: message.modelId,
     scope: message.scope,
-    includedCount: blockedReason === null ? 2 : 0,
-    steps: blockedReason === null ? [{ label: "Board A", requestShotIds: ["sh_12", "sh_13"], updateShotIds: ["sh_12", "sh_13"], estimatedMicroUsd: 81_234 }] : [],
-    estimatedMicroUsd: blockedReason === null ? 81_234 : null,
+    ...(message.shotId === undefined ? {} : { shotId: message.shotId }),
+    includedCount: blockedReason === null ? shotIds.length : 0,
+    steps: blockedReason === null ? [{
+      label: message.shotId === undefined ? "Board A" : `Shot ${message.shotId.replace(/^sh_0*/, "")}`,
+      requestShotIds: shotIds,
+      updateShotIds: shotIds,
+      estimatedMicroUsd,
+    }] : [],
+    estimatedMicroUsd: blockedReason === null ? estimatedMicroUsd : null,
     blockedReason,
     quotedAt: "2026-08-30T12:00:01Z",
   };
@@ -310,6 +366,37 @@ async function mount(state: ClientState, sent: ClientMessage[] = [], autoQuote =
   return result;
 }
 
+async function mountReport(
+  runs: FrameRunState[],
+  sent: ClientMessage[] = [],
+  selected: string[] = [],
+  outcomeRunId = RUN_ID,
+): Promise<Mounted> {
+  __setBridgeForTest(capture(sent, false));
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    __setStateForTest(stateWith({ runs }));
+    root.render(
+      <MemoryRouter initialEntries={[PATH]}>
+        <ConversationTranscript
+          workspace={reportWorkspace(outcomeRunId)}
+          running={false}
+          progress={null}
+          failure={null}
+          canRetry
+          frameRuns={runs}
+          onSelectShot={(shotId) => selected.push(shotId)}
+        />
+      </MemoryRouter>,
+    );
+  });
+  const result = { container, root };
+  mounted.push(result);
+  return result;
+}
+
 afterEach(async () => {
   for (const item of mounted.splice(0)) {
     await act(async () => item.root.unmount());
@@ -333,7 +420,10 @@ describe("frame-run quote authorization", () => {
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);
-    assert.deepEqual(sent[0], { kind: "frame-run-list", worldId: FIXTURE_WORLD_ID, productionId: "saltlight" });
+    assert.deepEqual(
+      sent.find((message) => message.kind === "frame-run-list"),
+      { kind: "frame-run-list", worldId: FIXTURE_WORLD_ID, productionId: "saltlight" },
+    );
     await click(named(item, "Generate frames"));
     const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
     assert.deepEqual({ ...request, requestId: "request" }, {
@@ -371,6 +461,38 @@ describe("frame-run quote authorization", () => {
     await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
     assert.equal(one(item, ".fy-swgen"), null, "the matching acceptance closes it");
     assert.equal(__stateForTest().frameRunStartResults[`${request.requestId}:${QUOTE_ID}`], undefined, "accepted result is consumed");
+  });
+
+  it("quotes and starts only the row whose Generate frame control was clicked", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWith(), sent);
+    const targetShotId = "sh_13";
+    const row = one(item, `[data-testid="workspace-row-${targetShotId}"]`)!;
+    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Generate frame") as HTMLElement);
+
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.deepEqual(
+      { shotId: request.shotId, mode: request.mode, scope: request.scope },
+      { shotId: targetShotId, mode: "per-shot", scope: "all" },
+    );
+    const quote = __stateForTest().frameRunQuotes[request.requestId]!;
+    assert.equal(quote.shotId, targetShotId);
+    assert.equal(quote.includedCount, 1);
+    assert.deepEqual(quote.steps, [{
+      label: "Shot 13",
+      requestShotIds: [targetShotId],
+      updateShotIds: [targetShotId],
+      estimatedMicroUsd: 37_000,
+    }]);
+
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    const start = sent.at(-1);
+    assert.ok(start && start.kind === "frame-run-start");
+    assert.deepEqual(
+      { shotId: start.shotId, mode: start.mode, scope: start.scope },
+      { shotId: targetShotId, mode: "per-shot", scope: "all" },
+    );
+    assert.deepEqual(quote.steps.flatMap((step) => step.requestShotIds), [targetShotId], "the quote contains no second shot");
   });
 
   it("ignores an unrelated start result", async () => {
@@ -578,6 +700,56 @@ describe("durable run projections", () => {
     await click(one(item, '[aria-label="Close generated frames"]')!);
     await click(one(item, '[aria-label="Dismiss frame run"]')!);
     assert.equal(sent.at(-1)?.kind, "frame-run-dismiss");
+  });
+});
+
+describe("durable frame-run reports in Arke", () => {
+  it("joins only the exact causal run and exposes its steps, failure, selection, and retry", async () => {
+    const failed = frameState({
+      first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      secondLanding: "filed",
+    });
+    const mismatched = { ...failed, productionId: "another-production" };
+    const loading = await mountReport([mismatched]);
+    assert.match(one(loading, ".fy-chat__runreport")?.textContent ?? "", /Loading run report/);
+
+    const sent: ClientMessage[] = [];
+    const selected: string[] = [];
+    const item = await mountReport([failed], sent, selected);
+    assert.equal(all(item, '.fy-chat__runreport-row[data-kind="step"]').length, 2);
+    const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
+    assert.match(failure.textContent ?? "", /provider timed out/);
+    await click(failure.querySelector("button") as HTMLElement);
+    assert.deepEqual(selected, ["sh_12"]);
+    await click(failure.querySelector(".fy-chat__runreport-retry") as HTMLElement);
+    assert.deepEqual(sent.at(-1), {
+      kind: "frame-run-retry-step",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      runId: RUN_ID,
+      stepIndex: 0,
+    });
+  });
+
+  it("keeps the original failure words after a successful retry without offering it again", async () => {
+    const item = await mountReport([retriedFrameState()]);
+    const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
+    assert.equal(failure.getAttribute("data-state"), "complete");
+    assert.match(failure.textContent ?? "", /provider timed out · retried/);
+    assert.equal(failure.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
+  it("does not offer retry for a terminal refusal", async () => {
+    const terminal = frameState({
+      first: { status: "failed", failureClass: "terminal", error: "content policy", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      secondLanding: "filed",
+    });
+    const item = await mountReport([terminal]);
+    const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
+    assert.match(failure.textContent ?? "", /content policy/);
+    assert.equal(failure.querySelector(".fy-chat__runreport-retry"), null);
   });
 });
 

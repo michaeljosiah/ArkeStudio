@@ -6,7 +6,7 @@ import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import { writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView } from "@arke-studio/contracts";
 
 /**
  * The navigation test (SPEC-001 R-7): every §2.9 screen mounts at its route, rendering the
@@ -613,7 +613,7 @@ describe("screen inventory", () => {
             ? {
                 ...production,
                 meta: { ...production.meta, styleOverride: "Bleached documentary realism" },
-                scenes: production.scenes.map((record) => writerSceneView(record)).map((scene) => ({
+                scenes: production.scenes.map((record) => legacySceneView(record)).map((scene) => ({
                   ...scene,
                   shots: scene.shots.map((shot, index) =>
                     index === 0

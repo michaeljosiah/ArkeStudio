@@ -8,6 +8,7 @@ import {
   onMediaReady,
   resetMediaElement,
   syncMediaElement,
+  transportPosition,
 } from "../src/lib/playback-engine.js";
 import { mediaTimeFor, spanAt, spineSpans, storySpans } from "../src/lib/cut-playback.js";
 import type { DerivedCut, DerivedSpineCut } from "@arke-studio/contracts";
@@ -26,6 +27,13 @@ interface Fake extends HTMLMediaElement {
   __srcSets: string[];
   __fireReady: () => void;
 }
+
+describe("the transport clock", () => {
+  it("derives position from an absolute start timestamp", () => {
+    assert.equal(transportPosition(2, 1_000, 3_500, 10), 4.5);
+    assert.equal(transportPosition(2, 1_000, 30_000, 10), 10, "a delayed frame lands on the end, not one tick later");
+  });
+});
 
 function fakeElement(over: Partial<{ readyState: number; paused: boolean; currentTime: number }> = {}): Fake {
   const el = {

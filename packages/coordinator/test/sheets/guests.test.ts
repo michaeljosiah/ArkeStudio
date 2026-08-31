@@ -29,7 +29,7 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
-import { writerSceneView } from "@arke-studio/contracts";
+import { legacySceneView } from "@arke-studio/contracts";
 
 /**
  * Production-scoped casts — the guest (SPEC-020).
@@ -220,7 +220,7 @@ describe("resolution ignores scope, dispatch warns (R-5, R-6, D3)", () => {
     const store = await openAt(dir);
     const bundle = store.getBundle();
     const production = bundle.productions.find((p) => p.meta.id === "saltlight")!;
-    const base = writerSceneView(production.scenes[0]!);
+    const base = legacySceneView(production.scenes[0]!);
     const scene: Scene = {
       ...base,
       shots: [{ ...base.shots[0]!, id: "sh_1", number: 1, description: "@the-barman pours." }],
@@ -250,7 +250,7 @@ describe("resolution ignores scope, dispatch warns (R-5, R-6, D3)", () => {
     await writeGuest(dir, { id: "the-barman", name: "The barman", production: "saltlight" });
     const store = await openAt(dir);
     const bundle = store.getBundle();
-    const base = writerSceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const base = legacySceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const plan = planScene(
       {
         world: bundle.meta,
@@ -270,7 +270,7 @@ describe("resolution ignores scope, dispatch warns (R-5, R-6, D3)", () => {
   it("a world sheet never warns, whichever production cites it", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
-    const base = writerSceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const base = legacySceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const plan = planScene(
       {
         world: bundle.meta,
@@ -583,7 +583,7 @@ describe("an inherited location is a citation too (R-6)", () => {
     await writeGuest(dir, { id: "the-inn", name: "The Inn", production: "the-ledger-of-nights", type: "location" });
     const store = await openAt(dir);
     const bundle = store.getBundle();
-    const base = writerSceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const base = legacySceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     // No @mention anywhere — the citation is the inheritance, which reaches the prompt and the
     // reference budget without ever entering the resolved cast.
     const scene: Scene = {
@@ -613,7 +613,7 @@ describe("an inherited location is a citation too (R-6)", () => {
     await writeGuest(dir, { id: "the-inn", name: "The Inn", production: "the-ledger-of-nights", type: "location" });
     const store = await openAt(dir);
     const bundle = store.getBundle();
-    const base = writerSceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
+    const base = legacySceneView(bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!);
     const plan = planScene(
       {
         world: bundle.meta,
