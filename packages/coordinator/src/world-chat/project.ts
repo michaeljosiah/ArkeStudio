@@ -403,6 +403,7 @@ export function projectWorkspace(
       receipts: (receiptsByMessage.get(m.id) ?? []).map(wordReceipt),
       refusals: wordRefusals(loaded.refusals[m.id] ?? []),
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
+      ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       createdAt: m.createdAt,
     })),
     hasMore: loaded.hasMore,

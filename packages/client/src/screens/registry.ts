@@ -77,7 +77,6 @@ export const SCREENS: ScreenEntry[] = [
   { id: "shot-sheet", samplePath: `${P}/scenes/sc_04/shots/sh_12` },
   { id: "new-scene", samplePath: `${P}/scenes/new` },
   { id: "generate-workspace", samplePath: `${P}/generate` },
-  { id: "dispatch-dialog", samplePath: `${P}/generate/dispatch` },
   { id: "voice-line-dialog", samplePath: `${P}/generate/voice-line` },
   { id: "cut", samplePath: `${P}/cut` },
   { id: "audio", samplePath: `${P}/audio` },

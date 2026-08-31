@@ -1,4 +1,4 @@
-import { Route, Routes, useLocation, useNavigate } from "react-router";
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
@@ -58,7 +58,6 @@ import {
   AudioScreen,
   ChapterTreeScreen,
   CutScreen,
-  DispatchDialogScreen,
   ExportsScreen,
   GenerateScreen,
   NewSceneScreen,
@@ -75,7 +74,6 @@ import {
 import { ShotSheetScreen } from "./screens/storyboard.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
-import { Navigate } from "react-router";
 import { QueueToaster } from "./components/queue-toaster.js";
 import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
@@ -128,6 +126,15 @@ export function UpdateTransition() {
       </div>
     </div>
   );
+}
+
+export function retiredDispatchPath(sceneId: string | null): string {
+  return sceneId === null ? "../generate" : `../scenes/${encodeURIComponent(sceneId)}?workspace=1`;
+}
+
+function RetiredDispatchRoute() {
+  const [searchParams] = useSearchParams();
+  return <Navigate to={retiredDispatchPath(searchParams.get("scene"))} replace />;
 }
 
 export function App() {
@@ -258,7 +265,7 @@ export function App() {
           {/* Interactive video's structural authority (epic 401) — linear seasons never route here. */}
           <Route path="branch-map" element={<BranchMapScreen />} />
           <Route path="generate" element={<GenerateScreen />} />
-          <Route path="generate/dispatch" element={<DispatchDialogScreen />} />
+          <Route path="generate/dispatch" element={<RetiredDispatchRoute />} />
           <Route path="generate/voice-line" element={<VoiceLineDialogScreen />} />
           <Route path="cut" element={<CutScreen />} />
           <Route path="audio" element={<AudioScreen />} />

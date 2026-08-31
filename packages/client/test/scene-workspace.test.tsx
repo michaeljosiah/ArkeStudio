@@ -6,7 +6,12 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { insertShot, orderedShots, type ClientMessage, type ClientState, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import {
+  __applyEventForTest,
+  __connectionStatusForTest,
+  __setBridgeForTest,
+  __setStateForTest,
+} from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -98,6 +103,9 @@ const all = (m: Mounted, selector: string): HTMLElement[] =>
 const click = async (element: HTMLElement): Promise<void> => {
   await act(async () => element.click());
 };
+const apply = async (event: Parameters<typeof __applyEventForTest>[0]): Promise<void> => {
+  await act(async () => __applyEventForTest(event));
+};
 
 describe("the flag decides whether the workspace exists at all", () => {
   it("with it off, the scene screen is the one that was always there", async () => {
@@ -112,6 +120,11 @@ describe("the flag decides whether the workspace exists at all", () => {
     assert.ok(q(mounted, '[data-testid="workspace-index"]'), "the scene index (R-22)");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "Storyboard is the default (R-21)");
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
+  });
+
+  it("a retired generation link reaches the workspace even before the rollout flag is on", async () => {
+    const mounted = await mount(false, `${SCENE_PATH}?workspace=1`);
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
   });
 });
 
@@ -276,6 +289,150 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
   });
 });
 
+describe("the generation-session handoff (SPEC-036 R-23)", () => {
+  it("selects a report-linked shot from the scene route", async () => {
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene)[1]!;
+    const mounted = await mount(true, `${SCENE_PATH}?shot=${shot.id}`);
+    assert.match(q(mounted, '[data-testid="workspace-subject"]')?.textContent ?? "", new RegExp(`Shot ${shot.number}`));
+  });
+
+  it("opens the chosen shot and navigates only for its matching answer", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(true);
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene)[0]!;
+    const row = q(mounted, `[data-testid="workspace-row-${shot.id}"]`)!;
+    const actions = row.querySelector(".fy-swedit") as HTMLElement;
+    assert.equal(actions.getAttribute("aria-label"), `Actions for shot ${shot.number}`);
+    await click(actions);
+    assert.equal(actions.getAttribute("aria-expanded"), "true");
+    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Open in generator") as HTMLElement);
+    const command = sent.findLast((message) => message.kind === "bench-open-subject");
+    assert.ok(command && command.kind === "bench-open-subject");
+    assert.deepEqual(command.subject, { kind: "shot", shotId: shot.id });
+    assert.equal(command.productionId, "saltlight");
+    assert.equal(command.sceneId, "sc_04");
+    assert.ok([...row.querySelectorAll("button")].some((button) => button.textContent === "Opening…" && button.disabled));
+
+    await apply({
+      at: "2026-08-31T10:00:00.000Z",
+      type: "bench.subject-opened",
+      worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD",
+      requestId: command.requestId,
+      sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HE",
+    });
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'), "another world's answer is ignored");
+
+    await apply({
+      at: "2026-08-31T10:00:01.000Z",
+      type: "bench.subject-opened",
+      worldId: FIXTURE_WORLD_ID,
+      requestId: command.requestId,
+      sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HE",
+    });
+    assert.ok(q(mounted, '[data-screen="bench"]'), "the matching answer enters its durable session route");
+  });
+
+  it("passes an ordered board identity and leaves a matching refusal on the workspace", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(true);
+    await click(q(mounted, ".fy-sw__boards-toggle")!);
+    const render = all(mounted, ".fy-swboard button").find((button) => button.textContent === "Render board");
+    assert.ok(render);
+    await click(render);
+    const command = sent.findLast((message) => message.kind === "bench-open-subject");
+    assert.ok(command && command.kind === "bench-open-subject" && command.subject.kind === "board");
+    const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const order = orderedShots(scene).map((shot) => shot.id);
+    assert.deepEqual(command.subject.memberShotIds, order.slice(0, command.subject.memberShotIds.length));
+
+    await apply({
+      at: "2026-08-31T10:01:00.000Z",
+      type: "bench.subject-opened",
+      worldId: FIXTURE_WORLD_ID,
+      requestId: command.requestId,
+      sessionId: null,
+      reason: "That board no longer matches the current scene.",
+    });
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
+    assert.match(mounted.container.textContent ?? "", /That board no longer matches the current scene/);
+  });
+
+  it("releases the handoff actions when their answer is lost with the connection", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(true);
+    const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swedit") as HTMLElement);
+    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Open in generator")!);
+    assert.ok([...row.querySelectorAll("button")].some((button) => button.textContent === "Opening…" && button.disabled));
+
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.match(mounted.container.textContent ?? "", /Connection lost - try again/);
+    assert.ok([...row.querySelectorAll("button")].some((button) => button.textContent === "Open in generator" && !button.disabled));
+    await act(async () => __connectionStatusForTest("open"));
+  });
+
+  it("links Flow shot and board nodes to the same subject handoff", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(true);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    const links = all(mounted, ".fy-swnode__generate");
+    assert.ok(links.some((button) => button.textContent === "Open in generator"));
+    assert.ok(links.some((button) => button.textContent === "Render board"));
+    const shotLink = links.find((button) => button.textContent === "Open in generator")!;
+    await click(shotLink);
+    const command = sent.findLast((message) => message.kind === "bench-open-subject");
+    assert.ok(command && command.kind === "bench-open-subject" && command.subject.kind === "shot");
+    assert.ok(all(mounted, ".fy-swnode__generate").every((button) => button.hasAttribute("disabled")));
+  });
+
+  it("does not let the previous scene's delayed answer navigate back from the current scene", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = structuredClone(stateWith(true)) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const firstScene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    production.scenes.push({
+      ...structuredClone(firstScene),
+      id: "sc_05",
+      slug: "the-next-scene",
+      number: 5,
+      title: "The next scene",
+    });
+    production.sceneFiles["sc_05"] = "05-the-next-scene";
+    const mounted = await mountState(state);
+    const firstRow = q(mounted, ".fy-swrow")!;
+    await click(firstRow.querySelector(".fy-swedit") as HTMLElement);
+    await click([...firstRow.querySelectorAll("button")].find((button) => button.textContent === "Open in generator")!);
+    const command = sent.findLast((message) => message.kind === "bench-open-subject");
+    assert.ok(command && command.kind === "bench-open-subject");
+
+    const nextScene = all(mounted, ".fy-swindex__scene").find((button) => !button.hasAttribute("data-current"));
+    assert.ok(nextScene);
+    await click(nextScene);
+    const currentTitle = q(mounted, ".fy-sw__title")?.textContent;
+    assert.ok(currentTitle && !currentTitle.includes("Scene 4"));
+
+    await apply({
+      at: "2026-08-31T10:03:00.000Z",
+      type: "bench.subject-opened",
+      worldId: FIXTURE_WORLD_ID,
+      requestId: command.requestId,
+      sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HE",
+    });
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
+    assert.equal(q(mounted, ".fy-sw__title")?.textContent, currentTitle);
+  });
+});
+
 describe("staged scene changes stay in place but inert until applied (T-12)", () => {
   it("draws a proposed shot in both views, excludes it from metrics, and keeps it after Keep discussing", async () => {
     const state = structuredClone(stateWith(true)) as ClientState;
@@ -413,7 +570,10 @@ describe("a scene the workspace cannot read is named, never guessed (R-29, R-60)
           newShotIds={new Set()}
           stagedBoards={false}
           locked={false}
+          generatorPending={false}
           onCommand={() => true}
+          onOpenShotInGenerator={() => {}}
+          onRenderBoard={() => {}}
         />,
       ),
     );

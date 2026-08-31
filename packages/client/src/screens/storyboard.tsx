@@ -23,7 +23,7 @@ import { Button, Callout, Textarea, cx } from "../components/ui.js";
 import { Plus, X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
-import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
+import { acceptedTakeId, mediaTakeFor, takesForShot, useProduction } from "../lib/selectors.js";
 import { deleteScene, restoreScene, saveScene, setPromptOverride } from "../lib/store.js";
 import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
 
@@ -34,8 +34,8 @@ import { Mentions, sceneFileOf, takeMediaPath } from "./production.js";
  * derived — never a stored status. A hand edit saves where it stands (the bible's model,
  * master §4.5): every save cuts a version, and a save against a scene that moved is refused by
  * the coordinator, which this screen learns from the snapshot's version rather than a reply.
- * The docked assistant and per-shot dispatch are later phases (turn 97's dv-next); until they
- * land, Generate frame and Regenerate go where those actions already live.
+ * The scene workspace owns generation. Legacy cards keep their editing surface while their
+ * generation links return to that owner rather than the retired takes/dispatch route.
  */
 
 // ---------------------------------------------------------------------------
@@ -301,9 +301,10 @@ export function StoryboardStrip({
         // the pixels live on the pass's primary take covering the same shot. The frame follows
         // the media, newest first, accepted preferred.
         const acceptedTake = accepted ? production.takes.find((t) => t.id === accepted) : undefined;
-        const mediaTake =
-          acceptedTake?.media !== undefined ? acceptedTake : [...takes].reverse().find((t) => t.media !== undefined);
-        const media = mediaTake ? takeMediaPath(production.meta.id, mediaTake) : null;
+        const mediaTake = acceptedTake !== undefined && mediaTakeFor(production, acceptedTake) !== null
+          ? acceptedTake
+          : [...takes].reverse().find((take) => mediaTakeFor(production, take) !== null);
+        const media = mediaTake ? takeMediaPath(production, mediaTake) : null;
         const framing = effectiveFraming(scene, shot);
         const mentioned = parseMentions(shot.description);
         const refs = world.sheets.filter((s) => mentioned.some((m) => s.id === m || s.id.includes(m)));
@@ -398,13 +399,13 @@ export function StoryboardStrip({
                 </div>
                 <div className="fy-sbactions">
                   {takes.length > 0 ? (
-                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
+                    <Button onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}>
                       Regenerate
                     </Button>
                   ) : (
                     <Button
                       variant="primary"
-                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}
+                      onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/${scene.id}?workspace=1&shot=${shot.id}`)}
                     >
                       Generate frame
                     </Button>
@@ -1121,7 +1122,7 @@ export function ShotSheetScreen() {
         <Button variant="ghost" onClick={() => navigate(back)}>
           Back to the storyboard
         </Button>
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate?shot=${shot.id}`)}>
+        <Button variant="primary" onClick={() => navigate(`${back}?workspace=1&shot=${shot.id}`)}>
           Generate frame
         </Button>
       </div>

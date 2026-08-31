@@ -354,6 +354,20 @@ export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void
   return () => briefEnhancedListeners.delete(listener);
 }
 
+export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
+const benchSubjectOpenedListeners = new Set<(answer: BenchSubjectOpened) => void>();
+export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void {
+  benchSubjectOpenedListeners.add(listener);
+  return () => benchSubjectOpenedListeners.delete(listener);
+}
+
+export type BenchSubjectAccepted = Extract<DomainEvent, { type: "bench.subject-accepted" }>;
+const benchSubjectAcceptedListeners = new Set<(answer: BenchSubjectAccepted) => void>();
+export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAccepted) => void): () => void {
+  benchSubjectAcceptedListeners.add(listener);
+  return () => benchSubjectAcceptedListeners.delete(listener);
+}
+
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
 export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
@@ -878,6 +892,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
+    }
+    if (event.type === "bench.subject-opened") {
+      for (const listener of benchSubjectOpenedListeners) listener(event);
+    }
+    if (event.type === "bench.subject-accepted") {
+      for (const listener of benchSubjectAcceptedListeners) listener(event);
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
@@ -3691,6 +3711,18 @@ export function sendBenchOpen(worldId: string, sessionId?: string): void {
   send({ kind: "bench-open", worldId, ...(sessionId !== undefined ? { sessionId } : {}) } as ClientMessage);
 }
 
+export function sendBenchOpenSubject(input: Omit<Extract<ClientMessage, { kind: "bench-open-subject" }>, "kind" | "requestId">): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-open-subject", requestId, ...input } as ClientMessage) ? requestId : null;
+}
+
+export function sendBenchRebuildSubject(worldId: string, sessionId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-rebuild-subject", worldId, sessionId, requestId } as ClientMessage)
+    ? requestId
+    : null;
+}
+
 export function sendBenchNewSession(worldId: string): void {
   send({ kind: "bench-new-session", worldId });
 }
@@ -3830,6 +3862,7 @@ export function sendBenchUploadReferences(
 export function sendBenchDispatch(
   worldId: string,
   sessionId: string,
+  composer: Extract<ClientMessage, { kind: "bench-dispatch" }>["composer"],
   voiceUploadConfirmedFor?: string,
 ): string {
   const requestId = queueRequest("bench-dispatch");
@@ -3838,6 +3871,7 @@ export function sendBenchDispatch(
     worldId,
     sessionId,
     requestId,
+    composer,
     ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
   } as ClientMessage);
   return requestId;
@@ -3863,6 +3897,13 @@ export function sendBenchRerun(
 
 export function sendBenchKeep(worldId: string, sessionId: string, takeId: string): void {
   send({ kind: "bench-keep", worldId, sessionId, requestId: ulid(), takeId } as ClientMessage);
+}
+
+export function sendBenchAccept(worldId: string, sessionId: string, takeId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "bench-accept", worldId, sessionId, requestId, takeId } as ClientMessage)
+    ? requestId
+    : null;
 }
 
 export function sendBenchDiscard(worldId: string, sessionId: string, takeId: string): void {

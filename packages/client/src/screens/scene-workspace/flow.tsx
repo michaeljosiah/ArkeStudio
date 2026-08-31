@@ -51,6 +51,7 @@ interface FlowNode {
   meta: string;
   thumb?: string;
   shotId?: string;
+  memberShotIds?: string[];
   staged: boolean;
 }
 
@@ -84,7 +85,10 @@ export function SceneFlow({
   newShotIds,
   stagedBoards,
   locked,
+  generatorPending,
   onCommand,
+  onOpenShotInGenerator,
+  onRenderBoard,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -96,7 +100,10 @@ export function SceneFlow({
   newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
   locked: boolean;
+  generatorPending: boolean;
   onCommand: (command: Command) => boolean;
+  onOpenShotInGenerator: (shotId: string) => void;
+  onRenderBoard: (memberShotIds: string[]) => void;
 }) {
   const sequence = linearizeSceneFlow(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -373,6 +380,30 @@ export function SceneFlow({
                 />,
               ],
         )}
+        {graph.nodes.flatMap((node) => {
+          const opensShot = node.kind === "shot" && node.shotId !== undefined;
+          const rendersBoard = node.kind === "board" && node.memberShotIds !== undefined;
+          if (!opensShot && !rendersBoard) return [];
+          const label = opensShot ? "Open in generator" : "Render board";
+          return [
+            <button
+              key={`generate:${node.id}`}
+              type="button"
+              className="fy-swnode__generate"
+              style={{ left: node.x, top: node.y - 27 }}
+              disabled={locked || node.staged || generatorPending}
+              aria-label={`${label} for ${node.name}`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (opensShot) onOpenShotInGenerator(node.shotId!);
+                else onRenderBoard([...node.memberShotIds!]);
+              }}
+            >
+              {generatorPending ? "Opening…" : label}
+            </button>,
+          ];
+        })}
       </div>
 
       {linkSource === null ? null : (
@@ -571,6 +602,7 @@ function buildGraph(input: {
         y: point.y,
         name: `Board ${board.letter}`,
         meta: `${board.memberShotIds.length} cells`,
+        memberShotIds: [...board.memberShotIds],
         staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
       });
       for (const member of members) {

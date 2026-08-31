@@ -7,6 +7,8 @@ import {
   BenchRequestSnapshotSchema,
   MUSIC_DURATION_SEC,
   BenchSessionSchema,
+  BenchSubjectSchema,
+  benchSubjectTitle,
   benchSessionSummary,
   BenchReferenceSourceSchema,
   benchSourceKey,
@@ -132,6 +134,235 @@ describe("a world file as a reference source", () => {
 });
 
 describe("the fold", () => {
+  it("keeps a production subject and applies its prefill as one event", () => {
+    const subject = {
+      kind: "shot" as const,
+      productionId: "pilot",
+      productionTitle: "Tide Clock",
+      episode: {
+        id: "ep_low-water",
+        order: 1,
+        title: "Low Water",
+      },
+      sceneId: "sc_4",
+      sceneNumber: 4,
+      sceneTitle: "The Causeway",
+      shotId: "sh_15",
+      shotNumber: 15,
+      shotTitle: "Maren turns",
+      durationSec: 4.5,
+      aspect: "16:9",
+    };
+    const named = {
+      ...ref("Image 1", AR),
+      label: "Maren Kest · v3",
+      detail: "character reference",
+      sheetId: "maren-kest",
+      sheetVersion: 3,
+      subjectRole: "reference" as const,
+    };
+    const session = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer: {
+          mode: "image",
+          provider: "fal",
+          model: "test-image",
+          params: { kind: "image", aspect: "16:9", count: 1 },
+          brief: "Maren turns toward the tide clock.",
+          activeTokens: ["Image 1"],
+          keyframeTokens: [],
+        },
+        references: [named],
+      }),
+    ]);
+
+    assert.equal(BenchSessionSchema.safeParse(session).success, true);
+    assert.deepEqual(session.subject, subject);
+    assert.equal(session.title, "Tide Clock · Episode 1 · Low Water · Scene 4 · The Causeway · Shot 15");
+    assert.equal(session.tokenRegistry[0]!.sheetVersion, 3);
+    assert.deepEqual(session.composer.activeTokens, ["Image 1"]);
+    assert.deepEqual(benchSessionSummary(session).subject, subject);
+
+    const removed = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer: session.composer,
+        references: [named],
+      }),
+      env(2, { type: "reference-removed", token: "Image 1" }),
+    ]);
+    assert.deepEqual(removed.subjectTokens, [], "an explicit removal leaves the current subject set");
+    const restored = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer: session.composer,
+        references: [named],
+      }),
+      env(2, { type: "reference-removed", token: "Image 1" }),
+      env(3, { type: "reference-restored", token: "Image 1" }),
+    ]);
+    assert.deepEqual(restored.subjectTokens, ["Image 1"]);
+    const replaced = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer: session.composer,
+        references: [named],
+      }),
+      env(2, {
+        type: "reference-replaced",
+        removed: "Image 1",
+        entry: ref("Image 2", "ar_01JAAAAAAAAAAAAAAAAAAAAAA1"),
+      }),
+    ]);
+    assert.deepEqual(replaced.subjectTokens, [], "a replacement cannot reactivate the removed subject image");
+
+    const longSubject = {
+      ...subject,
+      productionTitle: "P".repeat(300),
+      episode: { id: "ep_low-water", order: 1, title: "E".repeat(300) },
+      sceneTitle: "S".repeat(300),
+      shotTitle: "T".repeat(300),
+    };
+    assert.equal(BenchSubjectSchema.safeParse(longSubject).success, true);
+    const longTitle = benchSubjectTitle(longSubject);
+    assert.ok(longTitle.length <= 200);
+    assert.match(longTitle, /Episode 1/);
+    assert.match(longTitle, /Scene 4/);
+    assert.match(longTitle, /Shot 15$/);
+  });
+
+  it("rebuild keeps historical tokens and allocates around a changed reference", () => {
+    const subject = {
+      kind: "shot" as const,
+      productionId: "pilot",
+      productionTitle: "Tide Clock",
+      sceneId: "sc_4",
+      sceneNumber: 4,
+      sceneTitle: "The Causeway",
+      shotId: "sh_15",
+      shotNumber: 15,
+      shotTitle: "Maren turns",
+      durationSec: 4.5,
+      aspect: "16:9",
+    };
+    const oldSecond = "ar_01JAAAAAAAAAAAAAAAAAAAAAA1";
+    const newSecond = "ar_01JAAAAAAAAAAAAAAAAAAAAAA2";
+    const composer = {
+      mode: "image" as const,
+      provider: "fal",
+      model: "test-image",
+      params: { kind: "image" as const, count: 1 },
+      brief: "Maren turns toward @Image 2.",
+      activeTokens: ["Image 1", "Image 2"],
+      keyframeTokens: [],
+    };
+    const session = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer,
+        references: [ref("Image 1", AR), ref("Image 2", oldSecond)],
+      }),
+      env(2, {
+        type: "subject-prefill-set",
+        subject: { ...subject, durationSec: 6, shotTitle: "Maren listens" },
+        title: "Current shot title",
+        composer,
+        references: [
+          { ...ref("Image 1", AR), label: "Maren · current" },
+          { ...ref("Image 2", newSecond), label: "The new location" },
+        ],
+      }),
+    ]);
+
+    assert.deepEqual(session.tokenRegistry.map((entry) => entry.token), ["Image 1", "Image 2", "Image 3"]);
+    assert.equal(session.subject?.durationSec, 6);
+    assert.equal(session.title, "Current shot title");
+    assert.equal(session.composer.brief, "Maren turns toward @Image 3.");
+    assert.deepEqual(session.composer.activeTokens, ["Image 1", "Image 3"]);
+    assert.equal(session.tokenRegistry[1]!.source.source === "artifact" ? session.tokenRegistry[1]!.source.artifactId : null, oldSecond);
+    assert.equal(session.tokenRegistry[2]!.source.source === "artifact" ? session.tokenRegistry[2]!.source.artifactId : null, newSecond);
+  });
+
+  it("records production filing without pretending a board parent is an artifact", () => {
+    const subject = {
+      kind: "board" as const,
+      productionId: "pilot",
+      productionTitle: "Tide Clock",
+      sceneId: "sc_4",
+      sceneNumber: 4,
+      sceneTitle: "The Causeway",
+      letter: "A",
+      durationSec: 8,
+      aspect: "16:9",
+      packing: { maxDurationSec: 10 },
+      members: [
+        { shotId: "sh_15", number: 15, title: "Maren turns", durationSec: 4 },
+        { shotId: "sh_16", number: 16, title: "The clock", durationSec: 4 },
+      ],
+    };
+    const session = foldBenchSession({ ...META, subject }, [
+      env(1, {
+        type: "subject-prefill-set",
+        subject,
+        title: benchSubjectTitle(subject),
+        composer: {
+          mode: "video",
+          provider: "fal",
+          model: "test-video",
+          params: { kind: "video", durationSec: 8 },
+          brief: "one continuous pass",
+          activeTokens: [],
+          keyframeTokens: [],
+        },
+        references: [],
+      }),
+      env(2, {
+        type: "takes-reserved",
+        takes: [
+          {
+            id: TK as never,
+            n: 1,
+            requestId: "r1",
+            request: {
+              ...SNAPSHOT,
+              mode: "video",
+              model: "test-video",
+              params: { kind: "video", durationSec: 8 },
+              filing: {
+                kind: "board",
+                productionId: "pilot",
+                sceneId: subject.sceneId,
+                productionTakeId: TK,
+                members: [
+                  { shotId: subject.members[0]!.shotId, number: 15, startSec: 0, endSec: 4, takeId: TK2 },
+                ],
+              },
+              productionProvenance: { canonRevision: 1, sheets: {} },
+            },
+            createdAt: "2026-08-16T10:00:02.000Z",
+          },
+        ],
+      }),
+      env(3, { type: "take-subject-filed", takeId: TK as never, productionTakeIds: [TK as never, TK2 as never] }),
+    ]);
+
+    const parsed = BenchSessionSchema.parse(session);
+    assert.equal(parsed.takes[0]!.disposition, "filed");
+    assert.equal(parsed.takes[0]!.keptArtifactId, undefined);
+    assert.deepEqual(parsed.takes[0]!.filedTakeIds, [TK, TK2]);
+  });
+
   it("replays a session: reserve, job, completion, keep — and the counters clear the allocations", () => {
     const session = foldBenchSession(META, [
       env(1, { type: "composer-set", mode: "image", provider: "fal", model: "test-image", params: { kind: "image", count: 1 }, brief: "x" }),
@@ -185,6 +416,52 @@ describe("the fold", () => {
     assert.deepEqual(session.composer.activeTokens, ["Image 2"]);
     // And the take keeps its own copy, so a re-run replays the frames it was made with.
     assert.deepEqual(session.takes[0]!.request.keyframes.map((k) => k.token), ["Image 1"]);
+  });
+
+  it("keeps a subject-owned board frame staged after its take completes", () => {
+    const subject = {
+      kind: "board" as const,
+      productionId: "saltlight",
+      productionTitle: "Saltlight",
+      sceneId: "sc_04",
+      sceneNumber: 4,
+      sceneTitle: "The verse rises",
+      letter: "A",
+      durationSec: 4,
+      aspect: "16:9",
+      packing: { maxDurationSec: 10 },
+      members: [{ shotId: "sh_12", number: 12, title: "Maren at the rail", durationSec: 4 }],
+    };
+    const subjectFrame = { ...ref("Image 1", AR), subjectRole: "board-frame" as const };
+    const composer = {
+      mode: "video" as const,
+      provider: "fal",
+      model: "test-video",
+      params: { kind: "video" as const, durationSec: 4, aspect: "16:9", sound: true },
+      brief: "One beat.",
+      activeTokens: [],
+      keyframeTokens: ["Image 1"],
+    };
+    const request = {
+      mode: composer.mode,
+      brief: composer.brief,
+      references: [],
+      keyframes: [subjectFrame],
+      provider: composer.provider,
+      model: composer.model,
+      params: composer.params,
+    };
+    const session = foldBenchSession({ ...META, subject }, [
+      env(1, { type: "subject-prefill-set", subject, title: "Saltlight · Board A", composer, references: [subjectFrame] }),
+      env(2, { type: "takes-reserved", takes: [{ id: TK as never, n: 1, requestId: "r1", request, createdAt: "2026-08-16T10:00:02.000Z" }] }),
+      env(3, {
+        type: "take-completed",
+        takeId: TK as never,
+        media: { file: "clip.mp4", hash: "sha256:beefbeef" as never },
+        completedAt: "2026-08-16T10:00:03.000Z",
+      }),
+    ]);
+    assert.deepEqual(session.composer.keyframeTokens, ["Image 1"]);
   });
 
   it("keeps a frame staged for the next take, and one whose take has not landed", () => {

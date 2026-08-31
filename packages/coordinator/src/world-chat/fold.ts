@@ -67,6 +67,8 @@ export function foldConversation(
   const bibleEdits = new Map<string, BibleEditRecord>();
   /** Tools each turn was refused, by the studio message written despite them (#506). */
   const refusals = new Map<string, readonly string[]>();
+  /** Production filing rows, by the narration message they belong beneath. */
+  const benchOutcomes = new Map<string, WorldChatLoaded["benchOutcomes"][string]>();
   /** The log sequence each message arrived at, so paging can use a real cursor. */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
@@ -172,6 +174,10 @@ export function foldConversation(
           const c = candidates.get(t.candidateId);
           if (c) candidates.set(t.candidateId, { ...c, status: "withdrawn" });
         }
+        break;
+      case "bench.outcome-recorded":
+        addMessage(e.message, envelope.seq);
+        benchOutcomes.set(e.message.id, e.report);
         break;
       case "candidate.status-changed": {
         const c = candidates.get(e.candidateId);
@@ -338,6 +344,12 @@ export function foldConversation(
       shown.flatMap((m) => {
         const refused = refusals.get(m.id);
         return refused ? [[m.id, [...refused]] as const] : [];
+      }),
+    ),
+    benchOutcomes: Object.fromEntries(
+      shown.flatMap((message) => {
+        const report = benchOutcomes.get(message.id);
+        return report ? [[message.id, report] as const] : [];
       }),
     ),
     hasMore: shown.length < windowed.length,

@@ -48,13 +48,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (61 screens)", () => {
+  it("covers the full screen inventory (60 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    assert.equal(SCREENS.length, 61);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 61, "screen ids are unique");
+    assert.equal(SCREENS.length, 60);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 60, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -578,17 +578,13 @@ describe("screen inventory", () => {
     }
   });
 
-  it("names the inherited world look on the remaining visual generation surfaces", () => {
+  it("names the inherited world look on the remaining visual generation surface", () => {
     const worldId = FIXTURE_STATE.world!.meta.worldId;
-    // The workspace opens on the takes now (turn 102) and the bench is behind Advanced. The look
-    // is named where generating is configured, which is the bench and the dispatch dialog — the
-    // takes view assesses what came back and configures nothing.
+    // The workspace opens on the takes now (turn 102) and the bench is behind Advanced. The
+    // retired dispatch dialog no longer owns another copy of these generation settings.
     const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
-    const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
     assert.ok(workspace.includes("World look · v"));
     assert.ok(workspace.includes("carries as text"));
-    assert.ok(dispatch.includes("World look · v"));
-    assert.ok(dispatch.includes("carried in the prompt"));
   });
 
   it("names a production look instead of claiming the world look is inherited", () => {
@@ -607,13 +603,8 @@ describe("screen inventory", () => {
     try {
       const worldId = world.meta.worldId;
       const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
-      const dispatch = renderAt(`/w/${worldId}/p/saltlight/generate/dispatch`);
       assert.ok(workspace.includes("Production look"));
       assert.ok(workspace.includes("Bleached documentary realism"));
-      assert.ok(dispatch.includes("Production look"));
-      assert.ok(dispatch.includes("This production overrides the world look"));
-      assert.ok(dispatch.includes("Bleached documentary realism"));
-      assert.ok(dispatch.includes("a full shot prompt override keeps its own text"));
 
       const overriddenWorld = {
         ...world,

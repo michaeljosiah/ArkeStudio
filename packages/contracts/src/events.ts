@@ -20,6 +20,7 @@ import {
   ShotIdSchema,
   SlugSchema,
   SessionIdSchema,
+  TakeIdSchema,
   UlidSchema,
 } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
@@ -921,6 +922,30 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       type: z.literal("models.changed"),
       models: ModelAvailabilitySchema,
       faults: z.array(RoutingFaultSchema),
+    })
+    .strict(),
+  /** Correlated result of preparing a subject-bound Bench session. */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.subject-opened"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      sessionId: SessionIdSchema.nullable(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  /** Correlated result of filing a subject take into production. */
+  z
+    .object({
+      ...base,
+      type: z.literal("bench.subject-accepted"),
+      worldId: UlidSchema,
+      sessionId: SessionIdSchema,
+      takeId: TakeIdSchema,
+      requestId: UlidSchema,
+      accepted: z.boolean(),
+      reason: z.string().optional(),
     })
     .strict(),
   /** The enhancer's answer: the rewritten prompt, or null with why not (never silence). */

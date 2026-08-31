@@ -308,28 +308,6 @@ describe("the size control", () => {
   });
 });
 
-describe("the production dispatch dialog, with no routing default saved", () => {
-  it("dispatches with the model the bar is showing, rather than blocking", () => {
-    // A fresh install has routing.defaults = {}. Reading the default straight out of settings
-    // left the dialog showing a runnable model in the controls while both dispatch cards were
-    // replaced by "nothing to dispatch with" — the screen disagreeing with itself.
-    const state = stateWith({});
-    __setStateForTest({
-      ...state,
-      app: { ...state.app, routing: { defaults: {}, faults: [] } },
-    });
-    const world = FIXTURE_STATE.world!;
-    const production = world.productions[0]!;
-    const html = renderToString(
-      <MemoryRouter initialEntries={[`/w/${world.meta.worldId}/p/${production.meta.id}/generate/dispatch`]}>
-        <App />
-      </MemoryRouter>,
-    ).replace(/<!-- -->/g, "");
-    assert.ok(!html.includes("Nothing to dispatch with"), "a usable model is a usable model");
-    assert.ok(html.includes("Dispatch per shot"), "and the cards are there to press");
-  });
-});
-
 /**
  * The shape, where the model has said which shapes it takes.
  *

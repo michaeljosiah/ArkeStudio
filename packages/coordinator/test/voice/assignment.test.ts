@@ -550,6 +550,20 @@ describe("cloned voice assignment", () => {
         worldId: WORLD_ID,
         sessionId,
         requestId: REQUEST,
+        composer: {
+          mode: "voice",
+          provider: "comfyui",
+          model: MODEL.id,
+          params: {
+            kind: "voice",
+            count: 1,
+            voiceId: "harbour",
+            voiceProvider: "comfyui",
+            voiceModel: MODEL.id,
+            voiceLabel: "Harbour",
+          },
+          brief: "A line for the harbour.",
+        },
       });
       const confirmation = h.events.find((event) => event.type === "voice.upload-confirmation-required");
       assert.ok(confirmation && confirmation.type === "voice.upload-confirmation-required");
@@ -567,6 +581,20 @@ describe("cloned voice assignment", () => {
         worldId: WORLD_ID,
         sessionId,
         requestId: REQUEST,
+        composer: {
+          mode: "voice",
+          provider: "comfyui",
+          model: MODEL.id,
+          params: {
+            kind: "voice",
+            count: 1,
+            voiceId: "harbour",
+            voiceProvider: "comfyui",
+            voiceModel: MODEL.id,
+            voiceLabel: "Harbour",
+          },
+          brief: "A line for the harbour.",
+        },
         voiceUploadConfirmedFor: "remote-instance-1",
       });
       const refused = h.events.find((event) => event.type === "queue.enqueue-result");

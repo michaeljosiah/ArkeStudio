@@ -84,7 +84,18 @@ describe("remote cloned voice renderer confirmation", () => {
       shotId: SHOT,
       voiceUploadConfirmedFor: "engine-1",
     });
-    sendBenchDispatch(WORLD, SESSION, "engine-1");
+    sendBenchDispatch(
+      WORLD,
+      SESSION,
+      {
+        mode: "voice",
+        provider: "comfyui",
+        model: "comfyui-cloned-voice",
+        params: { kind: "voice", count: 1, voiceId: "harbour" },
+        brief: "Harbour line",
+      },
+      "engine-1",
+    );
     sendBenchRerun(WORLD, SESSION, TAKE, "engine-1");
     assert.deepEqual(
       messages.map((message) =>

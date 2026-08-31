@@ -84,6 +84,7 @@ import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./be
 import {
   discoverBenchSessions,
   openBenchSession,
+  openSubjectBenchSession,
   planBenchDispatch,
   addBenchReference,
   type WorldFileReader,
@@ -91,6 +92,14 @@ import {
   type BenchRecoveryJobFacts,
   type OpenedBench,
 } from "./bench/service.js";
+import { prepareBenchSubject, subjectSessionReferenceRouting } from "./bench/subject.js";
+import {
+  chainBenchSubjectBoundary,
+  copyBenchSubjectPoster,
+  existingBenchSubjectFiling,
+  fileBenchSubjectTake,
+} from "./bench/filing.js";
+import { recordBenchOutcome, serialiseSceneConversation } from "./bench/outcome.js";
 import { AppLog } from "./app-log.js";
 import { AppSettingsFile, routingFaults } from "./app-settings.js";
 import { AskService } from "./canon/ask.js";
@@ -222,7 +231,7 @@ function mediaSessionId(candidateId: string, revision: number): SessionId {
   return `sess_${body}` as SessionId;
 }
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
-import { measureMediaInfo, type MediaProbe } from "./media/probe.js";
+import { measureDurationSec, measureMediaInfo, type MediaProbe } from "./media/probe.js";
 import {
   acceptTake,
   audioDesignFor,
@@ -817,6 +826,10 @@ export class Coordinator {
   private readonly permissionRetryTimers = new Map<string, NodeJS.Timeout>();
   /** Genesis sandboxes whose attachments are still being carried into a new world. */
   private readonly carrying = new Map<string, Promise<void>>();
+  /** Accept and Discard are one decision per take, even when their messages overlap. */
+  private readonly benchTakeActions = new Map<string, Promise<void>>();
+  /** Reservations read and advance one session take counter. */
+  private readonly benchDispatchActions = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
   /**
@@ -1805,6 +1818,40 @@ export class Coordinator {
   private trackBackground<T>(work: Promise<T>): void {
     this.backgroundWork.add(work);
     void work.finally(() => this.backgroundWork.delete(work)).catch(() => {});
+  }
+
+  private async serialiseBenchTakeAction<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.benchTakeActions.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch(() => {}).then(() => held);
+    this.benchTakeActions.set(key, tail);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.benchTakeActions.get(key) === tail) this.benchTakeActions.delete(key);
+    }
+  }
+
+  private async serialiseBenchDispatch<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.benchDispatchActions.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch(() => {}).then(() => held);
+    this.benchDispatchActions.set(key, tail);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.benchDispatchActions.get(key) === tail) this.benchDispatchActions.delete(key);
+    }
   }
 
   /** Validate, fold, log, broadcast — the one path every event takes (R-3). */
@@ -3233,7 +3280,19 @@ export class Coordinator {
     }
   }
 
-  private async handleClientMessage(msg: ClientMessage): Promise<void> {
+  private async handleClientMessage(
+    msg: ClientMessage,
+    benchTakeActionHeld = false,
+    benchDispatchHeld = false,
+  ): Promise<void> {
+    if (!benchTakeActionHeld && (msg.kind === "bench-accept" || msg.kind === "bench-discard")) {
+      const key = `${msg.worldId}/${msg.sessionId}/${msg.takeId}`;
+      return this.serialiseBenchTakeAction(key, () => this.handleClientMessage(msg, true));
+    }
+    if (!benchDispatchHeld && (msg.kind === "bench-dispatch" || msg.kind === "bench-rerun")) {
+      const key = `${msg.worldId}/${msg.sessionId}`;
+      return this.serialiseBenchDispatch(key, () => this.handleClientMessage(msg, false, true));
+    }
     if (this.stopping) return;
     switch (msg.kind) {
       case "hello":
@@ -4012,11 +4071,30 @@ export class Coordinator {
         // to exclude. The raise is durable before the conversation directory exists.
         await store.ensureSchemaVersion(2, "world-chat");
         const service = new WorldChatService(store.dir);
-        const row = await service.create({
-          title: msg.title,
-          requestId: msg.requestId,
-          ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
-        });
+        const create = () =>
+          service.create({
+            title: msg.title,
+            requestId: msg.requestId,
+            ...(msg.entryContext ? { entryContext: msg.entryContext } : {}),
+          });
+        const sceneContext = msg.entryContext?.kind === "scene" ? msg.entryContext : null;
+        const row = sceneContext !== null
+          ? await serialiseSceneConversation(
+              store.dir,
+              sceneContext.productionId,
+              sceneContext.sceneId,
+              async () => {
+                const existing = (await discoverConversations(store.dir)).summaries.find(
+                  (summary) =>
+                    summary.status !== "archived" &&
+                    summary.entryContext?.kind === "scene" &&
+                    summary.entryContext.productionId === sceneContext.productionId &&
+                    summary.entryContext.sceneId === sceneContext.sceneId,
+                );
+                return existing ?? create();
+              },
+            )
+          : await create();
         await this.refreshConversations(store);
         await this.openWorldChat(store, row.id);
         return;
@@ -6741,6 +6819,111 @@ export class Coordinator {
         await this.openBenchWorkspace(store, msg.sessionId);
         return;
       }
+      case "bench-open-subject": {
+        const answer = (sessionId: SessionId | null, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.subject-opened",
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            sessionId,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return answer(null, "That world is not open.");
+        try {
+          const settings = this.appSettings ? await this.appSettings.load() : null;
+          const reader = worldFileReader(store.dir);
+          const prepared = await prepareBenchSubject(store.getBundle(), {
+            productionId: msg.productionId,
+            sceneId: msg.sceneId,
+            subject: msg.subject,
+            settings,
+            manifest: this.opts.manifest ?? null,
+            sources: {
+              read: reader.read,
+              durationSec: (path) =>
+                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
+            },
+          });
+          if (!prepared.ok) return answer(null, prepared.reason);
+          const sessionId = `sess_${msg.requestId}` as SessionId;
+          const opened = await openSubjectBenchSession(
+            store.dir,
+            sessionId,
+            this.nowIso(),
+            prepared.prefill,
+          );
+          await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () => this.nowIso());
+          await this.recoverBenchSubjectFilings(store, opened);
+          const session = (await opened.store.fold()) ?? opened.session;
+          await this.backfillBenchPosters(store, session);
+          this.readModel.setBench({ worldId: store.worldId, session });
+          this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+          this.transport.broadcastSnapshot();
+          answer(sessionId);
+        } catch (error) {
+          answer(null, error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
+      case "bench-rebuild-subject": {
+        const answer = (sessionId: SessionId | null, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.subject-opened",
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            sessionId,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          answer(null, "That subject session is no longer available.");
+          return;
+        }
+        try {
+          const bench = await this.benchFor(msg.worldId, msg.sessionId);
+          if (!bench || bench.session.subject === undefined) {
+            answer(null, "That subject session is no longer available.");
+            return;
+          }
+          const subject = bench.session.subject;
+          const settings = this.appSettings ? await this.appSettings.load() : null;
+          const reader = worldFileReader(store.dir);
+          const prepared = await prepareBenchSubject(store.getBundle(), {
+            productionId: subject.productionId,
+            sceneId: subject.sceneId,
+            subject:
+              subject.kind === "shot"
+                ? { kind: "shot", shotId: subject.shotId }
+                : { kind: "board", memberShotIds: subject.members.map((member) => member.shotId) },
+            settings,
+            manifest: this.opts.manifest ?? null,
+            sources: {
+              read: reader.read,
+              durationSec: (path) =>
+                measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
+            },
+          });
+          if (!prepared.ok) return answer(null, prepared.reason);
+          await bench.store.append(
+            {
+              type: "subject-prefill-set",
+              subject: prepared.prefill.subject,
+              title: prepared.prefill.title,
+              composer: prepared.prefill.composer,
+              references: prepared.prefill.references,
+            },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(msg.sessionId);
+        } catch (error) {
+          answer(null, error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
       case "bench-new-session": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -6765,6 +6948,10 @@ export class Coordinator {
       case "bench-compose": {
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
+        const model = this.opts.manifest?.models.find(
+          (candidate) => candidate.provider === msg.provider && candidate.id === msg.model,
+        ) ?? null;
+        const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
         await bench.store.append(
           {
             type: "composer-set",
@@ -6773,6 +6960,7 @@ export class Coordinator {
             model: msg.model,
             params: msg.params,
             brief: msg.brief,
+            ...(subjectRouting !== undefined ? { subjectRouting } : {}),
           },
           { at: this.nowIso(), requestId: msg.requestId },
         );
@@ -6887,7 +7075,7 @@ export class Coordinator {
       case "bench-dispatch":
       case "bench-rerun": {
         const store = this.opts.provider.openStore?.();
-        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        let bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!store || !bench) {
           this.rejectEnqueue(
             msg.requestId,
@@ -6895,6 +7083,39 @@ export class Coordinator {
             "The bench is unavailable. Reopen the world and try again.",
           );
           return;
+        }
+        if (msg.kind === "bench-dispatch") {
+          const currentSession = bench.session;
+          const model = this.opts.manifest?.models.find(
+            (candidate) =>
+              candidate.provider === msg.composer.provider && candidate.id === msg.composer.model,
+          ) ?? null;
+          const subjectRouting = subjectSessionReferenceRouting(currentSession, model);
+          const composer = {
+            ...msg.composer,
+            activeTokens: subjectRouting?.activeTokens ?? currentSession.composer.activeTokens,
+            keyframeTokens: subjectRouting?.keyframeTokens ?? currentSession.composer.keyframeTokens,
+          };
+          try {
+            await bench.store.append(
+              {
+                type: "composer-set",
+                ...msg.composer,
+                ...(subjectRouting !== undefined ? { subjectRouting } : {}),
+              },
+              { at: this.nowIso(), requestId: `${msg.requestId}/compose` },
+            );
+            // Plan from the exact event just persisted. A later handler may append another draft
+            // before this command reserves, but it cannot change what this press authorizes.
+            bench = { store: bench.store, session: { ...currentSession, composer } };
+          } catch (error) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              error instanceof Error ? error.message : String(error),
+            );
+            return;
+          }
         }
         const fromTake =
           msg.kind === "bench-rerun" ? bench.session.takes.find((t) => t.id === msg.takeId) : undefined;
@@ -7006,6 +7227,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!store || !bench) return;
+        if (bench.session.subject !== undefined) return;
         const take = bench.session.takes.find((t) => t.id === msg.takeId);
         if (!take || !take.media) return;
         // Idempotent by take id: a filed take answers with the artifact it already made.
@@ -7054,10 +7276,119 @@ export class Coordinator {
         await this.refreshBench(msg.worldId, msg.sessionId);
         return;
       }
+      case "bench-accept": {
+        const answer = (accepted: boolean, reason?: string) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "bench.subject-accepted",
+            worldId: msg.worldId,
+            sessionId: msg.sessionId,
+            takeId: msg.takeId,
+            requestId: msg.requestId,
+            accepted,
+            ...(reason !== undefined ? { reason } : {}),
+          });
+        const store = this.opts.provider.openStore?.();
+        const bench = await this.benchFor(msg.worldId, msg.sessionId);
+        if (!store || !bench || bench.session.subject === undefined) {
+          answer(false, "That subject session is no longer available.");
+          return;
+        }
+        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
+        if (!take || take.disposition === "discarded") {
+          answer(false, "That take is no longer available to accept.");
+          return;
+        }
+        try {
+          const filed = await fileBenchSubjectTake(
+            store,
+            bench.session,
+            take,
+            this.opts.boundaryFrameMaker !== undefined ? { toPng: this.opts.boundaryFrameMaker } : {},
+          );
+          if (filed.boundaryFrame !== undefined && !filed.boundaryFrame.ok) {
+            void this.appLog?.append({
+              kind: "boundary-frame.unavailable",
+              reason: filed.boundaryFrame.reason,
+              detail: { takeId: filed.productionTakeIds.at(-1) },
+            });
+          }
+          await bench.store.append(
+            {
+              type: "take-subject-filed",
+              takeId: take.id,
+              productionTakeIds: filed.productionTakeIds as never,
+              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
+            },
+            { at: this.nowIso(), requestId: msg.requestId },
+          );
+          // Production and Bench state are now truthful even if narration has a separate I/O
+          // failure. Opening the session retries this idempotent append from the filed ids.
+          const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch((error) => {
+            void this.appLog?.append({
+              kind: "bench.outcome-failed",
+              worldId: msg.worldId,
+              takeId: msg.takeId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return null;
+          });
+          if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(true);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          void this.appLog?.append({
+            kind: "bench.accept-failed",
+            worldId: msg.worldId,
+            takeId: msg.takeId,
+            error: reason,
+          });
+          const filed = existingBenchSubjectFiling(store, bench.session, take);
+          if (filed !== null) {
+            // The production commit is the acceptance boundary. Repair the secondary session
+            // record when possible, but never report failure after the requested selection landed.
+            await bench.store.append(
+              {
+                type: "take-subject-filed",
+                takeId: take.id,
+                productionTakeIds: filed.productionTakeIds as never,
+                ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
+              },
+              { at: this.nowIso(), requestId: msg.requestId },
+            ).catch(() => {});
+            const conversationId = await recordBenchOutcome(store, bench.session, take, filed).catch(() => null);
+            if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+            await this.refreshWorldSnapshot(msg.worldId);
+            await this.refreshBench(msg.worldId, msg.sessionId);
+            answer(true);
+            return;
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.refreshBench(msg.worldId, msg.sessionId);
+          answer(false, reason);
+        }
+        return;
+      }
       case "bench-discard": {
+        const store = this.opts.provider.openStore?.();
         const bench = await this.benchFor(msg.worldId, msg.sessionId);
         if (!bench) return;
-        if (bench.session.takes.some((t) => t.id === msg.takeId && t.disposition === "open")) {
+        const take = bench.session.takes.find((candidate) => candidate.id === msg.takeId);
+        const filed = store && take ? existingBenchSubjectFiling(store, bench.session, take) : null;
+        if (take?.disposition === "open" && filed !== null) {
+          await bench.store.append(
+            {
+              type: "take-subject-filed",
+              takeId: take.id,
+              productionTakeIds: filed.productionTakeIds as never,
+              ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
+            },
+            { at: this.nowIso(), requestId: `subject-filing-recovered:${bench.session.id}/${take.id}` },
+          );
+          await recordBenchOutcome(store!, bench.session, take, filed).catch(() => {});
+        } else if (take?.disposition === "open") {
           await bench.store.append(
             { type: "take-discarded", takeId: msg.takeId },
             { at: this.nowIso(), requestId: msg.requestId },
@@ -10009,11 +10340,64 @@ export class Coordinator {
     const touched = await recoverBenchSession(opened, this.benchJobFacts(store.worldId), () =>
       this.nowIso(),
     ).catch(() => false);
-    const session = touched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
+    const filingTouched = await this.recoverBenchSubjectFilings(store, opened).catch(() => false);
+    const session = touched || filingTouched ? ((await opened.store.fold()) ?? opened.session) : opened.session;
     await this.backfillBenchPosters(store, session);
+    await store.ownedWrite(async () => {
+      for (const take of session.takes) {
+        if (existingBenchSubjectFiling(store, session, take) !== null) {
+          await copyBenchSubjectPoster(store, session, take);
+        }
+      }
+    });
     this.readModel.setBench({ worldId: store.worldId, session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
+  }
+
+  /** Complete the small crash window between an atomic production commit and the Bench event. */
+  private async recoverBenchSubjectFilings(store: WorldStore, opened: OpenedBench): Promise<boolean> {
+    if (opened.session.subject === undefined) return false;
+    let touched = false;
+    for (const take of opened.session.takes) {
+      if (take.disposition === "discarded") continue;
+      const filed = existingBenchSubjectFiling(store, opened.session, take);
+      if (filed === null) continue;
+      if (this.opts.boundaryFrameMaker !== undefined) {
+        const boundaryFrame = await chainBenchSubjectBoundary(store, take, this.opts.boundaryFrameMaker);
+        if (boundaryFrame !== undefined && !boundaryFrame.ok) {
+          void this.appLog?.append({
+            kind: "boundary-frame.unavailable",
+            reason: boundaryFrame.reason,
+            detail: { takeId: filed.productionTakeIds.at(-1) },
+          });
+        }
+      }
+      if (take.disposition === "open") {
+        await opened.store.append(
+          {
+            type: "take-subject-filed",
+            takeId: take.id,
+            productionTakeIds: filed.productionTakeIds as never,
+            ...(filed.artifactId !== undefined ? { artifactId: filed.artifactId as never } : {}),
+          },
+          { at: this.nowIso(), requestId: `subject-filing-recovered:${opened.session.id}/${take.id}` },
+        );
+        touched = true;
+      }
+      const conversationId = await recordBenchOutcome(store, opened.session, take, filed).catch((error) => {
+        void this.appLog?.append({
+          kind: "bench.outcome-failed",
+          worldId: store.worldId,
+          takeId: take.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+      if (conversationId !== null) await this.refreshBenchOutcome(store, conversationId);
+      touched = true;
+    }
+    return touched;
   }
 
   /**
@@ -10389,6 +10773,13 @@ export class Coordinator {
   private async refreshConversations(store: WorldStore): Promise<void> {
     const { summaries } = await discoverConversations(store.dir);
     this.readModel.setConversations(summaries);
+  }
+
+  private async refreshBenchOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
+    await this.refreshConversations(store);
+    if (this.getState().worldChat?.conversationId === conversationId) {
+      await this.openWorldChat(store, conversationId);
+    }
   }
 
   /**

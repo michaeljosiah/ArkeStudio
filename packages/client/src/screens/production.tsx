@@ -88,7 +88,7 @@ import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { planForScene } from "../lib/scene-plan.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
-import { acceptedTakeId, isDayOne, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { acceptedTakeId, isDayOne, mediaTakeFor, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { SceneReview, SceneSynopsis, StoryboardFoot, StoryboardStrip } from "./storyboard.js";
@@ -196,9 +196,13 @@ export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?:
 }
 
 /** A take's poster image, on the shared convention (lib/poster.ts). */
-export function takeMediaPath(prodId: string, take: { id: string; media?: string }): string | null {
-  if (!take.media) return null;
-  return `productions/${prodId}/takes/${take.id}/${posterNameFor(take.media)}`;
+export function takeMediaPath(
+  production: Pick<ProductionBundle, "meta" | "takes">,
+  take: ProductionBundle["takes"][number],
+): string | null {
+  const mediaTake = mediaTakeFor(production, take);
+  if (mediaTake === null) return null;
+  return `productions/${production.meta.id}/takes/${mediaTake.id}/${posterNameFor(mediaTake.media)}`;
 }
 
 /**
@@ -1131,7 +1135,7 @@ export function ProductionDashboardScreen() {
                   <div className="fy-clip__frame">
                     <Portrait
                       worldSlug={world.meta.slug}
-                      path={takeMediaPath(production.meta.id, t) ?? ""}
+                      path={takeMediaPath(production, t) ?? ""}
                       label={t.coversShots[0]?.replace("sh_", "shot ") ?? t.id}
                     />
                   </div>
@@ -1718,6 +1722,7 @@ export function SceneChatScreen() {
 
 export function SceneDetailScreen() {
   const { worldId, prodId, sceneId } = useParams();
+  const [searchParams] = useSearchParams();
   const { world, production } = useProduction(worldId, prodId);
   const { state } = useStore();
   const navigate = useNavigate();
@@ -1733,7 +1738,7 @@ export function SceneDetailScreen() {
    * untouched — not hidden by CSS but never mounted, so a regression here cannot reach anyone
    * who has not turned it on.
    */
-  if (state?.app.internal.sceneWorkspace === true && world && production && record) {
+  if ((state?.app.internal.sceneWorkspace === true || searchParams.get("workspace") === "1") && world && production && record) {
     return <SceneWorkspace world={world} production={production} scene={record} />;
   }
   if (!production || !scene) {
@@ -2013,15 +2018,12 @@ function TakesView({
   /* Every scene, one chip away (review 2026-08-22): the first cut could only reach the first
      scene's shots from the rail, and a three-scene production had no way to its second. */
   const scenes = production?.scenes ?? [];
-  /*
-   * Only takes there is something to watch. A per-shot charge-split record carries the
-   * acceptance and no media of its own — the pixels live on the pass take covering the same
-   * shot — and a grid of things you watch must not offer one, which read as `running…` for a
-   * clip that finished ten days ago. Anything still in flight has no `completedAt` and stays.
-   */
-  const takes = (production && shotId ? takesForShot(production, shotId) : []).filter(
-    (t) => t.media !== undefined || t.completedAt === undefined,
-  );
+  /** Only takes with resolvable pixels, plus anything still in flight. */
+  const takes = production && shotId
+    ? takesForShot(production, shotId).filter(
+        (take) => mediaTakeFor(production, take) !== null || take.completedAt === undefined,
+      )
+    : [];
   const acceptedId = production && shotId ? acceptedTakeId(production, shotId) : null;
   /*
    * The mark tells no lies (review 2026-08-22). The first cut of this view guessed: when the
@@ -2077,7 +2079,7 @@ function TakesView({
         ) : (
           <div className="fy-takegrid">
             {takes.map((t, i) => {
-              const path = takeMediaPath(production.meta.id, t);
+              const path = takeMediaPath(production, t);
               return (
                 <button
                   key={t.id}
@@ -2318,7 +2320,7 @@ export function GenerateScreen() {
     prevShot && production
       ? production.takes.find((t) => t.id === acceptedTakeId(production, prevShot.id))
       : null;
-  const prevFrame = prevAccepted && production ? takeMediaPath(production.meta.id, prevAccepted) : null;
+  const prevFrame = prevAccepted && production ? takeMediaPath(production, prevAccepted) : null;
   // Strict frame behaviour is promised exactly where the route supports and receives it (issue
   // 154): the model's first-frame route, and the shot's durable boundary still. Anything less is
   // steering, and the copy says so instead of promising what the dispatch cannot send.
@@ -2513,7 +2515,7 @@ export function GenerateScreen() {
             <div className="fy-viewer">
               <Portrait
                 worldSlug={slug}
-                path={takeMediaPath(production!.meta.id, take) ?? ""}
+                path={takeMediaPath(production!, take) ?? ""}
                 label={`Take: first frame`}
                 radius={0}
               />
@@ -2580,7 +2582,7 @@ export function GenerateScreen() {
             <div className="fy-taketile__frame">
               <Portrait
                 worldSlug={slug}
-                path={takeMediaPath(production!.meta.id, t) ?? ""}
+                path={takeMediaPath(production!, t) ?? ""}
                 label={`take ${i + 1}`}
                 radius={0}
               />
@@ -5416,7 +5418,7 @@ function ContactSheet({
                 <div className="fy-shotcard__frame">
                   <Portrait
                     worldSlug={worldSlug}
-                    path={takeMediaPath(production!.meta.id, take) ?? ""}
+                    path={takeMediaPath(production!, take) ?? ""}
                     label={shotId?.replace("sh_", "shot ") ?? take.id}
                     radius={0}
                   />

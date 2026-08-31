@@ -50,11 +50,14 @@ export function StoryboardRows({
   newShotIds,
   stagedBoards,
   locked,
+  generatorPending,
   onCommand,
   refusalVersion,
   frameRun,
   worldId,
   onViewBoardSheet,
+  onOpenShotInGenerator,
+  onRenderBoard,
 }: {
   scene: SceneRecord;
   acceptedScene: SceneRecord;
@@ -72,11 +75,14 @@ export function StoryboardRows({
   newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
   locked: boolean;
+  generatorPending: boolean;
   onCommand: (command: Command) => boolean;
   refusalVersion: number;
   frameRun: FrameRunState | null;
   worldId: string;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
+  onOpenShotInGenerator: (shotId: string) => void;
+  onRenderBoard: (memberShotIds: string[]) => void;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -148,6 +154,7 @@ export function StoryboardRows({
                   capSec={capSec}
                   aspect={aspect}
                   locked={locked}
+                  generatorPending={generatorPending}
                   staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
                   movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
                   refusalVersion={refusalVersion}
@@ -155,6 +162,7 @@ export function StoryboardRows({
                   onDragStart={() => setDragBoundary(shot.id)}
                   onDragEnd={() => setDragBoundary(null)}
                   onViewBoardSheet={onViewBoardSheet}
+                  onRender={() => onRenderBoard([...board.memberShotIds])}
                 />
               ) : null}
               <Row
@@ -169,6 +177,7 @@ export function StoryboardRows({
                 staged={stagedShotIds.has(shot.id)}
                 newShot={newShotIds.has(shot.id)}
                 locked={locked}
+                generatorPending={generatorPending}
                 canMoveUp={index > 0}
                 canMoveDown={index < shots.length - 1}
                 onSelect={() => select({ kind: "shot", shotId: shot.id })}
@@ -187,6 +196,7 @@ export function StoryboardRows({
                 runState={frameRunShotState(frameRun, shot.id)}
                 run={frameRun}
                 worldId={worldId}
+                onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
               />
             </li>
           );
@@ -247,6 +257,7 @@ function BoardBand({
   capSec,
   aspect,
   locked,
+  generatorPending,
   staged,
   movable,
   refusalVersion,
@@ -254,6 +265,7 @@ function BoardBand({
   onDragStart,
   onDragEnd,
   onViewBoardSheet,
+  onRender,
 }: {
   board: PackedBoard;
   scene: SceneRecord;
@@ -262,6 +274,7 @@ function BoardBand({
   capSec: number;
   aspect: string;
   locked: boolean;
+  generatorPending: boolean;
   staged: boolean;
   movable: boolean;
   refusalVersion: number;
@@ -269,6 +282,7 @@ function BoardBand({
   onDragStart: () => void;
   onDragEnd: () => void;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
+  onRender: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const members = board.memberShotIds.map((id) => shots.find((shot) => shot.id === id)!).filter(Boolean);
@@ -304,6 +318,9 @@ function BoardBand({
         <span className="fy-swboard__rule" />
         {board.reason === null ? null : <span>split · {board.reason}</span>}
         <span>{board.durationSec}s / {capSec}s</span>
+        <button type="button" disabled={locked || staged || generatorPending} onClick={onRender}>
+          {generatorPending ? "Opening…" : "Render board"}
+        </button>
         <button type="button" title="Consolidated prompt" disabled={locked} onClick={() => setPromptOpen((open) => !open)}>P</button>
         <button
           type="button"
@@ -379,6 +396,7 @@ function Row({
   staged,
   newShot,
   locked,
+  generatorPending,
   canMoveUp,
   canMoveDown,
   onSelect,
@@ -392,6 +410,7 @@ function Row({
   runState,
   run,
   worldId,
+  onOpenInGenerator,
 }: {
   shot: Shot;
   production: ProductionBundle;
@@ -404,6 +423,7 @@ function Row({
   staged: boolean;
   newShot: boolean;
   locked: boolean;
+  generatorPending: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onSelect: () => void;
@@ -417,6 +437,7 @@ function Row({
   runState: ReturnType<typeof frameRunShotState>;
   run: FrameRunState | null;
   worldId: string;
+  onOpenInGenerator: () => void;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const restored = useRef(false);
@@ -555,20 +576,34 @@ function Row({
         )}
       </div>
       <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
-        <button type="button" className="fy-swedit" disabled={disabled} onClick={() => setMenu((open) => !open)}>•••</button>
+        <button
+          type="button"
+          className="fy-swedit"
+          disabled={disabled}
+          aria-label={`Actions for shot ${shot.number}`}
+          aria-expanded={menu}
+          aria-haspopup="menu"
+          onClick={() => setMenu((open) => !open)}
+        >
+          •••
+        </button>
         {menu ? (
-          <div className="fy-swrow__menu">
-            <button type="button" disabled={disabled || !canMoveUp} onClick={onMoveUp}>Move before previous</button>
-            <button type="button" disabled={disabled || !canMoveDown} onClick={onMoveDown}>Move after next</button>
-            <button type="button" disabled={disabled} onClick={() => onCommand({ kind: "duplicate-shot", shotId: shot.id })}>Duplicate</button>
+          <div className="fy-swrow__menu" role="menu">
+            <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
+              {generatorPending ? "Opening…" : "Open in generator"}
+            </button>
+            <button type="button" role="menuitem" disabled={disabled || !canMoveUp} onClick={onMoveUp}>Move before previous</button>
+            <button type="button" role="menuitem" disabled={disabled || !canMoveDown} onClick={onMoveDown}>Move after next</button>
+            <button type="button" role="menuitem" disabled={disabled} onClick={() => onCommand({ kind: "duplicate-shot", shotId: shot.id })}>Duplicate</button>
             <button
               type="button"
+              role="menuitem"
               disabled={disabled}
               onClick={() => onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: "Untitled shot", description: "" } })}
             >
               Add shot after
             </button>
-            <button type="button" className="fy-swrow__danger" disabled={disabled} onClick={() => setConfirmDelete(true)}>Delete</button>
+            <button type="button" role="menuitem" className="fy-swrow__danger" disabled={disabled} onClick={() => setConfirmDelete(true)}>Delete</button>
           </div>
         ) : null}
         {confirmDelete ? (

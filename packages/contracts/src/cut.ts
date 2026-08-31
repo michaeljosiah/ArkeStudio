@@ -209,16 +209,24 @@ export function episodeExportRefusals(
 
 function deriveCutOver(production: ProductionBundle, scenes: readonly ProductionBundle["scenes"][number][]): DerivedCut {
   const takesById = new Map(production.takes.map((t) => [t.id, t]));
+  const selectedFor = (shotId: string): Take | null => {
+    const takeId = production.selections[shotId]?.acceptedTakeId ?? null;
+    const take = takeId === null ? null : (takesById.get(takeId) ?? null);
+    return take !== null &&
+      take.kind === "clip" &&
+      take.boardSheetParent !== true &&
+      !(take.segment === undefined && take.coversShots.length > 1) &&
+      take.coversShots.includes(shotId)
+      ? take
+      : null;
+  };
   const entries: CutEntry[] = [];
   for (const scene of scenes) {
     const shots = orderedShots(scene);
     for (const [shotIndex, shot] of shots.entries()) {
-      const takeId = production.selections[shot.id]?.acceptedTakeId ?? null;
-      const selected = takeId !== null ? (takesById.get(takeId) ?? null) : null;
+      const selected = selectedFor(shot.id);
       const previousShot = shotIndex > 0 ? shots[shotIndex - 1] : undefined;
-      const predecessorId = previousShot
-        ? (production.selections[previousShot.id]?.acceptedTakeId ?? null)
-        : null;
+      const predecessorId = previousShot ? selectedFor(previousShot.id)?.id ?? null : null;
       // Scene edits can reorder or insert shots after review. A continuation only remains valid
       // while the exact take it extended is still selected immediately before it in this scene.
       const coversShot = selected?.coversShots.includes(shot.id) ?? false;

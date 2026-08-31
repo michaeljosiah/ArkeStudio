@@ -1,11 +1,15 @@
 import { z } from "zod";
 import {
   ArtifactIdSchema,
+  EpisodeIdSchema,
   IsoDateTimeSchema,
   JobIdSchema,
   PresetIdSchema,
+  SceneIdSchema,
   SessionIdSchema,
   Sha256Schema,
+  ShotIdSchema,
+  SlugSchema,
   TakeIdSchema,
 } from "./ids.js";
 import { JobStatusSchema } from "./job.js";
@@ -13,7 +17,7 @@ import { SizeTierSchema, modeSpec, modeUnavailableReason, supportsMode, type Man
 import { MediaInfoSchema } from "./media.js";
 import { PROVIDERS, type Capability } from "./provider.js";
 import { ReferenceKindSchema, type ReferenceKind } from "./reference-budget.js";
-import { TakeCostSchema } from "./take.js";
+import { ProvenanceSchema, TakeCostSchema } from "./take.js";
 import { DeliverySchema } from "./voice.js";
 
 /**
@@ -78,7 +82,8 @@ export const BenchVideoParamsSchema = z
     aspect: z.string().min(1).optional(),
     /** Video keeps its own words — "720p", never a normalised tier (manifest.ts). */
     resolution: z.string().min(1).optional(),
-    durationSec: z.number().int().min(1).optional(),
+    /** Authored board totals may be fractional; the provider route decides its own wire step. */
+    durationSec: z.number().positive().optional(),
     /** Present only where the model declares the control; absent is "the control does not exist". */
     sound: z.boolean().optional(),
   })
@@ -221,6 +226,27 @@ export const BenchReferenceTokenSchema = z
     token: z.string().regex(BENCH_TOKEN),
     kind: ReferenceKindSchema,
     source: BenchReferenceSourceSchema,
+    /** Subject-prefilled tiles name what they represent instead of only saying "Image 1". */
+    label: z.string().min(1).max(200).optional(),
+    detail: z.string().min(1).max(300).optional(),
+    /** Frozen sheet provenance for a named subject reference. */
+    sheetId: SlugSchema.optional(),
+    sheetVersion: z.number().int().min(1).optional(),
+    /** Measured length for subject audio/video that did not come through an artifact sidecar. */
+    durationSec: z.number().positive().optional(),
+    /** A subject audio tile remains visible when the chosen route cannot carry it. */
+    ride: z.enum(["required", "when-supported"]).optional(),
+    /** Production's attachment decision, used to bind the carried image in the provider prompt. */
+    productionBinding: z
+      .object({
+        subject: z.string().min(1).max(200),
+        rolePhrase: z.string().min(1).max(300),
+        mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation"]),
+      })
+      .strict()
+      .optional(),
+    /** Why a production prefill supplied this token; ordinary user references leave it absent. */
+    subjectRole: z.enum(["reference", "audio", "board-frame"]).optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -378,6 +404,66 @@ export const BenchRequestSnapshotSchema = z
     keyframes: z.array(BenchReferenceTokenSchema).default([]),
     /** Recorded only when one was asked for; providers do not universally return one. */
     requestedSeed: z.number().int().optional(),
+    /** The production values frozen when this paid request was authorized. */
+    productionProvenance: ProvenanceSchema.optional(),
+    /** Fixed filing identities and segment boundaries for a subject-bound take. */
+    filing: z
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            kind: z.literal("shot"),
+            productionId: SlugSchema,
+            sceneId: SceneIdSchema,
+            shotId: ShotIdSchema,
+            productionTakeId: TakeIdSchema,
+            frameArtifactId: ArtifactIdSchema,
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("board"),
+            productionId: SlugSchema,
+            sceneId: SceneIdSchema,
+            productionTakeId: TakeIdSchema,
+            members: z
+              .array(
+                z
+                  .object({
+                    shotId: ShotIdSchema,
+                    number: z.number().int().min(1),
+                    startSec: z.number().min(0),
+                    endSec: z.number().positive(),
+                    takeId: TakeIdSchema,
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .superRefine((members, ctx) => {
+                const shots = new Set<string>();
+                const takes = new Set<string>();
+                for (const [index, member] of members.entries()) {
+                  if (member.endSec <= member.startSec) {
+                    ctx.addIssue({ code: "custom", path: [index, "endSec"], message: "a segment ends after it starts" });
+                  }
+                  if (shots.has(member.shotId)) {
+                    ctx.addIssue({ code: "custom", path: [index, "shotId"], message: "a board files each shot once" });
+                  }
+                  if (takes.has(member.takeId)) {
+                    ctx.addIssue({ code: "custom", path: [index, "takeId"], message: "a board gives each segment its own take" });
+                  }
+                  shots.add(member.shotId);
+                  takes.add(member.takeId);
+                }
+                for (let index = 1; index < members.length; index++) {
+                  if (members[index]!.startSec !== members[index - 1]!.endSec) {
+                    ctx.addIssue({ code: "custom", path: [index, "startSec"], message: "board segments are contiguous" });
+                  }
+                }
+              }),
+          })
+          .strict(),
+      ])
+      .optional(),
   })
   .strict()
   .superRefine((request, ctx) => {
@@ -386,6 +472,15 @@ export const BenchRequestSnapshotSchema = z
     }
     if (request.keyframes.length > 0 && request.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "keyframes ride video, and nothing else" });
+    }
+    if (request.filing?.kind === "shot" && request.mode !== "image") {
+      ctx.addIssue({ code: "custom", message: "shot filing belongs to an image request" });
+    }
+    if (request.filing?.kind === "board" && request.mode !== "video") {
+      ctx.addIssue({ code: "custom", message: "board filing belongs to a video request" });
+    }
+    if ((request.filing === undefined) !== (request.productionProvenance === undefined)) {
+      ctx.addIssue({ code: "custom", message: "production filing and provenance travel together" });
     }
     // minimax-music-3 declares `referenceImages: 0`. Refused at the snapshot rather than
     // dropped at dispatch, so a reference can never be attached, priced and silently ignored.
@@ -434,6 +529,8 @@ export const BenchTakeSchema = z
     cost: TakeCostSchema.optional(),
     disposition: BenchTakeDispositionSchema,
     keptArtifactId: ArtifactIdSchema.optional(),
+    /** Production take ids filed by Accept when this session has a subject. Parent first. */
+    filedTakeIds: z.array(TakeIdSchema).min(1).optional(),
     /** Hidden from the wall. Presentation state — the bytes and the number both stay. */
     clearedFromView: z.boolean().optional(),
     error: z.string().optional(),
@@ -470,10 +567,103 @@ export const BenchComposerSchema = z
   .strict();
 export type BenchComposer = z.infer<typeof BenchComposerSchema>;
 
+const BenchSubjectContextShape = {
+  productionId: SlugSchema,
+  productionTitle: z.string().min(1),
+  episode: z
+    .object({
+      id: EpisodeIdSchema,
+      order: z.number().int().min(1),
+      title: z.string().min(1),
+    })
+    .strict()
+    .optional(),
+  sceneId: SceneIdSchema,
+  sceneNumber: z.number().int().min(1),
+  sceneTitle: z.string().min(1),
+  /** Sheet versions whose words were assembled into the subject's prompt at prefill time. */
+  promptSheetVersions: z.record(SlugSchema, z.number().int().min(1)).optional(),
+} as const;
+
+/** Stable production identity and current display/timing snapshots carried by a subject session. */
+export const BenchSubjectSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("shot"),
+      ...BenchSubjectContextShape,
+      shotId: ShotIdSchema,
+      shotNumber: z.number().int().min(1),
+      shotTitle: z.string().min(1),
+      durationSec: z.number().positive(),
+      aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("board"),
+      ...BenchSubjectContextShape,
+      letter: z.string().min(1).max(8),
+      durationSec: z.number().positive(),
+      aspect: z.string().min(1).max(20),
+      /** The production route constraints that made these exact members one board. */
+      packing: z
+        .object({
+          maxDurationSec: z.number().positive(),
+          maxMembers: z.number().int().positive().optional(),
+        })
+        .strict(),
+      members: z
+        .array(
+          z
+            .object({
+              shotId: ShotIdSchema,
+              number: z.number().int().min(1),
+              title: z.string().min(1),
+              durationSec: z.number().positive(),
+            })
+            .strict(),
+        )
+        .min(1),
+    })
+    .strict(),
+]);
+export type BenchSubject = z.infer<typeof BenchSubjectSchema>;
+
+function sameBenchSubjectIdentity(left: BenchSubject, right: BenchSubject): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.productionId !== right.productionId ||
+    left.sceneId !== right.sceneId
+  ) {
+    return false;
+  }
+  return left.kind === "shot" && right.kind === "shot"
+    ? left.shotId === right.shotId
+    : left.kind === "board" && right.kind === "board"
+      ? left.members.map((member) => member.shotId).join("\n") ===
+        right.members.map((member) => member.shotId).join("\n")
+      : false;
+}
+
+export function benchSubjectTitle(subject: BenchSubject): string {
+  const compact = (value: string): string =>
+    value.length <= 32 ? value : `${value.slice(0, 29)}...`;
+  const chain = [
+    compact(subject.productionTitle),
+    subject.episode ? `Episode ${subject.episode.order} · ${compact(subject.episode.title)}` : null,
+    `Scene ${subject.sceneNumber} · ${compact(subject.sceneTitle)}`,
+    subject.kind === "shot"
+      ? `Shot ${subject.shotNumber}`
+      : `Board ${subject.letter} · ${subject.members.length} shots · ${subject.durationSec}s · one pass`,
+  ].filter((part): part is string => part !== null);
+  return chain.join(" · ");
+}
+
 export const BenchSessionSchema = z
   .object({
     schemaVersion: z.literal(1),
     id: SessionIdSchema,
+    subject: BenchSubjectSchema.optional(),
     /** Null renders as "Untitled session". */
     title: z.string().max(200).nullable(),
     composer: BenchComposerSchema,
@@ -483,6 +673,8 @@ export const BenchSessionSchema = z
      * same bytes for the whole life of the session, in every brief that ever cited it.
      */
     tokenRegistry: z.array(BenchReferenceTokenSchema),
+    /** The current prefill's tokens; the registry also retains historical rebuild entries. */
+    subjectTokens: z.array(z.string().regex(BENCH_TOKEN)).default([]),
     /** Next number per kind. Monotonic; never reused within the session. */
     nextToken: z.record(ReferenceKindSchema, z.number().int().min(1)),
     nextTake: z.number().int().min(1),
@@ -508,8 +700,19 @@ export const BenchSessionSchema = z
       if (take.n >= session.nextTake) {
         ctx.addIssue({ code: "custom", message: `nextTake ${session.nextTake} does not clear allocated take ${take.n}` });
       }
-      if (take.disposition === "filed" && take.keptArtifactId === undefined) {
-        ctx.addIssue({ code: "custom", message: `take ${take.n} is filed but names no artifact` });
+      if (take.disposition === "filed" && take.keptArtifactId === undefined && take.filedTakeIds === undefined) {
+        ctx.addIssue({ code: "custom", message: `take ${take.n} is filed but names no filed output` });
+      }
+      if (take.filedTakeIds !== undefined) {
+        const expected =
+          take.request.filing?.kind === "shot"
+            ? [take.request.filing.productionTakeId]
+            : take.request.filing?.kind === "board"
+              ? [take.request.filing.productionTakeId, ...take.request.filing.members.map((member) => member.takeId)]
+              : null;
+        if (expected === null || expected.join("\n") !== take.filedTakeIds.join("\n")) {
+          ctx.addIssue({ code: "custom", message: `take ${take.n} filed ids do not match its dispatch plan` });
+        }
       }
     }
     if (session.selectedTakeId !== undefined && !seenId.has(session.selectedTakeId)) {
@@ -531,6 +734,14 @@ export const BenchSessionSchema = z
         }
       }
     }
+    const currentSubjectTokens = new Set<string>();
+    for (const token of session.subjectTokens) {
+      if (currentSubjectTokens.has(token)) {
+        ctx.addIssue({ code: "custom", message: `subject token "${token}" is current twice` });
+      }
+      currentSubjectTokens.add(token);
+      if (!tokens.has(token)) ctx.addIssue({ code: "custom", message: `subject token "${token}" is not in the registry` });
+    }
     const active = new Set<string>();
     for (const token of session.composer.activeTokens) {
       if (active.has(token)) ctx.addIssue({ code: "custom", message: `token "${token}" is active twice` });
@@ -550,6 +761,12 @@ export const BenchSessionSchema = z
     if (session.composer.params.kind !== session.composer.mode) {
       ctx.addIssue({ code: "custom", message: "composer params do not match the composer mode" });
     }
+    if (session.subject?.kind === "shot" && session.composer.mode !== "image") {
+      ctx.addIssue({ code: "custom", message: "a shot subject uses image mode" });
+    }
+    if (session.subject?.kind === "board" && session.composer.mode !== "video") {
+      ctx.addIssue({ code: "custom", message: "a board subject uses video mode" });
+    }
   });
 export type BenchSession = z.infer<typeof BenchSessionSchema>;
 
@@ -557,6 +774,8 @@ export type BenchSession = z.infer<typeof BenchSessionSchema>;
 export const BenchSessionSummarySchema = z
   .object({
     id: SessionIdSchema,
+    /** Present only for production-bound sessions; the id-less Bench never resumes one. */
+    subject: BenchSubjectSchema.optional(),
     title: z.string().max(200).nullable(),
     mode: BenchModeSchema,
     updatedAt: IsoDateTimeSchema,
@@ -585,6 +804,7 @@ export const BenchSessionMetaSchema = z
     schemaVersion: z.literal(1),
     id: SessionIdSchema,
     createdAt: IsoDateTimeSchema,
+    subject: BenchSubjectSchema.optional(),
   })
   .strict();
 export type BenchSessionMeta = z.infer<typeof BenchSessionMetaSchema>;
@@ -607,6 +827,16 @@ export const BenchReservedTakeSchema = z
 export type BenchReservedTake = z.infer<typeof BenchReservedTakeSchema>;
 
 export const BenchEventSchema = z.discriminatedUnion("type", [
+  /** One durable prefill: a subject session never opens with half its prompt or references. */
+  z
+    .object({
+      type: z.literal("subject-prefill-set"),
+      subject: BenchSubjectSchema,
+      title: z.string().min(1).max(200),
+      composer: BenchComposerSchema,
+      references: z.array(BenchReferenceTokenSchema),
+    })
+    .strict(),
   z.object({ type: z.literal("title-set"), title: z.string().max(200).nullable() }).strict(),
   z
     .object({
@@ -616,6 +846,13 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
       model: z.string(),
       params: BenchParamsSchema,
       brief: z.string(),
+      subjectRouting: z
+        .object({
+          activeTokens: z.array(z.string().regex(BENCH_TOKEN)),
+          keyframeTokens: z.array(z.string().regex(BENCH_TOKEN)),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   /** `lane` absent means the reference lane — every event written before the Keyframe lane. */
@@ -669,6 +906,14 @@ export const BenchEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("take-filed"), takeId: TakeIdSchema, artifactId: ArtifactIdSchema }).strict(),
+  z
+    .object({
+      type: z.literal("take-subject-filed"),
+      takeId: TakeIdSchema,
+      productionTakeIds: z.array(TakeIdSchema).min(1),
+      artifactId: ArtifactIdSchema.optional(),
+    })
+    .strict(),
   z.object({ type: z.literal("take-discarded"), takeId: TakeIdSchema }).strict(),
   z.object({ type: z.literal("take-cleared"), takeId: TakeIdSchema }).strict(),
   z.object({ type: z.literal("take-selected"), takeId: TakeIdSchema }).strict(),
@@ -705,9 +950,11 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
   const session: BenchSession = {
     schemaVersion: 1,
     id: meta.id,
+    ...(meta.subject !== undefined ? { subject: meta.subject } : {}),
     title: null,
     composer: { ...EMPTY_COMPOSER, params: { ...EMPTY_COMPOSER.params } as BenchParams, activeTokens: [], keyframeTokens: [] },
     tokenRegistry: [],
+    subjectTokens: [],
     nextToken: {},
     nextTake: 1,
     takes: [],
@@ -731,6 +978,59 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
   for (const { at, event } of envelopes) {
     session.updatedAt = at;
     switch (event.type) {
+      case "subject-prefill-set":
+        // Rebuild refreshes script-derived snapshots but cannot turn one durable production
+        // subject into another, even if a malformed log record names a different target.
+        if (session.subject === undefined || !sameBenchSubjectIdentity(session.subject, event.subject)) break;
+        session.subject = event.subject;
+        session.title = event.title;
+        // Rebuild replaces what rides now, not the registry's history. Old take snapshots cite
+        // the tokens they were made with, and dropping those entries made selecting one restore
+        // its words against newly numbered pictures. Reuse a token for the same source, allocate
+        // around collisions for a new source, and keep entries no longer in the current prefill.
+        {
+          const remapped = new Map<string, string>();
+          for (const incoming of event.references) {
+            const sourceKey = benchSourceKey(incoming.source);
+            const existingIndex = session.tokenRegistry.findIndex(
+              (entry) => benchSourceKey(entry.source) === sourceKey,
+            );
+            if (existingIndex >= 0) {
+              const token = session.tokenRegistry[existingIndex]!.token;
+              session.tokenRegistry[existingIndex] = { ...incoming, token };
+              remapped.set(incoming.token, token);
+              continue;
+            }
+            let entry = incoming;
+            if (session.tokenRegistry.some((candidate) => candidate.token === incoming.token)) {
+              entry = {
+                ...incoming,
+                token: benchTokenFor(incoming.kind, session.nextToken[incoming.kind] ?? 1),
+              };
+            }
+            claimToken(entry);
+            remapped.set(incoming.token, entry.token);
+          }
+          session.composer = {
+            ...event.composer,
+            params: { ...event.composer.params } as BenchParams,
+            brief: (() => {
+              let brief = "";
+              let at = 0;
+              for (const mention of benchMentionsIn(event.composer.brief)) {
+                const token = remapped.get(mention.token);
+                if (token === undefined) continue;
+                brief += event.composer.brief.slice(at, mention.start) + benchMentionFor(token);
+                at = mention.end;
+              }
+              return brief + event.composer.brief.slice(at);
+            })(),
+            activeTokens: event.composer.activeTokens.map((token) => remapped.get(token) ?? token),
+            keyframeTokens: event.composer.keyframeTokens.map((token) => remapped.get(token) ?? token),
+          };
+          session.subjectTokens = event.references.map((entry) => remapped.get(entry.token) ?? entry.token);
+        }
+        break;
       case "title-set":
         session.title = event.title;
         break;
@@ -741,8 +1041,8 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           model: event.model,
           params: event.params,
           brief: event.brief,
-          activeTokens: session.composer.activeTokens,
-          keyframeTokens: session.composer.keyframeTokens,
+          activeTokens: event.subjectRouting?.activeTokens ?? session.composer.activeTokens,
+          keyframeTokens: event.subjectRouting?.keyframeTokens ?? session.composer.keyframeTokens,
         };
         break;
       case "reference-added":
@@ -750,9 +1050,16 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         activate(event.entry.token, event.lane ?? "reference");
         break;
       case "reference-restored":
+        if (session.subject !== undefined) {
+          const restored = session.tokenRegistry.find((entry) => entry.token === event.token);
+          if (restored?.subjectRole !== undefined && !session.subjectTokens.includes(event.token)) {
+            session.subjectTokens.push(event.token);
+          }
+        }
         activate(event.token, event.lane ?? "reference");
         break;
       case "reference-removed":
+        session.subjectTokens = session.subjectTokens.filter((t) => t !== event.token);
         if ((event.lane ?? "reference") === "keyframe") {
           session.composer.keyframeTokens = session.composer.keyframeTokens.filter((t) => t !== event.token);
         } else {
@@ -761,6 +1068,7 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         break;
       case "reference-replaced":
         session.composer.activeTokens = session.composer.activeTokens.filter((t) => t !== event.removed);
+        session.subjectTokens = session.subjectTokens.filter((t) => t !== event.removed);
         claimToken(event.entry);
         activate(event.entry.token);
         break;
@@ -816,7 +1124,12 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
           // snapshot keeps its copy, so re-run still replays the frames it was made with.
           if (take.request.keyframes.length > 0) {
             const spent = new Set(take.request.keyframes.map((entry) => entry.token));
-            session.composer.keyframeTokens = session.composer.keyframeTokens.filter((t) => !spent.has(t));
+            // Production-owned board frames describe the durable subject, so they remain visible
+            // and ready for its next take. Only ad hoc session keyframes are one-use choices.
+            const subjectOwned = new Set(session.subjectTokens);
+            session.composer.keyframeTokens = session.composer.keyframeTokens.filter(
+              (token) => !spent.has(token) || subjectOwned.has(token),
+            );
           }
         }
         break;
@@ -826,6 +1139,15 @@ export function foldBenchSession(meta: BenchSessionMeta, envelopes: readonly Ben
         if (take) {
           take.disposition = "filed";
           take.keptArtifactId = event.artifactId;
+        }
+        break;
+      }
+      case "take-subject-filed": {
+        const take = takesById.get(event.takeId);
+        if (take) {
+          take.disposition = "filed";
+          take.filedTakeIds = event.productionTakeIds;
+          if (event.artifactId !== undefined) take.keptArtifactId = event.artifactId;
         }
         break;
       }
@@ -855,6 +1177,7 @@ export function benchSessionSummary(session: BenchSession): BenchSessionSummary 
   const failed = session.takes.filter((t) => t.status === "failed" || t.status === "needs-reconciliation").length;
   return {
     id: session.id,
+    ...(session.subject !== undefined ? { subject: session.subject } : {}),
     title: session.title,
     mode: session.composer.mode,
     updatedAt: session.updatedAt,

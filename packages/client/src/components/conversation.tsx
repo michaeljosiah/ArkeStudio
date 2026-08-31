@@ -67,6 +67,8 @@ export function ConversationTranscript({
   /** What stands in for the transcript before anything has been said. */
   empty?: React.ReactNode;
 }) {
+  const navigate = useNavigate();
+  const worldId = useStore().state?.world?.meta.worldId;
   const messages = workspace?.messages ?? [];
   if (messages.length === 0 && !running && !failure && empty) {
     return (
@@ -109,6 +111,27 @@ export function ConversationTranscript({
               <Button variant="ghost" onClick={() => onUndoBible?.(m.bibleEdit!.fromVersion)}>
                 Undo
               </Button>
+            </div>
+          )}
+          {m.benchOutcome && (
+            <div className="fy-chat__benchreport" aria-label="Filed production takes">
+              {m.benchOutcome.rows.map((row) => (
+                <button
+                  key={row.shotId}
+                  type="button"
+                  onClick={() => {
+                    if (worldId === undefined) return;
+                    void navigate(
+                      `/w/${worldId}/p/${m.benchOutcome!.productionId}/scenes/${m.benchOutcome!.sceneId}?workspace=1&shot=${row.shotId}`,
+                    );
+                  }}
+                >
+                  <span>Shot {row.shotNumber}</span>
+                  <span className="fy-mono">
+                    {row.artifactId === undefined ? row.productionTakeId : row.artifactId}
+                  </span>
+                </button>
+              ))}
             </div>
           )}
         </div>

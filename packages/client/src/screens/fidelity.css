@@ -4426,6 +4426,9 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * confinement worked, and the reply is the only thing at fault.
  */
 .fy-chat__refusals { margin-top: 6px; font: 400 10.5px var(--font-mono); color: var(--warning); }
+.fy-chat__benchreport { display: grid; gap: 1px; margin-top: 5px; border: 1px solid var(--border); background: var(--border); }
+.fy-chat__benchreport button { display: flex; justify-content: space-between; gap: 16px; padding: 8px 10px; border: 0; background: var(--card); color: var(--foreground); font: 500 11px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-chat__benchreport button:hover { background: var(--accent); }
 
 /* A turn that failed, where its reply would have been. Quiet: this is the app apologising, not
    an alarm, and the conversation above it is still perfectly good. */
@@ -4738,12 +4741,29 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-bench__mode button:hover { color: var(--foreground); }
 .fy-bench__mode button[aria-pressed="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 500; }
+.fy-bench__mode button:disabled { cursor: default; opacity: 0.38; }
+.fy-bench__mode button:disabled:hover { color: var(--muted-foreground); }
 .fy-bench__clear {
   appearance: none; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent;
   color: var(--neutral-400); cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   transition: var(--transition-control);
 }
 .fy-bench__clear:hover { background: var(--accent); color: var(--foreground); }
+.fy-bench__rebuild {
+  appearance: none; border: 0; border-radius: 7px; background: transparent; padding: 5px 7px;
+  color: var(--muted-foreground); cursor: pointer; font: 500 10.5px var(--font-sans);
+  transition: var(--transition-control);
+}
+.fy-bench__rebuild:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-bench__rebuild:disabled { cursor: default; opacity: 0.55; }
+.fy-bench__subjectcontext {
+  display: flex; align-items: center; gap: 5px; margin-top: 10px; flex-wrap: wrap;
+}
+.fy-bench__subjectcontext > span {
+  padding: 3px 7px; border-radius: 999px; background: var(--secondary);
+  color: var(--muted-foreground); font: 400 9.5px var(--font-mono);
+}
+.fy-bench__subjectcontext .fy-bench__subjectnote { background: transparent; color: var(--muted-foreground); }
 
 /* The lane tabs (design 68b): a full-width track; the active lane is the white cell. */
 .fy-bench__lanes { display: flex; gap: 3px; background: var(--muted); border-radius: 9px; padding: 3px; margin-top: 11px; flex: none; }
@@ -4776,6 +4796,24 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   background: color-mix(in srgb, var(--media-overlay-bg) 82%, transparent); color: var(--media-overlay-fg);
   font: 600 9.5px var(--font-sans);
 }
+.fy-bench__refcaption {
+  position: absolute; left: 6px; right: 5px; bottom: 5px; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px; padding: 3px 5px; border-radius: 6px;
+  background: color-mix(in srgb, var(--media-overlay-bg) 82%, transparent); color: var(--media-overlay-fg);
+}
+.fy-bench__refcaption strong,
+.fy-bench__refcaption span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fy-bench__refcaption strong { font: 600 9.5px var(--font-sans); }
+.fy-bench__refcaption span { font: 400 8.5px var(--font-mono); opacity: 0.78; }
+.fy-bench__wave {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 4px;
+  color: var(--muted-foreground); background: linear-gradient(135deg, var(--muted), var(--secondary));
+}
+.fy-bench__wave > span { width: 2px; height: 18px; border-radius: 2px; background: currentColor; opacity: 0.48; }
+.fy-bench__wave > span:nth-of-type(2) { height: 28px; }
+.fy-bench__wave > span:nth-of-type(3) { height: 12px; }
+.fy-bench__reftile[data-riding="false"] { background: var(--muted); }
+.fy-bench__reftile[data-riding="false"] .fy-portrait { opacity: 0.55; filter: saturate(0.5); }
 /* Remove appears when asked after — hover or focus — never at rest (design 68b). */
 .fy-bench__tokenremove {
   position: absolute; right: 3px; top: 3px; width: 18px; height: 18px; border: 0; border-radius: 5px;
@@ -5028,6 +5066,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-bench__overlaychip--name { font-weight: 500; letter-spacing: 0.1em; }
 .fy-bench__wallactions { display: flex; align-items: center; gap: 8px; padding: 10px 14px 12px; flex: none; }
+.fy-bench__acceptoutcome { font: 400 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-bench__acceptnote { font: 400 10.5px var(--font-sans); color: var(--destructive); }
 .fy-bench__viewlatest {
   position: absolute; left: 50%; transform: translateX(-50%); bottom: 56px;
   display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 999px;
@@ -6080,6 +6120,13 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swnode__port { position: absolute; width: 16px; height: 16px; border: 2px solid var(--card); border-radius: 999px; background: var(--muted-fg); box-shadow: 0 0 0 1px var(--border); cursor: crosshair; z-index: 4; }
 .fy-swnode__port[aria-pressed="true"] { background: var(--warning); box-shadow: 0 0 0 2px var(--ring); }
 .fy-swnode__port:disabled { opacity: .35; cursor: default; }
+.fy-swnode__generate {
+  position: absolute; z-index: 5; appearance: none; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--card); color: var(--muted-fg); padding: 3px 7px; box-shadow: var(--shadow-xs);
+  font: 500 9px var(--font-sans); cursor: pointer;
+}
+.fy-swnode__generate:hover:not(:disabled) { color: var(--foreground); border-color: var(--neutral-400); }
+.fy-swnode__generate:disabled { opacity: .45; cursor: default; }
 .fy-swlinkhint { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 9; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--warning); border-radius: 9px; background: var(--card); color: var(--fg); box-shadow: var(--shadow-sm); font-size: 11px; }
 .fy-swlinkhint button { border: 0; background: transparent; color: var(--muted-fg); cursor: pointer; text-decoration: underline; }
 .fy-swzoom {
