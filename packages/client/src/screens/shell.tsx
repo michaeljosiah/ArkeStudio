@@ -984,7 +984,10 @@ export function NewWorldScreen() {
   if (step !== "draft") {
     return (
       <div className="fy-app" data-screen="new-world-art-direction">
-        <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world · art direction" }} />
+        <AppChrome
+          back={{ label: genMode === "chat" ? "Back to chat" : "Back to form", onClick: () => setStep("draft") }}
+          context={{ label: "new world · art direction" }}
+        />
         <div className="fy-artstep">
           {step === "look" ? (
             <>
@@ -1477,13 +1480,17 @@ export function NewWorldScreen() {
               disabled={!canCreate}
               onClick={() => {
                 const proposed = blueprint?.look?.trim();
-                if (proposed && look.trim().length === 0) {
-                  // The conversation proposed the look; the step opens on its words, not on
-                  // a grid of presets that never heard the conversation.
-                  setLook(proposed);
-                  setLookSource("conversation");
-                  setPresetId(null);
-                  setStep("words");
+                const approvedLook = look.trim() || proposed;
+                if (approvedLook) {
+                  // Begin is the answer to a look already chosen here or proposed in chat. Keep
+                  // new proposal words ready for an optional edit, but do not ask for approval twice.
+                  if (look.trim().length === 0) {
+                    setLook(approvedLook);
+                    setLookSource("conversation");
+                    setPresetId(null);
+                  }
+                  if (buildMode) enterReview(approvedLook);
+                  else begin(approvedLook);
                 } else {
                   setStep("look");
                 }

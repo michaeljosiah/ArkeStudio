@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.js";
 import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
@@ -11,9 +14,21 @@ import { proposedMasterLookNote, splitDescription } from "../src/screens/art-dir
 import { authoredPrompt } from "../src/components/generation-dialog.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { App } from "../src/App.js";
-import { worldImagePrompt } from "@arke-studio/contracts";
+import { worldImagePrompt, type BuildReview, type GenesisBlueprint } from "@arke-studio/contracts";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+});
 
 /**
  * Genesis asks for the look (design turn 38). The rule under test is the one that decides what
@@ -75,6 +90,130 @@ describe("the art-direction step of genesis", () => {
   it("promises the step rather than springing it, so Begin is not a surprise", () => {
     __setStateForTest(FIXTURE_STATE);
     assert.ok(render().includes("One more question"));
+  });
+});
+
+const GENESIS_ID = "gen-00";
+const BUILD_REQUEST_ID = "01J8E0000000000000000000B1";
+
+function genesisBlueprint(look?: string): GenesisBlueprint {
+  return {
+    name: "Glass Harbor",
+    logline: "A drowned city bargains with the tide.",
+    ...(look ? { look } : {}),
+    threads: [],
+    characters: [],
+    locations: [],
+    factions: [],
+    dropped: [],
+  };
+}
+
+const BUILD_REVIEW: BuildReview = {
+  genesisId: GENESIS_ID,
+  requestId: BUILD_REQUEST_ID,
+  worldName: "Glass Harbor",
+  counts: { characters: 0, locations: 0, factions: 0, threads: 0 },
+  generations: 0,
+  estimateMicroUsd: 0,
+  imageModel: null,
+  notes: [],
+  dropped: [],
+};
+
+interface MountedGenesis {
+  container: HTMLElement;
+  root: Root;
+}
+
+async function mountGenesis(blueprint: GenesisBlueprint, plan?: BuildReview): Promise<MountedGenesis> {
+  __setStateForTest(
+    {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        health: { ...FIXTURE_STATE.app.health, harness: { status: "healthy" } },
+      },
+    },
+    {
+      genesis: {
+        [GENESIS_ID]: {
+          turns: [
+            { role: "user", text: "A drowned city.", at: "2026-08-31T12:00:00Z" },
+            { role: "gate", text: "Should we generate images based on this look?", at: "2026-08-31T12:01:00Z" },
+          ],
+          blueprint,
+          status: "completed",
+          working: null,
+          runStartedAt: null,
+          attachments: [],
+          refusals: [],
+        },
+      },
+      ...(plan ? { buildPlans: { [GENESIS_ID]: { requestId: plan.requestId, plan } } } : {}),
+    },
+  );
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const now = Date.now;
+  const random = Math.random;
+  Date.now = () => 0;
+  Math.random = () => 0;
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <NewWorldScreen />
+        </MemoryRouter>,
+      );
+    });
+  } finally {
+    Date.now = now;
+    Math.random = random;
+  }
+  return { container, root };
+}
+
+function button(container: HTMLElement, label: string): HTMLButtonElement {
+  const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  assert.ok(found, `${label} button is rendered`);
+  return found;
+}
+
+async function unmountGenesis(mounted: MountedGenesis): Promise<void> {
+  await act(async () => mounted.root.unmount());
+  mounted.container.remove();
+}
+
+describe("the chat-to-build handoff (issue 666)", () => {
+  it("treats Begin as approval of the look already proposed in conversation", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
+      assert.ok(
+        !mounted.container.textContent?.includes("The conversation proposed this look."),
+        "the duplicate words confirmation is skipped",
+      );
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("returns from art direction to the conversation without discarding it", async () => {
+    const mounted = await mountGenesis(genesisBlueprint());
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.ok(mounted.container.textContent?.includes("How should Glass Harbor look?"));
+      await act(async () => button(mounted.container, "Back to chat").click());
+      assert.ok(mounted.container.textContent?.includes("A drowned city."), "the existing conversation is restored");
+      assert.ok(mounted.container.textContent?.includes("Begin in this world"));
+    } finally {
+      await unmountGenesis(mounted);
+    }
   });
 });
 

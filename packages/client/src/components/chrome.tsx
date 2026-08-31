@@ -34,7 +34,7 @@ export function AppChrome({
   current,
   divided = true,
 }: {
-  back?: { label: string; to: string };
+  back?: { label: string; to: string } | { label: string; onClick: () => void };
   /** Where you are. Optional — the world picker is not "somewhere", it is the top. */
   context?: { label: string; to?: string };
   /** Rendered after the context — the bench's session switcher lives here (design 68b). */
@@ -59,7 +59,11 @@ export function AppChrome({
     <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
       <div className="fy-titlebar__side">
         {back && (
-          <button type="button" className="fy-iconbtn fy-iconbtn--wide" onClick={() => navigate(back.to)}>
+          <button
+            type="button"
+            className="fy-iconbtn fy-iconbtn--wide"
+            onClick={() => ("onClick" in back ? back.onClick() : navigate(back.to))}
+          >
             <ChevronLeft size={13} />
             {back.label}
           </button>
