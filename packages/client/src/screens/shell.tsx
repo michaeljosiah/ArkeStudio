@@ -820,12 +820,14 @@ export function NewWorldScreen() {
   // review and one press; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
-  const planRequestRef = useRef<string | null>(null);
+  const [planRequestId, setPlanRequestId] = useState<string | null>(null);
+  const [buildRequestId, setBuildRequestId] = useState<string | null>(null);
   const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
   // step arrives pre-filled with the agent's words when it proposed some (SPEC-031 R-3) —
   // the preset grid stays one press away as the override, never the only way in.
   const [lookSource, setLookSource] = useState<"conversation" | "preset" | null>(null);
+  const conversationLookRef = useRef<string | null>(null);
   const seededRef = useRef(false);
   const [genMode, setGenMode] = useState<"form" | "chat">("form");
   const modeTouchedRef = useRef(false);
@@ -869,7 +871,10 @@ export function NewWorldScreen() {
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   // A conversation that settled a name builds; anything less creates and seeds the old way.
   const buildMode = blueprint?.name !== undefined;
-  const buildPlan = useBuildPlans()[genesisId];
+  const buildPlans = useBuildPlans();
+  const reviewPlan = planRequestId === null ? undefined : buildPlans[genesisId]?.[planRequestId];
+  const buildResponse = buildRequestId === null ? undefined : buildPlans[genesisId]?.[buildRequestId];
+  const visibleBuildPlan = buildResponse?.plan === null ? buildResponse : reviewPlan;
   const myBuild = state?.app.builds.find((build) => build.genesisId === genesisId) ?? null;
   // The look preview (SPEC-031 §1.10): conversation-scoped jobs fold like any other, so the
   // rail reads the queue rather than keeping a private channel.
@@ -934,8 +939,11 @@ export function NewWorldScreen() {
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
-    if (buildPressed && buildPlan !== undefined && buildPlan.plan === null) setBuildPressed(false);
-  }, [buildPressed, buildPlan]);
+    if (buildPressed && buildResponse?.plan === null) {
+      buildRequestRef.current = null;
+      setBuildPressed(false);
+    }
+  }, [buildPressed, buildResponse]);
 
   // A preview can settle while the review is open, and it is the review's own answer that
   // changes: an unsettled preview carries if it lands before the press (SPEC-031 R-54). The
@@ -946,16 +954,33 @@ export function NewWorldScreen() {
     const status = previewJob?.status ?? null;
     if (previewStatusAtPlan.current === status) return;
     previewStatusAtPlan.current = status;
-    planRequestRef.current = ulid();
-    planFoundingBuild(genesisId, planRequestRef.current, lookForBuild);
+    const requestId = ulid();
+    setPlanRequestId(requestId);
+    planFoundingBuild(genesisId, requestId, lookForBuild);
   }, [step, buildPressed, previewJob?.status, lookForBuild, genesisId]);
 
   const enterReview = (lookText: string) => {
     setLookForBuild(lookText);
+    setBuildRequestId(null);
     previewStatusAtPlan.current = previewJob?.status ?? null;
-    planRequestRef.current = ulid();
-    planFoundingBuild(genesisId, planRequestRef.current, lookText);
+    const requestId = ulid();
+    setPlanRequestId(requestId);
+    planFoundingBuild(genesisId, requestId, lookText);
     setStep("review");
+  };
+
+  const returnToDraft = () => {
+    if (buildPressed) return;
+    // A proposal copied verbatim is conversation state, not an override. Let the next turn's
+    // proposal replace it; words the author edited or chose from a preset remain their choice.
+    if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
+      setLook("");
+      setLookSource(null);
+      conversationLookRef.current = null;
+    }
+    setPlanRequestId(null);
+    setBuildRequestId(null);
+    setStep("draft");
   };
 
   const canCreate = connection === "open" && shownName.length > 0 && submittedName === null;
@@ -984,7 +1009,14 @@ export function NewWorldScreen() {
   if (step !== "draft") {
     return (
       <div className="fy-app" data-screen="new-world-art-direction">
-        <AppChrome back={{ label: "Back", to: "/worlds" }} context={{ label: "new world · art direction" }} />
+        <AppChrome
+          back={{
+            label: genMode === "chat" ? "Back to chat" : "Back to form",
+            onClick: returnToDraft,
+            disabled: buildPressed,
+          }}
+          context={{ label: "new world · art direction" }}
+        />
         <div className="fy-artstep">
           {step === "look" ? (
             <>
@@ -1038,11 +1070,12 @@ export function NewWorldScreen() {
             </>
           ) : step === "review" ? (
             <BuildReviewStep
-              plan={buildPlan}
+              plan={visibleBuildPlan}
               pressed={buildPressed}
               onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
               onBuild={() => {
                 if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                setBuildRequestId(buildRequestRef.current);
                 setBuildPressed(true);
                 beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
               }}
@@ -1477,13 +1510,18 @@ export function NewWorldScreen() {
               disabled={!canCreate}
               onClick={() => {
                 const proposed = blueprint?.look?.trim();
-                if (proposed && look.trim().length === 0) {
-                  // The conversation proposed the look; the step opens on its words, not on
-                  // a grid of presets that never heard the conversation.
-                  setLook(proposed);
-                  setLookSource("conversation");
-                  setPresetId(null);
-                  setStep("words");
+                const approvedLook = look.trim() || proposed;
+                if (approvedLook) {
+                  // Begin is the answer to a look already chosen here or proposed in chat. Keep
+                  // new proposal words ready for an optional edit, but do not ask for approval twice.
+                  if (look.trim().length === 0) {
+                    setLook(approvedLook);
+                    setLookSource("conversation");
+                    conversationLookRef.current = approvedLook;
+                    setPresetId(null);
+                  }
+                  if (buildMode) enterReview(approvedLook);
+                  else begin(approvedLook);
                 } else {
                   setStep("look");
                 }

@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { ArtStyleGrid, ArtStyleWords } from "../src/components/art-style-picker.js";
 import { ART_STYLE_PRESETS, presetById, seedFrom } from "../src/lib/art-styles.js";
@@ -11,9 +14,22 @@ import { proposedMasterLookNote, splitDescription } from "../src/screens/art-dir
 import { authoredPrompt } from "../src/components/generation-dialog.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { App } from "../src/App.js";
-import { worldImagePrompt } from "@arke-studio/contracts";
-import { __setStateForTest } from "../src/lib/store.js";
+import { worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+});
 
 /**
  * Genesis asks for the look (design turn 38). The rule under test is the one that decides what
@@ -75,6 +91,230 @@ describe("the art-direction step of genesis", () => {
   it("promises the step rather than springing it, so Begin is not a surprise", () => {
     __setStateForTest(FIXTURE_STATE);
     assert.ok(render().includes("One more question"));
+  });
+});
+
+const GENESIS_ID = "gen-00";
+const BUILD_REQUEST_ID = "01J8E0000000000000000000B1";
+
+function genesisBlueprint(look?: string): GenesisBlueprint {
+  return {
+    name: "Glass Harbor",
+    logline: "A drowned city bargains with the tide.",
+    ...(look ? { look } : {}),
+    threads: [],
+    characters: [],
+    locations: [],
+    factions: [],
+    dropped: [],
+  };
+}
+
+const BUILD_REVIEW: BuildReview = {
+  genesisId: GENESIS_ID,
+  requestId: BUILD_REQUEST_ID,
+  worldName: "Glass Harbor",
+  counts: { characters: 0, locations: 0, factions: 0, threads: 0 },
+  generations: 0,
+  estimateMicroUsd: 0,
+  imageModel: null,
+  notes: [],
+  dropped: [],
+};
+
+interface MountedGenesis {
+  container: HTMLElement;
+  root: Root;
+  messages: ClientMessage[];
+}
+
+function bridge(messages: ClientMessage[]): ArkeBridge {
+  return {
+    appVersion: "test",
+    platform: "test",
+    connect: () => {},
+    subscribe: () => {},
+    send: (json) => messages.push(JSON.parse(json) as ClientMessage),
+  };
+}
+
+async function mountGenesis(blueprint: GenesisBlueprint, plan?: BuildReview): Promise<MountedGenesis> {
+  __setStateForTest(
+    {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        health: { ...FIXTURE_STATE.app.health, harness: { status: "healthy" } },
+      },
+    },
+    {
+      genesis: {
+        [GENESIS_ID]: {
+          turns: [
+            { role: "user", text: "A drowned city.", at: "2026-08-31T12:00:00Z" },
+            { role: "gate", text: "Should we generate images based on this look?", at: "2026-08-31T12:01:00Z" },
+          ],
+          blueprint,
+          status: "completed",
+          working: null,
+          runStartedAt: null,
+          attachments: [],
+          refusals: [],
+        },
+      },
+      ...(plan
+        ? { buildPlans: { [GENESIS_ID]: { [plan.requestId]: { requestId: plan.requestId, plan } } } }
+        : {}),
+    },
+  );
+  const messages: ClientMessage[] = [];
+  __setBridgeForTest(bridge(messages));
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const now = Date.now;
+  const random = Math.random;
+  Date.now = () => 0;
+  Math.random = () => 0;
+  try {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <NewWorldScreen />
+        </MemoryRouter>,
+      );
+    });
+  } finally {
+    Date.now = now;
+    Math.random = random;
+  }
+  return { container, root, messages };
+}
+
+function button(container: HTMLElement, label: string): HTMLButtonElement {
+  const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  assert.ok(found, `${label} button is rendered`);
+  return found;
+}
+
+async function unmountGenesis(mounted: MountedGenesis): Promise<void> {
+  await act(async () => mounted.root.unmount());
+  mounted.container.remove();
+  __setBridgeForTest(null);
+}
+
+function latestPlanRequest(mounted: MountedGenesis): Extract<ClientMessage, { kind: "plan-founding-build" }> {
+  const request = mounted.messages.findLast(
+    (message): message is Extract<ClientMessage, { kind: "plan-founding-build" }> =>
+      message.kind === "plan-founding-build",
+  );
+  assert.ok(request, "the build review is requested");
+  return request;
+}
+
+function latestBeginRequest(mounted: MountedGenesis): Extract<ClientMessage, { kind: "begin-founding-build" }> {
+  const request = mounted.messages.findLast(
+    (message): message is Extract<ClientMessage, { kind: "begin-founding-build" }> =>
+      message.kind === "begin-founding-build",
+  );
+  assert.ok(request, "the founding build is requested");
+  return request;
+}
+
+async function emitBuildPlan(requestId: string, plan: BuildReview | null, reason?: string): Promise<void> {
+  await act(async () => {
+    __applyEventForTest({
+      type: "build.plan",
+      at: "2026-08-31T12:02:00Z",
+      genesisId: GENESIS_ID,
+      requestId,
+      plan: plan === null ? null : { ...plan, requestId },
+      ...(reason ? { reason } : {}),
+    });
+  });
+}
+
+async function answerPlan(mounted: MountedGenesis): Promise<void> {
+  await emitBuildPlan(latestPlanRequest(mounted).requestId, BUILD_REVIEW);
+}
+
+describe("the chat-to-build handoff (issue 666)", () => {
+  it("treats Begin as approval of the look already proposed in conversation", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.ok(mounted.container.textContent?.includes("sizing the build"), "a cached review is not actionable");
+      assert.ok(!mounted.container.textContent?.includes("Build Glass Harbor"));
+      await answerPlan(mounted);
+      assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
+      assert.ok(
+        !mounted.container.textContent?.includes("The conversation proposed this look."),
+        "the duplicate words confirmation is skipped",
+      );
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("returns from art direction to the conversation without discarding it", async () => {
+    const mounted = await mountGenesis(genesisBlueprint());
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.ok(mounted.container.textContent?.includes("How should Glass Harbor look?"));
+      await act(async () => button(mounted.container, "Back to chat").click());
+      assert.ok(mounted.container.textContent?.includes("A drowned city."), "the existing conversation is restored");
+      assert.ok(mounted.container.textContent?.includes("Begin in this world"));
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("uses a conversational look that changed after returning to chat", async () => {
+    const firstLook = "Ink-washed miniatures under cold harbor light.";
+    const latestLook = "Charcoal silhouettes against a warm harbor dawn.";
+    const mounted = await mountGenesis(genesisBlueprint(firstLook));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const firstRequest = latestPlanRequest(mounted);
+      assert.equal(firstRequest.look, firstLook);
+      await act(async () => button(mounted.container, "Back to chat").click());
+      await act(async () => {
+        __applyEventForTest({
+          type: "genesis.blueprint",
+          at: "2026-08-31T12:03:00Z",
+          genesisId: GENESIS_ID,
+          blueprint: genesisBlueprint(latestLook),
+        });
+      });
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const latestRequest = latestPlanRequest(mounted);
+      assert.equal(latestRequest.look, latestLook);
+      await emitBuildPlan(latestRequest.requestId, BUILD_REVIEW);
+      await emitBuildPlan(firstRequest.requestId, { ...BUILD_REVIEW, worldName: "Old Harbor" });
+      assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."));
+      assert.ok(!mounted.container.textContent?.includes("Old Harbor"), "a late old reply cannot erase the review");
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("keeps chat locked while a build starts and shows a correlated refusal", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      await answerPlan(mounted);
+      await act(async () => button(mounted.container, "Build Glass Harbor").click());
+      assert.equal(button(mounted.container, "Back to chat").disabled, true, "the authorized blueprint cannot change");
+      assert.ok(mounted.container.textContent?.includes("Building…"), "the accepted review remains visible while it starts");
+      const beginRequest = latestBeginRequest(mounted);
+      await emitBuildPlan(beginRequest.requestId, null, "the blueprint changed; review it again");
+      assert.ok(mounted.container.textContent?.includes("the blueprint changed; review it again"));
+      assert.equal(button(mounted.container, "Back to chat").disabled, false, "a refused build releases navigation");
+    } finally {
+      await unmountGenesis(mounted);
+    }
   });
 });
 
