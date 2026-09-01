@@ -1815,7 +1815,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const second = await h.queue.enqueue(INPUT);
     const third = await h.queue.enqueue(INPUT);
-    await until(() => foldedJob(h, third.id)?.status === "succeeded", "the third job to succeed", FOLD_MS);
+    await until(() => [second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both siblings to succeed", FOLD_MS);
     const [a, b, c] = fake.submittedKeys;
     assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
     const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
@@ -1842,6 +1842,32 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.equal(h.queue.queuePosition(third.id), 0, "next up, although the retry precedes it in the FIFO");
     assert.equal(h.queue.queuePosition(first.id), 1, "the retry takes its turn once its backoff ends");
     await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
+    h.queue.dispose();
+  });
+
+  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async () => {
+    // The pump dispatches one job per lane interval and re-reads eligibility at each gate. A
+    // one-off split into ready and waiting reported B, C, A here; the pump takes B, then finds
+    // A's backoff over at the next gate and takes A before C.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 600, backoffBaseMs: 900, backoffCapMs: 900, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
+    assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
+    assert.equal(h.queue.queuePosition(third.id), 2);
+    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
+    const [a, b, aAgain, c] = fake.submittedKeys;
+    assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
     h.queue.dispose();
   });
 });

@@ -437,18 +437,27 @@ export class JobQueue {
   }
 
   /**
-   * The FIFO as the pump will take it: ready jobs in their order, then the ones sitting out a
-   * backoff by when it ends. The raw FIFO put a backing-off retry ahead of the job that was
-   * actually next, and "0 = next up" (R-11) was wrong for the length of every backoff.
+   * The FIFO as the pump will take it, walked gate by gate: the pump dispatches one job per
+   * lane interval, taking the first queued job whose backoff has ended by that gate, so a retry
+   * whose backoff ends between two gates goes out ahead of the FIFO entries behind it. The raw
+   * FIFO put a backing-off retry ahead of the job that was actually next, and a one-off split
+   * into ready and waiting put it behind jobs it would in fact precede; "0 = next up" (R-11)
+   * was wrong either way for the length of every backoff.
    */
   private dispatchOrder(lane: Lane): string[] {
-    const now = Date.now();
-    const queued = lane.fifo.filter((id) => this.jobs.get(id)?.status === "queued");
-    const ready = queued.filter((id) => (lane.notBefore.get(id) ?? 0) <= now);
-    const waiting = queued
-      .filter((id) => (lane.notBefore.get(id) ?? 0) > now)
-      .sort((a, b) => lane.notBefore.get(a)! - lane.notBefore.get(b)!);
-    return [...ready, ...waiting];
+    const remaining = lane.fifo.filter((id) => this.jobs.get(id)?.status === "queued");
+    const order: string[] = [];
+    let gate = Math.max(Date.now(), lane.nextAllowedAt);
+    while (remaining.length > 0) {
+      const at = remaining.findIndex((id) => (lane.notBefore.get(id) ?? 0) <= gate);
+      if (at === -1) {
+        gate = Math.min(...remaining.map((id) => lane.notBefore.get(id) ?? 0));
+        continue;
+      }
+      order.push(remaining.splice(at, 1)[0]!);
+      gate += lane.minIntervalMs;
+    }
+    return order;
   }
 
   listJobs(): Job[] {
