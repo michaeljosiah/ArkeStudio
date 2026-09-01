@@ -366,7 +366,12 @@ describe("takes and reviews", () => {
     kind: "clip",
     provider: "fal",
     model: "seedance-2.0",
-    provenance: { canonRevision: 42, sheets: { "maren-kest": 4, "the-vigil": 2 } },
+    provenance: {
+      canonRevision: 42,
+      sheets: { "maren-kest": 4, "the-vigil": 2 },
+      sceneId: "sc_04",
+      sceneVersion: 3,
+    },
     prompt: "Maren at the rail…",
     references: ["references/maren-kest/model-sheet-v4.png"],
     startFrame: "takes/tk_x/last-frame.png",

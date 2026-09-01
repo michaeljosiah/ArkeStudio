@@ -48,7 +48,7 @@ const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
 
 function stepSettled(job: Job | undefined): boolean {
   return job !== undefined && TERMINAL.has(job.status) &&
-    job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
+    job.finalization?.status !== "pending";
 }
 
 function runsDir(store: WorldStore, productionId: string): string {

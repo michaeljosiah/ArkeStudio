@@ -1,10 +1,12 @@
 import { readdir, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ProvenanceSchema,
   TakeIdSchema,
   TakeSchema,
   ulid,
   type Job,
+  type Provenance,
   type ShotPlanEntry,
   type Take,
   type TakeQc,
@@ -22,20 +24,23 @@ import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason 
  * pre-dispatch shot plan, never files, never inspection (R-3, R-4, D2, D3).
  */
 
-interface Provenance {
-  canonRevision: number;
-  sheets: Record<string, number>;
-  artDirectionVersion?: number;
-  recipeVersion?: number;
-}
-
 function provenanceOf(job: Job): Provenance {
-  const p = job.params["provenance"] as Provenance | undefined;
-  const base = p ?? { canonRevision: 0, sheets: {} };
+  const frozen = job.params["provenance"] as Partial<Provenance> | undefined;
   // The recipe version a local-recipe take was made with (SPEC-021 R-13), read from the
   // identity frozen on the job at enqueue — never looked up at arrival, because a job that
   // outlives an app update must land as what it was dispatched as.
-  return job.recipe !== undefined ? { ...base, recipeVersion: job.recipe.version } : base;
+  return ProvenanceSchema.parse({
+    canonRevision: frozen?.canonRevision ?? 0,
+    sheets: frozen?.sheets ?? {},
+    ...(frozen?.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
+    ...(frozen?.sceneId !== undefined ? { sceneId: frozen.sceneId } : {}),
+    ...(frozen?.sceneVersion !== undefined ? { sceneVersion: frozen.sceneVersion } : {}),
+    ...(job.recipe !== undefined
+      ? { recipeVersion: job.recipe.version }
+      : frozen?.recipeVersion !== undefined
+        ? { recipeVersion: frozen.recipeVersion }
+        : {}),
+  });
 }
 
 function takeKindFor(job: Job): Take["kind"] {
