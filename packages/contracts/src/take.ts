@@ -3,6 +3,7 @@ import {
   IsoDateTimeSchema,
   JobIdSchema,
   PassIdSchema,
+  SceneIdSchema,
   ShotIdSchema,
   SlugSchema,
   TakeIdSchema,
@@ -58,6 +59,9 @@ export const ProvenanceSchema = z
     sheets: z.record(SlugSchema, z.number().int().min(1)),
     /** Frozen at dispatch; later world-look versions never rewrite this value. */
     artDirectionVersion: z.number().int().min(1).optional(),
+    /** Frame runs retain the exact scene revision that authorized the take. */
+    sceneId: SceneIdSchema.optional(),
+    sceneVersion: z.number().int().min(1).optional(),
     /**
      * The recipe version a local-recipe take was made with (SPEC-021 §2.9, R-13). The recipe id
      * is already `model`; this is what keeps "made with Draft Video v1, which no longer exists"
