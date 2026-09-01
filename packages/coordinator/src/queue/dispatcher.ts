@@ -217,6 +217,8 @@ interface Lane {
   notBefore: Map<string, number>;
   successStreak: number;
   timer: NodeJS.Timeout | null;
+  /** When `timer` fires, so an earlier request can replace it. */
+  timerAt: number;
   recoveryGate: Promise<void> | null;
   recoveryBlocked: boolean;
   deferredRecovery: Array<() => Promise<void>>;
@@ -359,6 +361,7 @@ export class JobQueue {
         notBefore: new Map(),
         successStreak: 0,
         timer: null,
+        timerAt: 0,
         recoveryGate: null,
         recoveryBlocked: false,
         deferredRecovery: [],
@@ -429,9 +432,23 @@ export class JobQueue {
   queuePosition(jobId: string): number | null {
     const job = this.jobs.get(jobId);
     if (!job || job.status !== "queued") return null;
-    const lane = this.lane(job.provider);
-    const i = lane.fifo.indexOf(jobId);
+    const i = this.dispatchOrder(this.lane(job.provider)).indexOf(jobId);
     return i === -1 ? null : i;
+  }
+
+  /**
+   * The FIFO as the pump will take it: ready jobs in their order, then the ones sitting out a
+   * backoff by when it ends. The raw FIFO put a backing-off retry ahead of the job that was
+   * actually next, and "0 = next up" (R-11) was wrong for the length of every backoff.
+   */
+  private dispatchOrder(lane: Lane): string[] {
+    const now = Date.now();
+    const queued = lane.fifo.filter((id) => this.jobs.get(id)?.status === "queued");
+    const ready = queued.filter((id) => (lane.notBefore.get(id) ?? 0) <= now);
+    const waiting = queued
+      .filter((id) => (lane.notBefore.get(id) ?? 0) > now)
+      .sort((a, b) => lane.notBefore.get(a)! - lane.notBefore.get(b)!);
+    return [...ready, ...waiting];
   }
 
   listJobs(): Job[] {
@@ -603,12 +620,25 @@ export class JobQueue {
     return null;
   }
 
+  /**
+   * Wake the pump `delayMs` from now. A timer is a promise to wake by a time, so an earlier
+   * request replaces a later one: with a retry sitting out a thirty-second backoff, the lane's
+   * own interval wakeup and a sibling's enqueue were both dropped because a timer already
+   * existed, and every ready job waited out a backoff that was never theirs.
+   */
   private schedule(lane: Lane, delayMs: number): void {
-    if (this.disposed || lane.timer) return;
+    if (this.disposed) return;
+    const delay = Math.max(1, delayMs);
+    const at = Date.now() + delay;
+    if (lane.timer) {
+      if (at >= lane.timerAt) return;
+      clearTimeout(lane.timer);
+    }
+    lane.timerAt = at;
     lane.timer = setTimeout(() => {
       lane.timer = null;
       this.pump(lane.provider);
-    }, Math.max(1, delayMs));
+    }, delay);
     lane.timer.unref?.();
   }
 
@@ -896,13 +926,13 @@ export class JobQueue {
         await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
         const lane = this.lane(job.provider);
         const wait = backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng);
-        // The gate is the job's own (nextDispatchable); the timer below only wakes the pump and
-        // never held anything. A 429 is deliberately not pushed onto the lane-wide gate as well:
-        // noteRateLimit has already widened the lane's interval (R-10), which is the lane's
-        // answer to it, and this backoff is the job's.
+        // The gate is the job's own (nextDispatchable), and the pump that follows this return
+        // arms the wakeup for it; a timer armed here for the whole backoff used to outrank the
+        // lane's interval wakeup and hold every ready sibling. A 429 is deliberately not pushed
+        // onto the lane-wide gate as well: noteRateLimit has already widened the lane's interval
+        // (R-10), which is the lane's answer to it, and this backoff is the job's.
         lane.notBefore.set(job.id, Date.now() + wait);
         lane.fifo.push(job.id);
-        this.schedule(lane, wait);
         return;
       }
       case "terminal": {

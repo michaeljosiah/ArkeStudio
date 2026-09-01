@@ -55,6 +55,7 @@ async function makeHarness(
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
+    baseIntervalMs?: number;
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -79,6 +80,7 @@ function build(
     backoffBaseMs?: number;
     backoffCapMs?: number;
     rng?: () => number;
+    baseIntervalMs?: number;
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -128,6 +130,7 @@ function build(
     ...(opts.backoffBaseMs !== undefined ? { backoffBaseMs: opts.backoffBaseMs } : {}),
     ...(opts.backoffCapMs !== undefined ? { backoffCapMs: opts.backoffCapMs } : {}),
     ...(opts.rng !== undefined ? { rng: opts.rng } : {}),
+    ...(opts.baseIntervalMs !== undefined ? { baseIntervalMs: opts.baseIntervalMs } : {}),
   });
   const harness: Harness = {
     queue,
@@ -1788,6 +1791,57 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.equal(aAgain, a, "the first job went out last, after its backoff");
     const held = fake.submitStartedAt[2]! - fake.submitStartedAt[0]!;
     assert.ok(held >= 300, `the retry waited ${held} ms; the backoff is 300 ms`);
+    h.queue.dispose();
+  });
+
+  it("lets siblings ride the lane's interval while a retry's long backoff timer is armed", async () => {
+    // With a retry sitting out its backoff, the lane timer is armed for the end of it, and every
+    // wakeup asked for in the meantime — the interval after a sibling's dispatch, the interval
+    // after it finished — was dropped because a timer already existed. The job behind that
+    // sibling then waited out a backoff that was never its own.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 40;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 1200, backoffCapMs: 1200, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    // Let the interval wakeup from the failed attempt fire and re-arm the timer for the backoff.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, third.id)?.status === "succeeded", "the third job to succeed", FOLD_MS);
+    const [a, b, c] = fake.submittedKeys;
+    assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
+    const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
+    assert.ok(gap < 600, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 1200 ms backoff`);
+    await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
+    h.queue.dispose();
+  });
+
+  it("reports queue positions in the order the pump will take, not the raw FIFO", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 80;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 400, backoffCapMs: 400, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    assert.equal(h.queue.queuePosition(third.id), 0, "next up, although the retry precedes it in the FIFO");
+    assert.equal(h.queue.queuePosition(first.id), 1, "the retry takes its turn once its backoff ends");
+    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
     h.queue.dispose();
   });
 });
