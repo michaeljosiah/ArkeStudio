@@ -9,6 +9,7 @@ import {
   type DomainEvent,
   type ProviderId,
   type ProviderStatus,
+  type RuntimeProbes,
 } from "@arke-studio/contracts";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { Coordinator } from "../../src/coordinator.js";
@@ -158,7 +159,9 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
    * locality is mutable because the case that matters is the switch, not either end of it.
    */
   function engineStub() {
-    const state = { locality: "local" as "local" | "remote" };
+    // `asked` is every set of probes the recipe walk was handed, in order. The walk reports the
+    // VRAM floor, so what reaches it is the whole of issue 687.
+    const state = { locality: "local" as "local" | "remote", asked: [] as (RuntimeProbes | null)[] };
     const engineStatus = () => ({
       source: state.locality === "remote" ? "user-url" : "managed",
       state: "ready",
@@ -171,7 +174,10 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
     });
     const service = {
       engineStatus,
-      status: async () => ({ engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" }),
+      status: async (probes: RuntimeProbes | null) => {
+        state.asked.push(probes);
+        return { engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" };
+      },
       checkNow: async () => {},
       reverify: async () => {},
       subscribe: () => () => {},
@@ -259,6 +265,29 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
       h.engine.state.locality = "local";
       await h.send({ kind: "comfyui-refresh" });
       assert.equal(h.latest().models[0]?.fit, "insufficient");
+    } finally {
+      await h.close();
+    }
+  });
+
+  /**
+   * The measurement has to reach the walk that reports it (issue 687).
+   *
+   * Readiness is a published snapshot, not a live read: it is computed when the engine
+   * publishes, which for an already-running URL engine is once, at startup, before anything
+   * has measured the card. Detection then measured 10 GB, published it to the machine header,
+   * and told nobody else — so every recipe row went on saying its VRAM floor could not be
+   * checked directly underneath a panel displaying the number.
+   */
+  it("a fresh measurement reaches the recipe walk (issue 687)", async () => {
+    const h = await harness();
+    try {
+      await h.send({ kind: "detect-runtimes" });
+      assert.equal(
+        h.engine.state.asked.at(-1)?.vramMb,
+        12 * 1024,
+        "detection measured the card and the recipe walk was never told",
+      );
     } finally {
       await h.close();
     }
