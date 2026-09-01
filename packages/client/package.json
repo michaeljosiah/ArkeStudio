@@ -30,11 +30,13 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^8.3.0",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^5.2.0",
     "linkedom": "0.18.12",
     "tsx": "^4.19.0",

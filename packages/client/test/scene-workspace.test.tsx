@@ -130,7 +130,28 @@ describe("scene detail owns the workspace", () => {
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "Storyboard is the default (R-21)");
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
     assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
+    assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Stage"));
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
+  });
+
+  it("opens the derived blocking stage and keeps its shot selection shared", async () => {
+    const mounted = await mount();
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
+    assert.match(stage.textContent ?? "", /Blocking stage.*Playblast/);
+    const stagedShots = all(mounted, ".fy-swstage__shots button");
+    assert.equal(stagedShots.length, 2);
+    await click(stagedShots[1]!);
+    assert.equal(stagedShots[1]!.getAttribute("data-current"), "true");
+    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+  });
+
+  it("keeps the empty Arke dock conversation-first", async () => {
+    const mounted = await mount();
+    const dock = q(mounted, ".fy-arke")!;
+    assert.doesNotMatch(dock.textContent ?? "", /What it understood|Wrap up|story author|talking changes nothing/);
+    assert.equal(q(mounted, ".fy-arke__who .fy-mono"), null, "the compact header does not repeat the selected subject");
+    assert.ok(q(mounted, ".fy-arke__log .fy-bubble--gate"), "the conversation remains the primary surface");
   });
 
   it("keeps durable video plans and their Generation options with the scene owner", async () => {
@@ -462,6 +483,9 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.ok(labels.includes("Variants"));
     assert.ok(labels.includes("Upload"));
     assert.ok(labels.includes("Edit"));
+    assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
+    assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
+    assert.ok(row.querySelector(".fy-swchip > span"), "shot status uses a dot rather than a filled pill");
     const script = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement | null;
     assert.equal(script?.getAttribute("role"), "combobox", "the shared @ picker remains live in-place");
     assert.ok(script);
@@ -1318,7 +1342,8 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
     assert.equal(stagedRow.getAttribute("data-staged"), "true");
     assert.equal(stagedRow.getAttribute("aria-disabled"), "true");
     assert.match(q(mounted, ".fy-sw__metrics")?.textContent ?? "", new RegExp(`^${orderedShots(accepted).length} shots`));
-    assert.ok(all(mounted, "button").some((button) => button.textContent === "Apply changes"));
+    assert.ok(all(mounted, "button").some((button) => button.textContent === "Apply to shots"));
+    assert.match(q(mounted, ".fy-made")?.textContent ?? "", /Maren hears it land.*new/);
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     assert.equal(q(mounted, '.fy-swnode[data-shot-id="sh_999"]')?.getAttribute("data-staged"), "true");
@@ -1329,7 +1354,7 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
     await click(q(mounted, ".fy-madeaside")!);
-    await click(all(mounted, "button").find((button) => button.textContent === "Apply changes")!);
+    await click(all(mounted, "button").find((button) => button.textContent === "Apply to shots")!);
     assert.equal(sent.at(-1)?.kind, "proposal-accept");
   });
 });

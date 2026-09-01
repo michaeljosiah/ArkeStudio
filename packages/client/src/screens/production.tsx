@@ -501,6 +501,7 @@ export function ProductionLayout() {
                   </button>
                 )}
               </div>
+              <span className="fy-prodrail__section-divider" aria-hidden="true" />
               {item(
                 "takes",
                 "Takes",
@@ -558,6 +559,7 @@ export function ProductionLayout() {
                   {shape?.isBranching &&
                     item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
                   {item("scenes/new", "New scene", undefined, true, false, true)}
+                  <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
                   {item("cut", "Cut", cut ? railFigure : "0:00")}

@@ -139,7 +139,7 @@ describe("design tokens", () => {
     const rows = readFileSync(join(SRC, "screens", "scene-workspace", "rows.tsx"), "utf8");
     const brief = readFileSync(join(SRC, "components", "bench-brief.tsx"), "utf8");
     assert.match(css, /\.fy-sw__centre\s*\{[^}]*container-type:\s*inline-size/);
-    assert.match(css, /@container\s*\(max-width:\s*700px\)[\s\S]*?\.fy-swrow__band\s*\{\s*flex-direction:\s*column/);
+    assert.match(css, /@container\s*\(max-width:\s*700px\)[\s\S]*?\.fy-swrow__band\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
     assert.match(css, /\.fy-swrow__menu,\s*\.fy-swrow__confirm\s*\{[^}]*position:\s*fixed/);
     assert.match(rows, /createPortal\([\s\S]*?document\.body/);
     assert.match(brief, /createPortal\([\s\S]*?document\.body/);
@@ -150,7 +150,7 @@ describe("design tokens", () => {
     assert.match(css, /\.fy-swrow__preview\s*\{[^}]*width: 44px; height: 44px/);
     assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__generate, \.fy-swedit, \.fy-swrow__slot button,[\s\S]*?\.fy-swrow__menu button, \.fy-swrow__confirm button, \.fy-swpreview__retry \{ min-width: 44px; min-height: 44px;/);
     assert.match(css, /\.fy-swpreview__filmstrip\s*\{[^}]*overflow-x:\s*auto/);
-    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__stale button, \.fy-swrow__prompt button,[\s\S]*?\.fy-swpreview__transport button, \.fy-swpreview__filmstrip button \{ min-width: 44px; min-height: 44px;/);
+    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__stale button, \.fy-swrow__prompt button,[\s\S]*?\.fy-swpreview__transport button, \.fy-swpreview__filmstrip button,[\s\S]*?\.fy-swstage__head button, \.fy-swstage__shots button \{ min-width: 44px; min-height: 44px;/);
     assert.match(imageActions, /@media \(pointer: coarse\)[\s\S]*?\.fy-imgdl\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/);
     assert.match(css, /\.fy-swalt:focus-within\s*\{[^}]*clip-path:\s*none/, "focused edge words escape the visually-hidden clipping box");
   });
