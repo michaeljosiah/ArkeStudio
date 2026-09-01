@@ -249,6 +249,8 @@ export class ComfyUiEngineService {
    * would have given it.
    */
   private urlProbeTimer: ReturnType<typeof setInterval> | null = null;
+  /** Newer probes supersede older requests that are still in flight. */
+  private urlProbeGeneration = 0;
   /** class_type → present, from /object_info, per engine instance. */
   private nodeClasses: Set<string> | null = null;
   /** The last pre-flight verdict per recipe (§2.5): a mismatch disables until re-verified. */
@@ -555,6 +557,7 @@ export class ComfyUiEngineService {
     // Invalidate immediately, before the serialized stop/resolve work begins: an in-flight
     // checkpoint hash must not publish an old engine's verdict while this change waits its turn.
     this.cancelHashing();
+    this.urlProbeGeneration += 1;
     this.nodeClasses = null;
     this.invalidateVerification();
     const next = this.settingsWork.then(
@@ -599,7 +602,16 @@ export class ComfyUiEngineService {
   /** One reading of a URL engine, recorded. Publishes nothing — callers decide. */
   private async probeUrlEngine(): Promise<void> {
     if (this.resolved.source !== "user-url" || this.resolved.url === null) return;
-    const stats = await this.systemStats(this.resolved.url);
+    const url = this.resolved.url;
+    const generation = ++this.urlProbeGeneration;
+    const stats = await this.systemStats(url);
+    if (
+      this.disposed ||
+      generation !== this.urlProbeGeneration ||
+      this.resolved.source !== "user-url" ||
+      this.resolved.url !== url
+    )
+      return;
     this.probed = {
       version: stats.version,
       reachable: stats.reachable,
@@ -635,6 +647,28 @@ export class ComfyUiEngineService {
       clearInterval(this.urlProbeTimer);
       this.urlProbeTimer = null;
     }
+  }
+
+  /**
+   * Measure the selected engine now. For an absent selection this repeats discovery, so a
+   * ComfyUI started after Arke appears as an offer without requiring an application restart.
+   */
+  checkNow(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    const next = this.settingsWork.then(
+      () => this.checkNowOnce(),
+      () => this.checkNowOnce(),
+    );
+    this.settingsWork = next.catch(() => {});
+    return next;
+  }
+
+  private async checkNowOnce(): Promise<void> {
+    if (this.disposed) return;
+    if (this.resolved.source === "user-url") await this.probeUrlEngine();
+    else if (this.resolved.source === "absent") this.detected = await this.detectExisting();
+    if (this.disposed) return;
+    await this.reverify();
   }
 
   /** Where a dispatch reaches the engine right now, or null when nothing healthy answers. */

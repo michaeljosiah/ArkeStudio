@@ -5149,9 +5149,9 @@ export class Coordinator {
       }
       case "comfyui-refresh": {
         if (!this.appSettings || !this.opts.comfyui) return;
-        // Settings already applied when they changed. Refresh measures the active engine in
-        // place, including both /object_info and immutable dependency identity.
-        await this.opts.comfyui.service.reverify().catch(() => {});
+        // A manual check must measure connectivity now, not wait for the URL poll. With no
+        // selected engine it also repeats default-port discovery for ComfyUI started after Arke.
+        await this.opts.comfyui.service.checkNow().catch(() => {});
         await this.setup?.detect().catch(() => {});
         await this.refreshComfyUi();
         return;

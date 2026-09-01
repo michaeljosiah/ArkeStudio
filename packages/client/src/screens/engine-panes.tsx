@@ -328,6 +328,9 @@ export function ComfyUiDetail() {
   const ready = recipes.filter((r) => r.state === "ready").length;
   const managedRuntime = setup?.components.find((component) => component.id === "comfyui-runtime");
   const managedAvailable = engine?.source === "absent" && managedRuntime !== undefined;
+  useEffect(() => {
+    refreshComfyUi();
+  }, []);
   return (
     <div data-testid="comfyui-engine">
       <RuntimeHead
@@ -544,11 +547,17 @@ export function ComfyUiDetail() {
         );
       })}
       <div className="fy-rt__actions">
-        <button type="button" className="fy-set__link" onClick={() => restartComfyUi()}>
-          Restart
-        </button>
+        {(engine?.source === "managed" || engine?.source === "user-path") && (
+          <button type="button" className="fy-set__link" onClick={() => restartComfyUi()}>
+            Restart
+          </button>
+        )}
         <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
-          Refresh
+          {engine === null || engine.source === "absent"
+            ? "Re-detect"
+            : engine.source === "user-url"
+              ? "Check now"
+              : "Refresh"}
         </button>
       </div>
       {/*
