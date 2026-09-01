@@ -162,7 +162,9 @@ async function mountGenesis(blueprint: GenesisBlueprint, plan?: BuildReview): Pr
           refusals: [],
         },
       },
-      ...(plan ? { buildPlans: { [GENESIS_ID]: { requestId: plan.requestId, plan } } } : {}),
+      ...(plan
+        ? { buildPlans: { [GENESIS_ID]: { [plan.requestId]: { requestId: plan.requestId, plan } } } }
+        : {}),
     },
   );
   const messages: ClientMessage[] = [];
@@ -212,17 +214,30 @@ function latestPlanRequest(mounted: MountedGenesis): Extract<ClientMessage, { ki
   return request;
 }
 
-async function answerPlan(mounted: MountedGenesis): Promise<void> {
-  const request = latestPlanRequest(mounted);
+function latestBeginRequest(mounted: MountedGenesis): Extract<ClientMessage, { kind: "begin-founding-build" }> {
+  const request = mounted.messages.findLast(
+    (message): message is Extract<ClientMessage, { kind: "begin-founding-build" }> =>
+      message.kind === "begin-founding-build",
+  );
+  assert.ok(request, "the founding build is requested");
+  return request;
+}
+
+async function emitBuildPlan(requestId: string, plan: BuildReview | null, reason?: string): Promise<void> {
   await act(async () => {
     __applyEventForTest({
       type: "build.plan",
       at: "2026-08-31T12:02:00Z",
       genesisId: GENESIS_ID,
-      requestId: request.requestId,
-      plan: { ...BUILD_REVIEW, requestId: request.requestId },
+      requestId,
+      plan: plan === null ? null : { ...plan, requestId },
+      ...(reason ? { reason } : {}),
     });
   });
+}
+
+async function answerPlan(mounted: MountedGenesis): Promise<void> {
+  await emitBuildPlan(latestPlanRequest(mounted).requestId, BUILD_REVIEW);
 }
 
 describe("the chat-to-build handoff (issue 666)", () => {
@@ -262,7 +277,8 @@ describe("the chat-to-build handoff (issue 666)", () => {
     const mounted = await mountGenesis(genesisBlueprint(firstLook));
     try {
       await act(async () => button(mounted.container, "Begin in this world").click());
-      assert.equal(latestPlanRequest(mounted).look, firstLook);
+      const firstRequest = latestPlanRequest(mounted);
+      assert.equal(firstRequest.look, firstLook);
       await act(async () => button(mounted.container, "Back to chat").click());
       await act(async () => {
         __applyEventForTest({
@@ -273,7 +289,29 @@ describe("the chat-to-build handoff (issue 666)", () => {
         });
       });
       await act(async () => button(mounted.container, "Begin in this world").click());
-      assert.equal(latestPlanRequest(mounted).look, latestLook);
+      const latestRequest = latestPlanRequest(mounted);
+      assert.equal(latestRequest.look, latestLook);
+      await emitBuildPlan(latestRequest.requestId, BUILD_REVIEW);
+      await emitBuildPlan(firstRequest.requestId, { ...BUILD_REVIEW, worldName: "Old Harbor" });
+      assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."));
+      assert.ok(!mounted.container.textContent?.includes("Old Harbor"), "a late old reply cannot erase the review");
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("keeps chat locked while a build starts and shows a correlated refusal", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      await answerPlan(mounted);
+      await act(async () => button(mounted.container, "Build Glass Harbor").click());
+      assert.equal(button(mounted.container, "Back to chat").disabled, true, "the authorized blueprint cannot change");
+      assert.ok(mounted.container.textContent?.includes("Building…"), "the accepted review remains visible while it starts");
+      const beginRequest = latestBeginRequest(mounted);
+      await emitBuildPlan(beginRequest.requestId, null, "the blueprint changed; review it again");
+      assert.ok(mounted.container.textContent?.includes("the blueprint changed; review it again"));
+      assert.equal(button(mounted.container, "Back to chat").disabled, false, "a refused build releases navigation");
     } finally {
       await unmountGenesis(mounted);
     }

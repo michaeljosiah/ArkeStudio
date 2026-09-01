@@ -821,6 +821,7 @@ export function NewWorldScreen() {
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
+  const [buildRequestId, setBuildRequestId] = useState<string | null>(null);
   const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
   // step arrives pre-filled with the agent's words when it proposed some (SPEC-031 R-3) —
@@ -870,8 +871,10 @@ export function NewWorldScreen() {
   const coverage = blueprint ? blueprintCoverage(blueprint) : null;
   // A conversation that settled a name builds; anything less creates and seeds the old way.
   const buildMode = blueprint?.name !== undefined;
-  const buildPlan = useBuildPlans()[genesisId];
-  const visibleBuildPlan = buildPlan?.requestId === planRequestId ? buildPlan : undefined;
+  const buildPlans = useBuildPlans();
+  const reviewPlan = planRequestId === null ? undefined : buildPlans[genesisId]?.[planRequestId];
+  const buildResponse = buildRequestId === null ? undefined : buildPlans[genesisId]?.[buildRequestId];
+  const visibleBuildPlan = buildResponse?.plan === null ? buildResponse : reviewPlan;
   const myBuild = state?.app.builds.find((build) => build.genesisId === genesisId) ?? null;
   // The look preview (SPEC-031 §1.10): conversation-scoped jobs fold like any other, so the
   // rail reads the queue rather than keeping a private channel.
@@ -936,8 +939,11 @@ export function NewWorldScreen() {
   // A begin the coordinator refused answers with a reasoned plan; the press un-arms so the
   // refusal can be read and the author can go back — never a button stuck on "Building…".
   useEffect(() => {
-    if (buildPressed && visibleBuildPlan !== undefined && visibleBuildPlan.plan === null) setBuildPressed(false);
-  }, [buildPressed, visibleBuildPlan]);
+    if (buildPressed && buildResponse?.plan === null) {
+      buildRequestRef.current = null;
+      setBuildPressed(false);
+    }
+  }, [buildPressed, buildResponse]);
 
   // A preview can settle while the review is open, and it is the review's own answer that
   // changes: an unsettled preview carries if it lands before the press (SPEC-031 R-54). The
@@ -955,6 +961,7 @@ export function NewWorldScreen() {
 
   const enterReview = (lookText: string) => {
     setLookForBuild(lookText);
+    setBuildRequestId(null);
     previewStatusAtPlan.current = previewJob?.status ?? null;
     const requestId = ulid();
     setPlanRequestId(requestId);
@@ -963,6 +970,7 @@ export function NewWorldScreen() {
   };
 
   const returnToDraft = () => {
+    if (buildPressed) return;
     // A proposal copied verbatim is conversation state, not an override. Let the next turn's
     // proposal replace it; words the author edited or chose from a preset remain their choice.
     if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
@@ -971,6 +979,7 @@ export function NewWorldScreen() {
       conversationLookRef.current = null;
     }
     setPlanRequestId(null);
+    setBuildRequestId(null);
     setStep("draft");
   };
 
@@ -1001,7 +1010,11 @@ export function NewWorldScreen() {
     return (
       <div className="fy-app" data-screen="new-world-art-direction">
         <AppChrome
-          back={{ label: genMode === "chat" ? "Back to chat" : "Back to form", onClick: returnToDraft }}
+          back={{
+            label: genMode === "chat" ? "Back to chat" : "Back to form",
+            onClick: returnToDraft,
+            disabled: buildPressed,
+          }}
           context={{ label: "new world · art direction" }}
         />
         <div className="fy-artstep">
@@ -1062,6 +1075,7 @@ export function NewWorldScreen() {
               onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
               onBuild={() => {
                 if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                setBuildRequestId(buildRequestRef.current);
                 setBuildPressed(true);
                 beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
               }}

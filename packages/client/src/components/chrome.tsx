@@ -34,7 +34,7 @@ export function AppChrome({
   current,
   divided = true,
 }: {
-  back?: { label: string; to: string } | { label: string; onClick: () => void };
+  back?: { label: string; to: string; disabled?: boolean } | { label: string; onClick: () => void; disabled?: boolean };
   /** Where you are. Optional — the world picker is not "somewhere", it is the top. */
   context?: { label: string; to?: string };
   /** Rendered after the context — the bench's session switcher lives here (design 68b). */
@@ -62,6 +62,7 @@ export function AppChrome({
           <button
             type="button"
             className="fy-iconbtn fy-iconbtn--wide"
+            disabled={back.disabled}
             onClick={() => ("onClick" in back ? back.onClick() : navigate(back.to))}
           >
             <ChevronLeft size={13} />

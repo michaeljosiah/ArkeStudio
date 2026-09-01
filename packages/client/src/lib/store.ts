@@ -123,10 +123,10 @@ interface StoreState {
    * not a part of it — folding it in would make the read model carry its own derivative.
    */
   diagnostics: import("@arke-studio/contracts").DiagnosticsSnapshot | null;
-  /** The review before the press, per conversation (SPEC-031 R-12): the plan, or the refusal. */
+  /** Build reviews by conversation and request, so a late response cannot erase a newer answer. */
   buildPlans: Record<
     string,
-    { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string }
+    Record<string, { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string }>
   >;
   /** What key art would carry and drop, per world — the dialog's honest opening (SPEC-010 R-15). */
   keyArtPlans: Record<
@@ -969,9 +969,12 @@ function handleFrame(json: string): void {
       buildPlans = {
         ...buildPlans,
         [event.genesisId]: {
-          requestId: event.requestId,
-          plan: event.plan,
-          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          ...buildPlans[event.genesisId],
+          [event.requestId]: {
+            requestId: event.requestId,
+            plan: event.plan,
+            ...(event.reason !== undefined ? { reason: event.reason } : {}),
+          },
         },
       };
     } else if (event.type === "genesis.status") {
