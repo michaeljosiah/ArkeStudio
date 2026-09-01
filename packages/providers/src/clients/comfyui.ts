@@ -193,8 +193,22 @@ export class ComfyUiClient implements ProviderClient {
     private readonly freeVramMb?: () => Promise<number | null>,
     /** The device probe belongs to this computer and is invalid for a remote URL engine. */
     private readonly engineLocality: EngineLocality = () => "local",
-    /** How the card is waited on after `/free`, and what time it is — injected so the tests need no real clock. */
-    private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    /**
+     * How the card is waited on after `/free`, and what time it is — injected so the tests need
+     * no real clock. The wait ends early on the job's signal: a cancelled job must not hold the
+     * engine's slot for the rest of the window.
+     */
+    private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void> = (ms, signal) =>
+      new Promise((resolve) => {
+        const finish = (): void => {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, ms);
+        if (signal?.aborted) finish();
+        else signal?.addEventListener("abort", finish, { once: true });
+      }),
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -513,7 +527,7 @@ export class ComfyUiClient implements ProviderClient {
    * queue backs off and tries again while the engine finishes putting things down, and a user
    * told to close other programs "then try again" has a Retry to press when it gives up (#692).
    */
-  private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
+  private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe, signal?: AbortSignal): Promise<void> {
     // The free-VRAM floor, not the card-size floor: a streaming recipe (H3) legitimately needs
     // the whole card to exist and only a fraction of it free at dispatch.
     const need = recipe.hardware.minFreeVramMb;
@@ -532,8 +546,15 @@ export class ComfyUiClient implements ProviderClient {
     // the probe failing is not the card filling up.
     const deadline = this.now() + UNLOAD_WINDOW_MS;
     let after = await this.freeVramMb().catch(() => null);
-    while (after !== null && after < need && this.now() < deadline) {
-      await this.sleep(UNLOAD_POLL_MS);
+    while (after !== null && after < need) {
+      // The clock and the signal are read after the wait as well as before it: a probe launched
+      // at the deadline runs the window over by its own duration, and the engine's slot is held
+      // until submit returns, so a cancelled job left polling would block the next local job.
+      const remaining = deadline - this.now();
+      if (remaining <= 0) break;
+      await this.sleep(Math.min(UNLOAD_POLL_MS, remaining), signal);
+      signal?.throwIfAborted();
+      if (this.now() >= deadline) break;
       after = await this.freeVramMb().catch(() => null);
     }
     if (after === null || after >= need) return;
@@ -580,7 +601,7 @@ export class ComfyUiClient implements ProviderClient {
     const verified = await this.preflight(recipe.id);
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
     const base = this.require();
-    await this.ensureRoomOnTheCard(base, recipe);
+    await this.ensureRoomOnTheCard(base, recipe, request.signal);
     // The clip becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.

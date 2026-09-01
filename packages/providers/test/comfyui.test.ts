@@ -1565,7 +1565,7 @@ describe("making room on the graphics card", () => {
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
     assert.ok(sleeps.length >= 4 && sleeps.length <= 12, `bounded, and long enough to matter: ${sleeps.length} waits`);
     assert.ok(sleeps.reduce((sum, ms) => sum + ms, 0) <= 3000, "a couple of seconds, not a stall");
-    assert.equal(asked, sleeps.length + 2, "measured before asking, on the answer, and once per wait");
+    assert.equal(asked, sleeps.length + 1, "measured before asking, on the answer, and after every wait that ended inside the window");
   });
 
   it("bounds the window by elapsed time, so a slow probe cannot stretch it", async () => {
@@ -1578,6 +1578,22 @@ describe("making room on the graphics card", () => {
     const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, async (ms) => { now += ms; }, () => now);
     await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
     assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+  });
+
+  it("stops waiting on the card the moment the job is cancelled", async () => {
+    // The engine's slot is held until submit returns — the queue frees it in runJob's finally —
+    // so a cancelled job that kept polling would block the next local job for the rest of the
+    // window. The wait ends on the signal, and the loop reads it after every wait.
+    const { fetch, calls } = engineFake(ROUTES);
+    const controller = new AbortController();
+    let now = 0;
+    let asked = 0;
+    const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
+    const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
+    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, sleep, () => now);
+    await assert.rejects(cancelled.submit("", { ...VOICE, signal: controller.signal }), (err: Error) => err.name === "AbortError");
+    assert.equal(asked, 2, "measured before asking and on the answer, then never again");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
   });
 
