@@ -24,7 +24,8 @@
   },
   "dependencies": {
     "better-sqlite3-electron": "npm:better-sqlite3@^12.11.1",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "undici": "^7.29.0"
   },
   "devDependencies": {
     "@arke-studio/adapter-opencode": "*",
