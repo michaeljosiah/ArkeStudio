@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope — desktop, Aonik and Arke Cloud — Arke Studio</title>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<style>
+/* ==========================================================================
+   PAGE CHROME — the house review format, identical to style-guide.html and
+   loading.html. Scaffolding only; the tables and boundaries are the subject.
+   ========================================================================== */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, "Geist", system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 56px 40px 120px; }
+.kicker { font: 500 11px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-foreground); }
+h1 { font: 650 34px/1.15 inherit; letter-spacing: -0.025em; margin: 14px 0 12px; }
+.lede { font: 400 15px/1.65 inherit; color: var(--muted-foreground); max-width: 62ch; margin: 0 0 34px; }
+h2 { font: 600 19px/1.3 inherit; letter-spacing: -0.015em; margin: 58px 0 6px; padding-top: 26px; border-top: 1px solid var(--border); }
+h2 .n { font: 500 11px var(--font-mono, monospace); color: var(--muted-foreground); margin-right: 10px; }
+h3 { font: 600 13.5px/1.4 inherit; margin: 28px 0 6px; color: var(--foreground); }
+h4 { font: 500 10px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); margin: 24px 0 8px; }
+p { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 14px; }
+p strong, li strong, td strong { color: var(--foreground); font-weight: 600; }
+li { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 5px; }
+ul { padding-left: 18px; margin: 0 0 16px; }
+code { font: 400 12px var(--font-mono, monospace); background: var(--muted); padding: 1px 5px; border-radius: 4px; color: var(--foreground); }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font: 600 11px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+td { color: var(--muted-foreground); }
+td:first-child { color: var(--foreground); font-weight: 600; max-width: 22em; }
+table.tok td:first-child { font-family: var(--font-mono, monospace); font-size: 12px; font-weight: 400; }
+.flag { border-left: 2px solid var(--foreground); padding: 2px 0 2px 16px; margin: 22px 0; }
+.flag--warn { border-left-color: var(--warning, #b45309); }
+.flag--rev { border-left-color: var(--destructive); }
+.flag__t { font: 600 12px inherit; color: var(--foreground); margin-bottom: 3px; }
+.flag--rev .flag__t { color: var(--destructive); }
+.flag p { margin: 0 0 8px; font-size: 13px; }
+.flag p:last-child { margin-bottom: 0; }
+.flag ul { margin: 6px 0 0; }
+.flag li { font-size: 13px; }
+a { color: var(--foreground); }
+
+.stage { background: var(--muted); border: 1px solid var(--border); border-radius: 14px; padding: 30px 34px; margin: 18px 0 10px; }
+.caption { font: 400 11.5px/1.5 var(--font-mono, monospace); color: var(--muted-foreground); margin: 0 0 22px; }
+
+/* Mediums: cards, one struck through. */
+.meds { display: grid; grid-template-columns: repeat(auto-fit, minmax(206px, 1fr)); gap: 14px; margin: 18px 0 10px; }
+.med { border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px 20px; background: var(--background); }
+.med__n { font: 500 9.5px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--neutral-400, #a3a3a3); }
+.med__t { font: 600 15px inherit; color: var(--foreground); margin: 5px 0 7px; letter-spacing: -0.01em; }
+.med__d { font: 400 12.5px/1.6 inherit; color: var(--muted-foreground); margin: 0; }
+.med--out { background: var(--muted); }
+.med--out .med__t { color: var(--muted-foreground); text-decoration: line-through; text-decoration-thickness: 1px; }
+
+/* Three-layer platform split. */
+.layers { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--background); margin: 18px 0 10px; }
+.layers > div { padding: 20px 20px 22px; }
+.layers > div + div { border-left: 1px solid var(--border); }
+.layers__h { font: 500 9.5px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 4px; }
+.layers__t { font: 600 14px inherit; color: var(--foreground); margin-bottom: 12px; letter-spacing: -0.01em; }
+.layers ul { padding-left: 16px; margin: 0; }
+.layers li { font-size: 12px; line-height: 1.55; margin-bottom: 5px; }
+
+/* Phases: a numbered rail. */
+.phase { display: grid; grid-template-columns: 84px 1fr; gap: 20px; padding: 22px 0; border-bottom: 1px solid var(--border); }
+.phase:last-of-type { border-bottom: 0; }
+.phase__n { font: 500 10px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--neutral-400, #a3a3a3); padding-top: 3px; }
+.phase__t { font: 600 15px inherit; color: var(--foreground); margin: 0 0 8px; letter-spacing: -0.01em; }
+.phase p { margin: 0 0 8px; font-size: 13px; }
+.phase ul { margin: 0 0 8px; }
+.phase li { font-size: 12.5px; margin-bottom: 3px; }
+.pill { display: inline-block; font: 500 9.5px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; margin: 8px 5px 0 0; }
+.pill--open { border-color: var(--warning, #b45309); color: var(--warning, #b45309); }
+
+/* Lifecycle rail. */
+.life { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 20px; }
+.life span { font: 500 11px var(--font-mono, monospace); color: var(--foreground); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; background: var(--background); }
+.life i { color: var(--neutral-400, #a3a3a3); font-style: normal; font-size: 12px; }
+
+/* Positioning summary. */
+.pos { display: grid; gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 18px 0 10px; background: var(--background); }
+.pos > div { padding: 20px 24px; }
+.pos > div + div { border-top: 1px solid var(--border); }
+.pos__h { font: 500 9.5px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 7px; }
+.pos__l { font: 550 17px/1.35 inherit; color: var(--foreground); letter-spacing: -0.02em; margin: 0; max-width: 46ch; }
+.pos__l--sm { font: 400 13.5px/1.65 inherit; color: var(--foreground); letter-spacing: 0; max-width: 66ch; }
+
+@media (max-width: 860px) { .layers { grid-template-columns: 1fr; } .layers > div + div { border-left: 0; border-top: 1px solid var(--border); } }
+@media (max-width: 760px) {
+  .wrap { padding: 40px 22px 90px; }
+  .phase { grid-template-columns: 1fr; gap: 6px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">Arke Studio · scope</div>
+<h1>Desktop, Aonik and Arke Cloud</h1>
+<p class="lede">What Arke Studio makes, what it no longer makes, which capabilities live on the creator's machine, which are supplied by Aonik, and what Arke Cloud is for. Written after the decisions to drop the game production type and make Microdrama a flagship Video workflow.</p>
+<p class="lede" style="margin-top:-22px">Nothing here has been implemented merely because it appears in this document. This is the product boundary and decision record, not a delivery report.</p>
+
+<div class="flag">
+  <div class="flag__t">Standing</div>
+  <p>Sections 01–09 are decided. Section 10 lists the remaining open decisions. Section 11 records the cleanup created by this scope. Voice and visual rules remain in <a href="style-guide.html">style-guide.html</a>.</p>
+  <p>Blocks marked <strong style="color:var(--destructive)">Review</strong> are added by review, not by the authoring pass — they record a conflict with an earlier decision, a factual finding, or a gap. They are flagged rather than resolved.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">01</span>What Arke makes</h2>
+
+<p>Arke turns one coherent world into three audience mediums. The boundary between them is <strong>how the audience receives the work</strong>, not how it was authored.</p>
+
+<div class="meds">
+  <div class="med">
+    <div class="med__n">01</div>
+    <div class="med__t">Story</div>
+    <p class="med__d">Novels, novellas, short fiction, scripts and screenplays, serialised fiction and audio-first scripts. Words and structured narrative are the primary deliverable.</p>
+  </div>
+  <div class="med">
+    <div class="med__n">02</div>
+    <div class="med__t">Video</div>
+    <p class="med__d">Films, dramas, episodes and Microdramas. Linear: the audience watches and makes no decisions. A finished cut is the primary deliverable.</p>
+  </div>
+  <div class="med">
+    <div class="med__n">03</div>
+    <div class="med__t">Interactive video</div>
+    <p class="med__d">Branching video in which the audience chooses which scene follows. It remains video: segments, choices, outcomes and endings, never a general-purpose software or game engine.</p>
+  </div>
+  <div class="med med--out">
+    <div class="med__n">Cut</div>
+    <div class="med__t">Game</div>
+    <p class="med__d">The narrative-game production type, general state model and engine adapters are out of scope. See section 02.</p>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>One world, three mediums. The world does not know which production it is feeding.</strong></td><td>Canon, cast, locations, factions, artifacts and reference sets are medium-agnostic.</td></tr>
+    <tr><td><strong>The picker offers Story, Video and Interactive video.</strong></td><td>Microdrama is a flagship workflow inside Video, not a fourth medium. <strong>Formats describe how Arke helps make the work; mediums describe what the audience receives.</strong></td></tr>
+    <tr><td><strong>Audio is initially a track or delivery profile, not a top-level medium.</strong></td><td>Voice, score and mix can belong to Story, Video or Interactive video.</td></tr>
+    <tr><td><strong>Arke is a creative partner, not only a generation interface.</strong></td><td>It helps develop the world, story architecture, scripts, production plan and finished work, while material changes remain proposals until accepted.</td></tr>
+  </tbody>
+</table>
+
+<h3>Format hierarchy</h3>
+<table class="tok">
+  <thead><tr><th>Medium</th><th>Formats</th></tr></thead>
+  <tbody>
+    <tr><td>Story</td><td>Novel · novella · short story · screenplay · serial fiction · audio-first script</td></tr>
+    <tr><td>Video</td><td>Film · series · Microdrama · promotional short</td></tr>
+    <tr><td>Interactive video</td><td>Branching film · branching episode · interactive Microdrama</td></tr>
+  </tbody>
+</table>
+
+<div class="flag flag--rev">
+  <div class="flag__t">Review — audio lost an argument, not just a slot</div>
+  <p>Demoting audio from an export to “a track or delivery profile” is defensible, but the reason audio mattered has gone with it. <strong>Podcast distribution is an open RSS standard with no gatekeeper</strong> — no API to negotiate, no platform approval, no account review. That makes an audio drama the cheapest path in the entire product from a world to a finished, published, publicly reachable work.</p>
+  <p>Section 09 states that publishing moves earlier because <em>“Arke needs a visible, shareable audience result”</em>. Audio is the cheapest such result available and is currently scheduled nowhere. Worth deciding deliberately rather than by omission — see section 10.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">02</span>What is no longer in scope</h2>
+
+<p>The game production type is cut in full, together with the machinery that exists only to serve it. This is a deliberate narrowing, not a deferred roadmap promise. <strong>Arke should behave architecturally as though games will not return.</strong></p>
+
+<table>
+  <thead><tr><th>Removed</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr><td>Narrative-game workspace</td><td>Game dashboard, story overview, chapter graph as a game surface, health scoring and playtest.</td></tr>
+    <tr><td>Author-defined runtime state</td><td>Variables, inventories, conditions, unlocks and expressions such as <code>tess.trust &gt;= 40</code> create a state machine and an unacceptable testing burden.</td></tr>
+    <tr><td>Engine adapters and implementation</td><td>Godot targets, engine-neutral runtime cores and implementation testing. Arke produces narrative media, not software projects.</td></tr>
+    <tr><td>Structural health as a percentage</td><td>Surviving graph checks should report concrete facts, not an abstract game-build score.</td></tr>
+  </tbody>
+</table>
+
+<p>The gain is a product with a credible sentence:</p>
+
+<div class="stage" style="padding:26px 34px">
+  <p style="font:550 21px/1.3 inherit;letter-spacing:-.028em;color:var(--foreground);margin:0;max-width:30ch">Build one world. Arke helps you write, produce and release every story within it.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">03</span>Interactive video — the boundary</h2>
+
+<p>Interactive video survives because it remains audiovisual storytelling, and because it is one of the few places where Arke can be meaningfully differentiated. It survives inside a strict direct-routing model.</p>
+
+<div class="stage">
+  <div class="flag" style="margin:0">
+    <div class="flag__t">Binding. Choices route; they do not write narrative state.</div>
+    <p>A choice may select which scene follows. It may not:</p>
+    <ul>
+      <li>Set or modify variables</li>
+      <li>Change the availability or meaning of a later choice</li>
+      <li>Unlock content or populate an inventory</li>
+      <li>Evaluate a condition</li>
+      <li>Alter character statistics or relationships</li>
+      <li>Cause hidden logic outside the chosen route</li>
+    </ul>
+  </div>
+</div>
+
+<p>The player still holds unavoidable <strong>playback state</strong> — current scene, playback position, selected route and resume progress. What Arke excludes is <strong>author-defined persistent narrative state and conditional logic</strong>. Scenes, choices, outcomes and endings are the complete runtime vocabulary. Acts, chapters and sequences may group scenes, but carry no logic.</p>
+
+<h3>Validation</h3>
+<p>Arke validates finite graph properties rather than claiming every end-to-end journey must be manually watched:</p>
+<ul>
+  <li>Every published scene is reachable, or deliberately excluded</li>
+  <li>Every choice has a valid destination</li>
+  <li>Every non-ending scene can reach an ending</li>
+  <li>No unintended loop exists</li>
+  <li>Every edge has been traversed in preview</li>
+  <li>Unvisited routes are named</li>
+  <li>Reconverging branches are checked for production-continuity conflicts</li>
+</ul>
+
+<div class="flag">
+  <div class="flag__t">A branch can contradict itself without a single variable</div>
+  <p>If one route establishes that a character died and another that they survived, both cannot feed an identical later scene without neutralisation or separate continuation. Removing state removes the <em>logic</em> problem; it does not remove the <em>continuity</em> problem, and continuity is the one Arke is uniquely equipped to catch — it holds the canon.</p>
+</div>
+
+<h3>Canon</h3>
+<p>A branch outcome never becomes world canon by implication. <strong>Promotion to canon is an explicit, gated act with a visible ripple.</strong></p>
+
+<h3>Delivery</h3>
+<p>Interactive video requires a player runtime, but not Arke hosting exclusively. Arke may provide a managed production at an Arke URL, an exportable web package, or a player manifest plus media for self-hosting. <strong>Managed hosting is a paid convenience; exportability preserves the local-first and open-source promise.</strong></p>
+
+<h3>Deferred — Interact</h3>
+<p>Timed hotspots and overlays remain outside the first release. They require a second editor and runtime, and should return only after direct-choice video demonstrates demand.</p>
+
+<div class="flag flag--rev">
+  <div class="flag__t">Review — this reverses a closed decision, with a cost</div>
+  <p>Interact was previously <em>cut</em>, not deferred, and its asset reassigned: <code>ms-interact.png</code> was to become the Interactive video picker banner, which meant retiring <code>banner-game.png</code> cost nothing. Deferring instead holds that asset in reserve, so the picker now needs a <strong>newly generated Interactive video banner</strong> — plus Microdrama banner and season-board imagery. Three new assets rather than one reassignment.</p>
+  <p>Defensible if Interact is genuinely likely to return. If it is not, cutting it and taking the free banner is the cheaper path.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">04</span>Microdrama — the flagship Video workflow</h2>
+
+<p>Microdrama is a Video <em>format</em>, not a separate medium and not merely a vertical-video preset. It receives an opinionated end-to-end workflow because its value lies in story development, episodic structure, production continuity and release cadence working together.</p>
+
+<div class="stage" style="padding:26px 34px">
+  <p style="font:550 19px/1.35 inherit;letter-spacing:-.025em;color:var(--foreground);margin:0;max-width:34ch">Arke is the story room, production studio and creative partner for a Microdrama series.</p>
+</div>
+
+<h4>Series development</h4>
+<p>Arke helps establish audience and genre promise, central fantasy, core conflict, repeatable story engine, character and relationship arcs, season length, episode duration, escalation, reveals, reversals and continuation hooks.</p>
+
+<h4>Episode development</h4>
+<p>For each episode, Arke can propose the opening hook, beat sheet, scene outline, dialogue, visual action, emotional turn, cliffhanger, continuity dependencies and a duration or production-cost estimate.</p>
+
+<h4>Production and release</h4>
+<p>An accepted episode can become a shot list and storyboard; character, location and prop references; performance direction; image and video generation briefs; takes and selects; voice, score and sound cues; subtitles, captions, vertical edit and final cut; episode title, description, thumbnail, tags, recap and teaser; and platform-specific crops and release metadata.</p>
+
+<h4>Season intelligence</h4>
+<p>The Microdrama workspace identifies repeated hooks, repetitive cliffhangers, absent characters, unresolved promises, stalled relationship arcs, continuity contradictions, excessive new characters or locations, and episodes whose cost breaks the intended production pattern.</p>
+
+<h4>Lifecycle</h4>
+<div class="life">
+  <span>Concept</span><i>→</i><span>Story beats</span><i>→</i><span>Accepted script</span><i>→</i><span>Shot plan</span><i>→</i><span>Production</span><i>→</i><span>Final cut</span><i>→</i><span>Published</span>
+</div>
+
+<h3>AI partnership modes</h3>
+<table>
+  <thead><tr><th>Mode</th><th>Relationship</th></tr></thead>
+  <tbody>
+    <tr><td>Assist</td><td>The creator directs; Arke performs a specific task.</td></tr>
+    <tr><td>Collaborate</td><td>Arke proposes story or production decisions for review and acceptance.</td></tr>
+    <tr><td>Develop</td><td>Arke actively helps shape the concept, season and episodes, explaining material consequences before acceptance.</td></tr>
+  </tbody>
+</table>
+
+<p><strong>The mode changes initiative, not authority.</strong> Arke may be proactive but does not silently rewrite accepted canon or production intent.</p>
+
+<!-- ====================================================================== -->
+<h2><span class="n">05</span>The platform line</h2>
+
+<p>The boundary is the difference between the creator-owned work, the reusable domain platform, and services requiring other people or machines.</p>
+
+<div class="layers">
+  <div>
+    <div class="layers__h">Creator-owned studio</div>
+    <div class="layers__t">Desktop</div>
+    <ul>
+      <li>Worlds as folders on disk</li>
+      <li>Canon, cast, sheets, locations, factions and artifacts</li>
+      <li>Story, Video, Microdrama and Interactive-video authoring</li>
+      <li>Scenes, scripts, takes, edits and the accept gate</li>
+      <li>Local preview and export</li>
+      <li>OpenCode harness, local runtime, agents and guardrails</li>
+      <li>Bring-your-own provider keys held on the machine</li>
+      <li>Ollama and local Whisper</li>
+      <li>Full authoring function offline, with no account, indefinitely</li>
+    </ul>
+  </div>
+  <div>
+    <div class="layers__h">Domain platform</div>
+    <div class="layers__t">Aonik</div>
+    <ul>
+      <li>Identity, authentication and account security</li>
+      <li>Organisations, tenants and memberships</li>
+      <li>Billing and entitlements</li>
+      <li>Common service and storage foundations</li>
+      <li>Usage metering</li>
+      <li>Platform audit and operational security</li>
+    </ul>
+  </div>
+  <div>
+    <div class="layers__h">Creative services</div>
+    <div class="layers__t">Arke Cloud</div>
+    <ul>
+      <li>Personal sync across a creator's machines</li>
+      <li>Version history and cloud recovery</li>
+      <li>Studio collaboration and production roles</li>
+      <li>Managed hosting and player URLs</li>
+      <li>Aggregated model access</li>
+      <li>Publishing and platform-specific release packages</li>
+      <li>Creator analytics</li>
+    </ul>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="flag" style="margin:0">
+    <div class="flag__t">Binding. Aonik removes undifferentiated platform work; it does not own Arke's creative semantics.</div>
+    <p>Arke remains responsible for world and production ownership, offline reconciliation, canon-aware conflicts, proposals and ripples, artifact availability, creative collaboration roles, publishing and playback.</p>
+  </div>
+</div>
+
+<div class="flag flag--rev">
+  <div class="flag__t">Review — entitlements are the one Aonik dependency that can break the local promise</div>
+  <p>Aonik owns billing and entitlements. Section 06 promises that Arke <em>“opens, authors, previews and exports without an account or network indefinitely”</em>. Those two facts collide the first time an entitlement check cannot reach Aonik.</p>
+  <p>The rule this implies, and which is not yet written down: <strong>an unreachable Aonik degrades cloud features and nothing else.</strong> Authoring, preview and export must never wait on, or fail because of, an entitlement lookup. That is an architectural constraint on the integration, not a preference, and it is cheapest to state before the integration is built.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">06</span>Local-first and cloud truth</h2>
+
+<h3>Local usefulness is permanent</h3>
+<p>Arke opens, authors, previews and exports without an account or network indefinitely. <strong>A world that has never synced is not a lesser world.</strong></p>
+
+<h3>Cloud coordinates replicas; it does not confiscate ownership</h3>
+<p>Under sync or collaboration, multiple authorised replicas may exist. One device cannot always be described as the single canonical copy.</p>
+
+<div class="stage">
+  <div class="flag" style="margin:0">
+    <div class="flag__t">Binding. The world remains locally usable and exportable.</div>
+    <p>Arke Cloud coordinates authorised replicas but is never required to open or continue the world.</p>
+  </div>
+</div>
+
+<p>The product must define behaviour when devices are lost, two devices edit offline, a collaborator edits while the owner is offline, a subscription expires, a replica is deleted, or access is revoked.</p>
+
+<h3>Sync is opt-in per world</h3>
+<p>An author with one private world and one collaborative world should not make an account-level choice for both.</p>
+
+<h3>Personal sync precedes collaboration</h3>
+<p>Device sync, recovery and version history are separate deliverables from multi-user collaboration, even when both use Aonik services.</p>
+
+<h3>Conflict classes</h3>
+<table>
+  <thead><tr><th>Conflict</th><th>Handling</th></tr></thead>
+  <tbody>
+    <tr><td>Different records edited</td><td>Merge automatically</td></tr>
+    <tr><td>Different fields on one record</td><td>Merge automatically where safe</td></tr>
+    <tr><td>Same field edited differently</td><td>Focused human resolution</td></tr>
+    <tr><td>Canon-changing proposal</td><td>Accept gate and ripple analysis</td></tr>
+  </tbody>
+</table>
+
+<p><strong>The accept gate is for meaningful creative decisions, not incidental merge conflicts.</strong></p>
+
+<h3>Aggregated access is a convenience, never a lock</h3>
+<p>BYOK remains available and visible for every supported provider. Arke's managed route must not become the only easy route.</p>
+
+<p>The interface also says which machine or cloud service holds each artifact. <em>What cannot travel is shown with its reason, never hidden.</em></p>
+
+<div class="flag">
+  <div class="flag__t">Time-sensitive, and free to fix today</div>
+  <p><code>waitlist.html</code> is not deployed — its form still carries <code>action="REPLACE_WITH_YOUR_FORM_ENDPOINT"</code> and sends nothing. Its local-first copy predates this section and does not survive it. Correcting the wording now costs nothing; correcting it after launch is a public walk-back.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">07</span>What syncs</h2>
+
+<h3>Structured record — always eligible</h3>
+<ul>
+  <li>Canon, cast, locations, factions and artifact records</li>
+  <li>Story and production structures</li>
+  <li>Scripts, scenes, choices and shot plans</li>
+  <li>Decision history, proposals and accepted changes</li>
+  <li>References, manifests and artifact metadata</li>
+</ul>
+
+<h3>Large binaries — explicit</h3>
+<ul>
+  <li>Generated images</li>
+  <li>Audio and video takes</li>
+  <li>Final cuts</li>
+  <li>Large reference files</li>
+  <li>Export packages</li>
+</ul>
+
+<p><strong>Large binaries do not upload merely because a world is synced.</strong> They move when explicitly pinned across devices, shared for collaboration, or published.</p>
+
+<p>The interface distinguishes six artifact states:</p>
+<table class="tok">
+  <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>Local only</td><td>Present on this machine, nowhere else.</td></tr>
+    <tr><td>Uploading</td><td>In transit.</td></tr>
+    <tr><td>Available to collaborators</td><td>Shared into a studio production.</td></tr>
+    <tr><td>Pinned</td><td>Deliberately kept across the creator's devices.</td></tr>
+    <tr><td>Published</td><td>Part of a released production.</td></tr>
+    <tr><td>Missing from this device</td><td>Exists, but elsewhere — with its reason shown.</td></tr>
+  </tbody>
+</table>
+
+<p>Cloud recovery of the structured world is part of personal sync. <strong>Retrieval of pinned and published source artifacts is an explicit recovery or export operation</strong>, subject to retention settings.</p>
+
+<!-- ====================================================================== -->
+<h2><span class="n">08</span>Commercial model</h2>
+
+<p>The desktop application is free and MIT. <strong>Anything charged for must require Arke or Aonik infrastructure, or represent maintained content, service and support — never a local licence gate.</strong></p>
+
+<table>
+  <thead><tr><th>Line</th><th>What it is</th></tr></thead>
+  <tbody>
+    <tr><td>Arke Cloud Creator</td><td>Personal sync, recovery, version history and a managed publishing allowance.</td></tr>
+    <tr><td>Arke Cloud Studio</td><td>Collaboration, roles, shared productions and additional seats.</td></tr>
+    <tr><td>Hosting overage</td><td>Storage and bandwidth beyond the included allowance.</td></tr>
+    <tr><td>Managed model access</td><td>One account, many providers, with transparent metered usage.</td></tr>
+    <tr><td>Publishing services</td><td>Platform-specific packages and selected direct integrations.</td></tr>
+    <tr><td>Official modules and packs</td><td>Maintained formats, creative packs, templates and professional integrations.</td></tr>
+    <tr><td>Marketplace</td><td>Third-party modules with an Arke revenue share, once an ecosystem exists.</td></tr>
+    <tr><td>Commercial support</td><td>Procurement, stable releases, response commitments and optional commercial terms.</td></tr>
+  </tbody>
+</table>
+
+<h3>Packaging</h3>
+<ul>
+  <li><strong>Arke Desktop</strong> — free and open source</li>
+  <li><strong>Arke Cloud Creator</strong> — personal sync and included publishing</li>
+  <li><strong>Arke Cloud Studio</strong> — collaboration, roles and seats</li>
+  <li><strong>Managed generation</strong> — transparent metered usage</li>
+  <li><strong>Hosting overage</strong> — storage and bandwidth after allowance</li>
+  <li><strong>Official modules and packs</strong> — optional purchases or subscriptions</li>
+  <li><strong>Commercial support</strong> — separate agreement</li>
+</ul>
+
+<div class="stage">
+  <div class="flag" style="margin:0 0 20px">
+    <div class="flag__t">Binding. Credits may exist only as prepaid balance.</div>
+    <p>Before generation, show the estimated real-currency cost, the provider, the model and any multiplier; afterwards, show the actual charge. This follows two rules already in the record — <em>a control that multiplies the bill must show the bill</em>, and <em>a per-character price is exact, and carries no tilde</em>.</p>
+  </div>
+  <div class="flag" style="margin:0">
+    <div class="flag__t">Binding. Server delivery does not make a module technically scarce.</div>
+    <p>Official modules earn through convenience, maintenance, integration quality, updates, creative value and support — not through a gate. An MIT core cannot be defended by a licence check, and pretending otherwise costs more trust than the module earns.</p>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">09</span>Delivery phases</h2>
+
+<div class="phase">
+  <div class="phase__n">Phase 1</div>
+  <div>
+    <div class="phase__t">Local foundation and Aonik integration</div>
+    <ul>
+      <li>World, canon, cast and location foundations</li>
+      <li>Story and Video production</li>
+      <li>Flagship Microdrama workflow</li>
+      <li>Direct-choice Interactive-video authoring and local preview</li>
+      <li>Local exports</li>
+      <li>Aonik identity, organisation, entitlement and billing integration</li>
+      <li>BYOK and local providers</li>
+      <li>Optional personal structured-record sync</li>
+      <li>Version history and cloud recovery</li>
+    </ul>
+    <p><strong>The local studio does not require sign-in.</strong></p>
+    <span class="pill">no sign-in</span><span class="pill">aonik integration</span><span class="pill">byok</span><span class="pill">record sync</span>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase__n">Phase 2</div>
+  <div>
+    <div class="phase__t">Publish and experience</div>
+    <ul>
+      <li>Linear-video hosting</li>
+      <li>Microdrama series pages</li>
+      <li>Branching-video player</li>
+      <li>Shareable production URLs</li>
+      <li>Exportable web and media packages</li>
+      <li>Subtitles and mobile-first playback</li>
+      <li>Pinned production artifacts</li>
+      <li>Minimal creator-controlled analytics</li>
+    </ul>
+    <span class="pill">player runtime</span><span class="pill">series pages</span><span class="pill">export packages</span>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase__n">Phase 3</div>
+  <div>
+    <div class="phase__t">Studio collaboration</div>
+    <ul>
+      <li>Owner, Editor and Reviewer roles</li>
+      <li>Invitations and revocation</li>
+      <li>Shared proposals, comments and review</li>
+      <li>Canon accept gate and ripple analysis</li>
+      <li>Field-aware conflict handling</li>
+      <li>Shared production artifacts</li>
+      <li>Audit history</li>
+      <li>Studio seats and billing</li>
+    </ul>
+    <span class="pill">three roles</span><span class="pill">field-aware merge</span><span class="pill">seats</span>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase__n">Phase 4</div>
+  <div>
+    <div class="phase__t">Managed generation and distribution</div>
+    <ul>
+      <li>Aggregated provider access</li>
+      <li>Real-currency estimates and actual charges</li>
+      <li>Spending limits and provider-level cost breakdowns</li>
+      <li>Abuse and payment-risk controls</li>
+      <li>Platform-specific release packages</li>
+      <li>Selected direct-publishing integrations</li>
+    </ul>
+    <p><strong>BYOK remains equally visible throughout.</strong></p>
+    <span class="pill">metered</span><span class="pill">spend limits</span><span class="pill">direct publishing</span>
+  </div>
+</div>
+
+<div class="phase">
+  <div class="phase__n">Later</div>
+  <div>
+    <div class="phase__t">Interact, modules, marketplace, licensing</div>
+    <ul>
+      <li>Interact hotspots and timed overlays, if demand is proven</li>
+      <li>Official module catalogue</li>
+      <li>Third-party marketplace</li>
+      <li>Broader commercial support and licensing</li>
+    </ul>
+  </div>
+</div>
+
+<p><strong>Personal sync can appear early</strong> because Aonik supplies the platform foundations. <strong>Collaboration remains later</strong> because its complexity lies in creative permissions, concurrent editing and canon reconciliation rather than login screens. <strong>Publishing moves earlier</strong> because Arke needs a visible, shareable audience result before deep collaboration or managed generation.</p>
+
+<div class="flag flag--rev">
+  <div class="flag__t">Review — phase 1 is carrying more than one phase of work</div>
+  <p>It holds the world foundations, two full production mediums, interactive-video authoring, local export, the entire Aonik integration, BYOK, structured sync, version history and cloud recovery — <em>plus</em> the flagship Microdrama workflow, which on section 04's own description is series development, episode development, production and release, season intelligence and three partnership modes.</p>
+  <p>Microdrama alone is a phase. A split worth considering: <strong>1a the local studio (no account, no network), 1b Aonik integration and personal sync.</strong> It also protects the strongest claim in the plan — <em>the local studio does not require sign-in</em> — by letting it ship and be seen before any account work lands.</p>
+</div>
+
+<div class="flag flag--warn">
+  <div class="flag__t">Two senses of “publishing”, worth naming separately</div>
+  <p>Phase 2 delivers <em>outward-facing results</em> — hosted pages, shareable URLs, export packages. Phase 4 delivers <em>third-party distribution</em> — release packages and direct integrations. Both are called publishing, and the rationale note above reads as though one thing moved earlier when in fact it was split. Worth two names, since one of them is a phase-2 promise and the other is a phase-4 one.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">10</span>Open decisions</h2>
+
+<table>
+  <thead><tr><th>Question</th><th>Where it bites</th></tr></thead>
+  <tbody>
+    <tr><td>Which direct-publishing platform comes first?</td><td>Treat YouTube, Vimeo, podcast hosts, Substack and KDP separately; “publish everywhere” is not one integration. <strong>Finding on record:</strong> the video platforms and podcast RSS automate cleanly; KDP has no meaningful public publishing API and Substack's is thin. Book distribution is likely an export the author uploads, not an integration.</td></tr>
+    <tr><td>What is the initial Microdrama duration and season envelope?</td><td>Determines templates, production estimates and season-board design.</td></tr>
+    <tr><td>What hosting allowance is included?</td><td>Required to model storage, egress and pricing honestly.</td></tr>
+    <tr><td>What retention applies after subscription expiry?</td><td>Requires a clear export, grace-period and deletion policy.</td></tr>
+    <tr><td>How are world and production ownership separated?</td><td>A studio may own a production made from a creator-owned world, or vice versa.</td></tr>
+    <tr><td>What telemetry is collected by default?</td><td>Player data must be minimal, disclosed and governed. <strong>Prior position, for reference:</strong> aggregate to the author, disclosed to the player, identified to nobody.</td></tr>
+    <tr><td>Which fields merge automatically?</td><td>Determines schema, conflict UX and the boundary between reconciliation and canon proposals.</td></tr>
+    <tr><td>How are provider prompts disclosed under managed access?</td><td>Show provider, route, retention implications and cost before execution. <strong>Prior position, for reference:</strong> no retention beyond the billing receipt, never used for training.</td></tr>
+    <tr><td>Does audio later become a medium?</td><td>Only if its workflow cannot be expressed cleanly as a Story delivery profile. See the review note in section 01 — the question is not only workflow shape but whether the cheapest route to a published work should be scheduled.</td></tr>
+    <tr><td><strong>Added by review.</strong> Which roles hold the accept gate?</td><td>Owner, Editor and Reviewer are named in phase 3, but not which of them may <em>accept</em>. The accept gate is the entire point of the role model, so the roles are underspecified until this is answered. Reviewer presumably cannot; whether an Editor can is the real question.</td></tr>
+    <tr><td><strong>Added by review.</strong> Can one world have two Owners?</td><td>Simplest answer is yes, with disagreement resolving through the same proposal mechanism. Confirm before the permission model is built.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">11</span>Cleanup this scope creates</h2>
+
+<h3>Prototype screens</h3>
+<table class="tok">
+  <thead><tr><th>Screen</th><th>Disposition</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td>34a Game type</td><td>Replace</td><td>Third slot becomes Interactive video.</td></tr>
+    <tr><td>34b Game day one</td><td>Replace</td><td>Create separate Microdrama and Interactive-video onboarding.</td></tr>
+    <tr><td>34c Game story overview</td><td>Reassign</td><td>Interactive-video branch summary.</td></tr>
+    <tr><td>34d Game dashboard</td><td>Reassign</td><td>Fold reusable elements into 11a; add a Microdrama season board.</td></tr>
+    <tr><td>34e Chapter graph</td><td>Reassign</td><td>Branch map without variables, conditions or unlocks.</td></tr>
+    <tr><td>34f State and scopes</td><td>Remove</td><td>Author-defined runtime state is cut.</td></tr>
+    <tr><td>34g Chapter health</td><td>Replace</td><td>Reachability, dead-end, loop, traversal and continuity findings; no percentage.</td></tr>
+    <tr><td>34h Talk it through repair</td><td>Keep</td><td>Creative-partner pattern.</td></tr>
+    <tr><td>34i Canon promotion warning</td><td>Keep</td><td>Branch outcomes do not automatically become canon.</td></tr>
+    <tr><td>34j Manual playthrough</td><td>Reassign</td><td>Route preview and edge traversal.</td></tr>
+    <tr><td>35a Dual-layer graph</td><td>Remove initially</td><td>Depends on deferred Interact.</td></tr>
+    <tr><td>35b–35e interaction editor</td><td>Hold</td><td>Revisit only if Interact returns.</td></tr>
+  </tbody>
+</table>
+
+<h3>New Microdrama surfaces</h3>
+<ul>
+  <li>Series premise and season arc</li>
+  <li>Episode board</li>
+  <li>Character relationship view</li>
+  <li>Hook and cliffhanger tracking</li>
+  <li>Continuity findings</li>
+  <li>Production readiness and release status</li>
+  <li>Cross-episode cost and complexity warnings</li>
+</ul>
+
+<h3>Documents and assets</h3>
+<table class="tok">
+  <thead><tr><th>Item</th><th>Disposition</th></tr></thead>
+  <tbody>
+    <tr><td>arke_studio_narrative_graph_requirements_v2.md</td><td>Supersede the game workspace, state model, engine phases and health weighting; retain the storytelling vocabulary and canon principles.</td></tr>
+    <tr><td>image-prompts.md</td><td>Retire Game imagery; add Interactive-video and Microdrama workspace imagery.</td></tr>
+    <tr><td>channel-identity.md</td><td>Clarify that interactive stories mean branching video; add Microdrama without making it a fourth medium.</td></tr>
+    <tr><td>Website and waitlist</td><td>Update local-first language, the Aonik boundary and the Microdrama proposition. The waitlist is undeployed — see section 06.</td></tr>
+    <tr><td>Studio decision documents</td><td>Record supersession rather than deleting previous reasoning.</td></tr>
+    <tr><td>assets/banner-game.png</td><td>Replace with an Interactive-video banner.</td></tr>
+    <tr><td>Microdrama banner and season-board imagery</td><td>Add.</td></tr>
+    <tr><td>assets/ms-interact.png</td><td>Hold with the deferred Interact subtype.</td></tr>
+    <tr><td>assets/ms-watch.png, assets/ms-choose.png</td><td>Keep.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">12</span>Decision log</h2>
+
+<table>
+  <thead><tr><th>Decision</th><th>Reasoning</th></tr></thead>
+  <tbody>
+    <tr><td>Games are cut in full</td><td>They uniquely require a general state model, engine target and software implementation.</td></tr>
+    <tr><td>Interactive video survives with direct routing</td><td>Branching remains differentiated; variables and conditions create the unacceptable burden.</td></tr>
+    <tr><td>Microdrama is a flagship Video workflow</td><td>It has specialised story, season, production and release needs but remains linear video.</td></tr>
+    <tr><td>Arke partners in story development</td><td>World-aware development, continuity and accepted proposals are stronger than generation alone.</td></tr>
+    <tr><td>Aonik supplies platform infrastructure</td><td>Identity, tenancy, billing, entitlements and metering should not be rebuilt.</td></tr>
+    <tr><td>Arke retains creative-domain responsibility</td><td>Aonik does not solve canon conflicts, artifact availability or production collaboration.</td></tr>
+    <tr><td>Personal sync precedes collaboration</td><td>Shared infrastructure does not make multi-user reconciliation equivalent to device sync.</td></tr>
+    <tr><td>Publishing precedes deep collaboration</td><td>Arke needs a shareable audience result early.</td></tr>
+    <tr><td>Interactive productions remain exportable</td><td>Hosting is a paid convenience, not a lock.</td></tr>
+    <tr><td>Real currency is shown for managed generation</td><td>Prepaid balances must not obscure costs.</td></tr>
+    <tr><td>The picker keeps three mediums</td><td>Formats such as Microdrama live inside Story, Video or Interactive video.</td></tr>
+  </tbody>
+</table>
+
+<h3>Superseded by this revision</h3>
+<table>
+  <thead><tr><th>Earlier decision</th><th>Replaced by</th></tr></thead>
+  <tbody>
+    <tr><td>“The disk holds the original. The cloud holds a copy.”</td><td><strong>Cloud coordinates replicas; it does not confiscate ownership.</strong> The original framing breaks under multi-device sync — with two synced machines, neither disk is meaningfully the original. Section 06 is the more honest statement and makes the same promise.</td></tr>
+    <tr><td>The accept gate resolves sync conflicts</td><td><strong>Four conflict classes, only one of which reaches the gate.</strong> Routing an incidental field collision through a creative decision surface would devalue the gate. Section 06.</td></tr>
+    <tr><td>Validation means walking every path</td><td><strong>Finite graph properties plus named unvisited routes.</strong> Walking every path is exponential; checking reachability, dead ends and loops is not. Section 03.</td></tr>
+    <tr><td>Two seat roles — Author and Collaborator</td><td><strong>Owner, Editor and Reviewer.</strong> Phase 3. Which of them may accept is still open — section 10.</td></tr>
+    <tr><td>Anything billable requires Arke's servers</td><td><strong>Requires infrastructure, or represents maintained content, service and support.</strong> Server delivery is not technical scarcity, and the earlier wording implied it was. Section 08.</td></tr>
+    <tr><td>Hosting is the only route to an audience</td><td><strong>Managed URL, exportable web package, or player manifest for self-hosting.</strong> Exportability is what keeps the open-source promise intact. Section 03.</td></tr>
+    <tr><td>Audio is an export of both Story and Video</td><td><strong>A track or delivery profile, pending section 10.</strong> The strategic argument for audio is preserved in the section 01 review note rather than lost.</td></tr>
+    <tr><td>Interact is cut, its asset reassigned</td><td><strong>Deferred, asset held.</strong> Cost noted in section 03.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">13</span>Positioning summary</h2>
+
+<div class="pos">
+  <div>
+    <div class="pos__h">Product sentence</div>
+    <p class="pos__l">Arke is an AI-native studio for building worlds and turning them into stories, Microdramas, films and interactive video.</p>
+  </div>
+  <div>
+    <div class="pos__h">Creator promise</div>
+    <p class="pos__l">Build the world. Arke helps you write, produce and release every story within it.</p>
+  </div>
+  <div>
+    <div class="pos__h">Microdrama campaign</div>
+    <p class="pos__l">Your story room, production studio and creative partner — in one place.</p>
+  </div>
+  <div>
+    <div class="pos__h">Local-first promise</div>
+    <p class="pos__l pos__l--sm">Your world remains locally usable and exportable. Cloud services help it travel, collaborate and reach an audience; they never become a requirement to continue creating.</p>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

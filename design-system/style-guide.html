@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Style guide — Arke Worlds design system</title>
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
+<style>
+/* ==========================================================================
+   PAGE CHROME — the house review format, identical to composer.html and
+   loading.html so this page reads as one of the set. Everything here is
+   scaffolding; the specimens under each section are the subject.
+   ========================================================================== */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans, "Geist", system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 56px 40px 120px; }
+.kicker { font: 500 11px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-foreground); }
+h1 { font: 650 34px/1.15 inherit; letter-spacing: -0.025em; margin: 14px 0 12px; }
+.lede { font: 400 15px/1.65 inherit; color: var(--muted-foreground); max-width: 62ch; margin: 0 0 34px; }
+h2 { font: 600 19px/1.3 inherit; letter-spacing: -0.015em; margin: 58px 0 6px; padding-top: 26px; border-top: 1px solid var(--border); }
+h2 .n { font: 500 11px var(--font-mono, monospace); color: var(--muted-foreground); margin-right: 10px; }
+h3 { font: 600 13.5px/1.4 inherit; letter-spacing: -0.005em; margin: 26px 0 6px; color: var(--foreground); }
+p { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 14px; }
+p strong, li strong, td strong { color: var(--foreground); font-weight: 600; }
+li { font: 400 13.5px/1.7 inherit; color: var(--muted-foreground); max-width: 68ch; margin: 0 0 6px; }
+ul { padding-left: 18px; margin: 0 0 16px; }
+code { font: 400 12px var(--font-mono, monospace); background: var(--muted); padding: 1px 5px; border-radius: 4px; color: var(--foreground); }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 13px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font: 600 11px var(--font-mono, monospace); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+td { color: var(--muted-foreground); }
+td:first-child { color: var(--foreground); font-family: var(--font-mono, monospace); font-size: 12px; }
+/* The rule tables carry prose in column one, not identifiers, so they opt out
+   of the mono treatment the token tables want. */
+table.prose td:first-child { font-family: inherit; font-size: 13px; font-weight: 600; white-space: normal; max-width: 22em; }
+table.tok td:first-child { white-space: nowrap; }
+.flag { border-left: 2px solid var(--foreground); padding: 2px 0 2px 16px; margin: 22px 0; }
+.flag--warn { border-left-color: var(--warning, #b45309); }
+.flag__t { font: 600 12px inherit; color: var(--foreground); margin-bottom: 3px; }
+.flag p { margin: 0; font-size: 13px; }
+a { color: var(--foreground); }
+
+.stage { background: var(--muted); border: 1px solid var(--border); border-radius: 14px; padding: 34px; margin: 18px 0 10px; }
+.stage--plain { background: var(--background); }
+.caption { font: 400 11.5px/1.5 var(--font-mono, monospace); color: var(--muted-foreground); margin: 0 0 22px; }
+
+.toggles { display: flex; gap: 10px; align-items: center; margin: 0 0 30px; flex-wrap: wrap; }
+.tbtn { font: 500 11.5px inherit; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; cursor: pointer; transition: var(--transition-control); }
+.tbtn[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: transparent; }
+.tnote { font: 400 11.5px inherit; color: var(--muted-foreground); }
+
+/* Do / don't pairs. Two columns, one hairline between, no colour: the
+   difference is in the words, and a green tick would be the only hue on a
+   monochrome page. */
+.dd { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 16px 0 22px; }
+.dd > div { padding: 16px 18px; }
+.dd > div + div { border-left: 1px solid var(--border); }
+.dd__h { font: 500 9.5px var(--font-mono, monospace); letter-spacing: .12em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 8px; }
+.dd__l { font: 400 13.5px/1.6 inherit; color: var(--foreground); margin: 0 0 7px; }
+.dd__l:last-child { margin-bottom: 0; }
+.dd--no .dd__l { color: var(--muted-foreground); text-decoration: line-through; text-decoration-color: var(--neutral-300, #d4d4d4); text-decoration-thickness: 1px; }
+
+/* Colour specimens. */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+.sw { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--background); }
+.sw__chip { height: 54px; border-bottom: 1px solid var(--border); }
+.sw__b { padding: 8px 10px 10px; }
+.sw__n { font: 500 10.5px var(--font-mono, monospace); color: var(--foreground); word-break: break-all; }
+.sw__v { font: 400 10px var(--font-mono, monospace); color: var(--muted-foreground); margin-top: 2px; }
+.ramp { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.ramp i { flex: 1; height: 46px; }
+.ramp-labels { display: flex; margin-top: 6px; }
+.ramp-labels span { flex: 1; font: 400 9px var(--font-mono, monospace); color: var(--muted-foreground); text-align: center; }
+.dots { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+.dot-row { display: inline-flex; align-items: center; gap: 8px; font: 400 12px var(--font-mono, monospace); color: var(--muted-foreground); }
+.dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+
+/* Type specimens. */
+.spec { display: flex; align-items: baseline; gap: 20px; padding: 13px 0; border-bottom: 1px solid var(--border); }
+.spec:last-child { border-bottom: 0; }
+.spec__k { font: 500 10px var(--font-mono, monospace); letter-spacing: .1em; text-transform: uppercase; color: var(--neutral-400, #a3a3a3); width: 96px; flex: none; }
+.spec__m { font: 400 10px var(--font-mono, monospace); color: var(--muted-foreground); margin-left: auto; flex: none; white-space: nowrap; }
+.t-title { font: 600 24px/1.15 inherit; letter-spacing: -0.02em; }
+.t-h2 { font: 600 20px/1.3 inherit; letter-spacing: -0.01em; }
+.t-h3 { font: 600 18px/1.3 inherit; letter-spacing: -0.01em; }
+.t-lead { font: 400 18px/1.5 inherit; color: var(--muted-foreground); }
+.t-body { font: 400 14px/1.6 inherit; }
+.t-ui { font: 500 13px/1.4 inherit; }
+.t-label { font: 500 12px/1.2 inherit; }
+.t-mono { font: 400 13px/1.5 var(--font-mono, monospace); }
+.eyebrow { font: 500 10px var(--font-mono, monospace); letter-spacing: .14em; text-transform: uppercase; color: var(--muted-foreground); }
+
+/* Spacing and radius specimens. */
+.scale { display: flex; align-items: flex-end; gap: 8px; }
+.scale i { display: block; background: var(--neutral-300, #d4d4d4); border-radius: 2px; width: 26px; }
+.scale-labels { display: flex; gap: 8px; margin-top: 6px; }
+.scale-labels span { width: 26px; font: 400 9px var(--font-mono, monospace); color: var(--muted-foreground); text-align: center; }
+.radii { display: flex; gap: 14px; flex-wrap: wrap; }
+.radii > div { text-align: center; }
+.radii i { display: block; width: 66px; height: 66px; background: var(--background); border: 1px solid var(--border); }
+.radii span { display: block; margin-top: 7px; font: 400 9.5px var(--font-mono, monospace); color: var(--muted-foreground); }
+.elev { display: flex; gap: 16px; flex-wrap: wrap; }
+.elev > div { text-align: center; }
+.elev i { display: block; width: 96px; height: 62px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); }
+.elev span { display: block; margin-top: 8px; font: 400 9.5px var(--font-mono, monospace); color: var(--muted-foreground); }
+
+/* Motion specimen. Two cards: one at rest with ambient drift, one that
+   straightens on hover. Both are the real vocabulary, not an illustration
+   of it. */
+@keyframes sg-drift { from { transform: rotate(-2.5deg) translateY(0); } to { transform: rotate(-2.5deg) translateY(-7px); } }
+@keyframes sg-fadeup { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+.motion { display: flex; gap: 46px; align-items: center; justify-content: center; flex-wrap: wrap; min-height: 190px; }
+.mcard { width: 148px; height: 104px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--shadow-sm); display: grid; place-items: center; font: 500 11px inherit; color: var(--muted-foreground); }
+.mcard--drift { animation: sg-drift 7.4s var(--ease-standard, ease-in-out) infinite alternate; }
+.mcard--tilt { transform: rotate(1.8deg); transition: transform var(--dur-base, 200ms) var(--ease-out), box-shadow var(--dur-base, 200ms) var(--ease-out); }
+.mcard--tilt:hover { transform: rotate(0deg) translateY(-10px); box-shadow: var(--shadow-xl); }
+.mcard--fade { animation: sg-fadeup .7s var(--ease-out) both; }
+.still .mcard--drift, .still .mcard--fade { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .mcard--drift, .mcard--fade { animation: none; }
+  .mcard--tilt { transition: none; }
+}
+
+/* Imagery specimen: the palette the pictures are allowed, stated as a strip
+   rather than a photograph, so the page needs no assets to make the point. */
+.pal { display: flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
+.pal i { flex: 1; height: 62px; }
+.pal i.acc { flex: 0 0 44px; }
+
+@media (max-width: 760px) {
+  .wrap { padding: 40px 22px 90px; }
+  .dd { grid-template-columns: 1fr; }
+  .dd > div + div { border-left: 0; border-top: 1px solid var(--border); }
+  .spec { flex-wrap: wrap; gap: 8px; }
+  .spec__m { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="kicker">Arke Worlds · design system</div>
+<h1>Style guide</h1>
+<p class="lede">How Arke writes and how Arke looks. This page is the reference every document, screen and page in this folder is expected to match. It records rules that were already being followed — it does not invent new ones.</p>
+
+<div class="toggles">
+  <button class="tbtn" id="theme" type="button" aria-pressed="false">Dark</button>
+  <button class="tbtn" id="motion" type="button" aria-pressed="false">Stop motion</button>
+  <span class="tnote">Every specimen below is drawn with live tokens. If a swatch is wrong, the token is wrong.</span>
+</div>
+
+<div class="flag">
+  <div class="flag__t">Scope</div>
+  <p>Writing rules and visual rules. Component anatomy, the token reference and the ~90 <code>Binding</code> decisions in <code>Arke&nbsp;Studio.dc.html</code> are not restated here — that document remains the record for what a screen does. This one governs how anything new is worded and styled.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">01</span>The two names</h2>
+
+<p><strong>Arke Worlds is the parent brand. Arke Studio is the product inside it.</strong> The distinction is not decorative — it decides which name goes on a thing, and getting it wrong makes the company look like it has two identities.</p>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>The YouTube channel, the wordmark on the banner and anything audience-facing about the company is <strong>Arke Worlds</strong>.</td><td>The channel is a devblog about building a product; the publisher is the company, not the product.</td></tr>
+    <tr><td>The application, its screens, its releases, its licence line and the marketing site are <strong>Arke Studio</strong>.</td><td>That is the thing being downloaded. <code>Arke Studio · clickable flow</code>, <code>github.com/michaeljosiah/ArkeStudio</code>.</td></tr>
+    <tr><td>Never write <em>Arke</em> alone as the product name in prose.</td><td>It reads as a third brand. <em>Arke</em> alone is only acceptable inside the app's own voice, where context is unambiguous — "Arke is starting", "Arke shows the ripple then waits".</td></tr>
+    <tr><td>The wordmark is <strong>live text, never an asset</strong>.</td><td>Two spans and a font. Dark mode needs no second file, and the mark re-themes from tokens like everything else. Stated in <code>loading.html</code>.</td></tr>
+    <tr><td>The thesis line is <strong>“The world is the asset.”</strong></td><td>It appears as the banner tagline, in the channel description and in the site footer. It is one string. Extended forms — <em>Author once. Produce everywhere.</em> — follow it; they do not replace it.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">02</span>Voice</h2>
+
+<p>Arke writes in <strong>short declaratives that end in a full stop</strong>. The characteristic sentence is four to seven words, states a constraint, and does not soften it. Claims are made plainly and then qualified in the sentence after, never hedged inside the claim itself.</p>
+
+<div class="stage stage--plain">
+  <div class="eyebrow" style="margin-bottom:14px">Headlines, verbatim from the site and waitlist</div>
+  <p style="font:550 27px/1.15 inherit;letter-spacing:-.035em;color:var(--foreground);max-width:20ch;margin:0 0 10px">Nothing changes until you accept.</p>
+  <p style="font:550 27px/1.15 inherit;letter-spacing:-.035em;color:var(--foreground);max-width:20ch;margin:0 0 10px">Canon that knows when to refuse.</p>
+  <p style="font:550 27px/1.15 inherit;letter-spacing:-.035em;color:var(--foreground);max-width:20ch;margin:0 0 10px">Identity that travels.</p>
+  <p style="font:550 27px/1.15 inherit;letter-spacing:-.035em;color:var(--foreground);max-width:20ch;margin:0">Your world lives with you.</p>
+</div>
+<p class="caption">Sentence case · full stop · no colon-subtitle · no exclamation.</p>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Say what the thing does, not how it feels.</strong></td><td>"Built to remember what other tools forget" survives a sceptical reader. "Revolutionary AI-powered worldbuilding" does not.</td></tr>
+    <tr><td><strong>The reader is “you”. The system is named, never “we”.</strong></td><td>Second person for the creator; the product acts in the third person — "Arke shows the ripple then waits", "the screen is the gate". <em>We</em> appears only in the devblog voice, where a person really is speaking.</td></tr>
+    <tr><td><strong>State the ratio out loud.</strong></td><td>"Mostly this is the devblog" costs nine words and keeps the audience that stays. Same instinct as "Arke Studio is early" — a reader forgives a rough edge they were warned about and resents one they discover.</td></tr>
+    <tr><td><strong>Name what is wrong.</strong></td><td>"What we get wrong" is the whole difference between a devblog and a marketing feed. The design documents already do this — they say plainly what is designed and not yet written.</td></tr>
+    <tr><td><strong>No hype adjectives, no exclamation marks, no emoji.</strong></td><td>Status is carried by dots and pills, not faces. There is no emoji anywhere in the current asset set and there should not start being one.</td></tr>
+    <tr><td><strong>Parallel structure is a signature; use it deliberately.</strong></td><td>"Author once, produce everywhere." "Voice proposes. The screen disposes." "Local first · Open source · Human accepted · Provider independent." Two or three beats, never four for the sake of it.</td></tr>
+    <tr><td><strong>AI is a skill the product has, not an identity it claims.</strong></td><td>"How to direct image and video models" sits inside a list of craft. The channel is found by novelists and directors, and is not branded as an AI channel — that audience churns and is not the one being courted.</td></tr>
+  </tbody>
+</table>
+
+<div class="dd">
+  <div><div class="dd__h">Write</div>
+    <p class="dd__l">Nothing changes until you accept.</p>
+    <p class="dd__l">The canon doesn't answer this, and it won't guess.</p>
+    <p class="dd__l">Arke Studio is early, free and open source.</p>
+  </div>
+  <div class="dd--no"><div class="dd__h">Not</div>
+    <p class="dd__l">You're always in control of your creative vision!</p>
+    <p class="dd__l">Sorry, I couldn't find an answer to that question.</p>
+    <p class="dd__l">Introducing the future of AI-powered storytelling.</p>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">03</span>Casing, spelling, punctuation</h2>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Sentence case everywhere</strong> — headings, buttons, labels, menu items, table headers in prose.</td><td>Title Case reads as a marketing brochure and forces a judgement call on every preposition.</td></tr>
+    <tr><td><strong>Small labels may be uppercase</strong>, in mono, at <code>.14em</code> tracking.</td><td>The eyebrow is the house label form: <code>THE UNDERSONG · WORLD LOOK v3</code>, <code>HOLD TO SPEAK</code>, <code>FREE · MIT LICENCE</code>. It is the one place uppercase is allowed.</td></tr>
+    <tr><td><strong>British English.</strong></td><td><em>licence, organised, realisation, behaviour, colour, canonisation.</em> Already consistent across the site, the waitlist and the requirements spec — the exception is <code>color</code> inside CSS, which is a keyword, not a word.</td></tr>
+    <tr><td><strong>The middle dot <code>·</code> is the separator.</strong></td><td>Not a pipe, not an en dash, not a bullet. <code>Local first · Open source · Provider independent</code>. One space either side.</td></tr>
+    <tr><td><strong>Em dashes set off a clause; they do not join a list.</strong></td><td>Spaced or unspaced consistently within a document, never mixed.</td></tr>
+    <tr><td><strong>Curly quotes in prose, straight quotes in code.</strong></td><td>Anything in <code>var(--font-mono)</code> is a literal and is reproduced exactly.</td></tr>
+    <tr><td><strong>Numerals from zero. Prices are exact or tilde'd, never both.</strong></td><td><code>$0.03</code> is a price. <code>~$0.61</code> is an estimate. A per-unit price carries no tilde — the binding rule already in the master document.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">04</span>Microcopy</h2>
+
+<p>Four forms, and each one has a fixed shape. Mixing them is what makes an interface feel written by several people.</p>
+
+<table class="tok">
+  <thead><tr><th>Form</th><th>Shape</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>Button</td><td>Verb first, sentence case, no full stop</td><td>Generate specification · Accept · Open as thread · Hold to speak</td></tr>
+    <tr><td>Eyebrow</td><td>Uppercase mono, <code>.14em</code>, middle dots</td><td>MAREN KEST · CHARACTER SHEET</td></tr>
+    <tr><td>Status</td><td>Lowercase, mono, <code>key: value</code></td><td>status: draft · v0.2.2 · whisper · local</td></tr>
+    <tr><td>Empty state</td><td>States the answer, never blank</td><td>whatever OpenCode is set to</td></tr>
+  </tbody>
+</table>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>A screen labels; it does not explain.</strong></td><td>Binding, from the master document. Explanation belongs in the docs, in a callout, or nowhere.</td></tr>
+    <tr><td><strong>Every ending is named.</strong></td><td>A silent nothing reads as a failure. Success, refusal, empty and error each get words.</td></tr>
+    <tr><td><strong>Empty is an answer.</strong></td><td>An unset field says what it is inheriting rather than showing blank. Blank looks broken.</td></tr>
+    <tr><td><strong>A confirm names the outcome, it does not ask “are you sure?”.</strong></td><td>"Move this world to archive" tells the reader what will happen. "Are you sure?" tells them nothing and trains them to click through.</td></tr>
+    <tr><td><strong>What cannot travel is shown with its reason, never hidden.</strong></td><td>An unusable model stays listed, unselectable, sorted below, saying what is missing — "needs a FAL key". Hiding it makes the product look broken instead of unconfigured.</td></tr>
+    <tr><td><strong>Consent is a checkbox, not a paragraph.</strong></td><td>One literal sentence the person can read in full: <code>The person speaking agreed to have their voice cloned.</code></td></tr>
+    <tr><td><strong>No figure the product cannot stand behind.</strong></td><td>Never invent a cost estimate to fill a slot. Where a number is not knowable, offer stoppability instead.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">05</span>How a design decision is written</h2>
+
+<p>Every design decision in this folder is recorded in the same three parts, and new documents follow the same form. It is the reason the master document is usable as a record rather than a gallery.</p>
+
+<div class="stage stage--plain">
+  <div class="flag" style="margin:0">
+    <div class="flag__t">Binding. A screen labels; it does not explain.</div>
+    <p>The panel names the field and its value and stops. Anything that needs a sentence of justification is either a callout the reader can dismiss or it does not belong on the screen at all.</p>
+  </div>
+</div>
+<p class="caption">Binding · aphorism · reason. Nothing else.</p>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Open with <strong><code>Binding.</code></strong></td><td>It marks a constraint the implementation is expected to match, not a suggestion. If it is a suggestion, it is prose, not a rule.</td></tr>
+    <tr><td>The rule itself is <strong>one aphorism</strong>, bolded, sentence case, ending in a full stop.</td><td>A rule that takes a paragraph to state cannot be checked against a screen.</td></tr>
+    <tr><td>The reason follows in <strong>one short paragraph</strong>.</td><td>Six months later the reason is the part that is load-bearing — it tells the next reader whether the rule still applies.</td></tr>
+    <tr><td><strong>Supersession is recorded, never silent.</strong></td><td><code>supersedes 1c</code>, <code>amends 41a</code>, <code>extends 65a</code>. A rule that quietly replaces another leaves two live contradictions in the record.</td></tr>
+    <tr><td><strong>Disagreements with an earlier document are stated and reasoned.</strong></td><td><code>since-the-prototype.html</code> is the model: the prototype stays the reference for what it covers, the delta page says what changed and why.</td></tr>
+    <tr><td>Every review page closes with <strong>“what is not in this page”</strong>.</td><td>An unstated gap reads as an oversight. A stated one reads as scope.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">06</span>Colour</h2>
+
+<p><strong>The chrome is monochrome so the creator's imagery carries all the colour.</strong> This is the single most consequential visual rule in the system and everything else follows from it. White or near-black surfaces, hairline neutral borders, one red reserved for destructive and blocked, and colour that appears only in small state dots — never as a fill, never as chrome.</p>
+
+<div class="stage">
+  <div class="eyebrow" style="margin-bottom:14px">Theme tokens</div>
+  <div class="swatches">
+    <div class="sw"><div class="sw__chip" style="background:var(--background)"></div><div class="sw__b"><div class="sw__n">--background</div><div class="sw__v">#FFFFFF</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--foreground)"></div><div class="sw__b"><div class="sw__n">--foreground</div><div class="sw__v">#0A0A0A</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--primary)"></div><div class="sw__b"><div class="sw__n">--primary</div><div class="sw__v">#171717</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--muted)"></div><div class="sw__b"><div class="sw__n">--muted</div><div class="sw__v">#F5F5F5</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--muted-foreground)"></div><div class="sw__b"><div class="sw__n">--muted-foreground</div><div class="sw__v">#737373</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--border)"></div><div class="sw__b"><div class="sw__n">--border</div><div class="sw__v">#E5E5E5</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--destructive)"></div><div class="sw__b"><div class="sw__n">--destructive</div><div class="sw__v">#E7000B</div></div></div>
+    <div class="sw"><div class="sw__chip" style="background:var(--ring)"></div><div class="sw__b"><div class="sw__n">--ring</div><div class="sw__v">#A1A1A1</div></div></div>
+  </div>
+
+  <div class="eyebrow" style="margin:26px 0 12px">Neutral ramp</div>
+  <div class="ramp">
+    <i style="background:var(--neutral-50)"></i><i style="background:var(--neutral-100)"></i>
+    <i style="background:var(--neutral-200)"></i><i style="background:var(--neutral-300)"></i>
+    <i style="background:var(--neutral-400)"></i><i style="background:var(--neutral-500)"></i>
+    <i style="background:var(--neutral-600)"></i><i style="background:var(--neutral-700)"></i>
+    <i style="background:var(--neutral-800)"></i><i style="background:var(--neutral-900)"></i>
+    <i style="background:var(--neutral-950)"></i>
+  </div>
+  <div class="ramp-labels">
+    <span>50</span><span>100</span><span>200</span><span>300</span><span>400</span><span>500</span>
+    <span>600</span><span>700</span><span>800</span><span>900</span><span>950</span>
+  </div>
+
+  <div class="eyebrow" style="margin:26px 0 12px">Status — dots only, never fills</div>
+  <div class="dots">
+    <span class="dot-row"><i class="dot" style="background:var(--foreground)"></i>neutral</span>
+    <span class="dot-row"><i class="dot" style="background:var(--success)"></i>success · #16A34A</span>
+    <span class="dot-row"><i class="dot" style="background:var(--warning)"></i>warning · #D97706</span>
+    <span class="dot-row"><i class="dot" style="background:var(--destructive)"></i>destructive · #E7000B</span>
+  </div>
+</div>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Chrome stays neutral monochrome. The creator's imagery carries all the colour.</strong></td><td>The product's whole pitch is that the world is the asset. A branded interface competes with the thing the user made.</td></tr>
+    <tr><td><strong>Hairline <code>1px solid var(--border)</code> is the primary separator.</strong></td><td>Borders do the work shadows would otherwise do. Shadows are subtle, neutral and low.</td></tr>
+    <tr><td><strong>Colour must never carry meaning alone.</strong></td><td>Shape, icon and text label accompany every status. From the requirements spec, and it is also the accessibility floor.</td></tr>
+    <tr><td><strong>Red is reserved.</strong></td><td>Destructive, failed, blocked, and the "needs a human" signal. It is the only hue in the chrome, which is what makes it legible.</td></tr>
+    <tr><td><strong>Third-party marks render monochrome.</strong></td><td><code>var(--neutral-400)</code>, <code>fill:currentColor</code>. A provider band in nine brand colours would be the loudest thing on the page.</td></tr>
+    <tr><td><strong>No gradients in chrome.</strong></td><td>Gradients belong to imagery and to the loading sweep. Anywhere else they date the interface.</td></tr>
+    <tr><td><strong>Dark mode is the same tokens inverted under <code>.dark</code>.</strong></td><td>No second set of decisions, no second asset. Every surface must re-theme from tokens alone.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">07</span>Type</h2>
+
+<p><strong>Geist for everything. Geist Mono for the eyebrow, for identifiers, and for anything the reader might have to reproduce exactly.</strong> No display face, no serif, no third family — with one documented exception in section 12.</p>
+
+<div class="stage stage--plain">
+  <div class="spec"><span class="spec__k">Title</span><span class="t-title">Nothing changes until you accept.</span><span class="spec__m">600 · 24px · −0.02em</span></div>
+  <div class="spec"><span class="spec__k">H2</span><span class="t-h2">Identity that travels</span><span class="spec__m">600 · 20px · −0.01em</span></div>
+  <div class="spec"><span class="spec__k">H3</span><span class="t-h3">The reference set</span><span class="spec__m">600 · 18px · −0.01em</span></div>
+  <div class="spec"><span class="spec__k">Lead</span><span class="t-lead">The main photo and the character sheet.</span><span class="spec__m">400 · 18px · 1.5</span></div>
+  <div class="spec"><span class="spec__k">Body</span><span class="t-body">A card moves because the work moved, not because a person dragged it.</span><span class="spec__m">400 · 14px · 1.6</span></div>
+  <div class="spec"><span class="spec__k">UI</span><span class="t-ui">Accept &amp; persist</span><span class="spec__m">500 · 13px · 1.4</span></div>
+  <div class="spec"><span class="spec__k">Label</span><span class="t-label">Character sheet</span><span class="spec__m">500 · 12px · 1.2</span></div>
+  <div class="spec"><span class="spec__k">Eyebrow</span><span class="eyebrow">Maren Kest · character sheet</span><span class="spec__m">mono · 10px · .14em</span></div>
+  <div class="spec"><span class="spec__k">Mono</span><span class="t-mono">status: draft · v0.2.2</span><span class="spec__m">400 · 13px · 1.5</span></div>
+</div>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Headings are semibold with negative tracking.</strong></td><td><code>−0.02em</code> at UI sizes, tightening to <code>−0.05em</code> on marketing display sizes. Geist at large sizes set loose looks unresolved.</td></tr>
+    <tr><td><strong>13–14px is the workhorse. Never below 12px.</strong></td><td>The product is dense and read for hours.</td></tr>
+    <tr><td><strong>Prose measure is 62–68ch.</strong></td><td><code>--width-text: 780px</code>, <code>--width-prose: 68ch</code>. Tool surfaces are dense; reading surfaces are not.</td></tr>
+    <tr><td><strong>Mono is for identifiers, paths, prices, versions, timestamps and the eyebrow.</strong></td><td>Anything the reader may need to type back, plus the one label form. Not for body copy, not for emphasis.</td></tr>
+    <tr><td><strong>Headings balance, body copy wraps pretty.</strong></td><td><code>text-wrap: balance</code> on headings, <code>pretty</code> on paragraphs. A two-word orphan under a display heading is the most visible typographic failure the site has.</td></tr>
+  </tbody>
+</table>
+
+<div class="flag flag--warn">
+  <div class="flag__t">Inherited rule, overruled in practice</div>
+  <p>The token readme says <em>"Geist Mono for code, IDs, paths and metadata only — never for labels (that mono-label habit is gone in this theme)."</em> Every Arke surface uses a mono uppercase eyebrow, and it is now a recognisable part of the identity. <strong>The eyebrow stands.</strong> The rest of the rule holds: mono is not used for ordinary field labels, button text or emphasis.</p>
+</div>
+
+<!-- ====================================================================== -->
+<h2><span class="n">08</span>Space, radius, elevation</h2>
+
+<div class="stage">
+  <div class="eyebrow" style="margin-bottom:14px">4px grid</div>
+  <div class="scale">
+    <i style="height:4px"></i><i style="height:8px"></i><i style="height:12px"></i><i style="height:16px"></i>
+    <i style="height:20px"></i><i style="height:24px"></i><i style="height:28px"></i><i style="height:32px"></i>
+    <i style="height:40px"></i><i style="height:48px"></i><i style="height:64px"></i><i style="height:80px"></i>
+  </div>
+  <div class="scale-labels">
+    <span>4</span><span>8</span><span>12</span><span>16</span><span>20</span><span>24</span>
+    <span>28</span><span>32</span><span>40</span><span>48</span><span>64</span><span>80</span>
+  </div>
+
+  <div class="eyebrow" style="margin:30px 0 12px">Radius — one base, derived steps</div>
+  <div class="radii">
+    <div><i style="border-radius:var(--radius-sm)"></i><span>sm · 6</span></div>
+    <div><i style="border-radius:var(--radius-md)"></i><span>md · 8 · controls</span></div>
+    <div><i style="border-radius:var(--radius-lg)"></i><span>lg · 10 · base</span></div>
+    <div><i style="border-radius:var(--radius-xl)"></i><span>xl · 14 · cards</span></div>
+    <div><i style="border-radius:var(--radius-2xl)"></i><span>2xl · 18</span></div>
+    <div><i style="border-radius:999px"></i><span>pill · 999</span></div>
+  </div>
+
+  <div class="eyebrow" style="margin:30px 0 12px">Elevation</div>
+  <div class="elev">
+    <div><i style="box-shadow:var(--shadow-xs)"></i><span>xs · cards, buttons</span></div>
+    <div><i style="box-shadow:var(--shadow-sm)"></i><span>sm · resting</span></div>
+    <div><i style="box-shadow:var(--shadow-md)"></i><span>md · popovers</span></div>
+    <div><i style="box-shadow:var(--shadow-lg)"></i><span>lg · dialogs</span></div>
+    <div><i style="box-shadow:var(--shadow-xl)"></i><span>xl · lifted, window</span></div>
+  </div>
+</div>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Everything sits on the 4px grid.</strong></td><td>A 15px gap is a mistake, not a decision.</td></tr>
+    <tr><td><strong>Nothing is sharp-square; nothing is heavily rounded.</strong></td><td>One <code>--radius</code> of 10px drives the derived scale. Controls 8, cards 14, pills 999.</td></tr>
+    <tr><td><strong>Border first, shadow second.</strong></td><td>The hairline defines the shape. The shadow says only how far off the page it sits.</td></tr>
+    <tr><td><strong>The app chrome bar is 44px, on every screen.</strong></td><td>Left is where you are, centre is the wordmark, right is activity then settings — always in that order. The wordmark is absolutely centred to the window, not flex-centred, because the desktop shell reserves ~138px top-right. <em>A mark that moves is not a mark.</em></td></tr>
+    <tr><td><strong>Page container 1080px; the marketing site runs 1200px.</strong></td><td>A deliberate divergence: the site is media-led and 1080 crops the hero. Documents and app surfaces stay at 1080.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">09</span>Motion</h2>
+
+<p>Motion is <strong>choreographed but restrained</strong>, and every piece of it must be legible stopped — <code>prefers-reduced-motion</code> flattens animation to 0.01ms globally, so a loop whose meaning lives in the movement becomes a dot or a half-drawn letter.</p>
+
+<div class="stage">
+  <div class="motion">
+    <div class="mcard mcard--drift">ambient drift</div>
+    <div class="mcard mcard--tilt">hover to straighten</div>
+    <div class="mcard mcard--fade">fade up</div>
+  </div>
+</div>
+<p class="caption">drift 7.4s alternate · tilt 1.8° → 0° over 200ms · fadeUp 0.7s. Press “Stop motion” to check each one at rest.</p>
+
+<table class="tok">
+  <thead><tr><th>Token</th><th>Value</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td>--dur-fast</td><td>150ms</td><td>Control state changes — hover, press, focus</td></tr>
+    <tr><td>--dur-base</td><td>200ms</td><td>Card lift, tilt-to-straighten</td></tr>
+    <tr><td>--ease-standard</td><td>cubic-bezier(0.4, 0, 0.2, 1)</td><td>Anything that returns to where it started</td></tr>
+    <tr><td>--ease-out</td><td>cubic-bezier(0.16, 1, 0.3, 1)</td><td>Entrances</td></tr>
+    <tr><td>fadeUp</td><td>0.7s, staggered .15 / .27 / .39 / .51s</td><td>Screen entrances</td></tr>
+    <tr><td>drift</td><td>7–8.4s, infinite alternate, −7px</td><td>Resting cards only</td></tr>
+  </tbody>
+</table>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Every loop is legible stopped.</strong></td><td>Reduced motion is a global flatten in this app. A loop must declare its resting state, not inherit a half-finished frame.</td></tr>
+    <tr><td><strong>Nothing spins.</strong></td><td>A spinner says "software is busy". Arke's loader says "Arke is starting" — it is the mark, not a spinner with the mark parked inside.</td></tr>
+    <tr><td><strong>Whole beats at 1.4s–2.4s.</strong></td><td>Faster reads as anxious.</td></tr>
+    <tr><td><strong>No spinner without a subject.</strong></td><td>A loader that cannot say what it is waiting for is a confession.</td></tr>
+    <tr><td><strong>A number beats an animation.</strong></td><td>Where real progress is knowable — first-run setup — show the percentage. The loader is for waits with no number.</td></tr>
+    <tr><td><strong>Hover reveals with opacity, never display.</strong></td><td>Revealing an action must shift nothing on the page.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">10</span>Imagery</h2>
+
+<p>The chrome has no colour, so the pictures carry all of it — and they carry the same colour every time. <strong>Muted teal-slate, one warm amber accent, painterly cinematic, soft volumetric fog.</strong> One accent, deliberately: it is what makes the whole asset set read as one world.</p>
+
+<div class="stage stage--plain">
+  <div class="pal">
+    <i style="background:#0d1b21"></i><i style="background:#152a33"></i><i style="background:#1f3d47"></i>
+    <i style="background:#2f545c"></i><i style="background:#4a6f74"></i><i style="background:#7d9a9b"></i>
+    <i class="acc" style="background:#d98b3f"></i>
+  </div>
+</div>
+<p class="caption">Teal-slate value range, and the single amber accent. Indicative, not a token set — imagery is generated, not styled.</p>
+
+<table class="prose">
+  <thead><tr><th>Rule</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Every prompt ends with the <strong>house style suffix</strong>.</td><td><code>…painterly cinematic concept art, muted palette with one warm accent, soft volumetric fog, filmic lighting, high detail, no text, no watermark, no border</code></td></tr>
+    <tr><td>Character portraits add the <strong>cast clause</strong>.</td><td><code>…consistent character-sheet style, three-quarter view, plain dark neutral backdrop, chest-up framing</code> — so the roster reads as one cast, not six commissions.</td></tr>
+    <tr><td><strong>One warm accent. Count them.</strong></td><td>The banner specifies exactly three amber points in the whole frame. Where a generation comes back broadly warm-lit, halve the ambient and keep the lamps as isolated points — a blue/orange split is off-brand even when it is beautiful.</td></tr>
+    <tr><td><strong>Reuse one portrait everywhere a character appears.</strong></td><td>That <em>is</em> the product's pitch: one canon, many surfaces. Generating a second portrait for a second screen contradicts the thing being sold.</td></tr>
+    <tr><td><strong>No text baked into imagery</strong> — except the channel banner and avatar.</td><td>The page supplies all words. The two exceptions are documented in <code>channel-identity.md</code> and exist because YouTube crops kill an overlay.</td></tr>
+    <tr><td><strong>Product demonstrations use the real interface.</strong></td><td>Never ask an image or video model to generate UI text. A fabricated screenshot is a lie about the product.</td></tr>
+    <tr><td><strong>Every loop needs a poster that makes the same claim.</strong></td><td>Checked with sound off and at <code>prefers-reduced-motion</code>. If the still doesn't say it, the video is decoration.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">11</span>The accessibility floor</h2>
+
+<p>Not a section that gets traded away. These are already implemented across the site and the requirements spec; the guide records them so they are not lost in the next rewrite.</p>
+
+<ul>
+  <li><strong>Colour is never the only signal.</strong> Shape, icon and text label accompany every status.</li>
+  <li><strong>A visible focus ring on everything focusable</strong> — <code>--shadow-focus</code>, 3px of <code>--ring</code> at 50%.</li>
+  <li><strong><code>prefers-reduced-motion</code> is handled, not just declared.</strong> Video is hidden and the poster shown; animated states are replaced with a literal label, not frozen mid-slide.</li>
+  <li><strong>Never below 12px</strong>, and default UI text at 13–14px.</li>
+  <li><strong>Every graph and canvas action is reachable by keyboard</strong>, with a hierarchical list or script view as an alternative to the visual form.</li>
+  <li><strong>Status palettes account for colour-vision differences</strong>, which follows from the first rule but is worth stating separately for the person choosing a new status colour.</li>
+</ul>
+
+<!-- ====================================================================== -->
+<h2><span class="n">12</span>Known exceptions and inherited debt</h2>
+
+<p>Stated rather than hidden, so nobody discovers them and assumes they are mistakes.</p>
+
+<table class="prose">
+  <thead><tr><th>Exception</th><th>Standing</th></tr></thead>
+  <tbody>
+    <tr><td>The token folder is named and branded <strong>SpecOne Design System</strong>, and the component namespace is <code>SpecOneDesignSystem_b87656</code>.</td><td><strong>Inherited, accepted for now.</strong> Arke adopted the shadcn/ui neutral theme wholesale and re-skinned nothing at token level, which is exactly what an unbranded monochrome system is for. The names are cosmetic debt, not a design problem. Rename when something else forces the folder to move.</td></tr>
+    <tr><td>The readme in that folder carries <strong>SpecOne's writing rules</strong>, including "name the user by role, never <em>you</em>" and "never mono for labels".</td><td><strong>Superseded by this page.</strong> That readme describes a different product's voice. Where it conflicts with sections 02–04 here, this page wins.</td></tr>
+    <tr><td><strong>Jost</strong> is loaded in <code>Arke Studio.dc.html</code> for the launch wordmark — <code>200 58px</code> at <code>.55em</code> tracking.</td><td><strong>Single documented exception</strong> to the one-family rule, and confined to the launch screen. Do not extend it to any other surface.</td></tr>
+    <tr><td>The marketing site uses <strong>weight 550</strong> and a 1200px container, neither of which is in the token set.</td><td><strong>Deliberate.</strong> The site is media-led and display-scale. App surfaces and documents stay on the tokens.</td></tr>
+    <tr><td><code>macos-window.jsx</code> and <code>image-slot.js</code> carry <code>@ds-adherence-ignore</code> and use raw hexes and pixels.</td><td><strong>Vendored starters.</strong> They are overwritten on re-copy, so edits do not survive. Not a style violation and not worth fixing.</td></tr>
+    <tr><td><code>waitlist.html</code> inlines the colour tokens instead of linking them.</td><td><strong>Correct.</strong> It is a standalone public page. The file already notes: <em>"Every value is copied from the design system, not invented."</em> Any change to a token has to be mirrored there by hand.</td></tr>
+  </tbody>
+</table>
+
+<!-- ====================================================================== -->
+<h2><span class="n">13</span>What is not in this page</h2>
+
+<p><strong>Component anatomy.</strong> Buttons, inputs, cards, badges, status dots and the domain pieces live in <code>_ds/…/components/core/</code> and in the master document's screens. This page governs how they are worded and coloured, not how they are built.</p>
+
+<p><strong>The Binding decisions.</strong> Roughly ninety of them, in <code>Arke Studio.dc.html</code>, each attached to the screen it governs. Section 05 records the <em>form</em>; the document remains the record of the <em>content</em>. Consolidating them into one navigable list is a separate job and a worthwhile one.</p>
+
+<p><strong>Product terminology.</strong> The approved storytelling vocabulary — World, Production, Act, Chapter, Sequence, Scene, Beat, Choice, Outcome, Canon, Playthrough — and the four scopes of truth are specified in <code>uploads/arke_studio_narrative_graph_requirements_v2.md</code> §2.1 and §8. They are product rules, not style rules, and they change when the product does.</p>
+
+<p><strong>Image prompts.</strong> <code>image-prompts.md</code> and <code>channel-identity.md</code> hold the full prompt set, the delivery contracts and their own decision logs. Section 10 records only the rules that govern all of them.</p>
+
+<!-- ====================================================================== -->
+<h2><span class="n">14</span>Decision log</h2>
+
+<table class="prose">
+  <thead><tr><th>Decision</th><th>Reasoning</th></tr></thead>
+  <tbody>
+    <tr><td>The mono eyebrow overrules the inherited token readme</td><td>It is used on every Arke surface and has become part of the identity. A rule that describes a different product should not beat observed practice.</td></tr>
+    <tr><td>Second person for the reader, third person for the system</td><td>Also against the inherited readme. The site, the waitlist and the channel description all address the creator directly, and it is the warmer register the audience was chosen for.</td></tr>
+    <tr><td>SpecOne branding documented, not renamed</td><td>Renaming touches the folder, the manifest namespace, the readme and every link in five documents, and nothing visible improves. Recorded as debt instead.</td></tr>
+    <tr><td>Writing and visual rules only; no component reference</td><td>The component contract is already legible from the token files and the screens. The rules that were genuinely scattered were the written and visual ones.</td></tr>
+    <tr><td>Built as an HTML page in the house format</td><td>Colour, type, spacing and motion cannot be checked in prose. Every specimen on this page draws from the live tokens, so the page fails visibly if a token drifts.</td></tr>
+    <tr><td>Exceptions listed rather than corrected</td><td>Jost, weight 550, the 1200px container and the vendored starters are all defensible. An undocumented exception gets "fixed" by the next person and breaks something.</td></tr>
+  </tbody>
+</table>
+
+</div>
+
+<script>
+(function () {
+  var t = document.getElementById('theme');
+  var m = document.getElementById('motion');
+  t.addEventListener('click', function () {
+    var on = t.getAttribute('aria-pressed') === 'true';
+    t.setAttribute('aria-pressed', String(!on));
+    document.documentElement.classList.toggle('dark', !on);
+    document.documentElement.style.colorScheme = !on ? 'dark' : 'light';
+    t.textContent = !on ? 'Light' : 'Dark';
+  });
+  m.addEventListener('click', function () {
+    var on = m.getAttribute('aria-pressed') === 'true';
+    m.setAttribute('aria-pressed', String(!on));
+    document.body.classList.toggle('still', !on);
+    m.textContent = !on ? 'Play motion' : 'Stop motion';
+  });
+})();
+</script>
+</body>
+</html>

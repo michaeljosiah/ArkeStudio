@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code Quality &amp; Design Audit - Voice, TTS &amp; Settings</title>
+  <style>
+    :root{--bg:#0f1419;--panel:#161b22;--panel2:#1c2330;--border:#2d3748;--text:#d7dde6;--muted:#8b97a8;--accent:#4fc3f7;--accent2:#81d4fa;--good:#66bb6a;--warn:#ffb74d;--bad:#ef5350;--code-bg:#11151c}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.58 "Segoe UI",system-ui,sans-serif}.wrap{max-width:1100px;margin:0 auto;padding:30px 22px 64px}header.doc{border-bottom:1px solid var(--border);padding-bottom:22px}h1{font-size:30px;line-height:1.2;margin:0 0 8px}h2{font-size:21px;margin:32px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border)}h3{font-size:18px;margin:25px 0 8px}.sub{color:var(--muted);font-size:16px}.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:20px}.meta{background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:11px}.meta b{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}.meta span{display:block;margin-top:3px}.callout{background:var(--panel);border-left:4px solid var(--accent);padding:15px 17px;margin:12px 0}.callout.good{border-color:var(--good)}.callout.warn{border-color:var(--warn)}.callout.danger{border-color:var(--bad)}nav{background:var(--panel);border:1px solid var(--border);padding:14px 18px}nav a{color:var(--accent2);margin-right:18px;white-space:nowrap}table{width:100%;border-collapse:collapse;background:var(--panel);margin:12px 0 20px}th,td{text-align:left;vertical-align:top;border:1px solid var(--border);padding:9px 10px}th{background:var(--panel2);color:var(--accent2)}code,pre{font-family:"Cascadia Code",Consolas,monospace;font-size:12px}code{color:var(--accent2)}pre{background:var(--code-bg);border:1px solid var(--border);padding:12px;overflow:auto;color:var(--text);white-space:pre-wrap}.badge{display:inline-block;border:1px solid var(--muted);border-radius:12px;padding:1px 8px;margin-right:5px;font-size:11px;color:var(--muted);vertical-align:middle}.critical{color:var(--bad);border-color:var(--bad)}.major{color:var(--warn);border-color:var(--warn)}.minor{color:var(--accent);border-color:var(--accent)}.note{color:var(--muted)}.finding{padding-top:4px}.finding .location{display:block;color:var(--accent2);font-weight:normal;margin-top:5px}.muted{color:var(--muted)}.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:10px;margin:14px 0}.flow-card{background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:13px}.flow-card strong{color:var(--accent2)}ul,ol{padding-left:22px}a{color:var(--accent2)}.nowrap{white-space:nowrap}@media(max-width:700px){.wrap{padding:20px 12px 45px}h1{font-size:25px}table{display:block;overflow-x:auto}.finding .location{float:none}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="doc">
+    <h1>Code Quality &amp; Design Audit &mdash; Voice, TTS &amp; Settings</h1>
+    <div class="sub">End-to-end review of Arke Studio's cloud speech, Voxa/Kokoro runtime, ComfyUI cloned-voice lane, configuration, persistence, routing, and user-facing readiness.</div>
+    <div class="meta-grid">
+      <div class="meta"><b>Scope</b><span>Voice/TTS and Settings</span></div>
+      <div class="meta"><b>Branch/commit</b><span>main / 8a3a21b</span></div>
+      <div class="meta"><b>Build</b><span>Pass</span></div>
+      <div class="meta"><b>Tests</b><span>513 targeted pass</span></div>
+      <div class="meta"><b>Date</b><span>2026-08-24</span></div>
+      <div class="meta"><b>Files reviewed</b><span>63 relevant files</span></div>
+    </div>
+  </header>
+
+  <h2 id="contents">Contents</h2>
+  <nav>
+    <a href="#summary">Executive summary</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#scorecard">Scorecard</a>
+    <a href="#index">Findings</a>
+    <a href="#intentional">Intentional design</a>
+    <a href="#quick-wins">Quick wins</a>
+    <a href="#appendix">Appendix</a>
+  </nav>
+
+  <h2 id="summary">Executive Summary</h2>
+  <div class="callout danger">
+    <strong>The intended provider split is good, but the local cloned-voice lane is not shippable end to end.</strong>
+    <p>Arke has three additive speech paths, not a migration from one to another: Voxa hosts Kokoro preset TTS and Whisper dictation; ComfyUI hosts an IndexTTS recipe for voices cloned from a reference recording; ElevenLabs is the metered cloud TTS path. This is a coherent architecture. It keeps cloud spend in the durable queue, leaves small local inference in a supervised minimal sidecar, and reuses the existing recipe/VRAM machinery for a model too large and Python-heavy for Voxa.</p>
+    <p>The implementation currently breaks that contract at several integration seams. A ComfyUI voice can be shown but not assigned through the normal handler, production and Bench generation omit its required speaker clip, and successful FLAC output is rejected by the global ComfyUI sanitizer. Those are independent blockers. The same lane also has an unconfined clip path that can read and upload a file outside the world, and its custom node and 10.2 GB model download are not actually verified.</p>
+    <p>Settings has the right top-level separation, but several controls overstate what they govern. The global Voice routing default is not consumed by any voice execution path. Voxa repair and model-completion restart use component IDs that do not exist. The narrator picker can persist ComfyUI while read-aloud rejects it. A typed ComfyUI URL may be remote while voice rows still say "on this machine." These gaps make Settings a partly descriptive view rather than an authoritative configuration surface.</p>
+    <p><strong>Shipping assessment:</strong> Kokoro and ElevenLabs have credible core paths, subject to the reliability and security findings below. Local cloned voice should remain unavailable in release UI until VTS-01, VTS-02, VTS-04, and VTS-06 are resolved and covered by one real end-to-end test. The unauthenticated loopback transport is a broader desktop security blocker because it exposes all of these settings and dispatch commands.</p>
+  </div>
+
+  <h2 id="architecture">Architecture &amp; Configuration Trace</h2>
+  <div class="flow">
+    <div class="flow-card"><strong>Voxa / Kokoro / Whisper</strong><br>Settings chooses a host-owned executable or bundled runtime. Electron launches it on loopback with fixed model and espeak paths, no shell, and a minimal environment. Kokoro previews and narration call <code>/tts</code> directly; Bench/production takes can use the queue adapter. Dictation calls <code>/stt</code>.</div>
+    <div class="flow-card"><strong>ComfyUI / IndexTTS</strong><br>Settings chooses a local install, managed install, or URL and optionally maps its models folder. A world-level cloned-voice record maps <code>{provider: "comfyui", voiceId}</code> to a source clip. The fixed recipe uploads that clip, submits a graph, polls, and should land an unmetered take through the ordinary queue.</div>
+    <div class="flow-card"><strong>ElevenLabs</strong><br>Settings stores an encrypted key and exposes one <code>voice-tts</code> manifest model. Catalogue listing is direct and free. Preview, narration, Bench, and dialogue synthesis enter the job queue for estimate, ledger, artifact landing, and finalization.</div>
+    <div class="flow-card"><strong>Settings persistence</strong><br><code>settings.json</code> stores routing, model switches, narrator, Voxa, and ComfyUI configuration. <code>credentials.dat</code> stores OS-encrypted provider keys. World voice assignments live on sheets; cloned voices and clips live under each world.</div>
+  </div>
+  <table>
+    <thead><tr><th>Settings surface</th><th>What it currently controls</th><th>Assessment</th></tr></thead>
+    <tbody>
+      <tr><td>Providers &rarr; ElevenLabs</td><td>Key storage/test, capability probes, model switch</td><td>Good structure; saved keys are called connected before validation, and voice dispatch does not consistently enforce probe/switch state.</td></tr>
+      <tr><td>Local runtime &rarr; Voice</td><td>Voxa source, engine status, narrator, test/restart/repair</td><td>Correct ownership; setup IDs and partial-engine readiness make status and repair unreliable.</td></tr>
+      <tr><td>Local runtime &rarr; ComfyUI</td><td>Engine path/URL, models folder, recipe readiness</td><td>Correctly additive to Voxa; capability copy, remote/local privacy, pin verification, and model download reporting are incomplete.</td></tr>
+      <tr><td>Who does what &rarr; Voice</td><td>Persists a <code>voice-tts</code> model default</td><td>Dead affordance: assigned voice provider/model selection bypasses this setting.</td></tr>
+      <tr><td>Narrator</td><td>Persists a voice independent of character assignments</td><td>Sound concept; picker/execution disagree about ComfyUI and about local-versus-cloud labeling.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="scorecard">Dimension Scorecard</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Findings (C/Maj/Min)</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Business-logic placement &amp; layering</td><td>1 / 6 / 1</td><td>The provider split is sound, but Settings, catalogue, assignment, queue admission, and execution derive availability differently.</td></tr>
+      <tr><td>Bad TypeScript/Node practices</td><td>2 / 3 / 0</td><td>Path containment, transport authorization, crash durability, whole-file persistence, and matching arithmetic have concrete correctness/security consequences.</td></tr>
+      <tr><td>DRY violations</td><td>0 / 2 / 0</td><td>Duplicated setup IDs and duplicated provider/format branching have already drifted into failures.</td></tr>
+      <tr><td>Performance / hot path</td><td>0 / 1 / 0</td><td>Local TTS has no global serialization or deadlines, and synchronous clients retain every completed audio buffer.</td></tr>
+      <tr><td>Simplification / optimization</td><td>0 / 1 / 1</td><td>Remove the unused Voice routing default unless concrete semantics are defined; stop advertising unbuilt cloud cloning.</td></tr>
+      <tr><td>Over-engineering</td><td>0 / 0 / 0</td><td>The provider, queue, sidecar, host, and recipe seams are exercised and justified. The problem is incomplete integration, not excess abstraction.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="index">Findings Index</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Dimension</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Problem</th></tr></thead>
+    <tbody>
+      <tr><td><a href="#vts-01">VTS-01</a></td><td>Node correctness</td><td><span class="badge critical">Critical</span></td><td><span class="badge">Certain</span></td><td><code>comfyui/sanitize.ts:248-263</code></td><td>Every ComfyUI cloned-voice FLAC is rejected after generation and cannot be served.</td></tr>
+      <tr><td><a href="#vts-02">VTS-02</a></td><td>Node/security</td><td><span class="badge critical">Critical</span></td><td><span class="badge">Certain</span></td><td><code>voice/library.ts:230-237</code></td><td>A hand-edited voice clip can escape the world and be uploaded; absolute paths are also journaled.</td></tr>
+      <tr><td><a href="#vts-03">VTS-03</a></td><td>Layering/security</td><td><span class="badge critical">Critical</span></td><td><span class="badge">Likely</span></td><td><code>transport.ts:78-175</code></td><td>The privileged loopback WebSocket has no authentication or Origin check.</td></tr>
+      <tr><td><a href="#vts-04">VTS-04</a></td><td>Layering</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>coordinator.ts:3115-3125</code></td><td>Cloned voices are offered but cannot complete assignment, production, or Bench generation.</td></tr>
+      <tr><td><a href="#vts-05">VTS-05</a></td><td>Node correctness</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>clients/elevenlabs.ts:20-95</code></td><td>Paid synchronous ElevenLabs audio exists only in memory and is lost across a crash.</td></tr>
+      <tr><td><a href="#vts-06">VTS-06</a></td><td>Layering/security</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>comfyui/engine.ts:527-555</code></td><td>The declared custom-node pin and IndexTTS weights are not verified.</td></tr>
+      <tr><td><a href="#vts-07">VTS-07</a></td><td>Simplification</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>screens/shell.tsx:2704-2777</code></td><td>The Voice model in Who does what is persisted but no voice path consumes it.</td></tr>
+      <tr><td><a href="#vts-08">VTS-08</a></td><td>Layering/security</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>coordinator.ts:3411-3422</code></td><td>A remote ComfyUI can receive biometric clips while the UI says on this machine.</td></tr>
+      <tr><td><a href="#vts-09">VTS-09</a></td><td>DRY</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>setup/catalogue.ts:125-158</code></td><td>Voxa status, restart, and Repair use setup component IDs that do not exist.</td></tr>
+      <tr><td><a href="#vts-10">VTS-10</a></td><td>Layering</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>screens/shell.tsx:2715-2738</code></td><td>Settings and dispatch use incompatible definitions of provider/model availability.</td></tr>
+      <tr><td><a href="#vts-11">VTS-11</a></td><td>DRY</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>coordinator.ts:5666-5741</code></td><td>Two-provider cache/event/narrator assumptions misclassify or reject ComfyUI voice.</td></tr>
+      <tr><td><a href="#vts-12">VTS-12</a></td><td>Layering</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>contracts/voice.ts:303-340</code></td><td>Delivery support is hardcoded, absent for IndexTTS, and unavailable in production UI.</td></tr>
+      <tr><td><a href="#vts-13">VTS-13</a></td><td>Node correctness</td><td><span class="badge major">Major</span></td><td><span class="badge">Likely</span></td><td><code>app-settings.ts:30-44</code></td><td>Concurrent writes can lose settings, and malformed JSON silently resets the entire file.</td></tr>
+      <tr><td><a href="#vts-14">VTS-14</a></td><td>Layering/config</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>setup/catalogue.ts:125-158</code></td><td>Kokoro/Whisper download automatically instead of being offered or acquired on first use.</td></tr>
+      <tr><td><a href="#vts-15">VTS-15</a></td><td>Node correctness</td><td><span class="badge major">Major</span></td><td><span class="badge">Certain</span></td><td><code>contracts/voice.ts:118-129</code></td><td>Substring matching can match male to female and can produce an invalid overlap above 1.</td></tr>
+      <tr><td><a href="#vts-16">VTS-16</a></td><td>Performance/resources</td><td><span class="badge major">Major</span></td><td><span class="badge">Likely</span></td><td><code>voice/src/index.ts:83-125</code></td><td>Local speech has no request deadlines or global serialization, and audio result maps grow forever.</td></tr>
+      <tr><td><a href="#vts-17">VTS-17</a></td><td>Layering/UX</td><td><span class="badge minor">Minor</span></td><td><span class="badge">Certain</span></td><td><code>screens/world.tsx:2337-2377</code></td><td>Matching reasons are computed but hidden, and ordinary dialogue is skipped for previews.</td></tr>
+      <tr><td><a href="#vts-18">VTS-18</a></td><td>Simplification</td><td><span class="badge minor">Minor</span></td><td><span class="badge">Certain</span></td><td><code>clients/elevenlabs.ts:102-122</code></td><td>Cloud cloning is advertised even though the only clone flow is local ComfyUI.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="findings">Detailed Findings</h2>
+
+  <section class="finding" id="vts-01">
+    <h3><span class="badge critical">CRITICAL</span><span class="badge">CERTAIN</span> ComfyUI cloned speech is rejected after generation</h3>
+    <span class="location"><code>packages/providers/src/comfyui/recipes.ts:377-379</code>; <code>packages/coordinator/src/comfyui/sanitize.ts:248-263</code>; <code>packages/coordinator/src/world/provider.ts:467-479</code></span>
+    <p><strong>Dimension:</strong> Bad TypeScript/Node practices (cross-layer correctness).</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>"5": { class_type: "SaveAudio", inputs: { audio: ["4", 0], filename_prefix: "arke_voice" } }
+
+if (startsWith(data, PNG_SIGNATURE)) return sanitizePng(data);
+if (... === "WEBP") return sanitizeWebp(data);
+if (... === "ftyp") return sanitizeMp4(data);
+return { ok: false, reason: `... container the sanitiser does not handle ...` };
+
+MEDIA_TYPES includes .mp3 and .wav, but not .flac.</code></pre>
+    <p><strong>Why it matters:</strong> The recipe and provider client agree that <code>SaveAudio</code> produces FLAC, but every ComfyUI artifact passes through an image/video-only sanitizer. A successful, potentially minute-long generation is converted to a failed job. Even bypassing the sanitizer would leave the file unservable and only non-empty-body verified. This independently blocks previews, Bench takes, and production takes.</p>
+    <p><strong>Recommendation:</strong> Pick one supported container end to end. The smallest coherent change is to emit WAV, add a WAV metadata sanitizer, use strict RIFF/WAVE verification, and retain existing media serving. If FLAC is retained, add FLAC sanitization, signature/stream verification, MIME serving, and cache-hit validation together.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-02">
+    <h3><span class="badge critical">CRITICAL</span><span class="badge">CERTAIN</span> Cloned-voice clip paths can escape the world and are exposed durably</h3>
+    <span class="location"><code>packages/contracts/src/voice.ts:155-170</code>; <code>packages/coordinator/src/voice/library.ts:230-237</code>; <code>packages/coordinator/src/voice/service.ts:460-474</code>; <code>apps/desktop/src/main.ts:602-607</code></span>
+    <p><strong>Dimension:</strong> Bad TypeScript/Node practices (path security and leaky state).</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>clip: z.string().min(1)
+
+const absolute = join(store.dir, fromPortable(voice.clip));
+await stat(toExtendedLength(absolute));
+return absolute;
+
+params: { voiceId, text: normalized, ...(speakerFile !== undefined ? { speakerFile } : {}) }
+
+readClip: async (path) =&gt; new Uint8Array(await readFile(path))</code></pre>
+    <p><strong>Why it matters:</strong> A plain world is user-editable/importable. A clip such as <code>../../sensitive.wav</code>, an absolute path, or a symlink can resolve outside the world. Previewing that voice reads the host file and uploads it to the configured ComfyUI, which may be remote. Valid clips also put the absolute world path into job params, the queue journal, snapshots, and renderer events, weakening portability and host-path isolation.</p>
+    <p><strong>Recommendation:</strong> Store only a validated portable path or voice ID. Resolve it immediately before upload through the same realpath/symlink-safe containment pattern used by <code>readContainedImageReferences</code>; validate a regular file, audio magic, and size. Pass verified bytes ephemerally and never journal the resolved absolute path.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-03">
+    <h3><span class="badge critical">CRITICAL</span><span class="badge">LIKELY</span> The privileged loopback transport has no authentication</h3>
+    <span class="location"><code>packages/coordinator/src/transport.ts:78-175</code>; <code>packages/contracts/src/frames.ts:748-888</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and boundary security.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>res.setHeader("Access-Control-Allow-Origin", "*");
+const wss = new WebSocketServer({ server });
+wss.on("connection", (socket) =&gt; this.accept(socket));
+
+if (msg.kind === "hello") {
+  conn.helloed = true;
+  this.sendFrame(conn, { kind: "snapshot", ... });
+}
+this.opts.onMessage?.(msg);</code></pre>
+    <p><strong>Why it matters:</strong> Knowledge of the random loopback port is the only capability check. A local process, or a hostile browser origin able to find the port, can request the complete snapshot and send schema-valid settings, credential, voice clone, and paid-dispatch commands. This amplifies VTS-02 because an attacker can trigger the host-side clip read.</p>
+    <p><strong>Recommendation:</strong> Mint a per-launch high-entropy capability in Electron main, require it before <code>hello</code>, reject unexpected WebSocket origins, and protect media GETs separately. A user-scoped named pipe or Electron IPC is preferable for privileged commands; keep any HTTP media surface read-only and tokenized.</p>
+    <p><strong>Effort:</strong> Moderate to involved.</p>
+  </section>
+
+  <section class="finding" id="vts-04">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> The cloned-voice feature is disconnected at assignment and generation</h3>
+    <span class="location"><code>packages/coordinator/src/coordinator.ts:3115-3125,5523-5582</code>; <code>packages/coordinator/src/bench/service.ts:682-704</code>; <code>packages/providers/src/clients/comfyui.ts:300-315</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and layering.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Assignment omits the world's cloned voices.
+const available = (await this.voiceService?.catalogue().catch(() =&gt; [])) ?? [];
+
+// Production and Bench include voiceId/text, but no speakerFile.
+params: { voiceId: voice.voiceId, text: input.text, ... }
+
+if (typeof clip !== "string" || clip.length === 0) {
+  throw new Error(`... needs the voice's own recording`);
+}</code></pre>
+    <p><strong>Why it matters:</strong> The picker includes world clones, but Assign silently rejects them and leaves the button in "Assigning." If a voice is inserted manually, production and Bench jobs fail before submission because only preview resolves the source clip. The core SPEC-022 outcome cannot be reached through the product.</p>
+    <p><strong>Recommendation:</strong> Add one provider-neutral voice resolver that receives the world bundle and returns the candidate, model, and provider-specific ephemeral inputs. Use it for assignment, preview, narration, production, and Bench. Emit an explicit assignment refusal/result instead of returning silently.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-05">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Paid ElevenLabs audio is not crash-durable</h3>
+    <span class="location"><code>packages/providers/src/clients/elevenlabs.ts:20-95</code>; <code>packages/coordinator/src/queue/dispatcher.ts:528-572</code></span>
+    <p><strong>Dimension:</strong> Bad TypeScript/Node practices (lifetime and recovery correctness).</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>private readonly completed = new Map&lt;string, { artifacts: FetchedArtifact[] }&gt;();
+
+const remoteId = `elevenlabs-${++this.counter}-${Date.now()}`;
+const data = new Uint8Array(await res.arrayBuffer());
+this.completed.set(remoteId, { artifacts: [...] });
+return { remoteId, acceptedAt: new Date().toISOString() };
+
+return this.completed.has(remoteId)
+  ? { state: "succeeded" }
+  : { state: "failed", error: "... unknown request id (synchronous API)" };</code></pre>
+    <p><strong>Why it matters:</strong> ElevenLabs has already charged and returned the full MP3 before the queue records a synthetic running ID. A crash in that interval leaves a durable running job and a fresh client with no bytes. Recovery turns provider success into a failed job and cannot recover the paid audio. The tests use an idempotent fake rather than the real synchronous client.</p>
+    <p><strong>Recommendation:</strong> Return inline artifacts from <code>submit</code> and have the queue stage them durably before a terminal transition. Do not journal an in-memory-only ID as recoverable remote work. Also delete consumed entries if a compatibility map remains.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-06">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> IndexTTS dependencies are declared as pinned but accepted unverified</h3>
+    <span class="location"><code>packages/coordinator/src/comfyui/engine.ts:527-555</code>; <code>apps/desktop/src/main.ts:532-597</code>; <code>packages/providers/src/comfyui/recipes.ts:382-390</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and supply-chain boundary.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>readNodeRef?: (dir: string) =&gt; Promise&lt;string | null&gt;;
+...
+const ref = (await this.deps.readNodeRef?.(nodeDir)) ?? null;
+if (ref !== null &amp;&amp; ref !== node.pinnedRef) { refuse(); }
+
+// Desktop supplies no readNodeRef.
+
+checkpoints: [], // node fetches ~10.2 GB itself</code></pre>
+    <p><strong>Why it matters:</strong> Any directory named <code>TTS-Audio-Suite</code> passes in the shipped wiring, regardless of commit or local modifications. The node then fetches roughly 10.2 GB of model data outside Arke's hash, progress, disk, and notice machinery. Settings can report the recipe ready before the model exists. This defeats the specific supply-chain reason for using a fixed recipe.</p>
+    <p><strong>Recommendation:</strong> Make custom-node identity mandatory and fail closed when unreadable. Prefer a digest-verified archive or verify commit plus relevant working-tree content. Represent exact model files as setup entries with hashes, size, progress, and the Bilibili license notice, or require an equivalent verified provider cache contract before readiness.</p>
+    <p><strong>Effort:</strong> Involved.</p>
+  </section>
+
+  <section class="finding" id="vts-07">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Who does what exposes a dead Voice routing default</h3>
+    <span class="location"><code>packages/client/src/screens/shell.tsx:2704-2777</code>; <code>packages/coordinator/src/coordinator.ts:681-725,5544-5555</code>; <code>packages/coordinator/src/app-settings.ts:46-63</code></span>
+    <p><strong>Dimension:</strong> Simplification and optimization.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>const ROUTED_CAPABILITIES = ["video", "image", "music", "voice-tts", "llm"];
+
+// Dialogue chooses from the sheet assignment.
+const voice = sheet.voice;
+const model = manifest.models.find(m =&gt; m.provider === voice.provider &amp;&amp; m.capability === "voice-tts");
+
+// Narration explicitly lets the narrator provider win.
+const narrator = narratorFor(settings.narrator, catalogue);</code></pre>
+    <p><strong>Why it matters:</strong> Changing the Voice default persists a valid model and paints a green state, but character lines use the sheet's provider, previews use the selected candidate's provider, Bench uses its composer selection, and read-aloud uses the narrator. No voice execution path reads <code>routing["voice-tts"]</code>. The setting therefore changes nothing.</p>
+    <p><strong>Recommendation:</strong> Remove Voice from <code>ROUTED_CAPABILITIES</code> until a concrete use case exists. If retained, define narrow semantics that do not override voice identity, such as selecting among multiple TTS models within the already assigned provider, and consume it in one shared resolver.</p>
+    <p><strong>Effort:</strong> Trivial to remove; moderate to define and implement.</p>
+  </section>
+
+  <section class="finding" id="vts-08">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> A remote clone engine is presented as local</h3>
+    <span class="location"><code>packages/coordinator/src/coordinator.ts:3411-3422</code>; <code>packages/contracts/src/voice.ts:253-264</code>; <code>packages/client/src/screens/world.tsx:2363-2375</code>; <code>packages/providers/src/clients/comfyui.ts:376-409</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and privacy boundary.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>if (parsed.protocol !== "http:" &amp;&amp; parsed.protocol !== "https:") return;
+await this.applyComfyUiPatch({ engineUrl: msg.url, enginePath: null });
+
+provider: "comfyui", local: true
+
+candidate.provider === "comfyui" ? "cloned - on this machine" : ...
+
+await fetch(`${base}/upload/image`, { method: "POST", body: form });</code></pre>
+    <p><strong>Why it matters:</strong> User-directed remote ComfyUI is intentional for the general recipe system. For voice, however, the uploaded input is biometric material and the UI makes the opposite privacy claim. There is no destination confirmation or authentication facility in this client.</p>
+    <p><strong>Recommendation:</strong> Derive locality from the resolved engine, not provider ID. Either require loopback for <code>voice-tts</code>, or classify non-loopback recipes as remote and show the destination before the first clip upload with explicit confirmation and authentication support.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-09">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Duplicated setup IDs have drifted and broken Voxa controls</h3>
+    <span class="location"><code>packages/coordinator/src/setup/catalogue.ts:125-158</code>; <code>apps/desktop/src/main.ts:733-756</code>; <code>packages/coordinator/src/coordinator.ts:1077-1087,3456-3460</code></span>
+    <p><strong>Dimension:</strong> DRY violation.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Catalogue
+id: "tts-kokoro-82m"
+id: "stt-whisper-base-en"
+
+// Status, completion restart, and repair
+setupEngine("kokoro-82m", ...)
+setupEngine("whisper-base-en", ...)
+repair("kokoro-82m")
+repair("whisper-base-en")</code></pre>
+    <p><strong>Why it matters:</strong> Settings cannot reliably show model download/verification state, Voxa is not restarted when the actual model components finish, and Repair silently no-ops for unknown IDs. The visible controls exist but do not act on their stated components.</p>
+    <p><strong>Recommendation:</strong> Export canonical setup component ID constants with the catalogue entries and consume them everywhere. Add one wiring test for completion &rarr; restart &rarr; ready and one for Repair.</p>
+    <p><strong>Effort:</strong> Trivial.</p>
+  </section>
+
+  <section class="finding" id="vts-10">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Provider and model availability has no single authority</h3>
+    <span class="location"><code>packages/client/src/screens/shell.tsx:1590-1655,2715-2738</code>; <code>packages/coordinator/src/app-settings.ts:46-63</code>; <code>packages/coordinator/src/coordinator.ts:968-981,5550-5555</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and layering.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Providers pane uses deriveCapabilityAvailability(...).
+
+// Who does what only asks configured/local and disabled.
+!disabled.has(m.id) &amp;&amp; (configured.has(m.provider) || PROVIDER_TABLE[m.provider].local)
+
+// Backend routing write checks manifest + disabled only.
+
+// Voice line selects directly from the full manifest.
+
+// Queue admission enforces readiness only for ComfyUI.</code></pre>
+    <p><strong>Why it matters:</strong> A just-saved key is displayed as connected and considered unlocked while still untested. A key whose TTS probe failed, a faulted provider, a disabled voice model, or a missing Kokoro runtime can be selectable in one surface and refused only after work is composed. Settings cannot be trusted as a prediction of execution.</p>
+    <p><strong>Recommendation:</strong> Define one authoritative eligibility result for <code>{provider, model, capability}</code>, combining credential state, probes, faults, model switch, local runtime, and recipe readiness. Use it in Providers, Who does what, catalogues, routing writes, and generic queue admission. Label untested keys "stored, not tested" or validate automatically after save.</p>
+    <p><strong>Effort:</strong> Involved but incremental.</p>
+  </section>
+
+  <section class="finding" id="vts-11">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Two-provider assumptions remain in preview and narrator integration</h3>
+    <span class="location"><code>packages/contracts/src/events.ts:412-449</code>; <code>packages/coordinator/src/coordinator.ts:5666-5741,1790-1816</code>; <code>packages/client/src/screens/shell.tsx:2100-2128</code></span>
+    <p><strong>Dimension:</strong> DRY violation.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>provider: z.enum(["kokoro", "elevenlabs"])
+
+const cached = previewCacheFile(msg.provider, msg.voiceId, line.text, "mp3");
+provider: "elevenlabs", model: "eleven_multilingual_v2"
+
+narrator.provider === "kokoro"
+  ? "reads on this machine - free"
+  : "reads in the cloud - billed per character"
+
+if (narrator.provider !== "kokoro" &amp;&amp; narrator.provider !== "elevenlabs") fail(...)</code></pre>
+    <p><strong>Why it matters:</strong> ComfyUI preview cache hits are looked up as MP3 under the wrong model, successful/failing events are forced to say ElevenLabs because the contract cannot spell ComfyUI, and a local clone can be persisted as narrator while the UI calls it cloud-billed and execution rejects it. The new additive provider is modeled in the catalogue but not in shared result contracts.</p>
+    <p><strong>Recommendation:</strong> Widen result providers to <code>ProviderIdSchema</code>. Build provider/model/format cache metadata once and use it for lookup, enqueue, finalization, and restart folding. Filter narrator choices to executable providers or implement ComfyUI narration with the same clone resolver.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-12">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Delivery support is not a truthful provider/model capability</h3>
+    <span class="location"><code>packages/contracts/src/voice.ts:303-340</code>; <code>packages/providers/src/comfyui/recipes.ts:289-298</code>; <code>packages/client/src/screens/production.tsx:2726-2801</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and layering.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>if (provider === "elevenlabs") return ...;
+if (provider === "kokoro") return ...;
+return { ok: false, reason: `${provider} has no declared delivery mapping ...` };
+
+// IndexTTS recipe explicitly does not wire the eight-float vector.
+emotionAlpha: { ... internal: true ... }
+
+// Production dialog calls requestVoiceLine without delivery and exposes no selector.</code></pre>
+    <p><strong>Why it matters:</strong> SPEC-011 says delivery support is declared in the manifest, but it is a provider-name switch in contracts. IndexTTS cannot express any selected delivery through this path, and the normal production line dialog cannot request one for any provider. Unsupported direction is attached to a job rather than shown before dispatch.</p>
+    <p><strong>Recommendation:</strong> Add typed per-model delivery declarations to the manifest/recipe projection, including supported names and provider parameters. Use one planner for Bench and production, validate the wire with a delivery enum, and show a refusal before enqueue. Implement only measured controls for IndexTTS; amend the spec if the full vector is intentionally deferred.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-13">
+    <h3><span class="badge major">MAJOR</span><span class="badge">LIKELY</span> Whole-file settings and credentials can lose updates or reset silently</h3>
+    <span class="location"><code>packages/coordinator/src/app-settings.ts:30-44,46-177</code>; <code>packages/coordinator/src/coordinator.ts:1015-1031</code>; <code>packages/coordinator/src/credentials/store.ts:54-97</code></span>
+    <p><strong>Dimension:</strong> Bad TypeScript/Node practices (mutable state and async races).</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Messages are launched concurrently.
+const handling = this.handleClientMessage(msg).catch(...);
+
+// Every setter does load - derive whole object - persist.
+const current = await this.load();
+await this.persist({ ...current, ... });
+
+// Any settings read/JSON/schema error becomes a cached empty file.
+catch { this.cache = AppSettingsSchema.parse({}); }
+
+// Every credential write uses the same process-wide temp name.
+`.tmp-credentials-${process.pid}`</code></pre>
+    <p><strong>Why it matters:</strong> Two quick settings changes can derive from the same prior object and the last write can erase the first. Concurrent credential writes can race on one temp path. A malformed settings block is indistinguishable from an absent file, so all valid routing, narrator, Voxa, and ComfyUI settings reset in memory and the next write can overwrite the recoverable source.</p>
+    <p><strong>Recommendation:</strong> Serialize mutations per file with one promise queue and unique same-directory temp names. Distinguish ENOENT from parse failure; quarantine/backup a malformed file, preserve independently valid blocks, and publish a repair state instead of silently caching defaults.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-14">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Local speech models download without the choice Settings promises</h3>
+    <span class="location"><code>packages/coordinator/src/setup/catalogue.ts:125-158</code>; <code>packages/coordinator/src/setup/local-setup.ts:96-108</code>; <code>packages/coordinator/src/coordinator.ts:1340-1342</code>; <code>docs/specifications/016.first-run-and-packaging.md:242-253</code></span>
+    <p><strong>Dimension:</strong> Business-logic placement and configuration behavior.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Kokoro and Whisper are not optional.
+state: entry.optional === true ? "available" : "queued"
+
+// Coordinator startup immediately runs setup.
+void this.setup?.run();
+
+// Specification:
+"Offered at first run ... otherwise acquired on first use."
+"A user who only ever uses cloud voice should never wait for Kokoro."</code></pre>
+    <p><strong>Why it matters:</strong> A cloud-only user downloads Kokoro and Whisper without selecting either. The two independent features are also coupled at startup rather than acquired when TTS or dictation is first requested. Presence detection later accepts any non-empty config, voice vector, or Whisper file; only the ONNX has a SHA-256, so corruption can still be called present.</p>
+    <p><strong>Recommendation:</strong> Mark both components optional, offer them explicitly at first run, and trigger Kokoro and Whisper independently on first use with Activity progress. Pin hashes for every model/config/vector and revalidate before launch or against a persisted verified manifest.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-15">
+    <h3><span class="badge major">MAJOR</span><span class="badge">CERTAIN</span> Attribute matching can produce false matches and invalid scores</h3>
+    <span class="location"><code>packages/contracts/src/voice.ts:118-129</code>; <code>packages/contracts/src/voice.ts:75-86</code>; <code>packages/coordinator/src/coordinator.ts:5585-5593</code></span>
+    <p><strong>Dimension:</strong> Bad TypeScript practices (correctness).</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>.filter((a) =&gt; wanted.has(a) || [...wanted].some((w) =&gt; a.includes(w) || w.includes(a)))
+const unique = [...new Set(matched)];
+overlap: wanted.size === 0 ? 0 : unique.length / wanted.size
+
+overlap: z.number().min(0).max(1)
+
+await voiceService.candidates(...).catch(() =&gt; {});</code></pre>
+    <p><strong>Why it matters:</strong> <code>female</code> matches requested <code>male</code>. Several candidate attributes can match one wanted term, making the numerator larger than the denominator and causing event schema validation to throw. The handler swallows that failure, leaving the picker on "loading voices" with no explanation.</p>
+    <p><strong>Recommendation:</strong> Match each wanted attribute at most once. Use exact normalized tokens plus an explicit small synonym/lemma table, not arbitrary substrings. Compute <code>matchedWanted.size / wanted.size</code> and emit a terminal candidate error if ranking cannot be produced.</p>
+    <p><strong>Effort:</strong> Trivial to moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-16">
+    <h3><span class="badge major">MAJOR</span><span class="badge">LIKELY</span> Local speech has unbounded waits, concurrency, and retained buffers</h3>
+    <span class="location"><code>packages/voice/src/index.ts:83-125</code>; <code>packages/coordinator/src/voice/service.ts:389-424</code>; <code>packages/providers/src/clients/kokoro.ts:32-103</code>; <code>packages/providers/src/clients/elevenlabs.ts:20-95</code></span>
+    <p><strong>Dimension:</strong> Performance and hot-path resource handling.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>// Voxa fetches have no signal or timeout.
+await this.fetchImpl(`${this.baseUrl}/tts`, { ... })
+
+// Chunks are sequential only within one localSpeech call.
+for (const chunk of chunks) await sidecar.synthesize(...)
+
+// Both synchronous clients retain completed media indefinitely.
+private readonly completed = new Map&lt;string, ...&gt;();
+fetchArtifacts(...) { return hit.artifacts; }</code></pre>
+    <p><strong>Why it matters:</strong> A hung Voxa request leaves preview, narration, dictation, or shutdown pending indefinitely. Multiple independent previews/read-aloud/queue jobs can overlap on the same small local engine even though one oversized request is documented as able to fell it. Long sessions retain every generated audio buffer after it has also landed on disk.</p>
+    <p><strong>Recommendation:</strong> Add operation-specific abort deadlines and a service-level concurrency-one scheduler shared by every Voxa TTS caller. Configure the Kokoro queue lane accordingly. Consume-and-delete completed buffers when artifacts are fetched, and cancel pending operations during restart/shutdown.</p>
+    <p><strong>Effort:</strong> Moderate.</p>
+  </section>
+
+  <section class="finding" id="vts-17">
+    <h3><span class="badge minor">MINOR</span><span class="badge">CERTAIN</span> The picker hides its ranking evidence and skips ordinary dialogue</h3>
+    <span class="location"><code>packages/client/src/screens/world.tsx:2337-2377</code>; <code>packages/contracts/src/voice.ts:278-296</code></span>
+    <p><strong>Dimension:</strong> Business-logic presentation and UX correctness.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>.map(({ candidate }) =&gt; { ... candidate.attributes.join(", ") ... })
+
+// RankedVoice.matched is not rendered.
+
+const line = shot.audio?.kind === "vo" &amp;&amp; shot.audio.speaker === sheet.id
+  ? shot.audio.line
+  : undefined;
+
+// Draft fallback reads Essence only.</code></pre>
+    <p><strong>Why it matters:</strong> The service computes matched attributes specifically to explain ranking, but the UI shows all provider attributes instead. A character with real <code>dialogue</code> but no <code>vo</code> shot falls back to drafted or stock text, and a written Voice section is not used in that draft. This misses SPEC-011 R-7/R-9 without blocking synthesis.</p>
+    <p><strong>Recommendation:</strong> Render <code>matched</code> as "matched to" without a percentage. Treat known spoken kinds such as <code>vo</code> and <code>dialogue</code> as own lines, and build the fallback from both Essence and Voice-written content.</p>
+    <p><strong>Effort:</strong> Trivial.</p>
+  </section>
+
+  <section class="finding" id="vts-18">
+    <h3><span class="badge minor">MINOR</span><span class="badge">CERTAIN</span> ElevenLabs cloud cloning is advertised but has no operation</h3>
+    <span class="location"><code>packages/contracts/src/provider.ts:103-108</code>; <code>packages/providers/src/clients/elevenlabs.ts:102-122</code>; <code>packages/client/src/screens/world.tsx:2312-2317,2369-2375</code></span>
+    <p><strong>Dimension:</strong> Simplification and truthful capability exposure.</p>
+    <p><strong>Evidence:</strong></p>
+    <pre><code>capabilities: ["voice-tts", "voice-clone"]
+canClone: true
+
+candidate.canClone ? " - cloning available" : ""
+
+// The only Clone a voice action opens the world-level local clone dialog.</code></pre>
+    <p><strong>Why it matters:</strong> SPEC-022 explicitly leaves ElevenLabs cloning unbuilt, but provider probes and rows still advertise it. The visible clone action always creates a local ComfyUI library entry; no queue-backed ElevenLabs clone client exists.</p>
+    <p><strong>Recommendation:</strong> Until a cloud clone operation exists, stop declaring <code>voice-clone</code> available and set catalogue rows <code>canClone: false</code>, or render a disabled provider-specific action with the reason.</p>
+    <p><strong>Effort:</strong> Trivial.</p>
+  </section>
+
+  <h2 id="intentional">Confirmed-Intentional</h2>
+  <ul>
+    <li><strong>ComfyUI is additive, not a transition away from Voxa.</strong> SPEC-021 states that Voxa continues to cover preset speech while ComfyUI adds <code>voice-tts</code> recipes whose identity is a reference clip (<code>docs/specifications/021.local-image-and-video-generation.md:63-74</code>). This audit does not recommend consolidating those runtimes.</li>
+    <li><strong>Local previews and paid cloud speech route differently on purpose.</strong> Kokoro audition/read-aloud may call Voxa directly at zero cost, while cloud previews and generated takes use the queue for cost, reconciliation, and landing (<code>docs/specifications/011.voice.md:140-153</code>).</li>
+    <li><strong>Remote/user-directed ComfyUI is supported.</strong> SPEC-021 permits any reachable URL. VTS-08 is about accurately classifying voice data and obtaining informed consent, not banning remote image/video engines.</li>
+    <li><strong>Host-owned file selection is a real security seam.</strong> Voxa, ComfyUI, and clone-file paths originate from Electron dialogs or host discovery, not renderer-provided path strings (<code>packages/contracts/src/frames.ts:844-864</code>).</li>
+    <li><strong>The cloned library is world-level.</strong> The sheet link is provenance, not ownership; a voice can be reused across characters. The library entry is written after the clip so the picker cannot expose a half-created voice (<code>packages/coordinator/src/voice/library.ts:10-26,152-198</code>).</li>
+    <li><strong>Keeping a voice-owned clip in addition to the artifact is deliberate.</strong> The implementation chooses resilience when an artifact is removed. This differs from an older SPEC-022 sentence and should be reconciled in documentation, but the duplication itself is not reported as waste.</li>
+    <li><strong>Cloud cloning remains deferred.</strong> SPEC-022 explicitly leaves the ElevenLabs clone route out of scope (<code>docs/specifications/022.local-cloned-voice.md:48-54</code>). VTS-18 asks only that the current UI stop claiming it is available.</li>
+    <li><strong>The provider/queue abstractions are justified.</strong> They isolate credentials, paid reconciliation, local-zero ledger behavior, host file reads, fixed recipes, and test doubles. No speculative interface finding was identified.</li>
+  </ul>
+
+  <h2 id="quick-wins">Quick Wins</h2>
+  <ol>
+    <li>Replace the three wrong Voxa setup ID call sites with exported catalogue constants and add a repair/restart wiring test.</li>
+    <li>Remove <code>voice-tts</code> from Who does what until an execution path consumes that default.</li>
+    <li>Widen <code>voice.audio.provider</code>, remove hardcoded ElevenLabs finalization, and use the queued request's one cache specification for lookup and landing.</li>
+    <li>Pass world cloned voices into assignment validation and emit a refusal result instead of silently returning.</li>
+    <li>Resolve the cloned clip for production and Bench through one shared voice resolver; keep the absolute path out of the job.</li>
+    <li>Make the recipe output one supported audio format end to end and add a queue-level cloned-voice landing/playback/cache test.</li>
+    <li>Change newly saved provider copy from connected to stored, not tested, or validate immediately after save.</li>
+    <li>Stop advertising ElevenLabs cloning until its provider-specific operation exists.</li>
+  </ol>
+
+  <h2 id="appendix">Appendix</h2>
+  <h3>Verification</h3>
+  <table>
+    <thead><tr><th>Command</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>npm run typecheck</code></td><td>Pass across all workspaces.</td></tr>
+      <tr><td><code>npm run build</code></td><td>Pass. Vite emitted the existing large-chunk warning; desktop bundle built at 0.5.49.</td></tr>
+      <tr><td><code>npm run lint</code></td><td>Pass: 0 warnings and 0 errors across 557 files.</td></tr>
+      <tr><td><code>npm test --workspace @arke-studio/voice</code></td><td>10 pass.</td></tr>
+      <tr><td><code>npm test --workspace @arke-studio/providers</code></td><td>201 pass.</td></tr>
+      <tr><td><code>npm test --workspace @arke-studio/desktop</code></td><td>40 pass.</td></tr>
+      <tr><td>Targeted coordinator voice, ComfyUI, setup, credentials, provider, and queue tests</td><td>185 pass.</td></tr>
+      <tr><td>Targeted client provider, voice-line, clone, dictation, and Bench tests</td><td>77 pass.</td></tr>
+      <tr><td><code>npm test</code> full workspace</td><td>Not completed: the execution host terminated its PowerShell child with <code>Unknown: ChildProcess.kill</code>. The 513 directly relevant tests above completed successfully.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Highest-value missing tests</h3>
+  <ol>
+    <li>Capture/import &rarr; clone &rarr; assign &rarr; preview &rarr; production/Bench &rarr; landed playable take for ComfyUI.</li>
+    <li>Actual recipe audio through sanitizer, verifier, media server, and second-request cache hit.</li>
+    <li>Traversal, absolute, UNC, symlink, wrong-magic, oversized clip, and no-absolute-path-in-job tests.</li>
+    <li>Wrong and unreadable custom-node refs both refuse; exact IndexTTS files report setup progress and verify hashes.</li>
+    <li>Actual <code>ElevenLabsClient</code> through the queue with a crash after provider response and before artifact landing.</li>
+    <li>Missing/wrong loopback capability and hostile Origin are rejected before <code>hello</code>.</li>
+    <li>Concurrent independent settings and credential writes preserve both changes.</li>
+    <li>Malformed settings preserve valid Voxa/ComfyUI blocks and publish a repair state.</li>
+    <li>Provider key saved-but-untested, capability denied, model disabled, runtime absent, and recipe disabled all produce the same eligibility verdict in Settings and dispatch.</li>
+    <li><code>male</code> does not match <code>female</code>; overlap can never exceed 1; candidate failure is terminal rather than an endless loader.</li>
+    <li>Voxa killed or hung mid-TTS/STT produces a bounded failure and all local synthesis remains globally serialized.</li>
+    <li>Setup catalogue IDs are used by runtime status, completion restart, Repair, and Open folder.</li>
+  </ol>
+
+  <h3>Scope notes and unresolved specification questions</h3>
+  <ul>
+    <li>The Voxa server source is fetched from a separately pinned repository and is not in this workspace. This audit verified the Arke client, discovery, launch contract, supervision wiring, and package smoke tests, but not the sidecar's internal Kestrel binding, request limits, model disposal, or absence of cloud routes.</li>
+    <li>OpenAI TTS is not implemented: the provider table and client expose LLM/image only. SPEC-008 agrees, while SPEC-011 task T-6 names OpenAI voice. Reconcile the specs before treating this as a missing provider.</li>
+    <li>SPEC-022's task checklist is stale: several tasks marked remaining are partly implemented, while their end-to-end behavior is still incomplete. Update it by outcome rather than marking helper-level pieces done.</li>
+    <li>The report treats ComfyUI as an additional cloned-voice lane throughout, per the architecture amendment and the review clarification. No recommendation replaces Kokoro/Voxa with ComfyUI.</li>
+  </ul>
+
+  <h3>Representative files reviewed</h3>
+  <p class="muted">Specifications 008, 009, 011, 016, 021, 022; Settings and voice React screens; voice, provider, settings, frame, event, manifest, and client-state contracts; coordinator transport, settings, credentials, provider status, voice service/library, queue, setup, ComfyUI engine/sanitizer, Bench, take and media paths; Voxa client/runtime discovery; ElevenLabs, Kokoro, ComfyUI and OpenAI clients; relevant workspace tests and packaging/runtime configuration. No application code was modified. This HTML report is the only file created.</p>
+</main>
+</body>
+</html>
