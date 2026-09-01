@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { hasOwnFrame, type Job, type Selections, type Take } from "@arke-studio/contracts";
+import { hasOwnFrame, orderedShots, type Job, type Selections, type Take } from "@arke-studio/contracts";
+import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { acceptStill, fileDrawnFrame, reviewAppendFor, slotAtAuthorizationOf } from "../../src/takes/drawn-frame.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
@@ -50,6 +51,39 @@ async function still(store: WorldStore, id: string, shotId: string): Promise<Tak
   } as unknown as Take;
   await writeFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
   return take;
+}
+
+async function boardParent(store: WorldStore): Promise<Take> {
+  const landingDir = "productions/saltlight/incoming/board-parent-review-test";
+  await mkdir(join(store.dir, landingDir), { recursive: true });
+  await writeFile(join(store.dir, landingDir, "board.png"), encodePng(solidImage(8, 8, [20, 30, 40, 255])));
+  const job = {
+    id: "jb_01J8E0000000000000000000Q1",
+    idempotencyKey: "01J8E1000000000000000000Q1",
+    worldId: WORLD_ID,
+    productionId: "saltlight",
+    target: { kind: "board-sheet", coversShots: ["sh_13"] },
+    capability: "image",
+    provider: "test",
+    model: "test-image",
+    params: {
+      prompt: "A board parent",
+      references: [],
+      provenance: { canonRevision: 42, sheets: {} },
+      landing: "frame-slot",
+    },
+    estimatedMicroUsd: 1000,
+    status: "succeeded",
+    providerJobId: "board-parent-review-test",
+    attempt: 1,
+    landedFiles: [`${landingDir}/board.png`],
+    error: null,
+    createdAt: CLOCK(),
+    updatedAt: CLOCK(),
+  } as unknown as Job;
+  const [parent] = await recordTakesFromJob(store, job, 1000);
+  assert.ok(parent);
+  return parent;
 }
 
 /** Narrow to a filing that actually filed — a superseded no-op has no artifact to assert on. */
@@ -150,24 +184,9 @@ describe("the continuity chain never overwrites a frame somebody chose", () => {
     });
     const drawnOk = filedOk(drawn);
 
-    const clipDir = join(store.dir, "productions", "saltlight", "takes", "tk_clip99");
-    await mkdir(clipDir, { recursive: true });
-    const clip = {
-      id: "tk_clip99",
-      jobId: "jb_clip99",
-      kind: "clip",
-      coversShots: ["sh_12"],
-      media: "clip.mp4",
-      model: "test-video",
-      provenance: { canonRevision: 1, sheets: {} },
-      cost: { estimatedMicroUsd: 1000, actualMicroUsd: 1000, actualSource: "manifest-derived" },
-      createdAt: CLOCK(),
-      completedAt: CLOCK(),
-    } as unknown as Take;
-    await writeFile(join(clipDir, "take.json"), JSON.stringify(clip, null, 2) + "\n");
-    const fresh = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, { ...fresh, takes: [...fresh.takes, clip] }, {
-      takeId: "tk_clip99",
+    const clipId = "tk_01J8F0000000000000000000B2";
+    await acceptTake(store, production(store), {
+      takeId: clipId,
       shotId: "sh_12",
       by: "test",
     });
@@ -180,36 +199,21 @@ describe("the continuity chain never overwrites a frame somebody chose", () => {
     );
     assert.notEqual(
       map["sh_13"]?.startFrameTakeId,
-      "tk_clip99",
+      clipId,
       "and the accept did not seed footage over it",
     );
   });
 
   it("still seeds a following shot that has no frame of its own", async () => {
     const store = await open();
-    const clipDir = join(store.dir, "productions", "saltlight", "takes", "tk_clip98");
-    await mkdir(clipDir, { recursive: true });
-    const clip = {
-      id: "tk_clip98",
-      jobId: "jb_clip98",
-      kind: "clip",
-      coversShots: ["sh_12"],
-      media: "clip.mp4",
-      model: "test-video",
-      provenance: { canonRevision: 1, sheets: {} },
-      cost: { estimatedMicroUsd: 1000, actualMicroUsd: 1000, actualSource: "manifest-derived" },
-      createdAt: CLOCK(),
-      completedAt: CLOCK(),
-    } as unknown as Take;
-    await writeFile(join(clipDir, "take.json"), JSON.stringify(clip, null, 2) + "\n");
-    const fresh = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
-    await acceptTake(store, { ...fresh, takes: [...fresh.takes, clip] }, {
-      takeId: "tk_clip98",
+    const clipId = "tk_01J8C0000000000000000000C3";
+    await acceptTake(store, production(store), {
+      takeId: clipId,
       shotId: "sh_12",
       by: "test",
     });
     const map = await selections(store);
-    assert.equal(map["sh_13"]?.startFrameTakeId, "tk_clip98", "continuity still does its job");
+    assert.equal(map["sh_13"]?.startFrameTakeId, clipId, "continuity still does its job");
   });
 });
 
@@ -320,18 +324,20 @@ describe("accepting a still is one commit (SPEC-013 R-9, D6)", () => {
 
   it("refuses a still through the footage path, rather than half-writing it", async () => {
     const store = await open();
-    const take = await still(store, "tk_acc02", "sh_13");
-    const fresh = { ...production(store), takes: [...production(store).takes, take] };
     await assert.rejects(
-      () => acceptTake(store, fresh, { takeId: "tk_acc02", shotId: "sh_13", by: "user" }),
+      () => acceptTake(store, production(store), {
+        takeId: "tk_01J8A0000000000000000000A1",
+        shotId: "sh_12",
+        by: "user",
+      }),
       /is a still/,
     );
   });
 
   it("refuses explicit acceptance of a durable board-sheet parent", async () => {
     const store = await open();
-    const take = { ...await still(store, "tk_board_parent", "sh_13"), boardSheetParent: true as const };
-    const fresh = { ...production(store), takes: [...production(store).takes, take] };
+    const take = await boardParent(store);
+    const fresh = production(store);
     await assert.rejects(
       () => acceptStill(store, fresh, { takeId: take.id, shotId: "sh_13", by: "user" }),
       /board-sheet parent/,
@@ -394,6 +400,38 @@ describe("a non-PNG still normalises to PNG at filing", () => {
     assert.ok(sidecar!.file.endsWith(".jpg"), "the original format stands");
     const bytes = await readFile(join(store.dir, "artifacts", sidecar!.file));
     assert.equal(bytes.toString(), "jpeg-ish-bytes");
+  });
+
+  it("does not recreate a selection when its shot disappears during conversion", async () => {
+    const store = await open();
+    const scene = production(store).scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shotId = orderedShots(scene).at(-1)!.id;
+    const take = await jpegStill(store, "tk_jpg03", shotId);
+    const toPng: BoundaryFrameMaker = {
+      write: async (_input, output) => {
+        await applySceneCommand(store, {
+          productionId: "saltlight",
+          sceneFile: "04-the-verse-rises",
+          sceneId: scene.id,
+          baseVersion: scene.version,
+          command: { kind: "delete-shot", shotId },
+        });
+        await writeFile(output, encodePng(solidImage(4, 4, [9, 9, 9, 255])));
+        return { ok: true };
+      },
+    };
+
+    const outcome = await fileDrawnFrame(store, production(store), {
+      take,
+      shotId,
+      producedBy: "accept:deleted",
+      toPng,
+    });
+
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.ok ? "" : outcome.reason, /no shot/);
+    assert.equal((await selections(store))[shotId], undefined);
+    assert.ok(!store.getBundle().artifacts.some((artifact) => artifact.links.includes(take.id)));
   });
 });
 
@@ -478,7 +516,7 @@ describe("an auto-filed frame is already decided", () => {
         take,
         shotId: "sh_13",
         producedBy: "frame-run:jb_test",
-        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto01", "sh_13"))],
+        alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto01", "sh_13"))],
       }),
     );
     const reviews = await readFile(join(store.dir, "productions", "saltlight", "reviews.jsonl"), "utf8");
@@ -494,7 +532,7 @@ describe("an auto-filed frame is already decided", () => {
         take: first,
         shotId: "sh_13",
         producedBy: "frame-run:jb_test",
-        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto02", "sh_13"))],
+        alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto02", "sh_13"))],
       }),
     );
     filedOk(
@@ -502,7 +540,7 @@ describe("an auto-filed frame is already decided", () => {
         take: second,
         shotId: "sh_14",
         producedBy: "frame-run:jb_test",
-        alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto03", "sh_14"))],
+        alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto03", "sh_14"))],
       }),
     );
 
@@ -513,7 +551,7 @@ describe("an auto-filed frame is already decided", () => {
       shotId: "sh_13",
       producedBy: "frame-run:jb_slow",
       expectedArtifactId: null,
-      alsoCommit: [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto04", "sh_13"))],
+      alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor("tk_auto04", "sh_13"))],
     });
     assert.ok(overtaken.ok && "superseded" in overtaken);
 
@@ -521,6 +559,32 @@ describe("an auto-filed frame is already decided", () => {
     assert.match(reviews, /tk_auto02/);
     assert.match(reviews, /tk_auto03/, "the second append chained on the first");
     assert.ok(!reviews.includes("tk_auto04"), "no decision for a frame that was never installed");
+  });
+
+  it("serializes concurrent review appends with their frame commits", async () => {
+    const store = await open();
+    const first = await still(store, "tk_auto06", "sh_13");
+    const second = await still(store, "tk_auto07", "sh_14");
+    const current = production(store);
+    const [firstFiled, secondFiled] = await Promise.all([
+      fileDrawnFrame(store, current, {
+        take: first,
+        shotId: "sh_13",
+        producedBy: "frame-run:jb_parallel_1",
+        alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor(first.id, "sh_13"))],
+      }),
+      fileDrawnFrame(store, current, {
+        take: second,
+        shotId: "sh_14",
+        producedBy: "frame-run:jb_parallel_2",
+        alsoCommit: async () => [await reviewAppendFor(store, "saltlight", decisionFor(second.id, "sh_14"))],
+      }),
+    ]);
+    filedOk(firstFiled);
+    filedOk(secondFiled);
+    const reviews = await readFile(join(store.dir, "productions", "saltlight", "reviews.jsonl"), "utf8");
+    assert.match(reviews, /tk_auto06/);
+    assert.match(reviews, /tk_auto07/);
   });
 
   it("replay after filing recognizes the same job's artifact instead of calling it superseded", async () => {

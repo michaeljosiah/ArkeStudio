@@ -60,7 +60,11 @@ async function writeKit(
       baseHash: baseRaw === null ? null : sha256(baseRaw),
     },
   ];
-  if (review) {
+  if (!review) {
+    await store.commit({ kind: "kit-edit", source: "form", files });
+    return;
+  }
+  await store.gateOp(async () => {
     const path = "references/reviews.jsonl";
     let raw = "";
     let existed = false;
@@ -76,11 +80,11 @@ async function writeKit(
       content: raw + JSON.stringify(review) + "\n",
       baseHash: existed ? sha256(raw) : null,
     });
-  }
-  await store.commit({
-    kind: review ? "reference-accept" : "kit-edit",
-    source: review ? "review:user" : "form",
-    files,
+    await store.commitUnserialised({
+      kind: "reference-accept",
+      source: "review:user",
+      files,
+    });
   });
 }
 

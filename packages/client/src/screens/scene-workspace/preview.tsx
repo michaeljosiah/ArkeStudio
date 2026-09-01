@@ -27,6 +27,13 @@ interface PreviewSpan {
   boardStart: boolean;
 }
 
+export function fitPreviewStage(width: number, height: number, aspect: string): { width: number; height: number } {
+  const [wide, high] = aspect.split(":").map(Number);
+  const ratio = wide !== undefined && high !== undefined && wide > 0 && high > 0 ? wide / high : 16 / 9;
+  const fittedWidth = Math.max(0, Math.min(width, height * ratio));
+  return { width: fittedWidth, height: fittedWidth / ratio };
+}
+
 function framePath(
   production: ProductionBundle,
   artifacts: readonly ArtifactSidecar[],
@@ -117,7 +124,11 @@ export function ScenePreview({
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+  const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
+  const [failedClips, setFailedClips] = useState<ReadonlySet<string>>(() => new Set());
+  const [failedFrames, setFailedFrames] = useState<ReadonlySet<string>>(() => new Set());
   const timeRef = useRef(0);
+  const viewport = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const still = useRef<HTMLImageElement>(null);
   const { select } = useWorkspaceSelection();
@@ -139,13 +150,36 @@ export function ScenePreview({
     seek(totalSec);
   }, [seek, totalSec, timeRef]);
 
+  useEffect(() => {
+    const node = viewport.current;
+    if (node === null) return;
+    const measure = () => {
+      const box = node.getBoundingClientRect();
+      const next = fitPreviewStage(box.width, box.height, aspect);
+      setStageSize((current) =>
+        current !== null && current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [aspect]);
+
   const sync = useCallback((span: PreviewSpan | null, nowMs: number) => {
-    const clipSrc = span?.clipPath === null || span?.clipPath === undefined || worldSlug === undefined
+    const requestedClipSrc = span?.clipPath === null || span?.clipPath === undefined || worldSlug === undefined
       ? null
       : mediaUrl(worldSlug, span.clipPath);
+    const clipFailed = requestedClipSrc !== null && failedClips.has(requestedClipSrc);
+    const clipSrc = requestedClipSrc;
     const frameSrc = span?.framePath === null || span?.framePath === undefined || worldSlug === undefined
       ? null
       : mediaUrl(worldSlug, span.framePath);
+    const frameFailed = frameSrc !== null && failedFrames.has(frameSrc);
     const media = video.current;
     const image = still.current;
     if (media !== null) {
@@ -155,13 +189,13 @@ export function ScenePreview({
         playing,
         nowMs,
       });
-      media.style.opacity = clipSrc === null ? "0" : "1";
+      media.style.opacity = clipSrc === null || clipFailed ? "0" : "1";
     }
     if (image !== null) {
-      if (clipSrc === null && frameSrc !== null && image.getAttribute("src") !== frameSrc) image.setAttribute("src", frameSrc);
-      image.style.opacity = clipSrc === null && frameSrc !== null ? "1" : "0";
+      if ((clipSrc === null || clipFailed) && frameSrc !== null && image.getAttribute("src") !== frameSrc) image.setAttribute("src", frameSrc);
+      image.style.opacity = (clipSrc === null || clipFailed) && frameSrc !== null && !frameFailed ? "1" : "0";
     }
-  }, [playing, timeRef, worldSlug]);
+  }, [failedClips, failedFrames, playing, timeRef, worldSlug]);
 
   useEffect(() => {
     const media = video.current;
@@ -182,17 +216,82 @@ export function ScenePreview({
   }, [playing, spans, sync, time, timeRef]);
 
   const current = spanAt(spans, time);
+  const currentClipSrc = current?.clipPath === null || current?.clipPath === undefined || worldSlug === undefined
+    ? null
+    : mediaUrl(worldSlug, current.clipPath);
+  const currentFrameSrc = current?.framePath === null || current?.framePath === undefined || worldSlug === undefined
+    ? null
+    : mediaUrl(worldSlug, current.framePath);
+  const currentHasPlayableClip = currentClipSrc !== null && !failedClips.has(currentClipSrc);
+  const currentHasFrame = currentFrameSrc !== null && !failedFrames.has(currentFrameSrc);
+  const currentMediaFailed = !currentHasPlayableClip && (
+    (currentClipSrc !== null && failedClips.has(currentClipSrc)) ||
+    (currentFrameSrc !== null && failedFrames.has(currentFrameSrc))
+  );
+  const retryMedia = () => {
+    if (currentClipSrc !== null && failedClips.has(currentClipSrc)) video.current?.load();
+    if (currentFrameSrc !== null && failedFrames.has(currentFrameSrc) && still.current !== null) {
+      const image = still.current;
+      image.removeAttribute("src");
+      requestAnimationFrame(() => image.setAttribute("src", currentFrameSrc));
+    }
+  };
   return (
     <section className="fy-swpreview" data-testid="workspace-preview">
-      <div className="fy-swpreview__viewport">
-        <div className="fy-swpreview__stage" style={{ aspectRatio: aspect.replace(":", " / ") }}>
-          <video ref={video} playsInline muted aria-label="Rendered scene preview" />
-          <img ref={still} alt="" />
-          {current !== null && current.framePath === null && current.clipPath === null ? <span className="fy-swpreview__empty">no frame yet</span> : null}
+      <div ref={viewport} className="fy-swpreview__viewport">
+        <div
+          className="fy-swpreview__stage"
+          style={{
+            aspectRatio: aspect.replace(":", " / "),
+            ...(stageSize === null ? {} : { width: stageSize.width, height: stageSize.height }),
+          }}
+        >
+          <video
+            ref={video}
+            playsInline
+            muted
+            aria-label="Rendered scene preview"
+            onError={(event) => {
+              const failed = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
+              if (failed === null || failed === "") return;
+              setFailedClips((current) => current.has(failed) ? current : new Set([...current, failed]));
+            }}
+            onCanPlay={(event) => {
+              const recovered = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
+              if (recovered === null || recovered === "") return;
+              setFailedClips((current) => {
+                if (!current.has(recovered)) return current;
+                const next = new Set(current);
+                next.delete(recovered);
+                return next;
+              });
+            }}
+          />
+          <img
+            ref={still}
+            alt=""
+            onError={(event) => {
+              const failed = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
+              if (failed === null || failed === "") return;
+              setFailedFrames((current) => current.has(failed) ? current : new Set([...current, failed]));
+            }}
+            onLoad={(event) => {
+              const recovered = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
+              if (recovered === null || recovered === "") return;
+              setFailedFrames((current) => {
+                if (!current.has(recovered)) return current;
+                const next = new Set(current);
+                next.delete(recovered);
+                return next;
+              });
+            }}
+          />
+          {current !== null && !currentHasFrame && !currentHasPlayableClip ? <span className="fy-swpreview__empty">no frame yet</span> : null}
+          {currentMediaFailed ? <button type="button" className="fy-swpreview__retry" onClick={retryMedia}>Retry media</button> : null}
           {current === null ? null : (
             <>
               <span className="fy-swpreview__shot">shot {current.shot.number}</span>
-              <span className="fy-swpreview__kind">{current.clipPath === null ? "still · animatic" : "motion · rendered"}</span>
+              <span className="fy-swpreview__kind">{currentHasPlayableClip ? "motion · rendered" : currentHasFrame ? "still · animatic" : "no media"}</span>
               <span className="fy-swpreview__caption">
                 <strong>{current.shot.title}</strong>
                 <span>{current.shot.framing?.size ?? "shot"}{current.shot.framing?.lens === undefined ? "" : ` · ${current.shot.framing.lens}`} · {(current.endSec - current.startSec).toFixed(1)}s</span>

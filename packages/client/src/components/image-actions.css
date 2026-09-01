@@ -66,6 +66,13 @@
   }
 }
 
+@media (pointer: coarse) {
+  .fy-imgdl {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .fy-imgdl {
     transition: none;

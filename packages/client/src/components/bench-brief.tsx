@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { cx } from "./ui.js";
 import { Portrait } from "./portrait.js";
 import {
@@ -41,6 +42,7 @@ export function BenchBrief({
   placeholder,
   variant = "compact",
   autoFocus = false,
+  disabled = false,
   onEscape,
 }: {
   value: string;
@@ -54,6 +56,7 @@ export function BenchBrief({
   placeholder?: string;
   variant?: "compact" | "large";
   autoFocus?: boolean;
+  disabled?: boolean;
   /** Escape with no menu open — the write-large window closes on it. */
   onEscape?: () => void;
 }) {
@@ -254,11 +257,13 @@ export function BenchBrief({
         aria-haspopup="listbox"
         {...(open ? { "aria-activedescendant": `${listId}-${highlighted}` } : {})}
         value={value}
+        disabled={disabled}
         placeholder={placeholder}
         onChange={(e) => {
           onChange(e.target.value);
           sync(e.target);
         }}
+        onClick={(e) => sync(e.currentTarget)}
         onSelect={(e) => sync(e.currentTarget)}
         onBlur={() => {
           query.current = null;
@@ -271,48 +276,51 @@ export function BenchBrief({
           if (open) place();
         }}
       />
-      {open && anchor !== null && (
-        <ul
-          ref={list}
-          id={listId}
-          role="listbox"
-          aria-label="Attached references"
-          className="fy-bench__mentions"
-          data-testid="bench-mentions"
-          style={{
-            left: anchor.left,
-            ...(anchor.top !== undefined ? { top: anchor.top } : {}),
-            ...(anchor.bottom !== undefined ? { bottom: anchor.bottom } : {}),
-          }}
-        >
-          {matches.map((option, index) => (
-            <li
-              key={option.token}
-              id={`${listId}-${index}`}
-              role="option"
-              aria-selected={index === highlighted}
-              aria-label={`${option.token} — ${option.name}`}
-              className="fy-bench__mentionrow"
-              // Taking focus would close the menu on blur before the click ever lands.
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setActive(index)}
-              onClick={() => choose(option)}
+      {open && anchor !== null && typeof document !== "undefined"
+        ? createPortal(
+            <ul
+              ref={list}
+              id={listId}
+              role="listbox"
+              aria-label="Attached references"
+              className="fy-bench__mentions"
+              data-testid="bench-mentions"
+              style={{
+                left: anchor.left,
+                ...(anchor.top !== undefined ? { top: anchor.top } : {}),
+                ...(anchor.bottom !== undefined ? { bottom: anchor.bottom } : {}),
+              }}
             >
-              <span className="fy-bench__mentionthumb">
-                {option.imagePath !== undefined ? (
-                  <Portrait worldSlug={worldSlug} path={option.imagePath} label={option.kind} radius={0} />
-                ) : (
-                  <span className="fy-bench__mentionkind">{option.kind}</span>
-                )}
-              </span>
-              <span className="fy-bench__mentiontext">
-                <span className="fy-bench__mentiontoken">{`@${option.token}`}</span>
-                <span className="fy-bench__mentionname">{option.name}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+              {matches.map((option, index) => (
+                <li
+                  key={option.token}
+                  id={`${listId}-${index}`}
+                  role="option"
+                  aria-selected={index === highlighted}
+                  aria-label={`${option.token} — ${option.name}`}
+                  className="fy-bench__mentionrow"
+                  // Taking focus would close the menu on blur before the click ever lands.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => choose(option)}
+                >
+                  <span className="fy-bench__mentionthumb">
+                    {option.imagePath !== undefined ? (
+                      <Portrait worldSlug={worldSlug} path={option.imagePath} label={option.kind} radius={0} />
+                    ) : (
+                      <span className="fy-bench__mentionkind">{option.kind}</span>
+                    )}
+                  </span>
+                  <span className="fy-bench__mentiontext">
+                    <span className="fy-bench__mentiontoken">{`@${option.token}`}</span>
+                    <span className="fy-bench__mentionname">{option.name}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

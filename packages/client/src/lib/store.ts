@@ -3025,6 +3025,17 @@ export function acceptTake(worldId: string, productionId: string, takeId: string
   send({ kind: "accept-take", worldId, productionId, takeId, shotId });
 }
 
+/** Pick one local image, retain it as a Variant, and use it for this shot's frame. */
+export function importShotFrame(worldId: string, productionId: string, shotId: string): void {
+  send({
+    kind: "import-shot-frame",
+    worldId,
+    productionId,
+    shotId,
+    requestId: queueRequest("import-shot-frame"),
+  });
+}
+
 /**
  * Where a shot starts inside its selected media (R-8, issue 253) — the only authored edit the cut
  * offers, and trim-from-the-in-point only. The coordinator refuses a shot with no accepted take

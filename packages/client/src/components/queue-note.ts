@@ -70,7 +70,13 @@ const COMMAND_NOUN: Record<string, [one: string, many: string]> = {
  * Uploads never reach the queue: nothing was enqueued and nothing spends, so an Activity button
  * would send the user to a screen with no row on it (the existing `inActivity: false` case).
  */
-const NEVER_QUEUES = new Set(["upload-master-look", "upload-world-image", "upload-artifacts", "pick-staged-reference"]);
+const NEVER_QUEUES = new Set([
+  "upload-master-look",
+  "upload-world-image",
+  "upload-artifacts",
+  "pick-staged-reference",
+  "import-shot-frame",
+]);
 
 function noun(kind: string, count: number): string {
   const pair = NOUN[kind];
@@ -261,10 +267,11 @@ export function enqueueNote(
 
   const reason = reasonOf(result);
   if (NEVER_QUEUES.has(result.command)) {
+    const retained = reason?.startsWith("The image was kept as a Variant") === true;
     return {
       id: queueNoteId(result.requestId),
-      tone: "refused",
-      title: "That image can’t be used",
+      tone: retained ? "warning" : "refused",
+      title: retained ? "Image kept as a Variant" : "That image can’t be used",
       meta: "nothing spent",
       ...(reason ? { reason } : {}),
     };

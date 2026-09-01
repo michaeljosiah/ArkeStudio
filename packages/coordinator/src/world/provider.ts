@@ -405,13 +405,15 @@ export class FsWorldProvider implements WorldProvider {
   private async closeStore(): Promise<void> {
     const store = this.store;
     if (!store) return;
-    this.refreshRegistry(store.getBundle());
-    // Detached before the close, not after. Closing releases the lock before it reports anything
-    // (see WorldStore.close), so by the time it can reject — the world was reclaimed out from
-    // under us, or the scan state would not write — the store holds nothing worth keeping, and
-    // retaining it would leave the provider serving a world whose watcher and index are gone.
+    // Detached before the close drains, so no later write can be admitted through the provider.
+    // The registry is refreshed afterwards: writes admitted before close are allowed to finish,
+    // and reading their bundle early can cache a paid take as unreviewed after its accept lands.
     this.store = null;
-    await store.close();
+    try {
+      await store.close();
+    } finally {
+      this.refreshRegistry(store.getBundle());
+    }
   }
 
   /** The open store, for mutations. Null until a world is loaded. */

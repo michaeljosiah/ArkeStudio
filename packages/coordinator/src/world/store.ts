@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
@@ -72,6 +73,7 @@ export class WorldStore {
   private verifying = false;
   private verifyAgain = false;
   private closed = false;
+  private readonly admittedGate = new AsyncLocalStorage<{ active: boolean }>();
   private lockHeld: boolean;
   private closePromise: Promise<void> | null = null;
   private readonly closingController = new AbortController();
@@ -179,9 +181,13 @@ export class WorldStore {
       // check proves the lock still exists when the callback actually reaches the filesystem.
       this.assertLockHeld();
       this.watcher?.suppress();
+      const admission = { active: true };
       try {
-        return await fn();
+        return await this.admittedGate.run(admission, fn);
       } finally {
+        // Async-local context is inherited by timers and detached promises. Revoking the shared
+        // token keeps those descendants from borrowing this invocation's close-drain permit.
+        admission.active = false;
         await this.rescan().catch(() => {});
         this.watcher?.unsuppress();
       }
@@ -274,7 +280,10 @@ export class WorldStore {
    * outside that envelope.
    */
   async commitUnserialised(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
-    this.assertWritable();
+    // gateOp admits before enqueue, so a close may start while its callback is still running.
+    // Only that async call chain may drain under the lock; unrelated calls still see the close.
+    if (this.admittedGate.getStore()?.active === true) this.assertLockHeld();
+    else this.assertWritable();
     const result = await this.committer.commit(input, hooks);
     await this.rescan([...input.files.map((f) => f.path), "world.json"]);
     return result;
