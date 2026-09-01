@@ -1559,4 +1559,28 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
     const missing = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDER_DECLARATIONS[id] === undefined);
     assert.deepEqual(missing, [], "reconciliation strategy is chosen from declarations; an absent row has none");
   });
+
+  it("uses the engine-specific fetch for ComfyUI without changing cloud transports", async () => {
+    let sharedCalls = 0;
+    let comfyCalls = 0;
+    const clients = createProviderClients({
+      fetch: async () => {
+        sharedCalls += 1;
+        return new Response("{}", { status: 200 });
+      },
+      comfyui: {
+        fetch: async () => {
+          comfyCalls += 1;
+          return new Response(JSON.stringify({ system: { comfyui_version: "0.33.1" } }), { status: 200 });
+        },
+        baseUrl: () => "http://127.0.0.1:8188",
+        preflight: async () => ({ ok: true }),
+      },
+    });
+
+    await clients.comfyui!.validateKey("");
+
+    assert.equal(comfyCalls, 1);
+    assert.equal(sharedCalls, 0);
+  });
 });

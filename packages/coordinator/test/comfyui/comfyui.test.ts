@@ -511,6 +511,21 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     await service.dispose();
   });
 
+  it("keeps the nested transport code when a probe fails", async () => {
+    const world = fakeWorld();
+    const deps = engineDeps(world, "C:/app");
+    deps.fetch = async () => {
+      const socket = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" });
+      throw new TypeError("fetch failed", { cause: socket });
+    };
+    const service = new ComfyUiEngineService(deps);
+
+    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
+
+    assert.match(service.engineStatus().detail ?? "", /TypeError: fetch failed \[UND_ERR_SOCKET\]/);
+    await service.dispose();
+  });
+
   it("classifies a non-loopback URL as remote", async () => {
     const world = fakeWorld();
     world.urls.set("http://10.0.0.4:8188", { version: "0.33.1" });

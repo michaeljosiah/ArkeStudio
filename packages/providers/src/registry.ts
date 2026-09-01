@@ -42,6 +42,8 @@ export interface ProviderClientDeps {
    * wired — the client is then absent rather than present and dispatching unverified.
    */
   comfyui?: {
+    /** A transport scoped to the engine, where loopback connection policy may differ from cloud HTTP. */
+    fetch?: FetchLike;
     baseUrl: EngineBaseUrl;
     preflight: ComfyUiPreflight;
     /** Opens the engine's progress socket (SPEC-021 D16); omitted, jobs simply report no figure. */
@@ -120,7 +122,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.freeVramMb,
                 deps.comfyui!.locality,
               ),
-            fetchImpl,
+            deps.comfyui!.fetch ?? fetchImpl,
             capture,
           ),
         }),

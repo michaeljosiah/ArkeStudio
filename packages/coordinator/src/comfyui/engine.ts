@@ -111,6 +111,29 @@ function meetsFloor(version: string): boolean | null {
   return true;
 }
 
+/** Keep the useful part of Undici's nested failure without exposing socket objects or stacks. */
+function transportErrorDetail(err: unknown): string {
+  const named = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  const codes: string[] = [];
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [err];
+  while (pending.length > 0 && seen.size < 12) {
+    const node = pending.shift();
+    if (typeof node !== "object" || node === null || seen.has(node)) continue;
+    seen.add(node);
+    for (const field of ["code", "errno"] as const) {
+      const value = (node as Record<string, unknown>)[field];
+      if ((typeof value === "string" || typeof value === "number") && !codes.includes(String(value))) {
+        codes.push(String(value));
+      }
+    }
+    const members = (node as { errors?: unknown }).errors;
+    if (Array.isArray(members)) pending.push(...members);
+    pending.push((node as { cause?: unknown }).cause);
+  }
+  return codes.length === 0 ? named : `${named} [${codes.join(", ")}]`;
+}
+
 /**
  * Canonicalise only the URL components whose spelling cannot change endpoint semantics.
  * Userinfo, path, query and fragment stay byte-for-byte as entered: reverse proxies may treat
@@ -407,8 +430,7 @@ export class ComfyUiEngineService {
       const version = body?.system?.comfyui_version;
       return { reachable: true, version: typeof version === "string" ? version : null, detail: null };
     } catch (err) {
-      const named = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      return { reachable: false, version: null, detail: `${url} — ${named}` };
+      return { reachable: false, version: null, detail: `${url} — ${transportErrorDetail(err)}` };
     }
   }
 

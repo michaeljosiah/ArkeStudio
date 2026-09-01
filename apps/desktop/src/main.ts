@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
+import { createComfyUiFetch } from "./comfyui-transport.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -593,6 +594,8 @@ async function initialize(): Promise<{ port: number }> {
       );
     });
 
+  const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
+
   const comfyUiEngine = new ComfyUiEngineService({
     freeVramMb,
     appRoot,
@@ -613,7 +616,7 @@ async function initialize(): Promise<{ port: number }> {
       nodeClasses: recipeNodeClasses(recipe),
       identity: comfyUiRecipeIdentity(recipe),
     })),
-    fetch: (url, init) => fetch(url, init),
+    fetch: comfyUiFetch,
     fileExists: async (path) => {
       try {
         await stat(path);
@@ -691,6 +694,7 @@ async function initialize(): Promise<{ port: number }> {
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
+      fetch: comfyUiFetch,
       baseUrl: () => comfyUiEngine.baseUrl(),
       preflight: (recipeId) => comfyUiEngine.preflight(recipeId),
       locality: () => comfyUiEngine.engineStatus().locality,
