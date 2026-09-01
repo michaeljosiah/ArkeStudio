@@ -156,9 +156,12 @@ interface QueueEntryish {
  * used to make was nearly always short, and #692's run refused alternate shots on a card each
  * success had left full for the next. Two seconds covers an idle engine putting a video model
  * down; a card still short after that has something else on it, and refusing is the honest answer.
+ * The window is elapsed time with the probe's own duration counted, not a number of polls: the
+ * desktop's probe is an nvidia-smi run with a five-second timeout, and eight slow readings would
+ * have stretched two seconds into most of a minute with the job sitting in `submitting`.
  */
 const UNLOAD_POLL_MS = 250;
-const UNLOAD_POLLS = 8;
+const UNLOAD_WINDOW_MS = 2000;
 
 export class ComfyUiClient implements ProviderClient {
   readonly id = "comfyui" as const;
@@ -190,8 +193,9 @@ export class ComfyUiClient implements ProviderClient {
     private readonly freeVramMb?: () => Promise<number | null>,
     /** The device probe belongs to this computer and is invalid for a remote URL engine. */
     private readonly engineLocality: EngineLocality = () => "local",
-    /** How the card is waited on after `/free` — injected so the tests need no real clock. */
+    /** How the card is waited on after `/free`, and what time it is — injected so the tests need no real clock. */
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    private readonly now: () => number = Date.now,
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -526,8 +530,9 @@ export class ComfyUiClient implements ProviderClient {
     // Asked again over a short window rather than once, because the engine has said yes before
     // it has done anything. Unknown mid-window dispatches exactly as unknown at the start does:
     // the probe failing is not the card filling up.
+    const deadline = this.now() + UNLOAD_WINDOW_MS;
     let after = await this.freeVramMb().catch(() => null);
-    for (let poll = 0; after !== null && after < need && poll < UNLOAD_POLLS; poll += 1) {
+    while (after !== null && after < need && this.now() < deadline) {
       await this.sleep(UNLOAD_POLL_MS);
       after = await this.freeVramMb().catch(() => null);
     }

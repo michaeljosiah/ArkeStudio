@@ -1469,8 +1469,12 @@ describe("making room on the graphics card", () => {
   ];
   // No real clock in here: the wait after `/free` is a quarter of a second a poll, and a test
   // that sat through the window would be the stall the window exists to bound.
-  const client = (free: () => Promise<number | null>, fetch: FetchLike, sleep: (ms: number) => Promise<void> = async () => {}) =>
-    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, sleep);
+  // The clock is the sum of the sleeps, so the window is measured rather than counted.
+  const client = (free: () => Promise<number | null>, fetch: FetchLike, onSleep: (ms: number) => void = () => {}) => {
+    let now = 0;
+    const sleep = async (ms: number): Promise<void> => { now += ms; onSleep(ms); };
+    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, sleep, () => now);
+  };
 
   it("dispatches when the card cannot be measured", async () => {
     // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
@@ -1539,7 +1543,7 @@ describe("making room on the graphics card", () => {
     const { fetch, calls } = engineFake(ROUTES);
     const readings = [3000, 3000, 3000, 9000];
     const sleeps: number[] = [];
-    await client(async () => readings.shift() ?? 9000, fetch, async (ms) => { sleeps.push(ms); }).submit("", VOICE);
+    await client(async () => readings.shift() ?? 9000, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE);
     assert.equal(calls.filter((c) => c.url.endsWith("/free")).length, 1, "asked to put things down once, never once per poll");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "dispatched once the card emptied");
     assert.equal(sleeps.length, 2, "one wait per short reading after the engine answered");
@@ -1550,7 +1554,7 @@ describe("making room on the graphics card", () => {
     let asked = 0;
     const sleeps: number[] = [];
     await assert.rejects(
-      client(async () => { asked += 1; return 3072; }, fetch, async (ms) => { sleeps.push(ms); }).submit("", VOICE),
+      client(async () => { asked += 1; return 3072; }, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE),
       (err: Error) => {
         assert.ok(err instanceof ProviderBusyError, "still the transient it was");
         assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
@@ -1562,6 +1566,19 @@ describe("making room on the graphics card", () => {
     assert.ok(sleeps.length >= 4 && sleeps.length <= 12, `bounded, and long enough to matter: ${sleeps.length} waits`);
     assert.ok(sleeps.reduce((sum, ms) => sum + ms, 0) <= 3000, "a couple of seconds, not a stall");
     assert.equal(asked, sleeps.length + 2, "measured before asking, on the answer, and once per wait");
+  });
+
+  it("bounds the window by elapsed time, so a slow probe cannot stretch it", async () => {
+    // The desktop's probe is an nvidia-smi run with a five-second timeout. Counting polls would
+    // let eight slow readings hold a job in `submitting` for most of a minute.
+    const { fetch, calls } = engineFake(ROUTES);
+    let now = 0;
+    let asked = 0;
+    const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
+    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, async (ms) => { now += ms; }, () => now);
+    await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
+    assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
   });
 
   it("dispatches when the card stops being measurable mid-window (D15)", async () => {
