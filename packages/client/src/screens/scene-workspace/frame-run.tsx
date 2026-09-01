@@ -522,9 +522,17 @@ export function FrameRunBoardFailures({ run, worldId, productionId }: { run: Fra
   );
 }
 
-function runFailureCopy(state: Pick<FrameRunStepState, "failureClass" | "error">): string {
+function runFailureCopy(state: Pick<FrameRunStepState, "status" | "failureClass" | "error">): string {
   if (state.failureClass === "provider-fault") return state.error === null ? "provider fault · lane held" : `${state.error} · lane held`;
-  if (state.failureClass === "offline") return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "offline") {
+    // Offline holds the lane only while the job is still queued or running. A board that gave
+    // up after its last attempt is terminal with nothing paused behind it, so the suffix would
+    // name a hold that does not exist (issue 697). Provider-fault keeps it: a credential
+    // rejection pauses the lane even as it terminalizes the job.
+    const held = state.status === "queued" || state.status === "submitting" || state.status === "running";
+    if (!held) return state.error ?? "offline";
+    return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  }
   if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
   return state.error ?? "came back dark";
 }
