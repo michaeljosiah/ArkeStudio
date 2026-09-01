@@ -16,7 +16,7 @@ import { CutScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
-let focusedElement: HTMLElement | null = null;
+const focusedElements = new WeakSet<HTMLElement>();
 let viewportWidth = 800;
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({
@@ -26,7 +26,7 @@ Object.assign(dom.window, {
 });
 Object.assign(dom.HTMLElement.prototype, {
   focus(this: HTMLElement) {
-    focusedElement = this;
+    focusedElements.add(this);
   },
 });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
@@ -95,7 +95,6 @@ function button(screen: MountedCut, label: string): HTMLButtonElement {
 
 afterEach(() => {
   __setBridgeForTest(null);
-  focusedElement = null;
   viewportWidth = 800;
   document.body.replaceChildren();
 });
@@ -126,7 +125,10 @@ describe("durable Picture controls (#678)", () => {
         toggle.click();
         await Promise.resolve();
       });
-      assert.equal(panel.contains(focusedElement), true);
+      assert.equal(
+        [...panel.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),
+        true,
+      );
 
       const escape = new Event("keydown");
       Object.defineProperty(escape, "key", { value: "Escape" });
@@ -135,7 +137,7 @@ describe("durable Picture controls (#678)", () => {
         await Promise.resolve();
       });
       assert.equal(panel.getAttribute("data-open"), "false");
-      assert.equal(focusedElement, toggle);
+      assert.equal(focusedElements.has(toggle), true);
 
       viewportWidth = 1000;
       await act(async () => {
@@ -151,7 +153,10 @@ describe("durable Picture controls (#678)", () => {
       });
       assert.equal(panel.getAttribute("data-open"), "false");
       assert.equal(details.getAttribute("data-open"), "true");
-      assert.equal(details.contains(focusedElement), true);
+      assert.equal(
+        [...details.querySelectorAll<HTMLElement>("*")].some((element) => focusedElements.has(element)),
+        true,
+      );
     } finally {
       await close(screen);
     }
