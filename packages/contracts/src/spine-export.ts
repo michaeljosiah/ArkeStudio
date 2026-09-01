@@ -1,6 +1,7 @@
 import { PRESETS, type ExportPreset } from "./cut.js";
 import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js";
 import type { DerivedSpineCut, SpineCutSegment } from "./spine-cut.js";
+import type { FrameRate } from "./world.js";
 
 /**
  * Rendering a spine cut (#253, SPEC-013 R-19..R-21, D10, D11).
@@ -22,6 +23,7 @@ export type SpineExportItem =
 
 export interface SpineExportPlan {
   preset: ExportPreset;
+  frameRate: FrameRate;
   /** World-relative path of the master. The picture is cut to it; it is never cut to the picture. */
   trackPath: string;
   items: SpineExportItem[];
@@ -89,9 +91,13 @@ export function spineExportRefusals(cut: DerivedSpineCut, preset: ExportPreset):
  * real unit and a millionth of a second is not, so a segment that lands between two frame
  * boundaries collapses and is dropped here rather than being invented into a frame it never had.
  */
-export function buildSpineExportPlan(cut: DerivedSpineCut, preset: ExportPreset, trackPath: string): SpineExportPlan {
-  const { fps } = PRESETS[preset];
-  const grid = (sec: number): number => Math.round(sec * fps) / fps;
+export function buildSpineExportPlan(
+  cut: DerivedSpineCut,
+  preset: ExportPreset,
+  trackPath: string,
+  frameRate: FrameRate = PRESETS[preset].fps,
+): SpineExportPlan {
+  const grid = (sec: number): number => Math.round(sec * frameRate) / frameRate;
   const items: SpineExportItem[] = [];
   for (const segment of cut.segments) {
     const startSec = grid(segment.startSec);
@@ -99,7 +105,7 @@ export function buildSpineExportPlan(cut: DerivedSpineCut, preset: ExportPreset,
     if (durationSec <= 0) continue;
     items.push(itemFor(segment, startSec, durationSec));
   }
-  return { preset, trackPath, items, totalSec: grid(cut.trackDurationSec) };
+  return { preset, frameRate, trackPath, items, totalSec: grid(cut.trackDurationSec) };
 }
 
 function itemFor(segment: SpineCutSegment, startSec: number, durationSec: number): SpineExportItem {
@@ -144,6 +150,7 @@ function itemFor(segment: SpineCutSegment, startSec: number, durationSec: number
  */
 export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
   const p = PRESETS[plan.preset];
+  const fps = plan.frameRate;
   const args: string[] = ["-y"];
   const filters: string[] = [];
   const audioLabels: string[] = [];
@@ -166,7 +173,7 @@ export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, ou
        */
       const d = item.durationSec;
       filters.push(
-        `[${index}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps},tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${index}]`,
+        `[${index}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${index}]`,
       );
       if (item.audio) {
         const delayMs = Math.round(item.audio.atSec * 1000);
@@ -176,7 +183,7 @@ export function buildSpineFfmpegArgs(plan: SpineExportPlan, worldDir: string, ou
         audioLabels.push(`[a${index}]`);
       }
     } else {
-      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${fps}`);
       if (item.type === "slate") {
         // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
         // expansion=none: a shot titled "100% Practical" is a label, not a drawtext expression.

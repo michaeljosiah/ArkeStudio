@@ -12,9 +12,9 @@
  * pointer capture, pixels→seconds, the 0.2s snap threshold, and commit-once-on-release).
  *
  * Changes made, as Apache-2.0 §4(b) requires:
- *   - `formatTime`/`parseTime` renamed to `formatTimecode`/`parseTimecode`; the 24fps divisor
- *     became the exported `TIMECODE_FPS`; negative and non-finite input now clamp rather than
- *     producing `NaN:NaN` or a negative frame count.
+ *   - `formatTime`/`parseTime` renamed to `formatTimecode`/`parseTimecode`; the upstream 24fps
+ *     divisor became an argument with `TIMECODE_FPS` as its legacy default; negative and
+ *     non-finite input now clamp rather than producing `NaN:NaN` or a negative frame count.
  *   - The snapping loop, which was inline in the left-edge trim path and read `clip.startTime`
  *     and `clip.duration` off a stored timeline, is generalised to `snapToPoints` over a plain
  *     list of candidate seconds. Arke's cut is derived, so there are no clip records to read.
@@ -28,7 +28,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 
-/** Upstream's timecode is 24fps, and the export presets are 24fps too (PRESETS in cut.ts). */
+/** Upstream's timecode and Arke's legacy production clock are both 24fps. */
 export const TIMECODE_FPS = 24;
 
 /** Upstream's tolerance for treating two edges as the same cut point. */
@@ -37,27 +37,30 @@ export const CUT_POINT_TOLERANCE_SEC = 0.05;
 /** Upstream's snap threshold on a trim drag, in seconds of timeline. */
 export const SNAP_THRESHOLD_SEC = 0.2;
 
-/** `HH:MM:SS:FF` at {@link TIMECODE_FPS}. Non-finite and negative input read as zero. */
-export function formatTimecode(seconds: number): string {
+/** `HH:MM:SS:FF` at the production frame rate. Non-finite and negative input read as zero. */
+export function formatTimecode(seconds: number, frameRate = TIMECODE_FPS): string {
   const t = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
-  const hrs = Math.floor(t / 3600);
-  const mins = Math.floor((t % 3600) / 60);
-  const secs = Math.floor(t % 60);
-  const frames = Math.floor((t % 1) * TIMECODE_FPS);
+  // Frame-derived seconds often land just below their exact integer when multiplied back.
+  const totalFrames = Math.floor(t * frameRate + 1e-7);
+  const wholeSeconds = Math.floor(totalFrames / frameRate);
+  const hrs = Math.floor(wholeSeconds / 3600);
+  const mins = Math.floor((wholeSeconds % 3600) / 60);
+  const secs = wholeSeconds % 60;
+  const frames = totalFrames % frameRate;
   const pad = (n: number) => n.toString().padStart(2, "0");
   return `${pad(hrs)}:${pad(mins)}:${pad(secs)}:${pad(frames)}`;
 }
 
 /** `HH:MM:SS:FF`, `MM:SS:FF`, `MM:SS` or `SS` back to seconds; null when it does not parse. */
-export function parseTimecode(tc: string): number | null {
+export function parseTimecode(tc: string, frameRate = TIMECODE_FPS): number | null {
   const parts = tc
     .replace(/[^0-9:;]/g, "")
     .replace(/;/g, ":")
     .split(":");
   const n = parts.map((p) => Number.parseInt(p, 10));
   if (n.some(Number.isNaN)) return null;
-  if (n.length === 4) return n[0]! * 3600 + n[1]! * 60 + n[2]! + n[3]! / TIMECODE_FPS;
-  if (n.length === 3) return n[0]! * 60 + n[1]! + n[2]! / TIMECODE_FPS;
+  if (n.length === 4) return n[0]! * 3600 + n[1]! * 60 + n[2]! + n[3]! / frameRate;
+  if (n.length === 3) return n[0]! * 60 + n[1]! + n[2]! / frameRate;
   if (n.length === 2) return n[0]! * 60 + n[1]!;
   if (n.length === 1) return n[0]!;
   return null;

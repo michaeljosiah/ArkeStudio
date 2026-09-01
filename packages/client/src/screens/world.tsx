@@ -12,6 +12,7 @@ import {
   productionShape,
   worldSheets,
   type CanonEntry,
+  type FrameRate,
   type Job,
   type PendingSheet,
   type Sheet,
@@ -4710,6 +4711,7 @@ const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number]
  * they are the exception in the list now rather than the whole of it.
  */
 export const EPISODE_COUNT_CHOICES = [8, 12, 20, 30, 40, 60, 80, 100];
+export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
 export const MICRODRAMA_DEFAULTS = {
   // 60 rather than 7: the low end of what the form actually runs, so the season a person opens
@@ -4735,6 +4737,7 @@ export function NewProductionScreen() {
   // is the kind's to answer (turn 99), and a film that silently kept a micro drama's 9:16 would
   // be the exact failure the grouping is meant to prevent.
   const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
+  const [frameRate, setFrameRate] = useState<FrameRate>(24);
   const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
   const [episodeLength, setEpisodeLength] = useState(
     `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
@@ -4782,6 +4785,7 @@ export function NewProductionScreen() {
         // The frame a video delivers in is answerable for every kind, so it travels for every
         // kind (turn 99): before this, a film could not be made vertical until after it existed.
         ...(chosen.medium === "video" ? { aspect } : {}),
+        ...(chosen.medium === "video" ? { frameRate } : {}),
         ...(isMicrodrama
           ? {
               // One name, not two (turn 113): the series takes the production's name. The
@@ -4925,12 +4929,20 @@ export function NewProductionScreen() {
           {chosen.medium === "video" && (
           <div style={{ display: "grid", gap: 8 }}>
             <div className="fy-mono">DEFAULTS · CHANGE LATER</div>
-            {/* Three columns whatever is in them: a lone FRAME select stretched across the whole
-                dialog reads as a form field rather than as one default among several. */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+            {/* Four stable slots keep frame and rate compact while leaving room for episodic defaults. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
               <DefaultSelect label="FRAME" value={aspect} onChange={setAspect}>
                 <option value="9:16">9:16 vertical</option>
                 <option value="16:9">16:9 landscape</option>
+              </DefaultSelect>
+              <DefaultSelect
+                label="RATE"
+                value={String(frameRate)}
+                onChange={(value) => setFrameRate(Number(value) as FrameRate)}
+              >
+                {FRAME_RATE_CHOICES.map((rate) => (
+                  <option key={rate} value={String(rate)}>{rate} fps</option>
+                ))}
               </DefaultSelect>
               {isMicrodrama && (
                 <>

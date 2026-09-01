@@ -9,6 +9,7 @@ import {
   DOOR_CHOICES,
   EPISODE_COUNT_CHOICES,
   EPISODE_LENGTH_CHOICES,
+  FRAME_RATE_CHOICES,
   KIND_PLATES,
   MICRODRAMA_DEFAULTS,
   VIDEO_KIND_CHOICES,
@@ -187,6 +188,11 @@ describe("step two offers every kind and every default (design turn 53)", () => 
     for (const id of ["film", "music-video", "other"] as const) {
       assert.equal(byId.get(id), "16:9", `${id} delivers landscape unless told otherwise`);
     }
+  });
+
+  it("offers every supported production frame rate and defaults to the first one", () => {
+    assert.deepEqual(FRAME_RATE_CHOICES, [24, 25, 30]);
+    assert.equal(FRAME_RATE_CHOICES[0], 24);
   });
 
   it("how a season ends is not a default the door can ask (turn 99)", () => {

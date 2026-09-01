@@ -4,6 +4,7 @@ import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
 import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
 import { CutFileSchema } from "./cut.js";
+import { TimelineStateSchema } from "./timeline.js";
 import { WorldChatSummarySchema, WorldChatWorkspaceSchema } from "./world-chat.js";
 import { ArtifactSidecarSchema } from "./artifact.js";
 import { BenchPresetSchema, BenchSessionSummarySchema, BenchWorkspaceSchema } from "./bench.js";
@@ -154,6 +155,8 @@ export const ProductionBundleSchema = z
     spine: ProductionSpineSchema.nullable().default(null),
     /** `cut.json` — dialogue/score/ambience placement, which the spine does not own. */
     cut: CutFileSchema.default({ audio: [], overlays: [] }),
+    /** `timeline.json`, absent until the first editable Picture command (SPEC-037). */
+    timeline: TimelineStateSchema.optional(),
     /**
      * Measured media per take, read from the sidecars beside them (#253). Carried on the bundle
      * rather than on `TakeSchema` so the client and the pure cut helpers can see a duration

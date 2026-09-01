@@ -15,6 +15,7 @@ import {
   type ArtifactSidecar,
   type ManifestModel,
   type ProductionBundle,
+  type FrameRate,
   type ProductionFormat,
   type ProductionMedium,
   type ProposalSkill,
@@ -64,6 +65,7 @@ export interface CreateProductionInput {
   seriesTitle?: string;
   /** Delivery-profile values — concrete fields, never a discriminator (SPEC-023 R-3). */
   aspect?: string;
+  frameRate?: FrameRate;
   defaults?: Season["defaults"];
   logline?: string;
   /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
@@ -124,6 +126,7 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     ...(input.logline !== undefined ? { logline: input.logline } : {}),
     status: "in-progress",
     ...(aspect !== undefined && aspect !== null ? { aspect } : {}),
+    ...(input.frameRate !== undefined ? { frameRate: input.frameRate } : {}),
     created: store.now(),
     updated: store.now(),
   };
@@ -181,7 +184,11 @@ async function createProductionOnce(store: WorldStore, input: CreateProductionIn
     files,
     // Any new-model write crosses the schema boundary (SPEC-023 R-23) so older builds refuse
     // this world by name instead of silently dropping the production from the bundle.
-    ...(carriesNewModel || shape.isEpisodic ? { raiseSchemaVersion: 2 } : {}),
+    ...(input.frameRate !== undefined
+      ? { raiseSchemaVersion: 5 }
+      : carriesNewModel || shape.isEpisodic
+        ? { raiseSchemaVersion: 2 }
+        : {}),
     ...(input.requestId ? { requestId: input.requestId } : {}),
   });
   return slug;

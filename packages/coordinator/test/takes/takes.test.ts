@@ -750,6 +750,7 @@ describe("exports (R-19..R-22, D10..D12, §3.2)", () => {
     const worldDir = await tempDir("arke-export-");
     const plan: ExportPlan = {
       preset: "review-cut",
+      frameRate: 24,
       items: [{ type: "slate", label: "SHOT 1 · 4.0s", durationSec: 4 }],
       overlays: [],
       audio: [],

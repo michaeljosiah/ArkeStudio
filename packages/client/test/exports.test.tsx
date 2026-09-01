@@ -9,7 +9,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { __setStateForTest } from "../src/lib/store.js";
 import { CutScreen, ExportsScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import { legacySceneView, orderedShots } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots, seedStoryPictureTimeline } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, {
@@ -190,6 +190,23 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
     assert.ok(!text.includes("song to cut against"), "scene-order copy says nothing about a spine");
     assert.ok(!text.includes("cannot be made yet"), "ordinary presets retain their existing readiness");
     await unmount(renderer);
+  });
+
+  it("blocks invalid or unsupported saved timeline state instead of advertising a derived export", async () => {
+    const invalid = structuredClone(FIXTURE_STATE) as ClientState;
+    invalid.world!.productions[0]!.timeline = { status: "invalid", message: "timeline.json is malformed" };
+    const invalidRenderer = await renderExports(invalid);
+    assert.equal(exportAction(invalidRenderer).disabled, true);
+    assert.match(allText(invalidRenderer), /Timeline unavailable · timeline\.json is malformed/);
+    await unmount(invalidRenderer);
+
+    const timed = spineState("audio");
+    const production = timed.world!.productions[0]!;
+    production.timeline = { status: "ready", timeline: seedStoryPictureTimeline(production) };
+    const timedRenderer = await renderExports(ClientStateSchema.parse(timed));
+    assert.equal(exportAction(timedRenderer).disabled, true);
+    assert.match(allText(timedRenderer), /music-timed delivery does not consume the saved Picture timeline/);
+    await unmount(timedRenderer);
   });
 
   it("blocks every preset when the named track artifact is missing, without borrowing scene runtime", async () => {

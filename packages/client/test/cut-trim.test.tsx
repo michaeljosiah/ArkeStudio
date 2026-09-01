@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { ClientStateSchema, deriveCut, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
@@ -160,8 +161,8 @@ describe("the artifact panel and the overlay lane (82a)", () => {
 
   it("rests at two lanes: one to place a picture on and one under it for the sound", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
-    assert.equal((html.match(/fy-track__label">L\d/g) ?? []).length, 2);
-    assert.match(html, /L1[\s\S]*L0/, "the higher lane is drawn first, because it sits nearer the viewer");
+    assert.equal((html.match(/fy-track__label">Overlay L\d/g) ?? []).length, 2);
+    assert.match(html, /Overlay L1[\s\S]*Overlay L0/, "the higher lane is drawn first, because it sits nearer the viewer");
     // React escapes the apostrophe on the way out, so the bottom lane is matched by its words.
     assert.match(html, /drop a bed here, or split a clip.{1,8}s sound down to it/, "and the bottom one says so");
   });
@@ -176,7 +177,11 @@ describe("the artifact panel and the overlay lane (82a)", () => {
       ],
     } as typeof production.cut;
     const html = renderCut(ClientStateSchema.parse(state));
-    assert.equal((html.match(/fy-track__label">L\d/g) ?? []).length, 5, "L4 down to L0, so nothing is hidden");
+    assert.equal(
+      (html.match(/fy-track__label">Overlay L\d/g) ?? []).length,
+      5,
+      "L4 down to L0, so nothing is hidden",
+    );
   });
 
   it("counts what was placed, not what a split filed", () => {
@@ -282,6 +287,52 @@ function mediaOnlyState(): ClientState {
   } as typeof production.cut;
   return ClientStateSchema.parse(base);
 }
+
+describe("the unified editor shell (#685)", () => {
+  it("composes the real Library, centre and accessible right tabs around one timeline", () => {
+    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
+    const document = parseHTML(`<main>${html}</main>`).document;
+    const editor = document.querySelector<HTMLElement>("[data-screen='cut']");
+    assert.ok(editor, "the Cut editor renders");
+    assert.ok(editor.classList.contains("fy-cutcols"), "the editor owns the three panes beside the icon rail");
+    assert.equal(editor.querySelector(".fy-artpanel__title")?.textContent, "Library");
+    assert.equal(
+      editor.querySelector<HTMLInputElement>("input[type='search']")?.placeholder,
+      "Find a take, upload or line…",
+    );
+    assert.ok(editor.textContent?.includes("Maren at the rail, listening"), "an accepted real take is in the Library");
+    assert.ok(editor.querySelector(".fy-cutviewer"), "the real preview stays in the centre");
+    assert.equal(editor.querySelectorAll(".fy-timeline").length, 1, "the lanes share one timeline canvas");
+
+    const named = [...editor.querySelectorAll(".fy-track__label")]
+      .map((node) => node.textContent?.trim())
+      .filter((label) => ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"].includes(label ?? ""));
+    assert.deepEqual(named, ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"]);
+
+    const tabs = [...editor.querySelectorAll<HTMLButtonElement>("[role='tab']")];
+    assert.deepEqual(tabs.map((tab) => tab.textContent?.trim()), ["Inspector", "Arke"]);
+    assert.equal(tabs[0]?.getAttribute("aria-selected"), "true");
+    assert.ok(editor.querySelector("[role='tabpanel'][aria-labelledby='cut-inspector-tab']"));
+  });
+
+  it("inspects a selected real Picture clip with the existing trim control", () => {
+    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
+    const document = parseHTML(`<main>${html}</main>`).document;
+    const inspector = document.querySelector("#cut-inspector-panel");
+    assert.match(inspector?.textContent ?? "", /PICTURE CLIP/);
+    assert.match(inspector?.textContent ?? "", /tk_01J8F0000000000000000000B2/);
+    assert.ok(inspector?.querySelector(".fy-cutsel"), "trim moved into the reactive Inspector");
+  });
+
+  it("inspects a real overlay when there is no derived Picture clip to select", () => {
+    const html = renderCut(mediaOnlyState());
+    const document = parseHTML(`<main>${html}</main>`).document;
+    const inspector = document.querySelector("#cut-inspector-panel");
+    assert.match(inspector?.textContent ?? "", /OVERLAY CLIP/);
+    assert.match(inspector?.textContent ?? "", /plate\.mp4/);
+    assert.match(inspector?.textContent ?? "", /Overlay L1/);
+  });
+});
 
 describe("the cut footer of a production with no story (504)", () => {
   it("says nothing about shots or gaps, over uncovered time it has no claim on", () => {
