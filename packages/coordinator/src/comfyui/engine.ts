@@ -282,6 +282,12 @@ export class ComfyUiEngineService {
   /** Recipes invalidated by setup/restart and awaiting a healthy engine for verification. */
   private readonly pendingVerification = new Set<string>();
   private verificationWork: Promise<void> = Promise.resolve();
+  /**
+   * How many `reverify` passes are reading digests. Counted, not a flag: a weights download
+   * finishing and the person pressing Re-verify overlap routinely, and the first pass to end
+   * would otherwise clear the flag while the second was still reading.
+   */
+  private verifyingPasses = 0;
   /** Streamed checkpoint reads are cancelled when their lifecycle can no longer publish. */
   private hashAbort = new AbortController();
   /** Opaque identity replaced for every spawned process, including same-path restarts. */
@@ -1023,7 +1029,19 @@ export class ComfyUiEngineService {
     this.cancelHashing();
     this.nodeClasses = null;
     this.invalidateVerification(recipeIds);
-    await this.runVerificationWork(() => this.verifyPending(true));
+    // Say what is measurable now — the engine, its nodes, and what is in the models folder —
+    // before reading any digest. R-18 asks this control to measure what is present, and what is
+    // present is already known; making the answer wait on a 6.5 GB SHA-256 is what left a
+    // just-downloaded model reading as missing and Re-verify looking inert (issue 686).
+    // The count marks this pass as in flight, so the refresh this publish triggers reads the
+    // walk it can answer instead of starting a second read of the same bytes.
+    this.verifyingPasses += 1;
+    await this.publish();
+    try {
+      await this.runVerificationWork(() => this.verifyPending(true));
+    } finally {
+      this.verifyingPasses -= 1;
+    }
     await this.publish();
   }
 
@@ -1154,7 +1172,21 @@ export class ComfyUiEngineService {
     }
 
     // 5 · A pin mismatch found at pre-flight disables until re-verified (§2.5).
-    const verified = this.verification.get(recipe.id) ?? (await this.preflight(recipe.id));
+    //
+    // While a pass is reading digests, the verdict is read rather than computed. Computing it
+    // means a multi-gigabyte SHA-256 in the middle of the one call that publishes readiness, and
+    // `refreshComfyUi` awaits that call — so for as long as the digest took, no `comfyui.status`
+    // reached the screen at all. That is what left a model Arke had just downloaded still
+    // reading "1 of 1 model file missing", with Re-verify — whose whole job is to clear exactly
+    // that — looking inert, each press queueing another read of the 6.5 GB already being read
+    // (issue 686). Every rung above is cheap, so what they measure can be said now and the
+    // digest can land after.
+    const verified =
+      this.verification.get(recipe.id) ??
+      (this.verifyingPasses > 0 ? null : await this.preflight(recipe.id));
+    if (verified === null) {
+      return disabled("verification", "the model files are still being verified");
+    }
     if (!verified.ok) {
       return disabled(verified.reasonKind ?? "verification", verified.reason ?? "verification failed");
     }

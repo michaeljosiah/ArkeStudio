@@ -1243,6 +1243,55 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     assert.equal(status.recipes[0]!.state, "disabled");
     assert.match(status.recipes[0]!.reason!, /1 of 1 model file missing/);
   });
+
+  it("a weight file that has just landed stops reading as missing before its digest is read", async () => {
+    /*
+     * Issue 686. Readiness used to compute the pin verdict inline, which on a 6.5 GB checkpoint
+     * is a minute or more of SHA-256 in the middle of the one call the coordinator awaits before
+     * publishing. So a model Arke had just spent ten minutes downloading went on saying "1 of 1
+     * model file missing", and Re-verify — the control that exists for exactly that — looked
+     * inert, each press queueing another read of the bytes already being read.
+     *
+     * The rungs before the digest are all cheap. They answer while it is being read.
+     */
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:51999", {});
+    const deps = engineDeps(world, "C:/app");
+    let releaseDigest!: () => void;
+    const digestRead = new Promise<void>((resolve) => {
+      releaseDigest = resolve;
+    });
+    const readDigest = deps.hashFile;
+    const service = new ComfyUiEngineService({
+      ...deps,
+      hashFile: async (path, signal) => {
+        await digestRead;
+        return readDigest(path, signal);
+      },
+    });
+    await service.applySettings({
+      enginePath: null,
+      engineUrl: "http://127.0.0.1:51999",
+      modelsDir: "C:/models",
+    });
+    assert.match((await service.status(PROBES)).recipes[0]!.reason!, /1 of 1 model file missing/);
+
+    // The download completes: the file is on disk, its digest not yet read.
+    const landed = "C:/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add(landed);
+    world.hashes.set(landed, "a".repeat(64));
+    const reverified = service.reverify(["comfyui-draft-image"]);
+
+    const during = await service.status(PROBES);
+    assert.doesNotMatch(during.recipes[0]!.reason!, /missing/, "the file is present and was measured");
+    assert.match(during.recipes[0]!.reason!, /still being verified/);
+    // Still refused, because a verdict nobody has reached is not a pass (R-19 fails closed).
+    assert.equal(during.recipes[0]!.state, "disabled");
+
+    releaseDigest();
+    await reverified;
+    assert.equal((await service.status(PROBES)).recipes[0]!.state, "ready");
+  });
 });
 
 // ---------------------------------------------------------------------------
