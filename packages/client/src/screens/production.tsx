@@ -50,8 +50,10 @@ import { Badge, Button, Card, Input, Textarea, cx } from "../components/ui.js";
 import {
   Archive,
   Book,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   Film,
   Folder,
   Home,
@@ -106,6 +108,7 @@ import {
   exportWorld,
   rejectTake,
   placeOverlay,
+  proposeEpisode,
   removeOverlay,
   moveOverlay,
   rejoinOverlayAudio,
@@ -206,7 +209,7 @@ function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
-  const { worldId, prodId } = useParams();
+  const { worldId, prodId, episodeId, sceneId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const navigate = useNavigate();
@@ -236,6 +239,7 @@ export function ProductionLayout() {
     (production?.scenes
       .flatMap((s) => orderedShots(s))
       .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue").length ?? 0);
+  const artifactCount = (world?.artifacts ?? []).filter((artifact) => artifact.production === undefined).length;
   const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
   const guestCount = prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
@@ -252,6 +256,7 @@ export function ProductionLayout() {
    * otherwise. `null` is "never asked", which is why this is not a plain boolean.
   */
   const [railChoice, setRailChoice] = useRailCollapsed();
+  const [episodeExpansion, setEpisodeExpansion] = useState<Record<string, boolean>>({});
   const sceneDetailDefault = /\/scenes\/[^/]+\/?$/.test(location.pathname);
   const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
   /*
@@ -262,24 +267,26 @@ export function ProductionLayout() {
    */
   const MARKS: Record<string, (p: { size?: number }) => ReactNode> = {
     "": Home,
+    artifacts: Folder,
     cast: Users,
     story: Message,
     overview: Scroll,
+    season: Film,
     "story/chapters": Book,
     "story-structure": Folder,
     scenes: Film,
     "scenes/new": Plus,
     "branch-map": ListOrdered,
+    takes: VideoMark,
     generate: Sparkle,
     cut: VideoMark,
     audio: Waveform,
     exports: Archive,
   };
   /*
-   * An episode is reached by drilling into the season, and both of its screens live outside the
-   * `season` path — the chat under `story/episodes/:id`, the page under `episodes/:id` (turn 91).
-   * Neither lights any rail item on its own, so the rail goes blank exactly when somebody is two
-   * levels deep and most wants to know where they are. Season owns them: it is the level above.
+   * An episode is reached by drilling into the episode tree, and both of its screens live outside
+   * the `season` path — the chat under `story/episodes/:id`, the page under `episodes/:id` (turn 91).
+   * Neither lights the Episodes item on its own, so the tree claims both child routes explicitly.
    */
   const inEpisode = /\/episodes\//.test(location.pathname);
   /* `/season` keeps working as an address and now lands on the same screen as the index. */
@@ -295,19 +302,22 @@ export function ProductionLayout() {
     end?: boolean,
     also?: boolean,
     under?: boolean,
+    destination?: string,
+    active?: boolean,
   ) => {
     const Mark = MARKS[slug];
     return (
       <NavLink
-        key={slug || "dash"}
-        to={`${base}${slug ? `/${slug}` : ""}`}
+        key={`${slug || "dash"}:${label}`}
+        to={destination ?? `${base}${slug ? `/${slug}` : ""}`}
         end={end ?? slug === ""}
         title={folded ? label : undefined}
+        aria-current={active === undefined ? undefined : active ? "page" : "false"}
         className={({ isActive }) =>
           cx(
             "fy-prodrail__item",
             under && "fy-prodrail__item--under",
-            (isActive || also) && "fy-prodrail__item--active",
+            (active ?? (isActive || also)) && "fy-prodrail__item--active",
           )
         }
       >
@@ -334,10 +344,31 @@ export function ProductionLayout() {
     : seconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
-    ? isStory
+    ? shape?.isEpisodic
+      ? `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
+      : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
       : `${shape!.displayLabel.toLowerCase()}${cut ? ` · ${cutFigure} cut` : ""}`
     : "";
+  const currentEpisodeId =
+    episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
+  const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
+  const scenesById = new Map((production?.scenes ?? []).map((scene) => [scene.id, scene]));
+  const episodePrefix = prodId === undefined ? null : `productions/${prodId}/episodes/`;
+  const episodeStems = new Set(Object.values(production?.episodeFiles ?? {}));
+  const pendingEpisodeCreate =
+    episodePrefix !== null &&
+    (world?.proposals ?? []).some((staged) =>
+      staged.proposal.targets.some((target) => {
+        if (!target.path.startsWith(episodePrefix) || !target.path.endsWith(".json")) return false;
+        const stem = target.path.slice(episodePrefix.length, -".json".length);
+        return stem.length > 0 && !stem.includes("/") && !episodeStems.has(stem);
+      }),
+    );
+  const generateView = new URLSearchParams(location.search).get("view");
+  const inGenerate = location.pathname.endsWith("/generate");
+  const takesActive = inGenerate && generateView !== "bench";
+  const generateActive = inGenerate && generateView === "bench";
   return (
     <div className="fy-app">
       <AppChrome
@@ -348,7 +379,13 @@ export function ProductionLayout() {
         }}
       />
       <div className="fy-prod">
-        <div className={cx("fy-prodrail", folded && "fy-prodrail--folded")}>
+        <div
+          className={cx(
+            "fy-prodrail",
+            shape?.isEpisodic && "fy-prodrail--episodic",
+            folded && "fy-prodrail--folded",
+          )}
+        >
           {/* The person's own control (turn 101), where the prototype puts it. It sits above the
               switcher so folding never moves the thing you were about to press. */}
           <button
@@ -364,61 +401,170 @@ export function ProductionLayout() {
           <button
             type="button"
             className="fy-prodrail__switch"
+            aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
+            title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
             onClick={() => navigate(`/w/${worldId}/productions`)}
           >
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <span className="fy-prodrail__switchmark" aria-hidden>
+              {(production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+            </span>
+            <div className="fy-prodrail__switchcopy">
               <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
               <div className="fy-prodrail__switchsub">{switchSub}</div>
             </div>
-            <ChevronRight size={14} />
+            <span className="fy-prodrail__switchchevron">
+              {shape?.isEpisodic ? <ChevronsUpDown size={13} /> : <ChevronRight size={14} />}
+            </span>
           </button>
-          {shape?.isEpisodic
-            ? item("", "Season", production?.season ? `v${production.season.version}` : "—", true, inSeason)
-            : item("", "Dashboard")}
-          {/* Arcs, themes, setups and payoffs — one item under Season and off the default
-              walk (turn 99). It was a peer tab, which taught a second vocabulary to somebody
-              who did not yet have a first episode. */}
-          {shape?.isEpisodic && item("story-structure", "Story structure", undefined, true, false, true)}
-          {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
-              video does, and the count is the guests — the number the rail can say something
-              true about, since the world's cast is shared and belongs to the world's own rail. */}
-          {item("cast", "Cast", String(guestCount))}
-          {isStory ? (
+          <span className="fy-prodrail__fold-divider" aria-hidden />
+          {shape?.isEpisodic ? (
             <>
-              {/* World Chat with a production for a subject (turn 89) — the name teaches the
-                  model. Its details are their own item (turn 88), and it ends where Chapters
-                  begins so the two never light together. */}
-              {item("story", "Develop", "chat", true)}
-              {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-              {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+              {item("", "Overview", undefined, true)}
+              {item(
+                "season",
+                "Episodes",
+                String(production?.episodes.length ?? 0),
+                true,
+                inSeason || inScene,
+              )}
+              <div className="fy-prodrail__episodes">
+                {episodes.map((episode) => {
+                  const open = episodeExpansion[episode.id] ?? episode.id === currentEpisodeId;
+                  return (
+                    <div key={episode.id} className="fy-prodrail__episode">
+                      <button
+                        type="button"
+                        className="fy-prodrail__episode-toggle"
+                        aria-expanded={open}
+                        aria-label={`${open ? "Collapse" : "Expand"} Episode ${episode.order}: ${episode.title}`}
+                        onClick={() =>
+                          setEpisodeExpansion((current) => ({ ...current, [episode.id]: !open }))
+                        }
+                      >
+                        {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                        <span className="fy-prodrail__episode-name">
+                          Episode {episode.order} · {episode.title}
+                        </span>
+                        <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
+                      </button>
+                      {open && (
+                        <div className="fy-prodrail__scenes">
+                          {episode.scenes.map((id, index) => {
+                            const scene = scenesById.get(id);
+                            return scene === undefined ? (
+                              <span key={id} className="fy-prodrail__scene fy-prodrail__scene--missing">
+                                {index + 1} · Missing scene
+                              </span>
+                            ) : (
+                              <NavLink
+                                key={scene.id}
+                                to={`${base}/scenes/${scene.id}`}
+                                className={({ isActive }) =>
+                                  cx("fy-prodrail__scene", isActive && "fy-prodrail__scene--active")
+                                }
+                              >
+                                <span className="fy-prodrail__scene-name">
+                                  {scene.number} · {scene.title}
+                                </span>
+                                <span className="fy-prodrail__scene-dot" aria-hidden />
+                              </NavLink>
+                            );
+                          })}
+                          <NavLink
+                            to={`${base}/scenes/new`}
+                            className="fy-prodrail__new-scene"
+                          >
+                            <Plus size={11} />
+                            New scene
+                          </NavLink>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {production && (
+                  <button
+                    type="button"
+                    className="fy-prodrail__new-episode"
+                    disabled={pendingEpisodeCreate}
+                    onClick={() => {
+                      if (!worldId || !prodId) return;
+                      const order = Math.max(0, ...production.episodes.map((episode) => episode.order)) + 1;
+                      proposeEpisode(worldId, prodId, {
+                        title: `Episode ${String(order).padStart(2, "0")}`,
+                        order,
+                      });
+                    }}
+                  >
+                    <Plus size={11} />
+                    {pendingEpisodeCreate ? "New episode pending" : "New episode"}
+                  </button>
+                )}
+              </div>
+              {item(
+                "takes",
+                "Takes",
+                String(production?.takes.length ?? 0),
+                false,
+                false,
+                false,
+                `${base}/generate`,
+                takesActive,
+              )}
+              {item(
+                "artifacts",
+                "Artifacts",
+                String(artifactCount),
+                false,
+                false,
+                false,
+                `/w/${worldId}/artifacts`,
+              )}
               {item("audio", "Audio", String(audioCount))}
+              {item(
+                "generate",
+                "Generate",
+                String(production?.takes.length ?? 0),
+                false,
+                false,
+                false,
+                `${base}/generate?view=bench`,
+                generateActive,
+              )}
+              {item("cut", "Cut", cut ? railFigure : "0:00")}
               {item("exports", "Exports", String(exportCount))}
             </>
           ) : (
             <>
-              {/* World Chat with a production for a subject (turn 89): the same transcript, the
-                  same points, the same wrap-up.
-                  The item goes where the panel lands (turn 99). An episodic production carries
-                  Arke docked on its season and its episodes, so a rail entry would be a second
-                  door into the same thread; everything else still reaches it here, renamed from
-                  Production Chat, which named an implementation. The route is untouched either
-                  way — a rename is display, never wiring. */}
-              {!shape?.isEpisodic && item("story", "Develop", "chat", true)}
-              {/* An episodic production's front page is its season (turn 93), so Season is the
-                  rail's first item — drawn above, in place of Dashboard — and there is no second
-                  entry for it here. A production without a season keeps both. */}
-              {!shape?.isEpisodic &&
-                item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-              {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
-              {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
-              {shape?.isBranching &&
-                item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
-              {item("scenes/new", "New scene", undefined, true, false, true)}
-              {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
-              {item("generate", "Generate", String(production?.takes.length ?? 0))}
-              {item("cut", "Cut", cut ? railFigure : "0:00")}
-              {item("audio", "Audio", String(audioCount))}
-              {item("exports", "Exports", String(exportCount))}
+              {item("", "Dashboard")}
+              {/* Cast is on both formats' rails (SPEC-020 R-9): a story has a cast as much as a
+                  video does, and the count is the guests — the number the rail can say something
+                  true about, since the world's cast is shared and belongs to the world's own rail. */}
+              {item("cast", "Cast", String(guestCount))}
+              {isStory ? (
+                <>
+                  {item("story", "Develop", "chat", true)}
+                  {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
+                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  {item("audio", "Audio", String(audioCount))}
+                  {item("exports", "Exports", String(exportCount))}
+                </>
+              ) : (
+                <>
+                  {item("story", "Develop", "chat", true)}
+                  {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
+                  {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
+                  {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
+                  {shape?.isBranching &&
+                    item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
+                  {item("scenes/new", "New scene", undefined, true, false, true)}
+                  {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
+                  {item("generate", "Generate", String(production?.takes.length ?? 0))}
+                  {item("cut", "Cut", cut ? railFigure : "0:00")}
+                  {item("audio", "Audio", String(audioCount))}
+                  {item("exports", "Exports", String(exportCount))}
+                </>
+              )}
             </>
           )}
           <div className="fy-prodrail__spacer" />
