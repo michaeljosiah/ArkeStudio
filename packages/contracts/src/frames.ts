@@ -3,6 +3,7 @@ import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
+import { TimelineClipIdSchema, TimelineMoveDirectionSchema, TimelineSourceFingerprintSchema } from "./timeline.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
@@ -30,7 +31,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 
@@ -1412,6 +1413,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionKind: z.string().min(1).max(80).optional(),
       seriesTitle: z.string().min(1).max(200).optional(),
       aspect: z.string().min(1).max(20).optional(),
+      frameRate: FrameRateSchema.optional(),
       defaults: z
         .object({
           episodeCount: z.number().int().min(1).optional(),
@@ -2039,6 +2041,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       trimInSec: z.number().min(0).finite(),
     })
     .strict(),
+  /** SPEC-037: materialise if needed, then move one Picture clip by one position. */
+  z
+    .object({
+      kind: z.literal("timeline-move-picture"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      clipId: TimelineClipIdSchema,
+      direction: TimelineMoveDirectionSchema,
+      /** Null means the command was composed against the unsaved first assembly. */
+      baseRevision: z.number().int().min(0).nullable(),
+      sourceFingerprint: TimelineSourceFingerprintSchema,
+    })
+    .strict(),
+  /** SPEC-037: move one durable Picture history entry between Undo and Redo. */
+  z
+    .object({
+      kind: z.literal("timeline-history"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      action: z.enum(["undo", "redo"]),
+      baseRevision: z.number().int().min(0),
+    })
+    .strict(),
   /** SPEC-013 R-16/R-17: cut.json holds audio tracks and placement only. */
   z
     .object({
@@ -2122,6 +2147,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       /** One episode's deliverable (issue #396); absent exports the production-wide cut. */
       episodeId: z.string().optional(),
+      /** The saved timeline revision shown when this export was requested; null means legacy derivation. */
+      timelineRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
       preset: z.enum(["review-cut", "master", "social-excerpt"]),
     })
     .strict(),

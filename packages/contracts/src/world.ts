@@ -201,6 +201,15 @@ export type ProductionFormat = z.infer<typeof ProductionFormatSchema>;
 export const ProductionMediumSchema = z.enum(["story", "video", "interactive-video"]);
 export type ProductionMedium = z.infer<typeof ProductionMediumSchema>;
 
+export const FrameRateSchema = z.union([z.literal(24), z.literal(25), z.literal(30)]);
+export type FrameRate = z.infer<typeof FrameRateSchema>;
+export const DEFAULT_FRAME_RATE: FrameRate = 24;
+
+/** Existing production files have no clock field and continue to mean 24 fps without being rewritten. */
+export function productionFrameRate(production: { frameRate?: FrameRate }): FrameRate {
+  return production.frameRate ?? DEFAULT_FRAME_RATE;
+}
+
 export const ProductionSchema = z
   .object({
     /** The production's directory slug within the world. */
@@ -227,6 +236,8 @@ export const ProductionSchema = z
     logline: z.string().optional(),
     /** Display vocabulary ("in-progress", "cutting", …) — unversioned, change-logged only (§2.4.1). */
     status: z.string().min(1),
+    /** The production's whole-frame clock (SPEC-037 R-6). Absent legacy records resolve to 24 fps. */
+    frameRate: FrameRateSchema.optional(),
     /** Optional production-specific visual language; the world surface names this exception. */
     styleOverride: z.string().min(1).optional(),
     /**

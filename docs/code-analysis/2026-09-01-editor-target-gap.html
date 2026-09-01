@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arke Editor - Gaps and Decisions</title>
+  <style>
+    :root{--bg:#0f1419;--panel:#161b22;--panel2:#1c2330;--border:#2d3748;--text:#d7dde6;--muted:#8b97a8;--accent:#4fc3f7;--accent2:#81d4fa;--good:#66bb6a;--warn:#ffb74d;--bad:#ef5350;--code:#11151c}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 "Segoe UI",system-ui,sans-serif}.wrap{max-width:1120px;margin:0 auto;padding:32px 22px 70px}header{border-bottom:1px solid var(--border);padding-bottom:22px}h1{font-size:31px;line-height:1.2;margin:0 0 8px}h2{font-size:22px;margin:36px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border)}h3{font-size:18px;margin:25px 0 8px}.sub,.muted{color:var(--muted)}.sub{font-size:16px}.meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:20px}.meta,.card,.step{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:13px}.meta b{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}.meta span{display:block;margin-top:3px}.callout{background:var(--panel);border-left:4px solid var(--accent);padding:16px 18px;margin:14px 0}.callout.bad{border-color:var(--bad)}.callout.warn{border-color:var(--warn)}.callout.good{border-color:var(--good)}nav{background:var(--panel);border:1px solid var(--border);padding:13px 16px;display:flex;gap:8px 18px;flex-wrap:wrap}a{color:var(--accent2)}nav a{white-space:nowrap}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:14px 0}.card h3,.step h3{margin:0 0 7px}.card p,.step p{margin:6px 0}.decision{border-left:4px solid var(--warn)}.decision.recommended{border-left-color:var(--good)}table{width:100%;border-collapse:collapse;background:var(--panel);margin:12px 0 22px}th,td{text-align:left;vertical-align:top;border:1px solid var(--border);padding:10px}th{background:var(--panel2);color:var(--accent2)}code,pre{font-family:"Cascadia Code",Consolas,monospace;font-size:12px}code{color:var(--accent2)}pre{background:var(--code);border:1px solid var(--border);padding:12px;overflow:auto;white-space:pre-wrap}.tag{display:inline-block;border:1px solid var(--muted);border-radius:999px;padding:1px 8px;font-size:11px;white-space:nowrap}.blocker{color:var(--bad);border-color:var(--bad)}.missing{color:var(--warn);border-color:var(--warn)}.partial{color:var(--accent);border-color:var(--accent)}.ready{color:var(--good);border-color:var(--good)}strong{color:#eef4fa}ul,ol{padding-left:22px}.plain li{margin-bottom:7px}.term{color:var(--accent2);font-weight:600}.steps{display:grid;gap:10px}.step{border-left:4px solid var(--accent)}.step b{color:var(--accent2)}.source{color:var(--muted);font-size:12px}.source code{font-size:11px}@media(max-width:720px){.wrap{padding:20px 12px 48px}h1{font-size:26px}.meta-grid{grid-template-columns:1fr 1fr}table{display:block;overflow-x:auto}.cards{grid-template-columns:1fr}}@media print{body{background:#fff;color:#111}.wrap{max-width:none}.meta,.card,.step,.callout,table,th,td,nav{background:#fff;border-color:#bbb}.sub,.muted,.source{color:#555}a,code,th{color:#174a69}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>Arke Editor: Gaps and Decisions</h1>
+    <div class="sub">A plain-language comparison of the target editor design and the editor Arke has today.</div>
+    <div class="meta-grid">
+      <div class="meta"><b>Target reviewed</b><span>Downloads\Arke Editor.html</span></div>
+      <div class="meta"><b>Current code</b><span>analysis/editor-design-gap / caa33d0f</span></div>
+      <div class="meta"><b>Date</b><span>2026-09-01</span></div>
+      <div class="meta"><b>Verification</b><span>Code, specs and tests inspected; tests not run</span></div>
+    </div>
+  </header>
+
+  <h2>Contents</h2>
+  <nav>
+    <a href="#short-version">Short version</a>
+    <a href="#target">Target design</a>
+    <a href="#today">What Arke has</a>
+    <a href="#decisions">Decisions</a>
+    <a href="#gaps">Gap table</a>
+    <a href="#order">Build order</a>
+    <a href="#evidence">Evidence</a>
+  </nav>
+
+  <h2 id="short-version">The Short Version</h2>
+  <div class="callout bad">
+    <strong>The target is much more than a new layout.</strong>
+    <p>It combines the asset library, preview, timeline, clip settings, take choices and Arke assistant in one screen. It also expects normal timeline editing, mixed audio, subtitles, undo, and more export choices.</p>
+    <p>Arke already has strong foundations: accepted takes, visible gaps, real file storage, crash-safe saves and local export. We should keep those parts.</p>
+    <p>Three implementation issues must be solved before the target editor can be trusted:</p>
+    <ol>
+      <li>The current story cut does not save clip order. The new editor must save Arke's first assembly as an editable timeline that people can always override.</li>
+      <li>The current preview is silent and does not show every picture placed on the timeline. Export can therefore look and sound different from preview.</li>
+      <li>Episode and music-timed exports can silently leave out clips that are visible on the timeline.</li>
+    </ol>
+  </div>
+  <div class="callout warn">
+    <strong>Most of the product direction is now clear.</strong> The story guides generation and seeds the first edit, but it does not lock the editor. Plain recommendations for audio and subtitles are included below for review.
+  </div>
+
+  <h2 id="target">What The Target Editor Is Trying To Be</h2>
+  <p>The downloaded file is a design prototype. It shows the intended workflow, but it is not a working media editor. It uses still images instead of real video, has no real audio mix, does not save work, and does not produce an export.</p>
+  <table>
+    <thead><tr><th>Area</th><th>Target experience</th></tr></thead>
+    <tbody>
+      <tr><td>One editor screen</td><td>Navigation on the far left, assets beside it, preview and timeline in the middle, and Inspector or Arke on the right.</td></tr>
+      <tr><td>Automatic first cut</td><td>Accepted takes are placed in story order. Shots without an accepted take remain visible as gaps.</td></tr>
+      <tr><td>Asset library</td><td>Search, filter, upload, browse scenes and shots, and drag media onto the timeline.</td></tr>
+      <tr><td>Timeline</td><td>Picture, dialogue, ambience, music and subtitle tracks. Clips can move, trim, split, duplicate, delete and ripple delete.</td></tr>
+      <tr><td>Preview</td><td>Play and scrub the actual edited picture, sound and subtitles.</td></tr>
+      <tr><td>Inspector</td><td>Show settings for the selected cut, scene, track or clip. Change takes and audio settings without leaving the editor.</td></tr>
+      <tr><td>Arke</td><td>Ask for an edit, see the suggested clips as ghosts, then accept or discard the change.</td></tr>
+      <tr><td>Export</td><td>Choose format, size, subtitles and audio output.</td></tr>
+      <tr><td>Safety</td><td>Save automatically, recover after a crash, and undo or redo edits.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What not to copy from the prototype</h3>
+  <ul class="plain">
+    <li>It is fixed at 1400 by 880 pixels and does not adapt to smaller windows.</li>
+    <li>Most controls are clickable text or boxes instead of accessible buttons and menus.</li>
+    <li>Several actions are broken, including take switching, one Arke edit, keyboard playback and adding selected shots.</li>
+    <li>Upload and Export look active but do not do the work.</li>
+    <li>Its waveforms, playback, audio and subtitles are only visual examples.</li>
+  </ul>
+
+  <h2 id="today">What Arke Already Has</h2>
+  <div class="callout good">
+    <strong>These parts are valuable and should be carried into the new editor.</strong>
+  </div>
+  <table>
+    <thead><tr><th>Current strength</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Accepted takes build the cut</td><td>Changing the accepted take immediately changes the film. There is no second hidden list of shot choices.</td></tr>
+      <tr><td>Missing shots stay visible</td><td>A gap is shown in the timeline and becomes a labelled black slate in a review export.</td></tr>
+      <tr><td>Takes are never rewritten</td><td>The original generated result stays intact. Reviews and the current choice are saved separately.</td></tr>
+      <tr><td>Real upload and export</td><td>Electron opens the file picker. FFmpeg renders locally with progress and cancellation.</td></tr>
+      <tr><td>Crash-safe saves</td><td>Timeline placements are saved once when a drag ends, using an atomic filesystem commit.</td></tr>
+      <tr><td>Real proposal system</td><td>Arke already has staged changes, conflict checks, Accept and Discard for other parts of the product.</td></tr>
+      <tr><td>Some clip editing</td><td>Uploaded clips can move between lanes, trim from either end, remove, and split or rejoin their sound.</td></tr>
+      <tr><td>Real transport</td><td>The current Cut can play accepted video, seek and keep the playhead in sync with the picture.</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="decisions">Agreed Decisions And Recommendations</h2>
+  <p>The agreed choices describe how the editor should behave. Audio and subtitles include recommended defaults based on common editing workflows.</p>
+
+  <div class="cards">
+    <section class="card decision recommended">
+      <h3>1. The story starts the edit but never locks it</h3>
+      <p><span class="term">During generation:</span> the story controls which shots are made and their default order. This is where tighter controls belong.</p>
+      <p><span class="term">After generation:</span> Arke places the available shots into the editor as the first cut. That saved timeline then controls the finished film.</p>
+      <ul>
+        <li>A human can always move, split, duplicate, replace or delete a clip.</li>
+        <li>The UI may warn that the edit no longer follows the story, but it must never block the change.</li>
+        <li>A later story change must not silently overwrite manual timeline edits. Arke can offer an update as an approval request.</li>
+        <li>Standalone productions use the same editable timeline, simply without a story-based first assembly.</li>
+      </ul>
+      <p><strong>Saved result:</strong> generation follows the story; delivery follows the editor timeline.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>2. Use the target's track model</h3>
+      <p><span class="term">Today:</span> placed clips use numbered, untyped lanes. A separate unused model describes dialogue, score and ambience.</p>
+      <p><strong>Decision:</strong> use named Picture, Dialogue, Ambience, Music and Subtitle tracks. Each track has a stable ID, order, name, type, mute setting and clips. The current <em>score</em> concept becomes <em>music</em>.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>3. Store time as video frames</h3>
+      <p><span class="term">Today:</span> most timeline positions are decimal seconds. Story, episode and music-timed cuts use different clocks.</p>
+      <p><strong>Decision:</strong> every production has a frame rate, such as 24, 25 or 30 frames per second. Save clip positions and lengths as whole frame numbers and display them as <code>hours:minutes:seconds:frames</code>.</p>
+      <p>This is the normal video-editing model. It makes cuts exact and makes handoff to other editors much easier. A production can default to 24 frames per second, while allowing another rate when the production is created.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>4. Keep speech clear by lowering background sound</h3>
+      <p><span class="term">Today:</span> the editor preview is silent. Export can combine sound, but there are almost no controls for how loud each part should be.</p>
+      <p><strong>Recommended behavior:</strong></p>
+      <ul>
+        <li>Dialogue and narration are the most important sound.</li>
+        <li>When someone speaks, music and ambience become quieter by 9 dB by default. In plain terms, this is a strong reduction, but the background remains audible.</li>
+        <li>The background fades down quickly instead of jumping, then returns smoothly after the speech ends.</li>
+        <li>The user can turn this behavior off or change how much quieter the background becomes.</li>
+        <li>Every clip has a simple volume control. Every track has <strong>Mute</strong> (turn it off) and <strong>Solo</strong> (hear only that track).</li>
+        <li>Preview and export must sound the same, and the final mix should prevent harsh distortion when several sounds overlap.</li>
+      </ul>
+      <p>This automatic lowering is commonly called <em>ducking</em>. It is a normal starting point for dialogue-led video, but it remains editable rather than forced.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>5. Every completed editor action can be undone</h3>
+      <p><span class="term">Today:</span> saves are crash-safe, but completed Cut edits have no Undo or Redo.</p>
+      <p><strong>Decision:</strong> one drag, one menu action, one take switch or one accepted Arke request equals one undo step. Redo reapplies it. Undoing a take switch changes the selected take back but does not erase the review history.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>6. Arke can request approval for any editor action</h3>
+      <p><strong>Decision:</strong> Arke can prepare any action a human can perform in the editor. The request appears in chat with an <strong>Accept</strong> action and a plain summary of what will change.</p>
+      <ul>
+        <li>Accept applies the changes immediately to the editor.</li>
+        <li>The full accepted request is one undo step.</li>
+        <li>Reject changes nothing.</li>
+        <li>Where useful, the timeline shows the proposed result as ghost clips before acceptance.</li>
+        <li>If the timeline changed after Arke prepared the request, Arke must update the request and ask again instead of applying an old edit.</li>
+      </ul>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>7. Store subtitles as editable timed text</h3>
+      <p><span class="term">Today:</span> there is no saved subtitle cue model and no subtitle export.</p>
+      <p><strong>Recommended model:</strong> each subtitle item contains the words, start frame, end frame and optional speaker. A subtitle track also stores its language and a simple shared appearance.</p>
+      <ul>
+        <li>Subtitles can be imported from SRT or VTT files.</li>
+        <li>Speech-to-text can create the first draft.</li>
+        <li>People and Arke can edit the words and timing.</li>
+        <li>Support more than one subtitle track so a film can have different languages.</li>
+        <li>Export choices are: none, printed onto the video, a separate subtitle file, or both.</li>
+      </ul>
+      <p>The editable timed text is the saved original. Text printed onto an exported video is only an output, not the source.</p>
+    </section>
+
+    <section class="card decision recommended">
+      <h3>8. Every export includes the visible tracks</h3>
+      <p><span class="term">Today:</span> production-wide export includes placed lanes. Episode and music-timed export do not.</p>
+      <p><strong>Decision:</strong> support visible picture, dialogue, ambience, music and subtitle tracks in every export mode. Production, episode and music-timed exports must all use the same timeline contents and settings.</p>
+    </section>
+  </div>
+
+  <h2 id="gaps">Clear Gap Table</h2>
+  <table>
+    <thead><tr><th>Capability</th><th>State today</th><th>What is missing</th><th>When to solve</th></tr></thead>
+    <tbody>
+      <tr><td>Accepted-take first cut and visible gaps</td><td><span class="tag ready">Ready</span></td><td>Nothing fundamental. Keep this behavior.</td><td>Preserve from the start.</td></tr>
+      <tr><td>Story-guided first cut and standalone editing</td><td><span class="tag ready">Decided</span></td><td>Save Arke's first assembly as an editable timeline. Standalone starts with an empty or imported timeline.</td><td>Build the saved timeline model first.</td></tr>
+      <tr><td>Move/split/delete the main picture</td><td><span class="tag ready">Decided</span></td><td>Commands that let humans override the first assembly without being blocked.</td><td>Before enabling target timeline controls.</td></tr>
+      <tr><td>Frame-based time</td><td><span class="tag ready">Decided</span></td><td>Project frame rate, whole-frame positions and conversion from current seconds.</td><td>Build into the saved timeline model.</td></tr>
+      <tr><td>Preview matches export</td><td><span class="tag blocker">Blocker</span></td><td>Show placed picture, play the mixed sound and render subtitles in preview.</td><td>Before calling the screen an editor.</td></tr>
+      <tr><td>Episode and music-timed exports</td><td><span class="tag blocker">Must fix</span></td><td>Include every visible track in every export mode.</td><td>Fix first; this is a current correctness problem.</td></tr>
+      <tr><td>Typed tracks</td><td><span class="tag ready">Decided</span></td><td>Build the target Picture, Dialogue, Ambience, Music and Subtitle track model.</td><td>Data model first, UI second.</td></tr>
+      <tr><td>Full clip editing</td><td><span class="tag partial">Partial</span></td><td>Temporal split, duplicate, ripple delete, linked clips and collision rules.</td><td>After picture and track decisions.</td></tr>
+      <tr><td>Asset library in the editor</td><td><span class="tag partial">Partial</span></td><td>Search, filters, scene/shot hierarchy, Used state and click-to-locate.</td><td>With the new editor shell.</td></tr>
+      <tr><td>Take choices in the Inspector</td><td><span class="tag partial">Partial</span></td><td>Bring existing accepted/rejected take workflow into the Cut.</td><td>With the Inspector.</td></tr>
+      <tr><td>Audio monitoring and mixing</td><td><span class="tag ready">Recommended</span></td><td>Build real waveforms, volume, mute, solo, speech-first background lowering and distortion protection.</td><td>Confirm the recommended default, then build with shared preview/export sound.</td></tr>
+      <tr><td>Subtitles</td><td><span class="tag ready">Recommended</span></td><td>Build timed text, import, speech-to-text, editing, languages and all export choices.</td><td>Confirm the recommended model, then build with the track and export model.</td></tr>
+      <tr><td>Arke timeline approvals</td><td><span class="tag ready">Flow decided</span></td><td>Allow any editor action through chat approval, immediate Accept, ghost preview and one-step undo.</td><td>After edit commands and undo.</td></tr>
+      <tr><td>Undo and redo</td><td><span class="tag ready">Behavior decided</span></td><td>Build durable history where each completed action or accepted request is one step.</td><td>Before ripple and Arke edits ship.</td></tr>
+      <tr><td>Professional export settings</td><td><span class="tag partial">Partial</span></td><td>H.264/ProRes choice, custom size, crop/reframe, subtitles, mix/stems and saved presets.</td><td>After preview/export match.</td></tr>
+      <tr><td>Timeline handoff to other editors</td><td><span class="tag missing">Missing</span></td><td>OTIO first, then other formats only if needed.</td><td>Last; requires final time and track models.</td></tr>
+      <tr><td>Responsive and accessible editor</td><td><span class="tag partial">Partial</span></td><td>Collapsible panes, keyboard clip actions, non-drag placement, proper dialogs and focus handling.</td><td>Build into the shell, not afterward.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Current labels that are misleading</h3>
+  <div class="callout warn">
+    <ul class="plain">
+      <li><strong>Review cut says "timecode"</strong>, but export does not add timecode.</li>
+      <li><strong>Social excerpt says "captions"</strong>, but export does not add captions.</li>
+      <li><strong>Social excerpt is not an excerpt</strong>; it currently renders the full cut in a vertical frame.</li>
+    </ul>
+    <p>These labels should be corrected now, before the larger editor work.</p>
+  </div>
+
+  <h2 id="order">Recommended Build Order</h2>
+  <div class="steps">
+    <section class="step">
+      <h3><b>1.</b> Fix current export truth</h3>
+      <p>Stop episode and music-timed exports from dropping visible clips. Remove unsupported timecode, captions and excerpt wording. Clearly state that current preview excludes placed media and sound.</p>
+    </section>
+    <section class="step">
+      <h3><b>2.</b> Build the agreed timeline foundations</h3>
+      <p>Add the story-seeded editable timeline, target track types, frame-based time, subtitle data, undo history and migration from current seconds and numbered lanes.</p>
+    </section>
+    <section class="step">
+      <h3><b>3.</b> Build the new shell in read-only form</h3>
+      <p>Put library, preview, timeline, Inspector and Arke in one screen. Reuse existing data and actions. Add pane collapse, focus order and keyboard access now.</p>
+    </section>
+    <section class="step">
+      <h3><b>4.</b> Add editing and undo</h3>
+      <p>Add move, trim, split, duplicate, delete, ripple and track actions. Warnings can explain when an edit leaves story order, but they never block it. Make every action one safe save and one undo step.</p>
+    </section>
+    <section class="step">
+      <h3><b>5.</b> Make preview and export use the same rules</h3>
+      <p>Add picture compositing, mixed audio, real waveforms and subtitles. Speech lowers background sound by the editable default. The browser preview and every FFmpeg export mode must use the same tracks and settings.</p>
+    </section>
+    <section class="step">
+      <h3><b>6.</b> Add takes and Arke to the Inspector</h3>
+      <p>Reuse the current take acceptance flow. Let Arke request approval in chat for any editor action. Accept updates the editor immediately and creates one undo step; Reject changes nothing.</p>
+    </section>
+    <section class="step">
+      <h3><b>7.</b> Add professional delivery</h3>
+      <p>Add codec, size, subtitles, audio outputs and saved presets. Add OTIO only after the final time, track and export rules are stable.</p>
+    </section>
+  </div>
+
+  <h2 id="evidence">Technical Evidence</h2>
+  <p>This section supports the conclusions above. It can be skipped when making the product decisions.</p>
+  <table>
+    <thead><tr><th>Plain finding</th><th>Current source</th><th>Target source</th></tr></thead>
+    <tbody>
+      <tr><td>Story picture order is derived and not saved as clips.</td><td><code>packages/contracts/src/cut.ts:10-14, 49-68, 151-155</code><br><code>docs/specifications/013...md:114-125, 271-283</code></td><td>Picture move/split/delete: <code>Target T:2337-2607</code></td></tr>
+      <tr><td>The main picture only supports trim-in.</td><td><code>packages/client/src/screens/production.tsx:3448-3542</code><br><code>packages/client/test/cut-trim.test.tsx:80-93</code></td><td>Two-edge trim and context actions: <code>Target T:1540-1591</code></td></tr>
+      <tr><td>Preview is muted and does not show placed overlays.</td><td><code>production.tsx:3283-3444</code><br><code>docs/issues/099...md:337-340</code></td><td>Combined preview intent: <code>Target T:1440-1465</code></td></tr>
+      <tr><td>Episode and music-timed exports omit lane clips.</td><td><code>packages/coordinator/src/coordinator.ts:6734-6809</code><br><code>docs/issues/098...md:60-69</code></td><td>One visible cut/export model: <code>Target T:1394-1648, 1953-1981</code></td></tr>
+      <tr><td>Current lanes are numbered and untyped.</td><td><code>packages/contracts/src/cut.ts:49-123</code><br><code>production.tsx:2963-3023</code></td><td>Typed lanes: <code>Target T:2010-2019</code></td></tr>
+      <tr><td>A separate audio track model exists but has no shipped editor.</td><td><code>packages/contracts/src/cut.ts:21-47</code><br><code>packages/client/src/lib/store.ts:3127-3129</code></td><td>Dialogue/ambience/music controls: <code>Target T:1501-1618, 1816-1840</code></td></tr>
+      <tr><td>Cut edits have no undo history.</td><td><code>packages/coordinator/src/world/commit.ts:440-556</code></td><td>Prototype also lacks undo: <code>Target T:2105-2146</code></td></tr>
+      <tr><td>Export labels promise features not present in the FFmpeg plan.</td><td><code>production.tsx:4269-4279</code><br><code>packages/contracts/src/cut.ts:306-313, 565-680</code></td><td>Target export choices: <code>Target T:1953-1981</code></td></tr>
+      <tr><td>Current proposal system is reusable but has no Cut action type.</td><td><code>packages/contracts/src/proposal.ts:4-33, 99-172</code></td><td>Ghost proposal review: <code>Target T:1623-1631, 2685-2752</code></td></tr>
+      <tr><td>Cut placement and clip editing are mainly pointer-only.</td><td><code>production.tsx:2802-2819, 2862-2958</code></td><td>Prototype is also mouse-first: <code>Target T:2417-2682</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>How the target file was reviewed</h3>
+  <p class="source">The downloaded file is a 1.39 MB self-unpacking bundle with 397 physical lines. Its real page is encoded on lines 393-395. After decoding, the target contains 3,666 lines: CSS at <code>T:31-1301</code>, page structure at <code>T:1304-1988</code>, and behavior at <code>T:1989-3663</code>. References marked <code>Target T:</code> use those decoded line numbers.</p>
+
+  <h3>Verification limits</h3>
+  <div class="callout warn">
+    <p>No build or test command was run. The current implementation, specifications, relevant tests and Electron test plan were read in the isolated worktree. The target was studied from its full decoded HTML, CSS and handlers. No application code was changed.</p>
+  </div>
+</main>
+</body>
+</html>

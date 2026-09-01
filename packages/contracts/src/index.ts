@@ -46,6 +46,7 @@ export * from "./bench.js";
 export * from "./voice.js";
 export * from "./planning.js";
 export * from "./cut.js";
+export * from "./timeline.js";
 export * from "./ffmpeg-filter.js";
 export * from "./activity.js";
 export * from "./art-direction.js";

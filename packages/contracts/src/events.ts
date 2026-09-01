@@ -151,6 +151,17 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
+  z
+    .object({
+      ...base,
+      type: z.literal("timeline.command-refused"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      reason: z.string().min(1).max(500),
+    })
+    .strict(),
+
   /**
    * The correlated answer to one create-production request (issue #384): success carries the
    * actual slug only after the commit is durable; failure names its reason and navigates

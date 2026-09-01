@@ -6,6 +6,7 @@ import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js"
 import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
+import type { FrameRate } from "./world.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -306,7 +307,7 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
 export const ExportPresetSchema = z.enum(["review-cut", "master", "social-excerpt"]);
 export type ExportPreset = z.infer<typeof ExportPresetSchema>;
 
-export const PRESETS: Record<ExportPreset, { width: number; height: number; fps: number; crf: number }> = {
+export const PRESETS: Record<ExportPreset, { width: number; height: number; fps: FrameRate; crf: number }> = {
   "review-cut": { width: 1280, height: 720, fps: 24, crf: 28 },
   master: { width: 1920, height: 1080, fps: 24, crf: 18 },
   "social-excerpt": { width: 1080, height: 1920, fps: 30, crf: 23 },
@@ -341,6 +342,8 @@ export interface ExportOverlay {
 
 export interface ExportPlan {
   preset: ExportPreset;
+  /** The production clock, which may differ from the preset's legacy default. */
+  frameRate: FrameRate;
   items: ExportItem[];
   /** Laid over the assembled picture, in order; each covers only its own window. */
   overlays: ExportOverlay[];
@@ -521,6 +524,7 @@ export function buildExportPlan(
   preset: ExportPreset,
   overlays: readonly ExportOverlay[] = [],
   audio: readonly ExportAudioClip[] = [],
+  frameRate: FrameRate = PRESETS[preset].fps,
 ): ExportPlan {
   /*
    * Nothing derived, so the placed work is the whole film (issue 453): one black bed as long as
@@ -535,6 +539,7 @@ export function buildExportPlan(
     const film = placedExtentSec([...overlays, ...audio]);
     return {
       preset,
+      frameRate,
       items: film > 0 ? [{ type: "black" as const, durationSec: film }] : [],
       overlays: [...overlays],
       audio: [...audio],
@@ -555,7 +560,7 @@ export function buildExportPlan(
     // A black slate reading "SHOT 15 · 6.0s" beats a silent omission (R-20, D10).
     return { type: "slate" as const, label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec };
   });
-  return { preset, items, overlays: [...overlays], audio: [...audio], totalSec: cut.totalSec };
+  return { preset, frameRate, items, overlays: [...overlays], audio: [...audio], totalSec: cut.totalSec };
 }
 
 /**
@@ -564,6 +569,7 @@ export function buildExportPlan(
  */
 export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: string, slateFont: string): string[] {
   const p = PRESETS[plan.preset];
+  const fps = plan.frameRate;
   const args: string[] = ["-y"];
   const filters: string[] = [];
   let inputIndex = 0;
@@ -591,15 +597,15 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
        */
       const slot = item.durationSec;
       filters.push(
-        `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${p.fps},tpad=stop_mode=clone:stop_duration=${slot},trim=duration=${slot},setpts=PTS-STARTPTS[v${inputIndex}]`,
+        `[${inputIndex}:v]scale=${p.width}:${p.height}:force_original_aspect_ratio=decrease,pad=${p.width}:${p.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},tpad=stop_mode=clone:stop_duration=${slot},trim=duration=${slot},setpts=PTS-STARTPTS[v${inputIndex}]`,
       );
     } else if (item.type === "black") {
       // Ground for a production with no story (issue 453). The same source a slate is drawn on
       // and nothing written on it: there is no missing work to name, so naming it would be a lie.
-      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${fps}`);
       filters.push(`[${inputIndex}:v]null[v${inputIndex}]`);
     } else {
-      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${p.fps}`);
+      args.push("-f", "lavfi", "-t", String(item.durationSec), "-i", `color=c=black:s=${p.width}x${p.height}:r=${fps}`);
       assertSlateLabelSupported(item.label);
       const text = item.label.replace(/[':\\]/g, " ");
       filters.push(`[${inputIndex}:v]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=white:fontsize=48:x=(w-tw)/2:y=(h-th)/2[v${inputIndex}]`);

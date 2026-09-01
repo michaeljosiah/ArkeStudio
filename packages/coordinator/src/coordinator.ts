@@ -36,7 +36,8 @@ import {
   spineExportRefusals,
   ulid,
   CutFileSchema,
-  deriveCut,
+  resolvePictureTimeline,
+  productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
   estimateMicroUsd,
@@ -205,6 +206,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
+import { applyTimelineCommand } from "./productions/timeline.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -5261,6 +5263,7 @@ export class Coordinator {
             ...(msg.productionKind !== undefined ? { productionKind: msg.productionKind } : {}),
             ...(msg.seriesTitle !== undefined ? { seriesTitle: msg.seriesTitle } : {}),
             ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
+            ...(msg.frameRate !== undefined ? { frameRate: msg.frameRate } : {}),
             ...(msg.defaults !== undefined ? { defaults: msg.defaults } : {}),
             ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
             ...(requestId !== undefined ? { requestId } : {}),
@@ -6539,6 +6542,43 @@ export class Coordinator {
         }
         return;
       }
+      case "timeline-move-picture":
+      case "timeline-history": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await applyTimelineCommand(
+            store,
+            msg.productionId,
+            msg.kind === "timeline-move-picture"
+              ? {
+                  kind: "move-picture",
+                  clipId: msg.clipId,
+                  direction: msg.direction,
+                  baseRevision: msg.baseRevision,
+                  sourceFingerprint: msg.sourceFingerprint,
+                }
+              : { kind: msg.action, baseRevision: msg.baseRevision },
+          );
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          void this.appLog?.append({
+            kind: "timeline.refused",
+            reason,
+            detail: { productionId: msg.productionId, verb: msg.kind },
+          });
+          this.emit({
+            at: new Date().toISOString(),
+            type: "timeline.command-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            reason: reason.slice(0, 500),
+          });
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       /*
        * Overlays (82a). One handler for three verbs because they are one act — where a thing sits
        * — and the refusals are identical. A refused placement says why in the app log for the same
@@ -6653,6 +6693,8 @@ export class Coordinator {
             return;
           }
           const slateFont = runner.slateFont;
+          // A refusal is an attempt with an outcome, including one made before any media probe.
+          const attemptId = `ex_${ulid()}`;
           /*
            * A production cut to a track renders against the song, not against scene order (#253).
            *
@@ -6662,6 +6704,32 @@ export class Coordinator {
            * exactly as it was for everything else, which is most productions.
            */
           const spine = production.spine;
+          const timeline = production.timeline;
+          const currentTimelineRevision = timeline?.status === "ready" ? timeline.timeline.revision : null;
+          if (msg.timelineRevision !== currentTimelineRevision) {
+            emitProgress(
+              attemptId,
+              "failed",
+              0,
+              null,
+              `export was prepared from timeline revision ${msg.timelineRevision ?? "legacy"}, now ${currentTimelineRevision ?? "legacy"}`,
+            );
+            return;
+          }
+          if (
+            timeline !== undefined &&
+            timeline.status !== "absent" &&
+            (spine !== null || msg.episodeId !== undefined)
+          ) {
+            const reason =
+              timeline.status === "invalid"
+                ? `timeline is invalid: ${timeline.message}`
+                : msg.episodeId !== undefined
+                  ? "episode ranges do not consume the saved Picture timeline in this release"
+                  : "music-timed delivery does not consume the saved Picture timeline in this release";
+            emitProgress(attemptId, "failed", 0, null, `timeline is not ready for this export: ${reason}`);
+            return;
+          }
           const trackArtifact = spine
             ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
             : undefined;
@@ -6680,10 +6748,6 @@ export class Coordinator {
             trackFile !== undefined
               ? toExtendedLength(join(store.dir, "artifacts", fromPortable(trackFile)))
               : null;
-          // The id is allocated before the first thing that can fail. A probe that throws on the
-          // way to ffprobe used to escape the handler with no export event at all, so the user's
-          // click did nothing visible and only the transport backstop logged it (Codex round 6).
-          const attemptId = `ex_${ulid()}`;
           const probed =
             trackArtifact?.mediaInfo === undefined && trackPath !== null && this.opts.mediaProbe?.info
               ? await this.opts.mediaProbe.info(trackPath).catch(() => null)
@@ -6738,7 +6802,13 @@ export class Coordinator {
               return;
             }
             const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
-            const plan = buildExportPlan(deriveEpisodeCut(production, msg.episodeId), msg.preset);
+            const plan = buildExportPlan(
+              deriveEpisodeCut(production, msg.episodeId),
+              msg.preset,
+              [],
+              [],
+              productionFrameRate(production.meta),
+            );
             const stamp = new Date()
               .toISOString()
               .replace(/[-:TZ.]/g, "")
@@ -6783,7 +6853,12 @@ export class Coordinator {
               );
               return;
             }
-            const spinePlan = buildSpineExportPlan(spineCut, msg.preset, `artifacts/${trackFile}`);
+            const spinePlan = buildSpineExportPlan(
+              spineCut,
+              msg.preset,
+              `artifacts/${trackFile}`,
+              productionFrameRate(production.meta),
+            );
             buildArgs = (stage) => buildSpineFfmpegArgs(spinePlan, store.dir, stage, slateFont);
           } else {
             if (spine && trackDurationSec === null) {
@@ -6806,7 +6881,26 @@ export class Coordinator {
             const artifacts = store.getBundle().artifacts;
             const overlays = exportOverlays(production.cut.overlays, artifacts);
             const audio = exportAudioClips(production.cut.overlays, artifacts);
-            const plan = buildExportPlan(deriveCut(production), msg.preset, overlays, audio);
+            let pictureCut;
+            try {
+              pictureCut = resolvePictureTimeline(production, production.timeline);
+            } catch (error) {
+              emitProgress(
+                attemptId,
+                "failed",
+                0,
+                null,
+                `timeline is not ready to export: ${error instanceof Error ? error.message : String(error)}`,
+              );
+              return;
+            }
+            const plan = buildExportPlan(
+              pictureCut,
+              msg.preset,
+              overlays,
+              audio,
+              productionFrameRate(production.meta),
+            );
             /*
              * Nothing to render, said before the encode (issue 453).
              *

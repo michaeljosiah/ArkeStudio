@@ -225,6 +225,13 @@ describe("the arguments sound produces", () => {
     assert.deepEqual(plain, buildFfmpegArgs(buildExportPlan(cut, "review-cut"), "/w", "/out.mp4", font));
   });
 
+  it("conforms picture and generated slates to the production clock rather than the preset default", () => {
+    const args = buildFfmpegArgs(buildExportPlan(cut, "master", [], [], 25), "/w", "/out.mp4", font);
+    const graph = graphOf(args);
+    assert.match(graph, /fps=25/);
+    assert.equal(graph.includes("fps=24"), false);
+  });
+
   it("delays one sound to where it was placed and conforms it to the film", () => {
     const graph = graphOf(argsFor([], [{ path: "artifacts/bells.wav", startSec: 2, endSec: 4, gainDb: 0 }]));
     assert.match(graph, /adelay=2000:all=1/, "placed at 2s means delayed by 2000ms");

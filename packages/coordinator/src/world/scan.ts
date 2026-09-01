@@ -28,6 +28,7 @@ import {
   sortScenes,
   SelectionsSchema,
   ProductionSpineSchema,
+  ProductionTimelineSchema,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
@@ -78,7 +79,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
  * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 4;
+export const SUPPORTED_SCHEMA_VERSION = 5;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -645,6 +646,15 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         })
       : { audio: [], overlays: [] };
 
+    const timelinePath = `productions/${id}/timeline.json`;
+    const timeline: ProductionBundle["timeline"] = (await exists(join(pdir, "timeline.json")))
+      ? await tryParse(timelinePath, (raw) => ProductionTimelineSchema.parse(JSON.parse(raw))).then((parsed) =>
+          parsed === null
+            ? { status: "invalid", message: "timeline.json is invalid; see the world problems for details" }
+            : { status: "ready", timeline: parsed },
+        )
+      : { status: "absent" };
+
     // season.json — the season beside its production (SPEC-023 R-10); null when none.
     const season = (await exists(join(pdir, "season.json")))
       ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
@@ -666,6 +676,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       selections,
       spine,
       cut,
+      timeline,
       takeMediaInfo,
     });
   }

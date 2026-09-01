@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   deriveCut,
@@ -16,6 +16,10 @@ import {
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
+  productionFrameRate,
+  resolvePictureTimeline,
+  seedStoryPictureTimeline,
+  storyTimelineFingerprint,
   frameDispatchFor,
   modelCapabilityCopy,
   pickableSheets,
@@ -33,7 +37,9 @@ import {
   attachmentFor,
   lookHoldingScope,
   type CharacterLook,
+  type FrameRate,
   type ProductionBundle,
+  type ProductionTimeline,
   type Scene,
   type Sheet,
   type WorldBundle,
@@ -41,7 +47,6 @@ import {
   MAX_CLIP_LANE,
   type CutEntry,
   type CutOverlay,
-  type SpineCutSegment,
   orderedShots,
   legacySceneView,
 } from "@arke-studio/contracts";
@@ -64,6 +69,7 @@ import {
   Play,
   Plus,
   Scroll,
+  Search,
   Sparkle,
   Users,
   VideoMark,
@@ -84,7 +90,7 @@ import { acceptedTakeId, isDayOne, mediaTakeFor, takeDecisions, takesForShot, us
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
-import { useScrubDrag } from "../lib/timeline-drag.js";
+import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
 import { mediaSpans, mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
@@ -111,6 +117,8 @@ import {
   proposeEpisode,
   removeOverlay,
   moveOverlay,
+  moveTimelineHistory,
+  moveTimelinePictureClip,
   rejoinOverlayAudio,
   splitOverlayAudio,
   uploadArtifacts,
@@ -123,6 +131,7 @@ import {
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   subscribeQueueResults,
+  subscribeTimelineRefusals,
   subscribeVoiceUploadConfirmations,
 } from "../lib/store.js";
 
@@ -219,7 +228,15 @@ export function ProductionLayout() {
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
   const shape = production ? productionShape(production.meta) : null;
   const isStory = shape?.hasChapters === true;
-  const cut = production ? deriveCut(production) : null;
+  let cut: ReturnType<typeof deriveCut> | null = null;
+  if (production) {
+    try {
+      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, production.timeline);
+    } catch {
+      // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
+      // the legacy runtime while those screens correctly block it.
+    }
+  }
   /*
    * The rail and the switcher state a length, and it has to be the length the Cut screen states.
    *
@@ -2767,6 +2784,14 @@ const LANE_PITCH_PX = 50;
 const CLIP_MENU_WIDTH_PX = 216;
 const CLIP_MENU_HEIGHT_PX = 96;
 
+function focusFirstControl(pane: HTMLElement | null): void {
+  pane?.querySelector<HTMLElement>("button:not(:disabled), input:not(:disabled), [href], [tabindex='0']")?.focus();
+}
+
+function editorMediaMatches(query: string): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
+}
+
 /**
  * The world's artifacts, beside the cut (82a).
  *
@@ -2777,16 +2802,71 @@ function ArtifactPanel({
   worldId,
   artifacts,
   slug,
+  production,
+  usedArtifactIds,
+  usedShotIds,
+  onSelectShot,
+  open,
+  onClose,
+  panelRef,
 }: {
   worldId: string | undefined;
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
+  production: ProductionBundle | null | undefined;
+  usedArtifactIds: ReadonlySet<string>;
+  usedShotIds: ReadonlySet<string>;
+  onSelectShot: (shotId: string) => void;
+  open: boolean;
+  onClose: () => void;
+  panelRef: RefObject<HTMLElement | null>;
 }) {
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "unused" | "needs-take" | "audio">("all");
+  const normalQuery = query.trim().toLocaleLowerCase();
+  const shots = (production?.scenes ?? []).flatMap((scene) =>
+    orderedShots(scene).map((shot) => {
+      const takeId = production ? acceptedTakeId(production, shot.id) : null;
+      const take = production?.takes.find((candidate) => candidate.id === takeId) ?? null;
+      return {
+        scene,
+        shot,
+        take,
+        path: take && production ? takeMediaPath(production, take) : null,
+      };
+    }),
+  );
+  const acceptedShots = shots.filter((row) => row.take !== null && row.path !== null);
+  const missingShots = shots.filter((row) => row.take === null);
+  const shownArtifacts = artifacts.filter((artifact) => {
+    if (filter === "needs-take") return false;
+    if (filter === "audio" && artifact.kind !== "audio") return false;
+    if (filter === "unused" && usedArtifactIds.has(artifact.id)) return false;
+    if (normalQuery === "") return true;
+    return `${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`.toLocaleLowerCase().includes(normalQuery);
+  });
+  const shownShots = (
+    filter === "needs-take"
+      ? missingShots
+      : filter === "all"
+        ? acceptedShots
+        : filter === "unused"
+          ? acceptedShots.filter((row) => !usedShotIds.has(row.shot.id))
+          : []
+  ).filter(
+    ({ scene, shot, take }) =>
+      normalQuery === "" ||
+      `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""}`
+        .toLocaleLowerCase()
+        .includes(normalQuery),
+  );
+  const resultCount = shownArtifacts.length + shownShots.length;
+
   return (
-    <div className="fy-artpanel">
+    <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={open} aria-label="Library">
       <div className="fy-artpanel__head">
-        <span className="fy-artpanel__title">Artifacts</span>
-        <span className="fy-mono">{artifacts.length}</span>
+        <span className="fy-artpanel__title">Library</span>
+        <span className="fy-mono">{resultCount}</span>
         <span className="fy-h1row__push" />
         <Button
           variant="outline"
@@ -2796,37 +2876,111 @@ function ArtifactPanel({
         >
           Upload
         </Button>
+        <button type="button" className="fy-artpanel__close" aria-label="Close Library" onClick={onClose}>
+          &times;
+        </button>
+      </div>
+      <label className="fy-artpanel__search">
+        <Search size={13} />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find a take, upload or line…"
+          aria-label="Search Library"
+        />
+      </label>
+      <div className="fy-artpanel__filters" aria-label="Library filters">
+        {(
+          [
+            ["all", "All"],
+            ["unused", "Not in the cut"],
+            ["needs-take", "Needs a take"],
+            ["audio", "Audio"],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={filter === value}
+            onClick={() => setFilter(value)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
       <div className="fy-artpanel__list">
-        {artifacts.length === 0 ? (
-          <span className="fy-artpanel__empty">nothing filed in this world yet</span>
+        {resultCount === 0 ? (
+          <span className="fy-artpanel__empty">
+            {normalQuery === "" ? "nothing in this view yet" : `nothing matches “${query.trim()}”`}
+          </span>
         ) : (
-          artifacts.map((a) => (
-            <div
-              key={a.id}
-              className="fy-artrow"
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/x-arke-artifact", a.id);
-                e.dataTransfer.effectAllowed = "copy";
-              }}
-            >
-              <span className="fy-artrow__swatch">
-                {a.kind === "image" ? <Portrait worldSlug={slug} path={a.file} label="" radius={4} /> : null}
-              </span>
-              <span className="fy-artrow__body">
-                <span className="fy-artrow__name">{a.file.split("/").pop()}</span>
-                <span className="fy-artrow__meta">{a.kind}</span>
-              </span>
-            </div>
-          ))
+          <>
+            {shownShots.length > 0 && <div className="fy-artpanel__group">PICTURE · ACCEPTED TAKES</div>}
+            {shownShots.map(({ scene, shot, take, path }) =>
+              take && path ? (
+                <button
+                  key={shot.id}
+                  type="button"
+                  className="fy-artrow fy-artrow--take"
+                  onClick={() => onSelectShot(shot.id)}
+                >
+                  <span className="fy-artrow__swatch">
+                    <Portrait worldSlug={slug} path={path} label="" radius={4} />
+                  </span>
+                  <span className="fy-artrow__body">
+                    <span className="fy-artrow__name">{shot.title}</span>
+                    <span className="fy-artrow__meta">
+                      SC {scene.number} · SHOT {shot.number} · {take.id}
+                    </span>
+                  </span>
+                </button>
+              ) : (
+                <div key={shot.id} className="fy-artrow fy-artrow--missing">
+                  <span className="fy-artrow__swatch" />
+                  <span className="fy-artrow__body">
+                    <span className="fy-artrow__name">{shot.title}</span>
+                    <span className="fy-artrow__meta">
+                      SC {scene.number} · SHOT {shot.number} · NEEDS A TAKE
+                    </span>
+                  </span>
+                </div>
+              ),
+            )}
+            {shownArtifacts.length > 0 && <div className="fy-artpanel__group">FILED ARTIFACTS</div>}
+            {shownArtifacts.map((a) => (
+              <div
+                key={a.id}
+                className="fy-artrow"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/x-arke-artifact", a.id);
+                  e.dataTransfer.effectAllowed = "copy";
+                }}
+              >
+                <span className="fy-artrow__swatch">
+                  {a.kind === "image" || a.kind === "board" ? (
+                    <Portrait worldSlug={slug} path={a.file} label="" radius={4} />
+                  ) : a.kind === "audio" ? (
+                    <Wave seed={a.file} width={34} height={12} />
+                  ) : null}
+                </span>
+                <span className="fy-artrow__body">
+                  <span className="fy-artrow__name">{a.file.split("/").pop()}</span>
+                  <span className="fy-artrow__meta">
+                    {a.kind} · {usedArtifactIds.has(a.id) ? "used" : "not in the cut"}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </>
         )}
       </div>
       <div className="fy-artpanel__foot">
         <span className="fy-dot" />
         <span className="fy-mono">drag onto a lane to place</span>
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -2847,6 +3001,8 @@ function ClipView({
   maxLane,
   snapPoints,
   onMenu,
+  selected,
+  onSelect,
 }: {
   worldId: string;
   prodId: string;
@@ -2857,12 +3013,15 @@ function ClipView({
   maxLane: number;
   snapPoints: readonly number[];
   onMenu: (clip: CutOverlay, at: { x: number; y: number }) => void;
+  selected: boolean;
+  onSelect: (clipId: string) => void;
 }) {
   const [draft, setDraft] = useState<ClipPlacement | null>(null);
   const shown = draft ?? { startSec: clip.startSec, endSec: clip.endSec, lane: clip.lane ?? 0 };
 
   const begin = (gesture: ClipGesture) => (e: React.PointerEvent) => {
     if (e.button !== 0 || totalSec <= 0) return;
+    onSelect(clip.id);
     e.preventDefault();
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
@@ -2906,7 +3065,12 @@ function ClipView({
   const sound = mode === "only";
   return (
     <div
-      className={cx("fy-ovclip", sound && "fy-ovclip--sound", draft && "fy-ovclip--dragging")}
+      className={cx(
+        "fy-ovclip",
+        sound && "fy-ovclip--sound",
+        selected && "fy-ovclip--selected",
+        draft && "fy-ovclip--dragging",
+      )}
       style={{
         left: `${(shown.startSec / totalSec) * 100}%`,
         width: `${Math.max(((shown.endSec - shown.startSec) / totalSec) * 100, 1.5)}%`,
@@ -2922,8 +3086,10 @@ function ClipView({
       }}
       title={`${name} · ${shown.startSec.toFixed(1)}s → ${shown.endSec.toFixed(1)}s${mode === "keep" ? "" : ` · ${mode === "only" ? "sound only" : "muted"}`}`}
       onPointerDown={begin("move")}
+      onClick={() => onSelect(clip.id)}
       onContextMenu={(e) => {
         e.preventDefault();
+        onSelect(clip.id);
         onMenu(clip, { x: e.clientX, y: e.clientY });
       }}
     >
@@ -2948,7 +3114,10 @@ function ClipView({
         className="fy-ovclip__x"
         aria-label="Remove clip"
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => removeOverlay(worldId, prodId, clip.id)}
+        onClick={(event) => {
+          event.stopPropagation();
+          removeOverlay(worldId, prodId, clip.id);
+        }}
       >
         ×
       </button>
@@ -2980,6 +3149,8 @@ function ClipLanes({
   clips,
   artifacts,
   snapPoints,
+  selectedClipId,
+  onSelectClip,
 }: {
   worldId: string;
   prodId: string;
@@ -2988,6 +3159,8 @@ function ClipLanes({
   clips: readonly CutOverlay[];
   artifacts: readonly ArtifactSidecar[];
   snapPoints: readonly number[];
+  selectedClipId: string | null;
+  onSelectClip: (clipId: string) => void;
 }) {
   const [over, setOver] = useState<number | null>(null);
   const [added, setAdded] = useState(0);
@@ -3002,7 +3175,10 @@ function ClipLanes({
     if (menu === null) return;
     const close = () => setMenu(null);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        close();
+        e.stopImmediatePropagation();
+      }
     };
     // Capture, so a press that a clip's own handler stops still closes the menu above it.
     window.addEventListener("pointerdown", close, { capture: true });
@@ -3070,7 +3246,7 @@ function ClipLanes({
     <div className="fy-clanes" onPointerDown={() => setMenu(null)}>
       {Array.from({ length: laneCount }, (_, i) => maxLane - i).map((lane) => (
         <div className="fy-track" key={lane}>
-          <span className="fy-track__label">L{lane}</span>
+          <span className="fy-track__label">Overlay L{lane}</span>
           <div
             className={cx("fy-track__lane", "fy-ovlane", over === lane && "fy-ovlane--over")}
             onDragOver={(e) => {
@@ -3102,6 +3278,8 @@ function ClipLanes({
                   maxLane={maxLane}
                   snapPoints={snapPoints}
                   onMenu={(clip, at) => setMenu({ clip, x: at.x, y: at.y })}
+                  selected={selectedClipId === c.id}
+                  onSelect={onSelectClip}
                 />
               ))}
           </div>
@@ -3179,12 +3357,14 @@ function ClipLanes({
  * is doing, so the fraction of its width is the fraction of the film — the same arithmetic the
  * player dock already scrubs by.
  */
-function CutScrubber({ totalSec, transport }: { totalSec: number; transport: Transport }) {
+function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; frameRate: FrameRate; transport: Transport }) {
   const { time, seek, setPlaying } = transport;
   const seekToEvent = (e: React.PointerEvent | PointerEvent, el: HTMLElement) => {
     const box = el.getBoundingClientRect();
-    if (box.width <= 0 || totalSec <= 0) return;
-    seek(((e.clientX - box.left) / box.width) * totalSec);
+    const laneWidth = box.width - 88;
+    if (laneWidth <= 0 || totalSec <= 0) return;
+    const laneX = Math.max(0, Math.min(e.clientX - box.left - 88, laneWidth));
+    seek((laneX / laneWidth) * totalSec);
   };
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -3223,13 +3403,13 @@ function CutScrubber({ totalSec, transport }: { totalSec: number; transport: Tra
       aria-valuemin={0}
       aria-valuemax={Math.round(totalSec)}
       aria-valuenow={Math.round(time)}
-      aria-valuetext={clock(time)}
+      aria-valuetext={formatTimecode(time, frameRate)}
     >
-      <span className="fy-mono">0:00</span>
+      <span className="fy-mono">{formatTimecode(0, frameRate)}</span>
       <span className="fy-h1row__push" />
-      <span className="fy-mono">{clock(totalSec / 2)}</span>
+      <span className="fy-mono">{formatTimecode(totalSec / 2, frameRate)}</span>
       <span className="fy-h1row__push" />
-      <span className="fy-mono">{clock(totalSec)}</span>
+      <span className="fy-mono">{formatTimecode(totalSec, frameRate)}</span>
     </div>
   );
 }
@@ -3552,36 +3732,25 @@ function TrimStrip({
  * The one authored edit lives here: trim, on the selected clip, writing the selection (R-8).
  */
 function SpineCutTrack({
-  worldId,
-  prodId,
   slug,
   cut,
-  production,
+  selectedShotId,
+  onSelectShot,
 }: {
-  worldId: string;
-  prodId: string;
   slug: string | undefined;
   cut: ReturnType<typeof deriveSpineCut>;
-  production: Parameters<typeof trimCeilingSec>[0];
+  selectedShotId: string | null;
+  onSelectShot: (shotId: string) => void;
 }) {
-  const clips = cut.segments.filter(
-    (seg): seg is SpineCutSegment & { shotId: string } => seg.kind === "clip" && !!seg.shotId,
-  );
-  const [picked, setPicked] = useState<string | null>(null);
-  // The screen opens on a clip rather than on nothing: an empty strip below a full lane reads as
-  // a control that is missing rather than one that is waiting.
-  const selected = clips.find((c) => c.shotId === picked) ?? clips[0] ?? null;
-  const ceiling = selected?.takeId ? trimCeilingSec(production, selected.shotId, selected.takeId) : null;
-  const trim = selected ? (production.selections[selected.shotId]?.trimInSec ?? 0) : 0;
   return (
     <>
       <div className="fy-track">
-        <span className="fy-track__label">V</span>
+        <span className="fy-track__label">Picture</span>
         <div className="fy-track__lane">
           {cut.segments.map((seg, i) => {
             const span = Math.max(seg.endSec - seg.startSec, 0.25);
             if (seg.kind === "clip") {
-              const isSelected = selected !== null && seg.shotId === selected.shotId;
+              const isSelected = seg.shotId !== undefined && seg.shotId === selectedShotId;
               return (
                 <button
                   key={`${seg.kind}-${i}`}
@@ -3589,7 +3758,7 @@ function SpineCutTrack({
                   className={cx("fy-cutseg", "fy-cutseg--pick", isSelected && "fy-cutseg--selected")}
                   style={{ flex: span }}
                   aria-pressed={isSelected}
-                  onClick={() => seg.shotId && setPicked(seg.shotId)}
+                  onClick={() => seg.shotId && onSelectShot(seg.shotId)}
                 >
                   <Portrait
                     worldSlug={slug}
@@ -3620,18 +3789,6 @@ function SpineCutTrack({
           })}
         </div>
       </div>
-      {selected && (
-        <TrimStrip
-          worldId={worldId}
-          prodId={prodId}
-          shotId={selected.shotId}
-          heading={`SC ${selected.sceneNumber} · ${selected.shotId.replace("sh_", "shot ")}`}
-          title={selected.label}
-          figures={`${selected.takeId ?? "no take"} · budget ${(selected.endSec - selected.startSec).toFixed(1)}s`}
-          trim={trim}
-          ceiling={ceiling}
-        />
-      )}
     </>
   );
 }
@@ -3644,28 +3801,16 @@ function SpineCutTrack({
  * where the song's sections sit in 80a, and the lane carries the unit of work.
  */
 function StoryCutTrack({
-  worldId,
-  prodId,
   slug,
   cut,
-  production,
+  selectedShotId,
+  onSelectShot,
 }: {
-  worldId: string;
-  prodId: string;
   slug: string | undefined;
   cut: ReturnType<typeof deriveCut>;
-  production: Parameters<typeof trimCeilingSec>[0];
+  selectedShotId: string | null;
+  onSelectShot: (shotId: string) => void;
 }) {
-  const covered = cut.entries.filter((e) => e.media !== null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const selected = covered.find((e) => e.shot.id === picked) ?? covered[0] ?? null;
-  const ceiling = selected?.takeId ? trimCeilingSec(production, selected.shot.id, selected.takeId) : null;
-  const trim = selected ? (production.selections[selected.shot.id]?.trimInSec ?? 0) : 0;
-  // Absent is "not measured", never zero, so an unprobed take simply does not state a length.
-  const takeSec = selected?.takeId
-    ? production.takeMediaInfo[selected.takeId]?.mediaInfo.durationSec
-    : undefined;
-
   const scenes: { number: number; span: number }[] = [];
   for (const e of cut.entries) {
     const last = scenes[scenes.length - 1];
@@ -3678,7 +3823,6 @@ function StoryCutTrack({
    * named; a scene with nothing in it at all is one neutral card for the whole scene. They are
    * different facts -- work left inside a scene, against a scene not yet shot.
    */
-  const scenesWithCoverage = new Set(covered.map((e) => e.sceneNumber));
   type Lane =
     | { kind: "shot"; entry: CutEntry; span: number; key: string }
     | { kind: "gap"; label: string; span: number; warn: boolean; scene: number; key: string };
@@ -3688,28 +3832,14 @@ function StoryCutTrack({
       lane.push({ kind: "shot", entry: e, span: e.durationSec, key: e.shot.id });
       continue;
     }
-    if (scenesWithCoverage.has(e.sceneNumber)) {
-      lane.push({
-        kind: "gap",
-        label: `shot ${e.shot.number}`,
-        span: e.durationSec,
-        warn: true,
-        scene: e.sceneNumber,
-        key: e.shot.id,
-      });
-      continue;
-    }
-    const last = lane[lane.length - 1];
-    if (last?.kind === "gap" && !last.warn && last.scene === e.sceneNumber) last.span += e.durationSec;
-    else
-      lane.push({
-        kind: "gap",
-        label: `scene ${e.sceneNumber}, no takes yet`,
-        span: e.durationSec,
-        warn: false,
-        scene: e.sceneNumber,
-        key: e.shot.id,
-      });
+    lane.push({
+      kind: "gap",
+      label: `shot ${e.shot.number} · no accepted take`,
+      span: e.durationSec,
+      warn: true,
+      scene: e.sceneNumber,
+      key: e.shot.id,
+    });
   }
 
   return (
@@ -3725,21 +3855,29 @@ function StoryCutTrack({
         </div>
       </div>
       <div className="fy-track">
-        <span className="fy-track__label">V</span>
+        <span className="fy-track__label">Picture</span>
         <div className="fy-track__lane">
           {lane.map((item) => {
             if (item.kind === "gap") {
               return (
-                <div
+                <button
+                  type="button"
                   key={item.key}
-                  className={cx("fy-cutseg", "fy-cutseg--gap", item.warn && "fy-cutseg--gap-warn")}
+                  className={cx(
+                    "fy-cutseg",
+                    "fy-cutseg--gap",
+                    item.warn && "fy-cutseg--gap-warn",
+                    item.key === selectedShotId && "fy-cutseg--selected",
+                  )}
                   style={{ flex: Math.max(item.span, 0.25) }}
+                  aria-pressed={item.key === selectedShotId}
+                  onClick={() => onSelectShot(item.key)}
                 >
                   {item.label}
-                </div>
+                </button>
               );
             }
-            const isSelected = selected !== null && item.entry.shot.id === selected.shot.id;
+            const isSelected = item.entry.shot.id === selectedShotId;
             return (
               <button
                 key={item.key}
@@ -3747,7 +3885,7 @@ function StoryCutTrack({
                 className={cx("fy-cutseg", "fy-cutseg--pick", isSelected && "fy-cutseg--selected")}
                 style={{ flex: Math.max(item.span, 0.25) }}
                 aria-pressed={isSelected}
-                onClick={() => setPicked(item.entry.shot.id)}
+                onClick={() => onSelectShot(item.entry.shot.id)}
               >
                 <Portrait
                   worldSlug={slug}
@@ -3761,19 +3899,160 @@ function StoryCutTrack({
           })}
         </div>
       </div>
-      {selected && (
+    </>
+  );
+}
+
+type CutSelection = { kind: "picture"; id: string } | { kind: "overlay"; id: string };
+
+function EmptyEditorTrack({ label, detail, kind }: { label: string; detail: string; kind: string }) {
+  return (
+    <div className="fy-track fy-track--empty" data-track={kind}>
+      <span className="fy-track__label">{label}</span>
+      <div className="fy-track__lane">
+        <span className="fy-track__empty">{detail}</span>
+      </div>
+    </div>
+  );
+}
+
+function InspectorRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="fy-cutinspect__row">
+      <span>{label}</span>
+      <strong>{children}</strong>
+    </div>
+  );
+}
+
+function CutInspector({
+  worldId,
+  prodId,
+  production,
+  cut,
+  spineCut,
+  artifacts,
+  selection,
+  filmSec,
+  clipCount,
+  savedPictureOrder,
+}: {
+  worldId: string | undefined;
+  prodId: string | undefined;
+  production: ProductionBundle | null | undefined;
+  cut: ReturnType<typeof deriveCut> | null;
+  spineCut: ReturnType<typeof deriveSpineCut> | null;
+  artifacts: readonly ArtifactSidecar[];
+  selection: CutSelection | null;
+  filmSec: number;
+  clipCount: number;
+  savedPictureOrder: boolean;
+}) {
+  const selectedOverlay =
+    selection?.kind === "overlay"
+      ? (production?.cut.overlays.find((clip) => clip.id === selection.id) ?? null)
+      : null;
+  const overlayArtifact = selectedOverlay
+    ? (artifacts.find((artifact) => artifact.id === selectedOverlay.artifactId) ?? null)
+    : null;
+  const selectedSpine =
+    selection?.kind === "picture"
+      ? (spineCut?.segments.find(
+          (segment) => segment.kind === "clip" && segment.shotId === selection.id,
+        ) ?? null)
+      : null;
+  const selectedStory =
+    selection?.kind === "picture" && spineCut === null
+      ? (cut?.entries.find((entry) => entry.shot.id === selection.id) ?? null)
+      : null;
+  const selectedShotId = selectedSpine?.shotId ?? selectedStory?.shot.id ?? null;
+  const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ?? null;
+  const ceiling =
+    production && selectedShotId && selectedTakeId
+      ? trimCeilingSec(production, selectedShotId, selectedTakeId)
+      : null;
+  const trim = selectedShotId ? (production?.selections[selectedShotId]?.trimInSec ?? 0) : 0;
+  const takeSec = selectedTakeId
+    ? production?.takeMediaInfo[selectedTakeId]?.mediaInfo.durationSec
+    : undefined;
+
+  if (selectedOverlay) {
+    const mode = selectedOverlay.audio ?? "keep";
+    return (
+      <div className="fy-cutinspect">
+        <div className="fy-cutinspect__eyebrow">OVERLAY CLIP</div>
+        <h2>{overlayArtifact?.file.split("/").pop() ?? "Missing artifact"}</h2>
+        <div className="fy-cutinspect__rows">
+          <InspectorRow label="Source">{overlayArtifact?.file ?? selectedOverlay.artifactId}</InspectorRow>
+          <InspectorRow label="Type">{overlayArtifact?.kind ?? "missing"}</InspectorRow>
+          <InspectorRow label="In">{clock(selectedOverlay.startSec)}</InspectorRow>
+          <InspectorRow label="Out">{clock(selectedOverlay.endSec)}</InspectorRow>
+          <InspectorRow label="Duration">
+            {(selectedOverlay.endSec - selectedOverlay.startSec).toFixed(1)}s
+          </InspectorRow>
+          <InspectorRow label="Lane">Overlay L{selectedOverlay.lane ?? 0}</InspectorRow>
+          <InspectorRow label="Sound">
+            {mode === "only" ? "sound only" : mode === "mute" ? "muted" : "kept where supported"}
+          </InspectorRow>
+        </div>
+        <p className="fy-cutinspect__note">Drag the clip to move it. Drag either edge to trim; right-click for sound and remove actions.</p>
+      </div>
+    );
+  }
+
+  if (selectedShotId && production && worldId && prodId) {
+    const sceneNumber = selectedSpine?.sceneNumber ?? selectedStory?.sceneNumber ?? 0;
+    const title = selectedSpine?.label ?? selectedStory?.shot.title ?? "Picture clip";
+    const duration = selectedSpine
+      ? selectedSpine.endSec - selectedSpine.startSec
+      : (selectedStory?.durationSec ?? 0);
+    return (
+      <div className="fy-cutinspect">
+        <div className="fy-cutinspect__eyebrow">PICTURE CLIP</div>
+        <h2>{title}</h2>
+        <div className="fy-cutinspect__rows">
+          <InspectorRow label="Scene">SC {sceneNumber}</InspectorRow>
+          <InspectorRow label="Shot">{selectedShotId.replace("sh_", "shot ")}</InspectorRow>
+          <InspectorRow label="Take">{selectedTakeId ?? "no accepted take"}</InspectorRow>
+          <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
+          {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
+        </div>
         <TrimStrip
           worldId={worldId}
           prodId={prodId}
-          shotId={selected.shot.id}
-          heading={`SC ${selected.sceneNumber} · ${selected.shot.id.replace("sh_", "shot ")}`}
-          title={selected.shot.title}
-          figures={`${selected.takeId ?? "no take"} · shot ${selected.durationSec.toFixed(1)}s${takeSec !== undefined ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
+          shotId={selectedShotId}
+          heading={`SC ${sceneNumber} · ${selectedShotId.replace("sh_", "shot ")}`}
+          title={title}
+          figures={`${selectedTakeId ?? "no take"} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
           trim={trim}
           ceiling={ceiling}
         />
-      )}
-    </>
+        <p className="fy-cutinspect__note">
+          {savedPictureOrder
+            ? "Picture order is owned by the saved timeline. The accepted take and trim still resolve from this shot."
+            : "Picture order follows the story and accepted shot selections until the first timeline edit. Only trim-in is authored here."}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fy-cutinspect">
+      <div className="fy-cutinspect__eyebrow">CUT</div>
+      <h2>{production?.meta.title ?? "Opening production…"}</h2>
+      <div className="fy-cutinspect__rows">
+        <InspectorRow label="Duration">{runtimeSeconds(filmSec)}</InspectorRow>
+        <InspectorRow label="Aspect">{production ? productionAspect(production.meta) : "not loaded"}</InspectorRow>
+        <InspectorRow label="Frame rate">{production ? `${productionFrameRate(production.meta)} fps` : "not loaded"}</InspectorRow>
+        <InspectorRow label="Picture">{cut ? `${cut.covered} of ${cut.entries.length} shots` : "not loaded"}</InspectorRow>
+        <InspectorRow label="Overlays">{clipCount}</InspectorRow>
+        <InspectorRow label="Source">
+          {spineCut ? "accepted takes · master track" : cut && isMediaOnly(cut) ? "placed clips" : "accepted takes"}
+        </InspectorRow>
+        <InspectorRow label="Export preset">Review cut</InspectorRow>
+      </div>
+      <p className="fy-cutinspect__note">Select a Picture or overlay clip to inspect its real source and supported timing controls.</p>
+    </div>
   );
 }
 
@@ -3781,14 +4060,70 @@ export function CutScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const cut = production ? deriveCut(production) : null;
+  const timelineState = production?.timeline ?? { status: "absent" as const };
+  let cut: ReturnType<typeof deriveCut> | null = null;
+  let timelineError: string | null = null;
+  if (production) {
+    try {
+      // Music-timed editing remains on its existing clock in this first slice. Every other story
+      // production reads the saved Picture order as soon as one exists.
+      if (production.spine && timelineState.status !== "absent") {
+        throw new Error(
+          timelineState.status === "invalid"
+            ? timelineState.message
+            : "music-timed editing does not consume a saved Picture timeline in this release",
+        );
+      }
+      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
+    } catch (error) {
+      timelineError = error instanceof Error ? error.message : String(error);
+    }
+  }
   // One Cut, two clocks (80a): the story orders the picture until a spine exists, and then the
   // song does. Exports already chose this way; a Cut tab that did not would state a different
   // film from the screen next to it.
   const view = exportViewFor(world, production);
-  const spineCut = view.kind === "spine" ? view.cut : null;
+  const spineCut = timelineError === null && view.kind === "spine" ? view.cut : null;
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
+  const [selected, setSelected] = useState<CutSelection | null>(null);
+  const [selectionCleared, setSelectionCleared] = useState(false);
+  const [rightTab, setRightTab] = useState<"inspector" | "arke">("inspector");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
+  const libraryToggleRef = useRef<HTMLButtonElement>(null);
+  const libraryPanelRef = useRef<HTMLElement>(null);
+  const rightToggleRef = useRef<HTMLButtonElement>(null);
+  const rightPanelRef = useRef<HTMLElement>(null);
+  const [timelineCommandError, setTimelineCommandError] = useState<string | null>(null);
+  useEffect(
+    () => {
+      setTimelineCommandError(null);
+      return subscribeTimelineRefusals((event) => {
+        if (event.worldId === worldId && event.productionId === prodId) setTimelineCommandError(event.reason);
+      });
+    },
+    [worldId, prodId],
+  );
+  useEffect(() => {
+    if (!libraryOpen && !rightOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (document.querySelector(".fy-clipmenu")) return;
+      if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) {
+        setLibraryOpen(false);
+        queueMicrotask(() => libraryToggleRef.current?.focus());
+      } else if (rightOpen && editorMediaMatches("(max-width: 899px)")) {
+        setRightOpen(false);
+        queueMicrotask(() => rightToggleRef.current?.focus());
+      } else {
+        return;
+      }
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [libraryOpen, rightOpen]);
   const overlays = production?.cut.overlays ?? [];
   /*
    * A production with no story is the clips (issue 453), so they are the clock.
@@ -3860,96 +4195,319 @@ export function CutScreen() {
     spans.map((s) => s.startSec),
     totalSec,
   );
+  const firstPictureId = spineCut
+    ? (spineCut.segments.find((segment) => segment.kind === "clip" && segment.shotId)?.shotId ?? null)
+    : (cut?.entries[0]?.shot.id ?? null);
+  const selectedExists =
+    selected?.kind === "picture"
+      ? spineCut
+        ? spineCut.segments.some((segment) => segment.kind === "clip" && segment.shotId === selected.id)
+        : (cut?.entries.some((entry) => entry.shot.id === selected.id) ?? false)
+      : selected?.kind === "overlay"
+        ? overlays.some((clip) => clip.id === selected.id)
+        : false;
+  const activeSelection: CutSelection | null = selectedExists
+    ? selected
+    : selectionCleared
+      ? null
+      : firstPictureId
+        ? { kind: "picture", id: firstPictureId }
+        : overlays[0]
+          ? { kind: "overlay", id: overlays[0].id }
+          : null;
+  const selectPicture = (id: string) => {
+    setSelected({ kind: "picture", id });
+    setSelectionCleared(false);
+    setRightTab("inspector");
+    setLibraryOpen(false);
+    setRightOpen(true);
+    if (
+      editorMediaMatches("(max-width: 899px)") ||
+      (libraryOpen && editorMediaMatches("(max-width: 1199px)"))
+    ) {
+      queueMicrotask(() => focusFirstControl(rightPanelRef.current));
+    }
+  };
+  const selectOverlay = (id: string) => {
+    setSelected({ kind: "overlay", id });
+    setSelectionCleared(false);
+    setRightTab("inspector");
+    setLibraryOpen(false);
+    setRightOpen(true);
+    if (editorMediaMatches("(max-width: 899px)")) {
+      queueMicrotask(() => focusFirstControl(rightPanelRef.current));
+    }
+  };
+  const usedArtifactIds = new Set(overlays.map((clip) => clip.artifactId));
+  const cutMeta = spineCut
+    ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
+    : mediaOnly
+      ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
+      : cut
+        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
+        : "";
+  let editableTimeline: ProductionTimeline | null = null;
+  if (production && !production.spine && timelineState.status !== "invalid") {
+    try {
+      editableTimeline = timelineState.status === "ready" ? timelineState.timeline : seedStoryPictureTimeline(production);
+    } catch (error) {
+      timelineError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const usedShotIds = new Set(
+    editableTimeline
+      ? editableTimeline.tracks.flatMap((track) => track.clips.map((clip) => clip.source.shotId))
+      : cut?.entries.map((entry) => entry.shot.id) ?? [],
+  );
+  const pictureTrack = editableTimeline?.tracks.find((track) => track.kind === "picture") ?? null;
+  const orderedPictureClips = [...(pictureTrack?.clips ?? [])].sort(
+    (left, right) => left.startFrame - right.startFrame,
+  );
+  const selectedPictureClip =
+    activeSelection?.kind === "picture"
+      ? (orderedPictureClips.find((clip) => clip.source.shotId === activeSelection.id) ?? null)
+      : null;
+  const selectedPictureIndex = selectedPictureClip
+    ? orderedPictureClips.findIndex((clip) => clip.id === selectedPictureClip.id)
+    : -1;
+  const timelineRevision = timelineState.status === "ready" ? timelineState.timeline.revision : null;
+  const timelineUndo = timelineState.status === "ready" ? timelineState.timeline.history.undo.length : 0;
+  const timelineRedo = timelineState.status === "ready" ? timelineState.timeline.history.redo.length : 0;
+  const sendPictureMove = (direction: "earlier" | "later") => {
+    if (!worldId || !prodId || !production || !selectedPictureClip) return;
+    setTimelineCommandError(null);
+    moveTimelinePictureClip(
+      worldId,
+      prodId,
+      selectedPictureClip.id,
+      direction,
+      timelineRevision,
+      storyTimelineFingerprint(production),
+    );
+  };
 
   return (
     <div className="fy-cutcols" data-screen="cut">
-      <ArtifactPanel worldId={worldId} artifacts={world?.artifacts ?? []} slug={slug} />
-      <div className="fy-prodmain" style={{ minHeight: "100%" }}>
-        <div className="fy-h1row">
-          <h1 className="fy-h1">The cut</h1>
-          <span className="fy-h1row__meta">
-            {spineCut
-              ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
-              : mediaOnly
-                ? // No shots to be covered or uncovered, so coverage is not a fact about this cut.
-                  // What is true of it is how long it runs and what is on it, and nothing else.
-                  `${runtimeSeconds(filmSec)} · no story · what you place is the film`
-                : cut
-                  ? `${seconds(cut.totalSec)} · ${cut.covered} of ${cut.entries.length} shots covered · assembled from accepted takes only`
-                  : ""}
-            {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
-          </span>
+      <ArtifactPanel
+        worldId={worldId}
+        artifacts={artifacts}
+        slug={slug}
+        production={production}
+        usedArtifactIds={usedArtifactIds}
+        usedShotIds={usedShotIds}
+        onSelectShot={selectPicture}
+        open={libraryOpen}
+        onClose={() => {
+          setLibraryOpen(false);
+          if (editorMediaMatches("(max-width: 1199px)")) queueMicrotask(() => libraryToggleRef.current?.focus());
+        }}
+        panelRef={libraryPanelRef}
+      />
+      <main className="fy-cutmain">
+        <header className="fy-cuthead">
+          <button
+            ref={libraryToggleRef}
+            type="button"
+            className="fy-editorpane-toggle fy-editorpane-toggle--library"
+            aria-controls="cut-library"
+            aria-expanded={libraryOpen}
+            onClick={() => {
+              const opening = !libraryOpen;
+              setRightOpen(false);
+              setLibraryOpen(opening);
+              if (opening) queueMicrotask(() => focusFirstControl(libraryPanelRef.current));
+            }}
+          >
+            Library
+          </button>
+          <div className="fy-cuthead__title">
+            <h1>The cut</h1>
+            <span className="fy-cuthead__meta">
+              {cutMeta}
+              {clipCount > 0 && ` · ${clipCount} clip${clipCount === 1 ? "" : "s"}`}
+            </span>
+          </div>
           <span className="fy-h1row__push" />
-          <Button onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}>
-            Export cut…
+          <Button size="sm" onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={timelineError !== null}
+            onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}
+          >
+            Export film
           </Button>
+          <button
+            ref={rightToggleRef}
+            type="button"
+            className="fy-editorpane-toggle fy-editorpane-toggle--right"
+            aria-controls="cut-right-pane"
+            aria-expanded={rightOpen}
+            onClick={() => {
+              const opening = !rightOpen;
+              setLibraryOpen(false);
+              setRightOpen(opening);
+              if (opening) queueMicrotask(() => focusFirstControl(rightPanelRef.current));
+            }}
+          >
+            {rightTab === "arke" ? "Arke" : "Inspector"}
+          </button>
+        </header>
+        <div className="fy-cutnotice">
+          <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+          <strong>
+            {spineCut
+              ? `Arke assembled ${spineCut.segments.filter((segment) => segment.kind === "clip").length} picture anchors on the track.`
+              : mediaOnly
+                ? "This cut starts empty. Add media from the Library."
+                : cut
+                  ? `Arke assembled ${cut.covered} of ${cut.entries.length} shots.${cut.gaps > 0 ? ` ${cut.gaps} still ${cut.gaps === 1 ? "needs" : "need"} an accepted take.` : ""}`
+                  : "The cut will assemble when the story has shots."}
+          </strong>
+          <span className="fy-h1row__push" />
+          <button
+            type="button"
+            onClick={() => {
+              setRightTab("arke");
+              setLibraryOpen(false);
+              setRightOpen(true);
+              if (editorMediaMatches("(max-width: 899px)")) {
+                queueMicrotask(() => focusFirstControl(rightPanelRef.current));
+              }
+            }}
+          >
+            what it did
+          </button>
         </div>
-        <CutPreview
-          slug={slug}
-          spans={spans}
-          totalSec={filmSec}
-          soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
-          restartToken={watchToken}
-          transport={transport}
-        />
-        <div className="fy-timeline">
-          <CutScrubber totalSec={totalSec} transport={transport} />
-          <div className="fy-tracks">
-            {totalSec > 0 && (
-              <div
-                className="fy-playhead"
-                style={{ left: `${Math.min(100, (transport.time / totalSec) * 100)}%` }}
-                aria-hidden
-              />
-            )}
-            {worldId && prodId && production && cut ? (
-              spineCut ? (
-                <SpineCutTrack
-                  worldId={worldId}
-                  prodId={prodId}
-                  slug={slug}
-                  cut={spineCut}
-                  production={production}
+        <div className="fy-cutpreview-wrap">
+          {timelineError && <div className="fy-cuttimeline-error">Timeline unavailable · {timelineError}</div>}
+          <CutPreview
+            slug={slug}
+            spans={spans}
+            totalSec={filmSec}
+            soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
+            restartToken={watchToken}
+            transport={transport}
+          />
+        </div>
+        <section className="fy-timeline" aria-label="Timeline">
+          <div className="fy-timeline__toolbar">
+            <strong>TIMELINE</strong>
+            <span>{clipCount} clip{clipCount === 1 ? "" : "s"} · {Math.max(2, overlays.reduce((high, clip) => Math.max(high, (clip.lane ?? 0) + 1), 0))} overlay lanes</span>
+            <span className="fy-h1row__push" />
+            <button
+              type="button"
+              disabled={timelineError !== null || !worldId || !prodId || timelineRevision === null || timelineUndo === 0}
+              onClick={() => {
+                setTimelineCommandError(null);
+                if (worldId && prodId && timelineRevision !== null) {
+                  moveTimelineHistory(worldId, prodId, "undo", timelineRevision);
+                }
+              }}
+            >
+              Undo
+            </button>
+            <button
+              type="button"
+              disabled={timelineError !== null || !worldId || !prodId || timelineRevision === null || timelineRedo === 0}
+              onClick={() => {
+                setTimelineCommandError(null);
+                if (worldId && prodId && timelineRevision !== null) {
+                  moveTimelineHistory(worldId, prodId, "redo", timelineRevision);
+                }
+              }}
+            >
+              Redo
+            </button>
+            <button
+              type="button"
+              disabled={timelineError !== null || selectedPictureIndex <= 0}
+              onClick={() => sendPictureMove("earlier")}
+            >
+              Move earlier
+            </button>
+            <button
+              type="button"
+              disabled={
+                timelineError !== null ||
+                selectedPictureIndex < 0 ||
+                selectedPictureIndex >= orderedPictureClips.length - 1
+              }
+              onClick={() => sendPictureMove("later")}
+            >
+              Move later
+            </button>
+            <span>Snap on</span>
+          </div>
+          {timelineCommandError && (
+            <div className="fy-timeline__refusal" role="alert">Edit refused · {timelineCommandError}</div>
+          )}
+          <div
+            className="fy-timeline__canvas"
+            onClick={(event) => {
+              const target = event.target as HTMLElement;
+              if (target.closest(".fy-cutseg, .fy-ovclip")) return;
+              setSelected(null);
+              setSelectionCleared(true);
+            }}
+          >
+            <CutScrubber
+              totalSec={totalSec}
+              frameRate={production ? productionFrameRate(production.meta) : 24}
+              transport={transport}
+            />
+            <div className="fy-tracks">
+              {totalSec > 0 && (
+                <div
+                  className="fy-playhead"
+                  style={{ left: `calc(88px + (100% - 88px) * ${Math.min(1, transport.time / totalSec)})` }}
+                  aria-hidden
                 />
+              )}
+              <EmptyEditorTrack label="Subtitles" detail="No subtitle track yet" kind="subtitles" />
+              {production && cut ? (
+                spineCut ? (
+                  <SpineCutTrack
+                    slug={slug}
+                    cut={spineCut}
+                    selectedShotId={activeSelection?.kind === "picture" ? activeSelection.id : null}
+                    onSelectShot={selectPicture}
+                  />
+                ) : (
+                  <StoryCutTrack
+                    slug={slug}
+                    cut={cut}
+                    selectedShotId={activeSelection?.kind === "picture" ? activeSelection.id : null}
+                    onSelectShot={selectPicture}
+                  />
+                )
               ) : (
-                <StoryCutTrack
+                <EmptyEditorTrack label="Picture" detail="Opening accepted takes…" kind="picture" />
+              )}
+              <EmptyEditorTrack label="Dialogue" detail="Typed dialogue track not available" kind="dialogue" />
+              <EmptyEditorTrack label="Ambience" detail="Typed ambience track not available" kind="ambience" />
+              <EmptyEditorTrack label="Music" detail="Typed music track not available" kind="music" />
+              {worldId && prodId && timelineError === null && (
+                <ClipLanes
                   worldId={worldId}
                   prodId={prodId}
                   slug={slug}
-                  cut={cut}
-                  production={production}
+                  totalSec={totalSec}
+                  clips={overlays}
+                  artifacts={artifacts}
+                  snapPoints={snapPoints}
+                  selectedClipId={activeSelection?.kind === "overlay" ? activeSelection.id : null}
+                  onSelectClip={selectOverlay}
                 />
-              )
-            ) : null}
-            {/*
-             * The A row that used to sit here listed the world's audio artifacts and could do
-             * nothing with them — audio now lands on a lane like everything else, so a row that
-             * only ever described the inventory would be repeating the panel beside it.
-             */}
-            {worldId && prodId && (
-              <ClipLanes
-                worldId={worldId}
-                prodId={prodId}
-                slug={slug}
-                totalSec={totalSec}
-                clips={production?.cut.overlays ?? []}
-                artifacts={world?.artifacts ?? []}
-                snapPoints={snapPoints}
-              />
-            )}
+              )}
+            </div>
           </div>
           <div className="fy-cutfoot">
             <span className="fy-mono">
               {spineCut
                 ? `${spineCut.segments.filter((seg) => seg.kind === "clip").length} of ${spineCut.segments.filter((seg) => seg.kind !== "black").length} anchors covered`
                 : mediaOnly
-                  ? // Nothing to say (issue 504). This line answers how much of the work is
-                    // placed, and a production with no story has no work outstanding — "0 of 0
-                    // shots placed · 0 gaps" reads as a film in trouble, counts nothing that
-                    // exists, and calls eight uncovered seconds no gap in its own vocabulary.
-                    // What is on the timeline the header already states: runtime and clips both.
-                    ""
+                  ? ""
                   : cut
                     ? `${cut.covered} of ${cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
                     : ""}
@@ -3959,34 +4517,98 @@ export function CutScreen() {
               ? spineCut.blackSec > 0 && (
                   <span className="fy-warnchip">
                     <span className="fy-dot fy-dot--warn" />
-                    {spineCut.segments.filter((seg) => seg.kind === "black").length} black ·{" "}
-                    {seconds(spineCut.blackSec)} uncovered
+                    {spineCut.segments.filter((seg) => seg.kind === "black").length} black · {seconds(spineCut.blackSec)} uncovered
                   </span>
                 )
-              : cut &&
-                cut.gaps > 0 && (
+              : cut && cut.gaps > 0 && (
                   <span className="fy-warnchip">
                     <span className="fy-dot fy-dot--warn" />
                     {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} · {seconds(cut.uncoveredSec)} uncovered
                   </span>
                 )}
           </div>
+        </section>
+        <footer className="fy-cutmain__foot">
+          {production && timelineState.status === "ready"
+            ? `saved Picture timeline · revision ${timelineState.timeline.revision} · ${productionFrameRate(production.meta)} fps`
+            : mediaOnly
+            ? "the cut is what you placed — nothing recomputes it; the clips themselves are the record"
+            : "the cut is a projection — it recomputes from shot selections; restoring an earlier cut means restoring the selections that produced it"}
+        </footer>
+      </main>
+      <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
+        <div className="fy-cutside__tabs" role="tablist" aria-label="Editor details">
+          <button
+            type="button"
+            id="cut-inspector-tab"
+            role="tab"
+            aria-selected={rightTab === "inspector"}
+            aria-controls="cut-inspector-panel"
+            onClick={() => setRightTab("inspector")}
+          >
+            Inspector
+          </button>
+          <button
+            type="button"
+            id="cut-arke-tab"
+            role="tab"
+            aria-selected={rightTab === "arke"}
+            aria-controls="cut-arke-panel"
+            onClick={() => setRightTab("arke")}
+          >
+            Arke
+          </button>
+          <button
+            type="button"
+            className="fy-cutside__close"
+            aria-label="Close editor details"
+            onClick={() => {
+              setRightOpen(false);
+              if (editorMediaMatches("(max-width: 899px)")) queueMicrotask(() => rightToggleRef.current?.focus());
+            }}
+          >
+            &times;
+          </button>
         </div>
-        <div style={{ marginTop: "auto" }}>
-          {/*
-           * What restoring an earlier cut would mean, which is not the same sentence for both
-           * clocks (issue 504's neighbour). A derived cut holds nothing of its own, so the warning
-           * is that the selections are what to keep. A production with no story derives nothing:
-           * the placements ARE the record, and telling somebody their work recomputes from shot
-           * selections they do not have is false about the one thing this note exists to say.
-           */}
-          <span className="fy-mono">
-            {mediaOnly
-              ? "the cut is what you placed — nothing recomputes it; the clips themselves are the record"
-              : "the cut is a projection — it recomputes from shot selections; restoring an earlier cut means restoring the selections that produced it"}
-          </span>
-        </div>
-      </div>
+        {rightTab === "inspector" ? (
+          <div
+            className="fy-cutside__panel"
+            id="cut-inspector-panel"
+            role="tabpanel"
+            aria-labelledby="cut-inspector-tab"
+          >
+            <CutInspector
+              worldId={worldId}
+              prodId={prodId}
+              production={production}
+              cut={cut}
+              spineCut={spineCut}
+              artifacts={artifacts}
+              selection={activeSelection}
+              filmSec={filmSec}
+              clipCount={clipCount}
+              savedPictureOrder={timelineState.status === "ready"}
+            />
+          </div>
+        ) : (
+          <div
+            className="fy-cutside__panel fy-cutside__panel--arke"
+            id="cut-arke-panel"
+            role="tabpanel"
+            aria-labelledby="cut-arke-tab"
+          >
+            <ProductionConversation
+              worldId={worldId}
+              productionId={prodId}
+              dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation` }}
+              openingNote="opening production conversation…"
+              emptyLine="No production conversation yet. This tab uses the same real thread as Develop."
+              placeholder="Ask Arke about this production…"
+              pointsEmpty="Nothing understood yet. Timeline edit requests are not available in this shell."
+            />
+          </div>
+        )}
+      </aside>
     </div>
   );
 }
@@ -4222,7 +4844,23 @@ export function ExportsScreen() {
   // offers neither rather than a zero-length video (design 54a). It stays on the story rail
   // because the world folder export lives here, and the chapters travel whole inside it.
   const isStory = production ? productionShape(production.meta).hasChapters : false;
-  const cut = production ? deriveCut(production) : null;
+  const timelineState = production?.timeline ?? { status: "absent" as const };
+  let cut: ReturnType<typeof deriveCut> | null = null;
+  let timelineBlock: string | null = null;
+  if (production) {
+    try {
+      if (production.spine && timelineState.status !== "absent") {
+        throw new Error(
+          timelineState.status === "invalid"
+            ? timelineState.message
+            : "music-timed delivery does not consume the saved Picture timeline in this release",
+        );
+      }
+      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
+    } catch (error) {
+      timelineBlock = error instanceof Error ? error.message : String(error);
+    }
+  }
   const view = exportViewFor(world, production);
   /*
    * No story to derive a picture from, so what was placed is the film (issue 453). Resolved
@@ -4267,7 +4905,12 @@ export function ExportsScreen() {
    */
   const nothingPlaced = mediaOnly && placedSec === 0;
   const unusablePlacements = nothingPlaced && overlays.length > 0;
-  const blocked = refusal !== null || view.kind === "no-track" || view.kind === "silent" || nothingPlaced;
+  const blocked =
+    timelineBlock !== null || refusal !== null || view.kind === "no-track" || view.kind === "silent" || nothingPlaced;
+  const episodeTimelineBlock =
+    timelineState.status === "absent"
+      ? null
+      : timelineBlock ?? "episode ranges do not consume the saved Picture timeline in this release";
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": {
       label: "Review cut",
@@ -4296,14 +4939,15 @@ export function ExportsScreen() {
             Episodes · each its own deliverable
             <Button
               variant="secondary"
+              disabled={episodeTimelineBlock !== null}
               onClick={() => {
                 // The season batch is one send per episode (issue 396): each encode is its own
                 // export with its own progress and retry, so one failure never re-encodes the
                 // rest. Refused episodes are skipped here and say why on their row.
-                if (!worldId || !prodId) return;
+                if (!worldId || !prodId || episodeTimelineBlock !== null) return;
                 for (const episode of production.episodes) {
                   if (episodeExportRefusals(production, episode.id) === null) {
-                    exportCut(worldId, prodId, preset, episode.id);
+                    exportCut(worldId, prodId, preset, null, episode.id);
                   }
                 }
               }}
@@ -4313,7 +4957,9 @@ export function ExportsScreen() {
           </div>
           {production.episodes.map((episode) => {
             const episodeCut = deriveEpisodeCut(production, episode.id);
-            const episodeRefusal = episodeExportRefusals(production, episode.id);
+            const episodeRefusal = episodeTimelineBlock
+              ? { detail: episodeTimelineBlock }
+              : episodeExportRefusals(production, episode.id);
             return (
               <div key={episode.id} className="fy-listrow">
                 <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
@@ -4333,7 +4979,7 @@ export function ExportsScreen() {
                 ) : (
                   <Button
                     variant="ghost"
-                    onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, episode.id)}
+                    onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, null, episode.id)}
                   >
                     Export episode
                   </Button>
@@ -4405,6 +5051,12 @@ export function ExportsScreen() {
                 </button>
               ))}
             </div>
+            {timelineBlock && (
+              <div className="fy-notecard">
+                <span className="fy-dot fy-dot--warn" />
+                Timeline unavailable · {timelineBlock}
+              </div>
+            )}
             {view.kind === "no-track" && (
               <div className="fy-notecard">
                 <span className="fy-dot fy-dot--warn" />
@@ -4478,7 +5130,17 @@ export function ExportsScreen() {
               <Button
                 variant="primary"
                 disabled={blocked}
-                onClick={() => !blocked && worldId && prodId && exportCut(worldId, prodId, preset)}
+                onClick={() =>
+                  !blocked &&
+                  worldId &&
+                  prodId &&
+                  exportCut(
+                    worldId,
+                    prodId,
+                    preset,
+                    timelineState.status === "ready" ? timelineState.timeline.revision : null,
+                  )
+                }
               >
                 {runtimeSec === undefined ? "Export" : <>Export · {mediaOnly ? runtimeSeconds(runtimeSec) : seconds(runtimeSec)}</>}
               </Button>

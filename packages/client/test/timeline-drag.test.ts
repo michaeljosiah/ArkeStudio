@@ -21,6 +21,10 @@ describe("timecode, ported", () => {
     assert.equal(formatTimecode(0), "00:00:00:00");
     assert.equal(formatTimecode(1.5), "00:00:01:12");
     assert.equal(formatTimecode(3661.25), "01:01:01:06");
+    assert.equal(formatTimecode(1.5, 25), "00:00:01:12");
+    assert.equal(formatTimecode(1.5, 30), "00:00:01:15");
+    assert.equal(parseTimecode("00:00:01:15", 30), 1.5);
+    assert.equal(formatTimecode(29 / 25, 25), "00:00:01:04");
   });
 
   it("clamps what upstream would have rendered as nonsense", () => {

@@ -1198,7 +1198,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 /* 82a: the rail folds to marks so the Cut can open the world's artifacts beside it. Every
    destination stays; only the words are spent, and each keeps its name on a tooltip. */
-.fy-prodrail--folded { width: 44px; padding-left: 6px; padding-right: 6px; align-items: center; }
+.fy-prodrail--folded { width: 46px; padding-left: 6px; padding-right: 6px; align-items: center; }
 .fy-prodrail--folded .fy-prodrail__label,
 .fy-prodrail--folded .fy-prodrail__count,
 .fy-prodrail--folded .fy-prodrail__switchname,
@@ -1944,14 +1944,15 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* cut (24a) */
 .fy-cutviewer {
-  flex: 1;
-  min-height: 240px;
-  margin-top: 14px;
+  width: 100%;
+  height: 326px;
+  flex: none;
+  min-height: 0;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 11px;
   overflow: hidden;
   position: relative;
-  background: var(--primary);
+  background: var(--neutral-950);
   animation: fy-fade-up 0.7s var(--ease-out) 0.1s both;
 }
 .fy-cutviewer__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--neutral-950); transition: opacity 0.15s var(--ease-out); }
@@ -1967,19 +1968,57 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-align: center;
   padding: 0 24px;
 }
-.fy-timeline { flex: none; margin-top: 16px; animation: fy-fade-up 0.7s var(--ease-out) 0.2s both; }
-.fy-timeline__ruler { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.fy-timeline {
+  min-height: 250px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  overflow: hidden;
+  animation: fy-fade-up 0.7s var(--ease-out) 0.2s both;
+}
+.fy-timeline__toolbar {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font: 400 9px var(--font-mono);
+}
+.fy-timeline__toolbar strong { color: var(--foreground); font-weight: 600; letter-spacing: .08em; }
+.fy-timeline__canvas { overflow-x: auto; overflow-y: hidden; }
+.fy-timeline__canvas > * { min-width: 520px; }
+.fy-timeline__ruler { display: flex; align-items: baseline; gap: 10px; margin: 0; padding: 6px 9px 5px 97px; }
 /* The ruler is the seek surface: its width is the whole cut, so a fraction across is a fraction in. */
-.fy-scrub { cursor: pointer; touch-action: none; user-select: none; padding-bottom: 4px; }
+.fy-scrub { cursor: pointer; touch-action: none; user-select: none; }
 .fy-scrub:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
 .fy-tracks { position: relative; }
-/* 24a draws the playhead as a 2px rule standing over the tracks. */
-.fy-playhead { position: absolute; top: -6px; bottom: -4px; width: 1.5px; background: var(--foreground); pointer-events: none; z-index: 1; }
-.fy-playhead::before { content: ""; position: absolute; top: -4px; left: -3.5px; width: 8px; height: 8px; border-radius: 99px; background: var(--foreground); }
-.fy-track { display: flex; align-items: center; gap: 8px; }
-.fy-track + .fy-track { margin-top: 6px; }
-.fy-track__label { font: 500 9px var(--font-mono); color: var(--neutral-400); width: 20px; flex: none; }
-.fy-track__lane { flex: 1; display: flex; gap: 4px; min-width: 0; }
+.fy-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--destructive); pointer-events: none; z-index: 5; }
+.fy-playhead::before { content: ""; position: absolute; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 99px; background: var(--destructive); }
+.fy-track { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line-soft); }
+.fy-track + .fy-track { margin-top: 0; }
+.fy-track__label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 88px;
+  box-sizing: border-box;
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  font: 500 9px var(--font-mono);
+  color: var(--muted-foreground);
+}
+.fy-track__lane { flex: 1; display: flex; gap: 2px; min-width: 0; padding: 2px; }
+.fy-track__empty { margin: auto; font: 400 8.5px var(--font-mono); color: var(--neutral-400); }
+.fy-track[data-track="subtitles"] .fy-track__lane { height: 26px; box-sizing: border-box; }
+.fy-track[data-track="dialogue"] .fy-track__lane { height: 42px; box-sizing: border-box; }
+.fy-track[data-track="ambience"] .fy-track__lane,
+.fy-track[data-track="music"] .fy-track__lane { height: 38px; box-sizing: border-box; }
 .fy-cutseg { min-width: 0; height: 58px; border-radius: 7px; overflow: hidden; position: relative; border: 1px solid var(--border); }
 .fy-cutseg__tag {
   position: absolute;
@@ -2019,7 +2058,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-cutseg--pick { padding: 0; cursor: pointer; background: none; font: inherit; color: inherit; }
 /* 81a: the scene keeps its grouping in a band above the lane, where the song's sections sit in
    80a. Same 16 band on both clocks, so switching between them moves no row. */
-.fy-scenes { flex: 1; display: flex; gap: 0; min-width: 0; }
+.fy-scenes { flex: 1; display: flex; gap: 0; min-width: 0; padding: 0 2px; }
 .fy-scenes__band {
   min-width: 0;
   height: 16px;
@@ -2076,7 +2115,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-trim__step:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 .fy-trim__step:disabled { opacity: 0.35; cursor: default; }
-.fy-cutfoot { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.fy-cutfoot { min-height: 30px; display: flex; align-items: center; gap: 12px; padding: 0 10px; border-top: 1px solid var(--border); }
 .fy-warnchip { display: inline-flex; align-items: center; gap: 6px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 
 /* audio rows (25a) */
@@ -5713,23 +5752,182 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-voicelist::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 .fy-voicelist::-webkit-scrollbar-track { background: transparent; }
 
-/* ---- 82a: the artifact panel beside the cut, and the lane it drops onto ---- */
-.fy-cutcols { display: flex; min-height: 100%; }
-.fy-artpanel { width: 300px; flex: none; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-.fy-artpanel__head { display: flex; align-items: center; gap: 10px; padding: 16px 14px 10px; }
-.fy-artpanel__title { font: 650 13px var(--font-sans); letter-spacing: -0.01em; }
-.fy-artpanel__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px 12px; display: flex; flex-direction: column; gap: 2px; }
-.fy-artpanel__empty { font: 400 11px var(--font-mono); color: var(--neutral-400); padding: 10px 6px; }
-.fy-artpanel__foot { border-top: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; gap: 7px; }
-.fy-artrow { display: flex; align-items: center; gap: 9px; padding: 6px; border-radius: 8px; border: 1px solid transparent; cursor: grab; transition: var(--transition-control); }
+/* ---- SPEC-039 editor shell: Library / centre / Inspector or Arke -------------------------- */
+.fy-cutcols {
+  position: relative;
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr) 308px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.fy-artpanel {
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--background);
+  display: flex;
+  flex-direction: column;
+}
+.fy-artpanel__head { min-height: 43px; display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+.fy-artpanel__title { font: 600 14px var(--font-sans); letter-spacing: -0.01em; }
+.fy-artpanel__close, .fy-cutside__close {
+  display: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.fy-artpanel__close:hover, .fy-cutside__close:hover { background: var(--accent); color: var(--foreground); }
+.fy-artpanel__search {
+  height: 30px;
+  margin: 0 10px 8px;
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted-foreground);
+}
+.fy-artpanel__search:focus-within { outline: 2px solid var(--ring); outline-offset: -1px; }
+.fy-artpanel__search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--foreground);
+  font: 400 11px var(--font-sans);
+}
+.fy-artpanel__filters { display: flex; gap: 4px; padding: 0 10px 9px; overflow-x: auto; }
+.fy-artpanel__filters button {
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  padding: 4px 7px;
+  font: 500 9px var(--font-sans);
+  cursor: pointer;
+}
+.fy-artpanel__filters button[aria-pressed="true"] { border-color: var(--border); background: var(--secondary); color: var(--foreground); }
+.fy-artpanel__list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 7px 10px; display: flex; flex-direction: column; gap: 1px; }
+.fy-artpanel__group { padding: 9px 6px 4px; font: 500 8px var(--font-mono); letter-spacing: .08em; color: var(--neutral-400); }
+.fy-artpanel__empty { font: 400 10px var(--font-mono); color: var(--neutral-400); padding: 12px 6px; }
+.fy-artpanel__foot { min-height: 32px; border-top: 1px solid var(--border); padding: 0 12px; display: flex; align-items: center; gap: 7px; }
+.fy-artrow {
+  width: 100%;
+  min-height: 35px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  transition: var(--transition-control);
+}
 .fy-artrow:hover { background: var(--accent); }
 .fy-artrow:active { cursor: grabbing; }
-.fy-artrow__swatch { width: 38px; height: 26px; border-radius: 5px; background: var(--neutral-200); flex: none; overflow: hidden; }
+.fy-artrow--take { cursor: pointer; }
+.fy-artrow--take:active { cursor: pointer; }
+.fy-artrow--missing { color: var(--muted-foreground); cursor: default; }
+.fy-artrow__swatch { width: 46px; height: 27px; border-radius: 4px; background: var(--neutral-200); color: var(--neutral-400); flex: none; overflow: hidden; display: flex; align-items: center; justify-content: center; }
 .fy-artrow__body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.fy-artrow__name { font: 400 11.5px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-artrow__meta { font: 400 8.5px var(--font-mono); letter-spacing: 0.04em; color: var(--neutral-400); margin-top: 1px; }
+.fy-artrow__name { font: 500 10.5px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-artrow__meta { font: 400 7.5px var(--font-mono); letter-spacing: 0.035em; color: var(--neutral-400); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fy-cutmain {
+  min-width: 0;
+  min-height: 0;
+  padding: 0 18px 10px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: var(--muted);
+}
+.fy-cuthead { min-height: 53px; flex: none; display: flex; align-items: center; gap: 7px; }
+.fy-cuthead__title { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-cuthead h1 { margin: 0; font: 600 19px/1.1 var(--font-sans); letter-spacing: -.025em; }
+.fy-cuthead__meta { max-width: min(54vw, 590px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 8.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-editorpane-toggle {
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--foreground);
+  padding: 5px 8px;
+  font: 500 10px var(--font-sans);
+  cursor: pointer;
+}
+.fy-cutnotice {
+  min-height: 40px;
+  flex: none;
+  margin-top: 10px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  font: 400 10px var(--font-sans);
+}
+.fy-cutnotice strong { min-width: 0; font-weight: 500; }
+.fy-cutnotice__mark { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; background: var(--foreground); color: var(--background); }
+.fy-cutnotice button { flex: none; border: 0; background: transparent; color: var(--muted-foreground); padding: 4px; font: 400 9px var(--font-mono); cursor: pointer; }
+.fy-cutnotice button:hover { color: var(--foreground); }
+.fy-cutpreview-wrap { height: 348px; flex: none; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 10px 0 12px; }
+.fy-cuttimeline-error {
+  position: absolute; z-index: 2; max-width: min(620px, calc(100% - 40px)); padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--destructive) 42%, var(--border)); border-radius: 8px;
+  background: var(--background); color: var(--destructive); font: 500 10px/1.4 var(--font-mono);
+}
+.fy-cutmain > .fy-timeline { flex: none; }
+.fy-cutmain__foot { flex: none; padding: 7px 2px 0; font: 400 8px/1.4 var(--font-mono); color: var(--neutral-400); }
+
+.fy-cutside { min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--background); display: flex; flex-direction: column; }
+.fy-cutside__tabs { min-height: 43px; flex: none; display: flex; align-items: end; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.fy-cutside__tabs > [role="tab"] { height: 43px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-foreground); padding: 0 1px; font: 500 11.5px var(--font-sans); cursor: pointer; }
+.fy-cutside__tabs > [role="tab"][aria-selected="true"] { border-bottom-color: var(--foreground); color: var(--foreground); }
+.fy-cutside__close { margin: auto 0 auto auto; }
+.fy-cutside__panel { flex: 1; min-height: 0; overflow-y: auto; }
+.fy-cutside__panel--arke { display: flex; overflow: hidden; }
+.fy-cutinspect { padding: 16px 15px; }
+.fy-cutinspect__eyebrow { font: 500 8.5px var(--font-mono); letter-spacing: .1em; color: var(--neutral-400); }
+.fy-cutinspect h2 { margin: 5px 0 14px; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.015em; }
+.fy-cutinspect__rows { border-top: 1px solid var(--border); }
+.fy-cutinspect__row { min-height: 30px; display: flex; align-items: baseline; gap: 9px; padding: 6px 1px; border-bottom: 1px solid var(--line-soft); font-size: 10.5px; }
+.fy-cutinspect__row > span { width: 72px; flex: none; color: var(--muted-foreground); }
+.fy-cutinspect__row > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; text-align: right; }
+.fy-cutinspect__note { margin: 13px 0 0; color: var(--muted-foreground); font: 400 9.5px/1.55 var(--font-sans); }
+.fy-cutinspect .fy-cutsel { height: auto; min-height: 46px; margin-top: 14px; padding: 9px; flex-wrap: wrap; }
+.fy-cutinspect .fy-cutsel > .fy-mono:first-child { color: var(--foreground); }
+.fy-cutinspect .fy-cutsel__label { flex-basis: 100%; }
+.fy-cutinspect .fy-trim { margin-left: auto; }
+.fy-cutside .fy-arke { width: 100%; border-left: 0; background: var(--background); animation: none; }
+.fy-cutside .fy-arke__head { padding: 9px 14px; }
+.fy-cutside .fy-arke__log { padding: 10px 13px 4px; }
+.fy-cutside .fy-arke__strip { padding: 7px 13px 0; }
+.fy-cutside .fy-arke__foot { padding: 8px 13px 12px; }
+.fy-timeline__toolbar button {
+  height: 22px; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--background); color: var(--foreground); font: 500 9px var(--font-sans); cursor: pointer;
+}
+.fy-timeline__toolbar button:hover:not(:disabled) { background: var(--accent); }
+.fy-timeline__toolbar button:disabled { color: var(--neutral-400); cursor: default; }
+.fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
 /* The OV lane is shorter than V on purpose: it is not the film, it is what is laid over it. */
-.fy-ovlane { position: relative; height: 44px; border: 1px dashed transparent; border-radius: 7px; }
+.fy-ovlane { position: relative; height: 44px; border: 1px dashed transparent; border-radius: 5px; }
 .fy-ovlane--over { border-color: var(--foreground); background: color-mix(in srgb, var(--accent) 60%, transparent); }
 .fy-ovlane__empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 400 9px var(--font-mono); color: var(--neutral-400); pointer-events: none; }
 .fy-ovclip { position: absolute; top: 0; height: 44px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; overflow: hidden; }
@@ -5743,6 +5941,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-ovclip { cursor: grab; user-select: none; touch-action: none; }
 .fy-ovclip:active { cursor: grabbing; }
 .fy-ovclip--dragging { border-color: var(--foreground); box-shadow: var(--shadow-sm); z-index: 3; }
+.fy-ovclip--selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
 .fy-ovclip--sound { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
 .fy-ovclip__swatch { width: 34px; height: 22px; border-radius: 3px; overflow: hidden; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .fy-ovclip__swatch--wave { background: none; color: var(--neutral-400); }
@@ -5757,6 +5956,49 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-clipmenu__item:hover:not(:disabled) { background: var(--accent); }
 .fy-clipmenu__item:disabled { color: var(--neutral-400); cursor: default; }
 .fy-clipmenu__note { font: 400 9px var(--font-mono); color: var(--neutral-400); padding: 3px 9px 5px; }
+
+@media (max-width: 1199px) {
+  .fy-cutcols { grid-template-columns: minmax(0, 1fr) 308px; }
+  .fy-artpanel {
+    position: absolute;
+    z-index: 20;
+    inset: 0 auto 0 0;
+    width: 286px;
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(-101%);
+    transition: transform .18s var(--ease-out);
+  }
+  .fy-artpanel[data-open="true"] { visibility: visible; pointer-events: auto; transform: translateX(0); }
+  .fy-artpanel__close, .fy-editorpane-toggle--library { display: inline-flex; align-items: center; justify-content: center; }
+}
+
+@media (max-width: 899px) {
+  .fy-cutcols { grid-template-columns: minmax(0, 1fr); }
+  .fy-cutside {
+    position: absolute;
+    z-index: 20;
+    inset: 0 0 0 auto;
+    width: min(308px, calc(100% - 24px));
+    box-shadow: var(--shadow-lg);
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateX(101%);
+    transition: transform .18s var(--ease-out);
+  }
+  .fy-cutside[data-open="true"] { visibility: visible; pointer-events: auto; transform: translateX(0); }
+  .fy-cutside__close, .fy-editorpane-toggle--right { display: inline-flex; align-items: center; justify-content: center; }
+  .fy-cuthead { flex-wrap: wrap; padding: 7px 0; }
+  .fy-cuthead__title { flex: 1; }
+  .fy-cuthead__meta { max-width: 52vw; }
+}
+
+@media (max-height: 760px) {
+  .fy-cutpreview-wrap { height: 248px; }
+  .fy-cutviewer { height: 226px; }
+  .fy-cutmain__foot { display: none; }
+}
 
 /* ---- Arke, docked beside the thing it is about (design turns 97, 99, 100) ----------------
    The chat stops being a place you go to. The artifact keeps the width it had; the panel takes

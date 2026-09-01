@@ -34,6 +34,11 @@ const CLIP = {
 
 describe("spine export", () => {
   const font = "C:\\Users\\D'Angelo\\Arke Studio, Inc; Stable [x64]\\Geist-Regular.ttf";
+  it("uses the production frame rate for quantisation and ffmpeg", () => {
+    const plan = buildSpineExportPlan(cutOf([CLIP], 4), "master", "audio/master.mp3", 25);
+    assert.match(filtersOf(buildSpineFfmpegArgs(plan, "/w", "/out.mp4", font)), /fps=25/);
+  });
+
   it("quantises boundaries so error cannot accumulate across a long cut", () => {
     // Sixty contiguous 1.02s segments: rounding each length independently makes a 61.2s song
     // export as 60s, truncated by its own -t.

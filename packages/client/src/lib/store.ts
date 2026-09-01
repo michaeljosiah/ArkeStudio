@@ -434,6 +434,13 @@ export function subscribeSceneRefusals(
   return () => sceneRefusalListeners.delete(listener);
 }
 
+export type TimelineCommandRefusal = Extract<DomainEvent, { type: "timeline.command-refused" }>;
+const timelineRefusalListeners = new Set<(event: TimelineCommandRefusal) => void>();
+export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefusal) => void): () => void {
+  timelineRefusalListeners.add(listener);
+  return () => timelineRefusalListeners.delete(listener);
+}
+
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
 export function subscribeProductionCreateResults(
   listener: (result: ProductionCreateResult) => void,
@@ -858,6 +865,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "scene.write-refused") {
       for (const listener of sceneRefusalListeners) listener(event);
+    }
+    if (event.type === "timeline.command-refused") {
+      for (const listener of timelineRefusalListeners) listener(event);
     }
     if (event.type === "production.plan-result") {
       for (const listener of planResultListeners) listener(event);
@@ -2721,6 +2731,7 @@ export function createProduction(
     productionKind?: string;
     seriesTitle?: string;
     aspect?: string;
+    frameRate?: 24 | 25 | 30;
     defaults?: {
       episodeCount?: number;
       episodeSecondsMin?: number;
@@ -3047,6 +3058,34 @@ export function setShotTrim(worldId: string, productionId: string, shotId: strin
   send({ kind: "set-trim", worldId, productionId, shotId, trimInSec });
 }
 
+export function moveTimelinePictureClip(
+  worldId: string,
+  productionId: string,
+  clipId: `cl_${string}`,
+  direction: "earlier" | "later",
+  baseRevision: number | null,
+  sourceFingerprint: string,
+): void {
+  send({
+    kind: "timeline-move-picture",
+    worldId,
+    productionId,
+    clipId,
+    direction,
+    baseRevision,
+    sourceFingerprint,
+  });
+}
+
+export function moveTimelineHistory(
+  worldId: string,
+  productionId: string,
+  action: "undo" | "redo",
+  baseRevision: number,
+): void {
+  send({ kind: "timeline-history", worldId, productionId, action, baseRevision });
+}
+
 /** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
 export function uploadArtifacts(worldId: string): void {
   send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
@@ -3134,6 +3173,7 @@ export function exportCut(
   worldId: string,
   productionId: string,
   preset: "review-cut" | "master" | "social-excerpt",
+  timelineRevision: number | null,
   episodeId?: string,
 ): void {
   send({
@@ -3141,6 +3181,7 @@ export function exportCut(
     worldId,
     productionId,
     preset,
+    timelineRevision,
     ...(episodeId !== undefined ? { episodeId } : {}),
   });
 }
