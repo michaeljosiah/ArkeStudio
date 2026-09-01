@@ -379,7 +379,7 @@ export function ProductionConversation({
    * the composer. There is no room for a rail beside a 360px column, and no need for one: the
    * change a proposal makes is drawn on the page beside it.
    */
-  dock?: { title: string; subject: string; thumbnail?: { src: string; alt: string } };
+  dock?: { title: string; subject: string; thumbnail?: { src: string; alt: string }; conversationFirst?: boolean };
   onSelectShot?: (shotId: string) => void;
 }) {
   const { state } = useStore();
@@ -591,24 +591,29 @@ export function ProductionConversation({
 
   if (dock) {
     return (
-      <aside className="fy-arke" data-dock="conversation">
+      <aside
+        className="fy-arke"
+        data-dock="conversation"
+        data-conversation-first={dock.conversationFirst ? "true" : undefined}
+      >
         <div className="fy-arke__head">
           {dock.thumbnail === undefined ? null : <img className="fy-arke__thumb" src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
           <span className="fy-arke__who">
             <span className="fy-arke__name">{dock.title}</span>
-            <span className="fy-mono">{dock.subject}</span>
+            {dock.conversationFirst ? null : <span className="fy-mono">{dock.subject}</span>}
           </span>
         </div>
         <div className="fy-arke__log" aria-live="polite">
           {transcript}
         </div>
-        <div className="fy-arke__strip">
-          {side ?? (
+        {!dock.conversationFirst || side !== undefined || points.length > 0 || carriedPoints > 0 ? (
+          <div className="fy-arke__strip">
+            {side ?? (
             <>
               {/* The understanding is still here, put away rather than dropped: a column this
                   narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
                   the only way a conversation becomes anything (turn 92). */}
-              {pointsEmpty !== undefined && (
+              {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
                 <details className="fy-arke__points">
                   <summary>
                     What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
@@ -630,32 +635,35 @@ export function ProductionConversation({
                   {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
                 </details>
               )}
-              <WrapUp
-                worldId={worldId}
-                conversationId={conversationId}
-                seq={loaded?.seq ?? null}
-                carried={carriedPoints}
-                status={loaded?.status ?? null}
-                subjectKey={contextKey}
-                wrapping={wrapping}
-                onWrappingChange={setWrapping}
-              />
+              {!dock.conversationFirst || carriedPoints > 0 ? (
+                <WrapUp
+                  worldId={worldId}
+                  conversationId={conversationId}
+                  seq={loaded?.seq ?? null}
+                  carried={carriedPoints}
+                  status={loaded?.status ?? null}
+                  subjectKey={contextKey}
+                  wrapping={wrapping}
+                  onWrappingChange={setWrapping}
+                />
+              ) : null}
             </>
-          )}
-        </div>
+            )}
+          </div>
+        ) : null}
         <div className="fy-arke__foot">
           <Composer
             value={message}
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
-            agentLabel="story author"
+            {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
             busy={running}
             busyLabel="reading the world…"
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
-          <div className="fy-mono">talking changes nothing · a change waits for your yes</div>
+          {dock.conversationFirst ? null : <div className="fy-mono">talking changes nothing · a change waits for your yes</div>}
         </div>
       </aside>
     );
@@ -854,6 +862,8 @@ export function StagedDecision({
   subject,
   staged,
   writes,
+  applyLabel = "Apply changes",
+  items,
   onAccepted,
 }: {
   worldId: string | undefined;
@@ -862,6 +872,9 @@ export function StagedDecision({
   staged: StagedProposal;
   /** What applying does, said plainly under the buttons. */
   writes: string;
+  /** A dock can name the concrete things this draft would touch instead of repeating its file. */
+  items?: readonly { label: string; meta?: string }[];
+  applyLabel?: string;
   /**
    * Where accepting lands you (turn 91). Absent when this is docked beside the thing it decides
    * (turns 99, 100): you are already on it, and the change appears where it lives.
@@ -902,7 +915,17 @@ export function StagedDecision({
         The things themselves, not fields with a before and an after (turn 101). What Arke said
         about them is the message above this card, in the transcript, where a sentence belongs.
       */}
-      {overwrites ? (
+      {items !== undefined && items.length > 0 ? (
+        <div className="fy-made__list">
+          {items.map((item) => (
+            <div key={`${item.label}:${item.meta ?? ""}`} className="fy-made__row">
+              <span className="fy-made__tag">SHOT</span>
+              <span className="fy-made__name">{item.label}</span>
+              {item.meta === undefined ? null : <span className="fy-mono">{item.meta}</span>}
+            </div>
+          ))}
+        </div>
+      ) : overwrites ? (
         <div className="fy-made__diff">
           {/* Grouped under the thing each field changes (review 2026-08-22): a wrap-up amending
               three episodes rendered three cards all reading "Opens" with duplicate keys and
@@ -958,7 +981,7 @@ export function StagedDecision({
             onAccepted?.();
           }}
         >
-          Apply changes
+          {applyLabel}
         </Button>
         <Button variant="outline" size="sm" onClick={() => setAside(true)}>
           Keep discussing

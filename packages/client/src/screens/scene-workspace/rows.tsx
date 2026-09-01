@@ -723,10 +723,23 @@ function Row({
     (take) => (take.kind === "frame" || take.kind === "still") && take.media !== undefined,
   );
   const refs = resolveCast(shot.description, [...sheets]).cast;
-  const overrides = [
-    shot.framing?.size === undefined ? null : `${shot.framing.size} override`,
-    shot.framing?.movement === undefined ? null : `${shot.framing.movement} override`,
-  ].filter((label): label is string => label !== null);
+  const structuredOverrides = [
+    shot.framing?.size,
+    shot.framing?.angle,
+    shot.framing?.lens,
+    shot.framing?.focus,
+    shot.framing?.movement,
+    shot.framing?.pace,
+    shot.framing?.lighting,
+    shot.framing?.timeOfDay,
+    shot.framing?.grade,
+  ].filter((value): value is string => value !== undefined && value.trim() !== "");
+  // Older scenes carry the same authored camera decisions in one line. Keeping that line visible
+  // is more honest than presenting an empty override payload until the shot is opened and saved.
+  const overrides = (structuredOverrides.length > 0
+    ? structuredOverrides
+    : (shot.camera?.split("·").map((value) => value.trim()).filter(Boolean) ?? []))
+    .map((value) => `${value} override`);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
   const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
@@ -955,7 +968,7 @@ function Row({
     >
       {selected ? <span className="fy-swrow__ring" aria-hidden="true" /> : null}
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
-      <div className="fy-swrow__frame" style={{ aspectRatio: aspect.replace(":", " / ") }}>
+      <div className="fy-swrow__frame fy-imghost" style={{ aspectRatio: aspect.replace(":", " / ") }}>
         {src === null ? (
           <div className="fy-swrow__hatch"><span className="fy-swrow__nofr">no frame yet</span></div>
         ) : (
@@ -997,7 +1010,9 @@ function Row({
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          <button type="button" onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
+          {shot.description.trim() === "" ? null : (
+            <button type="button" onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
+          )}
           <button
             ref={variantsTrigger}
             type="button"
@@ -1072,7 +1087,7 @@ function Row({
       <div className="fy-swrow__body">
         <div className="fy-swrow__titleline">
           <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
-          <span className="fy-swchip" data-state={state}>{CHIP[state]}</span>
+          <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{CHIP[state]}</span>
         </div>
         {coverage === "changed" || runScriptChanged ? (
           <div className="fy-swrow__stale">
@@ -1167,6 +1182,7 @@ function Row({
           <button
             type="button"
             className="fy-swrow__generate"
+            data-existing={hasFrame ? "true" : undefined}
             disabled={disabled || run?.status === "active" || run?.status === "paused"}
             onClick={(event) => onGenerateFrame(event.currentTarget)}
           >
@@ -1191,10 +1207,12 @@ function Row({
             •••
           </button>
         </div>
-        <div className="fy-swrow__slot">
-          <span>{shot.promptOverride === undefined ? "prompt · auto" : "edited by you"}</span>
-          <button type="button" disabled={disabled} onClick={onEdit}>Edit</button>
-        </div>
+        {shot.description.trim() === "" ? null : (
+          <div className="fy-swrow__slot">
+            <span>{shot.promptOverride === undefined ? "prompt · auto" : "edited by you"}</span>
+            <button type="button" disabled={disabled} onClick={onEdit}>Edit</button>
+          </div>
+        )}
       </div>
       {menuOpen && typeof document !== "undefined"
         ? createPortal(

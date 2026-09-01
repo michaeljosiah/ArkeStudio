@@ -36,6 +36,7 @@ import { FrameRunBar, FrameRunBoardFailures, FrameRunReview, GenerateFramesDialo
 import { Button } from "../../components/ui.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
+import { SceneStage } from "./stage.js";
 import { sceneIsComplete } from "./completion.js";
 import { PlansPanel } from "./plans.js";
 
@@ -68,7 +69,7 @@ export function SceneWorkspace({
   const state = useClientState();
   const connection = useStore().connection;
   const digests = useBlockDigests(legacySceneView(scene));
-  const [view, setView] = useState<"storyboard" | "flow" | "preview">("storyboard");
+  const [view, setView] = useState<"storyboard" | "flow" | "stage" | "preview">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [generateTarget, setGenerateTarget] = useState<{ shotId?: string } | null>(null);
@@ -384,7 +385,7 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
+              {(["storyboard", "flow", "stage", "preview"] as const).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -394,32 +395,22 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
+                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : candidate === "stage" ? "Stage" : "Preview"}
                 </button>
               ))}
             </div>
-            {frameRun !== null ? (
-              <FrameRunBar
-                run={frameRun}
-                worldId={world.meta.worldId}
-                productionId={production.meta.id}
-                onReview={() => setReviewOpen(true)}
-              />
-            ) : (
-              <>
-                <span className="fy-sw__coverage">
-                  {shots.length - framed} of {shots.length} without a frame
-                </span>
-                <button
-                  type="button"
-                  className="fy-sw__boards-toggle"
-                  aria-pressed={showBoards}
-                  onClick={() => setShowBoards((shown) => !shown)}
-                >
-                  {showBoards ? "Hide boards" : "Show boards"}
-                </button>
-              </>
-            )}
+            <span className="fy-sw__coverage">
+              {shots.length - framed} of {shots.length} without a frame
+            </span>
+            <button
+              type="button"
+              className="fy-sw__boards-toggle"
+              aria-pressed={showBoards}
+              onClick={() => setShowBoards((shown) => !shown)}
+            >
+              <span className="fy-sw__toggle-track" aria-hidden="true"><span /></span>
+              Show boards
+            </button>
             <button
               type="button"
               className="fy-sw__put"
@@ -429,6 +420,16 @@ export function SceneWorkspace({
               {dock ? "Hide Arke" : "Show Arke"}
             </button>
           </div>
+          {frameRun === null ? null : (
+            <div className="fy-sw__runstrip">
+              <FrameRunBar
+                run={frameRun}
+                worldId={world.meta.worldId}
+                productionId={production.meta.id}
+                onReview={() => setReviewOpen(true)}
+              />
+            </div>
+          )}
           {frameRun === null ? null : <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />}
 
           {view === "storyboard" ? (
@@ -490,6 +491,12 @@ export function SceneWorkspace({
                 });
               }}
             />
+          ) : view === "stage" ? (
+            <SceneStage
+              scene={workingScene}
+              sheets={world.sheets}
+              aspect={aspect}
+            />
           ) : (
             <ScenePreview
               key={`${production.meta.id}/${scene.id}`}
@@ -526,6 +533,7 @@ export function SceneWorkspace({
             dock={{
               title: dockTitle,
               subject: dockSubject,
+              conversationFirst: true,
               ...(thumbnailSrc === null || focused === undefined
                 ? {}
                 : { thumbnail: { src: thumbnailSrc, alt: `Frame for shot ${focused.number}` } }),
@@ -537,19 +545,20 @@ export function SceneWorkspace({
             {...(staged === undefined
               ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }
               : {
-                  side: (
-                    <>
-                      {removedShots.length === 0 ? null : (
-                        <div className="fy-swproposal__removes">
-                          <span>Removes</span>
-                          {removedShots.map((shot) => <span key={shot.id}>Shot {shot.number} · {shot.title}</span>)}
-                        </div>
-                      )}
+                   side: (
+                     <>
                       <StagedDecision
                         worldId={world.meta.worldId}
                         subject={`scene ${scene.number}`}
                         staged={staged}
                         writes="Updates this scene and its board boundaries."
+                        applyLabel="Apply to shots"
+                        items={[
+                          ...workingShots
+                            .filter((shot) => stagedShotIds.has(shot.id))
+                            .map((shot) => ({ label: `Shot ${shot.number} · ${shot.title}`, meta: newShotIds.has(shot.id) ? "new" : "changed" })),
+                          ...removedShots.map((shot) => ({ label: `Shot ${shot.number} · ${shot.title}`, meta: "remove" })),
+                        ]}
                       />
                     </>
                   ),
