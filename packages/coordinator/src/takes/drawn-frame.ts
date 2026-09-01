@@ -10,6 +10,7 @@ import {
   type Take,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { decodePng } from "../references/png.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { BoundaryFrameMaker } from "./boundary.js";
@@ -175,10 +176,12 @@ export async function fileDrawnFrame(
      * frame through `decodePng` and swallows the decode error, so a JPEG or WebP filed raw
      * becomes a blank cell in every compiled board — valid provider output, silently absent.
      * The boundary maker already is an image-to-PNG converter when asked for frame zero, so
-     * the one ffmpeg the app ships does the job. Absent, or on failure, the original bytes
-     * file unchanged: a good frame is never lost to a failed conversion.
+     * the one ffmpeg the app ships does the job. Generated frames fall back to their immutable
+     * source on failure; upload acceptance can require PNG and leave that source as a Variant.
      */
     toPng?: BoundaryFrameMaker;
+    /** Refuse selection unless the filed bytes are a PNG the board compiler can decode. */
+    requirePng?: boolean;
   },
 ): Promise<DrawnFrameOutcome> {
   const { take, shotId } = input;
@@ -194,23 +197,30 @@ export async function fileDrawnFrame(
 
   const mediaPath = join(store.dir, "productions", production.meta.id, "takes", take.id, media);
   let bytes: Buffer | null = null;
-  if (extension !== ".png" && input.toPng !== undefined) {
-    // Frame zero of a still image IS that image, so the boundary cutter converts it.
-    const staging = join(store.dir, ".cache", "frames", `${ulid()}.png`);
-    try {
-      await mkdir(toExtendedLength(join(store.dir, ".cache", "frames")), { recursive: true });
-      const converted = await input.toPng.write(mediaPath, staging, 0);
-      if (converted.ok) {
-        const png = await readFile(toExtendedLength(staging));
-        if (png.byteLength > 0) {
-          bytes = png;
-          extension = ".png";
+  if (extension !== ".png") {
+    if (input.toPng !== undefined) {
+      // Frame zero of a still image IS that image, so the boundary cutter converts it.
+      const staging = join(store.dir, ".cache", "frames", `${ulid()}.png`);
+      try {
+        await mkdir(toExtendedLength(join(store.dir, ".cache", "frames")), { recursive: true });
+        const converted = await input.toPng.write(mediaPath, staging, 0);
+        if (converted.ok) {
+          const png = await readFile(toExtendedLength(staging));
+          if (png.byteLength > 0) {
+            decodePng(png);
+            bytes = png;
+            extension = ".png";
+          }
         }
+      } catch {
+        // A generated frame still falls back to its immutable source. Upload acceptance opts
+        // into the stricter branch below because compiled boards can consume PNG only.
+      } finally {
+        await rm(toExtendedLength(staging), { force: true }).catch(() => {});
       }
-    } catch {
-      // Fall through to the original bytes; the take's own media is always the safe answer.
-    } finally {
-      await rm(toExtendedLength(staging), { force: true }).catch(() => {});
+    }
+    if (bytes === null && input.requirePng === true) {
+      return { ok: false, reason: "the image could not be converted to a board-compatible PNG" };
     }
   }
   if (bytes === null) {
@@ -221,6 +231,13 @@ export async function fileDrawnFrame(
     }
   }
   if (bytes.byteLength === 0) return { ok: false, reason: `take ${take.id}'s media is empty` };
+  if (input.requirePng === true) {
+    try {
+      decodePng(bytes);
+    } catch {
+      return { ok: false, reason: "the image is not a board-compatible PNG" };
+    }
+  }
 
   /*
    * `ar_`, which is what `ArtifactIdSchema` accepts. Worth stating because getting it wrong
@@ -400,6 +417,7 @@ export async function acceptStill(
     expectedArtifactId?: string | null;
     expectedTakeId?: string | null;
     toPng?: BoundaryFrameMaker;
+    requirePng?: boolean;
   },
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
@@ -424,6 +442,7 @@ export async function acceptStill(
     ...(input.expectedArtifactId !== undefined ? { expectedArtifactId: input.expectedArtifactId } : {}),
     ...(input.expectedTakeId !== undefined ? { expectedTakeId: input.expectedTakeId } : {}),
     toPng: input.toPng,
+    requirePng: input.requirePng === true || (take.provider === "user" && take.model === "upload"),
     alsoCommit: async () => [await reviewAppendFor(store, production.meta.id, decision)],
   });
   return { decision, outcome };

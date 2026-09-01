@@ -601,10 +601,19 @@ describe("durable run projections", () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith({ runs: [wrongWorld, active] }), sent);
     assert.match(one(item, '[data-testid="frame-run-bar"]')?.textContent ?? "", /Shot 12.*0 of 2 frames.*~9s left/);
+    const editsBefore = sent.filter((message) => message.kind === "scene-command").length;
     const script = one(item, ".fy-swrow__script")!;
-    script.textContent = "Edited while frames run.";
+    const textarea = script.querySelector("textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      textarea.value = "Edited while frames run.";
+      textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    });
     await act(async () => script.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    assert.equal(sent.at(-1)?.kind, "scene-command");
+    assert.equal(
+      sent.filter((message) => message.kind === "scene-command").length,
+      editsBefore + 1,
+      "the script edit is sent among recovery polling",
+    );
     await click(named(item, "Pause"));
     await click(named(item, "Cancel"));
     assert.equal(sent.at(-2)?.kind, "frame-run-pause");

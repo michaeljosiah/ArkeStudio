@@ -4,8 +4,10 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
+import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
-import { pngBytes } from "../queue/fake-provider.js";
+import { jpegBytes } from "../queue/fake-provider.js";
 import { tempDir } from "../tmp.js";
 import { FIXTURE_WORLD, makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -13,6 +15,8 @@ const CLOCK = "2026-08-31T12:00:00.000Z";
 const PRODUCTION = "saltlight";
 const SHOT = "sh_12";
 const OTHER_WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HD";
+
+const framePngBytes = () => encodePng(solidImage(4, 4, [20, 30, 40, 255]));
 
 async function sourceFile(name: string, bytes: Uint8Array | string): Promise<string> {
   const dir = await tempDir("shot-frame-upload-");
@@ -22,7 +26,10 @@ async function sourceFile(name: string, bytes: Uint8Array | string): Promise<str
   return path;
 }
 
-async function harness(picked: () => readonly string[] | Promise<readonly string[]>) {
+async function harness(
+  picked: () => readonly string[] | Promise<readonly string[]>,
+  boundaryFrameMaker?: BoundaryFrameMaker,
+) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
   await provider.listWorlds();
@@ -35,6 +42,7 @@ async function harness(picked: () => readonly string[] | Promise<readonly string
     changeLogPath: join(root, "logs", "changes.jsonl"),
     appVersion: "test",
     observeEvent: (event) => events.push(event),
+    boundaryFrameMaker,
     pickFiles: async ({ accept }) => {
       asked.push(accept);
       return picked();
@@ -62,7 +70,7 @@ function result(events: DomainEvent[], requestId?: string) {
 
 describe("importing a shot frame", () => {
   it("keeps a zero-cost user/upload Variant and accepts it through the drawn-frame path", async () => {
-    const bytes = pngBytes();
+    const bytes = framePngBytes();
     const source = await sourceFile("my-opening-frame.png", bytes);
     const { provider, worldDir, events, asked, send } = await harness(() => [source]);
     try {
@@ -145,6 +153,51 @@ describe("importing a shot frame", () => {
     }
   });
 
+  it("keeps a non-PNG Variant unselected when PNG conversion is unavailable", async () => {
+    const source = await sourceFile("opening-frame.jpg", jpegBytes());
+    const { provider, events, send } = await harness(() => [source]);
+    try {
+      const beforeBundle = provider.openStore()!.getBundle();
+      const before = beforeBundle.productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      const previousSelection = before.selections[SHOT];
+
+      await send("01J8E1000000000000000000V8");
+
+      const afterBundle = provider.openStore()!.getBundle();
+      const after = afterBundle.productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      const take = after.takes.find(
+        (candidate) => candidate.provider === "user" && candidate.model === "upload" && candidate.media?.endsWith(".jpg"),
+      );
+      assert.ok(take, "the immutable upload remains available as a Variant");
+      assert.deepEqual(after.selections[SHOT], previousSelection, "an unreadable board frame is never selected");
+      assert.ok(!after.reviews.some((review) => review.takeId === take.id));
+      assert.ok(!afterBundle.artifacts.some((artifact) => artifact.links.includes(take.id)));
+      assert.equal(result(events)?.disposition, "rejected");
+      assert.match(result(events)?.failures[0]?.reason ?? "", /kept as a Variant.*board-compatible PNG/);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("keeps a non-PNG Variant unselected when PNG conversion fails", async () => {
+    const source = await sourceFile("opening-frame.jpg", jpegBytes());
+    const converter: BoundaryFrameMaker = { write: async () => ({ ok: false, reason: "process-failed" }) };
+    const { provider, events, send } = await harness(() => [source], converter);
+    try {
+      const before = provider.openStore()!.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      const previousSelection = before.selections[SHOT];
+
+      await send("01J8E1000000000000000000V9");
+
+      const after = provider.openStore()!.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      assert.deepEqual(after.selections[SHOT], previousSelection);
+      assert.equal(result(events)?.disposition, "rejected");
+      assert.match(result(events)?.failures[0]?.reason ?? "", /kept as a Variant.*board-compatible PNG/);
+    } finally {
+      await provider.close();
+    }
+  });
+
   it("refuses a non-image by its bytes without creating history", async () => {
     const source = await sourceFile("renamed.png", "not an image");
     const { provider, events, send } = await harness(() => [source]);
@@ -163,8 +216,8 @@ describe("importing a shot frame", () => {
   });
 
   it("refuses several selections instead of silently taking the first", async () => {
-    const first = await sourceFile("first.png", pngBytes());
-    const second = await sourceFile("second.png", pngBytes());
+    const first = await sourceFile("first.png", framePngBytes());
+    const second = await sourceFile("second.png", framePngBytes());
     const { provider, events, send } = await harness(() => [first, second]);
     try {
       const before = provider.openStore()!.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
@@ -180,8 +233,8 @@ describe("importing a shot frame", () => {
   });
 
   it("keeps an older picker completion from replacing a newer frame", async () => {
-    const olderSource = await sourceFile("older.png", pngBytes());
-    const newerSource = await sourceFile("newer.png", pngBytes());
+    const olderSource = await sourceFile("older.png", framePngBytes());
+    const newerSource = await sourceFile("newer.png", framePngBytes());
     let picks = 0;
     let releaseOlder!: (paths: readonly string[]) => void;
     const olderPick = new Promise<readonly string[]>((resolve) => { releaseOlder = resolve; });
@@ -214,7 +267,7 @@ describe("importing a shot frame", () => {
   });
 
   it("does not reopen a world that changed while the frame was being filed", async () => {
-    const source = await sourceFile("late-opening-frame.png", pngBytes());
+    const source = await sourceFile("late-opening-frame.png", framePngBytes());
     const { provider, root, events, send } = await harness(() => [source]);
     try {
       const secondDir = join(root, "worlds", "another-world");

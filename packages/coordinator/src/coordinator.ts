@@ -6326,6 +6326,7 @@ export class Coordinator {
             expectedArtifactId,
             expectedTakeId,
             toPng: this.opts.boundaryFrameMaker,
+            requirePng: true,
           });
           if (!outcome.ok) throw new Error(outcome.reason);
           if ("superseded" in outcome) {
