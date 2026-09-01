@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ProductionBundle } from "./client-state.js";
 import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
-import { ArtifactIdSchema, ShotIdSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { orderedShots } from "./scene-flow.js";
 import { ShotSelectionSchema, sortScenes } from "./scene.js";
 import { FrameRateSchema, productionFrameRate, type FrameRate } from "./world.js";
@@ -25,6 +25,13 @@ const WholeFrameSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const DurationFramesSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 
 /**
+ * Enough clips to cut a feature and few enough that a history entry naming every one of them is
+ * still a record a person can open. The same bound sizes an entry: a reorder can touch every
+ * clip on its track, so the entry's own limit is the track's, not a smaller number of its own.
+ */
+export const MAX_TRACK_CLIPS = 4000;
+
+/**
  * What a clip plays. A shot resolves through its current accepted take at read time (SPEC-037
  * R-12, D4), so a take switch never rewrites the timeline; a take or an artifact is named
  * directly because nothing else decides what they are.
@@ -40,7 +47,16 @@ export const TimelineClipSourceSchema = z.discriminatedUnion("kind", [
       label: z.string().min(1),
     })
     .strict(),
-  z.object({ kind: z.literal("take"), takeId: TakeIdSchema, label: z.string().min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("take"),
+      takeId: TakeIdSchema,
+      label: z.string().min(1),
+      /** Dialogue keeps the speaking sheet and the version its voice was assigned at (SPEC-013 R-18, SPEC-038 R-20). */
+      sheetId: SlugSchema.optional(),
+      voiceAssignedAtVersion: z.number().int().min(1).optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema, label: z.string().min(1) }).strict(),
 ]);
 export type TimelineClipSource = z.infer<typeof TimelineClipSourceSchema>;
@@ -58,6 +74,15 @@ export const TimelineClipSchema = z
      */
     sourceInFrames: WholeFrameSchema.default(0),
     source: TimelineClipSourceSchema,
+    /** Audio clips: gain in dB, 0 when absent (SPEC-038 R-13). */
+    gainDb: z.number().min(-60).max(12).optional(),
+    /**
+     * A placed video's own sound while it sits on a Picture track: kept or muted (SPEC-038 R-12).
+     * `only` never lands here; a split's sound half is a typed audio clip linked back to it.
+     */
+    audio: z.enum(["keep", "mute"]).optional(),
+    /** The other half of a split: the sound this picture lost, or the picture this sound left. */
+    linkedClipId: TimelineClipIdSchema.optional(),
   })
   .strict();
 export type TimelineClip = z.infer<typeof TimelineClipSchema>;
@@ -69,10 +94,65 @@ export const TimelineTrackSchema = z
     name: z.string().min(1),
     order: WholeFrameSchema,
     muted: z.boolean(),
-    clips: z.array(TimelineClipSchema),
+    /** Audio tracks only (SPEC-038 R-6, R-13). Never written for Picture or Subtitle tracks. */
+    solo: z.boolean().optional(),
+    /**
+     * Where the track's used range ends when that is past its last clip. Deleting the final clip
+     * leaves a hole (R-21), and a hole with nothing after it has no clip to mark its far side, so
+     * the track remembers it here. Absent means the last clip's end.
+     */
+    endFrame: WholeFrameSchema.optional(),
+    clips: z.array(TimelineClipSchema).max(MAX_TRACK_CLIPS),
   })
   .strict();
 export type TimelineTrack = z.infer<typeof TimelineTrackSchema>;
+
+/** How far a track reaches: its remembered end, or its last clip's. */
+export function trackEndFrame(track: Pick<TimelineTrack, "clips" | "endFrame">): number {
+  return Math.max(track.endFrame ?? 0, ...track.clips.map((clip) => clip.startFrame + clip.durationFrames), 0);
+}
+
+/** The properties a track command may change; clips move by their own commands. */
+export const TimelineTrackPropsSchema = z
+  .object({
+    name: z.string().min(1),
+    order: WholeFrameSchema,
+    muted: z.boolean(),
+    solo: z.boolean().optional(),
+    endFrame: WholeFrameSchema.optional(),
+  })
+  .strict();
+export type TimelineTrackProps = z.infer<typeof TimelineTrackPropsSchema>;
+
+export function trackProps(track: TimelineTrack): TimelineTrackProps {
+  return {
+    name: track.name,
+    order: track.order,
+    muted: track.muted,
+    ...(track.solo !== undefined ? { solo: track.solo } : {}),
+    ...(track.endFrame !== undefined ? { endFrame: track.endFrame } : {}),
+  };
+}
+
+/**
+ * One production-level mix policy (SPEC-038 §2.2, R-14, R-15, R-17). A clip stores only what
+ * differs per clip; five clips do not carry five copies of the same rule.
+ */
+export const MixSettingsSchema = z
+  .object({
+    speechFirst: z.boolean(),
+    /** How far Music and Ambience drop under speech, in dB: 0 through -24. */
+    duckingDb: z.number().min(-24).max(0),
+    lookAheadMs: z.number().int().min(0).max(2000),
+    releaseMs: z.number().int().min(0).max(5000),
+    limiterCeilingDb: z.number().min(-12).max(0),
+  })
+  .strict();
+export type MixSettings = z.infer<typeof MixSettingsSchema>;
+
+export const DEFAULT_MIX: MixSettings = { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 };
+
+export const AUDIO_TRACK_KINDS: ReadonlySet<TimelineTrackKind> = new Set(["dialogue", "ambience", "music"]);
 
 export const TimelineMoveDirectionSchema = z.enum(["earlier", "later"]);
 export type TimelineMoveDirection = z.infer<typeof TimelineMoveDirectionSchema>;
@@ -114,6 +194,18 @@ export const TimelineSelectionChangeSchema = z
   .strict();
 export type TimelineSelectionChange = z.infer<typeof TimelineSelectionChangeSchema>;
 
+/** A track's properties, or its existence, before and after a command. */
+export const TimelineTrackChangeSchema = z
+  .object({
+    trackId: TimelineTrackIdSchema,
+    kind: TimelineTrackKindSchema,
+    before: TimelineTrackPropsSchema.nullable(),
+    after: TimelineTrackPropsSchema.nullable(),
+  })
+  .strict()
+  .refine((change) => change.before !== null || change.after !== null, "a track change must name a track on at least one side");
+export type TimelineTrackChange = z.infer<typeof TimelineTrackChangeSchema>;
+
 /**
  * One completed action, whatever it did (R-24, D5). Recording the exact before and after of every
  * clip it touched is what lets Undo apply the exact inverse (R-25) without a second implementation
@@ -123,13 +215,18 @@ export const TimelineChangeHistoryEntrySchema = z
   .object({
     kind: z.literal("change"),
     label: z.string().min(1).max(160),
-    clips: z.array(TimelineClipChangeSchema).max(500),
-    selections: z.array(TimelineSelectionChangeSchema).max(200).default([]),
+    clips: z.array(TimelineClipChangeSchema).max(MAX_TRACK_CLIPS * 8),
+    selections: z.array(TimelineSelectionChangeSchema).max(MAX_TRACK_CLIPS).default([]),
+    tracks: z.array(TimelineTrackChangeSchema).max(200).default([]),
+    mix: z.object({ before: MixSettingsSchema, after: MixSettingsSchema }).strict().optional(),
     /** Present when the entry landed an Arke editor request (SPEC-039 R-30, R-36). */
     requestId: z.string().min(1).max(80).optional(),
   })
   .strict()
-  .refine((entry) => entry.clips.length > 0 || entry.selections.length > 0, "a history entry must change something");
+  .refine(
+    (entry) => entry.clips.length > 0 || entry.selections.length > 0 || entry.tracks.length > 0 || entry.mix !== undefined,
+    "a history entry must change something",
+  );
 export type TimelineChangeHistoryEntry = z.infer<typeof TimelineChangeHistoryEntrySchema>;
 
 export const TimelineHistoryEntrySchema = z.union([TimelineMoveHistoryEntrySchema, TimelineChangeHistoryEntrySchema]);
@@ -153,6 +250,13 @@ export const ProductionTimelineSchema = z
     frameRate: FrameRateSchema,
     tracks: z.array(TimelineTrackSchema),
     history: TimelineHistorySchema,
+    /** Defaulted so a record written before the mix existed reads with the documented policy. */
+    mix: MixSettingsSchema.default(DEFAULT_MIX),
+    /**
+     * Set once `cut.json`'s placements and audio tracks have been folded into typed tracks (R-30).
+     * Until then the render plan still reads `cut.json`; after it there is one writable copy.
+     */
+    migratedCut: z.literal(true).optional(),
   })
   .strict()
   .superRefine((timeline, ctx) => {
@@ -170,12 +274,14 @@ export const ProductionTimelineSchema = z
       trackIds.add(track.id);
       trackOrders.add(track.order);
 
-      if (track.kind !== "picture" && track.clips.length > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["tracks", trackIndex, "clips"],
-          message: "shot-sourced clips belong on Picture tracks",
-        });
+      if (track.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "solo"], message: "only audio tracks solo" });
+      }
+      for (const [clipIndex, clip] of track.clips.entries()) {
+        const problem = sourceProblem(track.kind, clip);
+        if (problem !== null) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "clips", clipIndex, "source"], message: problem });
+        }
       }
 
       const ordered = orderedTrackClips(track);
@@ -252,9 +358,43 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ripple-delete"), clipId: TimelineClipIdSchema }).strict(),
   /** Applied by the coordinator through the append-only review path (R-16); never pure. */
   z.object({ kind: z.literal("switch-take"), shotId: ShotIdSchema, takeId: TakeIdSchema }).strict(),
+  /** Place a clip on a track (SPEC-039 R-10). The clip arrives whole so a ghost and the record agree. */
+  z.object({ kind: z.literal("place"), trackId: TimelineTrackIdSchema, clip: TimelineClipSchema }).strict(),
+  z.object({ kind: z.literal("set-clip-gain"), clipId: TimelineClipIdSchema, gainDb: z.number().min(-60).max(12) }).strict(),
+  z
+    .object({
+      kind: z.literal("set-track"),
+      trackId: TimelineTrackIdSchema,
+      name: z.string().min(1).optional(),
+      muted: z.boolean().optional(),
+      solo: z.boolean().optional(),
+      order: WholeFrameSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("add-track"),
+      trackId: TimelineTrackIdSchema,
+      trackKind: TimelineTrackKindSchema,
+      name: z.string().min(1),
+      order: WholeFrameSchema.optional(),
+    })
+    .strict(),
+  /** Only an empty track goes; its clips are removed by their own commands first. */
+  z.object({ kind: z.literal("remove-track"), trackId: TimelineTrackIdSchema }).strict(),
+  z.object({ kind: z.literal("set-mix"), mix: MixSettingsSchema.partial().strict() }).strict(),
 ]);
 export type TimelineCommand = z.infer<typeof TimelineCommandSchema>;
 export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take" }>;
+
+/** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
+export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio">): string | null {
+  if (kind === "subtitle") return "a Subtitle track holds cues, not clips";
+  if (kind === "picture") return null;
+  if (clip.source.kind === "shot") return `a shot belongs on a Picture track, not ${kind}`;
+  if (clip.audio !== undefined) return "keep and mute describe a picture's own sound; an audio clip has gain";
+  return null;
+}
 
 /** A plain, present-tense line for a history entry or a request card (SPEC-039 R-34). */
 export function describeTimelineCommand(command: TimelineCommand): string {
@@ -277,6 +417,18 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Ripple delete ${command.clipId}`;
     case "switch-take":
       return `Use ${command.takeId} for ${command.shotId}`;
+    case "place":
+      return `Place ${command.clip.source.label} on ${command.trackId}`;
+    case "set-clip-gain":
+      return `Set ${command.clipId} to ${command.gainDb} dB`;
+    case "set-track":
+      return `Change track ${command.trackId}`;
+    case "add-track":
+      return `Add ${command.trackKind} track ${command.name}`;
+    case "remove-track":
+      return `Remove track ${command.trackId}`;
+    case "set-mix":
+      return "Change the mix";
   }
 }
 
@@ -291,7 +443,9 @@ export class TimelineOperationRefused extends Error {
 export function secondsToFrames(seconds: number, frameRate: FrameRate): number {
   if (!Number.isFinite(seconds) || seconds < 0) throw new RangeError("seconds must be a non-negative finite number");
   FrameRateSchema.parse(frameRate);
-  const frames = Math.round(seconds * frameRate);
+  // A product that lands a hair under a half frame in binary (4.02 × 25 = 100.49999…) meant the
+  // half frame; the nudge is far smaller than any frame and rounds it the way the figure reads.
+  const frames = Math.round(seconds * frameRate + 1e-6);
   if (!Number.isSafeInteger(frames)) throw new RangeError("seconds exceed the safe whole-frame range");
   return frames;
 }
@@ -379,6 +533,7 @@ export function seedStoryPictureTimeline(production: ProductionBundle): Producti
     frameRate,
     tracks: [{ id: PICTURE_TRACK_ID, kind: "picture", name: "Picture", order: 0, muted: false, clips }],
     history: { undo: [], redo: [] },
+    mix: DEFAULT_MIX,
   };
 }
 
@@ -463,10 +618,24 @@ function swapAdjacent(clips: TimelineClip[], firstIndex: number, secondIndex: nu
 // Applying commands (R-21, R-22): pure, all-or-nothing
 // ---------------------------------------------------------------------------
 
+/**
+ * How many frames a clip's source can supply from its first frame, when that is known (SPEC-038
+ * R-10, SPEC-013 R-5a). Unknown is `undefined` — not measured, never zero — and bounds nothing.
+ */
+export type SourceLengthFrames = (clip: TimelineClip) => number | undefined;
+
 interface Working {
   tracks: TimelineTrack[];
+  mix: MixSettings;
+  sourceLength: SourceLengthFrames;
   /** Every clip touched so far, keyed by id, with the state it had before the first touch. */
   touched: Map<TimelineClipId, { trackId: TimelineTrackId; before: TimelineClip | null }>;
+  /** Every track whose properties or existence changed, with what it was before the first touch. */
+  touchedTracks: Map<TimelineTrackId, { kind: TimelineTrackKind; before: TimelineTrackProps | null }>;
+}
+
+function touchTrack(working: Working, track: Pick<TimelineTrack, "id" | "kind">, before: TimelineTrackProps | null): void {
+  if (!working.touchedTracks.has(track.id)) working.touchedTracks.set(track.id, { kind: track.kind, before });
 }
 
 function findClip(working: Working, clipId: TimelineClipId): { track: TimelineTrack; clip: TimelineClip; ordered: TimelineClip[]; index: number } {
@@ -483,17 +652,28 @@ function touch(working: Working, trackId: TimelineTrackId, clipId: TimelineClipI
 }
 
 function replaceTrackClips(working: Working, trackId: TimelineTrackId, clips: TimelineClip[]): void {
-  const overlaps = trackOverlaps(orderedTrackClips({ clips }));
-  if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
+  const track = working.tracks.find((candidate) => candidate.id === trackId);
+  if (track === undefined) throw new TimelineOperationRefused(`track ${trackId} is not on the timeline`);
   for (const clip of clips) {
+    // The kind of thing before the shape of the window: a shot on a Music track is refused as
+    // that, not as an overlap with whatever the track already held.
+    const problem = sourceProblem(track.kind, clip);
+    if (problem !== null) throw new TimelineOperationRefused(problem);
     if (clip.startFrame < 0 || clip.durationFrames < 1 || clip.sourceInFrames < 0) {
       throw new TimelineOperationRefused(`${clip.id} would leave the frame clock`);
     }
     if (!Number.isSafeInteger(clipEnd(clip))) throw new TimelineOperationRefused(`${clip.id} would overflow the frame clock`);
   }
+  const overlaps = trackOverlaps(orderedTrackClips({ clips }));
+  if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
   // Stored in play order so the file a person opens reads the way the track plays.
   const sorted = orderedTrackClips({ clips });
-  working.tracks = working.tracks.map((track) => (track.id === trackId ? { ...track, clips: sorted } : track));
+  working.tracks = working.tracks.map((candidate) => {
+    if (candidate.id !== trackId) return candidate;
+    const { endFrame, ...rest } = candidate;
+    // A remembered end that no longer reaches past the clips says nothing, and is not written.
+    return endFrame !== undefined && endFrame > trackEndFrame({ clips: sorted }) ? { ...rest, endFrame, clips: sorted } : { ...rest, clips: sorted };
+  });
 }
 
 function assertNewClipId(working: Working, newClipId: TimelineClipId): void {
@@ -574,6 +754,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         if (following !== undefined && clipEnd(next) > following.startFrame) {
           throw new TimelineOperationRefused(`${clip.id} cannot extend into ${following.id}`);
         }
+        // A tail that reaches past the measured source is an impossible range, not a held frame.
+        const available = working.sourceLength(clip);
+        if (available !== undefined && next.sourceInFrames + next.durationFrames > available) {
+          throw new TimelineOperationRefused(`${clip.id} has only ${Math.max(0, available - next.sourceInFrames)} source frames from its in point`);
+        }
       }
       if (next.durationFrames < 1) throw new TimelineOperationRefused(`${clip.id} must keep at least one frame`);
       if (next.startFrame < 0) throw new TimelineOperationRefused(`${clip.id} cannot start before the timeline`);
@@ -616,7 +801,15 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     case "delete": {
       const { track, clip, ordered } = findClip(working, command.clipId);
       touch(working, track.id, clip.id, clip);
-      replaceTrackClips(working, track.id, ordered.filter((candidate) => candidate.id !== clip.id));
+      const remaining = ordered.filter((candidate) => candidate.id !== clip.id);
+      // The hole a deleted last clip leaves has no clip after it to mark its far side, so the
+      // track remembers where it reached (R-21): Delete is not Ripple delete at the end either.
+      const end = trackEndFrame(track);
+      if (end > trackEndFrame({ clips: remaining })) {
+        touchTrack(working, track, trackProps(track));
+        working.tracks = working.tracks.map((candidate) => (candidate.id === track.id ? { ...candidate, endFrame: end } : candidate));
+      }
+      replaceTrackClips(working, track.id, remaining);
       return;
     }
     case "ripple-delete": {
@@ -627,7 +820,81 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         touch(working, track.id, candidate.id, candidate);
         return { ...candidate, startFrame: candidate.startFrame - clip.durationFrames };
       });
+      if (track.endFrame !== undefined) {
+        touchTrack(working, track, trackProps(track));
+        const endFrame = Math.max(0, track.endFrame - clip.durationFrames);
+        working.tracks = working.tracks.map((candidate) =>
+          candidate.id === track.id ? { ...candidate, ...(endFrame > trackEndFrame({ clips: shifted }) ? { endFrame } : { endFrame: undefined }) } : candidate,
+        );
+      }
       replaceTrackClips(working, track.id, shifted);
+      return;
+    }
+    case "place": {
+      const track = working.tracks.find((candidate) => candidate.id === command.trackId);
+      if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
+      assertNewClipId(working, command.clip.id);
+      const clip = TimelineClipSchema.parse(command.clip);
+      touch(working, track.id, clip.id, null);
+      replaceTrackClips(working, track.id, [...track.clips, clip]);
+      return;
+    }
+    case "set-clip-gain": {
+      const { track, clip, ordered } = findClip(working, command.clipId);
+      if (!AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${clip.id} is on a ${track.kind} track, which has no gain`);
+      touch(working, track.id, clip.id, clip);
+      replaceTrackClips(working, track.id, ordered.map((candidate) => (candidate.id === clip.id ? { ...candidate, gainDb: command.gainDb } : candidate)));
+      return;
+    }
+    case "set-track": {
+      const track = working.tracks.find((candidate) => candidate.id === command.trackId);
+      if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
+      if (command.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${track.name} is not an audio track and cannot solo`);
+      if (command.order !== undefined && working.tracks.some((candidate) => candidate.id !== track.id && candidate.order === command.order)) {
+        throw new TimelineOperationRefused(`another track already has order ${command.order}`);
+      }
+      touchTrack(working, track, trackProps(track));
+      const next: TimelineTrack = {
+        ...track,
+        ...(command.name !== undefined ? { name: command.name } : {}),
+        ...(command.muted !== undefined ? { muted: command.muted } : {}),
+        ...(command.solo !== undefined ? { solo: command.solo } : {}),
+        ...(command.order !== undefined ? { order: command.order } : {}),
+      };
+      working.tracks = working.tracks.map((candidate) => (candidate.id === track.id ? next : candidate));
+      return;
+    }
+    case "add-track": {
+      if (working.tracks.some((candidate) => candidate.id === command.trackId)) {
+        throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
+      }
+      TimelineTrackIdSchema.parse(command.trackId);
+      const order = command.order ?? working.tracks.reduce((high, candidate) => Math.max(high, candidate.order + 1), 0);
+      if (working.tracks.some((candidate) => candidate.order === order)) throw new TimelineOperationRefused(`another track already has order ${order}`);
+      const track: TimelineTrack = {
+        id: command.trackId,
+        kind: command.trackKind,
+        name: command.name,
+        order,
+        muted: false,
+        ...(AUDIO_TRACK_KINDS.has(command.trackKind) ? { solo: false } : {}),
+        clips: [],
+      };
+      touchTrack(working, track, null);
+      working.tracks = [...working.tracks, track];
+      return;
+    }
+    case "remove-track": {
+      const track = working.tracks.find((candidate) => candidate.id === command.trackId);
+      if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
+      if (track.clips.length > 0) throw new TimelineOperationRefused(`${track.name} still holds ${track.clips.length} clip${track.clips.length === 1 ? "" : "s"}`);
+      if (track.id === PICTURE_TRACK_ID) throw new TimelineOperationRefused("the base Picture track stays");
+      touchTrack(working, track, trackProps(track));
+      working.tracks = working.tracks.filter((candidate) => candidate.id !== track.id);
+      return;
+    }
+    case "set-mix": {
+      working.mix = MixSettingsSchema.parse({ ...working.mix, ...command.mix });
       return;
     }
   }
@@ -641,9 +908,21 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
 export function applyTimelineCommands(
   timeline: ProductionTimeline,
   commands: readonly TimelineClipCommand[],
-  options: { label?: string; requestId?: string; selections?: readonly TimelineSelectionChange[] } = {},
+  options: {
+    label?: string;
+    requestId?: string;
+    selections?: readonly TimelineSelectionChange[];
+    /** Measured source lengths, so a tail trim cannot reach past what a source can supply. */
+    sourceLength?: SourceLengthFrames;
+  } = {},
 ): ProductionTimeline {
-  const working: Working = { tracks: timeline.tracks, touched: new Map() };
+  const working: Working = {
+    tracks: timeline.tracks,
+    mix: timeline.mix,
+    sourceLength: options.sourceLength ?? (() => undefined),
+    touched: new Map(),
+    touchedTracks: new Map(),
+  };
   for (const command of commands) applyClipCommand(working, command);
 
   const clips: TimelineClipChange[] = [];
@@ -652,8 +931,18 @@ export function applyTimelineCommands(
     if (sameClip(before, after)) continue;
     clips.push({ trackId, before, after });
   }
+  const tracks: TimelineTrackChange[] = [];
+  for (const [trackId, { kind, before }] of working.touchedTracks) {
+    const track = working.tracks.find((candidate) => candidate.id === trackId);
+    const after = track === undefined ? null : trackProps(track);
+    if (canonical(before) === canonical(after)) continue;
+    tracks.push({ trackId, kind, before, after });
+  }
+  const mix = canonical(working.mix) === canonical(timeline.mix) ? undefined : { before: timeline.mix, after: working.mix };
   const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (clips.length === 0 && selections.length === 0) throw new TimelineOperationRefused("the command changes nothing");
+  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && mix === undefined) {
+    throw new TimelineOperationRefused("the command changes nothing");
+  }
 
   const label = options.label ?? (commands.length === 1 ? describeTimelineCommand(commands[0]!) : `${commands.length} edits`);
   const entry: TimelineChangeHistoryEntry = {
@@ -661,12 +950,15 @@ export function applyTimelineCommands(
     label: label.slice(0, 160),
     clips,
     selections,
+    tracks,
+    ...(mix !== undefined ? { mix } : {}),
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
   };
   return {
     ...timeline,
     revision: nextRevision(timeline),
     tracks: working.tracks,
+    mix: working.mix,
     history: { undo: bounded([...timeline.history.undo, entry]), redo: [] },
   };
 }
@@ -718,6 +1010,29 @@ function replayChange(
   phase: "undo" | "redo",
 ): TimelineTrack[] {
   let next = tracks.map((track) => ({ ...track, clips: [...track.clips] }));
+  // A track comes back before the clips it held are put back, and goes only once they are gone:
+  // an addition undone is applied after the clip changes, a removal undone before them.
+  const applyTracks = (predicate: (change: TimelineTrackChange) => boolean): void => {
+    for (const change of entry.tracks.filter(predicate)) {
+      const expected = phase === "undo" ? change.after : change.before;
+      const target = phase === "undo" ? change.before : change.after;
+      const current = next.find((track) => track.id === change.trackId);
+      if (canonical(current === undefined ? null : trackProps(current)) !== canonical(expected)) {
+        throw new TimelineOperationRefused(`saved history is not in its ${phase} position for track ${change.trackId}`);
+      }
+      if (target === null) {
+        if (current !== undefined && current.clips.length > 0) throw new TimelineOperationRefused(`track ${change.trackId} still holds clips`);
+        next = next.filter((track) => track.id !== change.trackId);
+      } else if (current === undefined) {
+        next = [...next, { id: change.trackId, kind: change.kind, ...target, clips: [] }];
+      } else {
+        // Rebuilt from the recorded properties rather than spread over the live ones, so a
+        // property the other side did not have (a remembered end) is gone and not carried.
+        next = next.map((track) => (track.id === change.trackId ? { id: track.id, kind: track.kind, ...target, clips: track.clips } : track));
+      }
+    }
+  };
+  applyTracks((change) => (phase === "undo" ? change.before : change.after) !== null);
   for (const change of entry.clips) {
     const expected = phase === "undo" ? change.after : change.before;
     const target = phase === "undo" ? change.before : change.after;
@@ -732,11 +1047,19 @@ function replayChange(
     if (target !== null) clips.push(target);
     next = next.map((candidate) => (candidate.id === track.id ? { ...candidate, clips: orderedTrackClips({ clips }) } : candidate));
   }
+  applyTracks((change) => (phase === "undo" ? change.before : change.after) === null);
   for (const track of next) {
     const overlaps = trackOverlaps(orderedTrackClips(track));
     if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
   }
   return next;
+}
+
+function replayMix(mix: MixSettings, entry: TimelineHistoryEntry, phase: "undo" | "redo"): MixSettings {
+  if (entry.kind !== "change" || entry.mix === undefined) return mix;
+  const expected = phase === "undo" ? entry.mix.after : entry.mix.before;
+  if (canonical(mix) !== canonical(expected)) throw new TimelineOperationRefused(`saved history is not in its ${phase} position for the mix`);
+  return phase === "undo" ? entry.mix.before : entry.mix.after;
 }
 
 function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelineTrack[] {
@@ -746,9 +1069,12 @@ function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEnt
 /** Whether the saved stack replays from the record it sits beside, and where it stops if not. */
 function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { index: number; message: string } | null {
   let tracks: readonly TimelineTrack[] = timeline.tracks;
+  let mix = timeline.mix;
   for (let index = timeline.history[stack].length - 1; index >= 0; index -= 1) {
     try {
-      tracks = replayEntry(tracks, timeline.history[stack][index]!, stack);
+      const entry = timeline.history[stack][index]!;
+      tracks = replayEntry(tracks, entry, stack);
+      mix = replayMix(mix, entry, stack);
     } catch (error) {
       if (error instanceof TimelineOperationRefused) {
         return { index, message: `saved history is not replayable from its ${stack} position: ${error.reason}` };
@@ -777,6 +1103,7 @@ export function undoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "undo"),
+    mix: replayMix(timeline.mix, entry, "undo"),
     history: { undo: timeline.history.undo.slice(0, -1), redo: bounded([...timeline.history.redo, entry]) },
   };
 }
@@ -788,6 +1115,7 @@ export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "redo"),
+    mix: replayMix(timeline.mix, entry, "redo"),
     history: { undo: bounded([...timeline.history.undo, entry]), redo: timeline.history.redo.slice(0, -1) },
   };
 }
@@ -795,6 +1123,34 @@ export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTim
 /** The first slice's names, kept for its callers. */
 export const undoPictureMove = undoTimelineHistory;
 export const redoPictureMove = redoTimelineHistory;
+
+/**
+ * The source lengths a production knows (SPEC-013 R-5a): a pass segment's planned range, a
+ * measured take, a measured artifact. Anything unmeasured is unknown and bounds nothing.
+ */
+export function sourceLengthFramesFor(
+  production: ProductionBundle,
+  artifacts: ReadonlyArray<{ id: string; mediaInfo?: { durationSec: number } }>,
+): SourceLengthFrames {
+  const frameRate = productionFrameRate(production.meta);
+  const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
+  const measured = (takeId: string): number | undefined => {
+    const seconds = production.takeMediaInfo[takeId]?.mediaInfo.durationSec;
+    return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
+  };
+  return (clip) => {
+    if (clip.source.kind === "artifact") {
+      const seconds = artifacts.find((artifact) => artifact.id === (clip.source.kind === "artifact" ? clip.source.artifactId : ""))?.mediaInfo?.durationSec;
+      return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
+    }
+    if (clip.source.kind === "take") return measured(clip.source.takeId);
+    const takeId = production.selections[clip.source.shotId]?.acceptedTakeId ?? null;
+    const take = takeId === null ? undefined : takesById.get(takeId);
+    if (take === undefined) return undefined;
+    if (take.segment !== undefined) return Math.max(1, secondsToFrames(take.segment.outSec - take.segment.inSec, frameRate));
+    return measured(take.id);
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Story drift (R-4, D7): named, never blocking
@@ -932,6 +1288,22 @@ export function resolvePictureTimeline(
       media = media.outSec !== undefined && inSec >= media.outSec ? null : { ...media, inSec };
     }
     entries.push({ ...entry, clipId: clip.id, media, takeId: media === null ? null : entry.takeId, take: media === null ? null : entry.take, durationSec });
+  }
+  const end = base === null ? 0 : trackEndFrame(base);
+  if (end > cursor) {
+    // The hole a deleted last clip left: timeline the track still reaches, with nothing on it.
+    const durationSec = framesToSeconds(end - cursor, frameRate);
+    entries.push({
+      clipId: `cl_end`,
+      hole: true,
+      sceneNumber: 0,
+      shot: { id: `hole_${cursor}`, number: 0, title: "empty", description: "", durationSec },
+      takeId: null,
+      take: null,
+      media: null,
+      durationSec,
+      label: `EMPTY · ${formatFrames(end - cursor, frameRate)}`,
+    });
   }
   const gaps = entries.filter((entry) => entry.takeId === null && entry.hole !== true);
   return {

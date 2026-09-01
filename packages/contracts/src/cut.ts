@@ -350,6 +350,12 @@ export interface ExportPlan {
   /** Mixed under the whole film, each delayed to its own window. */
   audio: ExportAudioClip[];
   totalSec: number;
+  /**
+   * Speech-first mixing (SPEC-038 R-14..R-17): where speech is expected and how far the
+   * background drops. Absent on a legacy plan, which mixes exactly as it always did.
+   */
+  mix?: { speechFirst: boolean; duckingDb: number; lookAheadMs: number; releaseMs: number; limiterCeilingDb: number };
+  speech?: Array<{ startSec: number; endSec: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +419,27 @@ export interface ExportAudioClip {
   startSec: number;
   endSec: number;
   gainDb: number;
+  /** What the sound is for; only Music and Ambience are lowered under speech (SPEC-038 R-14). */
+  role?: "dialogue" | "ambience" | "music" | "picture";
+  /** Seconds into the source where the window starts; absent reads as the top of the file. */
+  sourceInSec?: number;
+}
+
+/**
+ * The ducking envelope as an FFmpeg expression in film seconds, 0 through 1 (SPEC-038 R-15).
+ *
+ * The browser evaluates `duckingEnvelope` from the same regions; this is the same piecewise
+ * function spelled for `volume=eval=frame`, where `t` is the output timestamp because the
+ * filter runs after `adelay` has moved the clip to its window.
+ */
+function duckingExpression(speech: ReadonlyArray<{ startSec: number; endSec: number }>, lookAheadSec: number, releaseSec: number): string {
+  const regions = speech.map(({ startSec, endSec }) => {
+    const from = Math.max(0, startSec - lookAheadSec);
+    const inside = `between(t,${from},${endSec})`;
+    if (releaseSec <= 0) return `if(${inside},1,0)`;
+    return `if(${inside},1,if(between(t,${endSec},${endSec + releaseSec}),1-(t-${endSec})/${releaseSec},0))`;
+  });
+  return regions.length === 1 ? regions[0]! : regions.reduce((acc, region) => `max(${acc},${region})`);
 }
 
 /** What resolving a clip needs to know about the artifact it cites. */
@@ -547,6 +574,9 @@ export function buildExportPlan(
     };
   }
   const items: ExportItem[] = cut.entries.map((entry) => {
+    // Empty timeline space a saved timeline resolved (SPEC-037 R-21) is black: nothing asked for
+    // picture there, so there is no shot to name on a slate.
+    if ((entry as { hole?: boolean }).hole === true) return { type: "black" as const, durationSec: entry.durationSec };
     if (entry.media) {
       return {
         type: "clip" as const,
@@ -656,13 +686,26 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
    * track occupies thirty seconds rather than the rest of the film.
    */
   const audioLabels: string[] = [];
+  /*
+   * Speech-first mixing (SPEC-038 R-14, R-15). A Music or Ambience clip under expected speech is
+   * lowered by the production's ducking figure along the same look-ahead and release envelope the
+   * browser applies, as a per-frame volume expression in film seconds. A plan with no speech, or
+   * no mix at all, emits the plain `volume=<gain>dB` it always did.
+   */
+  const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
+  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
   plan.audio.forEach((clip, i) => {
     const index = plan.items.length + plan.overlays.length + i;
+    // Windowed at the input so the source starts where the clip's own in-point says (R-19).
+    if (clip.sourceInSec !== undefined && clip.sourceInSec > 0) args.push("-ss", String(clip.sourceInSec));
     args.push("-i", `${worldDir}/${clip.path}`);
     const d = Math.max(clip.endSec - clip.startSec, 0);
     const delayMs = Math.round(clip.startSec * 1000);
+    const volume = ducked(clip)
+      ? `volume=eval=frame:volume='pow(10,(${clip.gainDb}+(${plan.mix!.duckingDb})*(${duckingExpression(speech, plan.mix!.lookAheadMs / 1000, plan.mix!.releaseMs / 1000)}))/20)'`
+      : `volume=${clip.gainDb}dB`;
     filters.push(
-      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,volume=${clip.gainDb}dB[ac${i}]`,
+      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}[ac${i}]`,
     );
     audioLabels.push(`[ac${i}]`);
   });
@@ -675,9 +718,12 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
       );
     }
     // Conformed to the film, so a sound placed near the end cannot extend it and one that stops
-    // early does not shorten it.
+    // early does not shorten it. Peak protection last (R-17): the same ceiling the browser's
+    // limiter holds, applied after every gain and duck, and transparent when nothing reaches it.
+    const ceilingDb = plan.mix?.limiterCeilingDb ?? -1;
+    const ceiling = Math.pow(10, ceilingDb / 20).toFixed(6);
     filters.push(
-      `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS[aout]`,
+      `${mixed}apad=whole_dur=${plan.totalSec},atrim=duration=${plan.totalSec},asetpts=PTS-STARTPTS,alimiter=limit=${ceiling}:level=false[aout]`,
     );
   }
 

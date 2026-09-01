@@ -3,6 +3,7 @@ import {
   applyTimelineCommands,
   orderedTrackClips,
   type ProductionTimeline,
+  type SourceLengthFrames,
   type TimelineClip,
   type TimelineClipCommand,
   type TimelineClipId,
@@ -48,6 +49,7 @@ export function pictureDragCommand(
   clipId: TimelineClipId,
   gesture: PictureGesture,
   deltaFrames: number,
+  sourceLength: SourceLengthFrames = () => undefined,
 ): TimelineClipCommand | null {
   const ordered = orderedTrackClips({ clips: [...clips] });
   const index = ordered.findIndex((clip) => clip.id === clipId);
@@ -66,19 +68,41 @@ export function pictureDragCommand(
     const delta = clamp(deltaFrames, earliest, clip.durationFrames - 1);
     return delta === 0 ? null : { kind: "trim", clipId, edge: "start", deltaFrames: delta };
   }
-  const latest = following ? following.startFrame - (clip.startFrame + clip.durationFrames) : Number.MAX_SAFE_INTEGER;
+  const available = sourceLength(clip);
+  const bySource = available === undefined ? Number.MAX_SAFE_INTEGER : available - clip.sourceInFrames - clip.durationFrames;
+  const latest = Math.min(following ? following.startFrame - (clip.startFrame + clip.durationFrames) : Number.MAX_SAFE_INTEGER, bySource);
   const delta = clamp(deltaFrames, -(clip.durationFrames - 1), latest);
   return delta === 0 ? null : { kind: "trim", clipId, edge: "end", deltaFrames: delta };
+}
+
+/**
+ * The one command a completed gesture on a Dialogue, Ambience, Music or overlay Picture track
+ * sends. These tracks are not sequences: a move is a move by frame, and landing on a neighbour
+ * is refused by the algebra rather than resolved by reordering (issue 681).
+ */
+export function trackDragCommand(
+  clips: readonly TimelineClip[],
+  clipId: TimelineClipId,
+  gesture: PictureGesture,
+  deltaFrames: number,
+  sourceLength: SourceLengthFrames = () => undefined,
+): TimelineClipCommand | null {
+  if (gesture !== "move") return pictureDragCommand(clips, clipId, gesture, deltaFrames, sourceLength);
+  const clip = clips.find((candidate) => candidate.id === clipId);
+  if (clip === undefined || deltaFrames === 0) return null;
+  const startFrame = Math.max(0, clip.startFrame + deltaFrames);
+  return startFrame === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame };
 }
 
 /** The timeline as it would read after `commands`, or null when the batch would be refused. */
 export function previewTimeline(
   timeline: ProductionTimeline,
   commands: readonly TimelineClipCommand[],
+  sourceLength?: SourceLengthFrames,
 ): ProductionTimeline | null {
   if (commands.length === 0) return timeline;
   try {
-    return applyTimelineCommands(timeline, commands);
+    return applyTimelineCommands(timeline, commands, sourceLength === undefined ? {} : { sourceLength });
   } catch (error) {
     if (error instanceof TimelineOperationRefused) return null;
     throw error;

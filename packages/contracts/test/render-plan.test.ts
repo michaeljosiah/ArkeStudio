@@ -199,19 +199,32 @@ function planOf(result: ReturnType<typeof buildRenderPlan>) {
   return result.ok ? result.plan : (undefined as never);
 }
 
+/** The plan as the FFmpeg builder reads it: the render fields and the audio roles set aside. */
 function stripRender(plan: RenderPlan): ExportPlan {
   const { preset, frameRate, items, overlays, audio, totalSec } = plan;
-  return { preset, frameRate, items, overlays, audio, totalSec };
+  return {
+    preset,
+    frameRate,
+    items,
+    overlays,
+    audio: audio.map(({ path, startSec, endSec, gainDb }) => ({ path, startSec, endSec, gainDb })),
+    totalSec,
+  };
 }
 
 describe("one render plan for preview and export (#680)", () => {
   it("projects a legacy production to exactly the plan it always exported", () => {
     const value = production();
     const plan = planOf(buildRenderPlan({ production: value, artifacts, timeline: { status: "absent" }, scope: { kind: "production" }, preset: "review-cut" }));
+    const legacy = buildExportPlan(deriveCut(value), "review-cut", exportOverlays(value.cut.overlays, artifacts), exportAudioClips(value.cut.overlays, artifacts), 25);
+    assert.deepEqual(stripRender(plan), legacy);
     assert.deepEqual(
-      stripRender(plan),
-      buildExportPlan(deriveCut(value), "review-cut", exportOverlays(value.cut.overlays, artifacts), exportAudioClips(value.cut.overlays, artifacts), 25),
+      buildFfmpegArgs(plan, "/w", "/out.mp4", "/fonts/Geist-Regular.ttf"),
+      buildFfmpegArgs(legacy, "/w", "/out.mp4", "/fonts/Geist-Regular.ttf"),
+      "the encode a legacy world gets is byte for byte the one it always got",
     );
+    assert.deepEqual(plan.speech, []);
+    assert.deepEqual(plan.audio.map((clip) => clip.role), ["picture"], "legacy placed sound has no role and is never lowered");
     assert.equal(plan.revision, null);
     assert.deepEqual(plan.range, { startSec: 0, endSec: 7.5 });
   });
@@ -245,12 +258,13 @@ describe("one render plan for preview and export (#680)", () => {
         ["slate", 4],
         ["black", 0.2],
         ["clip", 1.8],
+        ["black", 1.52],
       ],
-      "gap slate, the hole a head trim opened, then the trimmed clip; the deleted last clip leaves no trailing time",
+      "gap slate, the hole a head trim opened, the trimmed clip, then the hole the deleted last clip left",
     );
-    assert.equal(plan.totalSec, 6, "the film ends where the last clip does");
+    assert.equal(plan.totalSec, 7.52, "Delete is not Ripple delete at the end of the track either");
     const args = buildFfmpegArgs(plan, "/w", "/out.mp4", "/fonts/Geist-Regular.ttf");
-    const named = [0.5, 1.5, 2.9, 3.5, 4.1, 4.5, 5.9];
+    const named = [0.5, 1.5, 2.9, 3.5, 4.1, 4.5, 5.9, 6.5, 7.4];
     for (const sec of named) {
       const expected = pictureAtSec(plan, sec);
       const graph = ffmpegPictureAtSec(args, sec);
@@ -274,9 +288,10 @@ describe("one render plan for preview and export (#680)", () => {
     assert.equal(clipAt?.path, `productions/bell-watch/takes/${TAKE}/clip.mp4`);
     assert.equal(clipAt?.sourceSec, 0.2 + (4.5 - 4.2));
     assert.equal(pictureAtSec(plan, 4.1)?.path, null, "the hole a trim opened is black, not a slate");
-    assert.equal(pictureAtSec(plan, 6.5), null, "nothing plays past the film");
+    assert.equal(pictureAtSec(plan, 6.5)?.path, null, "the deleted last clip's range is black, not a slate");
+    assert.equal(pictureAtSec(plan, 7.6), null, "nothing plays past the film");
     assert.equal(pictureAtSec(plan, 0.5)?.label, "SHOT 3 · sh_3 · 4.0s", "an unresolved shot is a labelled slate");
-    assert.deepEqual(pictureEdges(plan), [0, 1, 2.5, 3, 4, 4.2, 6]);
+    assert.deepEqual(pictureEdges(plan), [0, 1, 2.5, 3, 4, 4.2, 6, 7.52]);
   });
 
   it("refuses a placed clip whose artifact is missing or has no picture, by name", () => {

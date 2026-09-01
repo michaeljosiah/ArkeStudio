@@ -2,12 +2,12 @@ import { pictureAtSec, pictureEdges, type ExportPlan } from "@arke-studio/contra
 import type { PlaybackSpan } from "./cut-playback.js";
 
 /**
- * The browser executor's reading of the render plan (SPEC-038 R-1, R-8, D1; issue #680).
+ * The browser executor's reading of the render plan (SPEC-038 R-1, R-8, D1; issue 680).
  *
  * The preview does not walk the story, the lanes or the timeline: it asks the plan what is
  * visible between every pair of edges where the answer could change, and plays that. The FFmpeg
  * builder reads the same plan, so a placed still appears in the viewer at exactly the window the
- * file will show it (GitHub issue #486).
+ * file will show it (GitHub issue 486).
  */
 export function planSpans(plan: ExportPlan): PlaybackSpan[] {
   const edges = pictureEdges(plan);

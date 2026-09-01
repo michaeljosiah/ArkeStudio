@@ -204,7 +204,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
-import { applyTimelineCommand } from "./productions/timeline.js";
+import { applyTimelineCommand, placementsLiveOnTimeline } from "./productions/timeline.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -6546,7 +6546,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
         try {
-          await applyTimelineCommand(
+          const { dropped } = await applyTimelineCommand(
             store,
             msg.productionId,
             msg.kind === "timeline-move-picture"
@@ -6566,6 +6566,15 @@ export class Coordinator {
                   }
                 : { kind: msg.action, baseRevision: msg.baseRevision },
           );
+          // Named, never counted: a placement the migration could not carry is a thing somebody
+          // placed, and the log is where a refused write already explains itself.
+          for (const placement of dropped) {
+            void this.appLog?.append({
+              kind: "timeline.migration-dropped",
+              reason: placement,
+              detail: { productionId: msg.productionId },
+            });
+          }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -6600,6 +6609,11 @@ export class Coordinator {
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
         try {
+          // One writable copy of a placement (SPEC-037 R-30): once the timeline has absorbed
+          // cut.json, a lane write would create the second answer the migration removed.
+          if (placementsLiveOnTimeline(production)) {
+            throw new Error("placements now live on the timeline; edit the clip there");
+          }
           if (msg.kind === "place-overlay") {
             await placeOverlay(store, msg.productionId, {
               artifactId: msg.artifactId,
@@ -6637,6 +6651,10 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          if (production !== undefined && placementsLiveOnTimeline(production)) {
+            throw new Error("audio placement now lives on the timeline's typed tracks");
+          }
           const cut = CutFileSchema.parse(msg.cut);
           await saveAudioTracks(store, msg.productionId, JSON.stringify(cut, null, 2) + "\n");
           await this.refreshWorldSnapshot(msg.worldId);

@@ -7,6 +7,7 @@ import {
   type ProductionBundle,
   type ProductionTimeline,
   type ResolvedPictureCut,
+  type SourceLengthFrames,
   type TimelineClip,
   type TimelineClipCommand,
   type TimelineClipId,
@@ -95,6 +96,7 @@ export function PictureTrack({
   playheadFrame,
   disabled,
   mintClipId,
+  sourceLength,
 }: {
   timeline: ProductionTimeline;
   views: readonly PictureClipView[];
@@ -109,6 +111,8 @@ export function PictureTrack({
   playheadFrame: number;
   disabled: boolean;
   mintClipId: () => TimelineClipId;
+  /** Measured source lengths, so a tail drag stops where the source does. */
+  sourceLength: SourceLengthFrames;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
   const clips = views.map((view) => view.clip);
@@ -116,18 +120,25 @@ export function PictureTrack({
   useEffect(() => {
     if (menu === null) return;
     const close = () => setMenu(null);
+    // Capture-phase, so a press a clip's own handler stops still closes the menu — but a press
+    // inside the menu is the menu being used, and closing on it would unmount the item before
+    // its click could fire.
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".fy-clipmenu")) return;
+      close();
+    };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         close();
         event.stopImmediatePropagation();
       }
     };
-    window.addEventListener("pointerdown", close, { capture: true });
+    window.addEventListener("pointerdown", closeOutside, { capture: true });
     window.addEventListener("keydown", onKey);
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, { capture: true });
     return () => {
-      window.removeEventListener("pointerdown", close, { capture: true });
+      window.removeEventListener("pointerdown", closeOutside, { capture: true });
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", close);
       window.removeEventListener("scroll", close, { capture: true });
@@ -179,23 +190,29 @@ export function PictureTrack({
     let command: TimelineClipCommand | null = null;
     const move = (pointer: PointerEvent) => {
       const delta = framesFromDelta(pointer.clientX - originX, laneWidth, span);
-      command = pictureDragCommand(clips, clipId, gesture, delta);
-      onPreview(command === null ? null : previewTimeline(timeline, [command]));
+      command = pictureDragCommand(clips, clipId, gesture, delta, sourceLength);
+      onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
     };
-    const up = (pointer: PointerEvent) => {
+    const finish = (pointer: PointerEvent) => {
       element.releasePointerCapture(pointer.pointerId);
       element.removeEventListener("pointermove", move);
       element.removeEventListener("pointerup", up);
-      element.removeEventListener("pointercancel", up);
+      element.removeEventListener("pointercancel", cancel);
       onPreview(null);
+    };
+    const up = (pointer: PointerEvent) => {
+      finish(pointer);
       // A click that only selected sends nothing: a write with no change is not an edit.
-      if (command !== null && previewTimeline(timeline, [command]) !== null) {
+      if (command !== null && previewTimeline(timeline, [command], sourceLength) !== null) {
         onCommands([command], gesture === "move" ? "Move clip" : `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
       }
     };
+    // A gesture the browser took away — a touch the OS claimed, capture lost — was never
+    // completed, so it writes nothing: the preview clears and the record stays as it was.
+    const cancel = (pointer: PointerEvent) => finish(pointer);
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
-    element.addEventListener("pointercancel", up);
+    element.addEventListener("pointercancel", cancel);
   };
 
   const onLanePointerDown = (event: React.PointerEvent) => {

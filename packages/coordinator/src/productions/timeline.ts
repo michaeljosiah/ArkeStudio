@@ -6,8 +6,10 @@ import {
   applyTimelineCommands,
   describeTimelineCommand,
   historySelectionChanges,
+  migrateLegacyCut,
   redoTimelineHistory,
   seedStoryPictureTimeline,
+  sourceLengthFramesFor,
   storyTimelineFingerprint,
   undoTimelineHistory,
   type ProductionBundle,
@@ -87,8 +89,22 @@ function applySelectionChanges(selections: Selections, changes: readonly Timelin
   return next;
 }
 
+/** Key-order-independent, because a selection read from disk and one that went through the schema spell their keys differently. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function sameSelection(a: ShotSelection | null | undefined, b: ShotSelection | null | undefined): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  return canonical(a ?? null) === canonical(b ?? null);
 }
 
 /**
@@ -134,12 +150,17 @@ function planTakeSwitches(
   return { decisions, selections: current, changes };
 }
 
-/** Materialise or update one production timeline under the world's existing atomic write gate. */
+/**
+ * Materialise or update one production timeline under the world's existing atomic write gate.
+ *
+ * Returns what the legacy `cut.json` migration could not carry, when this write was the one that
+ * folded it in (SPEC-037 R-30): named placements, never a count, so the caller can say them.
+ */
 export async function applyTimelineCommand(
   store: WorldStore,
   productionId: string,
   write: TimelineWrite,
-): Promise<void> {
+): Promise<{ dropped: string[] }> {
   const timelinePath = `productions/${productionId}/timeline.json`;
   const reviewsPath = `productions/${productionId}/reviews.jsonl`;
   const selectionsPath = `productions/${productionId}/selections.json`;
@@ -153,7 +174,7 @@ export async function applyTimelineCommand(
         }
       : write;
 
-  await store.gateOp(async () => {
+  return store.gateOp(async () => {
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new TimelineCommandRefused(`production ${productionId} is not in this world`);
     if (production.spine) {
@@ -161,6 +182,7 @@ export async function applyTimelineCommand(
     }
 
     const raw = await readOptional(store, timelinePath);
+    let dropped: string[] = [];
 
     let current: ProductionTimeline;
     if (raw === null) {
@@ -185,6 +207,18 @@ export async function applyTimelineCommand(
           `the timeline moved from revision ${command.baseRevision ?? "none"} to ${current.revision} while this edit was being made`,
         );
       }
+    }
+    /*
+     * The legacy placements fold into typed tracks with the first write that reaches a record
+     * that has not yet absorbed them (SPEC-037 R-30, R-31): the first materialisation, or the
+     * first command against a first-slice timeline. It lands in the same commit as the command,
+     * as part of the base the command applies to rather than as a history entry of its own —
+     * nobody chose it, so nobody undoes it — and from then on `cut.json` has no writer.
+     */
+    if (current.migratedCut !== true) {
+      const migrated = migrateLegacyCut(current, production, store.getBundle().artifacts);
+      current = migrated.timeline;
+      dropped = migrated.dropped;
     }
 
     const files: CommitFileInput[] = [];
@@ -220,6 +254,7 @@ export async function applyTimelineCommand(
         next = applyTimelineCommands(current, clipCommands, {
           label,
           selections: selectionChanges,
+          sourceLength: sourceLengthFramesFor(production, store.getBundle().artifacts),
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
         });
       } else {
@@ -231,7 +266,19 @@ export async function applyTimelineCommand(
         const changes = historySelectionChanges(entry, command.kind);
         if (changes.length > 0) {
           const selectionsRaw = await readOptional(store, selectionsPath);
-          const selections = applySelectionChanges(JSON.parse(selectionsRaw ?? "{}") as Selections, changes);
+          const live = JSON.parse(selectionsRaw ?? "{}") as Selections;
+          // The timeline revision fences the timeline; the selection has other writers
+          // (accept-take, set-trim) that leave the revision alone. A switch undone over a
+          // selection somebody has since changed would silently discard their choice, so each
+          // shot must still read as the entry recorded it before anything is written.
+          for (const change of changes) {
+            if (!sameSelection(live[change.shotId], change.before)) {
+              throw new TimelineCommandRefused(
+                `shot ${change.shotId}'s selection changed since this take switch was made; ${command.kind} would discard that choice`,
+              );
+            }
+          }
+          const selections = applySelectionChanges(live, changes);
           files.push(fileFor(selectionsPath, selectionsRaw, JSON.stringify(selections, null, 2) + "\n"));
         }
       }
@@ -249,5 +296,11 @@ export async function applyTimelineCommand(
       raiseSchemaVersion: 5,
       files: [fileFor(timelinePath, raw, `${JSON.stringify(next, null, 2)}\n`), ...files],
     });
+    return { dropped };
   });
+}
+
+/** True once the timeline owns every placement, so a legacy `cut.json` write must refuse (R-30). */
+export function placementsLiveOnTimeline(production: ProductionBundle): boolean {
+  return production.timeline?.status === "ready" && production.timeline.timeline.migratedCut === true;
 }

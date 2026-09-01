@@ -13,13 +13,18 @@ import {
   type ExportPreset,
 } from "./cut.js";
 import {
+  AUDIO_TRACK_KINDS,
+  DEFAULT_MIX,
   TimelineOperationRefused,
   basePictureTrack,
   framesToSeconds,
   orderedTrackClips,
   resolvePictureTimeline,
+  type MixSettings,
   type ProductionTimeline,
+  type TimelineClip,
   type TimelineState,
+  type TimelineTrack,
 } from "./timeline.js";
 import { productionFrameRate, type FrameRate } from "./world.js";
 
@@ -40,12 +45,31 @@ import { productionFrameRate, type FrameRate } from "./world.js";
 
 export type RenderScope = { kind: "production" } | { kind: "episode"; episodeId: string };
 
+/** What a sound is for, which decides whether speech lowers it (SPEC-038 R-12, R-14). */
+export type RenderAudioRole = "dialogue" | "ambience" | "music" | "picture";
+
+export interface RenderAudioItem extends ExportAudioClip {
+  role: RenderAudioRole;
+  /** Seconds into the source where the clip starts. */
+  sourceInSec: number;
+  clipId?: string;
+}
+
+export interface SpeechRegion {
+  startSec: number;
+  endSec: number;
+}
+
 export interface RenderPlan extends ExportPlan {
   /** The saved timeline revision this plan was frozen from; null for legacy derivation. */
   revision: number | null;
   /** The delivery window on the timeline, in seconds of the production clock. */
   range: { startSec: number; endSec: number };
   scope: RenderScope;
+  audio: RenderAudioItem[];
+  mix: MixSettings;
+  /** Where speech is expected (R-16): the Dialogue clip windows, merged. */
+  speech: SpeechRegion[];
 }
 
 export type RenderPlanResult = { ok: true; plan: RenderPlan } | { ok: false; reason: string };
@@ -68,6 +92,45 @@ export interface RenderPlanInput {
 
 const STILL_KINDS: ReadonlySet<string> = new Set(["image", "board"]);
 
+/** Legacy placed sound had no role: it is never ducked, exactly as it never was. */
+function legacyAudio(clips: readonly ExportAudioClip[]): RenderAudioItem[] {
+  return clips.map((clip) => ({ ...clip, role: "picture", sourceInSec: 0 }));
+}
+
+function withRender(plan: ExportPlan, scope: RenderScope, revision: number | null, mix: MixSettings): RenderPlan {
+  return {
+    ...plan,
+    audio: legacyAudio(plan.audio),
+    revision,
+    range: { startSec: 0, endSec: plan.totalSec },
+    scope,
+    mix,
+    speech: [],
+  };
+}
+
+/**
+ * Which tracks sound (R-6): a muted track is out, and once anything is solo, only solo audio
+ * tracks are in. Saved Mute values are never touched by solo; this is a read.
+ */
+export function audibleTracks(timeline: Pick<ProductionTimeline, "tracks">): TimelineTrack[] {
+  const audio = timeline.tracks.filter((track) => AUDIO_TRACK_KINDS.has(track.kind));
+  const soloed = audio.filter((track) => track.solo === true);
+  if (soloed.length > 0) return soloed.filter((track) => !track.muted);
+  return timeline.tracks.filter((track) => !track.muted);
+}
+
+function mergeRegions(regions: SpeechRegion[]): SpeechRegion[] {
+  const sorted = [...regions].sort((a, b) => a.startSec - b.startSec);
+  const merged: SpeechRegion[] = [];
+  for (const region of sorted) {
+    const last = merged[merged.length - 1];
+    if (last !== undefined && region.startSec <= last.endSec) last.endSec = Math.max(last.endSec, region.endSec);
+    else merged.push({ ...region });
+  }
+  return merged;
+}
+
 /**
  * Picture clips on tracks above the base one composite over it (R-8). Each becomes an overlay
  * item at its frame window; a still holds, a video shifts. A missing or non-picture artifact is
@@ -78,9 +141,12 @@ function overlaysFromTimeline(
   timeline: ProductionTimeline,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
-): { ok: true; overlays: ExportOverlay[] } | { ok: false; reason: string } {
+): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[] } | { ok: false; reason: string } {
   const base = basePictureTrack(timeline);
   const overlays: ExportOverlay[] = [];
+  const sound: RenderAudioItem[] = [];
+  const audible = new Set(audibleTracks(timeline).map((track) => track.id));
+  const anySolo = timeline.tracks.some((track) => track.solo === true);
   const upper = timeline.tracks
     .filter((track) => track.kind === "picture" && track.id !== base?.id && !track.muted)
     .sort((a, b) => a.order - b.order);
@@ -96,15 +162,69 @@ function overlaysFromTimeline(
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
       }
-      overlays.push({
-        path: `artifacts/${artifact.file}`,
-        startSec: framesToSeconds(clip.startFrame, frameRate),
-        endSec: framesToSeconds(clip.startFrame + clip.durationFrames, frameRate),
-        still,
-      });
+      const startSec = framesToSeconds(clip.startFrame, frameRate);
+      const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
+      overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still });
+      // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
+      if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
+        sound.push({
+          path: `artifacts/${artifact.file}`,
+          startSec,
+          endSec,
+          gainDb: clip.gainDb ?? 0,
+          role: "picture",
+          sourceInSec: framesToSeconds(clip.sourceInFrames, frameRate),
+          clipId: clip.id,
+        });
+      }
     }
   }
-  return { ok: true, overlays };
+  return { ok: true, overlays, sound };
+}
+
+/** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
+function audioFromTimeline(
+  timeline: ProductionTimeline,
+  production: ProductionBundle,
+  artifacts: readonly RenderArtifact[],
+  frameRate: FrameRate,
+): { ok: true; audio: RenderAudioItem[]; speech: SpeechRegion[] } | { ok: false; reason: string } {
+  const audio: RenderAudioItem[] = [];
+  const speech: SpeechRegion[] = [];
+  const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
+  for (const track of audibleTracks(timeline).filter((track) => AUDIO_TRACK_KINDS.has(track.kind)).sort((a, b) => a.order - b.order)) {
+    for (const clip of orderedTrackClips(track)) {
+      const startSec = framesToSeconds(clip.startFrame, frameRate);
+      const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
+      let path: string;
+      if (clip.source.kind === "artifact") {
+        const artifactId = clip.source.artifactId;
+        const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+        if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+        const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
+        if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
+        path = `artifacts/${artifact.file}`;
+      } else if (clip.source.kind === "take") {
+        const takeId = clip.source.takeId;
+        const take = takesById.get(takeId);
+        if (take?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        path = `productions/${production.meta.id}/takes/${take.id}/${take.media}`;
+      } else {
+        return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
+      }
+      audio.push({
+        path,
+        startSec,
+        endSec,
+        gainDb: clip.gainDb ?? 0,
+        role: track.kind as RenderAudioRole,
+        sourceInSec: framesToSeconds(clip.sourceInFrames, frameRate),
+        clipId: clip.id,
+      });
+      if (track.kind === "dialogue") speech.push({ startSec, endSec });
+    }
+  }
+  return { ok: true, audio, speech: mergeRegions(speech) };
 }
 
 /**
@@ -130,14 +250,14 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       return { ok: false, reason: "episode ranges do not consume the saved Picture timeline in this release" };
     }
     const plan = buildExportPlan(deriveEpisodeCut(production, scope.episodeId), preset, [], [], frameRate);
-    return { ok: true, plan: { ...plan, revision: null, range: { startSec: 0, endSec: plan.totalSec }, scope } };
+    return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
   }
 
-  const legacyOverlays = exportOverlays(production.cut.overlays, artifacts);
-  const legacyAudio = exportAudioClips(production.cut.overlays, artifacts);
   if (timeline === undefined || timeline.status === "absent") {
-    const plan = buildExportPlan(deriveCut(production), preset, legacyOverlays, legacyAudio, frameRate);
-    return { ok: true, plan: { ...plan, revision: null, range: { startSec: 0, endSec: plan.totalSec }, scope } };
+    const overlays = exportOverlays(production.cut.overlays, artifacts);
+    const audio = exportAudioClips(production.cut.overlays, artifacts);
+    const plan = buildExportPlan(deriveCut(production), preset, overlays, audio, frameRate);
+    return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
   }
 
   let cut;
@@ -147,8 +267,15 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     if (error instanceof TimelineOperationRefused) return { ok: false, reason: `timeline is not ready to render: ${error.reason}` };
     throw error;
   }
-  const upper = overlaysFromTimeline(timeline.timeline, artifacts, frameRate);
+  const record = timeline.timeline;
+  const upper = overlaysFromTimeline(record, artifacts, frameRate);
   if (!upper.ok) return upper;
+  const typed = audioFromTimeline(record, production, artifacts, frameRate);
+  if (!typed.ok) return typed;
+  // Until the legacy placements are folded into typed tracks they are still read here (SPEC-037
+  // R-30): the file remains readable, and there is still only one writable copy.
+  const legacyOverlays = record.migratedCut === true ? [] : exportOverlays(production.cut.overlays, artifacts);
+  const legacySound = record.migratedCut === true ? [] : legacyAudio(exportAudioClips(production.cut.overlays, artifacts));
 
   /*
    * The base sequence, in the export plan's own terms. A hole is black and says nothing, because
@@ -157,8 +284,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
    * video is a clip, a still is black under a held overlay — the one still path FFmpeg has been
    * verified on.
    */
+  const base = basePictureTrack(record);
+  const baseAudible = base !== null && !base.muted && !record.tracks.some((track) => track.solo === true);
   const items: ExportItem[] = [];
   const stillOverlays: ExportOverlay[] = [];
+  const baseSound: RenderAudioItem[] = [];
   let cursorSec = 0;
   for (const entry of cut.entries) {
     const startSec = cursorSec;
@@ -167,10 +297,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       items.push({ type: "black", durationSec: entry.durationSec });
       continue;
     }
-    const clip = basePictureTrack(timeline.timeline)?.clips.find((candidate) => candidate.id === entry.clipId);
+    const clip: TimelineClip | undefined = base?.clips.find((candidate) => candidate.id === entry.clipId);
     if (clip !== undefined && clip.source.kind === "artifact") {
-      const artifact = artifacts.find((candidate) => candidate.id === (clip.source.kind === "artifact" ? clip.source.artifactId : ""));
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${clip.source.artifactId}, which this world does not have` };
+      const artifactId = clip.source.artifactId;
+      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });
@@ -185,6 +316,17 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         durationSec: entry.durationSec,
         label: entry.label,
       });
+      if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true) {
+        baseSound.push({
+          path: `artifacts/${artifact.file}`,
+          startSec,
+          endSec: startSec + entry.durationSec,
+          gainDb: clip.gainDb ?? 0,
+          role: "picture",
+          sourceInSec: inSec,
+          clipId: clip.id,
+        });
+      }
       continue;
     }
     if (entry.media) {
@@ -202,7 +344,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];
-  const totalSec = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), ...legacyAudio.map((clip) => clip.endSec), 0);
+  const audio = [...legacySound, ...baseSound, ...upper.sound, ...typed.audio];
+  const totalSec = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), ...audio.map((clip) => clip.endSec), 0);
   if (totalSec > cut.totalSec && items.length > 0) {
     // Placed work reaching past the last Picture clip is still in the film (R-2, SPEC-037 R-32).
     items.push({ type: "black", durationSec: totalSec - cut.totalSec });
@@ -213,11 +356,14 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     frameRate,
     items,
     overlays,
-    audio: [...legacyAudio],
+    audio,
     totalSec,
-    revision: timeline.timeline.revision,
+    revision: record.revision,
     range: { startSec: 0, endSec: totalSec },
     scope,
+    mix: record.mix,
+    // Sound cannot extend the delivery range (R-19): a speech window is clipped to the film.
+    speech: record.mix.speechFirst ? typed.speech.map((region) => ({ startSec: region.startSec, endSec: Math.min(region.endSec, totalSec) })) : [],
   };
   return { ok: true, plan };
 }
@@ -276,7 +422,38 @@ export function pictureEdges(plan: ExportPlan): number[] {
   return [...edges].filter((edge) => edge >= 0 && edge <= plan.totalSec).sort((a, b) => a - b);
 }
 
-/** The sound mixed under one moment (R-12..R-19 land the gains; here it is presence and gain). */
-export function audioAtSec(plan: ExportPlan, sec: number): ExportAudioClip[] {
-  return plan.audio.filter((clip) => sec >= clip.startSec && sec < clip.endSec);
+/**
+ * How far speech lowers the background at one moment, 0 through 1 (R-14, R-15). Fully down from
+ * the look-ahead before a region to its end, then back up over the release. Regions overlap by
+ * taking the deepest, so a pause shorter than the release never lets the bed swell.
+ */
+export function duckingEnvelope(speech: readonly SpeechRegion[], mix: Pick<MixSettings, "lookAheadMs" | "releaseMs">, sec: number): number {
+  const lookAhead = mix.lookAheadMs / 1000;
+  const release = mix.releaseMs / 1000;
+  let depth = 0;
+  for (const region of speech) {
+    if (sec >= region.startSec - lookAhead && sec < region.endSec) return 1;
+    if (release > 0 && sec >= region.endSec && sec < region.endSec + release) {
+      depth = Math.max(depth, 1 - (sec - region.endSec) / release);
+    }
+  }
+  return depth;
+}
+
+/** Whether speech-first mixing lowers this sound at all (R-14): Music and Ambience, nothing else. */
+export function isDuckable(role: RenderAudioRole): boolean {
+  return role === "music" || role === "ambience";
+}
+
+/** The gain a sound plays at, in dB, after its own gain and any ducking (R-13, R-14, R-17). */
+export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role">, sec: number): number {
+  if (!plan.mix.speechFirst || !isDuckable(item.role) || plan.speech.length === 0) return item.gainDb;
+  return item.gainDb + plan.mix.duckingDb * duckingEnvelope(plan.speech, plan.mix, sec);
+}
+
+/** The sound mixed under one moment, each at the gain it plays at (R-12..R-19). */
+export function audioAtSec(plan: RenderPlan, sec: number): Array<RenderAudioItem & { effectiveGainDb: number }> {
+  return plan.audio
+    .filter((clip) => sec >= clip.startSec && sec < clip.endSec)
+    .map((clip) => ({ ...clip, effectiveGainDb: audioGainDbAt(plan, clip, sec) }));
 }

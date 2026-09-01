@@ -104,6 +104,16 @@ function savedState(): ClientState {
   return state;
 }
 
+/**
+ * The round trip a real command makes: the coordinator writes, the snapshot's revision moves,
+ * and the editor's one-in-flight gate lifts. Tests that send twice advance it between sends.
+ */
+async function advance(state: ClientState): Promise<void> {
+  const timeline = state.world!.productions[0]!.timeline;
+  if (timeline?.status === "ready") timeline.timeline.revision += 1;
+  await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+}
+
 function keydown(target: EventTarget, key: string, init: { ctrlKey?: boolean; shiftKey?: boolean } = {}): void {
   const event = new Event("keydown", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "key", { value: key });
@@ -143,7 +153,8 @@ describe("semantic Picture editing (#679)", () => {
   });
 
   it("offers split only with the playhead inside the clip, and mints one new id per split", async () => {
-    const screen = await mountCut(savedState());
+    const state = savedState();
+    const screen = await mountCut(state);
     try {
       assert.equal(button(screen, "Split").disabled, true, "the playhead sits on the first frame");
       const scrubber = screen.container.querySelector<HTMLElement>("[role='slider'][aria-label='Seek']");
@@ -160,6 +171,7 @@ describe("semantic Picture editing (#679)", () => {
       assert.equal(sent.commands[0].atFrame, 48, "two seconds at 24 fps");
       assert.match(sent.commands[0].newClipId, /^cl_[0-9A-HJKMNP-TV-Z]{26}$/);
 
+      await advance(state);
       await act(async () => button(screen, "Duplicate").click());
       const duplicate = commandsSent(screen)[1]!;
       assert.equal(duplicate.commands[0]?.kind, "duplicate");
@@ -174,29 +186,38 @@ describe("semantic Picture editing (#679)", () => {
   });
 
   it("routes keyboard shortcuts and the clip menu to the same single commands", async () => {
-    const screen = await mountCut(savedState());
+    const state = savedState();
+    const screen = await mountCut(state);
     try {
-      const clip = screen.container.querySelector<HTMLButtonElement>("[data-clip='cl_sh-12']");
-      assert.ok(clip);
-      await act(async () => clip.click());
-      await act(async () => keydown(clip, "Delete", { shiftKey: true }));
+      const clip = () => {
+        const found = screen.container.querySelector<HTMLButtonElement>("[data-clip='cl_sh-12']");
+        assert.ok(found);
+        return found;
+      };
+      await act(async () => clip().click());
+      await act(async () => keydown(clip(), "Delete", { shiftKey: true }));
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "ripple-delete", clipId: "cl_sh-12" }]);
-      await act(async () => keydown(clip, "["));
+      await advance(state);
+      await act(async () => clip().click());
+      await act(async () => keydown(clip(), "["));
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "move-adjacent", clipId: "cl_sh-12", direction: "earlier" }]);
 
+      await advance(state);
       await act(async () => keydown(window, "z", { ctrlKey: true }));
-      const history = screen.sent.filter((message) => message.kind === "timeline-history");
-      assert.deepEqual(history.at(-1), {
+      const history = () => screen.sent.filter((message) => message.kind === "timeline-history");
+      assert.deepEqual(history().at(-1), {
         kind: "timeline-history",
         worldId: FIXTURE_STATE.world!.meta.worldId,
         productionId: "saltlight",
         action: "undo",
-        baseRevision: 1,
+        baseRevision: 3,
       });
+      await advance(state);
       assert.equal(button(screen, "Redo").disabled, true);
       await act(async () => keydown(window, "y", { ctrlKey: true }));
-      assert.equal(history.length, 1, "Redo with nothing to redo sends nothing");
+      assert.equal(history().length, 1, "Redo with nothing to redo sends nothing");
 
+      await act(async () => clip().click());
       await act(async () => keydown(window, "Delete"));
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "delete", clipId: "cl_sh-12" }], "Delete outside a text field removes the selection");
     } finally {
@@ -220,6 +241,7 @@ describe("semantic Picture editing (#679)", () => {
       assert.deepEqual(sent.commands, [{ kind: "switch-take", shotId: "sh_12", takeId: "tk_01J8F0000000000000000000B2" }]);
       assert.equal(sent.label, "Switch take");
 
+      await advance(state);
       const laterFrame = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(
         (candidate) => candidate.getAttribute("aria-label") === "In one frame later",
       );
