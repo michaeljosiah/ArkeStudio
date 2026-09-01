@@ -252,10 +252,9 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.doesNotMatch(html, /Edit the promise/, "authoring happens in the conversation");
   });
 
-  it("the rail says Season on both of an episode's screens", () => {
-    // Both live outside the `season` path, so neither lights a rail item on its own — and the
-    // rail goes blank exactly when somebody is two levels deep and most wants to know where
-    // they are. Season owns them because it is the level above.
+  it("the rail says Episodes on both of an episode's screens", () => {
+    // Both live outside the `season` path, so neither lights a rail item on its own. The episode
+    // tree is their visible parent and stays current on both the conversation and detail routes.
     for (const path of [CHAT, PAGE]) {
       __setStateForTest(state);
       try {
@@ -265,7 +264,7 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
           </MemoryRouter>,
         ).replace(/<!-- -->/g, "");
         const active = html.match(/fy-prodrail__item[^"]*--active[^>]*>[\s\S]*?<span class="fy-prodrail__label">([^<]*)/);
-        assert.equal(active?.[1], "Season", `${path} lights Season`);
+        assert.equal(active?.[1], "Episodes", `${path} lights Episodes`);
       } finally {
         __setStateForTest(FIXTURE_STATE);
       }
@@ -449,12 +448,53 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.doesNotMatch(html, /Nothing written yet/, "and never contradicts it with a day one");
   });
 
-  it("the rail carries Season once, in the first slot", () => {
+  it("the rail follows the production hierarchy and keeps the production actions", () => {
     const html = home(PROD);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
-    assert.equal(labels[0], "Season", "Season replaces Dashboard rather than sitting beside it");
-    assert.equal(labels.filter((l) => l === "Season").length, 1, "and there is no second entry");
-    assert.ok(!labels.includes("Dashboard"), "Dashboard is gone for this medium");
+    assert.deepEqual(
+      labels.slice(0, 8),
+      ["Overview", "Episodes", "Takes", "Artifacts", "Audio", "Generate", "Cut", "Exports"],
+    );
+    assert.ok(!labels.includes("Dashboard"), "a series has an overview and episodes instead");
+    assert.ok(!labels.includes("Cast"), "the scene workspace keeps the production hierarchy quiet");
+    assert.match(html, /series · 1 episode · 0 scenes/);
+  });
+
+  it("opens the current episode in the rail and shows its scene in place", () => {
+    const state = withMicrodrama([
+      episode("ep_the-vigil", 2, { title: "The vigil", scenes: ["sc_04"] }),
+    ]);
+    const source = FIXTURE_STATE.world!.productions.find((production) => production.meta.id === "saltlight")!;
+    const production = state.world!.productions.find(
+      (candidate) => candidate.meta.id === "bell-watch-season-1",
+    )!;
+    production.scenes = structuredClone(source.scenes);
+    production.sceneFiles = { ...source.sceneFiles };
+
+    const html = renderApp(
+      state,
+      `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_04`,
+    );
+    assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
+    assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
+    assert.match(html, /4 · The verse rises/);
+    assert.match(html, /bell-watch-season-1\/scenes\/new/);
+    assert.match(html, /New episode/);
+    assert.match(html, /fy-prodrail--folded/);
+    assert.match(html, /aria-label="Switch production\. Current production: Bell Watch — Season 1"/);
+  });
+
+  it("distinguishes reviewing Takes from opening Generate", () => {
+    const state = withMicrodrama([ONE]);
+    const currentItemLabels = (html: string) =>
+      [...html.matchAll(/<a[^>]*aria-current="page"[^>]*class="fy-prodrail__item[^"]*"[^>]*>[\s\S]*?<span class="fy-prodrail__label">([^<]*)/g)]
+        .map((match) => match[1]);
+
+    const takes = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/${PROD}/generate`);
+    assert.deepEqual(currentItemLabels(takes), ["Takes"]);
+
+    const generate = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/${PROD}/generate?view=bench`);
+    assert.deepEqual(currentItemLabels(generate), ["Generate"]);
   });
 
   it("every other medium keeps its dashboard, having no season to be", () => {
@@ -529,16 +569,9 @@ describe("story structure is off the default walk (design turn 99)", () => {
     assert.match(html, /Develop is where they get decided/, "and it points at the renamed thread");
   });
 
-  it("the rail carries it once, under Season, and only where there is a season", () => {
+  it("the target rail leaves story structure off the default walk", () => {
     const episodic = renderApp(withMicrodrama([ONE]), `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
-    // The window is generous because the mark's SVG sits between the tag and the label — one
-    // shape for every destination means every item now carries one (turn 101).
-    assert.match(
-      episodic,
-      /fy-prodrail__item--under[\s\S]{0,900}?Story structure/,
-      "one item, indented under Season, in the same shape as every other",
-    );
-    assert.equal(episodic.match(/Story structure/g)?.length, 1, "and exactly one");
+    assert.doesNotMatch(episodic, /fy-prodrail__label">Story structure/);
     const plain = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     assert.doesNotMatch(plain, /Story structure/, "a production with no season has no lanes to hold");
   });

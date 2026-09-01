@@ -1224,6 +1224,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   width: 100%;
 }
 .fy-prodrail__switch:hover { background: var(--accent); }
+.fy-prodrail__switchcopy { flex: 1; min-width: 0; }
+.fy-prodrail__switchmark,
+.fy-prodrail__fold-divider { display: none; }
+.fy-prodrail__switchchevron { display: inline-flex; flex: none; color: var(--muted-foreground); }
 .fy-prodrail__switchname { font: 600 13px var(--font-sans); }
 .fy-prodrail__switchsub { font: 400 10px var(--font-mono); color: var(--muted-foreground); margin-top: 2px; }
 .fy-prodrail__item {
@@ -1293,6 +1297,155 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   transition: var(--transition-control);
 }
 .fy-prodrail__foot:hover { color: var(--foreground); }
+
+/* The microdrama rail follows the scene-workspace prototype: the production summary gives way to
+   an episode tree, while the folded rail keeps one marked destination for every top-level item. */
+.fy-prodrail--episodic {
+  width: 206px;
+  padding: 14px 12px 18px;
+  gap: 3px;
+}
+.fy-prodrail--episodic .fy-prodrail__collapse {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 4px;
+}
+.fy-prodrail--episodic .fy-prodrail__switch {
+  gap: 10px;
+  padding: 9px 11px;
+  margin-bottom: 9px;
+}
+.fy-prodrail--episodic .fy-prodrail__item { padding: 7px 10px; }
+.fy-prodrail__episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 0 6px 6px;
+}
+.fy-prodrail__episode-toggle {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: var(--transition-control);
+}
+.fy-prodrail__episode-toggle:hover { background: var(--accent); }
+.fy-prodrail__episode-toggle > svg { flex: none; color: var(--neutral-400); stroke-width: 2; }
+.fy-prodrail__episode-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 12px var(--font-sans);
+}
+.fy-prodrail__episode-count {
+  flex: none;
+  font: 400 9.5px var(--font-mono);
+  color: var(--neutral-400);
+}
+.fy-prodrail__scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 1px 0 0 17px;
+}
+.fy-prodrail__scene {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  font: 400 12px var(--font-sans);
+  text-decoration: none;
+  transition: var(--transition-control);
+}
+.fy-prodrail__scene:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail__scene--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-prodrail__scene--missing { color: var(--neutral-400); }
+.fy-prodrail__scene-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-prodrail__scene-dot {
+  width: 5px;
+  height: 5px;
+  margin-left: auto;
+  flex: none;
+  border-radius: 999px;
+  background: var(--neutral-300);
+}
+.fy-prodrail__scene--active .fy-prodrail__scene-dot { background: var(--warning); }
+.fy-prodrail__new-scene,
+.fy-prodrail__new-episode {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted-foreground);
+  font: 400 12px var(--font-sans);
+  text-decoration: none;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-prodrail__new-scene {
+  padding: 6px 9px;
+  margin-top: 3px;
+  border: 1px dashed var(--border);
+}
+.fy-prodrail__new-episode { width: 100%; margin-top: 3px; }
+.fy-prodrail__new-scene:hover,
+.fy-prodrail__new-episode:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail__new-episode:disabled { cursor: default; color: var(--neutral-400); }
+.fy-prodrail__new-episode:disabled:hover { background: none; }
+
+.fy-prodrail--episodic.fy-prodrail--folded {
+  width: 46px;
+  padding: 16px 0;
+  gap: 14px;
+  align-items: center;
+}
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__collapse { margin: 0; }
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__switch {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  margin: 0;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: var(--foreground);
+  color: var(--background);
+  box-shadow: none;
+}
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__switchcopy,
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__switchchevron,
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__episodes { display: none; }
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__switchmark {
+  display: inline-flex;
+  font: 600 10px var(--font-mono);
+}
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__fold-divider {
+  display: block;
+  width: 18px;
+  height: 1px;
+  background: var(--border);
+}
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__item {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+.fy-prodrail--episodic.fy-prodrail--folded .fy-prodrail__foot { padding: 0; border-top: 0; }
 
 .fy-prodmain {
   flex: 1;
