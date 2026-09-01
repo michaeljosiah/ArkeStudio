@@ -3,7 +3,12 @@ import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
-import { TimelineClipIdSchema, TimelineMoveDirectionSchema, TimelineSourceFingerprintSchema } from "./timeline.js";
+import {
+  TimelineClipIdSchema,
+  TimelineCommandSchema,
+  TimelineMoveDirectionSchema,
+  TimelineSourceFingerprintSchema,
+} from "./timeline.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
@@ -2052,6 +2057,25 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** Null means the command was composed against the unsaved first assembly. */
       baseRevision: z.number().int().min(0).nullable(),
       sourceFingerprint: TimelineSourceFingerprintSchema,
+    })
+    .strict(),
+  /**
+   * SPEC-037 R-18, R-24 (issue #679): one completed action as one batch of semantic commands.
+   *
+   * The batch lands as one revision and one Undo entry or not at all. `baseRevision` null with the
+   * source fingerprint materialises the first assembly under the same command, exactly as the
+   * one-position move does.
+   */
+  z
+    .object({
+      kind: z.literal("timeline-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      commands: z.array(TimelineCommandSchema).min(1).max(50),
+      baseRevision: z.number().int().min(0).nullable(),
+      sourceFingerprint: TimelineSourceFingerprintSchema,
+      /** What the history entry calls this action; derived from the commands when absent. */
+      label: z.string().min(1).max(160).optional(),
     })
     .strict(),
   /** SPEC-037: move one durable Picture history entry between Undo and Redo. */

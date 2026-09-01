@@ -6543,6 +6543,7 @@ export class Coordinator {
         return;
       }
       case "timeline-move-picture":
+      case "timeline-command":
       case "timeline-history": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -6552,13 +6553,20 @@ export class Coordinator {
             msg.productionId,
             msg.kind === "timeline-move-picture"
               ? {
-                  kind: "move-picture",
-                  clipId: msg.clipId,
-                  direction: msg.direction,
+                  kind: "commands",
+                  commands: [{ kind: "move-adjacent", clipId: msg.clipId, direction: msg.direction }],
                   baseRevision: msg.baseRevision,
                   sourceFingerprint: msg.sourceFingerprint,
                 }
-              : { kind: msg.action, baseRevision: msg.baseRevision },
+              : msg.kind === "timeline-command"
+                ? {
+                    kind: "commands",
+                    commands: msg.commands,
+                    baseRevision: msg.baseRevision,
+                    sourceFingerprint: msg.sourceFingerprint,
+                    ...(msg.label !== undefined ? { label: msg.label } : {}),
+                  }
+                : { kind: msg.action, baseRevision: msg.baseRevision },
           );
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {

@@ -27,6 +27,7 @@ import {
   type WorldChatContext,
   type BenchMode,
   ulid,
+  type TimelineCommand,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
@@ -3074,6 +3075,30 @@ export function moveTimelinePictureClip(
     direction,
     baseRevision,
     sourceFingerprint,
+  });
+}
+
+/**
+ * One completed editor action as one batch (SPEC-037 R-24, issue 679). A drag, a menu item, a
+ * keyboard command and an accepted request all arrive here, and every one of them is one
+ * revision and one Undo step on the other side or nothing at all.
+ */
+export function sendTimelineCommands(
+  worldId: string,
+  productionId: string,
+  commands: TimelineCommand[],
+  baseRevision: number | null,
+  sourceFingerprint: string,
+  label?: string,
+): void {
+  send({
+    kind: "timeline-command",
+    worldId,
+    productionId,
+    commands,
+    baseRevision,
+    sourceFingerprint,
+    ...(label !== undefined ? { label } : {}),
   });
 }
 
