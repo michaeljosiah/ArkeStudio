@@ -185,6 +185,50 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await store.close();
   });
 
+  it("drains only the gate operation admitted before close", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    let entered!: () => void;
+    let release!: () => void;
+    const inside = new Promise<void>((resolve) => { entered = resolve; });
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const admitted = store.gateOp(async () => {
+      entered();
+      await held;
+      return store.commitUnserialised({ kind: "admitted-before-close", source: "test", files: [] });
+    });
+    await inside;
+    const closing = store.close();
+
+    await assert.rejects(
+      () => store.commitUnserialised({ kind: "not-admitted", source: "test", files: [] }),
+      /closed/,
+      "an unrelated async chain cannot borrow the admitted gate's close exemption",
+    );
+    release();
+    await admitted;
+    await closing;
+  });
+
+  it("revokes close-drain admission from detached gate descendants", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    let wake!: () => void;
+    let detached!: Promise<unknown>;
+
+    await store.gateOp(async () => {
+      const sleeping = new Promise<void>((resolve) => { wake = resolve; });
+      detached = sleeping.then(() =>
+        store.commitUnserialised({ kind: "detached-after-gate", source: "test", files: [] }),
+      );
+    });
+
+    const closing = store.close();
+    wake();
+    await assert.rejects(detached, /closed/);
+    await closing;
+  });
+
   it("does not expose mutation seams on a read-only store", async () => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir, { readOnly: true, clock: CLOCK });

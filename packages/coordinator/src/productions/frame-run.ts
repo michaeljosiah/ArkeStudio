@@ -1183,16 +1183,23 @@ export async function recordBoardSheetFromJob(
   const parents = await recordTakesFromJob(store, job, actualMicroUsd, {}, actualSource);
   const parent = parents[0];
   if (parent === undefined || parent.media === undefined) throw new Error("board sheet finalization produced no parent take");
-  const currentProduction = store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id);
-  if (!currentProduction?.reviews.some((review) => review.takeId === parent.id)) {
+  await store.gateOp(async () => {
+    const currentProduction = store
+      .getBundle()
+      .productions.find((candidate) => candidate.meta.id === production.meta.id);
+    if (currentProduction?.reviews.some((review) => review.takeId === parent.id)) return;
     const parentReview = await reviewAppendFor(store, production.meta.id, {
       ts: store.now(),
       takeId: parent.id,
       decision: "accept",
       by: `frame-run:${job.id}`,
     });
-    await store.commit({ kind: "board-sheet-accepted", source: `frame-run:${job.id}`, files: [parentReview] });
-  }
+    await store.commitUnserialised({
+      kind: "board-sheet-accepted",
+      source: `frame-run:${job.id}`,
+      files: [parentReview],
+    });
+  });
   const parentPath = join(store.dir, "productions", production.meta.id, "takes", parent.id, parent.media);
   const parentBytes = await readFile(toExtendedLength(parentPath));
   const parentHash = hash(parentBytes);
@@ -1271,7 +1278,7 @@ export async function recordBoardSheetFromJob(
       shotId: panel.shotId,
       producedBy: `frame-run:${job.id}`,
       toPng,
-      alsoCommit: [await reviewAppendFor(store, production.meta.id, decision)],
+      alsoCommit: async () => [await reviewAppendFor(store, production.meta.id, decision)],
       expectedArtifactId: request.slotAtAuthorization[panel.shotId] ?? null,
     });
     if (!filed.ok) throw new Error(`the frame for ${panel.shotId} could not be filed: ${filed.reason}`);

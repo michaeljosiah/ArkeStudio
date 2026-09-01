@@ -183,6 +183,34 @@ describe("queue notification", () => {
     assert.equal(note?.reason, "The file is 8.4 MB; the ceiling is 6 MB.");
   });
 
+  it("keeps a rejected shot-frame import away from an Activity row that cannot exist", () => {
+    const note = enqueueNote(
+      result({ command: "import-shot-frame", disposition: "rejected", acceptedJobIds: [], failures: [{ index: 0, reason: "Choose a PNG, JPEG or WebP image." }] }),
+      [],
+      manifest,
+    );
+    assert.equal(note?.action, undefined);
+    assert.equal(note?.title, "That image can’t be used");
+    assert.equal(note?.reason, "Choose a PNG, JPEG or WebP image.");
+  });
+
+  it("says when an upload was retained even though its older selection lost", () => {
+    const note = enqueueNote(
+      result({
+        command: "import-shot-frame",
+        disposition: "rejected",
+        requestedCount: 1,
+        acceptedJobIds: [],
+        failures: [{ index: 0, reason: "The image was kept as a Variant, but the shot's frame changed before it could be selected." }],
+      }),
+      [],
+      manifest,
+    );
+    assert.equal(note?.tone, "warning");
+    assert.equal(note?.title, "Image kept as a Variant");
+    assert.equal(note?.action, undefined);
+  });
+
   it("says nothing at all about work that never reached the queue", () => {
     assert.equal(enqueueNote(result({ disposition: "not-queued", requestedCount: 0, acceptedJobIds: [] }), [], manifest), null);
   });

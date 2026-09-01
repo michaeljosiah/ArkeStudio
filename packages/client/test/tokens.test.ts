@@ -41,6 +41,12 @@ describe("design tokens", () => {
     assert.ok(colors.includes(".dark"), "colors.css must define the .dark theme scope");
   });
 
+  it("names the loaded Geist Sans family exactly", () => {
+    const typography = readFileSync(join(TOKENS_DIR, "typography.css"), "utf8");
+    assert.match(typography, /--font-sans:\s*"Geist Sans"/);
+    assert.doesNotMatch(typography, /--font-sans:\s*"Geist"[;,]/);
+  });
+
   it("hard-codes no colour outside the token files (R-11)", () => {
     const offenders: string[] = [];
     const hex = /#[0-9a-fA-F]{3,8}\b/;
@@ -125,6 +131,28 @@ describe("design tokens", () => {
     const css = readFileSync(join(SRC, "screens", "fidelity.css"), "utf8");
     assert.doesNotMatch(css, /\.fy-content--cast \.fy-pillnav/, "Cast must not override the shared menu");
     assert.match(css, /@media \(max-width: 900px\)[\s\S]*\.fy-pillnav \{ overflow-x: auto;/);
+  });
+
+  it("lets scene rows answer to centre width and keeps their menus out of layout", () => {
+    const css = readFileSync(join(SRC, "screens", "fidelity.css"), "utf8");
+    const imageActions = readFileSync(join(SRC, "components", "image-actions.css"), "utf8");
+    const rows = readFileSync(join(SRC, "screens", "scene-workspace", "rows.tsx"), "utf8");
+    const brief = readFileSync(join(SRC, "components", "bench-brief.tsx"), "utf8");
+    assert.match(css, /\.fy-sw__centre\s*\{[^}]*container-type:\s*inline-size/);
+    assert.match(css, /@container\s*\(max-width:\s*700px\)[\s\S]*?\.fy-swrow__band\s*\{\s*flex-direction:\s*column/);
+    assert.match(css, /\.fy-swrow__menu,\s*\.fy-swrow__confirm\s*\{[^}]*position:\s*fixed/);
+    assert.match(rows, /createPortal\([\s\S]*?document\.body/);
+    assert.match(brief, /createPortal\([\s\S]*?document\.body/);
+    assert.match(rows, /target\?\.focus\(\)/, "opening a row menu moves focus into it");
+    assert.match(rows, /event\.key === "ArrowDown"/, "row menus implement keyboard traversal");
+    assert.match(rows, /role=\{confirmDelete \? "alertdialog" : "menu"\}/);
+    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__frameactions button \{ min-width: 44px; min-height: 44px;/);
+    assert.match(css, /\.fy-swrow__preview\s*\{[^}]*width: 44px; height: 44px/);
+    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__generate, \.fy-swedit, \.fy-swrow__slot button,[\s\S]*?\.fy-swrow__menu button, \.fy-swrow__confirm button, \.fy-swpreview__retry \{ min-width: 44px; min-height: 44px;/);
+    assert.match(css, /\.fy-swpreview__filmstrip\s*\{[^}]*overflow-x:\s*auto/);
+    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__stale button, \.fy-swrow__prompt button,[\s\S]*?\.fy-swpreview__transport button, \.fy-swpreview__filmstrip button \{ min-width: 44px; min-height: 44px;/);
+    assert.match(imageActions, /@media \(pointer: coarse\)[\s\S]*?\.fy-imgdl\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/);
+    assert.match(css, /\.fy-swalt:focus-within\s*\{[^}]*clip-path:\s*none/, "focused edge words escape the visually-hidden clipping box");
   });
 
   it("keeps credential material out of the client (R-10; SPEC-008 R-5, R-6)", () => {

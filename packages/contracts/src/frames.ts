@@ -2000,6 +2000,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       shotId: ShotIdSchema,
     })
     .strict(),
+  /** Bring one image into a shot's Variants and accept it through the ordinary still path. */
+  z
+    .object({
+      kind: z.literal("import-shot-frame"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      shotId: ShotIdSchema,
+      requestId: UlidSchema,
+    })
+    .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
   z
     .object({

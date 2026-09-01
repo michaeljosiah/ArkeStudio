@@ -12,9 +12,10 @@ import {
 } from "@arke-studio/contracts";
 import { closeOnCleanup, tempDir } from "../tmp.js";
 import { readChanges } from "../../src/world/change-writer.js";
+import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { exportWorld, runExport, type FfmpegRunner } from "../../src/takes/export.js";
-import { acceptTake, rejectTake, setTrim } from "../../src/takes/review.js";
+import { acceptTake, applyTakeAcceptance, rejectTake, setTrim } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { legacySceneView, orderedShots, routingFindings } from "@arke-studio/contracts";
@@ -382,6 +383,59 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     await store.close();
   });
 
+  it("refuses acceptance when a queued deletion removes the shot first", async () => {
+    const { store } = await open();
+    const stale = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = stale.scenes.find((candidate) => orderedShots(candidate).some((shot) => shot.id === "sh_13"))!;
+
+    let releaseHolder!: () => void;
+    let holderEntered!: () => void;
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const inside = new Promise<void>((resolve) => { holderEntered = resolve; });
+    const gateOp = store.gateOp.bind(store);
+    const holder = gateOp(async () => {
+      holderEntered();
+      await held;
+    });
+    await inside;
+
+    let deletionQueued!: () => void;
+    const queued = new Promise<void>((resolve) => { deletionQueued = resolve; });
+    let gateCalls = 0;
+    store.gateOp = <T>(operation: () => Promise<T>): Promise<T> => {
+      gateCalls += 1;
+      if (gateCalls === 1) deletionQueued();
+      return gateOp(operation);
+    };
+    const deleting = applySceneCommand(store, {
+      productionId: stale.meta.id,
+      sceneFile: "04-the-verse-rises",
+      sceneId: scene.id,
+      baseVersion: scene.version,
+      command: { kind: "delete-shot", shotId: "sh_13" },
+    });
+    await queued;
+
+    const accepting = acceptTake(store, stale, {
+      takeId: "tk_01J8D0000000000000000000D4",
+      shotId: "sh_13",
+      by: "user",
+    });
+    const refused = assert.rejects(accepting, /shot sh_13 is no longer in production saltlight/);
+    releaseHolder();
+    await Promise.all([holder, deleting, refused]);
+
+    const current = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    assert.ok(!current.scenes.some((candidate) => orderedShots(candidate).some((shot) => shot.id === "sh_13")));
+    assert.equal(current.selections["sh_13"], undefined, "acceptance does not recreate the deleted selection");
+    assert.ok(
+      !current.reviews.some(
+        (review) => review.takeId === "tk_01J8D0000000000000000000D4" && review.decision === "accept",
+      ),
+      "acceptance records no decision for the deleted shot",
+    );
+  });
+
   it("keeps a continuation on no-op accept, then clears and guards it when its predecessor changes", async () => {
     const { dir, store } = await open();
     const predecessor = "tk_01J8F0000000000000000000B2";
@@ -389,21 +443,32 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     const continuation = "tk_01J8D0000000000000000000D4";
     const continuationPath = join(dir, "productions/saltlight/takes", continuation, "take.json");
     const immutableBefore = await readFile(continuationPath, "utf8");
+    let acceptedSelections = store.getBundle().productions.find(
+      (production) => production.meta.id === "saltlight",
+    )!.selections;
     const productionWithEdge = () => {
       const current = store.getBundle().productions.find((production) => production.meta.id === "saltlight")!;
       return {
         ...current,
+        selections: acceptedSelections,
         takes: current.takes.map((take) =>
           take.id === continuation ? { ...take, continuedFrom: predecessor as never } : take,
         ),
       };
     };
+    const accept = (candidate: ProductionBundle, input: { takeId: string; shotId: string }): void => {
+      acceptedSelections = applyTakeAcceptance(
+        candidate,
+        store.getBundle().artifacts,
+        acceptedSelections,
+        { ...input, by: "user", at: CLOCK() },
+      ).selections;
+    };
 
-    await acceptTake(store, productionWithEdge(), { takeId: continuation, shotId: "sh_13", by: "user" });
-    await acceptTake(store, productionWithEdge(), { takeId: predecessor, shotId: "sh_12", by: "user" });
+    accept(productionWithEdge(), { takeId: continuation, shotId: "sh_13" });
+    accept(productionWithEdge(), { takeId: predecessor, shotId: "sh_12" });
     assert.equal(
-      store.getBundle().productions.find((production) => production.meta.id === "saltlight")!.selections["sh_13"]
-        ?.acceptedTakeId,
+      acceptedSelections["sh_13"]?.acceptedTakeId,
       continuation,
       "re-accepting the same predecessor invalidates nothing",
     );
@@ -428,16 +493,16 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     multiHop.takes = multiHop.takes.map((take) =>
       take.id === predecessor ? { ...take, continuedFrom: replacement as never } : take,
     );
-    await assert.rejects(
-      () => acceptTake(store, multiHop, { takeId: continuation, shotId: "sh_13", by: "user" }),
+    assert.throws(
+      () => accept(multiHop, { takeId: continuation, shotId: "sh_13" }),
       /itself continued/,
     );
-    await assert.rejects(
-      () => acceptTake(store, productionWithEdge(), { takeId: continuation, shotId: "sh_14", by: "user" }),
+    assert.throws(
+      () => accept(productionWithEdge(), { takeId: continuation, shotId: "sh_14" }),
       /does not cover shot/,
     );
 
-    await acceptTake(store, productionWithEdge(), { takeId: replacement, shotId: "sh_12", by: "user" });
+    accept(productionWithEdge(), { takeId: replacement, shotId: "sh_12" });
     let production = productionWithEdge();
     assert.equal(production.selections["sh_13"]?.acceptedTakeId, null);
     assert.equal(
@@ -445,17 +510,16 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
       null,
       "the derived cut cannot keep stale continuation footage",
     );
-    await assert.rejects(
-      () => acceptTake(store, production, { takeId: continuation, shotId: "sh_13", by: "user" }),
+    assert.throws(
+      () => accept(production, { takeId: continuation, shotId: "sh_13" }),
       /footage no longer selected/,
     );
 
-    await acceptTake(store, production, { takeId: predecessor, shotId: "sh_12", by: "user" });
+    accept(production, { takeId: predecessor, shotId: "sh_12" });
     production = productionWithEdge();
-    await acceptTake(store, production, { takeId: continuation, shotId: "sh_13", by: "user" });
+    accept(production, { takeId: continuation, shotId: "sh_13" });
     assert.equal(
-      store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections["sh_13"]
-        ?.acceptedTakeId,
+      acceptedSelections["sh_13"]?.acceptedTakeId,
       continuation,
       "restoring the exact predecessor makes the continuation valid again",
     );
@@ -507,8 +571,12 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
       ],
     });
 
-    await acceptTake(store, routed(leftTakeId), { takeId: rightTakeId, shotId: "sh_13", by: "user" });
-    const selected = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections;
+    let selected = applyTakeAcceptance(
+      routed(leftTakeId),
+      store.getBundle().artifacts,
+      production.selections,
+      { takeId: rightTakeId, shotId: "sh_13", by: "user", at: CLOCK() },
+    ).selections;
     assert.equal(selected["sh_12"]?.acceptedTakeId, leftTakeId);
     assert.equal(selected["sh_13"]?.acceptedTakeId, rightTakeId);
     const reconverged = routed(leftTakeId);
@@ -521,14 +589,21 @@ describe("immutability and review (R-1, R-2, R-6..R-11, D1, D5, D6, §3.2)", () 
     assert.equal(orderedShots(scenes[3]!).at(0)?.id, "sh_14", "the continuation target is the scene's first shot");
 
     for (const predecessor of [leftTakeId, rightTakeId]) {
-      await assert.rejects(
-        () => acceptTake(store, routed(predecessor), { takeId: joinTakeId, shotId: "sh_14", by: "user" }),
+      assert.throws(
+        () => {
+          selected = applyTakeAcceptance(
+            routed(predecessor),
+            store.getBundle().artifacts,
+            selected,
+            { takeId: joinTakeId, shotId: "sh_14", by: "user", at: CLOCK() },
+          ).selections;
+        },
         /in this scene/,
         `${predecessor} belongs to an inbound route, not the target scene`,
       );
     }
     assert.equal(
-      store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!.selections["sh_14"],
+      selected["sh_14"],
       undefined,
       "neither route selects continuation footage for the join scene",
     );

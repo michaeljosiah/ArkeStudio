@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rm } from "node:fs/promises";
-import { extname, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import {
+  orderedShots,
   ulid,
   type ArtifactSidecar,
   type ProductionBundle,
@@ -73,6 +74,62 @@ export type DrawnFrameOutcome =
   | { ok: false; reason: string };
 
 /**
+ * Keep a hand-picked image as an immutable production take before accepting it. It is deliberately
+ * a take rather than a loose artifact: Variants and review history must tell the same story as a
+ * generated frame, while the explicit user/upload identity and local-zero cost say no model ran.
+ */
+export async function recordUploadedShotFrameTake(
+  store: WorldStore,
+  productionId: string,
+  shotId: string,
+  media: string,
+  data: Uint8Array,
+): Promise<Take> {
+  if (basename(media) !== media || media === "." || media === "..") throw new Error(`unsafe media name ${media}`);
+  if (!IMAGE_EXTENSIONS.has(extname(media).toLowerCase())) throw new Error("the uploaded frame is not an image");
+  if (data.byteLength === 0) throw new Error("the uploaded frame is empty");
+
+  return store.gateOp(async () => {
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production) throw new Error(`no production ${productionId}`);
+    if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === shotId))) {
+      throw new Error(`no shot ${shotId} in production ${productionId}`);
+    }
+
+    const id = `tk_${ulid()}` as Take["id"];
+    const now = store.now();
+    const take: Take = {
+      id,
+      coversShots: [shotId] as Take["coversShots"],
+      kind: "frame",
+      provider: "user",
+      model: "upload",
+      provenance: {
+        canonRevision: bundle.meta.canonRevision,
+        sheets: {},
+        artDirectionVersion: bundle.artDirection.version,
+      },
+      references: [],
+      params: { uploadedFile: media },
+      cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
+      dispatchedAt: now,
+      completedAt: now,
+      media,
+    };
+    const dir = join(store.dir, "productions", productionId, "takes", id);
+    try {
+      await atomicWriteFile(join(dir, media), data);
+      await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
+    } catch (error) {
+      await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+    return take;
+  });
+}
+
+/**
  * File a take's still as this shot's frame, and point the selection at it — the artifact and the
  * selection in one commit, so a crash between them cannot leave a selection naming bytes that
  * were never filed.
@@ -98,6 +155,8 @@ export async function fileDrawnFrame(
      * whatever is there because the person is looking at it when they press.
      */
     expectedArtifactId?: string | null;
+    /** The legacy take pointer beside the artifact slot when foreground work was authorized. */
+    expectedTakeId?: string | null;
     /**
      * Extra files landing in the SAME commit — the accept's review append (SPEC-013 R-9, D6).
      *
@@ -105,12 +164,12 @@ export async function fileDrawnFrame(
      * window where the durable review says the take was accepted while the slot still names
      * the old frame, which is the divergence the one-commit rule exists to prevent.
      */
-    alsoCommit?: readonly {
+    alsoCommit?: () => Promise<readonly {
       path: string;
       action: "create" | "replace";
       content: string;
       baseHash: string | null;
-    }[];
+    }[]>;
     /**
      * Normalises a non-PNG still to PNG while filing. The board compiler reads every filed
      * frame through `decodePng` and swallows the decode error, so a JPEG or WebP filed raw
@@ -191,6 +250,14 @@ export async function fileDrawnFrame(
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
   try {
     return await store.gateOp(async () => {
+      const currentProduction = store
+        .getBundle()
+        .productions.find((candidate) => candidate.meta.id === production.meta.id);
+      if (!currentProduction) return { ok: false as const, reason: `no production ${production.meta.id}` };
+      if (!currentProduction.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === shotId))) {
+        return { ok: false as const, reason: `no shot ${shotId} in production ${production.meta.id}` };
+      }
+
       let raw: string;
       let existed = true;
       try {
@@ -206,16 +273,19 @@ export async function fileDrawnFrame(
        * fails: the take is already on disk, browsable and priced, and it simply is not this
        * shot's frame.
        */
-      if (input.expectedArtifactId !== undefined) {
-        const current =
+      if (input.expectedArtifactId !== undefined || input.expectedTakeId !== undefined) {
+        const currentArtifact =
           (selections[shotId]?.["startFrameArtifactId"] as string | null | undefined) ?? null;
-        if (current !== input.expectedArtifactId) {
+        const currentTake = (selections[shotId]?.["startFrameTakeId"] as string | null | undefined) ?? null;
+        const artifactMoved = input.expectedArtifactId !== undefined && currentArtifact !== input.expectedArtifactId;
+        const takeMoved = input.expectedTakeId !== undefined && currentTake !== input.expectedTakeId;
+        if (artifactMoved || takeMoved) {
           // Recovery after the filing commit but before the run outcome write sees the slot move
           // to this job's own artifact. That is proof the earlier filing completed, not a newer
           // decision overtaking it; return its existing id without appending another review.
           const existing = store.getBundle().artifacts.find(
             (artifact) =>
-              artifact.id === current &&
+              artifact.id === currentArtifact &&
               artifact.origin.by === "system" &&
               artifact.origin.producedBy === input.producedBy &&
               artifact.links.includes(shotId) &&
@@ -230,6 +300,9 @@ export async function fileDrawnFrame(
           };
         }
       }
+      // Review append hashes are read under this same gate. Preparing them before enqueue lets
+      // two accepts carry the same base hash, so the second fails after its image bytes were filed.
+      const alsoCommit = input.alsoCommit === undefined ? [] : await input.alsoCommit();
       await mkdir(join(store.dir, "artifacts"), { recursive: true });
       await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
       selections[shotId] = {
@@ -250,7 +323,7 @@ export async function fileDrawnFrame(
         files: [
           // The accept's review append rides here, so a still's decision and its frame are one
           // commit and cannot diverge across a crash (SPEC-013 R-9, D6).
-          ...(input.alsoCommit ?? []),
+          ...alsoCommit,
           {
             path: `artifacts/${file}.json`,
             action: "create",
@@ -287,8 +360,9 @@ export async function fileDrawnFrame(
  * than landing in one of its own. Committed separately, a crash between them leaves a durable
  * review saying the take was accepted while the slot still names the old frame.
  *
- * No authorization fence here, deliberately: this is somebody pressing Accept on a picture they
- * are looking at, and the newest explicit decision is the one that should win.
+ * The authorization fence remains optional so a synchronous caller can explicitly replace the
+ * current picture. A caller that waits on conversion passes both slot pointers from the moment
+ * the command began, so an older completion cannot undo a choice that landed while it waited.
  */
 /**
  * The review append for a decision that must land in the same commit as the frame it decides
@@ -319,7 +393,14 @@ export async function reviewAppendFor(
 export async function acceptStill(
   store: WorldStore,
   production: ProductionBundle,
-  input: { takeId: string; shotId: string; by: string; toPng?: BoundaryFrameMaker },
+  input: {
+    takeId: string;
+    shotId: string;
+    by: string;
+    expectedArtifactId?: string | null;
+    expectedTakeId?: string | null;
+    toPng?: BoundaryFrameMaker;
+  },
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
   if (!take) throw new Error(`take ${input.takeId} is not in this production`);
@@ -340,8 +421,10 @@ export async function acceptStill(
     take,
     shotId: input.shotId,
     producedBy: `accept:${input.takeId}`,
+    ...(input.expectedArtifactId !== undefined ? { expectedArtifactId: input.expectedArtifactId } : {}),
+    ...(input.expectedTakeId !== undefined ? { expectedTakeId: input.expectedTakeId } : {}),
     toPng: input.toPng,
-    alsoCommit: [await reviewAppendFor(store, production.meta.id, decision)],
+    alsoCommit: async () => [await reviewAppendFor(store, production.meta.id, decision)],
   });
   return { decision, outcome };
 }

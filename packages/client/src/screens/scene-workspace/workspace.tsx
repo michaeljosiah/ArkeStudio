@@ -483,6 +483,12 @@ export function SceneWorkspace({
               generatorPending={generatorPending}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
+              onTalkToArke={() => {
+                setDock(true);
+                requestAnimationFrame(() => {
+                  (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
+                });
+              }}
             />
           ) : (
             <ScenePreview

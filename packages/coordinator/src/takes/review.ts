@@ -114,38 +114,44 @@ export async function acceptTake(
 ): Promise<ReviewDecision> {
   const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
-  const reviews = await readOr(store, reviewsPath, "");
-  const selections = await readOr(store, selectionsPath, "{}");
+  return store.gateOp(async () => {
+    const current = store
+      .getBundle()
+      .productions.find((candidate) => candidate.meta.id === production.meta.id);
+    if (current === undefined) throw new Error(`production ${production.meta.id} is no longer available`);
+    if (!current.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === input.shotId))) {
+      throw new Error(`shot ${input.shotId} is no longer in production ${production.meta.id}`);
+    }
+    const reviews = await readOr(store, reviewsPath, "");
+    const selections = await readOr(store, selectionsPath, "{}");
+    const applied = applyTakeAcceptance(
+      current,
+      store.getBundle().artifacts,
+      JSON.parse(selections.raw) as Selections,
+      { ...input, at: store.now() },
+    );
+    const decision = applied.decision;
 
-  const applied = applyTakeAcceptance(
-    production,
-    store.getBundle().artifacts,
-    JSON.parse(selections.raw) as Selections,
-    { ...input, at: store.now() },
-  );
-  const decision = applied.decision;
-
-  const next = applied.selections;
-
-  await store.commit({
-    kind: "take-review",
-    source: `review:${input.by}`,
-    files: [
-      {
-        path: reviewsPath,
-        action: reviews.existed ? "replace" : "create",
-        content: reviews.raw + JSON.stringify(decision) + "\n",
-        baseHash: reviews.existed ? sha256(reviews.raw) : null,
-      },
-      {
-        path: selectionsPath,
-        action: selections.existed ? "replace" : "create",
-        content: JSON.stringify(next, null, 2) + "\n",
-        baseHash: selections.existed ? sha256(selections.raw) : null,
-      },
-    ],
+    await store.commitUnserialised({
+      kind: "take-review",
+      source: `review:${input.by}`,
+      files: [
+        {
+          path: reviewsPath,
+          action: reviews.existed ? "replace" : "create",
+          content: reviews.raw + JSON.stringify(decision) + "\n",
+          baseHash: reviews.existed ? sha256(reviews.raw) : null,
+        },
+        {
+          path: selectionsPath,
+          action: selections.existed ? "replace" : "create",
+          content: JSON.stringify(applied.selections, null, 2) + "\n",
+          baseHash: selections.existed ? sha256(selections.raw) : null,
+        },
+      ],
+    });
+    return decision;
   });
-  return decision;
 }
 
 /**
@@ -214,28 +220,30 @@ export async function rejectTake(
     throw new Error("a rejection requires a cited sheet and field (R-10)");
   }
   const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
-  const reviews = await readOr(store, reviewsPath, "");
-  const decision: ReviewDecision = {
-    ts: store.now(),
-    takeId: input.takeId as ReviewDecision["takeId"],
-    ...(input.shotId !== undefined ? { shotId: input.shotId as ReviewDecision["shotId"] } : {}),
-    decision: "reject",
-    by: input.by,
-    citation: input.citation,
-  };
-  await store.commit({
-    kind: "take-review",
-    source: `review:${input.by}`,
-    files: [
-      {
-        path: reviewsPath,
-        action: reviews.existed ? "replace" : "create",
-        content: reviews.raw + JSON.stringify(decision) + "\n",
-        baseHash: reviews.existed ? sha256(reviews.raw) : null,
-      },
-    ],
+  return store.gateOp(async () => {
+    const reviews = await readOr(store, reviewsPath, "");
+    const decision: ReviewDecision = {
+      ts: store.now(),
+      takeId: input.takeId as ReviewDecision["takeId"],
+      ...(input.shotId !== undefined ? { shotId: input.shotId as ReviewDecision["shotId"] } : {}),
+      decision: "reject",
+      by: input.by,
+      citation: input.citation,
+    };
+    await store.commitUnserialised({
+      kind: "take-review",
+      source: `review:${input.by}`,
+      files: [
+        {
+          path: reviewsPath,
+          action: reviews.existed ? "replace" : "create",
+          content: reviews.raw + JSON.stringify(decision) + "\n",
+          baseHash: reviews.existed ? sha256(reviews.raw) : null,
+        },
+      ],
+    });
+    return decision;
   });
-  return decision;
 }
 
 /**

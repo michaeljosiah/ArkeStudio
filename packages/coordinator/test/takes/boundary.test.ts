@@ -250,31 +250,31 @@ describe("boundary-frame extraction (issue 154)", () => {
 
   it("declines before decoding anything when the following shot owns its frame", async () => {
     const { dir, store, production } = await open();
-    const accepted = take("tk_01J8E0000000000000000000B6");
+    const accepted = take("tk_01J8E0000000000000000000B6", { coversShots: ["sh_04"] });
     await landClip(dir, production.meta.id, accepted.id);
-    await expectBoundaryFrom(store, dir, production.meta.id, "sh_1", "sh_2", accepted.id);
+    await expectBoundaryFrom(store, dir, production.meta.id, "sh_04", "sh_05", accepted.id);
 
-    // sh_2 is given its own picture — a drawn frame, no extraction provenance.
+    // The following shot is given its own picture — a drawn frame, no extraction provenance.
     const drawn = take("tk_01J8E0000000000000000000B7", {
       kind: "frame",
       media: "frame.png",
-      coversShots: ["sh_2"],
+      coversShots: ["sh_05"],
     });
     const takeDir = join(dir, "productions", production.meta.id, "takes", drawn.id);
     await mkdir(takeDir, { recursive: true });
     await writeFile(join(takeDir, "frame.png"), encodePng(solidImage(4, 4, [0, 255, 0, 255])));
     const filed = await fileDrawnFrame(store, production, {
       take: drawn,
-      shotId: "sh_2",
+      shotId: "sh_05",
       producedBy: "test:drawn",
     });
-    assert.ok(filed.ok && !("superseded" in filed));
+    assert.ok(filed.ok && !("superseded" in filed), JSON.stringify(filed));
 
     const calls: Array<{ input: string; atSec: number | null }> = [];
     const result = await chainBoundaryFrame(
       store,
       { ...production, takes: [accepted, drawn] },
-      { take: accepted, sourceShotId: "sh_1", followingShotId: "sh_2", maker: fakeMaker(calls), clock: CLOCK },
+      { take: accepted, sourceShotId: "sh_04", followingShotId: "sh_05", maker: fakeMaker(calls), clock: CLOCK },
     );
     assert.ok(result.ok && "skipped" in result && result.skipped === "following-shot-has-own-frame");
     // The point of the early check: the common "drew the frames first" path pays for no ffmpeg run.
@@ -286,42 +286,42 @@ describe("boundary-frame extraction (issue 154)", () => {
     // extraction to be unconfigured about, and `not-configured` here would log an unavailable
     // for an operation that needed nothing.
     const { dir, store, production } = await open();
-    const accepted = take("tk_01J8E0000000000000000000C1");
+    const accepted = take("tk_01J8E0000000000000000000C1", { coversShots: ["sh_04"] });
     await landClip(dir, production.meta.id, accepted.id);
-    await expectBoundaryFrom(store, dir, production.meta.id, "sh_1", "sh_2", accepted.id);
+    await expectBoundaryFrom(store, dir, production.meta.id, "sh_04", "sh_05", accepted.id);
     const drawn = take("tk_01J8E0000000000000000000C2", {
       kind: "frame",
       media: "frame.png",
-      coversShots: ["sh_2"],
+      coversShots: ["sh_05"],
     });
     const takeDir = join(dir, "productions", production.meta.id, "takes", drawn.id);
     await mkdir(takeDir, { recursive: true });
     await writeFile(join(takeDir, "frame.png"), encodePng(solidImage(4, 4, [0, 255, 0, 255])));
     const filed = await fileDrawnFrame(store, production, {
       take: drawn,
-      shotId: "sh_2",
+      shotId: "sh_05",
       producedBy: "test:drawn",
     });
-    assert.ok(filed.ok);
+    assert.ok(filed.ok, JSON.stringify(filed));
 
     const result = await chainBoundaryFrame(
       store,
       { ...production, takes: [accepted, drawn] },
-      { take: accepted, sourceShotId: "sh_1", followingShotId: "sh_2", maker: undefined, clock: CLOCK },
+      { take: accepted, sourceShotId: "sh_04", followingShotId: "sh_05", maker: undefined, clock: CLOCK },
     );
     assert.ok(result.ok && "skipped" in result && result.skipped === "following-shot-has-own-frame");
   });
 
   it("declines inside the gate when a drawn frame lands while extraction is in flight", async () => {
     const { dir, store, production } = await open();
-    const accepted = take("tk_01J8E0000000000000000000B8");
+    const accepted = take("tk_01J8E0000000000000000000B8", { coversShots: ["sh_04"] });
     await landClip(dir, production.meta.id, accepted.id);
-    await expectBoundaryFrom(store, dir, production.meta.id, "sh_1", "sh_2", accepted.id);
+    await expectBoundaryFrom(store, dir, production.meta.id, "sh_04", "sh_05", accepted.id);
 
     const drawn = take("tk_01J8E0000000000000000000B9", {
       kind: "frame",
       media: "frame.png",
-      coversShots: ["sh_2"],
+      coversShots: ["sh_05"],
     });
     const takeDir = join(dir, "productions", production.meta.id, "takes", drawn.id);
     await mkdir(takeDir, { recursive: true });
@@ -335,17 +335,17 @@ describe("boundary-frame extraction (issue 154)", () => {
         await writeFile(output, encodePng(solidImage(4, 4, [255, 0, 0, 255])));
         const filed = await fileDrawnFrame(store, production, {
           take: drawn,
-          shotId: "sh_2",
+          shotId: "sh_05",
           producedBy: "test:drawn-mid-flight",
         });
-        assert.ok(filed.ok && !("superseded" in filed));
+        assert.ok(filed.ok && !("superseded" in filed), JSON.stringify(filed));
         return { ok: true };
       },
     };
     const result = await chainBoundaryFrame(
       store,
       { ...production, takes: [accepted, drawn] },
-      { take: accepted, sourceShotId: "sh_1", followingShotId: "sh_2", maker, clock: CLOCK },
+      { take: accepted, sourceShotId: "sh_04", followingShotId: "sh_05", maker, clock: CLOCK },
     );
     assert.ok(result.ok && "skipped" in result && result.skipped === "following-shot-has-own-frame");
     assert.equal(calls.length, 1, "the extraction did run — this is the in-gate catch, not the early one");
@@ -354,9 +354,9 @@ describe("boundary-frame extraction (issue 154)", () => {
     const selections = SelectionsSchema.parse(
       JSON.parse(await readFile(join(dir, "productions", production.meta.id, "selections.json"), "utf8")),
     );
-    const filedId = selections["sh_2"]?.startFrameArtifactId;
+    const filedId = selections["sh_05"]?.startFrameArtifactId;
     assert.ok(filedId !== undefined);
     const files = await import("node:fs/promises").then((fs) => fs.readdir(join(dir, "artifacts")));
-    assert.equal(files.some((file) => file.startsWith("boundary-sh_2-")), false);
+    assert.equal(files.some((file) => file.startsWith("boundary-sh_05-")), false);
   });
 });

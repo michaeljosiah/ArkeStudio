@@ -1,12 +1,12 @@
 /* ============================================================
    SpecOne · Typography tokens — shadcn / Geist
-   One sans family (Geist) for everything; Geist Mono for code,
+   One sans family (Geist Sans) for everything; Geist Mono for code,
    IDs and technical values. No display/mono-label split — the
    shadcn look is quiet, sans, with small medium-weight labels.
    ============================================================ */
 :root {
   /* ---- Families ------------------------------------------- */
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Back-compat aliases (display/body both map to sans) */

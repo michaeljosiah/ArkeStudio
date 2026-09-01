@@ -316,12 +316,10 @@ async function candidateFor(
  * selections file claimed as a write dependency even when it carries no row for this shot.
  *
  * An accepted take is a blocker, so what is dropped here is never a decision: a trim, a pinned
- * frame, a cleared slot. The claim is the subtler half. `acceptTake` reads and validates before
- * queuing its commit, so an acceptance that began before the blocker check can commit after the
- * shot is gone — and if the shot had no row, a deletion that never touched the file leaves that
- * accept's `baseHash` still valid, so it lands a selection keyed to a shot that no longer
- * exists. Rewriting the file makes the two writes collide on the hash instead: whichever
- * commits second is refused by name, and neither order can orphan a selection.
+ * frame, a cleared slot. Selection writers now validate under the same gate, but claiming the
+ * file here also protects this commit from any writer that still carries an optimistic base
+ * hash. Whichever operation reaches the gate second must observe the deletion or a changed hash;
+ * neither order can leave bookkeeping keyed to a shot that no longer exists.
  */
 async function appendSelectionCleanup(
   store: WorldStore,

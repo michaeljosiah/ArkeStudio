@@ -208,6 +208,7 @@ import { applySceneCommand, sceneCommandFrom } from "./productions/scene-command
 import {
   acceptStill,
   fileDrawnFrame,
+  recordUploadedShotFrameTake,
   reviewAppendFor,
   slotAtAuthorizationOf,
 } from "./takes/drawn-frame.js";
@@ -2887,7 +2888,7 @@ export class Coordinator {
               shotId,
               producedBy: `frame-run:${job.id}`,
               toPng: this.opts.boundaryFrameMaker,
-              alsoCommit: [await reviewAppendFor(store, fresh.meta.id, decision)],
+              alsoCommit: async () => [await reviewAppendFor(store, fresh.meta.id, decision)],
               ...(expected !== undefined ? { expectedArtifactId: expected } : {}),
             });
             if (filed.ok && "superseded" in filed) {
@@ -6249,11 +6250,134 @@ export class Coordinator {
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
         return;
       }
+      case "import-shot-frame": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Shot frame import is unavailable.");
+          return;
+        }
+        const current = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+        if (!current?.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === msg.shotId))) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That shot is no longer available.");
+          return;
+        }
+        const expectedArtifactId = current.selections[msg.shotId]?.startFrameArtifactId ?? null;
+        const expectedTakeId = current.selections[msg.shotId]?.startFrameTakeId ?? null;
+
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        if (!source) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (chosen.length > 1) {
+          this.rejectEnqueue(msg.requestId, msg.kind, ONE_IMAGE_ONLY);
+          return;
+        }
+        if (!this.stillOpen(store)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        if ("error" in picked) {
+          this.rejectEnqueue(msg.requestId, msg.kind, picked.error);
+          return;
+        }
+
+        let takeId: string;
+        try {
+          const take = await recordUploadedShotFrameTake(
+            store,
+            msg.productionId,
+            msg.shotId,
+            `frame-upload${picked.extension}`,
+            picked.data,
+          );
+          takeId = take.id;
+        } catch {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be copied into the production.");
+          this.refreshIfStillOpen(store);
+          return;
+        }
+        if (!this.stillOpen(store)) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            "The image was kept as a Variant, but the world closed before it could be selected.",
+          );
+          return;
+        }
+
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+        if (!production) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "The production is no longer available.");
+          return;
+        }
+        try {
+          const { decision, outcome } = await acceptStill(store, production, {
+            takeId,
+            shotId: msg.shotId,
+            by: "user",
+            expectedArtifactId,
+            expectedTakeId,
+            toPng: this.opts.boundaryFrameMaker,
+          });
+          if (!outcome.ok) throw new Error(outcome.reason);
+          if ("superseded" in outcome) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              "The image was kept as a Variant, but the shot's frame changed before it could be selected.",
+            );
+            this.refreshIfStillOpen(store);
+            return;
+          }
+          if (!this.stillOpen(store)) {
+            // The commit finished before the switch drained. It succeeded; publishing stale-world
+            // events would be wrong, but calling it a refusal would invite a duplicate upload.
+            this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+            return;
+          }
+          this.emit({
+            at: this.nowIso(),
+            type: "review.recorded",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            review: decision,
+          });
+          this.emit({
+            at: this.nowIso(),
+            type: "selection.changed",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            shotId: msg.shotId,
+            selection: store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId)
+              ?.selections[msg.shotId] ?? { trimInSec: 0 },
+          });
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          this.refreshIfStillOpen(store);
+        } catch (error) {
+          this.rejectEnqueue(
+            msg.requestId,
+            msg.kind,
+            `The image was kept as a Variant, but could not be selected: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          this.refreshIfStillOpen(store);
+        }
+        return;
+      }
       case "accept-take": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
         if (!production) return;
+        const expectedStartFrameArtifactId = production.selections[msg.shotId]?.startFrameArtifactId ?? null;
+        const expectedStartFrameTakeId = production.selections[msg.shotId]?.startFrameTakeId ?? null;
         try {
           /*
            * A still is this shot's frame, never footage (SPEC-036 R-21) — and its decision, its
@@ -6268,9 +6392,12 @@ export class Coordinator {
                     takeId: msg.takeId,
                     shotId: msg.shotId,
                     by: "user",
+                    expectedArtifactId: expectedStartFrameArtifactId,
+                    expectedTakeId: expectedStartFrameTakeId,
                     toPng: this.opts.boundaryFrameMaker,
                   });
                   if (!outcome.ok) throw new Error(outcome.reason);
+                  if ("superseded" in outcome) return null;
                   return d;
                 })()
               : await acceptTake(store, production, {
@@ -6278,6 +6405,9 @@ export class Coordinator {
                   shotId: msg.shotId,
                   by: "user",
                 });
+          // Conversion can take long enough for another explicit choice to land. The older
+          // command kept its take, but installed nothing and therefore made no review decision.
+          if (decision === null) return;
           this.emit({
             at: new Date().toISOString(),
             type: "review.recorded",

@@ -155,4 +155,13 @@ describe("app chrome", () => {
     assert.ok(body.includes("position: absolute"), "the wordmark is placed, not flowed");
     assert.ok(body.includes("left: 50%") && body.includes("translateX(-50%)"), "and placed at the middle");
   });
+
+  it("keeps narrow context out of the centred wordmark", () => {
+    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
+    assert.match(
+      css,
+      /\.fy-titlebar__side:first-child\s*\{[^}]*padding-right:\s*48px/,
+      "the ellipsised left context reserves the wordmark's half-width before it can overlap",
+    );
+  });
 });

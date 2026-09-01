@@ -357,25 +357,27 @@ export async function recordReferenceReview(
 ): Promise<ReviewDecision> {
   const review = referenceReviewDecision(store.now(), take, decision, input);
   const path = "references/reviews.jsonl";
-  let raw = "";
-  let existed = false;
-  try {
-    raw = await readFile(toExtendedLength(join(store.dir, path)), "utf8");
-    existed = true;
-  } catch {
-    /* first review */
-  }
-  await store.commit({
-    kind: "reference-review",
-    source: "review:user",
-    files: [
-      {
-        path,
-        action: existed ? "replace" : "create",
-        content: raw + JSON.stringify(review) + "\n",
-        baseHash: existed ? sha256(raw) : null,
-      },
-    ],
+  await store.gateOp(async () => {
+    let raw = "";
+    let existed = false;
+    try {
+      raw = await readFile(toExtendedLength(join(store.dir, path)), "utf8");
+      existed = true;
+    } catch {
+      /* first review */
+    }
+    await store.commitUnserialised({
+      kind: "reference-review",
+      source: "review:user",
+      files: [
+        {
+          path,
+          action: existed ? "replace" : "create",
+          content: raw + JSON.stringify(review) + "\n",
+          baseHash: existed ? sha256(raw) : null,
+        },
+      ],
+    });
   });
   return review;
 }

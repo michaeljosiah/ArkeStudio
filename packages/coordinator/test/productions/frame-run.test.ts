@@ -37,6 +37,8 @@ import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import type { WorldProvider } from "../../src/world-provider.js";
 import { ReadModel } from "../../src/read-model.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
+import { recordTakesFromJob } from "../../src/takes/arrival.js";
+import { acceptTake } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta, WorldOpenError } from "../../src/world/scan.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
@@ -755,6 +757,112 @@ describe("frame-run coordinator service", () => {
       999,
       "existing children remain in the allocation on replay",
     );
+  });
+
+  it("serializes an ordinary take review with a board parent review", async () => {
+    const f = await fixture();
+    const boardShot = orderedShots(f.scene)[2]!;
+    const request = {
+      prompt: "One mixed-writer board",
+      panels: [{ panel: 1, shotId: boardShot.id, role: "update" as const }],
+      references: [],
+      provenance: {
+        canonRevision: f.world.meta.canonRevision,
+        artDirectionVersion: f.world.artDirection.version,
+      },
+      droppedReferences: [],
+      layout: {
+        columns: 2 as const,
+        rows: 1,
+        canvasWidth: 16,
+        canvasHeight: 9,
+        regions: [{ panel: 1, x: 0, y: 0, width: 16, height: 9 }],
+      },
+      aspect: "16:9",
+      slotAtAuthorization: { [boardShot.id]: null },
+    };
+    const incoming = `productions/${f.production.meta.id}/incoming/mixed-board.jpg`;
+    await mkdir(join(f.dir, "productions", f.production.meta.id, "incoming"), { recursive: true });
+    await writeFile(join(f.dir, incoming), Buffer.from("immutable-mixed-writer-parent"));
+    const job: Job = {
+      id: "jb_00000000000000000000000011",
+      idempotencyKey: "00000000000000000000000012",
+      worldId: WORLD_ID,
+      productionId: f.production.meta.id,
+      target: { kind: "board-sheet", coversShots: [boardShot.id] },
+      capability: "image",
+      provider: IMAGE.provider,
+      model: IMAGE.id,
+      params: {
+        prompt: request.prompt,
+        references: [],
+        provenance: { canonRevision: f.world.meta.canonRevision, sheets: {} },
+        landing: "frame-slot",
+        request,
+      },
+      estimatedMicroUsd: 1000,
+      status: "succeeded",
+      providerJobId: "remote-mixed-board",
+      attempt: 1,
+      landedFiles: [incoming],
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+      error: null,
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    };
+    const converter = {
+      write: async (_input: string, output: string) => {
+        await writeFile(output, encodePng(solidImage(16, 9, [40, 80, 120, 255])));
+        return { ok: true as const };
+      },
+    };
+    const [parent] = await recordTakesFromJob(f.store, job, 900);
+    assert.ok(parent, "the parent is durable before its replayed finalization records the review");
+
+    let releaseHolder!: () => void;
+    let holderEntered!: () => void;
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const inside = new Promise<void>((resolve) => { holderEntered = resolve; });
+    const gateOp = f.store.gateOp.bind(f.store);
+    const commit = f.store.commit.bind(f.store);
+    const holder = gateOp(async () => {
+      holderEntered();
+      await held;
+    });
+    await inside;
+
+    let queued = 0;
+    let bothQueued!: () => void;
+    const queuedTogether = new Promise<void>((resolve) => { bothQueued = resolve; });
+    const noteQueued = (): void => {
+      queued += 1;
+      if (queued === 2) bothQueued();
+    };
+    f.store.gateOp = <T>(operation: () => Promise<T>): Promise<T> => {
+      noteQueued();
+      return gateOp(operation);
+    };
+    f.store.commit = (input, hooks) => {
+      noteQueued();
+      return commit(input, hooks);
+    };
+
+    const current = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+    const ordinaryTakeId = "tk_01J8D0000000000000000000D4";
+    const writes = Promise.all([
+      acceptTake(f.store, current, { takeId: ordinaryTakeId, shotId: "sh_13", by: "user" }),
+      recordBoardSheetFromJob(f.store, current, job, 900, "provider-reported", converter),
+    ]);
+    await queuedTogether;
+    releaseHolder();
+    await Promise.all([holder, writes]);
+
+    const reviews = (await readFile(join(f.dir, "productions", f.production.meta.id, "reviews.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { takeId: string });
+    assert.ok(reviews.some((review) => review.takeId === ordinaryTakeId), "the ordinary review remains");
+    assert.ok(reviews.some((review) => review.takeId === parent.id), "the board parent review remains");
   });
 
   it("pauses terminal advancement, resumes it, cancels live work, and appends retries", async () => {

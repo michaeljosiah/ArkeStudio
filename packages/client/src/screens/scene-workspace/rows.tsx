@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
+  assemblePrompt,
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
   orderedShots,
+  productionShape,
+  promptFor,
   resolveCast,
   shotCardState,
   shotCoverage,
@@ -22,8 +26,10 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
 import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./selection.js";
-import { frameRunCommand } from "../../lib/store.js";
+import { acceptTake, frameRunCommand, importShotFrame } from "../../lib/store.js";
 import { frameRunShotState } from "./frame-run.js";
+import { BenchBrief } from "../../components/bench-brief.js";
+import { ImageDialog } from "../../components/image-dialog.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -35,8 +41,15 @@ const CHIP: Record<ShotCardState, string> = {
   rendered: "rendered",
 };
 
+const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
+
+function canPickFiles(): boolean {
+  return typeof window !== "undefined" && window.arke !== undefined;
+}
+
 export function StoryboardRows({
   scene,
+  acceptedScene,
   world,
   production,
   artifacts,
@@ -94,14 +107,71 @@ export function StoryboardRows({
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
   const current = selectedShotId(subject);
+  const rowBands = useRef(new Map<string, HTMLDivElement>());
+  const rowsRoot = useRef<HTMLDivElement | HTMLOListElement | null>(null);
+  const rowsOwnFocus = useRef(false);
+  const focusedShotId = useRef<string | null>(null);
+  const deleteDialogShotId = useRef<string | null>(null);
+  const confirmedDeleteShotId = useRef<string | null>(null);
+  const previousShotIds = useRef(orderedShots(acceptedScene).map((shot) => shot.id));
   const [dragShot, setDragShot] = useState<string | null>(null);
   const [dragBoundary, setDragBoundary] = useState<string | null>(null);
   const boards = boardPack.ok ? boardPack.boards : [];
   const boardAt = new Map(boards.map((board) => [board.memberShotIds[0]!, board]));
+  const shotIdentity = shots.map((shot) => shot.id).join("\u0000");
+  const stagedIdentity = shots.filter((shot) => stagedShotIds.has(shot.id)).map((shot) => shot.id).join("\u0000");
+  const boardIdentity = boards.map((board) => board.memberShotIds.join("\u0000")).join("\u0001");
+
+  useLayoutEffect(() => {
+    const currentIds = shots.map((shot) => shot.id);
+    const currentSet = new Set(currentIds);
+    const available = (shotId: string | null): shotId is string =>
+      shotId !== null && currentSet.has(shotId) && !stagedShotIds.has(shotId);
+    const unavailable = (shotId: string | null): shotId is string => shotId !== null && !available(shotId);
+    const replacementFor = (shotId: string): string | null => {
+      const acceptedIds = orderedShots(acceptedScene).map((shot) => shot.id);
+      const basis = previousShotIds.current.includes(shotId) ? previousShotIds.current : acceptedIds;
+      const index = basis.indexOf(shotId);
+      const candidates = index < 0
+        ? currentIds
+        : [...basis.slice(index + 1), ...basis.slice(0, index).reverse(), ...currentIds];
+      return candidates.find((candidate, at) => available(candidate) && candidates.indexOf(candidate) === at) ?? null;
+    };
+    const focusFrom = unavailable(confirmedDeleteShotId.current)
+      ? confirmedDeleteShotId.current
+      : unavailable(deleteDialogShotId.current)
+        ? deleteDialogShotId.current
+        : rowsOwnFocus.current && unavailable(focusedShotId.current)
+          ? focusedShotId.current
+          : null;
+
+    if (focusFrom !== null) {
+      const replacement = replacementFor(focusFrom);
+      select(replacement === null ? { kind: "scene" } : { kind: "shot", shotId: replacement });
+      focusedShotId.current = replacement;
+      rowsOwnFocus.current = true;
+      if (confirmedDeleteShotId.current === focusFrom) confirmedDeleteShotId.current = null;
+      if (deleteDialogShotId.current === focusFrom) deleteDialogShotId.current = null;
+      requestAnimationFrame(() => {
+        const target = replacement === null ? rowsRoot.current : rowBands.current.get(replacement);
+        if (target?.isConnected) target.focus({ preventScroll: true });
+      });
+    } else if (subject.kind === "shot" && !available(subject.shotId)) {
+      const replacement = replacementFor(subject.shotId);
+      select(replacement === null ? { kind: "scene" } : { kind: "shot", shotId: replacement });
+    } else if (subject.kind === "board" && !boards.some((board) => subjectMatchesBoard(subject, board.memberShotIds))) {
+      const replacement = boards.find((board) => board.memberShotIds.some((shotId) => subject.memberShotIds.includes(shotId)));
+      select(replacement === undefined ? { kind: "scene" } : { kind: "board", memberShotIds: [...replacement.memberShotIds] });
+    }
+    previousShotIds.current = currentIds;
+  }, [acceptedScene, boardIdentity, select, shotIdentity, shots, stagedIdentity, stagedShotIds, subject, boards]);
+  useEffect(() => {
+    confirmedDeleteShotId.current = null;
+  }, [refusalVersion]);
 
   if (shots.length === 0) {
     return (
-      <div className="fy-swempty" data-testid="workspace-empty">
+      <div ref={(element) => { rowsRoot.current = element; }} className="fy-swempty" data-testid="workspace-empty" tabIndex={-1}>
         <p className="fy-swempty__line">No shots yet.</p>
         <button
           type="button"
@@ -124,7 +194,21 @@ export function StoryboardRows({
   return (
     <>
       {!boardPack.ok ? <p className="fy-swboards__refusal">{boardPack.reason}</p> : null}
-      <ol className="fy-swrows" data-testid="workspace-rows" aria-label={`Shots in scene ${scene.number}`}>
+      <ol
+        ref={(element) => { rowsRoot.current = element; }}
+        className="fy-swrows"
+        data-testid="workspace-rows"
+        aria-label={`Shots in scene ${scene.number}`}
+        tabIndex={-1}
+        onFocusCapture={(event) => {
+          rowsOwnFocus.current = true;
+          focusedShotId.current = (event.target as Element).closest<HTMLElement>(".fy-swrow__band")?.dataset.shotId ?? null;
+        }}
+        onBlurCapture={(event) => {
+          if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+          rowsOwnFocus.current = false;
+        }}
+      >
         {shots.map((shot, index) => {
           const board = boardAt.get(shot.id);
           return (
@@ -177,6 +261,8 @@ export function StoryboardRows({
               ) : null}
               <Row
                 shot={shot}
+                scene={scene}
+                world={world}
                 production={production}
                 artifacts={artifacts}
                 sheets={sheets}
@@ -191,7 +277,21 @@ export function StoryboardRows({
                 canMoveUp={index > 0}
                 canMoveDown={index < shots.length - 1}
                 onSelect={() => select({ kind: "shot", shotId: shot.id })}
+                onBand={(element) => {
+                  if (element === null) rowBands.current.delete(shot.id);
+                  else rowBands.current.set(shot.id, element);
+                }}
                 onCommand={onCommand}
+                onDelete={() => {
+                  confirmedDeleteShotId.current = shot.id;
+                  const accepted = onCommand({ kind: "delete-shot", shotId: shot.id });
+                  if (!accepted) confirmedDeleteShotId.current = null;
+                  return accepted;
+                }}
+                onDeleteDialogOpen={() => { deleteDialogShotId.current = shot.id; }}
+                onDeleteDialogClose={() => {
+                  if (deleteDialogShotId.current === shot.id) deleteDialogShotId.current = null;
+                }}
                 onMoveUp={() => onCommand({ kind: "move-shot", shotId: shot.id, to: { before: shots[index - 1]!.id } })}
                 onMoveDown={() => onCommand({ kind: "move-shot", shotId: shot.id, to: { after: shots[index + 1]!.id } })}
                 onDragStart={() => setDragShot(shot.id)}
@@ -303,6 +403,14 @@ function BoardBand({
   onPlanVideo: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
+  const promptDirty = useRef(false);
+  const preservedRefusal = useRef<number | null>(null);
+  const pendingRebuildVersion = useRef<number | null>(null);
+  const [pendingHide, setPendingHide] = useState<{
+    expected: string;
+    draft: string;
+    refusalVersion: number;
+  } | null>(null);
   const members = board.memberShotIds.map((id) => shots.find((shot) => shot.id === id)!).filter(Boolean);
   const stored = boardPromptFor(scene, board.memberShotIds);
   const assembled = assembleBoardPrompt({
@@ -313,9 +421,76 @@ function BoardBand({
     aspect,
     artDirection: world.artDirection.description,
   });
+  const promptValue = stored ?? assembled;
+  const previousPromptValue = useRef(promptValue);
+  const [promptDraft, setPromptDraft] = useState(promptValue);
   const first = members[0]?.number;
   const last = members.at(-1)?.number;
   const startId = board.memberShotIds[0]!;
+  useEffect(() => {
+    const durablePromptChanged = previousPromptValue.current !== promptValue;
+    previousPromptValue.current = promptValue;
+    if (pendingHide !== null) {
+      if (stored === pendingHide.expected) {
+        pendingRebuildVersion.current = null;
+        preservedRefusal.current = null;
+        promptDirty.current = false;
+        setPromptDraft(promptValue);
+        setPendingHide(null);
+        setPromptOpen(false);
+      }
+      return;
+    }
+    if (!durablePromptChanged || preservedRefusal.current === refusalVersion || promptDirty.current || promptDraft === promptValue) return;
+    pendingRebuildVersion.current = null;
+    setPromptDraft(promptValue);
+  }, [pendingHide, promptDraft, promptValue, refusalVersion, stored]);
+  useEffect(() => {
+    if (pendingHide !== null) {
+      if (pendingHide.refusalVersion === refusalVersion) return;
+      preservedRefusal.current = refusalVersion;
+      promptDirty.current = true;
+      setPromptDraft(pendingHide.draft);
+      setPendingHide(null);
+      return;
+    }
+    if (pendingRebuildVersion.current === null || pendingRebuildVersion.current === refusalVersion) return;
+    pendingRebuildVersion.current = null;
+    promptDirty.current = false;
+    setPromptDraft(promptValue);
+  }, [pendingHide, promptValue, refusalVersion]);
+  const commitPrompt = (value = promptDraft): boolean => {
+    const next = value.trim();
+    promptDirty.current = false;
+    if (next.length === 0 || next === promptValue) {
+      setPromptDraft(promptValue);
+      return true;
+    }
+    if (!onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text: next })) {
+      setPromptDraft(promptValue);
+      return false;
+    }
+    setPromptDraft(next);
+    return true;
+  };
+  const hidePrompt = (value: string) => {
+    const next = value.trim();
+    if (next.length === 0 || next === promptValue) {
+      preservedRefusal.current = null;
+      promptDirty.current = false;
+      setPromptDraft(promptValue);
+      setPromptOpen(false);
+      return;
+    }
+    if (!onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text: next })) {
+      promptDirty.current = true;
+      setPromptDraft(value);
+      return;
+    }
+    promptDirty.current = false;
+    setPromptDraft(value);
+    setPendingHide({ expected: next, draft: value, refusalVersion });
+  };
   return (
     <div
       className="fy-swboard"
@@ -378,30 +553,51 @@ function BoardBand({
         </div>
       )}
       {promptOpen ? (
-        <div className="fy-swboard__prompt">
+        <div
+          className="fy-swboard__prompt"
+          onBlur={(event) => {
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+            if (!promptDirty.current) return;
+            commitPrompt(event.currentTarget.querySelector("textarea")?.value ?? promptDraft);
+          }}
+        >
           <div>
             <span>consolidated prompt · sent once for the board</span>
             {stored === null ? null : (
-              <button type="button" disabled={locked} onClick={() => onCommand({ kind: "clear-board-prompt", members: [...board.memberShotIds] })}>
+              <button
+                type="button"
+                disabled={locked}
+                onClick={() => {
+                  promptDirty.current = false;
+                  if (onCommand({ kind: "clear-board-prompt", members: [...board.memberShotIds] })) {
+                    pendingRebuildVersion.current = refusalVersion;
+                    setPromptDraft(assembled);
+                  } else {
+                    setPromptDraft(promptValue);
+                  }
+                }}
+              >
                 Rebuild
               </button>
             )}
-            <button type="button" onClick={() => setPromptOpen(false)}>Hide</button>
+            <button
+              type="button"
+              disabled={pendingHide !== null}
+              onClick={(event) => {
+                const value = event.currentTarget.closest(".fy-swboard__prompt")?.querySelector("textarea")?.value ?? promptDraft;
+                hidePrompt(value);
+              }}
+            >
+              Hide
+            </button>
           </div>
           <textarea
-            key={`${stored ?? assembled}:${refusalVersion}`}
-            defaultValue={stored ?? assembled}
+            value={promptDraft}
             disabled={locked}
             aria-label={`Consolidated prompt for board ${board.letter}`}
-            onBlur={(event) => {
-              const text = event.currentTarget.value.trim();
-              if (text.length === 0) {
-                event.currentTarget.value = stored ?? assembled;
-              } else if (text !== (stored ?? assembled)) {
-                if (!onCommand({ kind: "set-board-prompt", members: [...board.memberShotIds], text })) {
-                  event.currentTarget.value = stored ?? assembled;
-                }
-              }
+            onChange={(event) => {
+              promptDirty.current = true;
+              setPromptDraft(event.target.value);
             }}
           />
         </div>
@@ -412,6 +608,8 @@ function BoardBand({
 
 function Row({
   shot,
+  scene,
+  world,
   production,
   artifacts,
   sheets,
@@ -426,7 +624,11 @@ function Row({
   canMoveUp,
   canMoveDown,
   onSelect,
+  onBand,
   onCommand,
+  onDelete,
+  onDeleteDialogOpen,
+  onDeleteDialogClose,
   onMoveUp,
   onMoveDown,
   onDragStart,
@@ -441,6 +643,8 @@ function Row({
   onOpenInGenerator,
 }: {
   shot: Shot;
+  scene: SceneRecord;
+  world: WorldBundle;
   production: ProductionBundle;
   artifacts: readonly ArtifactSidecar[];
   sheets: readonly Sheet[];
@@ -455,7 +659,11 @@ function Row({
   canMoveUp: boolean;
   canMoveDown: boolean;
   onSelect: () => void;
+  onBand: (element: HTMLDivElement | null) => void;
   onCommand: (command: Command) => boolean;
+  onDelete: () => boolean;
+  onDeleteDialogOpen: () => void;
+  onDeleteDialogClose: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onDragStart: () => void;
@@ -470,11 +678,30 @@ function Row({
   onOpenInGenerator: () => void;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
+  const menuTrigger = useRef<HTMLButtonElement | null>(null);
+  const menuPanel = useRef<HTMLDivElement | null>(null);
+  const variantsTrigger = useRef<HTMLButtonElement | null>(null);
+  const variantsDialog = useRef<HTMLDialogElement | null>(null);
+  const menuReturnFocus = useRef<HTMLElement | null>(null);
   const restored = useRef(false);
+  const promptDirty = useRef(false);
+  const preservedRefusal = useRef<number | null>(null);
+  const pendingRebuildVersion = useRef<number | null>(null);
+  const focusWhenVisible = useRef(false);
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const [scriptDraft, setScriptDraft] = useState(shot.description);
+  const [promptOpen, setPromptOpen] = useState(false);
+  const [promptDraft, setPromptDraft] = useState<string | null>(null);
+  const [pendingHide, setPendingHide] = useState<{
+    expected: string | null;
+    draft: string;
+    refusalVersion: number;
+  } | null>(null);
   const accepted = newShot ? null : acceptedTakeId(production, shot.id);
-  const acceptedTake = accepted === null ? undefined : takesForShot(production, shot.id).find((take) => take.id === accepted);
+  const takes = takesForShot(production, shot.id);
+  const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
   const hasFrame = shotHasFrame(production, artifacts, shot.id);
   const state = shotCardState({
@@ -486,20 +713,74 @@ function Row({
   const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
   const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
   const legacyStill = acceptedTake?.kind === "frame" || acceptedTake?.kind === "still" ? acceptedTake : undefined;
-  const src =
-    slug === undefined
+  const framePath = artifact !== undefined && hasFrame
+    ? `artifacts/${artifact.file}`
+    : legacyStill?.media === undefined
       ? null
-      : artifact !== undefined && hasFrame
-        ? mediaUrl(slug, `artifacts/${artifact.file}`)
-        : legacyStill?.media === undefined
-          ? null
-          : mediaUrl(slug, `productions/${production.meta.id}/takes/${legacyStill.id}/${legacyStill.media}`);
+      : `productions/${production.meta.id}/takes/${legacyStill.id}/${legacyStill.media}`;
+  const src = slug === undefined || framePath === null ? null : mediaUrl(slug, framePath);
+  const frameVariants = takes.filter(
+    (take) => (take.kind === "frame" || take.kind === "still") && take.media !== undefined,
+  );
   const refs = resolveCast(shot.description, [...sheets]).cast;
   const overrides = [
     shot.framing?.size === undefined ? null : `${shot.framing.size} override`,
     shot.framing?.movement === undefined ? null : `${shot.framing.movement} override`,
   ].filter((label): label is string => label !== null);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
+  const style = production.meta.styleOverride?.trim() || world.artDirection.description;
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const assembledPrompt = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
+  const currentPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
+  const durablePromptOverride = shot.promptOverride?.text ?? null;
+  const promptValue = promptDraft ?? currentPrompt.text;
+  const mentionOptions = sheets.map((sheet) => ({
+    token: sheet.id,
+    kind: "image" as const,
+    name: sheet.name,
+    meta: `${sheet.type} · v${sheet.version}`,
+  }));
+  const disabled = locked || staged;
+  const menuOpen = menu || confirmDelete;
+
+  const closeMenu = useCallback((restoreFocus = false) => {
+    if (confirmDelete) onDeleteDialogClose();
+    focusWhenVisible.current = false;
+    setMenu(false);
+    setConfirmDelete(false);
+    setMenuPosition(null);
+    if (restoreFocus) {
+      requestAnimationFrame(() => {
+        const target = menuReturnFocus.current;
+        if (target?.isConnected && (target as HTMLButtonElement).disabled !== true) target.focus();
+        else if (band.current?.isConnected) band.current.focus();
+      });
+    }
+  }, [confirmDelete, onDeleteDialogClose]);
+  const openDelete = () => {
+    onDeleteDialogOpen();
+    focusWhenVisible.current = true;
+    setMenu(false);
+    setConfirmDelete(true);
+    setMenuPosition(null);
+  };
+  const placeMenu = useCallback(() => {
+    const trigger = menuTrigger.current;
+    const panel = menuPanel.current;
+    if (trigger === null || panel === null) return;
+    const anchor = trigger.getBoundingClientRect();
+    const box = panel.getBoundingClientRect();
+    if (![anchor.right, anchor.bottom, anchor.top, box.width, box.height, window.innerWidth, window.innerHeight].every(Number.isFinite)) {
+      setMenuPosition({ left: 8, top: 8 });
+      return;
+    }
+    const left = Math.max(8, Math.min(anchor.right - box.width, window.innerWidth - box.width - 8));
+    const below = anchor.bottom + 6;
+    const top = below + box.height <= window.innerHeight - 8
+      ? below
+      : Math.max(8, anchor.top - box.height - 6);
+    setMenuPosition({ left, top });
+  }, []);
 
   useEffect(() => {
     if (!selected) {
@@ -512,19 +793,143 @@ function Row({
     band.current.focus({ preventScroll: true });
   }, [selected]);
   useEffect(() => {
-    if (band.current === null) return;
-    const editor = band.current.querySelector<HTMLElement>(".fy-swrow__script");
-    if (editor !== null) editor.textContent = shot.description;
-  }, [shot.description, refusalVersion]);
+    setScriptDraft(shot.description);
+  }, [shot.description]);
+  useEffect(() => {
+    if (pendingHide !== null) {
+      if (durablePromptOverride === pendingHide.expected) {
+        pendingRebuildVersion.current = null;
+        preservedRefusal.current = null;
+        promptDirty.current = false;
+        setPromptDraft(null);
+        setPendingHide(null);
+        setPromptOpen(false);
+      }
+    }
+    if (durablePromptOverride === null) pendingRebuildVersion.current = null;
+  }, [durablePromptOverride, pendingHide]);
+  useEffect(() => {
+    if (pendingHide !== null) {
+      if (pendingHide.refusalVersion === refusalVersion) return;
+      preservedRefusal.current = refusalVersion;
+      promptDirty.current = true;
+      setPromptDraft(pendingHide.draft);
+      setPendingHide(null);
+      return;
+    }
+    if (pendingRebuildVersion.current === null || pendingRebuildVersion.current === refusalVersion) return;
+    pendingRebuildVersion.current = null;
+    promptDirty.current = false;
+    setPromptDraft(null);
+  }, [pendingHide, refusalVersion]);
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    if (menuPosition === null) {
+      placeMenu();
+    }
+  }, [menuOpen, menuPosition, placeMenu]);
+  useLayoutEffect(() => {
+    if (!menuOpen || menuPosition === null || !focusWhenVisible.current) return;
+    focusWhenVisible.current = false;
+    const target = menuPanel.current?.querySelector<HTMLButtonElement>(
+      confirmDelete ? "button:not(:disabled)" : '[role="menuitem"]:not(:disabled)',
+    );
+    target?.focus();
+  }, [confirmDelete, menuOpen, menuPosition]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const outside = (event: Event) => {
+      const target = event.target as Node | null;
+      if (target !== null && menuPanel.current?.contains(target)) return;
+      if (!confirmDelete && target !== null && menuTrigger.current?.contains(target)) return;
+      if (!confirmDelete) {
+        closeMenu();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      menuPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    };
+    const containFocus = (event: FocusEvent) => {
+      if (!confirmDelete || (event.target instanceof Node && menuPanel.current?.contains(event.target))) return;
+      menuPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeMenu(true);
+    };
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("click", outside, true);
+    document.addEventListener("focusin", containFocus, true);
+    window.addEventListener("resize", placeMenu);
+    window.addEventListener("scroll", placeMenu, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("click", outside, true);
+      document.removeEventListener("focusin", containFocus, true);
+      window.removeEventListener("resize", placeMenu);
+      window.removeEventListener("scroll", placeMenu, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [closeMenu, confirmDelete, menuOpen, placeMenu]);
+  useEffect(() => {
+    if (confirmDelete && staged) closeMenu(false);
+  }, [closeMenu, confirmDelete, staged]);
 
-  const disabled = locked || staged;
-  const resetScript = (element: HTMLElement) => {
-    element.textContent = shot.description;
+  const commitScript = (next = scriptDraft) => {
+    if (disabled || next === shot.description) return;
+    if (!onCommand({ kind: "edit-shot", shotId: shot.id, change: { description: next } })) {
+      setScriptDraft(shot.description);
+    }
+  };
+  const commitPrompt = (value = promptValue) => {
+    const next = value.trim();
+    promptDirty.current = false;
+    if (next === currentPrompt.text.trim()) {
+      setPromptDraft(null);
+      return true;
+    }
+    const replacement = next === "" || next === assembledPrompt.trim() ? null : next;
+    if (!onCommand({
+      kind: "set-prompt-override",
+      shotId: shot.id,
+      text: replacement,
+    })) {
+      setPromptDraft(null);
+      return false;
+    }
+    setPromptDraft(replacement === null ? assembledPrompt : next);
+    return true;
+  };
+  const hidePrompt = (value: string) => {
+    const next = value.trim();
+    if (next === currentPrompt.text.trim()) {
+      preservedRefusal.current = null;
+      promptDirty.current = false;
+      setPromptOpen(false);
+      return;
+    }
+    const expected = next === "" || next === assembledPrompt.trim() ? null : next;
+    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected })) {
+      promptDirty.current = true;
+      setPromptDraft(value);
+      return;
+    }
+    promptDirty.current = false;
+    setPromptDraft(value);
+    setPendingHide({ expected, draft: value, refusalVersion });
   };
   return (
     <div
-      ref={band}
+      ref={(element) => {
+        band.current = element;
+        onBand(element);
+      }}
       className="fy-swrow__band"
+      data-shot-id={shot.id}
       data-state={state}
       data-selected={selected ? "true" : undefined}
       data-staged={staged ? "true" : undefined}
@@ -532,9 +937,6 @@ function Row({
       tabIndex={staged ? -1 : 0}
       aria-disabled={staged ? "true" : undefined}
       aria-label={`Shot ${shot.number}, ${shot.title}, ${staged ? "staged, " : ""}${state}`}
-      draggable={!disabled}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       onDragOver={(event) => !disabled && event.preventDefault()}
       onDrop={(event) => { event.preventDefault(); onDrop(); }}
       onClick={() => !staged && onSelect()}
@@ -543,7 +945,8 @@ function Row({
         if (staged) return;
         if (event.key === "Delete") {
           event.preventDefault();
-          setConfirmDelete(true);
+          menuReturnFocus.current = event.currentTarget;
+          openDelete();
         } else if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onSelect();
@@ -558,10 +961,107 @@ function Row({
         ) : (
           <div className="fy-swrow__img" role="img" aria-label={shot.title} style={{ backgroundImage: `url(${src})` }} />
         )}
-        <span className="fy-swrow__label">shot {shot.number}</span>
+        <span
+          className="fy-swrow__label"
+          draggable={!disabled}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            onDragStart();
+          }}
+          onDragEnd={onDragEnd}
+        >
+          shot {shot.number}
+        </span>
         <span className="fy-swrow__chipmeta">
           {aspect} · {(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
         </span>
+        {framePath === null ? null : (
+          <ImageDialog
+            worldSlug={slug}
+            path={framePath}
+            label={shot.title}
+            dialogLabel={`Frame for shot ${shot.number}, ${shot.title}`}
+            title={`Shot ${shot.number} · ${shot.title}`}
+            subtitle="Filed frame"
+            triggerLabel={`Preview frame for shot ${shot.number}`}
+            triggerClassName="fy-swrow__preview"
+            dialogClassName="fy-swrow__preview-dialog"
+            triggerRadius={999}
+            dialogRadius={10}
+            download
+            downloadName={`shot-${shot.number}-${shot.title}`}
+          />
+        )}
+        <div
+          className="fy-swrow__frameactions"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button type="button" onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
+          <button
+            ref={variantsTrigger}
+            type="button"
+            disabled={frameVariants.length === 0}
+            onClick={() => variantsDialog.current?.showModal()}
+          >
+            Variants
+          </button>
+          <button
+            type="button"
+            disabled={disabled || !canPickFiles()}
+            title={canPickFiles() ? "Use an image from this computer" : UPLOAD_UNAVAILABLE}
+            onClick={() => importShotFrame(worldId, production.meta.id, shot.id)}
+          >
+            Upload
+          </button>
+        </div>
+        <dialog
+          ref={variantsDialog}
+          className="fy-swvariants"
+          aria-label={`Frame variants for shot ${shot.number}`}
+          onClose={() => variantsTrigger.current?.focus()}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) variantsDialog.current?.close();
+          }}
+        >
+          <div className="fy-swvariants__panel">
+            <header>
+              <div>
+                <span>Shot {shot.number} · frame history</span>
+                <h2>{shot.title}</h2>
+              </div>
+              <button type="button" aria-label="Close frame variants" onClick={() => variantsDialog.current?.close()}>Close</button>
+            </header>
+            <div className="fy-swvariants__grid">
+              {frameVariants.map((take) => {
+                const path = `productions/${production.meta.id}/takes/${take.id}/${take.media!}`;
+                const current = production.selections[shot.id]?.startFrameTakeId === take.id || artifact?.links.includes(take.id) === true;
+                return (
+                  <article key={take.id} data-current={current ? "true" : undefined}>
+                    <img
+                      src={slug === undefined ? undefined : mediaUrl(slug, path)}
+                      alt={`Variant for shot ${shot.number}`}
+                      style={{ aspectRatio: aspect.replace(":", " / ") }}
+                    />
+                    <div>
+                      <span>{take.model}</span>
+                      <button
+                        type="button"
+                        disabled={current || disabled}
+                        onClick={() => {
+                          acceptTake(worldId, production.meta.id, take.id, shot.id);
+                          variantsDialog.current?.close();
+                        }}
+                      >
+                        {current ? "Current" : "Use frame"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </dialog>
         {runState === null ? null : (
           <FrameState
             state={runState}
@@ -574,26 +1074,83 @@ function Row({
           <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}>{CHIP[state]}</span>
         </div>
-        {coverage === "changed" || runScriptChanged ? <div className="fy-swrow__stale"><span className="fy-swrow__stalelabel">script changed</span></div> : null}
+        {coverage === "changed" || runScriptChanged ? (
+          <div className="fy-swrow__stale">
+            <span className="fy-swrow__stalelabel">script changed</span>
+            <button type="button" onClick={onEdit}>Re-read</button>
+          </div>
+        ) : null}
         <div
-          className="fy-swrow__script"
-          contentEditable={!disabled}
-          suppressContentEditableWarning
-          role="textbox"
-          aria-label={`Script for shot ${shot.number}`}
+          className="fy-swrow__script fy-swrow__scripteditor"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           onBlur={(event) => {
-            const description = event.currentTarget.textContent ?? "";
-            if (!disabled && description !== shot.description) {
-              if (!onCommand({ kind: "edit-shot", shotId: shot.id, change: { description } })) {
-                resetScript(event.currentTarget);
-              }
-            }
+            if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+            commitScript(event.currentTarget.querySelector("textarea")?.value ?? scriptDraft);
           }}
         >
-          {shot.description}
+          <BenchBrief
+            value={scriptDraft}
+            onChange={setScriptDraft}
+            options={mentionOptions}
+            worldSlug={slug}
+            underlay={scriptDraft}
+            label={`Script for shot ${shot.number}`}
+            placeholder="Write what happens."
+            disabled={disabled}
+          />
         </div>
+        {promptOpen ? (
+          <div
+            className="fy-swrow__prompt"
+            onClick={(event) => event.stopPropagation()}
+            onBlur={(event) => {
+              if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+              if (!promptDirty.current) return;
+              commitPrompt(event.currentTarget.querySelector("textarea")?.value ?? promptValue);
+            }}
+          >
+            <div>
+              <span>Image prompt · {shot.promptOverride === undefined ? "auto" : "edited by you"}</span>
+              {shot.promptOverride === undefined ? null : (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    promptDirty.current = false;
+                    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
+                      pendingRebuildVersion.current = refusalVersion;
+                      setPromptDraft(assembledPrompt);
+                    } else {
+                      setPromptDraft(null);
+                    }
+                  }}
+                >
+                  Rebuild
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={pendingHide !== null}
+                onClick={(event) => {
+                  const value = event.currentTarget.closest(".fy-swrow__prompt")?.querySelector("textarea")?.value ?? promptValue;
+                  hidePrompt(value);
+                }}
+              >
+                Hide
+              </button>
+            </div>
+            <textarea
+              value={promptValue}
+              disabled={disabled}
+              aria-label={`Image prompt for shot ${shot.number}`}
+              onChange={(event) => {
+                promptDirty.current = true;
+                setPromptDraft(event.target.value);
+              }}
+            />
+          </div>
+        ) : null}
         {refs.length === 0 && overrides.length === 0 ? null : (
           <div className="fy-swrow__meta">
             <div className="fy-swrow__refs">
@@ -606,54 +1163,141 @@ function Row({
         )}
       </div>
       <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
-        <button
-          type="button"
-          className="fy-swrow__generate"
-          disabled={disabled || run?.status === "active" || run?.status === "paused"}
-          onClick={(event) => onGenerateFrame(event.currentTarget)}
-        >
-          {hasFrame ? "Regenerate" : "Generate frame"}
-        </button>
-        <button
-          type="button"
-          className="fy-swedit"
-          disabled={disabled}
-          aria-label={`Actions for shot ${shot.number}`}
-          aria-expanded={menu}
-          aria-haspopup="menu"
-          onClick={() => setMenu((open) => !open)}
-        >
-          •••
-        </button>
-        {menu ? (
-          <div className="fy-swrow__menu" role="menu">
-            <button type="button" role="menuitem" disabled={disabled} onClick={onEdit}>Edit shot</button>
-            <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
-              {generatorPending ? "Opening…" : "Open in generator"}
-            </button>
-            <button type="button" role="menuitem" disabled={disabled || !canMoveUp} onClick={onMoveUp}>Move before previous</button>
-            <button type="button" role="menuitem" disabled={disabled || !canMoveDown} onClick={onMoveDown}>Move after next</button>
-            <button type="button" role="menuitem" disabled={disabled} onClick={() => onCommand({ kind: "duplicate-shot", shotId: shot.id })}>Duplicate</button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={disabled}
-              onClick={() => onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: "Untitled shot", description: "" } })}
-            >
-              Add shot after
-            </button>
-            <button type="button" role="menuitem" className="fy-swrow__danger" disabled={disabled} onClick={() => setConfirmDelete(true)}>Delete</button>
-          </div>
-        ) : null}
-        {confirmDelete ? (
-          <div className="fy-swrow__confirm" role="alert">
-            <span>Delete shot {shot.number}?</span>
-            <button type="button" onClick={() => onCommand({ kind: "delete-shot", shotId: shot.id })}>Delete</button>
-            <button type="button" onClick={() => setConfirmDelete(false)}>Cancel</button>
-          </div>
-        ) : null}
-        <p className="fy-swrow__slot">{shot.promptOverride === undefined ? "prompt · auto" : "edited by you"}</p>
+        <div className="fy-swrow__actionline">
+          <button
+            type="button"
+            className="fy-swrow__generate"
+            disabled={disabled || run?.status === "active" || run?.status === "paused"}
+            onClick={(event) => onGenerateFrame(event.currentTarget)}
+          >
+            {hasFrame ? "Regenerate" : "Generate frame"}
+          </button>
+          <button
+            ref={menuTrigger}
+            type="button"
+            className="fy-swedit"
+            disabled={disabled}
+            aria-label={`Actions for shot ${shot.number}`}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            onClick={() => {
+              menuReturnFocus.current = menuTrigger.current;
+              setConfirmDelete(false);
+              setMenuPosition(null);
+              focusWhenVisible.current = !menu;
+              setMenu(!menu);
+            }}
+          >
+            •••
+          </button>
+        </div>
+        <div className="fy-swrow__slot">
+          <span>{shot.promptOverride === undefined ? "prompt · auto" : "edited by you"}</span>
+          <button type="button" disabled={disabled} onClick={onEdit}>Edit</button>
+        </div>
       </div>
+      {menuOpen && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              {confirmDelete ? (
+                <div
+                  data-testid="row-confirmation-blocker"
+                  aria-hidden="true"
+                  style={{ position: "fixed", inset: 0, zIndex: 99 }}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    menuPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    menuPanel.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+                  }}
+                />
+              ) : null}
+            <div
+              ref={menuPanel}
+              className={confirmDelete ? "fy-swrow__confirm" : "fy-swrow__menu"}
+              role={confirmDelete ? "alertdialog" : "menu"}
+              aria-modal={confirmDelete ? "true" : undefined}
+              aria-label={confirmDelete ? `Delete shot ${shot.number}?` : `Actions for shot ${shot.number}`}
+              style={menuPosition === null ? { left: 0, top: 0, visibility: "hidden" } : menuPosition}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                const selector = confirmDelete ? "button:not(:disabled)" : '[role="menuitem"]:not(:disabled)';
+                const items = [...(menuPanel.current?.querySelectorAll<HTMLButtonElement>(selector) ?? [])];
+                const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                let next: number | null = null;
+                if (!confirmDelete && event.key === "ArrowDown") next = (current + 1) % items.length;
+                else if (!confirmDelete && event.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+                else if (!confirmDelete && event.key === "Home") next = 0;
+                else if (!confirmDelete && event.key === "End") next = items.length - 1;
+                else if (event.key === "Tab" && confirmDelete) {
+                  event.preventDefault();
+                  next = event.shiftKey
+                    ? (current - 1 + items.length) % items.length
+                    : (current + 1) % items.length;
+                } else if (event.key === "Tab") {
+                  event.preventDefault();
+                  closeMenu(true);
+                }
+                const item = next === null ? undefined : items[next];
+                if (item === undefined) return;
+                event.preventDefault();
+                item.focus();
+              }}
+            >
+              {confirmDelete ? (
+                <>
+                  <span>Delete shot {shot.number}?</span>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      if (onDelete()) closeMenu(true);
+                    }}
+                  >
+                    Delete
+                  </button>
+                  <button type="button" onClick={() => closeMenu(true)}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onEdit(); }}>Advanced</button>
+                  <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
+                    {generatorPending ? "Opening…" : "Open in generator"}
+                  </button>
+                  <button type="button" role="menuitem" disabled={disabled || !canMoveUp} onClick={() => { closeMenu(true); onMoveUp(); }}>Move before previous</button>
+                  <button type="button" role="menuitem" disabled={disabled || !canMoveDown} onClick={() => { closeMenu(true); onMoveDown(); }}>Move after next</button>
+                  <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={disabled}
+                    onClick={() => {
+                      closeMenu(true);
+                      onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: "Untitled shot", description: "" } });
+                    }}
+                  >
+                    Add shot after
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="fy-swrow__danger"
+                    disabled={disabled}
+                    onClick={openDelete}
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
