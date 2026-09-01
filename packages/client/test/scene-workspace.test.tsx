@@ -260,8 +260,8 @@ describe("scene detail owns the workspace", () => {
   it("keeps the empty Arke dock conversation-first", async () => {
     const mounted = await mount();
     const dock = q(mounted, ".fy-arke")!;
-    assert.doesNotMatch(dock.textContent ?? "", /What it understood|Wrap up|story author|talking changes nothing/);
-    assert.equal(q(mounted, ".fy-arke__who .fy-mono"), null, "the compact header does not repeat the selected subject");
+    assert.doesNotMatch(dock.textContent ?? "", /What it understood|Wrap up|story author/);
+    assert.ok(q(mounted, ".fy-arke__who .fy-mono"), "the head names the subject under the title");
     assert.ok(q(mounted, ".fy-arke__log .fy-bubble--gate"), "the conversation remains the primary surface");
   });
 
@@ -569,8 +569,8 @@ describe("Preview plays the accepted scene on its authored clock (R-28)", () => 
     assert.equal(still.style.opacity, "1");
 
     await act(async () => still.dispatchEvent(new dom.window.Event("error")));
-    assert.match(q(mounted, ".fy-swpreview__kind")?.textContent ?? "", /no media/);
-    assert.match(q(mounted, ".fy-swpreview__empty")?.textContent ?? "", /no frame yet/);
+    assert.match(q(mounted, ".fy-swpreview__kind")?.textContent ?? "", /still · animatic/, "the badge only ever says still or motion (R-28)");
+    assert.match(q(mounted, ".fy-swpreview__empty")?.textContent ?? "", /no frame for this shot yet/);
 
     await click(q(mounted, ".fy-swpreview__retry")!);
     await act(async () => new Promise((resolve) => setTimeout(resolve, 1)));

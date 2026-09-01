@@ -194,10 +194,25 @@ export const PauseSolid = solid(
     <rect x="14" y="4" width="4" height="16" rx="1.5" />
   </>,
 );
+/** Back to the top: the preview transport's restart, drawn beside the play disc it rewinds. */
+export const RotateCcw = icon(
+  <>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" />
+  </>,
+);
 export const Lock = icon(
   <>
     <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </>,
+);
+// The Arke dock's unpin control and its collapsed rail (SPEC-036): the assistant is pinned beside
+// the work rather than toggled from the toolbar, so the glyph is a pin, not an eye.
+export const Pin = icon(
+  <>
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
   </>,
 );
 

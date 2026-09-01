@@ -10,10 +10,11 @@ import {
   type SceneRecord,
   type Shot,
 } from "@arke-studio/contracts";
+import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
 import { mediaUrl } from "../../lib/media.js";
-import { mediaTakeFor, acceptedTakeId } from "../../lib/selectors.js";
-import { posterNameFor, posterize } from "../../lib/poster.js";
+import { posterize } from "../../lib/poster.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback-engine.js";
+import { ShotLightbox, shotFramePath } from "./lightbox.js";
 import { useWorkspaceSelection } from "./selection.js";
 
 interface PreviewSpan {
@@ -34,32 +35,6 @@ export function fitPreviewStage(width: number, height: number, aspect: string): 
   return { width: fittedWidth, height: fittedWidth / ratio };
 }
 
-function framePath(
-  production: ProductionBundle,
-  artifacts: readonly ArtifactSidecar[],
-  shotId: string,
-): string | null {
-  const selection = production.selections[shotId];
-  if (hasOwnFrame(selection, artifacts)) {
-    const artifact = artifacts.find((candidate) => candidate.id === selection?.startFrameArtifactId);
-    if (artifact !== undefined) return `artifacts/${artifact.file}`;
-  }
-  const steeringId = selection?.startFrameTakeId ?? null;
-  const steering = steeringId === null ? undefined : production.takes.find((take) => take.id === steeringId);
-  const steeringMedia = steering === undefined ? null : mediaTakeFor(production, steering);
-  if (steeringMedia !== null) {
-    return `productions/${production.meta.id}/takes/${steeringMedia.id}/${posterNameFor(steeringMedia.media)}`;
-  }
-  const accepted = acceptedTakeId(production, shotId);
-  const legacy = accepted === null
-    ? undefined
-    : production.takes.find((take) => take.id === accepted && (take.kind === "frame" || take.kind === "still"));
-  const legacyMedia = legacy === undefined ? null : mediaTakeFor(production, legacy);
-  return legacyMedia === null
-    ? null
-    : `productions/${production.meta.id}/takes/${legacyMedia.id}/${posterNameFor(legacyMedia.media)}`;
-}
-
 export function scenePreviewSpans(
   production: ProductionBundle,
   scene: SceneRecord,
@@ -77,7 +52,7 @@ export function scenePreviewSpans(
     const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const entry = entries.get(shot.id);
     const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : null;
-    const frame = framePath(production, artifacts, shot.id) ?? (clipPath === null ? null : posterize(clipPath));
+    const frame = shotFramePath(production, artifacts, shot.id) ?? (clipPath === null ? null : posterize(clipPath));
     const span: PreviewSpan = {
       shot,
       startSec: at,
@@ -109,6 +84,8 @@ export function ScenePreview({
   boards,
   worldSlug,
   aspect,
+  onEditShot,
+  onOpenShotInGenerator,
 }: {
   production: ProductionBundle;
   scene: SceneRecord;
@@ -116,6 +93,10 @@ export function ScenePreview({
   boards: readonly PackedBoard[];
   worldSlug: string | undefined;
   aspect: string;
+  // The lightbox's Advanced and Generate frame hand off to the workspace; optional only so a
+  // caller that has not wired them yet still compiles, in which case those two buttons just close.
+  onEditShot?: (shotId: string) => void;
+  onOpenShotInGenerator?: (shotId: string) => void;
 }) {
   const spans = useMemo(
     () => scenePreviewSpans(production, scene, artifacts, boards),
@@ -124,6 +105,7 @@ export function ScenePreview({
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+  const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
   const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
   const [failedClips, setFailedClips] = useState<ReadonlySet<string>>(() => new Set());
   const [failedFrames, setFailedFrames] = useState<ReadonlySet<string>>(() => new Set());
@@ -144,6 +126,13 @@ export function ScenePreview({
     setPosition(next);
     setTime(next);
   }, [setPosition, totalSec]);
+
+  // The end holds (R-29), so play pressed there goes back to the top rather than doing nothing.
+  const play = () => {
+    if (totalSec === 0) return;
+    if (timeRef.current >= totalSec) seek(0);
+    setPlaying(true);
+  };
 
   useEffect(() => {
     if (timeRef.current <= totalSec) return;
@@ -286,27 +275,43 @@ export function ScenePreview({
               });
             }}
           />
-          {current !== null && !currentHasFrame && !currentHasPlayableClip ? <span className="fy-swpreview__empty">no frame yet</span> : null}
-          {currentMediaFailed ? <button type="button" className="fy-swpreview__retry" onClick={retryMedia}>Retry media</button> : null}
+          {current !== null && !currentHasFrame && !currentHasPlayableClip ? (
+            <span className="fy-swpreview__empty"><ImageMark size={20} /><span>no frame for this shot yet</span></span>
+          ) : null}
+          {currentMediaFailed ? <button type="button" className="fy-swpreview__retry" onClick={retryMedia}>Retry</button> : null}
           {current === null ? null : (
             <>
-              <span className="fy-swpreview__shot">shot {current.shot.number}</span>
-              <span className="fy-swpreview__kind">{currentHasPlayableClip ? "motion · rendered" : currentHasFrame ? "still · animatic" : "no media"}</span>
+              <span className="fy-swpreview__badges">
+                <span className="fy-swpreview__shot">shot {current.shot.number}</span>
+                <span className="fy-swpreview__kind">{currentHasPlayableClip ? "motion · rendered" : "still · animatic"}</span>
+              </span>
               <span className="fy-swpreview__caption">
                 <strong>{current.shot.title}</strong>
                 <span>{current.shot.framing?.size ?? "shot"}{current.shot.framing?.lens === undefined ? "" : ` · ${current.shot.framing.lens}`} · {(current.endSec - current.startSec).toFixed(1)}s</span>
               </span>
+              <button type="button" className="fy-swpreview__larger" onClick={() => setLightboxShotId(current.shot.id)}>Larger</button>
             </>
           )}
           {playing || totalSec === 0 ? null : (
-            <button type="button" className="fy-swpreview__stageplay" aria-label="Play scene preview" onClick={() => setPlaying(true)} />
+            <button type="button" className="fy-swpreview__stageplay" aria-label="Play scene preview" onClick={play}>
+              <span className="fy-swpreview__playdisc"><PlaySolid size={20} /></span>
+            </button>
           )}
         </div>
       </div>
       <div className="fy-swpreview__controls">
         <div className="fy-swpreview__transport">
-          <button type="button" onClick={() => setPlaying((value) => totalSec > 0 && !value)}>{playing ? "Pause" : "Play"}</button>
-          <button type="button" aria-label="Restart preview" onClick={() => { seek(0); setPlaying(totalSec > 0); }}>Restart</button>
+          <button
+            type="button"
+            className="fy-swpreview__toggle"
+            aria-label={playing ? "Pause" : "Play"}
+            onClick={() => (playing ? setPlaying(false) : play())}
+          >
+            {playing ? <PauseSolid size={12} /> : <PlaySolid size={12} />}
+          </button>
+          <button type="button" className="fy-swpreview__restart" aria-label="Restart preview" onClick={() => { seek(0); setPlaying(false); }}>
+            <RotateCcw size={14} />
+          </button>
           <span>{time.toFixed(1)}s / {totalSec.toFixed(1)}s</span>
         </div>
         <div className="fy-swpreview__striptrack">
@@ -324,11 +329,13 @@ export function ScenePreview({
                   aria-label={`Seek to shot ${span.shot.number}`}
                   onClick={() => {
                     seek(span.startSec);
+                    // The prototype only seeks. Here the strip also moves the selection, on
+                    // purpose: Arke's subject is the selection (R-1), and the shot you just
+                    // seeked to is the one you want to ask about.
                     select({ kind: "shot", shotId: span.shot.id });
                   }}
                 >
                   {thumb === null ? null : <span style={{ backgroundImage: `url(${thumb})` }} />}
-                  <b>{span.shot.number}</b>
                 </button>
               );
             })}
@@ -336,7 +343,22 @@ export function ScenePreview({
           <span className="fy-swpreview__progress"><span style={{ width: `${totalSec === 0 ? 0 : (time / totalSec) * 100}%` }} /></span>
         </div>
       </div>
-      <p className="fy-swpreview__script">{current?.shot.description ?? "No shots in this scene."}</p>
+      <p className="fy-swpreview__script">{current?.shot.description ?? ""}</p>
+      <ShotLightbox
+        scene={scene}
+        production={production}
+        artifacts={artifacts}
+        worldSlug={worldSlug}
+        aspect={aspect}
+        shotId={lightboxShotId}
+        onClose={() => setLightboxShotId(null)}
+        onSelectShot={(shotId) => {
+          setLightboxShotId(shotId);
+          select({ kind: "shot", shotId });
+        }}
+        onEditShot={onEditShot ?? (() => {})}
+        onOpenInGenerator={onOpenShotInGenerator ?? (() => {})}
+      />
     </section>
   );
 }

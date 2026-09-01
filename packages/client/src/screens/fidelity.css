@@ -4626,9 +4626,6 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * confinement worked, and the reply is the only thing at fault.
  */
 .fy-chat__refusals { margin-top: 6px; font: 400 10.5px var(--font-mono); color: var(--warning); }
-.fy-chat__benchreport { display: grid; gap: 1px; margin-top: 5px; border: 1px solid var(--border); background: var(--border); }
-.fy-chat__benchreport button { display: flex; justify-content: space-between; gap: 16px; padding: 8px 10px; border: 0; background: var(--card); color: var(--foreground); font: 500 11px var(--font-sans); text-align: left; cursor: pointer; }
-.fy-chat__benchreport button:hover { background: var(--accent); }
 
 /* A turn that failed, where its reply would have been. Quiet: this is the app apologising, not
    an alarm, and the conversation above it is still perfectly good. */
@@ -6027,32 +6024,34 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   background: var(--background);
 }
 .fy-arke__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.fy-arke__thumb { width: 36px; height: 36px; flex: none; border-radius: 6px; object-fit: cover; background: var(--muted); }
+/* The title is a button when the subject can be flipped between the shot and the scene; it keeps the span's look either way. */
+button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fy-arke__thumb { width: 36px; height: 36px; flex: none; border-radius: 6px; overflow: hidden; background: var(--muted); }
+.fy-arke__thumb > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* The wide docks never had a picture, so an empty slot there would be a new blank square. */
+.fy-arke__thumb:empty { display: none; }
 .fy-arke__name { font: 600 12.5px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-arke__head .fy-arke__pin { width: 22px; height: 22px; flex: none; padding: 0; border: 0; border-radius: 6px; color: var(--neutral-400); }
+.fy-arke__head .fy-arke__pin:hover { background: var(--accent); color: var(--foreground); }
 .fy-arke__log { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 16px 6px; }
 .fy-arke__strip { flex: none; padding: 8px 16px 0; display: flex; flex-direction: column; gap: 8px; }
 .fy-arke__foot { flex: none; padding: 10px 16px 14px; display: flex; flex-direction: column; gap: 6px; }
-.fy-arke[data-conversation-first="true"] .fy-arke__head { min-height: 50px; padding: 8px 14px; }
-.fy-arke[data-conversation-first="true"] .fy-arke__thumb { width: 32px; height: 32px; }
-.fy-arke[data-conversation-first="true"] .fy-arke__name { font-size: 13px; }
-.fy-arke[data-conversation-first="true"] .fy-arke__log { padding: 16px 14px 8px; }
-.fy-arke[data-conversation-first="true"] .fy-arke__foot { padding: 10px 14px 14px; }
-.fy-arke[data-conversation-first="true"] .fy-chat__turn--studio { position: relative; padding-left: 27px; }
-.fy-arke[data-conversation-first="true"] .fy-chat__turn--studio::before,
-.fy-arke[data-conversation-first="true"] .fy-bubble--gate::before {
-  content: "A";
-  width: 19px;
-  height: 19px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  background: var(--foreground);
-  color: var(--background);
-  font: 600 9px var(--font-mono);
-}
-.fy-arke[data-conversation-first="true"] .fy-chat__turn--studio::before { position: absolute; left: 0; top: 2px; }
-.fy-arke[data-conversation-first="true"] .fy-bubble--gate { position: relative; margin-left: 27px; }
-.fy-arke[data-conversation-first="true"] .fy-bubble--gate::before { position: absolute; right: calc(100% + 8px); top: 2px; }
+.fy-arke__prompts { display: flex; flex-wrap: wrap; gap: 5px; }
+.fy-arke__prompt { border: 1px solid var(--border); border-radius: 999px; background: var(--background); padding: 4px 9px; font: 400 11px var(--font-sans); color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-arke__prompt:hover { background: var(--accent); color: var(--foreground); }
+/* The scene dock (SPEC-036, design 2483-2543): a bordered 26px slot, the subject in small mono under
+   the title, and the transcript as plain cards — no avatar disc, because the head already says who
+   is speaking and a 330px column cannot spare the 27px. */
+.fy-arke[data-conversation-first="true"] .fy-arke__head { padding: 12px 14px; }
+.fy-arke[data-conversation-first="true"] .fy-arke__thumb { display: block; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: var(--neutral-100); }
+.fy-arke[data-conversation-first="true"] .fy-arke__who .fy-mono { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-arke[data-conversation-first="true"] .fy-arke__log { padding: 14px 14px 6px; }
+.fy-arke[data-conversation-first="true"] .fy-arke__foot { padding: 8px 14px 14px; gap: 8px; }
+.fy-arke[data-conversation-first="true"] .fy-arke__foot > .fy-mono { font: 400 9.5px/1.5 var(--font-mono); color: var(--neutral-400); }
+.fy-arke[data-conversation-first="true"] .fy-chat__bubble { font-size: 12px; }
+.fy-arke[data-conversation-first="true"] .fy-chat__turn--studio .fy-chat__bubble { border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 9px 11px; box-shadow: var(--shadow-xs); }
+.fy-arke[data-conversation-first="true"] .fy-chat__turn--user { max-width: 82%; }
+.fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: var(--foreground); color: var(--background); border-radius: 10px; padding: 8px 11px; }
 .fy-arke__points { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
 .fy-arke__points > summary {
   cursor: pointer;
@@ -6314,17 +6313,21 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-sw__runstrip { flex: none; border-bottom: 1px solid var(--border); }
 .fy-sw__runstrip > .fy-swrun { min-height: 38px; padding: 0 2px; border-bottom: 0; }
 .fy-sw > .fy-arke { width: auto; min-width: 0; }
+/* The design's send is a 24px radius-7 square; the glyph stays the house arrow the other composers share. */
+.fy-sw .fy-cx__send { width: 24px; height: 24px; border-radius: 7px; }
 .fy-swproposal__removes { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; padding: 8px; border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-size: 11px; }
-.fy-chat__runreport { display: grid; gap: 1px; margin-top: 5px; border: 1px solid var(--border); background: var(--border); }
+/* The report card (design 2509-2521): mono, muted rows with the key in the foreground, and Retry an
+   inline link rather than a cell of its own — the row is the thing you click, the link the exception. */
+.fy-chat__runreport { display: grid; gap: 1px; margin-top: 5px; border: 1px solid var(--border); border-radius: 10px; background: var(--border); box-shadow: var(--shadow-xs); overflow: hidden; }
 .fy-chat__runreport[data-state="loading"] { padding: 8px 10px; background: var(--card); color: var(--muted-foreground); font: 500 10px var(--font-mono); }
-.fy-chat__runreport-row { display: flex; align-items: stretch; background: var(--card); }
-.fy-chat__runreport-row > button:first-child { display: flex; align-items: baseline; gap: 7px; min-width: 0; flex: 1; padding: 8px 10px; border: 0; background: transparent; color: var(--foreground); font: 500 10.5px var(--font-sans); text-align: left; cursor: pointer; }
-.fy-chat__runreport-row > button:first-child:hover { background: var(--accent); }
+.fy-chat__runreport-row { display: flex; align-items: stretch; background: var(--card); transition: var(--transition-control); }
+.fy-chat__runreport-row:hover { background: var(--accent); }
+.fy-chat__runreport-row > button:first-child { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; padding: 7px 10px; border: 0; background: transparent; color: var(--muted-foreground); font: 400 10.5px var(--font-mono); text-align: left; cursor: pointer; }
+.fy-chat__runreport-key { color: var(--foreground); }
 .fy-chat__runreport-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--neutral-400); }
 .fy-chat__runreport-row[data-state="complete"] .fy-chat__runreport-dot { background: var(--success); }
 .fy-chat__runreport-row[data-state="failed"] .fy-chat__runreport-dot { background: var(--danger); }
-.fy-chat__runreport-retry { flex: none; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--foreground); padding: 0 9px; font: 500 10.5px var(--font-sans); cursor: pointer; }
-.fy-chat__runreport-retry:hover { background: var(--accent); }
+.fy-chat__runreport-retry { flex: none; border: 0; background: transparent; color: var(--foreground); padding: 0 10px 0 0; font: 500 10px var(--font-sans); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 
 /* the rows — the prototype's §7.1, structure and measurements */
 .fy-swrows { list-style: none; margin: 0; padding: 9px 0 40px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; flex: 1; min-height: 0; overflow-y: auto; }
@@ -6771,36 +6774,73 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swstage__count { flex: none; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 
 /* Preview — the scene's authored clock, with boards visible at the seams. */
-.fy-swpreview { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 12px; }
+.fy-swpreview { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 12px; animation: fy-fade-up 0.4s var(--ease-out) both; }
 .fy-swpreview__viewport { flex: 1; min-height: 180px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.fy-swpreview__stage { position: relative; width: 100%; max-width: 100%; max-height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--neutral-900); color: white; }
+.fy-swpreview__stage { position: relative; width: 100%; max-width: 100%; max-height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--neutral-900); color: white; }
 .fy-swpreview__stage video, .fy-swpreview__stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; transition: opacity 100ms linear; }
-.fy-swpreview__empty { position: absolute; inset: 0; display: grid; place-items: center; background: repeating-linear-gradient(135deg, var(--neutral-800) 0 8px, var(--neutral-900) 8px 16px); color: var(--neutral-400); font: 500 10px var(--font-mono); }
+.fy-swpreview__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: color-mix(in srgb, var(--neutral-50) 50%, transparent); font: 400 10.5px var(--font-mono); }
+/* Retry has no counterpart in the prototype (a real media element can fail to load); it wears the house on-media ghost style, as does Larger above it. */
 .fy-swpreview__retry { position: absolute; z-index: 3; right: 12px; top: 44px; min-height: 32px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 28%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); padding: 5px 9px; cursor: pointer; font: 500 10px var(--font-sans); }
-.fy-swpreview__shot, .fy-swpreview__kind { position: absolute; top: 12px; z-index: 2; padding: 4px 7px; border-radius: 5px; background: color-mix(in srgb, black 72%, transparent); font: 500 9.5px var(--font-mono); }
-.fy-swpreview__shot { left: 12px; }
-.fy-swpreview__kind { left: 70px; }
-.fy-swpreview__caption { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; align-items: baseline; gap: 12px; padding: 22px 14px 12px; background: linear-gradient(transparent, color-mix(in srgb, black 82%, transparent)); }
-.fy-swpreview__caption strong { flex: 1; min-width: 0; font: 600 13px var(--font-sans); }
-.fy-swpreview__caption span { flex: none; color: var(--neutral-300); font: 400 10px var(--font-mono); }
-.fy-swpreview__stageplay { position: absolute; inset: 0; z-index: 1; border: 0; background: transparent; cursor: pointer; }
-.fy-swpreview__stageplay::before { content: ""; position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--foreground); box-shadow: var(--shadow-md); }
-.fy-swpreview__stageplay::after { content: ""; position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform: translate(-35%, -50%); border-top: 9px solid transparent; border-bottom: 9px solid transparent; border-left: 14px solid var(--background); }
+.fy-swpreview__larger { position: absolute; z-index: 3; right: 12px; top: 12px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 28%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); padding: 4px 9px; cursor: pointer; font: 500 10px var(--font-sans); transition: var(--transition-control); }
+.fy-swpreview__larger:hover { background: color-mix(in srgb, var(--media-overlay-bg) 88%, transparent); }
+/* The stage ground is the theme-invariant neutral-900, so its badges are literal white-on-dark and dark-on-white in both themes. */
+.fy-swpreview__badges { position: absolute; z-index: 2; top: 12px; left: 14px; display: inline-flex; align-items: center; gap: 8px; }
+.fy-swpreview__shot { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-50) 92%, transparent); color: var(--neutral-900); font: 500 10px var(--font-mono); }
+.fy-swpreview__kind { padding: 2px 7px; border-radius: 5px; background: color-mix(in srgb, var(--neutral-950) 60%, transparent); color: var(--neutral-50); font: 400 9.5px var(--font-mono); }
+.fy-swpreview__caption { position: absolute; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 16px 14px; background: linear-gradient(transparent, color-mix(in srgb, var(--neutral-950) 78%, transparent)); }
+.fy-swpreview__caption strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--neutral-50); font: 600 12.5px var(--font-sans); letter-spacing: -.01em; }
+.fy-swpreview__caption span { color: color-mix(in srgb, var(--neutral-50) 62%, transparent); font: 400 10px var(--font-mono); }
+.fy-swpreview__stageplay { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.fy-swpreview__playdisc { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 999px; background: color-mix(in srgb, var(--neutral-50) 92%, transparent); color: var(--neutral-900); box-shadow: var(--shadow-md); transition: var(--transition-control), transform var(--dur-fast) var(--ease-standard); }
+.fy-swpreview__stageplay:hover .fy-swpreview__playdisc { background: var(--neutral-50); transform: scale(1.06); }
 .fy-swpreview__controls { flex: none; display: flex; align-items: center; gap: 12px; }
-.fy-swpreview__transport { display: flex; align-items: center; gap: 8px; flex: none; }
-.fy-swpreview__transport button { border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--foreground); padding: 5px 9px; font-size: 11px; cursor: pointer; }
-.fy-swpreview__transport span { flex: none; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
+.fy-swpreview__transport { display: flex; align-items: center; gap: 12px; flex: none; }
+.fy-swpreview__transport button { flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 0; cursor: pointer; transition: var(--transition-control), opacity var(--dur-fast) var(--ease-standard); }
+.fy-swpreview__toggle { width: 32px; height: 32px; border-radius: 999px; background: var(--foreground); color: var(--background); }
+.fy-swpreview__toggle:hover { opacity: .88; }
+.fy-swpreview__restart { width: 30px; height: 30px; border-radius: 8px; background: transparent; color: var(--muted-foreground); }
+.fy-swpreview__restart:hover { background: var(--accent); color: var(--foreground); }
+.fy-swpreview__transport span { flex: none; color: var(--muted-foreground); font: 400 11px var(--font-mono); }
 .fy-swpreview__striptrack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.fy-swpreview__filmstrip { display: flex; align-items: stretch; gap: 3px; height: 44px; overflow-x: auto; overflow-y: hidden; }
-.fy-swpreview__filmstrip button { position: relative; min-width: 24px; overflow: hidden; border: 1px solid var(--border); border-radius: 5px; background: var(--neutral-800); color: white; cursor: pointer; transition: transform 140ms var(--ease-out), outline-color 140ms var(--ease-out); }
+/* Tiles are proportional flex, so the strip never scrolls: it fits, or the smallest tiles reach their minimum and clip. */
+.fy-swpreview__filmstrip { display: flex; align-items: stretch; gap: 2px; height: 44px; overflow: hidden; }
+.fy-swpreview__filmstrip button { position: relative; min-width: 20px; overflow: hidden; border: 0; padding: 0; border-radius: 6px; background: var(--neutral-100); cursor: pointer; }
 .fy-swpreview__filmstrip button > span { position: absolute; inset: 0; background-position: center; background-size: cover; }
-.fy-swpreview__filmstrip button > b { position: absolute; left: 4px; bottom: 3px; z-index: 1; padding: 1px 3px; border-radius: 3px; background: color-mix(in srgb, black 70%, transparent); font: 500 8px var(--font-mono); }
-.fy-swpreview__filmstrip button[data-frameless="true"] { background: repeating-linear-gradient(135deg, var(--neutral-700) 0 6px, var(--neutral-800) 6px 12px); }
-.fy-swpreview__filmstrip button[data-board-start="true"] { border-left: 3px solid var(--foreground); }
-.fy-swpreview__filmstrip button[data-current="true"] { z-index: 2; outline: 2px solid var(--foreground); outline-offset: -2px; }
+.fy-swpreview__filmstrip button[data-frameless="true"] { background: repeating-linear-gradient(45deg, var(--neutral-100) 0 8px, var(--neutral-50) 8px 16px); }
+/* The live shot is lifted out with a ring while the rest sit under a white wash (R-28): one overlay does both, because a tile is never both. */
+.fy-swpreview__filmstrip button::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: 6px; background: color-mix(in srgb, var(--neutral-50) 42%, transparent); }
+.fy-swpreview__filmstrip button[data-current="true"]::after { background: transparent; border: 1.5px solid var(--foreground); }
+.fy-swpreview__filmstrip button[data-board-start="true"]::before { content: ""; position: absolute; top: 0; left: 0; bottom: 0; z-index: 2; width: 2px; background: var(--foreground); }
 .fy-swpreview__progress { display: block; height: 3px; overflow: hidden; border-radius: 99px; background: var(--secondary); }
 .fy-swpreview__progress > span { display: block; height: 100%; background: var(--foreground); transition: width 100ms linear; }
 .fy-swpreview__script { flex: none; margin: 0; color: var(--muted-foreground); font: 400 12.5px/1.7 var(--font-sans); }
+/* The preview lightbox: the prototype's dark full-frame overlay as a native dialog, so the top layer puts it over the rail and the dock too (R-1). */
+.fy-swlightbox { border: 0; padding: 0; background: transparent; color: var(--media-overlay-fg); max-width: none; max-height: none; }
+.fy-swlightbox::backdrop { background: var(--media-overlay-bg); opacity: .72; }
+.fy-swlightbox__panel { width: min(760px, calc(100vw - 68px)); max-height: calc(100vh - 68px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; animation: fy-swlightbox-in 0.16s var(--ease-out) both; }
+@keyframes fy-swlightbox-in {
+  from { opacity: 0; transform: translateY(-6px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+.fy-swlightbox__head { display: flex; align-items: center; gap: 10px; }
+.fy-swlightbox__label { flex: none; color: color-mix(in srgb, var(--media-overlay-fg) 60%, transparent); font: 500 10.5px var(--font-mono); }
+.fy-swlightbox__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px var(--font-sans); letter-spacing: -.01em; }
+.fy-swlightbox__chip { flex: none; color: color-mix(in srgb, var(--media-overlay-fg) 60%, transparent); font: 400 10px var(--font-mono); }
+.fy-swlightbox__close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: color-mix(in srgb, var(--media-overlay-fg) 75%, transparent); cursor: pointer; transition: var(--transition-control); }
+.fy-swlightbox__close:hover { background: color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); color: var(--media-overlay-fg); }
+.fy-swlightbox__frame { position: relative; width: 100%; overflow: hidden; border-radius: 12px; background: var(--neutral-900); box-shadow: var(--shadow-xl); }
+.fy-swlightbox__frame > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-swlightbox__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--media-overlay-fg) 5%, transparent) 0 12px, color-mix(in srgb, var(--media-overlay-fg) 2%, transparent) 12px 24px); color: color-mix(in srgb, var(--media-overlay-fg) 62%, transparent); font: 400 10.5px var(--font-mono); }
+.fy-swlightbox__empty button { border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 30%, transparent); border-radius: 8px; background: color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); color: var(--media-overlay-fg); padding: 6px 12px; cursor: pointer; font: 500 11.5px var(--font-sans); transition: var(--transition-control); }
+.fy-swlightbox__empty button:hover { background: color-mix(in srgb, var(--media-overlay-fg) 30%, transparent); }
+.fy-swlightbox__prev, .fy-swlightbox__next { position: absolute; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 22%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--media-overlay-bg) 50%, transparent); color: var(--media-overlay-fg); cursor: pointer; transition: var(--transition-control); }
+.fy-swlightbox__prev { left: 12px; }
+.fy-swlightbox__next { right: 12px; }
+.fy-swlightbox__prev:hover, .fy-swlightbox__next:hover { background: color-mix(in srgb, var(--media-overlay-bg) 78%, transparent); }
+.fy-swlightbox__foot { display: flex; align-items: flex-start; gap: 14px; }
+.fy-swlightbox__foot p { flex: 1; min-width: 0; margin: 0; color: color-mix(in srgb, var(--media-overlay-fg) 78%, transparent); font: 400 12.5px/1.7 var(--font-sans); text-wrap: pretty; }
+.fy-swlightbox__foot button { flex: none; border: 0; border-radius: 7px; background: transparent; color: color-mix(in srgb, var(--media-overlay-fg) 78%, transparent); padding: 4px 8px; cursor: pointer; font: 400 11px var(--font-sans); transition: var(--transition-control); }
+.fy-swlightbox__foot button:hover { background: color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); color: var(--media-overlay-fg); }
 .fy-sw__done {
   align-self: flex-end; margin: 2px 24px 24px; border: 0; background: transparent; color: var(--foreground);
   cursor: pointer; font-size: 12px; font-weight: 650; text-decoration: underline; text-underline-offset: 4px;
