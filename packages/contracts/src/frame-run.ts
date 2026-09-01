@@ -424,7 +424,7 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       : job.providerHeld === true || job.finalization === "pending"
         ? "running"
         : job.finalization === "failed"
-          ? "needs-reconciliation"
+          ? "failed"
           : job.status;
   const succeeded = (job: FrameRunJobFacts | undefined) =>
     job?.status === "succeeded" && job.finalization !== "pending" && job.finalization !== "failed";

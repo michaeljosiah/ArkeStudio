@@ -1140,7 +1140,13 @@ describe("take QC at arrival (#248)", () => {
         params: {
           prompt: "Maren at the rail",
           references: ["references/maren-kest/model-sheet-v4.png"],
-          provenance: { canonRevision: 42, sheets: {} },
+          provenance: {
+            canonRevision: 42,
+            sheets: {},
+            sceneId: "sc_04",
+            sceneVersion: 2,
+            jobOnly: "not take provenance",
+          },
           durationSec: 6,
           aspect: "16:9",
           resolution: "720p",
@@ -1156,7 +1162,12 @@ describe("take QC at arrival (#248)", () => {
     // And nothing that already has a home of its own — duplicated state is state that can disagree.
     assert.equal(take.prompt, "Maren at the rail");
     assert.deepEqual(take.references, ["references/maren-kest/model-sheet-v4.png"]);
-    assert.equal(take.provenance.canonRevision, 42);
+    assert.deepEqual(take.provenance, {
+      canonRevision: 42,
+      sheets: {},
+      sceneId: "sc_04",
+      sceneVersion: 2,
+    });
     for (const key of ["prompt", "references", "provenance"]) {
       assert.equal(key in take.params, false, `${key} is a field, not a setting`);
     }

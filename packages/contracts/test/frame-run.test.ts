@@ -379,9 +379,11 @@ describe("frame-run fold", () => {
       { ...run, steps: [run.steps[0]!] },
       [{ id: JOB_1, status: "succeeded", finalization: "failed", finalizationError: "crop failed" }],
     );
-    assert.equal(failed.steps[0]!.status, "needs-reconciliation");
+    assert.equal(failed.steps[0]!.status, "failed");
     assert.equal(failed.steps[0]!.error, "crop failed");
     assert.equal(failed.failedSteps, 1);
+    assert.equal(failed.steps[0]!.canRetry, false, "local repair belongs to finalization, not another paid job");
+    assert.equal(failed.status, "completed");
   });
 
   it("reconciles a failed source after its retry succeeds and suppresses duplicate retry", () => {

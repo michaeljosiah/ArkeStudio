@@ -446,6 +446,28 @@ describe("frame-run coordinator service", () => {
     assert.equal(q.inputs.length, 2, "one terminal wakeup enqueues one next shot");
   });
 
+  it("continues to the next step when local finalization fails", async () => {
+    const f = await fixture();
+    const run = await start(f, "per-shot");
+    const q = queue();
+    const current = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    const firstJobId = current.steps[0]!.jobId!;
+    const firstJob = q.jobs.get(firstJobId)!;
+    q.jobs.set(firstJobId, {
+      ...firstJob,
+      status: "succeeded",
+      finalization: { status: "failed", error: "the frame could not be prepared", updatedAt: CLOCK() },
+    });
+
+    const advanced = (await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps))!;
+    assert.equal(q.inputs.length, 2, "a local failure does not strand the remaining authorized spend");
+    assert.ok(advanced.steps[1]!.jobId);
+    const state = await frameRunState(f.store, f.production.meta.id, advanced, [...q.jobs.values()]);
+    assert.equal(state.steps[0]!.status, "failed");
+    assert.equal(state.steps[0]!.error, "the frame could not be prepared");
+    assert.equal(state.steps[0]!.canRetry, false);
+  });
+
   it("quotes and persists a targeted one-shot run, and refuses a shot outside the scene", async () => {
     const f = await fixture();
     const shot = orderedShots(f.scene)[1]!;

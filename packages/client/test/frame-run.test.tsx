@@ -636,6 +636,22 @@ describe("durable run projections", () => {
     assert.match(one(item, '[data-testid="frame-run-bar"]')?.textContent ?? "", /^2 frames added/);
   });
 
+  it("completes and names a board whose local finalization failed", async () => {
+    const failed = frameState({
+      mode: "board",
+      first: {
+        status: "succeeded",
+        finalization: "failed",
+        finalizationError: "board panels could not be prepared",
+        etaSec: null,
+      },
+    });
+    const item = await mount(stateWith({ runs: [failed] }));
+    assert.match(one(item, '[data-testid="frame-run-bar"]')?.textContent ?? "", /^0 frames added · 2 failed/);
+    assert.match(one(item, ".fy-swrunboards")?.textContent ?? "", /Board A.*board panels could not be prepared/);
+    assert.equal(all(item, "button").some((button) => ["Pause", "Cancel"].includes(button.textContent?.trim() ?? "")), false);
+  });
+
   it("offers failed board retry only, then a cell retry only from backend per-shot facts", async () => {
     const sent: ClientMessage[] = [];
     const failed = frameState({ mode: "board", first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null } });
