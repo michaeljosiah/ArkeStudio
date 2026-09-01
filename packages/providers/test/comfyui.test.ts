@@ -21,7 +21,7 @@ import { redactComfyUiBody, scrubPaths } from "../src/comfyui/redact.js";
 import { captureProviderClient } from "../src/capture.js";
 import { FalClient } from "../src/clients/fal.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
-import type { FetchLike } from "../src/types.js";
+import { ProviderBusyError, type FetchLike } from "../src/types.js";
 
 /**
  * SPEC-021 §3.2: recipes round-trip like any model, substitution cannot alter structure, the
@@ -1517,6 +1517,12 @@ describe("making room on the graphics card", () => {
         assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
         assert.match(err.message, /this machine has 3\.0 GB free/);
         assert.match(err.message, /close other programs/);
+        // "then try again" has to be true (#692): a full card is a busy engine, not a refused
+        // request, so the queue must read it as transient — backed off, retried, and offered a
+        // live Retry when it gives up — never as the witnessed rejection that ends an attempt.
+        assert.ok(err instanceof ProviderBusyError, "a busy card declares its own class");
+        assert.equal(err.failureClass, "transient");
+        assert.equal("submissionRejected" in err, false);
         return true;
       },
     );

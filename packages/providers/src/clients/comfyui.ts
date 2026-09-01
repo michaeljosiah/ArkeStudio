@@ -20,7 +20,7 @@ import type {
   SubmitRequest,
   SubmitResult,
 } from "../types.js";
-import { ProviderRequestRejectedError } from "../types.js";
+import { ProviderBusyError, ProviderRequestRejectedError } from "../types.js";
 
 /** Where the engine is listening right now, or null when none is configured and healthy. */
 export type EngineBaseUrl = () => string | null;
@@ -486,6 +486,11 @@ export class ComfyUiClient implements ProviderClient {
    * model from an earlier job, most likely — and the card is measured again. That is worth doing
    * only when short: `/free` throws away the model cache, so calling it before every dispatch
    * would buy a cold start on every line.
+   *
+   * Still short is a busy card, not a refused request: nothing about the job is wrong, and the
+   * same job goes through once the card is free. It is thrown as the transient it is, so the
+   * queue backs off and tries again while the engine finishes putting things down, and a user
+   * told to close other programs "then try again" has a Retry to press when it gives up (#692).
    */
   private async ensureRoomOnTheCard(base: string, recipe: ComfyUiRecipe): Promise<void> {
     // The free-VRAM floor, not the card-size floor: a streaming recipe (H3) legitimately needs
@@ -504,7 +509,7 @@ export class ComfyUiClient implements ProviderClient {
     const after = await this.freeVramMb().catch(() => null);
     if (after === null || after >= need) return;
     const gb = (mb: number): string => `${(mb / 1024).toFixed(1)} GB`;
-    throw new ProviderRequestRejectedError(
+    throw new ProviderBusyError(
       `comfyui: ${recipe.displayName} needs ${gb(need)} of free graphics memory and this machine has ${gb(after)} free. ` +
         `The engine has already put down what it was holding — close other programs using the graphics card, then try again.`,
     );

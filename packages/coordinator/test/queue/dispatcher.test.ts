@@ -1719,6 +1719,26 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.deepEqual(new Set(fake.submittedKeys).size, 1, "every safe retry carries the same persisted key");
     h.queue.dispose();
   });
+
+  it("an error that declares itself transient is backed off, and the class survives giving up", async () => {
+    // A local engine whose card has no room for the recipe (#692). Its message matches no
+    // pattern, so only the class the client declared makes it a retry — and the failed row has
+    // to keep that class, because it is what every frame-run surface offers Retry on.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = Object.assign(
+      new Error("comfyui: Draft Image needs 5.9 GB of free graphics memory and this machine has 2.0 GB free. Close other programs using the graphics card, then try again."),
+      { failureClass: "transient" },
+    );
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.equal(fake.submitCount, 3, "a busy engine is retried, bounded");
+    assert.equal(foldedJob(h, job.id)?.attempt, 3);
+    assert.equal(foldedJob(h, job.id)?.failureClass, "transient", "an exhausted transient keeps a live Retry (SPEC-036 R-18)");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /^gave up after 3 attempts: comfyui: Draft Image needs/);
+    h.queue.dispose();
+  });
 });
 
 describe("rate and concurrency (R-10, D8)", () => {

@@ -71,11 +71,26 @@ function transportClass(err: unknown): FailureClass | null {
   return null;
 }
 
+const CLASSES: ReadonlySet<string> = new Set<FailureClass>(["transient", "terminal", "provider-fault", "offline"]);
+
+/** The class a provider client declared on the error itself, or null where it named none. */
+function declaredClass(err: unknown): FailureClass | null {
+  if (typeof err !== "object" || err === null) return null;
+  const declared = (err as { failureClass?: unknown }).failureClass;
+  return typeof declared === "string" && CLASSES.has(declared) ? (declared as FailureClass) : null;
+}
+
 export function classifyError(err: unknown): FailureClass {
+  // A client that names its own class is believed before anything is read: it witnessed the
+  // condition where it arose, and a card without room for a recipe (`ProviderBusyError`) has no
+  // status, no transport code and no word in its message that could tell it from a refusal. D5's
+  // default made it terminal, and the user was told to try again with nothing to press (#692).
+  const declared = declaredClass(err);
+  if (declared !== null) return declared;
   const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-  // Ahead of the chain, and the only thing that is: a witnessed HTTP status outranks any reading
-  // of the transport, and a rejected credential retried on backoff is a lane that never says why
-  // it is stuck. Nothing reporting one of these carries a transport code to lose.
+  // Next, still ahead of the chain: a witnessed HTTP status outranks any reading of the
+  // transport, and a rejected credential retried on backoff is a lane that never says why it is
+  // stuck. Nothing reporting one of these carries a transport code to lose.
   if (PROVIDER_FAULT.test(message)) return "provider-fault";
   // Then the chain, ahead of the message: `fetch failed` is what the message says for every one
   // of them, so reading it first is reading the one part that cannot tell them apart.
