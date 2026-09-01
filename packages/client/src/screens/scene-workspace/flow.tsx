@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   linearizeSceneFlow,
   resolveCast,
+  stagingMoveWord,
   type ArtifactSidecar,
   type ClientMessage,
   type ProductionBundle,
@@ -38,6 +39,8 @@ const NODE = {
   shot: { w: 232, h: 96 },
   board: { w: 196, h: 86 },
   clip: { w: 208, h: 152 },
+  /** The Stage's staging of a shot: a soft input like a reference, sized as the prototype draws it. */
+  block: { w: 152, h: 92 },
   exit: { w: 112, h: 52 },
 } as const;
 
@@ -107,6 +110,7 @@ export function SceneFlow({
   generatorPending,
   onCommand,
   onOpenShotInGenerator,
+  onOpenStage,
   onRenderBoard,
   onTalkToArke,
 }: {
@@ -123,6 +127,7 @@ export function SceneFlow({
   generatorPending: boolean;
   onCommand: (command: Command) => boolean;
   onOpenShotInGenerator: (shotId: string) => void;
+  onOpenStage: (shotId: string) => void;
   onRenderBoard: (memberShotIds: string[]) => void;
   onTalkToArke: () => void;
 }) {
@@ -613,7 +618,9 @@ export function SceneFlow({
                 return;
               }
               select(subjectForNode(node));
-              if (event.key === "Enter" && node.kind === "shot" && node.shotId !== undefined && !locked && !generatorPending) {
+              if (event.key === "Enter" && node.kind === "block" && node.shotId !== undefined) {
+                onOpenStage(node.shotId);
+              } else if (event.key === "Enter" && node.kind === "shot" && node.shotId !== undefined && !locked && !generatorPending) {
                 onOpenShotInGenerator(node.shotId);
               }
             }}
@@ -621,6 +628,7 @@ export function SceneFlow({
             {node.thumb === undefined ? null : (
               <span className="fy-swnode__thumb" style={{ backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />
             )}
+            {node.kind === "block" ? <span className="fy-swnode__figures" aria-hidden="true"><i /><i /><i /></span> : null}
             <span className="fy-swnode__name">{node.name}</span>
             <span className="fy-swnode__meta">{node.meta}</span>
             {node.staged ? <span className="fy-swnode__staged">staged</span> : null}
@@ -678,8 +686,9 @@ export function SceneFlow({
         {graph.nodes.flatMap((node) => {
           const opensShot = node.kind === "shot" && node.shotId !== undefined;
           const rendersBoard = node.kind === "board" && node.memberShotIds !== undefined;
-          if (!opensShot && !rendersBoard) return [];
-          const label = opensShot ? "Open in generator" : "Render board";
+          const opensStage = node.kind === "block" && node.shotId !== undefined;
+          if (!opensShot && !rendersBoard && !opensStage) return [];
+          const label = opensShot ? "Open in generator" : opensStage ? "Open the staging" : "Render board";
           return [
             <button
               key={`generate:${node.id}`}
@@ -691,11 +700,12 @@ export function SceneFlow({
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
-                if (opensShot) onOpenShotInGenerator(node.shotId!);
+                if (opensStage) onOpenStage(node.shotId!);
+                else if (opensShot) onOpenShotInGenerator(node.shotId!);
                 else onRenderBoard([...node.memberShotIds!]);
               }}
             >
-              {generatorPending ? "Opening…" : label}
+              {generatorPending && !opensStage ? "Opening…" : label}
             </button>,
           ];
         })}
@@ -904,6 +914,43 @@ function buildGraph(input: {
       ...(!newShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
         ? { thumb: mediaUrl(slug, `artifacts/${artifact.file}`) }
         : {}),
+    });
+  });
+  // A staged shot's blocking, drawn where a reference would go next: it is an input to the shot
+  // the way a sheet is, and the reference grid already keeps things clear of one another.
+  let contextSlot = cited.length;
+  sequence.shots.forEach(({ nodeId, shot }) => {
+    if (shot.staging === undefined) return;
+    const slot = contextSlot;
+    contextSlot += 1;
+    const point = at(
+      `k:${shot.id}`,
+      compact ? 280 : 20 + (slot % 2) * 172,
+      compact ? 24 + slot * 196 : 24 + Math.floor(slot / 2) * 196,
+    );
+    nodes.push({
+      id: `k:${shot.id}`,
+      kind: "block",
+      x: point.x,
+      y: point.y,
+      name: `Staging · shot ${shot.number}`,
+      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys)} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
+      shotId: shot.id,
+      staged: stagedShotIds.has(shot.id),
+    });
+    edges.push({
+      id: `e:k:${shot.id}`,
+      fromNodeId: `k:${shot.id}`,
+      toNodeId: nodeId,
+      from: point,
+      fromKind: "block",
+      to: shotAt.get(shot.id)!,
+      toKind: "shot",
+      soft: true,
+      label: `The staging of shot ${shot.number} guides shot ${shot.number}`,
+      fromShotId: null,
+      toShotId: shot.id,
+      staged: stagedShotIds.has(shot.id),
     });
   });
   const exitPoint = at(sequence.exitNodeId, shotX, shotStartY + shots.length * shotPitch);

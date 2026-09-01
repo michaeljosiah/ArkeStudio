@@ -23,6 +23,7 @@ export const CLEARABLE_SHOT_FIELDS = [
   "continuity",
   "covers",
   "promptOverride",
+  "staging",
 ] as const;
 import { ShotAnchorSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -2012,6 +2013,26 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
     })
     .strict(),
+  /**
+   * File a playblast the Stage rendered onto its shot. The bytes arrive the way a pasted
+   * picture does — spooled by the host, which appends `sourcePath` — and the artifact is then
+   * pinned on the shot's staging through the ordinary versioned scene write, so a stale scene
+   * refuses it by name rather than pinning a move onto keys that have since changed.
+   */
+  z
+    .object({
+      kind: z.literal("stage-playblast"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      sceneId: SceneIdSchema,
+      baseVersion: z.number().int().min(1),
+      shotId: ShotIdSchema,
+      /** The staging version the playblast was rendered from — what the pin records. */
+      stagingVersion: z.number().int().min(1),
+      sourcePath: z.string().min(1),
+    })
+    .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
   z
     .object({
@@ -2321,6 +2342,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         z.object({ kind: z.literal("shot"), shotId: ShotIdSchema }).strict(),
         z.object({ kind: z.literal("board"), memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
       ]),
+      /**
+       * A shot opens in image mode (SPEC-036 R-23) unless the Stage asks for video — `Render
+       * with this` wants the clip, with the playblast riding and the move written as beats.
+       * Ignored for a board, which is video by definition.
+       */
+      mode: z.enum(["image", "video"]).optional(),
     })
     .strict(),
   /** Reassemble a subject session's words from the current production and script. */

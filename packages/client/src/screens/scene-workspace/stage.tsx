@@ -1,282 +1,666 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AmbientLight,
-  BoxGeometry,
-  CameraHelper,
-  Color,
-  CylinderGeometry,
-  DirectionalLight,
-  GridHelper,
-  Group,
-  Mesh,
-  MeshStandardMaterial,
-  PerspectiveCamera,
-  PlaneGeometry,
-  Scene,
-  SphereGeometry,
-  WebGLRenderer,
-} from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   DEFAULT_SHOT_SEC,
   effectiveFraming,
-  framingClause,
   orderedShots,
   resolveCast,
+  stageShot,
+  stagingFov,
+  stagingMoveWord,
+  type ClientMessage,
+  type ProductionBundle,
   type SceneRecord,
-  type Sheet,
   type Shot,
+  type ShotStaging,
+  type StagingKey,
+  type WorldBundle,
 } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
-import { Play, X } from "../../components/icons.js";
+import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
+import { stagePlayblast } from "../../lib/store.js";
+import { Button } from "../../components/ui.js";
+import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
+
+type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 function aspectNumber(aspect: string): number {
   const [wide, high] = aspect.split(":").map(Number);
   return Number.isFinite(wide) && Number.isFinite(high) && high! > 0 ? wide! / high! : 16 / 9;
 }
 
-function lensFov(shot: Shot): number {
-  const lens = shot.framing?.lens ?? shot.camera ?? "";
-  const millimetres = Number.parseFloat(/([\d.]+)\s*mm/i.exec(lens)?.[1] ?? "");
-  if (!Number.isFinite(millimetres) || millimetres <= 0) return 46;
-  return Math.max(18, Math.min(82, 2 * Math.atan(18 / millimetres) * 180 / Math.PI));
+/** A staging with its bookkeeping stripped, for asking whether two are the same move. */
+function moveOf(staging: ShotStaging | null): string {
+  if (staging === null) return "";
+  const { version: _version, playblast: _playblast, ...move } = staging;
+  return JSON.stringify(move);
 }
 
-function cameraDistance(shot: Shot): number {
-  const words = `${shot.framing?.size ?? ""} ${shot.camera ?? ""}`.toLowerCase();
-  if (words.includes("extreme close") || words.includes("ecu")) return 1.7;
-  if (words.includes("close") || words.includes("mcu") || words.includes("cu")) return 2.8;
-  if (words.includes("wide") || words.includes("ws")) return 7;
-  return 4.5;
+const round = (value: number): number => Math.round(value * 100) / 100;
+const mix = (a: readonly [number, number, number], b: readonly [number, number, number], f: number): [number, number, number] => [
+  round(a[0] + (b[0] - a[0]) * f),
+  round(a[1] + (b[1] - a[1]) * f),
+  round(a[2] + (b[2] - a[2]) * f),
+];
+
+function nearestKey(keys: readonly StagingKey[], at: number): number {
+  let best = 0;
+  keys.forEach((key, index) => {
+    if (Math.abs(key.t - at) < Math.abs(keys[best]!.t - at)) best = index;
+  });
+  return best;
 }
 
-function addStandIn(scene: Scene, index: number, total: number): void {
-  const group = new Group();
-  const spacing = 1.35;
-  group.position.set((index - (total - 1) / 2) * spacing, 0, index % 2 === 0 ? 0 : -0.45);
-  const material = new MeshStandardMaterial({ color: index % 2 === 0 ? 0xc9a66b : 0x7e9ba8, roughness: 0.86 });
-  const body = new Mesh(new CylinderGeometry(0.25, 0.34, 1.25, 20), material);
-  body.position.y = 0.72;
-  body.castShadow = true;
-  const head = new Mesh(new SphereGeometry(0.24, 20, 14), material);
-  head.position.y = 1.56;
-  head.castShadow = true;
-  group.add(body, head);
-  scene.add(group);
+function sortedKeys(keys: readonly StagingKey[]): StagingKey[] {
+  return [...keys].sort((left, right) => left.t - right.t);
 }
 
-function movementPosition(shot: Shot, elapsed: number, distance: number): [number, number, number] {
-  const movement = `${shot.framing?.movement ?? ""} ${shot.camera ?? ""}`.toLowerCase();
-  if (movement.includes("push") || movement.includes("dolly in")) return [0, 1.55, distance - elapsed * Math.min(1.5, distance * 0.28)];
-  if (movement.includes("pull") || movement.includes("dolly out")) return [0, 1.55, distance + elapsed * 1.5];
-  if (movement.includes("pan") || movement.includes("truck")) return [-1.2 + elapsed * 2.4, 1.55, distance];
-  if (movement.includes("crane") || movement.includes("tilt")) return [0, 1.25 + elapsed * 1.5, distance];
-  return [0, 1.55, distance];
+/** Insert-or-update at the playhead: the Blender workflow, move the playhead then the camera. */
+function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>): { staging: ShotStaging; index: number } {
+  const keys = staging.keys;
+  const near = keys.findIndex((key) => Math.abs(key.t - at) < 0.12);
+  if (near >= 0) {
+    return { staging: { ...staging, keys: keys.map((key, index) => (index === near ? { ...key, ...patch } : key)) }, index: near };
+  }
+  const base = keys[nearestKey(keys, at)] ?? { t: at, p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] };
+  const made: StagingKey = { ...base, ...patch, t: round(at) };
+  const next = sortedKeys([...keys, made]);
+  return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
+}
+
+function keyName(index: number, count: number): string {
+  return index === 0 ? "start" : index === count - 1 ? "end" : `key ${index}`;
 }
 
 /**
- * A derived technical previs, never a second owner for shot framing. The authored camera and cast
- * determine the block; orbiting and playing it are inspection gestures and write nothing.
+ * The Stage (the design's Stage tab; the Stage guide): a greybox previs where the shot is
+ * blocked out — cast as figures, set as massing, one camera on a motion path — and exported as a
+ * playblast the generator receives beside the sheets and the prompt.
+ *
+ * The staging is authored state on the shot. Edits accumulate in a local draft and land through
+ * one `edit-shot` on Keep, so a dozen gizmo drags are one version rather than twelve; Discard
+ * is the draft going away. Staging a shot for the first time writes at once — there is nothing
+ * to weigh a fresh v1 against.
  */
 export function SceneStage({
   scene,
-  sheets,
+  production,
+  world,
   aspect,
+  sceneFile,
+  locked,
+  generatorPending,
+  onCommand,
+  onRenderShot,
 }: {
   scene: SceneRecord;
-  sheets: readonly Sheet[];
+  production: ProductionBundle;
+  world: WorldBundle;
   aspect: string;
+  sceneFile: string | undefined;
+  locked: boolean;
+  generatorPending: boolean;
+  onCommand: (command: Command) => boolean;
+  onRenderShot: (shotId: string) => void;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
   const selected = selectedShotId(subject);
-  const shot = shots.find((candidate) => candidate.id === selected) ?? shots[0] ?? null;
-  const canvas = useRef<HTMLCanvasElement | null>(null);
-  const progress = useRef<HTMLSpanElement | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [viewRevision, setViewRevision] = useState(0);
+  const index = Math.max(0, shots.findIndex((candidate) => candidate.id === selected));
+  const shot: Shot | null = shots[index] ?? null;
+  const previous = index > 0 ? shots[index - 1] ?? null : null;
+  const sheets = world.sheets;
+  const persisted = shot?.staging ?? null;
+  const durationSec = shot?.durationSec ?? DEFAULT_SHOT_SEC;
   const framing = shot === null ? {} : effectiveFraming(scene, shot);
-  const framingText = shot === null ? "No shot selected" : framingClause(framing) || shot.camera || "Camera not blocked yet";
-  const references = useMemo(
-    () => shot === null ? [] : resolveCast(shot.description, [...sheets]).cast,
-    [shot, sheets],
-  );
-  const cast = references.filter((entry) => entry.sheet.type === "character");
-  const castKey = cast.map((entry) => entry.sheet.id).join("\u0000");
+  const references = useMemo(() => (shot === null ? [] : resolveCast(shot.description, [...sheets]).cast), [shot, sheets]);
+  const castIds = references.filter((entry) => entry.sheet.type === "character").map((entry) => entry.sheet.id);
+  const locationIds = [
+    ...(scene.inherits?.location === undefined ? [] : [scene.inherits.location]),
+    ...references.filter((entry) => entry.sheet.type === "location").map((entry) => entry.sheet.id),
+  ].filter((id, position, list) => list.indexOf(id) === position);
+  const nameOf = (sheetId: string) => sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+
+  const [draft, setDraft] = useState<ShotStaging | null>(null);
+  const [at, setAt] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [keyIndex, setKeyIndex] = useState(0);
+  const [mode, setMode] = useState<"look" | "camera">("look");
+  const [selection, setSelection] = useState<StageSelection>(null);
+  const [ghost, setGhost] = useState(false);
+  const [staging, setStaging] = useState(false);
+  const [exporting, setExporting] = useState<number | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const host = useRef<HTMLDivElement | null>(null);
+  const viewport = useRef<StageViewport | null>(null);
+  const playStart = useRef<{ wall: number; from: number } | null>(null);
+
+  const working = draft ?? persisted;
+  const moved = draft !== null && moveOf(draft) !== moveOf(persisted);
+  const keys = working?.keys ?? [];
+  const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
+  const activeKey = keys[active] ?? null;
+  // The viewport outlives many renders and its callbacks must see the current draft, not the
+  // one standing when it was created.
+  const latest = useRef({ working, active });
+  latest.current = { working, active };
+
+  // A new snapshot that carries the draft's move retires the draft; one that does not — an edit
+  // from elsewhere — leaves it standing, since the person's unsaved move is the newer decision.
+  useEffect(() => {
+    setDraft((current) => (current !== null && moveOf(current) === moveOf(persisted) ? null : current));
+    setStaging(false);
+  }, [persisted]);
+  useEffect(() => {
+    setDraft(null);
+    setAt(0);
+    setPlaying(false);
+    setKeyIndex(0);
+    setSelection(null);
+    setNote(null);
+    playStart.current = null;
+  }, [shot?.id]);
+
+  // The clock is elapsed from a start timestamp, never accumulated (SPEC-036 R-29).
+  useEffect(() => {
+    if (!playing) return;
+    let frame = 0;
+    const tick = () => {
+      const start = playStart.current;
+      if (start === null) return;
+      const next = start.from + (Date.now() - start.wall) / 1000;
+      if (next >= durationSec) {
+        setAt(durationSec);
+        setPlaying(false);
+        playStart.current = null;
+        return;
+      }
+      setAt(next);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, durationSec]);
+
+  const stop = () => {
+    setPlaying(false);
+    playStart.current = null;
+  };
+  const patch = (change: (current: ShotStaging) => ShotStaging) => {
+    const current = latest.current.working;
+    if (current === null) return;
+    setDraft(change(current));
+  };
+  const patchKey = (which: number, change: Partial<StagingKey>) =>
+    patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...key, ...change } : key)) }));
+
+  const data: StageData | null = useMemo(() => {
+    if (working === null || shot === null) return null;
+    const ghosts = ghost && previous?.staging !== undefined ? previous.staging.cast : [];
+    return {
+      cast: working.cast.map((figure, position) => {
+        const before = ghosts.find((candidate) => candidate.sheetId === figure.sheetId);
+        return {
+          sheetId: figure.sheetId,
+          name: nameOf(figure.sheetId),
+          colour: figureColour(position),
+          x: figure.x,
+          z: figure.z,
+          to: figure.to ?? null,
+          ghost: before === undefined ? null : (before.to ?? [before.x, before.z]),
+        };
+      }),
+      sets: working.sets,
+      keys: working.keys,
+      durationSec,
+      active,
+      mode,
+      at,
+      fov: stagingFov(framing.lens),
+      aspect: aspectNumber(aspect),
+      lensLabel: framing.lens ?? "lens unset",
+    };
+  }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets]);
 
   useEffect(() => {
-    const target = canvas.current;
-    if (target === null || shot === null || typeof target.getContext !== "function") return;
-    let context: WebGL2RenderingContext | WebGLRenderingContext | null = null;
+    const element = host.current;
+    if (element === null || data === null || viewport.current !== null) return;
+    // No WebGL — a test DOM, a headless run — leaves the panel standing without a viewport.
+    const probe = document.createElement("canvas");
+    if (typeof probe.getContext !== "function") return;
+    let context: RenderingContext | null = null;
     try {
-      context = target.getContext("webgl2") ?? target.getContext("webgl");
+      context = probe.getContext("webgl2") ?? probe.getContext("webgl");
     } catch {
       return;
     }
     if (context === null) return;
-
-    const renderer = new WebGLRenderer({ canvas: target, context, antialias: true, alpha: false });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    renderer.shadowMap.enabled = true;
-    const world = new Scene();
-    world.background = new Color(0x15171a);
-    world.add(new AmbientLight(0xf5ead7, 1.3));
-    const key = new DirectionalLight(0xffe0ab, 3.2);
-    key.position.set(4, 7, 5);
-    key.castShadow = true;
-    world.add(key);
-
-    const floor = new Mesh(
-      new PlaneGeometry(18, 18),
-      new MeshStandardMaterial({ color: 0x26292d, roughness: 1 }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    world.add(floor);
-    const grid = new GridHelper(18, 18, 0x59616a, 0x34383d);
-    grid.position.y = 0.005;
-    world.add(grid);
-
-    const locationMaterial = new MeshStandardMaterial({ color: 0x4a5056, roughness: 0.95 });
-    for (const [x, z, width, depth, height] of [
-      [-2.8, -1.7, 1.8, 0.45, 1.1],
-      [2.8, -1.4, 1.4, 0.6, 1.8],
-      [0, 2.2, 5.8, 0.3, 0.65],
-    ] as const) {
-      const block = new Mesh(new BoxGeometry(width, height, depth), locationMaterial);
-      block.position.set(x, height / 2, z);
-      block.castShadow = true;
-      block.receiveShadow = true;
-      world.add(block);
-    }
-    const standIns = Math.max(1, cast.length);
-    for (let index = 0; index < standIns; index += 1) addStandIn(world, index, standIns);
-
-    const ratio = aspectNumber(aspect);
-    const distance = cameraDistance(shot);
-    const shotCamera = new PerspectiveCamera(lensFov(shot), ratio, 0.1, 100);
-    shotCamera.position.set(0, 1.55, distance);
-    shotCamera.lookAt(0, 0.95, 0);
-    const helper = new CameraHelper(shotCamera);
-    helper.visible = !playing;
-    world.add(helper);
-
-    const blockingCamera = new PerspectiveCamera(42, 1, 0.1, 100);
-    blockingCamera.position.set(7.2, 5.4, 8.4);
-    blockingCamera.lookAt(0, 0.8, 0);
-    const controls = new OrbitControls(blockingCamera, target);
-    controls.target.set(0, 0.8, 0);
-    controls.enabled = !playing;
-
-    const size = () => {
-      const width = Math.max(320, target.clientWidth || target.parentElement?.clientWidth || 720);
-      const height = Math.max(240, target.clientHeight || target.parentElement?.clientHeight || 440);
-      renderer.setSize(width, height, false);
-      blockingCamera.aspect = width / height;
-      blockingCamera.updateProjectionMatrix();
-      renderer.render(world, playing ? shotCamera : blockingCamera);
-    };
-    size();
-    window.addEventListener("resize", size);
-
-    let frame = 0;
-    let started = 0;
-    const durationMs = Math.max(500, (shot.durationSec ?? DEFAULT_SHOT_SEC) * 1000);
-    const render = (now: number) => {
-      if (playing) {
-        if (started === 0) started = now;
-        const elapsed = Math.min(1, (now - started) / durationMs);
-        const [x, y, z] = movementPosition(shot, elapsed, distance);
-        shotCamera.position.set(x, y, z);
-        shotCamera.lookAt(0, 0.95, 0);
-        if (progress.current !== null) progress.current.style.width = `${elapsed * 100}%`;
-        renderer.render(world, shotCamera);
-        if (elapsed >= 1) {
-          setPlaying(false);
-          return;
-        }
-      }
-      if (playing) frame = requestAnimationFrame(render);
-    };
-    const renderBlocking = () => renderer.render(world, blockingCamera);
-    controls.addEventListener("change", renderBlocking);
-    if (playing) frame = requestAnimationFrame(render);
-
+    const created = new StageViewport(element, data, {
+      autokey: (when, p) => {
+        stop();
+        patch((current) => {
+          const next = withKeyAt(current, when, { p });
+          setKeyIndex(next.index);
+          return next.staging;
+        });
+      },
+      autoaim: (when, l) => {
+        stop();
+        patch((current) => {
+          const next = withKeyAt(current, when, { l });
+          const key = next.staging.keys[next.index]!;
+          const { track: _track, ...free } = key;
+          setKeyIndex(next.index);
+          return { ...next.staging, keys: next.staging.keys.map((candidate, position) => (position === next.index ? free : candidate)) };
+        });
+      },
+      castchange: (sheetId, x, z) =>
+        patch((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, x, z } : figure)) })),
+      walkchange: (sheetId, x, z) =>
+        patch((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, to: [x, z] } : figure)) })),
+      selchange: setSelection,
+      trackpick: (sheetId) => patchKey(latest.current.active, { track: sheetId, l: [0, 1.25, 0] }),
+    });
+    viewport.current = created;
     return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("resize", size);
-      controls.removeEventListener("change", renderBlocking);
-      controls.dispose();
-      world.traverse((object) => {
-        const mesh = object as Mesh;
-        mesh.geometry?.dispose();
-        const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material === undefined ? [] : [mesh.material];
-        for (const material of materials) material.dispose();
-      });
-      renderer.dispose();
+      created.dispose();
+      viewport.current = null;
     };
-  }, [aspect, castKey, playing, shot, viewRevision]);
-
+    // The viewport is created once per staged shot; attribute changes flow through `set`.
+  }, [shot?.id, data === null]);
   useEffect(() => {
-    setPlaying(false);
-    if (progress.current !== null) progress.current.style.width = "0%";
-  }, [shot?.id]);
+    if (data !== null) viewport.current?.set(data);
+  }, [data]);
+  useEffect(() => {
+    viewport.current?.select(selection);
+  }, [selection]);
 
   if (shot === null) {
-    return <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">Add a shot to begin blocking.</div>;
+    return <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">Add a shot to begin.</div>;
   }
 
+  const write = (next: ShotStaging): boolean =>
+    onCommand({ kind: "edit-shot", shotId: shot.id, change: { staging: next } });
+  const stage = () => {
+    const fresh = stageShot(shot, { cast: castIds, sets: locationIds.map(nameOf), durationSec, framing });
+    if (write(fresh)) setStaging(true);
+  };
+  const keep = () => {
+    if (draft === null || persisted === null) return;
+    write({ ...draft, version: persisted.version + 1, ...(persisted.playblast === undefined ? {} : { playblast: persisted.playblast }) });
+  };
+  const toggle = () => {
+    if (playing) {
+      stop();
+      return;
+    }
+    const from = at >= durationSec ? 0 : at;
+    playStart.current = { wall: Date.now(), from };
+    setAt(from);
+    setPlaying(true);
+  };
+  const seek = (which: number) => {
+    stop();
+    setKeyIndex(which);
+    setAt(keys[which]?.t ?? 0);
+  };
+  const addKey = () => {
+    if (working === null) return;
+    const when = Math.max(0.05, Math.min(durationSec - 0.05, at));
+    if (keys.some((key) => Math.abs(key.t - when) < 0.12)) return;
+    let before = 0;
+    while (before < keys.length - 1 && keys[before + 1]!.t < when) before += 1;
+    const a = keys[before]!;
+    const b = keys[Math.min(keys.length - 1, before + 1)]!;
+    const f = b.t === a.t ? 0 : (when - a.t) / (b.t - a.t);
+    const made: StagingKey = {
+      ...a,
+      t: round(when),
+      p: mix(a.p, b.p, f),
+      l: mix(a.l, b.l, f),
+    };
+    const next = sortedKeys([...keys, made]);
+    patch((current) => ({ ...current, keys: next }));
+    setKeyIndex(next.indexOf(made));
+  };
+  const dropKey = () => {
+    if (keys.length <= 2 || active === 0 || active === keys.length - 1) return;
+    patch((current) => ({ ...current, keys: current.keys.filter((_, position) => position !== active) }));
+    setKeyIndex(Math.max(0, active - 1));
+  };
+  const retime = (which: number, event: ReactMouseEvent<HTMLSpanElement>) => {
+    if (event.button !== 0 || which === 0 || which === keys.length - 1) return;
+    event.stopPropagation();
+    const track = event.currentTarget.closest<HTMLElement>("[data-key-track]");
+    if (track === null) return;
+    const bounds = track.getBoundingClientRect();
+    const low = keys[which - 1]!.t + 0.1;
+    const high = keys[which + 1]!.t - 0.1;
+    stop();
+    setKeyIndex(which);
+    const move = (next: MouseEvent) => {
+      const when = round(Math.max(low, Math.min(high, ((next.clientX - bounds.left) / Math.max(1, bounds.width)) * durationSec)));
+      patchKey(which, { t: when });
+      setAt(when);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+  const nudge = (axis: 1 | 2, delta: number) => {
+    if (activeKey === null) return;
+    const p: [number, number, number] = [...activeKey.p];
+    p[axis] = round(p[axis] + delta);
+    patchKey(active, { p });
+  };
+  const anchorTo = (sheetId: string | null) => {
+    if (activeKey === null || working === null) return;
+    const figureOf = (id: string | undefined) => (id === undefined ? undefined : working.cast.find((figure) => figure.sheetId === id));
+    const base = figureOf(activeKey.anchor);
+    const world: [number, number, number] = base === undefined ? [...activeKey.p] : [round(activeKey.p[0] + base.x), activeKey.p[1], round(activeKey.p[2] + base.z)];
+    if (sheetId === null) {
+      const { anchor: _anchor, ...free } = activeKey;
+      patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...free, p: world } : key)) }));
+      return;
+    }
+    const subject = figureOf(sheetId);
+    const offset: [number, number, number] = subject === undefined ? world : [round(world[0] - subject.x), world[1], round(world[2] - subject.z)];
+    patchKey(active, { anchor: sheetId, track: sheetId, p: offset });
+  };
+  const toggleWalk = (sheetId: string) =>
+    patch((current) => ({
+      ...current,
+      cast: current.cast.map((figure) => {
+        if (figure.sheetId !== sheetId) return figure;
+        if (figure.to !== undefined) {
+          const { to: _to, ...holds } = figure;
+          return holds;
+        }
+        return { ...figure, to: [round(figure.x + 0.4), round(figure.z - 3.4)] };
+      }),
+    }));
+  const exportPlayblast = async () => {
+    const view = viewport.current;
+    if (view === null || persisted === null || sceneFile === undefined || exporting !== null) return;
+    stop();
+    setNote(null);
+    setExporting(0);
+    try {
+      const blob = await view.record(setExporting);
+      const outcome = await stagePlayblast(
+        {
+          kind: "stage-playblast",
+          worldId: world.meta.worldId,
+          productionId: production.meta.id,
+          sceneFile,
+          sceneId: scene.id,
+          baseVersion: scene.version,
+          shotId: shot.id,
+          stagingVersion: persisted.version,
+        },
+        new Uint8Array(await blob.arrayBuffer()),
+      );
+      if (!outcome.ok) {
+        setNote(outcome.reason);
+        // A browser session has no host to file into; the file is still the person's to keep.
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `shot-${shot.number}-playblast.webm`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+      }
+    } catch (error) {
+      setNote(error instanceof Error ? error.message : "the playblast could not be recorded");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const selLabel =
+    selection === null
+      ? "nothing selected"
+      : selection.kind === "rig"
+        ? "camera"
+        : selection.kind === "aim"
+          ? "aim target"
+          : `${nameOf(selection.sheetId)} · ${selection.kind === "cast" ? "start" : "end"}`;
+  const filed = persisted?.playblast;
+  const ghostable = previous?.staging !== undefined;
+  const busy = staging && persisted === null;
+
   return (
-    <section className="fy-swstage" data-testid="workspace-stage" aria-label="Scene blocking stage">
-      <header className="fy-swstage__head">
-        <div>
-          <h2>Blocking stage</h2>
-          <span>derived preview · framing stays on the shot</span>
-        </div>
-        <button type="button" className="fy-swstage__reset" disabled={playing} onClick={() => setViewRevision((revision) => revision + 1)}>
-          Reset view
+    <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage">
+      <div className="fy-swstage__head">
+        <button
+          type="button"
+          className="fy-swstage__step"
+          aria-label="Previous shot"
+          disabled={index === 0}
+          onClick={() => shots[index - 1] && select({ kind: "shot", shotId: shots[index - 1]!.id })}
+        >
+          <ChevronLeft size={12} />
         </button>
-        <button type="button" className="fy-swstage__play" onClick={() => setPlaying((current) => !current)}>
-          {playing ? <X size={13} /> : <Play size={13} />}
-          {playing ? "Stop" : "Playblast"}
+        <strong>Shot {shot.number}</strong>
+        <button
+          type="button"
+          className="fy-swstage__step"
+          aria-label="Next shot"
+          disabled={index >= shots.length - 1}
+          onClick={() => shots[index + 1] && select({ kind: "shot", shotId: shots[index + 1]!.id })}
+        >
+          <ChevronRight size={12} />
         </button>
-      </header>
+        <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
+        {working === null ? null : (
+          <span className="fy-swstage__version">
+            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMoveWord(keys)}
+          </span>
+        )}
+      </div>
+
       <div className="fy-swstage__work">
-        <div className="fy-swstage__viewport" data-playing={playing ? "true" : undefined}>
-          <canvas ref={canvas} aria-label={`Three-dimensional blocking preview for shot ${shot.number}`} />
-          <span className="fy-swstage__shot">shot {shot.number}</span>
-          <span className="fy-swstage__mode">{playing ? "camera · playblast" : "blocking · orbit"}</span>
-          <span className="fy-swstage__progress" aria-hidden="true"><span ref={progress} /></span>
+        <div className="fy-swstage__viewport" data-mode={mode}>
+          {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
+          {working === null && !busy ? (
+            <div className="fy-swstage__empty">
+              <span>Nothing staged yet.</span>
+              <Button variant="primary" size="sm" disabled={locked} onClick={stage}>Stage the shot</Button>
+            </div>
+          ) : null}
+          {busy ? <div className="fy-swstage__busy">staging…</div> : null}
+          {mode === "camera" ? (
+            <div className="fy-swstage__safe" aria-hidden="true"><span /><span /><span /></div>
+          ) : null}
+          {working === null ? null : (
+            <>
+              <div className="fy-swstage__modes" role="radiogroup" aria-label="View">
+                {(["look", "camera"] as const).map((candidate) => (
+                  <button
+                    key={candidate}
+                    type="button"
+                    role="radio"
+                    aria-checked={mode === candidate}
+                    data-on={mode === candidate ? "true" : undefined}
+                    onClick={() => setMode(candidate)}
+                  >
+                    {candidate === "look" ? "Look" : "Camera"}
+                  </button>
+                ))}
+              </div>
+              <div className="fy-swstage__corner">
+                {moved ? (
+                  <span className="fy-swstage__moved" data-testid="stage-moved">
+                    <span>{keyName(active, keys.length)} moved</span>
+                    <button type="button" aria-label="Discard" title="Discard" onClick={() => setDraft(null)}><X size={11} /></button>
+                    <button type="button" className="fy-swstage__keep" disabled={locked} onClick={keep}>Keep</button>
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="fy-swstage__ghost"
+                  aria-pressed={ghost}
+                  disabled={!ghostable}
+                  title={ghostable ? "Ghost the previous shot" : "Previous shot not staged"}
+                  aria-label="Ghost the previous shot"
+                  onClick={() => setGhost((on) => !on)}
+                >
+                  <Lamp size={14} />
+                </button>
+              </div>
+            </>
+          )}
         </div>
-        <aside className="fy-swstage__inspector">
-          <span className="fy-swstage__eyebrow">Current shot</span>
-          <h3>{shot.number} · {shot.title}</h3>
-          <p>{framingText}</p>
-          <dl>
-            <div><dt>Duration</dt><dd>{(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s</dd></div>
-            <div><dt>Aspect</dt><dd>{aspect}</dd></div>
-            <div><dt>Stand-ins</dt><dd>{Math.max(1, cast.length)}</dd></div>
-          </dl>
-          <span className="fy-swstage__eyebrow">On stage</span>
-          <div className="fy-swstage__cast">
-            {cast.length === 0 ? <span>unassigned stand-in</span> : cast.map((entry) => <span key={entry.sheet.id}>{entry.sheet.name}</span>)}
-          </div>
-          <p className="fy-swstage__hint">Drag to orbit · wheel to move · Playblast uses the authored camera move.</p>
+
+        <aside className="fy-swstage__panel">
+          {working === null ? (
+            <p className="fy-swstage__note">Stage the shot to place the cast, put down the set and start a camera move.</p>
+          ) : (
+            <>
+              <div className="fy-swstage__sel" data-selected={selection === null ? undefined : "true"} title="Click to select · drag the axis arrows to move it · in Camera view drag to pan and tilt · middle or right drag orbits the view">
+                <span aria-hidden="true" />
+                <span>{selLabel}</span>
+              </div>
+
+              <div className="fy-swstage__block">
+                <div className="fy-swstage__eyebrow">
+                  <span>Camera</span>
+                  <span>{keyName(active, keys.length)}</span>
+                </div>
+                <div className="fy-swstage__row">
+                  <span title="Drag the green arrow on the camera to raise or lower it">height</span>
+                  <span>{activeKey === null ? "—" : `${activeKey.p[1].toFixed(2)}m`}</span>
+                  <span className="fy-swstage__nudge">
+                    <button type="button" aria-label="Lower" onClick={() => nudge(1, -0.1)}><Minus size={10} /></button>
+                    <button type="button" aria-label="Raise" onClick={() => nudge(1, 0.1)}><Plus size={10} /></button>
+                  </span>
+                </div>
+                <div className="fy-swstage__row">
+                  <span title="Drag the red or blue arrow to move the camera across the floor">back</span>
+                  <span>{activeKey === null ? "—" : `${activeKey.p[2].toFixed(2)}m`}</span>
+                  <span className="fy-swstage__nudge">
+                    <button type="button" aria-label="Closer" onClick={() => nudge(2, -0.25)}><Minus size={10} /></button>
+                    <button type="button" aria-label="Further" onClick={() => nudge(2, 0.25)}><Plus size={10} /></button>
+                  </span>
+                </div>
+                <div className="fy-swstage__row">
+                  <span title="Drag the ring, or double-click a figure to track them">aim</span>
+                  <span>{activeKey?.track === undefined ? "free" : nameOf(activeKey.track)}</span>
+                </div>
+                <div className="fy-swstage__row fy-swstage__row--chips">
+                  <span title="World keys stay put; anchored keys ride with the subject, so you set the offset once">anchor</span>
+                  <span className="fy-swstage__chips">
+                    {[null, ...working.cast.map((figure) => figure.sheetId)].map((candidate) => (
+                      <button
+                        key={candidate ?? "world"}
+                        type="button"
+                        data-on={(activeKey?.anchor ?? null) === candidate ? "true" : undefined}
+                        onClick={() => anchorTo(candidate)}
+                      >
+                        {candidate === null ? "world" : nameOf(candidate)}
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <span className="fy-swstage__quiet">{activeKey?.anchor === undefined ? "fixed in the set" : `rides with ${nameOf(activeKey.anchor)}`}</span>
+              </div>
+
+              {working.cast.length === 0 ? null : (
+                <div className="fy-swstage__block">
+                  <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
+                  {working.cast.map((figure, position) => (
+                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" onClick={() => toggleWalk(figure.sheetId)}>
+                      <span style={{ background: figureColour(position) }} aria-hidden="true" />
+                      <span>{nameOf(figure.sheetId)}</span>
+                      <span data-walks={figure.to === undefined ? undefined : "true"}>{figure.to === undefined ? "holds" : "walks"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="fy-swstage__block">
+                <div className="fy-swstage__eyebrow"><span title="Resolved from the shot · reads out on the prompt">Framing</span></div>
+                <div className="fy-swstage__row"><span>size</span><span>{framing.size?.toLowerCase() ?? "—"}</span></div>
+                <div className="fy-swstage__row"><span>lens</span><span>{framing.lens ?? "—"}</span></div>
+                <div className="fy-swstage__row"><span>movement</span><span>{framing.movement?.toLowerCase() ?? "—"}</span></div>
+                {/* A shot written before the structured camera keeps its one line, and it still staged from it. */}
+                {shot.camera === undefined || framing.size !== undefined || framing.movement !== undefined ? null : (
+                  <div className="fy-swstage__row"><span>camera</span><span>{shot.camera}</span></div>
+                )}
+              </div>
+
+              <span className="fy-swstage__spacer" />
+
+              <div className="fy-swstage__block fy-swstage__block--playblast">
+                <div className="fy-swstage__row">
+                  <span>playblast</span>
+                  <span data-filed={filed === undefined ? undefined : "true"}>
+                    {filed === undefined ? "not filed" : filed.version === persisted?.version ? "filed" : `filed · v${filed.version}`}
+                  </span>
+                </div>
+                {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={locked || moved || persisted === null || exporting !== null || sceneFile === undefined}
+                  title={moved ? "Keep the move first" : undefined}
+                  onClick={() => void exportPlayblast()}
+                >
+                  {exporting === null ? "Export playblast" : `exporting… ${Math.round(exporting * 100)}%`}
+                </Button>
+                <Button variant="primary" size="sm" disabled={generatorPending || locked} onClick={() => onRenderShot(shot.id)}>
+                  {generatorPending ? "Opening…" : "Render with this"}
+                </Button>
+              </div>
+            </>
+          )}
         </aside>
       </div>
-      <div className="fy-swstage__shots" aria-label="Shots on stage">
-        {shots.map((candidate) => (
-          <button
-            key={candidate.id}
-            type="button"
-            data-current={candidate.id === shot.id ? "true" : undefined}
-            onClick={() => select({ kind: "shot", shotId: candidate.id })}
-          >
-            <span>{candidate.number}</span>
-            <strong>{candidate.title}</strong>
+
+      {working === null ? null : (
+        <div className="fy-swstage__timeline">
+          <button type="button" className="fy-swstage__play" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
+            {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
           </button>
-        ))}
-      </div>
+          <span className="fy-swstage__time">{Math.min(at, durationSec).toFixed(1)}s / {durationSec.toFixed(1)}s</span>
+          <div className="fy-swstage__track" data-key-track="1">
+            <span className="fy-swstage__rail" aria-hidden="true" />
+            <span className="fy-swstage__head-fill" style={{ width: `${((Math.min(at, durationSec) / Math.max(0.01, durationSec)) * 100).toFixed(1)}%` }} aria-hidden="true" />
+            {keys.map((key, position) => {
+              const first = position === 0;
+              const last = position === keys.length - 1;
+              const left = `${Math.max(0, Math.min(100, (key.t / Math.max(0.01, durationSec)) * 100)).toFixed(2)}%`;
+              return (
+                <span
+                  key={position}
+                  className="fy-swstage__key"
+                  data-on={position === active ? "true" : undefined}
+                  data-mid={!first && !last ? "true" : undefined}
+                  style={first ? { left: 0 } : last ? { right: 0 } : { left, transform: "translateX(-50%)" }}
+                  title={`${keyName(position, keys.length)} · ${key.t.toFixed(1)}s${first || last ? "" : " · drag to retime"}`}
+                  onMouseDown={(event) => {
+                    if (first || last) {
+                      event.stopPropagation();
+                      seek(position);
+                    } else retime(position, event);
+                  }}
+                >
+                  <span aria-hidden="true" />
+                  {position === active ? <b>{keyName(position, keys.length)} · {key.t.toFixed(1)}s</b> : null}
+                </span>
+              );
+            })}
+          </div>
+          <span className="fy-swstage__keytools">
+            <button type="button" aria-label="Add a camera key at the playhead" title="Add a camera key at the playhead" onClick={addKey}><Plus size={12} /></button>
+            {keys.length > 2 ? (
+              <button type="button" aria-label="Remove the selected key" title="Remove the selected key" disabled={active === 0 || active === keys.length - 1} onClick={dropKey}><Minus size={12} /></button>
+            ) : null}
+          </span>
+          <span className="fy-swstage__count">{keys.length} keys</span>
+        </div>
+      )}
     </section>
   );
 }

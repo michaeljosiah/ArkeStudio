@@ -294,13 +294,17 @@ export function SceneWorkspace({
     pendingPlan.current = null;
     setPlanError("Connection lost - try again.");
   }, [connection]);
-  const openGenerator = (subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"]) => {
+  const openGenerator = (
+    subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"],
+    mode?: "image" | "video",
+  ) => {
     if (pendingGenerator.current !== null) return;
     const requestId = sendBenchOpenSubject({
       worldId: world.meta.worldId,
       productionId: production.meta.id,
       sceneId: scene.id,
       subject,
+      ...(mode === undefined ? {} : { mode }),
     });
     if (requestId !== null) {
       pendingGenerator.current = { requestId, sceneKey };
@@ -309,6 +313,12 @@ export function SceneWorkspace({
     } else {
       setGeneratorError("Not connected - try again.");
     }
+  };
+  // The Stage is reached from a row's menu and a Flow staging node as well as its tab: one
+  // gesture selects the shot and changes the view, so the tab opens on the shot that asked.
+  const openStage = (shotId: string) => {
+    setSubject({ kind: "shot", shotId: shotId as never });
+    setView("stage");
   };
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
@@ -465,6 +475,7 @@ export function SceneWorkspace({
               }}
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onStageShot={openStage}
               onPlanVideo={planVideo}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
@@ -483,6 +494,7 @@ export function SceneWorkspace({
               onCommand={write}
               generatorPending={generatorPending}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onOpenStage={openStage}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={() => {
                 setDock(true);
@@ -494,8 +506,14 @@ export function SceneWorkspace({
           ) : view === "stage" ? (
             <SceneStage
               scene={workingScene}
-              sheets={world.sheets}
+              production={production}
+              world={world}
               aspect={aspect}
+              sceneFile={sceneFile}
+              locked={staged !== undefined || sceneFile === undefined || commandPending}
+              generatorPending={generatorPending}
+              onCommand={write}
+              onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
             />
           ) : (
             <ScenePreview

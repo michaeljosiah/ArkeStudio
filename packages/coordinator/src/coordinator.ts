@@ -6253,6 +6253,52 @@ export class Coordinator {
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
         return;
       }
+      case "stage-playblast": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const refuse = (reason: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason,
+          });
+        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+        const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
+        const shot = scene === undefined ? undefined : orderedShots(scene).find((candidate) => candidate.id === msg.shotId);
+        // Refused before the bytes are copied: a playblast with no staging to pin onto would be
+        // an orphan on the shelf, and the version fence below would refuse the pin anyway.
+        if (shot?.staging === undefined) {
+          refuse("stage the shot before filing a playblast for it");
+          return;
+        }
+        if (shot.staging.version !== msg.stagingVersion) {
+          refuse(`the staging moved to v${shot.staging.version} while the playblast rendered — export it again`);
+          return;
+        }
+        // Our own bytes, sized by the shot's length; the large-file consent is for imports.
+        const artifactId = await this.fileOne(msg.worldId, msg.sourcePath, {
+          links: [msg.shotId],
+          production: msg.productionId,
+          allowLarge: true,
+        });
+        if (artifactId === null) return;
+        await applySceneCommand(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          sceneId: msg.sceneId,
+          baseVersion: msg.baseVersion,
+          command: {
+            kind: "edit-shot",
+            shotId: msg.shotId,
+            change: { staging: { ...shot.staging, playblast: { artifactId, version: msg.stagingVersion } } },
+          },
+        }).catch((err: unknown) => refuse(err instanceof Error ? err.message : "the playblast could not be pinned"));
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "import-shot-frame": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
@@ -6999,6 +7045,7 @@ export class Coordinator {
             productionId: msg.productionId,
             sceneId: msg.sceneId,
             subject: msg.subject,
+            ...(msg.mode !== undefined ? { mode: msg.mode } : {}),
             settings,
             manifest: this.opts.manifest ?? null,
             sources: {

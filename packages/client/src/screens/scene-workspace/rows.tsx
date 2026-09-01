@@ -73,6 +73,7 @@ export function StoryboardRows({
   onGenerateFrame,
   onEditShot,
   onOpenShotInGenerator,
+  onStageShot,
   onPlanVideo,
   onRenderBoard,
 }: {
@@ -101,6 +102,7 @@ export function StoryboardRows({
   onGenerateFrame: (shotId: string, trigger: HTMLButtonElement) => void;
   onEditShot: (shotId: string) => void;
   onOpenShotInGenerator: (shotId: string) => void;
+  onStageShot: (shotId: string) => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
 }) {
@@ -309,6 +311,7 @@ export function StoryboardRows({
                 onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
                 onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
+                onStage={() => onStageShot(shot.id)}
               />
             </li>
           );
@@ -641,6 +644,7 @@ function Row({
   onGenerateFrame,
   onEdit,
   onOpenInGenerator,
+  onStage,
 }: {
   shot: Shot;
   scene: SceneRecord;
@@ -676,6 +680,7 @@ function Row({
   onGenerateFrame: (trigger: HTMLButtonElement) => void;
   onEdit: () => void;
   onOpenInGenerator: () => void;
+  onStage: () => void;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -1088,6 +1093,9 @@ function Row({
         <div className="fy-swrow__titleline">
           <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{CHIP[state]}</span>
+          {shot.staging?.playblast === undefined ? null : (
+            <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
+          )}
         </div>
         {coverage === "changed" || runScriptChanged ? (
           <div className="fy-swrow__stale">
@@ -1286,6 +1294,7 @@ function Row({
                   <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
                     {generatorPending ? "Opening…" : "Open in generator"}
                   </button>
+                  <button type="button" role="menuitem" disabled={staged} onClick={() => { closeMenu(true); onStage(); }}>Stage this shot</button>
                   <button type="button" role="menuitem" disabled={disabled || !canMoveUp} onClick={() => { closeMenu(true); onMoveUp(); }}>Move before previous</button>
                   <button type="button" role="menuitem" disabled={disabled || !canMoveDown} onClick={() => { closeMenu(true); onMoveDown(); }}>Move after next</button>
                   <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>

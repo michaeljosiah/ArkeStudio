@@ -46,7 +46,18 @@ type AttachTarget =
    */
   | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
-  | { kind: "world-chat-attach"; worldId: string; conversationId: string };
+  | { kind: "world-chat-attach"; worldId: string; conversationId: string }
+  /** A playblast the Stage rendered, filed onto its shot against the scene version it saw. */
+  | {
+      kind: "stage-playblast";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      shotId: string;
+      stagingVersion: number;
+    };
 
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;

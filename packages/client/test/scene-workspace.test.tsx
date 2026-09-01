@@ -134,16 +134,127 @@ describe("scene detail owns the workspace", () => {
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
   });
 
-  it("opens the derived blocking stage and keeps its shot selection shared", async () => {
+  it("opens the Stage on the selected shot, offers to stage it, and keeps the selection shared", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
     const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    assert.match(stage.textContent ?? "", /Blocking stage.*Playblast/);
-    const stagedShots = all(mounted, ".fy-swstage__shots button");
-    assert.equal(stagedShots.length, 2);
-    await click(stagedShots[1]!);
-    assert.equal(stagedShots[1]!.getAttribute("data-current"), "true");
+    assert.match(stage.textContent ?? "", /Shot 12/);
+    assert.match(stage.textContent ?? "", /Nothing staged yet\./);
+    // Stepping to the next shot is the same selection the storyboard and Arke share.
+    await click(q(mounted, '[aria-label="Next shot"]')!);
+    assert.match(stage.textContent ?? "", /Shot 13/);
     assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
+    await click(q(mounted, '[aria-label="Previous shot"]')!);
+
+    // Staging writes at once, as one versioned shot edit: cast from the script's references,
+    // a massing box for the scene's location, and a camera move read off the framing words.
+    const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Stage the shot") as unknown as HTMLElement;
+    await click(stageButton);
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.equal(command.kind, "scene-command");
+    assert.equal(command.command.kind, "edit-shot");
+    if (command.command.kind !== "edit-shot") return;
+    assert.equal(command.command.shotId, "sh_12");
+    const staging = command.command.change.staging!;
+    assert.equal(staging.version, 1);
+    assert.deepEqual(staging.cast.map((figure) => figure.sheetId), ["maren-kest"]);
+    assert.ok(staging.sets.length >= 1, "the scene's location becomes set massing");
+    assert.equal(staging.keys.length, 2);
+    assert.equal(staging.keys[0]!.anchor, "maren-kest", "a shot with a subject rides its keys on them");
+    assert.ok(staging.keys[1]!.p[2] < staging.keys[0]!.p[2], "a push-in ends closer than it starts");
+    assert.equal(staging.keys[1]!.t, 4, "the last key sits at the shot's length");
+  });
+
+  it("reads a staged shot back: readouts, keys on the track, Keep after a nudge, and the playblast state", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    (shot as { staging?: unknown }).staging = {
+      version: 2,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0, to: [0.4, -3.4] }],
+      sets: [{ name: "The Vigil", x: -3.4, z: -3.4, w: 4.4, h: 2.9, d: 1.1 }],
+      keys: [
+        { t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+        { t: 2, p: [-2.5, 1.5, 0.2], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+        { t: 4, p: [0, 1.45, -2.9], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+      ],
+    };
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
+    assert.match(stage.textContent ?? "", /v2 · 3 keys · orbit/);
+    assert.match(stage.textContent ?? "", /1\.55m/, "the camera readout is in metres");
+    assert.match(stage.textContent ?? "", /rides with Maren/);
+    assert.match(stage.textContent ?? "", /walks/);
+    assert.match(stage.textContent ?? "", /not filed/);
+    assert.equal(all(mounted, ".fy-swstage__key").length, 3);
+    assert.equal(all(mounted, ".fy-swstage__key[data-mid=\"true\"]").length, 1, "only interior keys retime");
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+
+    // Render with this asks the bench for the clip, not a still.
+    await click([...stage.querySelectorAll("button")].find((button) => button.textContent === "Render with this") as unknown as HTMLElement);
+    const open = sent.at(-1) as Extract<ClientMessage, { kind: "bench-open-subject" }>;
+    assert.equal(open.kind, "bench-open-subject");
+    assert.deepEqual(open.subject, { kind: "shot", shotId: "sh_12" });
+    assert.equal(open.mode, "video");
+
+    // A nudge is a draft: nothing is written until Keep, and Keep writes the next version.
+    await click(q(mounted, '[aria-label="Raise"]')!);
+    assert.match(stage.textContent ?? "", /1\.65m/);
+    const moved = q(mounted, '[data-testid="stage-moved"]')!;
+    assert.match(moved.textContent ?? "", /start moved/);
+    const before = sent.length;
+    await click([...moved.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    assert.equal(sent.length, before + 1);
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.equal(command.command.kind, "edit-shot");
+    if (command.command.kind !== "edit-shot") return;
+    assert.equal(command.command.change.staging?.version, 3);
+    assert.equal(command.command.change.staging?.keys[0]?.p[1], 1.65);
+
+    // Lowering back to the kept height is not a move at all — the chip goes without a click.
+    await click(q(mounted, '[aria-label="Lower"]')!);
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    // Discard is the draft going away.
+    await click(q(mounted, '[aria-label="Lower"]')!);
+    assert.match(stage.textContent ?? "", /1\.45m/);
+    await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.match(stage.textContent ?? "", /1\.55m/);
+  });
+
+  it("reaches the Stage from a row's menu and draws a staged shot's blocking on the canvas", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_13")!;
+    (shot as { staging?: unknown }).staging = {
+      version: 1,
+      cast: [],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 6, p: [0, 1.5, 4], l: [0, 1, 0] }],
+      playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 1 },
+    };
+    const mounted = await mountState(state);
+    const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
+    assert.match(row.querySelector(".fy-swrow__playblast")?.textContent ?? "", /staged/);
+    await click(row.querySelector(".fy-swedit") as HTMLElement);
+    await click(menuButtons().find((button) => button.textContent === "Stage this shot") as unknown as HTMLElement);
+    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
+    assert.match(stage.textContent ?? "", /Shot 13/);
+    assert.match(stage.textContent ?? "", /v1 · 2 keys · static/);
+    assert.match(stage.textContent ?? "", /filed/);
+
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
+    const block = q(mounted, '[data-testid="flow-node-k:sh_13"]')!;
+    assert.equal(block.getAttribute("data-kind"), "block");
+    assert.match(block.textContent ?? "", /Staging · shot 13/);
+    assert.match(block.textContent ?? "", /playblast filed/);
   });
 
   it("keeps the empty Arke dock conversation-first", async () => {
@@ -1480,6 +1591,7 @@ describe("a scene the workspace cannot read is named, never guessed (R-29, R-60)
           generatorPending={false}
           onCommand={() => true}
           onOpenShotInGenerator={() => {}}
+          onOpenStage={() => {}}
           onRenderBoard={() => {}}
           onTalkToArke={() => {}}
         />,

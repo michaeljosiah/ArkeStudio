@@ -87,6 +87,15 @@ export const Plus = icon(
     <path d="M12 5v14" />
   </>,
 );
+export const Minus = icon(<path d="M5 12h14" />);
+/** A lamp: the Stage's continuity ghost, lighting the previous shot's positions. */
+export const Lamp = icon(
+  <>
+    <path d="M9 18h6" />
+    <path d="M10 22h4" />
+    <path d="M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2Z" />
+  </>,
+);
 /** A pane with a rail down its left: the control that shows and hides one (71a). */
 export const PanelLeft = icon(
   <>

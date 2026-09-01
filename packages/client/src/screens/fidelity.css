@@ -6290,13 +6290,16 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-sw__context > span:not(.fy-sw__metrics) { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
 .fy-sw__metrics { margin-left: 3px; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
 .fy-sw__toolbar { display: flex; align-items: center; gap: 6px; flex: none; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-.fy-sw__tabs { display: flex; align-items: center; gap: 6px; }
+/* The view tabs are one segmented control on a recessed pill, the way the prototype draws them:
+   the chosen mode lifts out on the page colour with a hairline shadow, the rest sit in the well. */
+.fy-sw__tabs { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--secondary); }
 .fy-sw__tab {
-  border: 1px solid transparent; background: transparent; cursor: pointer;
-  padding: 5px 12px; border-radius: var(--radius-control); font-size: 13px; color: var(--muted-foreground);
+  border: 0; background: transparent; cursor: pointer;
+  padding: 5px 14px; border-radius: 8px; font: 500 12px var(--font-sans); color: var(--muted-foreground);
   transition: var(--transition-control);
 }
-.fy-sw__tab[data-on="true"] { background: var(--card); border-color: var(--border); color: var(--foreground); }
+.fy-sw__tab:hover { color: var(--foreground); }
+.fy-sw__tab[data-on="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 600; letter-spacing: -0.01em; cursor: default; }
 .fy-sw__coverage { margin-left: auto; color: var(--muted-foreground); font: 400 10.5px var(--font-mono); }
 .fy-swrun {
   display: flex; align-items: center; gap: 10px; min-height: 43px; padding: 0 2px 12px;
@@ -6617,6 +6620,18 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swnode__name { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-swnode__meta { font-size: 9px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-swnode__staged { color: var(--warning); font: 400 9px var(--font-mono, ui-monospace, monospace); }
+/* A staging node: three greybox figures on a floor, the prototype's tiny illustration of the Stage. */
+.fy-swnode[data-kind="block"] { padding: 0; overflow: hidden; }
+.fy-swnode[data-kind="block"] .fy-swnode__name, .fy-swnode[data-kind="block"] .fy-swnode__meta { padding: 0 9px; }
+.fy-swnode[data-kind="block"] .fy-swnode__name { padding-top: 6px; font-size: 10px; }
+.fy-swnode[data-kind="block"] .fy-swnode__meta { padding-bottom: 7px; font: 400 8.5px var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
+.fy-swnode__figures { position: relative; flex: 1; min-height: 0; display: flex; align-items: flex-end; justify-content: center; gap: 4px; padding-bottom: 9px; background: linear-gradient(180deg, #EFEDE9, #DCD8D1); }
+.fy-swnode__figures i { width: 8px; height: 20px; border-radius: 4px 4px 2px 2px; background: #8C837A; }
+.fy-swnode__figures i:nth-child(2) { width: 10px; height: 27px; border-radius: 5px 5px 2px 2px; background: #7A2E43; }
+.fy-swnode__figures i:nth-child(3) { height: 18px; }
+.fy-swnode__figures::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 9px; background-image: linear-gradient(90deg, rgba(10, 10, 10, .12) 1px, transparent 1px); background-size: 13px 9px; }
+/* A shot with a filed playblast says so beside its chip; the word is the prototype's. */
+.fy-swrow__playblast { color: var(--neutral-400); font: 400 9.5px var(--font-mono, ui-monospace, monospace); white-space: nowrap; }
 .fy-swnode__port { position: absolute; width: 16px; height: 16px; border: 2px solid var(--card); border-radius: 999px; background: var(--muted-foreground); box-shadow: 0 0 0 1px var(--border); cursor: crosshair; z-index: 4; }
 .fy-swnode__socket { position: absolute; z-index: 3; width: 12px; height: 12px; box-sizing: border-box; border: 2px solid var(--card); border-radius: 999px; background: var(--muted-foreground); box-shadow: 0 0 0 1px var(--border); }
 .fy-swnode__socket[data-port="out"] { background: var(--success); }
@@ -6659,41 +6674,101 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-swflow__findings { margin: 0; padding-left: 18px; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
 
 /* Stage — a derived three.js block and an authored-camera playblast, not another shot editor. */
-.fy-swstage { flex: 1; min-height: 0; padding: 12px 0 20px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+/* The Stage — a greybox previs of one shot: viewport, panel, timeline (the design's Stage tab). */
+.fy-swstage { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 11px; overflow: hidden; }
 .fy-swstage--empty { align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
 .fy-swstage__head { flex: none; display: flex; align-items: center; gap: 8px; }
-.fy-swstage__head > div { flex: 1; min-width: 0; }
-.fy-swstage__head h2 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.01em; }
-.fy-swstage__head span { color: var(--muted-foreground); font: 400 9.5px var(--font-mono); }
-.fy-swstage__head button { min-height: 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--foreground); padding: 5px 9px; cursor: pointer; font: 500 10.5px var(--font-sans); }
-.fy-swstage__head button:disabled { opacity: .4; cursor: default; }
-.fy-swstage__head .fy-swstage__play { display: inline-flex; align-items: center; gap: 6px; border-color: var(--foreground); background: var(--foreground); color: var(--background); }
-.fy-swstage__work { flex: 1; min-height: 320px; display: grid; grid-template-columns: minmax(0, 1fr) 220px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
-.fy-swstage__viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: var(--media-overlay-bg); }
-.fy-swstage__viewport canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
-.fy-swstage__viewport canvas:active { cursor: grabbing; }
-.fy-swstage__viewport[data-playing="true"] canvas { cursor: default; }
-.fy-swstage__shot, .fy-swstage__mode { position: absolute; z-index: 2; top: 10px; padding: 3px 6px; border-radius: 5px; background: color-mix(in srgb, var(--media-overlay-bg) 68%, transparent); color: var(--media-overlay-fg); font: 500 9px var(--font-mono); pointer-events: none; }
-.fy-swstage__shot { left: 10px; }
-.fy-swstage__mode { right: 10px; }
-.fy-swstage__progress { position: absolute; z-index: 2; left: 10px; right: 10px; bottom: 9px; height: 2px; overflow: hidden; border-radius: 99px; background: color-mix(in srgb, var(--media-overlay-fg) 22%, transparent); pointer-events: none; }
-.fy-swstage__progress > span { display: block; width: 0; height: 100%; background: var(--media-overlay-fg); }
-.fy-swstage__inspector { box-sizing: border-box; padding: 15px; border-left: 1px solid var(--border); background: var(--background); overflow-y: auto; }
-.fy-swstage__eyebrow { display: block; margin-bottom: 6px; color: var(--neutral-400); font: 500 9px var(--font-mono); text-transform: uppercase; letter-spacing: .06em; }
-.fy-swstage__inspector h3 { margin: 0; font: 650 13px/1.35 var(--font-sans); }
-.fy-swstage__inspector p { margin: 7px 0 13px; color: var(--muted-foreground); font: 400 11px/1.55 var(--font-sans); }
-.fy-swstage__inspector dl { display: grid; gap: 1px; margin: 0 0 16px; border: 1px solid var(--border); background: var(--border); }
-.fy-swstage__inspector dl > div { display: flex; align-items: center; gap: 8px; padding: 6px 7px; background: var(--card); }
-.fy-swstage__inspector dt { flex: 1; color: var(--muted-foreground); font-size: 10px; }
-.fy-swstage__inspector dd { margin: 0; font: 400 9.5px var(--font-mono); }
-.fy-swstage__cast { display: flex; flex-wrap: wrap; gap: 4px; }
-.fy-swstage__cast span { padding: 3px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font-size: 9.5px; }
-.fy-swstage__inspector .fy-swstage__hint { margin: 14px 0 0; font: 400 9px/1.55 var(--font-mono); }
-.fy-swstage__shots { flex: none; display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; }
-.fy-swstage__shots button { min-width: 116px; max-width: 170px; display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); color: var(--foreground); padding: 6px 8px; text-align: left; cursor: pointer; }
-.fy-swstage__shots button[data-current="true"] { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
-.fy-swstage__shots button > span { color: var(--muted-foreground); font: 400 9px var(--font-mono); }
-.fy-swstage__shots button > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.fy-swstage__head > strong { font: 600 12.5px var(--font-sans); letter-spacing: -0.01em; }
+.fy-swstage__step { width: 22px; height: 22px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-swstage__step:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-swstage__step:disabled { opacity: .35; cursor: default; }
+.fy-swstage__meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--neutral-400); font: 400 10px var(--font-mono); }
+.fy-swstage__version { color: var(--neutral-400); font: 400 10px var(--font-mono); }
+.fy-swstage__work { flex: 1; min-height: 320px; display: flex; gap: 12px; }
+/* The gradient is the design's, and it is a fixed light ground on purpose: the ink lines, the
+   grid and the labels are drawn in fixed dark values, so the previs reads the same in both themes. */
+.fy-swstage__viewport { flex: 1; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: linear-gradient(180deg, #F2F0EC 0%, #E6E3DD 62%, #DAD6CF 100%); }
+.fy-swstage__canvas { position: absolute; inset: 0; }
+.fy-swstage__canvas canvas { touch-action: none; }
+.fy-swstage__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; color: var(--muted-foreground); font-size: 12px; }
+.fy-swstage__busy { position: absolute; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; background: rgba(242, 240, 236, .8); color: var(--muted-foreground); font: 400 11px var(--font-mono); animation: fy-swstage-pulse 1.6s ease-in-out infinite; }
+@keyframes fy-swstage-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.fy-swstage__safe { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.fy-swstage__safe > span:nth-child(1) { position: absolute; left: 6%; right: 6%; top: 8%; bottom: 8%; border: 1px solid rgba(10, 10, 10, .3); }
+.fy-swstage__safe > span:nth-child(2) { position: absolute; left: 50%; top: 8%; bottom: 8%; width: 1px; background: rgba(10, 10, 10, .1); }
+.fy-swstage__safe > span:nth-child(3) { position: absolute; left: 6%; right: 6%; top: 50%; height: 1px; background: rgba(10, 10, 10, .1); }
+.fy-swstage__modes { position: absolute; top: 11px; left: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, .92); box-shadow: var(--shadow-xs); }
+.fy-swstage__modes button { border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); padding: 4px 11px; cursor: pointer; font: 400 10.5px var(--font-sans); transition: var(--transition-control); }
+.fy-swstage__modes button:hover { color: var(--foreground); }
+.fy-swstage__modes button[data-on="true"] { background: #0A0A0A; color: #FAFAFA; font-weight: 500; cursor: default; }
+.fy-swstage__corner { position: absolute; top: 11px; right: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 6px; }
+.fy-swstage__moved { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-md); color: var(--muted-foreground); font: 400 10px var(--font-mono); }
+.fy-swstage__moved button { border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 6px; transition: var(--transition-control); }
+.fy-swstage__moved button:hover { background: var(--accent); color: var(--foreground); }
+.fy-swstage__moved .fy-swstage__keep { width: auto; padding: 4px 10px; background: var(--foreground); color: var(--background); font: 500 10.5px var(--font-sans); }
+.fy-swstage__moved .fy-swstage__keep:hover { background: var(--foreground); color: var(--background); opacity: .88; }
+.fy-swstage__moved .fy-swstage__keep:disabled { opacity: .45; cursor: default; }
+.fy-swstage__ghost { width: 28px; height: 28px; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: rgba(255, 255, 255, .92); color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-swstage__ghost:hover:not(:disabled) { color: var(--foreground); }
+.fy-swstage__ghost[aria-pressed="true"] { border-color: #0A0A0A; background: #0A0A0A; color: #FAFAFA; }
+.fy-swstage__ghost:disabled { opacity: .4; cursor: default; }
+.fy-swstage__pip { border: 1px solid rgba(255, 255, 255, .5); border-radius: 8px; box-shadow: var(--shadow-md); overflow: hidden; }
+.fy-swstage__pip > span { position: absolute; left: 0; right: 0; top: 0; padding: 4px 7px; background: linear-gradient(rgba(10, 10, 10, .62), rgba(10, 10, 10, 0)); color: #fff; font: 500 9px var(--font-mono); letter-spacing: .05em; }
+.fy-swstage__label { padding: 2px 7px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255, 255, 255, .94); color: #0A0A0A; font: 500 9.5px var(--font-sans); letter-spacing: .01em; }
+.fy-swstage__label--camera { padding: 3px 8px; border: 0; background: #0A0A0A; color: #FAFAFA; box-shadow: var(--shadow-sm); font: 600 10px var(--font-sans); letter-spacing: .06em; }
+.fy-swstage__panel { width: 238px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.fy-swstage__note { margin: 0; color: var(--muted-foreground); font: 400 11.5px/1.6 var(--font-sans); text-wrap: pretty; }
+.fy-swstage__sel { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 8px; background: var(--secondary); color: var(--neutral-400); font: 400 10.5px var(--font-mono); }
+.fy-swstage__sel > span:first-child { width: 7px; height: 7px; flex: none; border: 1px solid var(--neutral-400); border-radius: 2px; transform: rotate(45deg); }
+.fy-swstage__sel > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-swstage__sel[data-selected="true"] { color: var(--foreground); font-weight: 500; }
+.fy-swstage__sel[data-selected="true"] > span:first-child { border: 0; background: var(--foreground); }
+.fy-swstage__block { display: flex; flex-direction: column; gap: 5px; }
+.fy-swstage__block + .fy-swstage__block, .fy-swstage__block--playblast { border-top: 1px solid var(--border); padding-top: 11px; }
+.fy-swstage__block--playblast { gap: 7px; }
+.fy-swstage__eyebrow { display: flex; align-items: baseline; gap: 8px; }
+.fy-swstage__eyebrow > span:first-child { flex: 1; color: var(--muted-foreground); font: 500 10px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
+.fy-swstage__eyebrow > span:last-child:not(:first-child) { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
+.fy-swstage__row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.fy-swstage__row > span:first-child { width: 48px; flex: none; color: var(--neutral-400); font: 400 10px var(--font-mono); }
+.fy-swstage__row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
+.fy-swstage__block--playblast .fy-swstage__row > span:first-child { flex: 1; }
+.fy-swstage__block--playblast .fy-swstage__row > span:nth-child(2) { flex: none; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
+.fy-swstage__block--playblast .fy-swstage__row > span[data-filed="true"] { color: var(--success); }
+.fy-swstage__nudge { display: inline-flex; align-items: center; gap: 1px; flex: none; }
+.fy-swstage__nudge button { width: 19px; height: 19px; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-swstage__nudge button:hover { background: var(--accent); color: var(--foreground); }
+.fy-swstage__row--chips { align-items: flex-start; }
+.fy-swstage__row--chips > span:first-child { padding-top: 4px; }
+.fy-swstage__chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+.fy-swstage__chips button { border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted-foreground); padding: 2px 7px; cursor: pointer; font: 400 10px var(--font-sans); transition: var(--transition-control); }
+.fy-swstage__chips button:hover { background: var(--accent); color: var(--foreground); }
+.fy-swstage__chips button[data-on="true"] { border-color: var(--foreground); background: var(--foreground); color: var(--background); font-weight: 500; cursor: default; }
+.fy-swstage__quiet { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
+.fy-swstage__mover { display: flex; align-items: center; gap: 8px; min-height: 22px; border: 0; background: transparent; color: var(--foreground); padding: 0; cursor: pointer; text-align: left; }
+.fy-swstage__mover > span:first-child { width: 8px; height: 8px; flex: none; border-radius: 2px; }
+.fy-swstage__mover > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
+.fy-swstage__mover > span:last-child { border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
+.fy-swstage__mover > span[data-walks="true"] { border-color: transparent; background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-swstage__spacer { flex: 1; }
+.fy-swstage__block--playblast .ui-btn { width: 100%; }
+.fy-swstage__timeline { flex: none; display: flex; align-items: center; gap: 12px; }
+.fy-swstage__play { width: 30px; height: 30px; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: 999px; background: var(--foreground); color: var(--background); cursor: pointer; transition: var(--transition-control); }
+.fy-swstage__play:hover { opacity: .88; }
+.fy-swstage__time { flex: none; color: var(--muted-foreground); font: 400 11px var(--font-mono); }
+.fy-swstage__track { position: relative; flex: 1; min-width: 0; height: 30px; display: flex; align-items: center; }
+.fy-swstage__rail { position: absolute; left: 0; right: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--secondary); }
+.fy-swstage__head-fill { position: absolute; left: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--foreground); transition: width .1s linear; }
+.fy-swstage__key { position: absolute; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; z-index: 2; }
+.fy-swstage__key[data-mid="true"] { cursor: ew-resize; z-index: 3; }
+.fy-swstage__key > span { width: 9px; height: 9px; box-sizing: border-box; border: 1px solid var(--foreground); border-radius: 2px; background: var(--background); transform: translateY(3px) rotate(45deg); }
+.fy-swstage__key[data-on="true"] > span { background: var(--foreground); }
+.fy-swstage__key > b { color: var(--foreground); font: 500 9px var(--font-mono); white-space: nowrap; pointer-events: none; }
+.fy-swstage__keytools { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.fy-swstage__keytools button { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
+.fy-swstage__keytools button:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-swstage__keytools button:disabled { opacity: .35; cursor: default; }
+.fy-swstage__count { flex: none; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 
 /* Preview — the scene's authored clock, with boards visible at the seams. */
 .fy-swpreview { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 12px; }
@@ -6753,9 +6828,9 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   .fy-swboard-sheet__foot { align-items: stretch; flex-direction: column; }
   .fy-sw > .fy-arke { width: auto; border-left: 0; border-top: 1px solid var(--border); min-height: 520px; }
   .fy-swstage { min-height: 560px; overflow: visible; }
-  .fy-swstage__work { grid-template-columns: minmax(0, 1fr); overflow: visible; }
+  .fy-swstage__work { flex-direction: column; }
   .fy-swstage__viewport { min-height: 340px; }
-  .fy-swstage__inspector { border-left: 0; border-top: 1px solid var(--border); }
+  .fy-swstage__panel { width: auto; }
   .fy-swpreview { min-height: 520px; }
   .fy-swpreview__controls { align-items: stretch; flex-direction: column; gap: 8px; }
 }
@@ -6768,7 +6843,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   .fy-swrow__stale button, .fy-swrow__prompt button,
   .fy-swvariants__panel > header button, .fy-swvariants__grid article button,
   .fy-swpreview__transport button, .fy-swpreview__filmstrip button,
-  .fy-swstage__head button, .fy-swstage__shots button { min-width: 44px; min-height: 44px; }
+  .fy-swstage__step, .fy-swstage__play, .fy-swstage__keytools button, .fy-swstage__nudge button,
+  .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button { min-width: 44px; min-height: 44px; }
   .fy-swboard__sheet, .fy-swboard-sheet__head button { width: 44px; height: 44px; }
   .fy-swboard-sheet__retry-cell, .fy-swboard-sheet__foot button { min-width: 44px; min-height: 44px; }
 }

@@ -64,6 +64,77 @@ export const ShotFramingSchema = z
   .strict();
 export type ShotFraming = z.infer<typeof ShotFramingSchema>;
 
+/**
+ * The Stage: where the camera is and how it moves, blocked out on a greybox previs in metres
+ * and seconds (the scene workspace's Stage tab). Authored ON the shot because the camera move
+ * is a shot decision — one owner, versioned with the scene, restorable with it — and every
+ * number here is one the prompt can state.
+ *
+ * World metres, +Y up; a figure faces +Z until it walks. An anchored key's `p` and `l` are
+ * OFFSETS from that subject rather than world positions, so lengthening a walk moves every
+ * key with it and none has to be re-authored. Aim is its own channel: `track` follows a
+ * subject live at height `l[1]`, which is how a camera swinging round a walking figure keeps
+ * them centred without a key per step.
+ *
+ * Nothing here is required beyond identity: this is the read path, and a `.min()` on the key
+ * list would delete a hand-edited scene from a world on disk.
+ */
+export const StagingKeySchema = z
+  .object({
+    /** Seconds from the shot's start. */
+    t: z.number().min(0),
+    /** Camera position — world metres, or an offset from `anchor`. */
+    p: z.tuple([z.number(), z.number(), z.number()]),
+    /** Where the lens points — world metres, or an offset from `anchor`. */
+    l: z.tuple([z.number(), z.number(), z.number()]),
+    /** The cast sheet the position rides with. */
+    anchor: SlugSchema.optional(),
+    /** The cast sheet the aim follows live. */
+    track: SlugSchema.optional(),
+  })
+  .strict();
+export type StagingKey = z.infer<typeof StagingKeySchema>;
+
+export const StagingFigureSchema = z
+  .object({
+    sheetId: SlugSchema,
+    x: z.number(),
+    z: z.number(),
+    /** Where the figure ends the shot; absent holds still. */
+    to: z.tuple([z.number(), z.number()]).optional(),
+  })
+  .strict();
+export type StagingFigure = z.infer<typeof StagingFigureSchema>;
+
+/** Set massing: a translucent box, named so the label reads on the floor. */
+export const StagingSetSchema = z
+  .object({
+    name: z.string().min(1),
+    x: z.number(),
+    z: z.number(),
+    w: z.number(),
+    h: z.number(),
+    d: z.number(),
+  })
+  .strict();
+export type StagingSet = z.infer<typeof StagingSetSchema>;
+
+export const ShotStagingSchema = z
+  .object({
+    /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
+    version: z.number().int().min(1),
+    cast: z.array(StagingFigureSchema),
+    sets: z.array(StagingSetSchema),
+    keys: z.array(StagingKeySchema),
+    /** The playblast filed from this staging, and the staging version it shows. */
+    playblast: z
+      .object({ artifactId: ArtifactIdSchema, version: z.number().int().min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type ShotStaging = z.infer<typeof ShotStagingSchema>;
+
 export const ShotSchema = z
   .object({
     id: ShotIdSchema,
@@ -82,6 +153,8 @@ export const ShotSchema = z
       .optional(),
     /** Turn 97 (14d): the structured camera. A present field overrides the scene's `defaults`. */
     framing: ShotFramingSchema.optional(),
+    /** The blocked-out camera move and cast positions (the Stage), where the shot has been staged. */
+    staging: ShotStagingSchema.optional(),
     /**
      * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
      * an authored intent — the dispatch already chains when a boundary still exists; this records

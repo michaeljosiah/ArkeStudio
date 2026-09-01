@@ -3039,6 +3039,24 @@ export function acceptTake(worldId: string, productionId: string, takeId: string
 }
 
 /** Pick one local image, retain it as a Variant, and use it for this shot's frame. */
+/**
+ * File a playblast the Stage rendered. The bytes go the way a pasted picture does — the host
+ * spools them and sends the target with `sourcePath` appended — so a browser session, which has
+ * no host, answers with the reason rather than pretending.
+ */
+export async function stagePlayblast(
+  target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+  bytes: Uint8Array,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const host = bridge;
+  if (!host?.attachBytes) return { ok: false, reason: "filing needs the desktop app — the file was downloaded instead" };
+  try {
+    return await host.attachBytes(target, "playblast.webm", bytes);
+  } catch {
+    return { ok: false, reason: "the playblast could not be handed to the app" };
+  }
+}
+
 export function importShotFrame(worldId: string, productionId: string, shotId: string): void {
   send({
     kind: "import-shot-frame",

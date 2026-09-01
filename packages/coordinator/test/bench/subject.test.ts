@@ -725,6 +725,78 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
   });
 });
 
+describe("the Stage's handoff to the bench", () => {
+  it("opens a staged shot in video mode with the playblast riding and the move written as beats", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    world.artifacts.push({
+      id: "ar_01J8G0000000000000000000A1",
+      kind: "video",
+      file: "playblast.webm",
+      hash: "sha256:0123456789abcdef",
+      origin: { by: "user" },
+      links: ["sh_12"],
+      production: "saltlight",
+      mediaInfo: { durationSec: 4, hasAudio: false },
+      created: CLOCK(),
+    });
+    shot.staging = {
+      version: 2,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0 }],
+      sets: [],
+      keys: [
+        { t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+        { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+      ],
+      playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 2 },
+    };
+
+    const video = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    assert.equal(video.prefill.composer.mode, "video");
+    assert.equal(video.prefill.composer.params.kind, "video");
+    assert.equal(video.prefill.composer.params.durationSec, 4);
+    const playblast = video.prefill.references.find((reference) => reference.kind === "video");
+    assert.equal(playblast?.label, "Staging · Playblast v2");
+    assert.equal(playblast?.detail, "2 keys · dolly");
+    assert.equal(playblast?.durationSec, 4);
+    assert.equal(playblast?.ride, "when-supported");
+    assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A1", hash: "sha256:0123456789abcdef" });
+    assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
+    // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
+    assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
+    // No route maps a video reference yet, so the tile shows and says it is not riding.
+    assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+
+    // The ordinary handoff is a still, and a still has no move to describe.
+    const image = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(image.ok);
+    if (!image.ok) return;
+    assert.equal(image.prefill.composer.mode, "image");
+    assert.equal(image.prefill.references.some((reference) => reference.kind === "video"), false);
+    assert.doesNotMatch(image.prefill.composer.brief, /Camera move/);
+  });
+});
+
 describe("subject Accept filing (SPEC-036 R-24)", () => {
   it("copies a still into production, selects its frame artifact, and retries without duplication", async () => {
     const { dir, store } = await openWorld();
