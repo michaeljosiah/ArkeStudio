@@ -1334,10 +1334,20 @@ function sceneVersionMoved(run: FrameRunState, production: ProductionBundle, sho
   return scene !== undefined && scene.version !== run.run.sceneVersion && run.run.steps.some((step) => step.updateShotIds.includes(shotId));
 }
 
-function failureCopy(state: { failureClass: "transient" | "terminal" | "provider-fault" | "offline" | null; error: string | null }): string {
+function failureCopy(state: Pick<NonNullable<ReturnType<typeof frameRunShotState>>, "status" | "failureClass" | "error">): string {
   if (state.failureClass === "provider-fault") return state.error === null ? "provider fault · lane held" : `${state.error} · lane held`;
   if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
-  if (state.failureClass === "offline") return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "offline") {
+    // Offline holds the lane only while the job is still queued or running: the dispatcher paused
+    // it and resumes it when connectivity returns. Once the job has given up after its last
+    // attempt it is terminal and nothing is paused, so a failed row that still said "lane held"
+    // promised a resume that was never coming (issue 697). A credential rejection is the other
+    // way round — it terminalizes and pauses the lane — which is why provider-fault above keeps
+    // the suffix on a failed row.
+    const held = state.status === "queued" || state.status === "submitting" || state.status === "running";
+    if (!held) return state.error ?? "offline";
+    return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  }
   return state.error ?? "came back dark";
 }
 

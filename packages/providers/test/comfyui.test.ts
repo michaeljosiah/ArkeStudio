@@ -21,7 +21,7 @@ import { redactComfyUiBody, scrubPaths } from "../src/comfyui/redact.js";
 import { captureProviderClient } from "../src/capture.js";
 import { FalClient } from "../src/clients/fal.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
-import type { FetchLike } from "../src/types.js";
+import { ProviderBusyError, type FetchLike } from "../src/types.js";
 
 /**
  * SPEC-021 §3.2: recipes round-trip like any model, substitution cannot alter structure, the
@@ -1467,8 +1467,14 @@ describe("making room on the graphics card", () => {
     { match: /\/upload\/image$/, status: 200, body: { name: "c.wav", subfolder: "" } },
     { match: /\/prompt$/, status: 200, body: { prompt_id: "p-1", node_errors: {} } },
   ];
-  const client = (free: () => Promise<number | null>, fetch: FetchLike) =>
-    new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free);
+  // No real clock in here: the wait after `/free` is a quarter of a second a poll, and a test
+  // that sat through the window would be the stall the window exists to bound.
+  // The clock is the sum of the sleeps, so the window is measured rather than counted.
+  const client = (free: () => Promise<number | null>, fetch: FetchLike, onSleep: (ms: number) => void = () => {}) => {
+    let now = 0;
+    const sleep = async (ms: number): Promise<void> => { now += ms; onSleep(ms); };
+    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, sleep, () => now);
+  };
 
   it("dispatches when the card cannot be measured", async () => {
     // D15: unknown stays unknown and dispatches. A card this build cannot read is not a card it
@@ -1517,10 +1523,84 @@ describe("making room on the graphics card", () => {
         assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
         assert.match(err.message, /this machine has 3\.0 GB free/);
         assert.match(err.message, /close other programs/);
+        // "then try again" has to be true (#692): a full card is a busy engine, not a refused
+        // request, so the queue must read it as transient — backed off, retried, and offered a
+        // live Retry when it gives up — never as the witnessed rejection that ends an attempt.
+        assert.ok(err instanceof ProviderBusyError, "a busy card declares its own class");
+        assert.equal(err.failureClass, "transient");
+        assert.equal("submissionRejected" in err, false);
         return true;
       },
     );
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
     assert.equal(calls.some((c) => c.url.endsWith("/upload/image")), false, "no clip left on the engine");
+  });
+
+  it("keeps asking the card for a moment, because the engine says yes before it has put anything down", async () => {
+    // `/free` sets flags and answers; the worker thread unloads when it next wakes. Measured the
+    // instant the answer lands, the card is the card as it was — which #692 saw as alternate
+    // shots refused on a card that was free a moment later.
+    const { fetch, calls } = engineFake(ROUTES);
+    const readings = [3000, 3000, 3000, 9000];
+    const sleeps: number[] = [];
+    await client(async () => readings.shift() ?? 9000, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE);
+    assert.equal(calls.filter((c) => c.url.endsWith("/free")).length, 1, "asked to put things down once, never once per poll");
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "dispatched once the card emptied");
+    assert.equal(sleeps.length, 2, "one wait per short reading after the engine answered");
+  });
+
+  it("gives up after a bounded window, with the same refusal", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    let asked = 0;
+    const sleeps: number[] = [];
+    await assert.rejects(
+      client(async () => { asked += 1; return 3072; }, fetch, (ms) => { sleeps.push(ms); }).submit("", VOICE),
+      (err: Error) => {
+        assert.ok(err instanceof ProviderBusyError, "still the transient it was");
+        assert.match(err.message, /needs 7\.8 GB of free graphics memory/);
+        assert.match(err.message, /this machine has 3\.0 GB free/);
+        return true;
+      },
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+    assert.ok(sleeps.length >= 4 && sleeps.length <= 12, `bounded, and long enough to matter: ${sleeps.length} waits`);
+    assert.ok(sleeps.reduce((sum, ms) => sum + ms, 0) <= 3000, "a couple of seconds, not a stall");
+    assert.equal(asked, sleeps.length + 1, "measured before asking, on the answer, and after every wait that ended inside the window");
+  });
+
+  it("bounds the window by elapsed time, so a slow probe cannot stretch it", async () => {
+    // The desktop's probe is an nvidia-smi run with a five-second timeout. Counting polls would
+    // let eight slow readings hold a job in `submitting` for most of a minute.
+    const { fetch, calls } = engineFake(ROUTES);
+    let now = 0;
+    let asked = 0;
+    const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
+    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, async (ms) => { now += ms; }, () => now);
+    await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
+    assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+  });
+
+  it("stops waiting on the card the moment the job is cancelled", async () => {
+    // The engine's slot is held until submit returns — the queue frees it in runJob's finally —
+    // so a cancelled job that kept polling would block the next local job for the rest of the
+    // window. The wait ends on the signal, and the loop reads it after every wait.
+    const { fetch, calls } = engineFake(ROUTES);
+    const controller = new AbortController();
+    let now = 0;
+    let asked = 0;
+    const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
+    const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
+    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, sleep, () => now);
+    await assert.rejects(cancelled.submit("", { ...VOICE, signal: controller.signal }), (err: Error) => err.name === "AbortError");
+    assert.equal(asked, 2, "measured before asking and on the answer, then never again");
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
+  });
+
+  it("dispatches when the card stops being measurable mid-window (D15)", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    const readings: Array<number | null> = [3000, 3000, null];
+    await client(async () => readings.shift() ?? null, fetch).submit("", VOICE);
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
   });
 });
