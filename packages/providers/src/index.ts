@@ -63,6 +63,7 @@ export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
+  ProviderBusyError,
   ProviderRequestRejectedError,
   type CommandResult,
   type CommandRunner,

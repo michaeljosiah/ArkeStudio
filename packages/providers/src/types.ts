@@ -141,6 +141,27 @@ export class ProviderRequestRejectedError extends Error {
   }
 }
 
+/**
+ * The provider cannot take the request right now, and nothing about the request is why — a
+ * graphics card without room for the recipe, most likely, with another job's model still on it.
+ * The same request is expected to succeed later, so this is SPEC-009's transient: the queue
+ * backs off and retries it, bounded, and a failure it gives up on keeps a live Retry (SPEC-036
+ * R-18). A rejection of the request itself is `ProviderRequestRejectedError`, and terminal.
+ *
+ * Found by a run of six local frames (#692): the card ran short on alternate shots, the message
+ * told the user to try again, and the queue had classed the failure terminal — so no surface
+ * could offer the retry the message promised. The class is declared here, where the condition
+ * is witnessed, because no reading of the message can tell it from a refusal.
+ */
+export class ProviderBusyError extends Error {
+  readonly failureClass = "transient" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderBusyError";
+  }
+}
+
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface CommandResult {

@@ -145,3 +145,27 @@ describe("classifyError: what the chain does not get to override", () => {
     assert.equal(classifyError(abort), "transient");
   });
 });
+
+describe("classifyError: a class the client declared on the error", () => {
+  const BUSY = "comfyui: Draft Image needs 5.9 GB of free graphics memory and this machine has 2.0 GB free. Close other programs using the graphics card, then try again.";
+
+  it("believes an error that names its own class, where the message alone would be terminal", () => {
+    // A card without room for a recipe (#692): no status, no transport code, and not a word a
+    // pattern could tell from a refusal. D5's default made it terminal, the message told the
+    // user to try again, and nothing on screen let them.
+    assert.equal(classifyError(new Error(BUSY)), "terminal", "the message on its own is the D5 default");
+    assert.equal(classifyError(Object.assign(new Error(BUSY), { failureClass: "transient" })), "transient");
+  });
+
+  it("keeps a declared class ahead of the chain and the message alike", () => {
+    const refused = fetchFailed(coded("Error", "ECONNREFUSED", "connect ECONNREFUSED 127.0.0.1:8188"));
+    assert.equal(classifyError(refused), "offline", "the chain on its own says offline");
+    assert.equal(classifyError(Object.assign(refused, { failureClass: "transient" })), "transient");
+  });
+
+  it("ignores a declaration that names no class it knows", () => {
+    assert.equal(classifyError(Object.assign(new Error("HTTP 503"), { failureClass: "retryable" })), "transient");
+    assert.equal(classifyError(Object.assign(new Error("HTTP 503"), { failureClass: 7 })), "transient");
+    assert.equal(classifyError(Object.assign(new Error("inscrutable"), { failureClass: "" })), "terminal");
+  });
+});

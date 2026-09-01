@@ -838,7 +838,7 @@ export class JobQueue {
       }
       case "offline": {
         if (job.attempt >= this.maxAttempts) {
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
         await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
@@ -848,7 +848,10 @@ export class JobQueue {
       }
       case "transient": {
         if (job.attempt >= this.maxAttempts) {
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
+          // The class the queue retried on is the class the failed row keeps: an exhausted
+          // transient reads `came back dark · Retry` (SPEC-036 R-18), and re-reading the wrapped
+          // message would lose a class that was only ever declared on the error object (#692).
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
         await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
