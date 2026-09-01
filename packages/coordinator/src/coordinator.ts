@@ -10152,7 +10152,14 @@ export class Coordinator {
         } catch {
           // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
           // the last known figures, and nothing gets disabled by a broken probe.
+          return;
         }
+        // The recipe walk reads these same figures, but its answer is a published snapshot
+        // rather than a live read: it is computed when the engine publishes, which for an
+        // already-running URL engine is once, at startup, before anything has been measured.
+        // Without this the rows keep saying "VRAM could not be measured" on a machine whose
+        // card was measured seconds later and is displayed at the top of the same panel (#687).
+        await this.refreshComfyUi();
         return;
       }
       case "permission-reply": {

@@ -1127,9 +1127,13 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
 
     const unknown = await service.status({ vramMb: null, memMb: 32000, diskFreeMb: 1000 });
     assert.equal(unknown.recipes[0]!.state, "unknown");
-    assert.match(
-      unknown.recipes[0]!.reason!,
-      /VRAM could not be measured\. The 6 GB floor was not checked\./,
+    // Whole sentence, not a match: the local branch of this string spent a release reading
+    // "VRAM VRAM could not be measured", the word arriving once from the locality ternary and
+    // once from the literal after it. A substring assertion cannot see a duplicate it sits
+    // inside, which is why the old regex here passed throughout (issue 687).
+    assert.equal(
+      unknown.recipes[0]!.reason,
+      "VRAM could not be measured. The 6 GB floor was not checked.",
     );
   });
 
