@@ -47,6 +47,7 @@ import {
   type TimelineClipId,
   type TimelineCommand,
   basePictureTrack,
+  buildRenderPlan,
   orderedTrackClips,
   secondsToFrames,
   storyOrderDrift,
@@ -101,7 +102,8 @@ import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
-import { mediaSpans, mediaTimeFor, spanAt, spineSpans, storySpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { mediaTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { planSpans } from "../lib/plan-playback.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
   MIN_CLIP_SEC,
@@ -4135,29 +4137,33 @@ export function CutScreen() {
    * becomes media-only the moment its last shot is removed, and any placement inherited from the
    * old story timeline can sit well beyond the minimum canvas.
    */
+  /*
+   * One render plan for the preview and the export (SPEC-038 R-1, issue 680). The viewer asks
+   * the plan what is visible; the coordinator hands the same plan to FFmpeg. A production the
+   * plan refuses is a production the export refuses, so the refusal blocks the editor by name.
+   */
+  const renderPlan =
+    production && !production.spine && timelineError === null
+      ? buildRenderPlan({ production, artifacts, timeline: timelineState, scope: { kind: "production" }, preset: "review-cut" })
+      : null;
+  if (renderPlan !== null && !renderPlan.ok && timelineError === null) timelineError = renderPlan.reason;
+  const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
   const canvasSec = spineCut
     ? spineCut.trackDurationSec
     : mediaOnly
       ? mediaCanvasSec(overlays)
-      : (cut?.totalSec ?? 0);
-  const filmSec = mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : canvasSec;
+      : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0);
+  const filmSec = mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : (planTotalSec ?? canvasSec);
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
   // Where the cuts are, so a dragged clip lands on a boundary rather than near one — the snap the
   // LTX port has always offered and nothing had yet asked for.
   /*
-   * What the preview shows. A media-only production has no shots to walk, so its spans come from
-   * the placed picture — without this the transport advanced over a film the viewer reported as
-   * empty, because `storySpans` has no entries to build from.
+   * What the preview shows: the plan's answer at every edge, on either clock. The song clock keeps
+   * its own spans until its timeline is materialised (SPEC-037 §2.3).
    */
-  const spans = spineCut
-    ? spineSpans(spineCut)
-    : mediaOnly
-      ? mediaSpans(placedPicture)
-      : cut
-        ? storySpans(cut)
-        : [];
+  const spans = spineCut ? spineSpans(spineCut) : renderPlan?.ok ? planSpans(renderPlan.plan) : [];
   /*
    * What a person placed, which a split does not add to: splitting files a second record over the
    * same file, and counting both would report two clips for one piece of media still drawn as one

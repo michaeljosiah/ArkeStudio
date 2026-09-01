@@ -24,8 +24,6 @@ import {
   type PermissionRequest,
   type HealthComponent,
   buildExportPlan,
-  exportAudioClips,
-  exportOverlays,
   deriveEpisodeCut,
   episodeExportRefusals,
   sortScenes,
@@ -36,7 +34,7 @@ import {
   spineExportRefusals,
   ulid,
   CutFileSchema,
-  resolvePictureTimeline,
+  buildRenderPlan,
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
@@ -6886,29 +6884,24 @@ export class Coordinator {
              * dropped rather than rendered as an absence — and picture and sound are resolved
              * separately because a lane holds either, and one clip can contribute both.
              */
-            const artifacts = store.getBundle().artifacts;
-            const overlays = exportOverlays(production.cut.overlays, artifacts);
-            const audio = exportAudioClips(production.cut.overlays, artifacts);
-            let pictureCut;
-            try {
-              pictureCut = resolvePictureTimeline(production, production.timeline);
-            } catch (error) {
-              emitProgress(
-                attemptId,
-                "failed",
-                0,
-                null,
-                `timeline is not ready to export: ${error instanceof Error ? error.message : String(error)}`,
-              );
+            /*
+             * One render plan for the preview and this encode (SPEC-038 R-1, R-4; issue 680).
+             * Built once, here, before the encode starts: the arguments close over this frozen
+             * plan, so an edit landing while FFmpeg runs changes the next export and never this
+             * one. A refusal is the plan's own words, which are the words the editor showed.
+             */
+            const projected = buildRenderPlan({
+              production,
+              artifacts: store.getBundle().artifacts,
+              timeline: production.timeline,
+              scope: { kind: "production" },
+              preset: msg.preset,
+            });
+            if (!projected.ok) {
+              emitProgress(attemptId, "failed", 0, null, `timeline is not ready to export: ${projected.reason}`);
               return;
             }
-            const plan = buildExportPlan(
-              pictureCut,
-              msg.preset,
-              overlays,
-              audio,
-              productionFrameRate(production.meta),
-            );
+            const plan = projected.plan;
             /*
              * Nothing to render, said before the encode (issue 453).
              *
