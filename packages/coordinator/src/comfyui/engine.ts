@@ -172,8 +172,8 @@ export function engineInstanceId(source: string, location: string): string {
  * The host spelling from the URL's raw authority, before WHATWG canonicalisation.
  *
  * `new URL("http://2130706433")` reports `127.0.0.1`. That is useful browser behaviour and the
- * wrong security boundary: only an address the user literally wrote as Arke's two accepted
- * loopback literals may inherit the biometric-upload promise made for this machine.
+ * wrong security boundary: only an address the user literally wrote as one of Arke's accepted
+ * loopback hosts may inherit the biometric-upload promise made for this machine.
  */
 function rawUrlHostname(value: string): string | null {
   const authority = /^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/i.exec(value.trim())?.[1];
@@ -187,13 +187,13 @@ function rawUrlHostname(value: string): string | null {
   return colon < 0 ? hostAndPort : hostAndPort.slice(0, colon);
 }
 
-/** A URL engine is local only for the literal IP hosts `127.0.0.1` and `::1`. */
+/** A URL engine is local only for the exact loopback hosts the desktop transport confines. */
 export function comfyUiUrlIsLoopback(value: string): boolean {
   try {
     const url = new URL(value);
     const parsed = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
     const raw = rawUrlHostname(value)?.toLowerCase();
-    return (raw === "127.0.0.1" && parsed === "127.0.0.1") || (raw === "::1" && parsed === "::1");
+    return raw === parsed && (parsed === "127.0.0.1" || parsed === "::1" || parsed === "localhost");
   } catch {
     return false;
   }

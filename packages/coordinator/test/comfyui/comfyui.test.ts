@@ -535,24 +535,31 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(service.engineIdentity()?.locality, "remote");
   });
 
-  it("classifies localhost and a loopback-looking hostname as remote engine identities", async () => {
-    for (const url of ["http://localhost:8188", "http://127.attacker.example:8188"]) {
-      const world = fakeWorld();
-      world.urls.set(url, { version: "0.33.1" });
-      const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
-      await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
-      assert.equal(service.engineStatus().locality, "remote", url);
-      assert.equal(service.engineIdentity()?.locality, "remote", url);
-      assert.equal(service.voiceUploadDestination()?.label, new URL(url).host, url);
-    }
+  it("classifies exact localhost as local throughout the engine identity", async () => {
+    const url = "http://localhost:8188";
+    const world = fakeWorld();
+    world.urls.set(url, { version: "0.33.1" });
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({ enginePath: null, engineUrl: url, modelsDir: null });
+    assert.equal(service.engineStatus().locality, "local");
+    assert.equal(service.engineIdentity()?.locality, "local");
+    assert.equal(service.voiceUploadDestination(), null);
   });
 
-  it("trusts only literal loopback IP hosts", () => {
-    for (const url of ["http://127.0.0.1:8188", "http://[::1]:8188"]) {
+  it("trusts only exact loopback hosts", () => {
+    for (const url of [
+      "http://127.0.0.1:8188",
+      "http://[::1]:8188",
+      "http://localhost:8188",
+      "HTTP://LOCALHOST:8188",
+      "http://user@localhost:8188",
+    ]) {
       assert.equal(comfyUiUrlIsLoopback(url), true, url);
     }
     for (const url of [
-      "http://localhost:8188",
+      "http://localhost.:8188",
+      "http://localhost.example:8188",
+      "http://localhost@evil.example:8188",
       "http://127.0.0.2:8188",
       "http://127.attacker.example:8188",
       "http://2130706433:8188",
@@ -1104,13 +1111,13 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
 
   it("VRAM below the floor: both figures and the cloud alternative; unknown stays unknown and dispatchable (D15)", async () => {
     const world = fakeWorld();
-    world.urls.set("http://127.0.0.1:8188", {});
+    world.urls.set("http://localhost:8188", {});
     world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
     world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
     const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
     await service.applySettings({
       enginePath: null,
-      engineUrl: "http://127.0.0.1:8188",
+      engineUrl: "http://localhost:8188",
       modelsDir: "C:/models",
     });
 
