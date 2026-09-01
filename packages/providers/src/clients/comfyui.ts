@@ -146,6 +146,20 @@ interface QueueEntryish {
  * All-false declarations (D12): a spawned engine's queue dies with Arke and recovery requeues;
  * a surviving URL engine's ambiguous window is the user's honest decision, priced as GPU time.
  */
+/**
+ * How long the card is given to empty after `/free`, and how often it is asked (SPEC-022 §2.6).
+ *
+ * The engine answers `/free` before it has done anything: the route sets two flags on its prompt
+ * queue, and the worker thread unloads when it next wakes — after the response, and only once any
+ * prompt it is executing has finished — with CUDA handing the memory back after that. A card
+ * measured the instant the response lands is the card as it was, so the one re-measurement this
+ * used to make was nearly always short, and #692's run refused alternate shots on a card each
+ * success had left full for the next. Two seconds covers an idle engine putting a video model
+ * down; a card still short after that has something else on it, and refusing is the honest answer.
+ */
+const UNLOAD_POLL_MS = 250;
+const UNLOAD_POLLS = 8;
+
 export class ComfyUiClient implements ProviderClient {
   readonly id = "comfyui" as const;
   readonly declarations: ClientDeclarations = {
@@ -176,6 +190,8 @@ export class ComfyUiClient implements ProviderClient {
     private readonly freeVramMb?: () => Promise<number | null>,
     /** The device probe belongs to this computer and is invalid for a remote URL engine. */
     private readonly engineLocality: EngineLocality = () => "local",
+    /** How the card is waited on after `/free` — injected so the tests need no real clock. */
+    private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   ) {}
 
   /** Latest step count per prompt, fed by the engine's socket and read by `poll`. */
@@ -483,9 +499,10 @@ export class ComfyUiClient implements ProviderClient {
    * question asked at the moment it matters, of the device rather than of the engine.
    *
    * When it is short, the engine is asked to put down whatever it is still holding — a video
-   * model from an earlier job, most likely — and the card is measured again. That is worth doing
-   * only when short: `/free` throws away the model cache, so calling it before every dispatch
-   * would buy a cold start on every line.
+   * model from an earlier job, most likely — and the card is measured again, for a couple of
+   * seconds: the engine says yes before it has put anything down (see UNLOAD_POLL_MS). Asking is
+   * worth doing only when short: `/free` throws away the model cache, so calling it before every
+   * dispatch would buy a cold start on every line.
    *
    * Still short is a busy card, not a refused request: nothing about the job is wrong, and the
    * same job goes through once the card is free. It is thrown as the transient it is, so the
@@ -506,7 +523,14 @@ export class ComfyUiClient implements ProviderClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ unload_models: true, free_memory: true }),
     }).catch(() => undefined);
-    const after = await this.freeVramMb().catch(() => null);
+    // Asked again over a short window rather than once, because the engine has said yes before
+    // it has done anything. Unknown mid-window dispatches exactly as unknown at the start does:
+    // the probe failing is not the card filling up.
+    let after = await this.freeVramMb().catch(() => null);
+    for (let poll = 0; after !== null && after < need && poll < UNLOAD_POLLS; poll += 1) {
+      await this.sleep(UNLOAD_POLL_MS);
+      after = await this.freeVramMb().catch(() => null);
+    }
     if (after === null || after >= need) return;
     const gb = (mb: number): string => `${(mb / 1024).toFixed(1)} GB`;
     throw new ProviderBusyError(
