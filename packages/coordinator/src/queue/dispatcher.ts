@@ -213,6 +213,8 @@ interface Lane {
   maxConcurrent: number;
   minIntervalMs: number;
   nextAllowedAt: number;
+  /** Earliest dispatch time per queued job — a retry's backoff (R-9), held by the job itself. */
+  notBefore: Map<string, number>;
   successStreak: number;
   timer: NodeJS.Timeout | null;
   recoveryGate: Promise<void> | null;
@@ -354,6 +356,7 @@ export class JobQueue {
         maxConcurrent: this.concurrencyFor(provider),
         minIntervalMs: this.baseIntervalMs,
         nextAllowedAt: 0,
+        notBefore: new Map(),
         successStreak: 0,
         timer: null,
         recoveryGate: null,
@@ -542,9 +545,9 @@ export class JobQueue {
       return;
     }
     while (lane.inFlight.size < lane.maxConcurrent && lane.fifo.length > 0) {
-      const jobId = lane.fifo.shift()!;
-      const job = this.jobs.get(jobId);
-      if (!job || job.status !== "queued") continue;
+      const jobId = this.nextDispatchable(lane);
+      if (jobId === null) break;
+      const job = this.jobs.get(jobId)!;
       const runKey = this.engineRunKey(job);
       lane.inFlight.add(runKey);
       lane.nextAllowedAt = Date.now() + lane.minIntervalMs;
@@ -562,6 +565,42 @@ export class JobQueue {
         break;
       }
     }
+  }
+
+  /**
+   * The first job in the FIFO whose turn has come, taken out of it — or null, with a pump
+   * scheduled for the earliest one still waiting out its backoff.
+   *
+   * A retry used to go back into the FIFO with only a lane timer to hold it, and the timer held
+   * nothing: the failing attempt's own completion pumps the lane, and an attempt that outlasted
+   * the dispatch interval — every real provider call — met an open gate and went straight back
+   * out. R-9's backoff was computed and never waited on, and a card still putting a model down
+   * (#692) was asked four times over in the time it takes to ask once. The wait belongs to the
+   * job rather than the lane: the sibling behind it is not what failed, and holding the whole
+   * lane for one retry's backoff would let a single 503 stall everything queued behind it.
+   */
+  private nextDispatchable(lane: Lane): string | null {
+    const now = Date.now();
+    let earliest = Infinity;
+    for (let i = 0; i < lane.fifo.length; i += 1) {
+      const jobId = lane.fifo[i]!;
+      const job = this.jobs.get(jobId);
+      if (!job || job.status !== "queued") {
+        lane.fifo.splice(i, 1);
+        lane.notBefore.delete(jobId);
+        i -= 1;
+        continue;
+      }
+      const at = lane.notBefore.get(jobId) ?? 0;
+      if (at <= now) {
+        lane.fifo.splice(i, 1);
+        lane.notBefore.delete(jobId);
+        return jobId;
+      }
+      earliest = Math.min(earliest, at);
+    }
+    if (earliest !== Infinity) this.schedule(lane, earliest - now);
+    return null;
   }
 
   private schedule(lane: Lane, delayMs: number): void {
@@ -856,8 +895,14 @@ export class JobQueue {
         }
         await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
         const lane = this.lane(job.provider);
+        const wait = backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng);
+        // The gate is the job's own (nextDispatchable); the timer below only wakes the pump and
+        // never held anything. A 429 is deliberately not pushed onto the lane-wide gate as well:
+        // noteRateLimit has already widened the lane's interval (R-10), which is the lane's
+        // answer to it, and this backoff is the job's.
+        lane.notBefore.set(job.id, Date.now() + wait);
         lane.fifo.push(job.id);
-        this.schedule(lane, backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+        this.schedule(lane, wait);
         return;
       }
       case "terminal": {
@@ -1242,6 +1287,7 @@ export class JobQueue {
   private async cancelInner(jobId: string, job: Job): Promise<void> {
     const lane = this.lane(job.provider);
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
+    lane.notBefore.delete(jobId);
     const submitAbort = this.submitAborts.get(jobId);
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
@@ -1709,6 +1755,7 @@ export class JobQueue {
     for (const job of orphans) {
       const lane = this.lane(job.provider);
       lane.fifo = lane.fifo.filter((id) => id !== job.id);
+      lane.notBefore.delete(job.id);
       const replacement = requeueAs?.(job) ?? null;
       if (replacement !== null) {
         const retiredRun = this.engineRunKey(job);

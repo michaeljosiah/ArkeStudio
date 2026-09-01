@@ -52,6 +52,9 @@ async function makeHarness(
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     admit?: JobQueueOptions["admit"];
+    backoffBaseMs?: number;
+    backoffCapMs?: number;
+    rng?: () => number;
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -73,6 +76,9 @@ function build(
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     admit?: JobQueueOptions["admit"];
+    backoffBaseMs?: number;
+    backoffCapMs?: number;
+    rng?: () => number;
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -119,6 +125,9 @@ function build(
     baseIntervalMs: 1,
     ...(opts.baseConcurrency !== undefined ? { baseConcurrency: opts.baseConcurrency } : {}),
     ...(opts.providerConcurrency !== undefined ? { providerConcurrency: opts.providerConcurrency } : {}),
+    ...(opts.backoffBaseMs !== undefined ? { backoffBaseMs: opts.backoffBaseMs } : {}),
+    ...(opts.backoffCapMs !== undefined ? { backoffCapMs: opts.backoffCapMs } : {}),
+    ...(opts.rng !== undefined ? { rng: opts.rng } : {}),
   });
   const harness: Harness = {
     queue,
@@ -1737,6 +1746,48 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.equal(foldedJob(h, job.id)?.attempt, 3);
     assert.equal(foldedJob(h, job.id)?.failureClass, "transient", "an exhausted transient keeps a live Retry (SPEC-036 R-18)");
     assert.match(foldedJob(h, job.id)?.error ?? "", /^gave up after 3 attempts: comfyui: Draft Image needs/);
+    h.queue.dispose();
+  });
+
+  it("waits out the backoff before resubmitting, even when the attempt outlasted the interval", async () => {
+    // The lane timer alone never held a retry: the failing attempt's own completion pumps the
+    // lane, and an attempt longer than the dispatch interval met an open gate. Every real
+    // provider call is longer than the interval, so every retry went straight back out.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 30;
+    const h = await makeHarness({ fake }, { backoffBaseMs: 200, backoffCapMs: 200, rng: () => 1 });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    assert.equal(fake.submitCount, 2);
+    const gap = fake.submitStartedAt[1]! - fake.submitStartedAt[0]!;
+    assert.ok(gap >= 200, `resubmitted ${gap} ms after the first attempt began; the backoff is 200 ms`);
+    h.queue.dispose();
+  });
+
+  it("holds only the job that is backing off, never a sibling queued behind it", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 10;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 300, backoffCapMs: 300, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    await until(() => [first.id, second.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both jobs to succeed", FOLD_MS);
+    assert.equal(fake.submitCount, 3);
+    const [a, b, aAgain] = fake.submittedKeys;
+    assert.notEqual(b, a, "the sibling went out while the first job waited");
+    assert.equal(aAgain, a, "the first job went out last, after its backoff");
+    const held = fake.submitStartedAt[2]! - fake.submitStartedAt[0]!;
+    assert.ok(held >= 300, `the retry waited ${held} ms; the backoff is 300 ms`);
     h.queue.dispose();
   });
 });
