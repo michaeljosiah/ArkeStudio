@@ -7,7 +7,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { ENGINE_LABEL, type ClientState, type SetupComponent } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __handleFrameForTest, __setStateForTest, __stateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -99,6 +99,17 @@ describe("the suppression is deleted, not relocated (R-6, D22, matrix row 39)", 
 });
 
 describe("Engines: one row per engine, and the components under it (R-68, R-71)", () => {
+  it("folds a ComfyUI status that arrives after the startup snapshot", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const comfyui = stateWith().app.comfyui!;
+    __handleFrameForTest({
+      kind: "event",
+      seq: 1,
+      event: { at: "2026-08-27T12:00:00.000Z", type: "comfyui.status", comfyui },
+    });
+    assert.deepEqual(__stateForTest().state?.app.comfyui, comfyui);
+  });
+
   it("mounts at its own route and rails the three engines", () => {
     const html = render("/settings/providers");
     assert.match(html, /data-screen="settings-providers"/);
@@ -157,6 +168,27 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // partition rather than overlap — the recipe list takes what the engine has answered for,
     // the model group only what it has not (SPEC-034 R-7, SPEC-033 R-6).
     assert.doesNotMatch(comfy, /RECIPES[\s\S]*MODELS/);
+  });
+
+  it("offers a connection check, not a restart, for an external URL", () => {
+    const comfyui = stateWith().app.comfyui!;
+    const html = plain(
+      render(
+        "/settings/providers?provider=comfyui",
+        stateWith({
+          comfyui: {
+            ...comfyui,
+            engine: {
+              ...comfyui.engine,
+              source: "user-url",
+              location: "http://127.0.0.1:8188",
+            },
+          },
+        }),
+      ),
+    );
+    assert.match(html, /Check now/);
+    assert.doesNotMatch(html, /Restart/);
   });
 
   it("leaves a provider's tool to Providers, which owns the credential it is for (R-1)", () => {

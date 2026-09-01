@@ -482,6 +482,35 @@ describe("the engine service resolves, probes, and never spawns a URL (§2.2, D1
     assert.equal(service.baseUrl(), null, "an incompatible engine is not dispatched to");
   });
 
+  it("Check now reconnects a URL that became available after its first probe", async () => {
+    const world = fakeWorld();
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
+    assert.equal(service.engineStatus().state, "unreachable");
+
+    world.urls.set("http://127.0.0.1:8188", { version: "0.33.1" });
+    await service.checkNow();
+
+    assert.equal(service.engineStatus().state, "ready");
+    assert.equal(service.baseUrl(), "http://127.0.0.1:8188");
+    await service.dispose();
+  });
+
+  it("Check now repeats discovery when ComfyUI starts after Arke", async () => {
+    const world = fakeWorld();
+    const service = new ComfyUiEngineService(engineDeps(world, "C:/app"));
+    await service.applySettings(NO_SETTINGS);
+    assert.deepEqual(service.engineStatus().detected, []);
+
+    world.urls.set("http://127.0.0.1:8188", { version: "0.33.1" });
+    await service.checkNow();
+
+    assert.deepEqual(service.engineStatus().detected, [
+      { location: "http://127.0.0.1:8188", version: "0.33.1" },
+    ]);
+    await service.dispose();
+  });
+
   it("classifies a non-loopback URL as remote", async () => {
     const world = fakeWorld();
     world.urls.set("http://10.0.0.4:8188", { version: "0.33.1" });

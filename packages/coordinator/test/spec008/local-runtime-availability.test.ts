@@ -172,6 +172,7 @@ describe("the gate hears the engine, not the provider flag (SPEC-033 R-9, R-13)"
     const service = {
       engineStatus,
       status: async () => ({ engine: engineStatus(), recipes: [], checkedAt: "2026-08-27T12:00:00.000Z" }),
+      checkNow: async () => {},
       reverify: async () => {},
       subscribe: () => () => {},
       dispose: async () => {},
