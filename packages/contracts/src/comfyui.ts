@@ -49,7 +49,7 @@ export const ComfyUiEngineStatusSchema = z
   .object({
     source: ComfyUiEngineSourceSchema,
     state: ComfyUiEngineStateSchema,
-    /** Actual data locality. A user URL is local only for literal `127.0.0.1` or `::1`. */
+    /** Actual data locality. A user URL is local only for an exact, transport-confined loopback host. */
     locality: z.enum(["local", "remote"]),
     location: z.string().min(1).nullable(),
     /** `system.comfyui_version` as reported; null until an engine has answered. */
