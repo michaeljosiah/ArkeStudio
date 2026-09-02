@@ -368,16 +368,17 @@ describe("the shell collapses rather than demanding the width (R-28)", () => {
   it("Arke can be put away and brought back, and the work keeps the room", async () => {
     const mounted = await mount();
     assert.ok(q(mounted, ".fy-arke"), "the dock starts open");
-    const put = q(mounted, ".fy-sw__put")!;
-    assert.equal(put.getAttribute("aria-pressed"), "false");
-
-    await click(put);
+    // The put-away lives on the dock itself (a pin in its head), and a slim rail brings it back.
+    await click(q(mounted, '.fy-arke__head [aria-label="Unpin the assistant"]')!);
     assert.equal(q(mounted, ".fy-arke"), null, "put away, not merely hidden");
     assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "false");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and the rows are still there");
+    const rail = q(mounted, ".fy-sw__rail")!;
+    assert.match(rail.textContent ?? "", /Ask Arke/);
 
-    await click(q(mounted, ".fy-sw__put")!);
+    await click(rail);
     assert.ok(q(mounted, ".fy-arke"), "and back again");
+    assert.equal(q(mounted, ".fy-sw__rail"), null);
   });
 });
 
@@ -658,8 +659,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       assert.equal(menu.parentElement, dom.document.body, "viewport coordinates live outside the query container");
       assert.doesNotMatch(menu.getAttribute("style") ?? "", /NaN/);
       assert.doesNotMatch(menu.getAttribute("style") ?? "", /visibility:\s*hidden/, "the menu is visible before focus enters it");
-      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Advanced", "opening moves focus into the menu");
-      assert.deepEqual(portalFocus.filter((entry) => entry.label === "Advanced"), [{ label: "Advanced", hidden: false }]);
+      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Stage this shot", "opening moves focus into the menu");
+      assert.deepEqual(portalFocus.filter((entry) => entry.label === "Stage this shot"), [{ label: "Stage this shot", hidden: false }]);
 
       const down = new dom.window.Event("keydown", { bubbles: true });
       Object.defineProperty(down, "key", { value: "ArrowDown" });
@@ -672,7 +673,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
         "Open in generator",
         "viewport repositioning does not reset menu focus",
       );
-      assert.equal(portalFocus.filter((entry) => entry.label === "Advanced").length, 1);
+      assert.equal(portalFocus.filter((entry) => entry.label === "Stage this shot").length, 1);
 
       const tab = new dom.window.Event("keydown", { bubbles: true });
       Object.defineProperty(tab, "key", { value: "Tab" });
@@ -1144,11 +1145,11 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const shots = orderedShots(scene);
 
+    // The shot label is the reorder handle (R-6); dropping it on another row moves the shot before it.
     const second = q(mounted, `[data-testid="workspace-row-${shots[1]!.id}"]`)!;
-    await click(second.querySelector(".fy-swedit") as HTMLElement);
-    const moveBefore = menuButtons()
-      .find((button) => button.textContent === "Move before previous") as unknown as HTMLElement;
-    await click(moveBefore);
+    const firstBand = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"] .fy-swrow__band`)!;
+    await act(async () => second.querySelector(".fy-swrow__label")!.dispatchEvent(new dom.window.Event("dragstart", { bubbles: true })));
+    await act(async () => firstBand.dispatchEvent(new dom.window.Event("drop", { bubbles: true, cancelable: true })));
     assert.deepEqual(sent.at(-1), {
       kind: "scene-command",
       worldId: FIXTURE_WORLD_ID,
@@ -1343,14 +1344,14 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mount();
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
-    const links = all(mounted, ".fy-swnode__generate");
-    assert.ok(links.some((button) => button.textContent === "Open in generator"));
-    assert.ok(links.some((button) => button.textContent === "Render board"));
-    const shotLink = links.find((button) => button.textContent === "Open in generator")!;
+    const links = all(mounted, ".fy-swnode__run");
+    assert.ok(links.some((button) => /^(Generate|Regenerate)$/.test(button.textContent ?? "")));
+    assert.ok(links.some((button) => button.textContent === "Render"));
+    const shotLink = q(mounted, '.fy-swnode[data-kind="shot"] .fy-swnode__run')!;
     await click(shotLink);
     const command = sent.findLast((message) => message.kind === "bench-open-subject");
     assert.ok(command && command.kind === "bench-open-subject" && command.subject.kind === "shot");
-    assert.ok(all(mounted, ".fy-swnode__generate").every((button) => button.hasAttribute("disabled")));
+    assert.ok(all(mounted, ".fy-swnode__run").every((button) => button.hasAttribute("disabled")));
   });
 
   it("uses Enter for a Flow shot's generator action and Space only for selection", async () => {
@@ -1615,7 +1616,7 @@ describe("an empty scene keeps its canonical path (SPEC-029 R-29)", () => {
     delete (empty as { flow?: unknown }).flow;
     production.scenes[at] = empty;
     const mounted = await mountState(state);
-    await click(q(mounted, ".fy-sw__put")!);
+    await click(q(mounted, '.fy-arke__head [aria-label="Unpin the assistant"]')!);
     assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "false");
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
 
@@ -2042,12 +2043,12 @@ describe("Flow is a canvas (the prototype's §11)", () => {
     assert.equal(node.getAttribute("style"), dragged, "a graph change preserves stable manually placed nodes");
     assert.equal(board.getAttribute("style"), boardDragged, "a board keeps its manual position while its content identity survives");
 
-    const fit = all(mounted, ".fy-swzoom button").find((b) => b.textContent === "Fit")!;
+    const fit = all(mounted, ".fy-swzoom button").find((b) => b.textContent === "Arrange")!;
     await click(fit);
     const layer = q(mounted, '[data-testid="workspace-flow-layer"]')!;
     assert.match(layer.getAttribute("style") ?? "", /scale\(/, "fit leaves a transform behind it");
-    assert.equal(node.getAttribute("style"), before, "Fit clears the dragged session position");
-    assert.notEqual(board.getAttribute("style"), boardDragged, "Fit clears the derived node's manual position too");
+    assert.equal(node.getAttribute("style"), before, "Arrange clears the dragged session position");
+    assert.notEqual(board.getAttribute("style"), boardDragged, "Arrange clears the derived node's manual position too");
   });
 
   it("keeps dragged board and clip positions with their members when an earlier board is inserted", async () => {
@@ -2158,7 +2159,7 @@ describe("Flow is a canvas (the prototype's §11)", () => {
       const board = all(mounted, '.fy-swnode[data-kind="board"]')[0]!;
       assert.match(board.getAttribute("style") ?? "", /left:\s*280px/);
       assert.match(board.getAttribute("data-testid") ?? "", /b:sh_12:sh_13$/, "board identity names its stable members");
-      await click(all(mounted, ".fy-swzoom button").find((button) => button.textContent === "Fit")!);
+      await click(all(mounted, ".fy-swzoom button").find((button) => button.textContent === "Arrange")!);
       assert.ok(Number.parseInt(q(mounted, ".fy-swzoom__label")?.textContent ?? "0", 10) >= 50);
     } finally {
       Reflect.deleteProperty(globalThis, "ResizeObserver");

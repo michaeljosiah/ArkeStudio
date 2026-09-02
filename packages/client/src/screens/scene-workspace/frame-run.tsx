@@ -4,7 +4,6 @@ import {
   orderedShots,
   sceneImageOutput,
   ulid,
-  type ArtifactSidecar,
   type FrameRunQuote,
   type FrameRunState,
   type FrameRunStepState,
@@ -14,9 +13,8 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
-import { ChevronLeft, ChevronRight, X } from "../../components/icons.js";
+import { X } from "../../components/icons.js";
 import { Button } from "../../components/ui.js";
-import { mediaUrl } from "../../lib/media.js";
 import {
   clearFrameRunQuote,
   clearFrameRunStartResult,
@@ -70,11 +68,10 @@ function moveRadio(event: KeyboardEvent<HTMLElement>, select: (index: number) =>
   radios[next]?.focus();
 }
 
-function boardCap(model: ManifestModel | null): { seconds: number; panels: number | undefined; name: string } {
+function boardCap(model: ManifestModel | null): { seconds: number; panels: number | undefined } {
   return {
     seconds: model?.limits.maxDurationSec ?? 10,
     panels: model?.limits.storyboardPanels,
-    name: model?.displayName ?? "routed video model",
   };
 }
 
@@ -255,6 +252,10 @@ function GenerateFramesDialogOpen({
     quote.signature !== null &&
     quote.estimatedMicroUsd !== null;
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
+  // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
+  // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
+  // the backend's refusal, because switching scope would not change anything there.
+  const emptyScope = shotId === undefined && scope === "missing" && missing.length === 0 && shots.length > 0;
 
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
@@ -308,11 +309,8 @@ function GenerateFramesDialogOpen({
     >
       <div className="fy-swgen__panel">
         <header className="fy-swgen__head">
-          <div>
-            <span className="fy-swgen__eyebrow">Scene {scene.number} · frames</span>
-            <h2 id={titleId}>Generate {matchingOptions ? quote.includedCount : included.length} frame{(matchingOptions ? quote.includedCount : included.length) === 1 ? "" : "s"}</h2>
-          </div>
-          <button type="button" aria-label="Close generate frames" onClick={onClose}><X size={18} /></button>
+          <h2 id={titleId}>Generate {matchingOptions ? quote.includedCount : included.length} frame{(matchingOptions ? quote.includedCount : included.length) === 1 ? "" : "s"}</h2>
+          <span className="fy-swgen__scene">scene {scene.number}</span>
         </header>
 
         {shotId === undefined ? <section className="fy-swgen__section">
@@ -331,7 +329,7 @@ function GenerateFramesDialogOpen({
                 onClick={() => setMode(candidate)}
               >
                 <strong>{candidate === "per-shot" ? "Per shot" : "Shot board"}</strong>
-                <span>{candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together - a retry redoes the whole board."}</span>
+                <span>{candidate === "per-shot" ? "Fastest, cheap to retry, but characters and light drift between shots." : "Holds cast, light and grade together — a retry redoes the whole board."}</span>
               </button>
             ))}
           </div>
@@ -354,14 +352,14 @@ function GenerateFramesDialogOpen({
                 onKeyDown={(event) => moveRadio(event, (at) => setScope((["missing", "all"] as const)[at]!))}
                 onClick={() => setScope(candidate)}
               >
-                {candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"} <span>{candidate === "missing" ? missing.length : shots.length}</span>
+                {candidate === "missing" ? "Shots without a frame" : "Every shot in the scene"}
               </button>
             ))}
           </div>
         </section> : null}
 
         <section className="fy-swgen__section">
-          <h3>Image model</h3>
+          <h3>Model</h3>
           <div className="fy-swgen__models" role="radiogroup" aria-label="Image model">
             {modelChoices.map((choice) => {
               const candidate = choice.model;
@@ -377,13 +375,14 @@ function GenerateFramesDialogOpen({
                   tabIndex={selected ? 0 : -1}
                   aria-checked={selected}
                   data-on={selected ? "true" : undefined}
+                  title={candidate !== null && candidateUnavailable ? strandReason(state, candidate) : undefined}
                   onKeyDown={(event) => moveRadio(event, (at) => setModelId(modelChoices[at]!.id))}
                   onClick={() => setModelId(choice.id)}
                 >
-                  <strong>{candidate?.displayName ?? choice.id}{candidateUnavailable ? " · unavailable" : ""}</strong>
+                  {candidate?.displayName ?? choice.id}{candidateUnavailable ? " · unavailable" : ""}
                   <span>{candidate === null
-                    ? "No longer in the model catalogue"
-                    : `${output!.width}x${output!.height} output · ${candidate.accepts.referenceImages} reference${candidate.accepts.referenceImages === 1 ? "" : "s"}${candidateUnavailable ? ` · ${strandReason(state, candidate)}` : ""}`}</span>
+                    ? "not in the catalogue"
+                    : `${output!.width}×${output!.height} · ${candidate.accepts.referenceImages} ref${candidate.accepts.referenceImages === 1 ? "" : "s"}`}</span>
                 </button>
               );
             })}
@@ -392,21 +391,32 @@ function GenerateFramesDialogOpen({
         </section>
 
         <footer className="fy-swgen__foot">
-          <div className="fy-swgen__context" aria-label="Inherited scene context">
-            {contextLabels(scene, world, production, aspect).map((label) => <span key={label}>{label}</span>)}
-          </div>
-          <div className="fy-swgen__estimate">
-            {startPending !== null
-              ? "Starting frame run..."
-              : matchingOptions
-                ? `${quote.includedCount} frame${quote.includedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
-                : quotePending
-                  ? "Checking current price..."
-                  : "Quote unavailable"}
-          </div>
-          <Button onClick={onClose}>Cancel</Button>
-          {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-          {blockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{blockedReason}</p> : <Button variant="primary" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
+          <span className="fy-swgen__context" aria-label="Inherited scene context">
+            applies the scene context · {contextValues(scene, world, aspect).join(", ")}
+          </span>
+          {emptyScope ? (
+            <div className="fy-swgen__actions">
+              <span className="fy-swgen__empty">
+                Every shot already has a frame. Switch to <button type="button" onClick={() => setScope("all")}>every shot in the scene</button> to re-render.
+              </span>
+              <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+            </div>
+          ) : (
+            <div className="fy-swgen__actions">
+              <span className="fy-swgen__estimate">
+                {startPending !== null
+                  ? "Starting frame run..."
+                  : matchingOptions
+                    ? `${quote.includedCount} frame${quote.includedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
+                    : quotePending
+                      ? "Checking current price..."
+                      : "Quote unavailable"}
+              </span>
+              <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+              {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
+              {blockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{blockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
+            </div>
+          )}
         </footer>
       </div>
     </dialog>
@@ -425,40 +435,54 @@ function PackingPreview({
   const numberById = new Map(shots.map((shot) => [shot.id, shot.number]));
   return (
     <section className="fy-swgen__section fy-swgen__packing">
-      <h3>Packing preview · {cap.name} · {cap.seconds}s cap{cap.panels === undefined ? "" : ` · ${cap.panels} panels`}</h3>
+      <div className="fy-swgen__packing-head">
+        <h3>Packing</h3>
+        {pack.ok ? <span>{shots.length} shot{shots.length === 1 ? "" : "s"} → {pack.boards.length} board{pack.boards.length === 1 ? "" : "s"}</span> : null}
+        <span>{cap.seconds}s clip limit</span>
+      </div>
       {!pack.ok ? <p className="fy-swgen__guard">{pack.reason}</p> : (
         <>
-          <p className="fy-swgen__packline">{shots.length} shots → {pack.boards.length} board{pack.boards.length === 1 ? "" : "s"}</p>
           <div className="fy-swgen__boards">
             {pack.boards.map((board) => {
+              // Sums of shot durations are binary floats, so the labels are fixed to one
+              // decimal or a 16.5s board can print as 16.499999999s.
               const headroom = cap.seconds - board.durationSec;
+              const first = numberById.get(board.memberShotIds[0]!);
+              const last = numberById.get(board.memberShotIds.at(-1)!);
               return (
                 <article key={board.letter}>
-                  <strong>Board {board.letter} · shots {numberById.get(board.memberShotIds[0]!)}–{numberById.get(board.memberShotIds.at(-1)!)}</strong>
-                  <span>{board.durationSec}s / {cap.seconds}s · <i data-tight={headroom < 2 ? "true" : undefined}>{headroom}s spare</i></span>
-                  {board.reason === null ? null : <span>split · {board.reason}</span>}
-                  {board.notes.map((note, index) => <span key={`${note.text}:${index}`} data-kind={note.kind}>{note.text}</span>)}
+                  <div className="fy-swgen__board-head">
+                    <strong>Board {board.letter}</strong>
+                    <span>{board.memberShotIds.length > 1 ? `shots ${first}–${last}` : `shot ${first}`}</span>
+                    <span>{board.durationSec.toFixed(1)}s / {cap.seconds}s</span>
+                  </div>
+                  {board.notes.length === 0 ? null : (
+                    <div className="fy-swgen__board-notes">
+                      {board.notes.map((note, index) => <span key={`${note.text}:${index}`} data-kind={note.kind}>{note.text}</span>)}
+                    </div>
+                  )}
+                  <div className="fy-swgen__board-foot">
+                    {board.reason === null ? null : <span>split · {board.reason}</span>}
+                    <span data-tight={headroom < 2 ? "true" : undefined}>{headroom.toFixed(1)}s spare</span>
+                  </div>
                 </article>
               );
             })}
           </div>
-          <p className="fy-swgen__hint">This preview explains continuity packing. The current quote decides whether the selected image model can render the composite.</p>
+          <p className="fy-swgen__hint">Boards break at the clip limit and wherever continuity breaks. Frames are sliced back onto the shots; the board is kept as the source for retries.</p>
         </>
       )}
     </section>
   );
 }
 
-function contextLabels(scene: SceneRecord, world: WorldBundle, production: ProductionBundle, aspect: string): string[] {
+/** The same values the header's context chips carry, in the same order. */
+function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): string[] {
   const location = scene.inherits?.location === undefined
     ? null
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
-  return [
-    location === null ? null : `location · ${location}`,
-    scene.inherits?.timeOfDay === undefined ? null : `time · ${scene.inherits.timeOfDay}`,
-    production.meta.styleOverride === undefined ? `world look · v${world.artDirection.version}` : "production look",
-    `aspect · ${aspect}`,
-  ].filter((label): label is string => label !== null);
+  return [location, scene.inherits?.timeOfDay ?? null, scene.inherits?.tone ?? null, aspect]
+    .filter((value): value is string => value !== null);
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview: () => void }) {
@@ -473,30 +497,33 @@ export function FrameRunBar({ run, worldId, productionId, onReview }: { run: Fra
   if (run.status === "completed") {
     return (
       <div className="fy-swrun fy-swrun--complete" data-testid="frame-run-bar" role="status">
-        <strong>{run.filedShots} frame{run.filedShots === 1 ? "" : "s"} added{run.failedShots > 0 ? ` · ${run.failedShots} failed` : ""}{run.supersededShots > 0 ? ` · ${run.supersededShots} overtaken` : ""}</strong>
-        <span className="fy-swrun__rule" />
-        <button type="button" onClick={onReview}>Review</button>
-        <button type="button" aria-label="Dismiss frame run" onClick={() => control("frame-run-dismiss")}><X size={14} /></button>
+        <span className="fy-swrun__done">{run.filedShots} frame{run.filedShots === 1 ? "" : "s"} added{run.failedShots > 0 ? ` · ${run.failedShots} failed` : ""}{run.supersededShots > 0 ? ` · ${run.supersededShots} overtaken` : ""}</span>
+        <button type="button" className="fy-swrun__review" data-primary="true" onClick={onReview}>Review</button>
+        <button type="button" className="fy-swrun__dismiss" aria-label="Dismiss frame run" onClick={() => control("frame-run-dismiss")}><X size={11} /></button>
       </div>
     );
   }
-  if (run.status === "cancelled") {
-    return (
-      <div className="fy-swrun fy-swrun--complete" data-testid="frame-run-bar" role="status">
-        <strong>Frame run cancelled</strong><span className="fy-swrun__rule" />
-        <button type="button" aria-label="Dismiss frame run" onClick={() => control("frame-run-dismiss")}><X size={14} /></button>
-      </div>
-    );
-  }
+  // Cancel returns the row to idle at once. The workspace dismisses a cancelled record itself
+  // and never mounts the bar for one, so there is no cancelled state to draw here.
+  if (run.status === "cancelled") return null;
+  const pct = total === 0 ? 0 : Math.round((settled / total) * 100);
   return (
     <div className="fy-swrun" data-testid="frame-run-bar" role="status">
-      <progress value={settled} max={Math.max(1, total)} aria-label={`${settled} of ${total} frames`} />
+      <span
+        className="fy-swrun__bar"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={settled}
+        aria-label={`${settled} of ${total} frames`}
+      >
+        <span style={{ width: `${pct}%` }} />
+      </span>
       <strong>{run.status === "paused" ? `paused${finishing > 0 ? ` · finishing ${finishing}` : ""}` : currentLabel ?? "Preparing frames"}</strong>
-      <span>{settled} of {total} frames</span>
-      {run.etaSec === null ? null : <span>~{Math.ceil(run.etaSec)}s left</span>}
-      <span className="fy-swrun__rule" />
+      <span className="fy-swrun__count">{settled} of {total} frames</span>
+      {run.etaSec === null ? null : <span className="fy-swrun__eta">~{Math.ceil(run.etaSec)}s left</span>}
       {run.status === "paused"
-        ? <button type="button" onClick={() => control("frame-run-resume")}>Resume</button>
+        ? <button type="button" data-primary="true" onClick={() => control("frame-run-resume")}>Resume</button>
         : <button type="button" onClick={() => control("frame-run-pause")}>Pause</button>}
       <button type="button" onClick={() => control("frame-run-cancel")}>Cancel</button>
     </div>
@@ -535,57 +562,4 @@ function runFailureCopy(state: Pick<FrameRunStepState, "status" | "failureClass"
   }
   if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
   return state.error ?? "came back dark";
-}
-
-export function FrameRunReview({
-  run,
-  scene,
-  artifacts,
-  worldSlug,
-  open,
-  onClose,
-}: {
-  run: FrameRunState;
-  scene: SceneRecord;
-  artifacts: readonly ArtifactSidecar[];
-  worldSlug: string | undefined;
-  open: boolean;
-  onClose: () => void;
-}) {
-  const jobs = new Set(run.run.steps.flatMap((step) => step.jobId === null ? [] : [step.jobId]));
-  const shotOrder = run.run.steps.filter((step) => step.grain === "initial").flatMap((step) => step.updateShotIds);
-  const frames = artifacts.filter((artifact) => {
-    if (artifact.kind !== "image" || artifact.origin.by !== "system") return false;
-    const producedBy = artifact.origin.producedBy;
-    return [...jobs].some((jobId) => producedBy === `frame-run:${jobId}`);
-  }).sort((left, right) => {
-    const leftAt = shotOrder.findIndex((shotId) => left.links.includes(shotId));
-    const rightAt = shotOrder.findIndex((shotId) => right.links.includes(shotId));
-    return leftAt - rightAt || left.created.localeCompare(right.created);
-  });
-  const [index, setIndex] = useState(0);
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const node = dialog.current;
-    if (!open || node === null) return;
-    setIndex(0);
-    if (node.showModal !== undefined) node.showModal();
-    else node.setAttribute("open", "");
-  }, [open]);
-  if (!open) return null;
-  const frame = frames[index] ?? null;
-  const shot = frame === null ? undefined : orderedShots(scene).find((candidate) => frame.links.includes(candidate.id));
-  return (
-    <dialog ref={dialog} className="fy-swreview" aria-label="Generated frames" onCancel={(event) => { event.preventDefault(); onClose(); }}>
-      <div className="fy-swreview__panel">
-        <button type="button" className="fy-swreview__close" aria-label="Close generated frames" onClick={onClose}><X size={18} /></button>
-        {frame === null || worldSlug === undefined ? <p>No filed frames from this run are available yet.</p> : <img src={mediaUrl(worldSlug, `artifacts/${frame.file}`)} alt={shot === undefined ? "Generated frame" : `Shot ${shot.number} · ${shot.title}`} />}
-        <footer>
-          <button type="button" aria-label="Previous frame" disabled={index === 0} onClick={() => setIndex((value) => value - 1)}><ChevronLeft /></button>
-          <span>{frames.length === 0 ? "No frames" : `${index + 1} of ${frames.length}`}</span>
-          <button type="button" aria-label="Next frame" disabled={index >= frames.length - 1} onClick={() => setIndex((value) => value + 1)}><ChevronRight /></button>
-        </footer>
-      </div>
-    </dialog>
-  );
 }

@@ -5,6 +5,7 @@ import {
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
+  effectiveFraming,
   orderedShots,
   productionShape,
   promptFor,
@@ -29,7 +30,9 @@ import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./se
 import { acceptTake, frameRunCommand, importShotFrame } from "../../lib/store.js";
 import { frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
-import { ImageDialog } from "../../components/image-dialog.js";
+import { Grid2x2, Grip, ImageMark, Lines, More, Plus } from "../../components/icons.js";
+import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { Button } from "../../components/ui.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -74,6 +77,8 @@ export function StoryboardRows({
   onEditShot,
   onOpenShotInGenerator,
   onStageShot,
+  onPreviewShot,
+  onTalkToArke,
   onPlanVideo,
   onRenderBoard,
 }: {
@@ -103,6 +108,8 @@ export function StoryboardRows({
   onEditShot: (shotId: string) => void;
   onOpenShotInGenerator: (shotId: string) => void;
   onStageShot: (shotId: string) => void;
+  onPreviewShot: (shotId: string) => void;
+  onTalkToArke: () => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
 }) {
@@ -170,25 +177,35 @@ export function StoryboardRows({
   useEffect(() => {
     confirmedDeleteShotId.current = null;
   }, [refusalVersion]);
+  // The readiness line counts what the design's does: blank scripts and scripts a frame no longer
+  // covers. Both are the row's own `needs attention` and `script changed` reads, so the footer can
+  // never say ready while a row above it is asking for a look.
+  const attention = shots.filter((shot) => shot.description.trim() === "" || shotCoverage(shot, digests) === "changed").length;
 
   if (shots.length === 0) {
     return (
-      <div ref={(element) => { rowsRoot.current = element; }} className="fy-swempty" data-testid="workspace-empty" tabIndex={-1}>
-        <p className="fy-swempty__line">No shots yet.</p>
-        <button
-          type="button"
-          className="fy-swedit"
-          disabled={locked}
-          onClick={() =>
-            onCommand({
-              kind: "insert-shot",
-              at: { atStart: true },
-              shot: { title: "Untitled shot", description: "" },
-            })
-          }
-        >
-          Add first shot
-        </button>
+      <div ref={(element) => { rowsRoot.current = element; }} className="fy-sw__empty" data-testid="workspace-empty" tabIndex={-1}>
+        <div>
+          <h2>Build this scene</h2>
+          <p>Tell Arke what happens, or start adding shots yourself. Nothing here needs the assistant.</p>
+          <div>
+            <Button variant="primary" size="sm" onClick={onTalkToArke}>Talk to Arke</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={locked}
+              onClick={() =>
+                onCommand({
+                  kind: "insert-shot",
+                  at: { atStart: true },
+                  shot: { title: "Untitled shot", description: "" },
+                })
+              }
+            >
+              Add first shot
+            </Button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -215,6 +232,32 @@ export function StoryboardRows({
           const board = boardAt.get(shot.id);
           return (
             <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`}>
+              {showBoards && board !== undefined ? (
+                <BoardBand
+                  board={board}
+                  scene={scene}
+                  world={world}
+                  shots={shots}
+                  capSec={capSec}
+                  aspect={aspect}
+                  locked={locked}
+                  generatorPending={generatorPending}
+                  staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
+                  movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
+                  refusalVersion={refusalVersion}
+                  selected={subjectMatchesBoard(subject, board.memberShotIds)}
+                  onSelect={() => select({ kind: "board", memberShotIds: [...board.memberShotIds] })}
+                  onCommand={onCommand}
+                  onDragStart={() => setDragBoundary(shot.id)}
+                  onDragEnd={() => setDragBoundary(null)}
+                  onViewBoardSheet={onViewBoardSheet}
+                  onRender={() => onRenderBoard([...board.memberShotIds])}
+                  onPlanVideo={onPlanVideo}
+                  onStage={() => onStageShot(board.memberShotIds[0]!)}
+                />
+              ) : null}
+              {/* The insert line sits between a band and its first card, the way the design draws it,
+                  so a board's header is never separated from the row it heads. */}
               {index > 0 ? (
                 <Divider
                   shot={shot}
@@ -238,29 +281,6 @@ export function StoryboardRows({
                   }}
                 />
               ) : null}
-              {showBoards && board !== undefined ? (
-                <BoardBand
-                  board={board}
-                  scene={scene}
-                  world={world}
-                  shots={shots}
-                  capSec={capSec}
-                  aspect={aspect}
-                  locked={locked}
-                  generatorPending={generatorPending}
-                  staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
-                  movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
-                  refusalVersion={refusalVersion}
-                  selected={subjectMatchesBoard(subject, board.memberShotIds)}
-                  onSelect={() => select({ kind: "board", memberShotIds: [...board.memberShotIds] })}
-                  onCommand={onCommand}
-                  onDragStart={() => setDragBoundary(shot.id)}
-                  onDragEnd={() => setDragBoundary(null)}
-                  onViewBoardSheet={onViewBoardSheet}
-                  onRender={() => onRenderBoard([...board.memberShotIds])}
-                  onPlanVideo={onPlanVideo}
-                />
-              ) : null}
               <Row
                 shot={shot}
                 scene={scene}
@@ -276,8 +296,6 @@ export function StoryboardRows({
                 newShot={newShotIds.has(shot.id)}
                 locked={locked}
                 generatorPending={generatorPending}
-                canMoveUp={index > 0}
-                canMoveDown={index < shots.length - 1}
                 onSelect={() => select({ kind: "shot", shotId: shot.id })}
                 onBand={(element) => {
                   if (element === null) rowBands.current.delete(shot.id);
@@ -294,8 +312,6 @@ export function StoryboardRows({
                 onDeleteDialogClose={() => {
                   if (deleteDialogShotId.current === shot.id) deleteDialogShotId.current = null;
                 }}
-                onMoveUp={() => onCommand({ kind: "move-shot", shotId: shot.id, to: { before: shots[index - 1]!.id } })}
-                onMoveDown={() => onCommand({ kind: "move-shot", shotId: shot.id, to: { after: shots[index + 1]!.id } })}
                 onDragStart={() => setDragShot(shot.id)}
                 onDragEnd={() => setDragShot(null)}
                 onDrop={() => {
@@ -312,11 +328,33 @@ export function StoryboardRows({
                 onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
                 onStage={() => onStageShot(shot.id)}
+                onPreview={() => onPreviewShot(shot.id)}
               />
             </li>
           );
         })}
+        <li className="fy-swaddshot">
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() =>
+              onCommand({
+                kind: "insert-shot",
+                at: { after: shots.at(-1)!.id },
+                shot: { title: "Untitled shot", description: "" },
+              })
+            }
+          >
+            <span className="fy-swaddshot__ring" aria-hidden="true"><Plus size={12} /></span>
+            Add shot
+          </button>
+        </li>
       </ol>
+      <div className="fy-swready">
+        <span className="fy-swready__dot" data-ready={attention === 0 ? "true" : undefined} aria-hidden="true" />
+        <span>{attention === 0 ? "Ready to generate" : attention === 1 ? "1 item worth reviewing" : `${attention} items worth reviewing`}</span>
+        <span className="fy-swready__meta">scene {scene.number} · v{scene.version}</span>
+      </div>
     </>
   );
 }
@@ -351,15 +389,25 @@ function Divider({
         onMoveBoundary();
       }}
     >
-      <button type="button" title="Insert a shot here" aria-label={`Insert before shot ${shot.number}`} disabled={locked} onClick={onInsert}>
-        +
-      </button>
-      <span />
       {moving ? (
-        <button type="button" disabled={locked} onClick={onMoveBoundary}>Move boundary here</button>
-      ) : showBoards && canSplit ? (
-        <button type="button" disabled={locked} onClick={onSplit}>Split board here</button>
-      ) : null}
+        <>
+          {/* The whole line is the drop zone; the label stays a button so the click path the band
+              handle opens (click the handle, then click a line) still reaches the keyboard. */}
+          <span />
+          <button type="button" disabled={locked} onClick={onMoveBoundary}>Move boundary here</button>
+          <span />
+        </>
+      ) : (
+        <>
+          <button type="button" title="Insert a shot here" aria-label={`Insert before shot ${shot.number}`} disabled={locked} onClick={onInsert}>
+            <Plus size={12} />
+          </button>
+          <span />
+          {showBoards && canSplit ? (
+            <button type="button" title="Start a new board here" disabled={locked} onClick={onSplit}>Split board here</button>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -384,6 +432,7 @@ function BoardBand({
   onViewBoardSheet,
   onRender,
   onPlanVideo,
+  onStage,
 }: {
   board: PackedBoard;
   scene: SceneRecord;
@@ -404,6 +453,7 @@ function BoardBand({
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
   onRender: () => void;
   onPlanVideo: () => void;
+  onStage: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const promptDirty = useRef(false);
@@ -514,18 +564,22 @@ function BoardBand({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
         >
-          ⠿ Board {board.letter}
+          <Grip size={10} /> Board {board.letter}
         </button>
-        {staged ? <span className="fy-swboard__staged">staged</span> : null}
-        <span>shots {first}{last !== first ? `–${last}` : ""}</span>
+        <span className="fy-swboard__meta">{members.length > 1 ? `shots ${first}–${last}` : `shot ${first}`}</span>
         <span className="fy-swboard__rule" />
-        {board.reason === null ? null : <span>split · {board.reason}</span>}
-        <span>{board.durationSec}s / {capSec}s</span>
-        <button type="button" disabled={locked || staged || generatorPending} onClick={onRender}>
-          {generatorPending ? "Opening…" : "Render board"}
+        {board.reason === null ? null : <span className="fy-swboard__meta" data-kind="reason">split · {board.reason}</span>}
+        <span className="fy-swboard__meta" data-kind="duration">{board.durationSec.toFixed(1)}s / {capSec}s</span>
+        <button
+          type="button"
+          className="fy-swboard__sheet"
+          title="Consolidated prompt"
+          aria-label={`Consolidated prompt for board ${board.letter}`}
+          disabled={locked}
+          onClick={() => setPromptOpen((open) => !open)}
+        >
+          <Lines size={14} />
         </button>
-        <button type="button" disabled={locked || staged} onClick={onPlanVideo}>Plan video</button>
-        <button type="button" title="Consolidated prompt" disabled={locked} onClick={() => setPromptOpen((open) => !open)}>P</button>
         <button
           type="button"
           className="fy-swboard__sheet"
@@ -533,13 +587,30 @@ function BoardBand({
           aria-label={`View board sheet ${board.letter}`}
           onClick={(event) => onViewBoardSheet(board, event.currentTarget)}
         >
-          <span aria-hidden="true" />
+          <Grid2x2 size={14} />
         </button>
+        {staged ? <span className="fy-swboard__staged">staged</span> : null}
+        {/* Stopped here: the band's own click selects the board, and the Stage reads a shot
+            selection, so the bubble would undo the selection this link just made. */}
+        <button
+          type="button"
+          title="Stage the camera for this board"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStage();
+          }}
+        >
+          Stage
+        </button>
+        <button type="button" title="Send this board to the generator" disabled={locked || staged || generatorPending} onClick={onRender}>
+          {generatorPending ? "Opening…" : "Render board"}
+        </button>
+        <button type="button" disabled={locked || staged} onClick={onPlanVideo}>Plan video</button>
         {board.reason === null ? null : (
           <button
             type="button"
             disabled={locked || board.reason === "clip limit" || board.reason === "panel limit"}
-            title={board.reason === "clip limit" || board.reason === "panel limit" ? `Cannot merge across the ${board.reason}` : undefined}
+            title={board.reason === "clip limit" || board.reason === "panel limit" ? `Cannot merge across the ${board.reason}` : "Merge this board into the one above"}
             onClick={() =>
               onCommand(
                 { kind: "set-board-override", shotId: startId, override: "merge" },
@@ -566,23 +637,21 @@ function BoardBand({
         >
           <div>
             <span>consolidated prompt · sent once for the board</span>
-            {stored === null ? null : (
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => {
-                  promptDirty.current = false;
-                  if (onCommand({ kind: "clear-board-prompt", members: [...board.memberShotIds] })) {
-                    pendingRebuildVersion.current = refusalVersion;
-                    setPromptDraft(assembled);
-                  } else {
-                    setPromptDraft(promptValue);
-                  }
-                }}
-              >
-                Rebuild
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={locked || stored === null}
+              onClick={() => {
+                promptDirty.current = false;
+                if (onCommand({ kind: "clear-board-prompt", members: [...board.memberShotIds] })) {
+                  pendingRebuildVersion.current = refusalVersion;
+                  setPromptDraft(assembled);
+                } else {
+                  setPromptDraft(promptValue);
+                }
+              }}
+            >
+              Rebuild
+            </button>
             <button
               type="button"
               disabled={pendingHide !== null}
@@ -624,16 +693,12 @@ function Row({
   newShot,
   locked,
   generatorPending,
-  canMoveUp,
-  canMoveDown,
   onSelect,
   onBand,
   onCommand,
   onDelete,
   onDeleteDialogOpen,
   onDeleteDialogClose,
-  onMoveUp,
-  onMoveDown,
   onDragStart,
   onDragEnd,
   onDrop,
@@ -645,6 +710,7 @@ function Row({
   onEdit,
   onOpenInGenerator,
   onStage,
+  onPreview,
 }: {
   shot: Shot;
   scene: SceneRecord;
@@ -660,16 +726,12 @@ function Row({
   newShot: boolean;
   locked: boolean;
   generatorPending: boolean;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
   onSelect: () => void;
   onBand: (element: HTMLDivElement | null) => void;
   onCommand: (command: Command) => boolean;
   onDelete: () => boolean;
   onDeleteDialogOpen: () => void;
   onDeleteDialogClose: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   onDrop: () => void;
@@ -681,6 +743,7 @@ function Row({
   onEdit: () => void;
   onOpenInGenerator: () => void;
   onStage: () => void;
+  onPreview: () => void;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -744,7 +807,8 @@ function Row({
   const overrides = (structuredOverrides.length > 0
     ? structuredOverrides
     : (shot.camera?.split("·").map((value) => value.trim()).filter(Boolean) ?? []))
-    .map((value) => `${value} override`);
+    .map((value) => `${value} override`)
+    .slice(0, 2);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
   const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
@@ -922,6 +986,22 @@ function Row({
     setPromptDraft(replacement === null ? assembledPrompt : next);
     return true;
   };
+  // Rebuild and Re-read share this: drop whatever was typed and read the prompt off the current
+  // script again. Only a durable override needs a command; a local draft is just let go.
+  const canRebuild = durablePromptOverride !== null || promptDraft !== null;
+  const rebuildPrompt = () => {
+    promptDirty.current = false;
+    if (durablePromptOverride === null) {
+      setPromptDraft(null);
+      return;
+    }
+    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
+      pendingRebuildVersion.current = refusalVersion;
+      setPromptDraft(assembledPrompt);
+    } else {
+      setPromptDraft(null);
+    }
+  };
   const hidePrompt = (value: string) => {
     const next = value.trim();
     if (next === currentPrompt.text.trim()) {
@@ -975,12 +1055,13 @@ function Row({
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
       <div className="fy-swrow__frame fy-imghost" style={{ aspectRatio: aspect.replace(":", " / ") }}>
         {src === null ? (
-          <div className="fy-swrow__hatch"><span className="fy-swrow__nofr">no frame yet</span></div>
+          <div className="fy-swrow__hatch"><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
         ) : (
           <div className="fy-swrow__img" role="img" aria-label={shot.title} style={{ backgroundImage: `url(${src})` }} />
         )}
         <span
           className="fy-swrow__label"
+          title="Drag to reorder"
           draggable={!disabled}
           onDragStart={(event) => {
             event.stopPropagation();
@@ -994,20 +1075,17 @@ function Row({
           {aspect} · {(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
         </span>
         {framePath === null ? null : (
-          <ImageDialog
-            worldSlug={slug}
-            path={framePath}
-            label={shot.title}
-            dialogLabel={`Frame for shot ${shot.number}, ${shot.title}`}
-            title={`Shot ${shot.number} · ${shot.title}`}
-            subtitle="Filed frame"
-            triggerLabel={`Preview frame for shot ${shot.number}`}
-            triggerClassName="fy-swrow__preview"
-            dialogClassName="fy-swrow__preview-dialog"
-            triggerRadius={999}
-            dialogRadius={10}
-            download
-            downloadName={`shot-${shot.number}-${shot.title}`}
+          // The circle alone is the hit area, so the rest of the thumbnail stays draggable (§7.1).
+          <button
+            type="button"
+            className="fy-swrow__preview"
+            aria-label={`Preview frame for shot ${shot.number}`}
+            title="Open larger"
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPreview();
+            }}
           />
         )}
         <div
@@ -1015,9 +1093,7 @@ function Row({
           onMouseDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
         >
-          {shot.description.trim() === "" ? null : (
-            <button type="button" onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
-          )}
+          <button type="button" disabled={shot.description.trim() === ""} onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
           <button
             ref={variantsTrigger}
             type="button"
@@ -1091,8 +1167,8 @@ function Row({
       </div>
       <div className="fy-swrow__body">
         <div className="fy-swrow__titleline">
-          <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
-          <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{CHIP[state]}</span>
+          <span className="fy-swrow__title">Shot {shot.number} · {effectiveFraming(scene, shot).size ?? shot.title}</span>
+          <span className="fy-swchip" data-state={state}>{CHIP[state]}<span aria-hidden="true" /></span>
           {shot.staging?.playblast === undefined ? null : (
             <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
           )}
@@ -1100,11 +1176,21 @@ function Row({
         {coverage === "changed" || runScriptChanged ? (
           <div className="fy-swrow__stale">
             <span className="fy-swrow__stalelabel">script changed</span>
-            <button type="button" onClick={onEdit}>Re-read</button>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => {
+                rebuildPrompt();
+                setPromptOpen(true);
+              }}
+            >
+              Re-read
+            </button>
           </div>
         ) : null}
         <div
           className="fy-swrow__script fy-swrow__scripteditor"
+          title="Write what happens · type @ to name anything in the world"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           onBlur={(event) => {
@@ -1134,24 +1220,15 @@ function Row({
             }}
           >
             <div>
-              <span>Image prompt · {shot.promptOverride === undefined ? "auto" : "edited by you"}</span>
-              {shot.promptOverride === undefined ? null : (
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    promptDirty.current = false;
-                    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
-                      pendingRebuildVersion.current = refusalVersion;
-                      setPromptDraft(assembledPrompt);
-                    } else {
-                      setPromptDraft(null);
-                    }
-                  }}
-                >
-                  Rebuild
-                </button>
-              )}
+              <span>image prompt</span>
+              <button
+                type="button"
+                title="Rebuild from the script, references and camera"
+                disabled={disabled || !canRebuild}
+                onClick={rebuildPrompt}
+              >
+                Rebuild
+              </button>
               <button
                 type="button"
                 disabled={pendingHide !== null}
@@ -1177,29 +1254,42 @@ function Row({
         {refs.length === 0 && overrides.length === 0 ? null : (
           <div className="fy-swrow__meta">
             <div className="fy-swrow__refs">
-              {refs.map((entry) => <span key={entry.sheet.id} className="fy-swrow__ref" title={entry.sheet.type}>{entry.sheet.name}</span>)}
+              {refs.map((entry) => (
+                <span key={entry.sheet.id} className="fy-swrow__ref" title={`${entry.sheet.type} · v${entry.sheet.version}`}>
+                  <span className="fy-swrow__refthumb">
+                    <Portrait
+                      worldSlug={slug}
+                      path={entry.sheet.type === "location" ? locationPortraitPath(world, entry.sheet.id) : characterPortraitPath(world, entry.sheet.id)}
+                      label=""
+                      radius={99}
+                    />
+                  </span>
+                  {entry.sheet.name}
+                </span>
+              ))}
             </div>
             <div className="fy-swrow__overrides">
-              {overrides.map((label) => <span key={label} className="fy-swrow__override">{label}</span>)}
+              {overrides.map((label) => <span key={label} className="fy-swrow__override" title="overrides the scene">{label}</span>)}
             </div>
           </div>
         )}
       </div>
       <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
         <div className="fy-swrow__actionline">
-          <button
-            type="button"
+          <Button
+            variant={hasFrame ? "outline" : "primary"}
+            size="sm"
             className="fy-swrow__generate"
-            data-existing={hasFrame ? "true" : undefined}
             disabled={disabled || run?.status === "active" || run?.status === "paused"}
             onClick={(event) => onGenerateFrame(event.currentTarget)}
           >
             {hasFrame ? "Regenerate" : "Generate frame"}
-          </button>
+          </Button>
           <button
             ref={menuTrigger}
             type="button"
-            className="fy-swedit"
+            className="fy-swedit fy-swrow__more"
+            title="More"
             disabled={disabled}
             aria-label={`Actions for shot ${shot.number}`}
             aria-expanded={menuOpen}
@@ -1212,13 +1302,13 @@ function Row({
               setMenu(!menu);
             }}
           >
-            •••
+            <More size={15} />
           </button>
         </div>
-        {shot.description.trim() === "" ? null : (
+        {promptOpen ? null : (
           <div className="fy-swrow__slot">
-            <span>{shot.promptOverride === undefined ? "prompt · auto" : "edited by you"}</span>
-            <button type="button" disabled={disabled} onClick={onEdit}>Edit</button>
+            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · edited by you"}</span>
+            <button type="button" disabled={disabled} onClick={() => setPromptOpen(true)}>Edit</button>
           </div>
         )}
       </div>
@@ -1290,13 +1380,11 @@ function Row({
                 </>
               ) : (
                 <>
-                  <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onEdit(); }}>Advanced</button>
+                  <button type="button" role="menuitem" disabled={staged} onClick={() => { closeMenu(true); onStage(); }}>Stage this shot</button>
                   <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
                     {generatorPending ? "Opening…" : "Open in generator"}
                   </button>
-                  <button type="button" role="menuitem" disabled={staged} onClick={() => { closeMenu(true); onStage(); }}>Stage this shot</button>
-                  <button type="button" role="menuitem" disabled={disabled || !canMoveUp} onClick={() => { closeMenu(true); onMoveUp(); }}>Move before previous</button>
-                  <button type="button" role="menuitem" disabled={disabled || !canMoveDown} onClick={() => { closeMenu(true); onMoveDown(); }}>Move after next</button>
+                  <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onEdit(); }}>Advanced</button>
                   <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>
                   <button
                     type="button"
@@ -1375,7 +1463,7 @@ function FrameState({ state, onRetry }: { state: NonNullable<ReturnType<typeof f
   }
   if (state.status === "running") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
-    return <div className="fy-swrow__run" data-state={held ? "failed" : "running"}>{held ? failureCopy(state) : "generating frame..."}</div>;
+    return <div className="fy-swrow__run" data-state={held ? "failed" : "running"}>{held ? failureCopy(state) : "generating frame…"}</div>;
   }
   if (state.status === "failed" || state.status === "missing" || state.status === "needs-reconciliation") {
     return (

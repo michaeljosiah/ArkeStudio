@@ -59,7 +59,7 @@ import type { StagingKey, StagingSet } from "@arke-studio/contracts";
 export interface StageFigureData {
   sheetId: string;
   name: string;
-  colour: string;
+  colour: number;
   x: number;
   z: number;
   to: readonly [number, number] | null;
@@ -102,8 +102,8 @@ export interface StageEvents {
   trackpick(sheetId: string): void;
 }
 
-const PALETTE = ["#7A2E43", "#B08C2E", "#5F6B7A", "#3F4A5A", "#8A6A4F"];
-export function figureColour(index: number): string {
+const PALETTE = [0x7a2e43, 0xb08c2e, 0x5f6b7a, 0x3f4a5a, 0x8a6a4f];
+export function figureColour(index: number): number {
   return PALETTE[index % PALETTE.length]!;
 }
 
@@ -142,9 +142,9 @@ function lineBetween(a: Vector3, b: Vector3, material: LineBasicMaterial): Line 
 }
 
 /** A neutral capsule figure: head, torso, arms, legs. Greybox, never a render. */
-function figure(colour: string, ghost: boolean): Group {
+function figure(colour: number, ghost: boolean): Group {
   const group = new Group();
-  const skin = new MeshStandardMaterial({ color: "#8C837A", roughness: 0.85, metalness: 0 });
+  const skin = new MeshStandardMaterial({ color: 0x8c837a, roughness: 0.85, metalness: 0 });
   const cloth = new MeshStandardMaterial({ color: colour, roughness: 0.78, metalness: 0 });
   if (ghost) {
     for (const material of [skin, cloth]) {
@@ -178,7 +178,7 @@ function figure(colour: string, ghost: boolean): Group {
 /** The camera body with a wireframe cone generated from the real lens. */
 function rig(fov: number, aspect: number): Group {
   const group = new Group();
-  const body = new Mesh(new BoxGeometry(0.3, 0.2, 0.38), new MeshStandardMaterial({ color: "#0A0A0A", roughness: 0.5 }));
+  const body = new Mesh(new BoxGeometry(0.3, 0.2, 0.38), new MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.5 }));
   group.add(body);
   const edge = new LineSegments(new EdgesGeometry(new BoxGeometry(0.3, 0.2, 0.38)), new LineBasicMaterial({ color: 0xffffff }));
   edge.raycast = noPick;
@@ -485,7 +485,7 @@ export class StageViewport {
     for (const set of data.sets) {
       const box = new Mesh(
         new BoxGeometry(set.w, set.h, set.d),
-        new MeshStandardMaterial({ color: "#A79E93", roughness: 0.95, transparent: true, opacity: 0.22 }),
+        new MeshStandardMaterial({ color: 0xa79e93, roughness: 0.95, transparent: true, opacity: 0.22 }),
       );
       box.position.set(set.x, set.h / 2, set.z);
       box.receiveShadow = true;
@@ -654,9 +654,9 @@ export class StageViewport {
     mount.appendChild(renderer.domElement);
     const knobs: Mesh[] = [];
     const axes = [
-      { v: new Vector3(1, 0, 0), c: "#B4553F" },
-      { v: new Vector3(0, 1, 0), c: "#5C8551" },
-      { v: new Vector3(0, 0, 1), c: "#4A6E96" },
+      { v: new Vector3(1, 0, 0), c: 0xb4553f },
+      { v: new Vector3(0, 1, 0), c: 0x5c8551 },
+      { v: new Vector3(0, 0, 1), c: 0x4a6e96 },
     ];
     for (const axis of axes) {
       for (const sign of [1, -1]) {

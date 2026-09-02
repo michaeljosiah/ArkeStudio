@@ -439,8 +439,8 @@ describe("frame-run quote authorization", () => {
     const dialog = one(item, ".fy-swgen")!;
     assert.match(dialog.textContent ?? "", /2 frames · \$0.08/);
     assert.doesNotMatch(dialog.textContent ?? "", /~\$/);
-    assert.match(dialog.textContent ?? "", /Packing preview · Seedance 2.0 · 15s cap · 6 panels/);
-    assert.match(dialog.textContent ?? "", /1536x864 output · 4 references/);
+    assert.match(dialog.textContent ?? "", /Packing.*2 shots → 1 board.*15s clip limit/);
+    assert.match(dialog.textContent ?? "", /1536×864 · 4 refs/);
     await click([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.deepEqual(sent.at(-1), {
       kind: "frame-run-start",
@@ -740,9 +740,11 @@ describe("durable run projections", () => {
     });
     const item = await mount(state, sent);
     assert.match(one(item, '[data-testid="frame-run-bar"]')?.textContent ?? "", /1 frame added · 1 failed/);
+    // Review opens the first frame the run put down in the one lightbox, to arrow through (R-19).
     await click(named(item, "Review"));
-    assert.equal(one(item, ".fy-swreview img")?.getAttribute("alt"), "Shot 12 · Maren at the rail, listening");
-    await click(one(item, '[aria-label="Close generated frames"]')!);
+    assert.equal(one(item, ".fy-swlightbox img")?.getAttribute("alt"), "Maren at the rail, listening");
+    assert.match(one(item, ".fy-swlightbox")?.textContent ?? "", /shot 12/);
+    await click(one(item, '.fy-swlightbox [aria-label="Close"]')!);
     await click(one(item, '[aria-label="Dismiss frame run"]')!);
     assert.equal(sent.at(-1)?.kind, "frame-run-dismiss");
   });
@@ -819,7 +821,7 @@ describe("board sheet review", () => {
 
     const sheet = one(item, ".fy-swboard-sheet")!;
     assert.equal(sheet.parentElement?.classList.contains("fy-sw"), true, "the overlay mounts on the whole app frame");
-    assert.match(sheet.textContent ?? "", /Board A.*shots 12–13 · 2 cells · one pass.*10s/);
+    assert.match(sheet.textContent ?? "", /Board A.*shots 12–13 · 2 cells · one pass.*10\.0s \/ 15s/);
     assert.match(sheet.textContent ?? "", /One image, one pass .* cast, light and grade are shared/);
     assert.equal(one(item, ".fy-swboard-sheet__grid")?.getAttribute("data-columns"), "2");
     assert.equal(one(item, '[data-testid="board-sheet-cell-sh_12"]')?.getAttribute("style"), "aspect-ratio:16 / 9");

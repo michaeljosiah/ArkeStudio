@@ -118,6 +118,7 @@ export function BoardSheet({
   artifacts,
   runs,
   aspect,
+  capSec,
   worldId,
   worldSlug,
   returnFocus,
@@ -129,6 +130,8 @@ export function BoardSheet({
   artifacts: readonly ArtifactSidecar[];
   runs: readonly FrameRunState[];
   aspect: string;
+  /** The clip cap the board was packed against, so the duration reads against it. */
+  capSec: number;
   worldId: string;
   worldSlug: string | undefined;
   returnFocus: HTMLElement | null;
@@ -175,9 +178,9 @@ export function BoardSheet({
       <div className="fy-swboard-sheet__panel">
         <header className="fy-swboard-sheet__head">
           <h2 id={titleId}>Board {board.letter}</h2>
-          <span>shots {first}{last !== first ? `–${last}` : ""} · {members.length} cell{members.length === 1 ? "" : "s"} · one pass</span>
-          <span>{board.durationSec}s</span>
-          <button type="button" aria-label="Close board sheet" onClick={onClose}><X size={16} /></button>
+          <span>{members.length > 1 ? `shots ${first}–${last}` : `shot ${first}`} · {members.length} cell{members.length === 1 ? "" : "s"} · one pass</span>
+          <span>{board.durationSec.toFixed(1)}s / {capSec}s</span>
+          <button type="button" aria-label="Close board sheet" onClick={onClose}><X size={13} /></button>
         </header>
 
         <div className="fy-swboard-sheet__grid" data-columns={columns}>
@@ -209,7 +212,7 @@ export function BoardSheet({
                 {src === null
                   ? <div className="fy-swboard-sheet__empty">no frame yet</div>
                   : <img src={src} alt={shot.title} />}
-                {busy ? <div className="fy-swboard-sheet__busy" role="status" aria-live="polite">regenerating cell...</div> : null}
+                {busy ? <div className="fy-swboard-sheet__busy" role="status" aria-live="polite">regenerating cell…</div> : null}
                 <span className="fy-swboard-sheet__number">shot {shot.number}</span>
                 <span className="fy-swboard-sheet__meta">{(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s{lighting === undefined ? "" : ` · ${lighting}`}</span>
                 <button

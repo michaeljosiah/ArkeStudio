@@ -571,7 +571,7 @@ export function SceneStage({
                   <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
                   {working.cast.map((figure, position) => (
                     <button key={figure.sheetId} type="button" className="fy-swstage__mover" onClick={() => toggleWalk(figure.sheetId)}>
-                      <span style={{ background: figureColour(position) }} aria-hidden="true" />
+                      <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
                       <span>{nameOf(figure.sheetId)}</span>
                       <span data-walks={figure.to === undefined ? undefined : "true"}>{figure.to === undefined ? "holds" : "walks"}</span>
                     </button>

@@ -761,9 +761,8 @@ export const BenchSessionSchema = z
     if (session.composer.params.kind !== session.composer.mode) {
       ctx.addIssue({ code: "custom", message: "composer params do not match the composer mode" });
     }
-    if (session.subject?.kind === "shot" && session.composer.mode !== "image") {
-      ctx.addIssue({ code: "custom", message: "a shot subject uses image mode" });
-    }
+    // A shot subject opens in image mode and may switch to video — the Stage's Render with this
+    // wants the clip (SPEC-036 R-36) — so only a board is pinned to one mode.
     if (session.subject?.kind === "board" && session.composer.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "a board subject uses video mode" });
     }
