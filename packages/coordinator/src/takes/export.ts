@@ -1,4 +1,4 @@
-import { cp, mkdir, rename, rm } from "node:fs/promises";
+import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
@@ -20,8 +20,14 @@ export interface ExportHandle {
   id: string;
   cancel(): void;
   done: Promise<
-    { status: "done"; output: string } | { status: "cancelled" } | { status: "failed"; error: string }
+    { status: "done"; output: string; sidecar?: string } | { status: "cancelled" } | { status: "failed"; error: string }
   >;
+}
+
+/** A subtitle sidecar delivered beside the video (SPEC-038 R-27): its name and its whole text. */
+export interface ExportSidecar {
+  name: string;
+  text: string;
 }
 
 /**
@@ -41,11 +47,18 @@ export function runExport(
   outName: string,
   runner: FfmpegRunner,
   onProgress: (percent: number) => void,
+  /**
+   * A sidecar that lands with the video or not at all (SPEC-038 R-30, A-10): staged beside the
+   * encode, renamed after it, removed with it on cancellation or failure.
+   */
+  sidecar?: ExportSidecar,
 ): ExportHandle {
   const id = `ex_${ulid()}`;
   const controller = new AbortController();
   const stage = join(worldDir, ".cache", "exports", `${id}.mp4`);
   const output = join(worldDir, "exports", outName);
+  const sidecarStage = sidecar === undefined ? null : join(worldDir, ".cache", "exports", `${id}-${sidecar.name}`);
+  const sidecarOutput = sidecar === undefined ? null : join(worldDir, "exports", sidecar.name);
   const done = (async () => {
     try {
       await mkdir(toExtendedLength(join(worldDir, ".cache", "exports")), { recursive: true });
@@ -53,12 +66,18 @@ export function runExport(
       // A cancel that lands before the encoder starts must still cancel: an already-aborted
       // signal never invokes listeners added later, so the check happens here.
       if (controller.signal.aborted) throw new Error("cancelled before start");
+      if (sidecar !== undefined && sidecarStage !== null) await writeFile(toExtendedLength(sidecarStage), sidecar.text, "utf8");
       await runner.run(buildArgs(stage), onProgress, controller.signal);
       if (controller.signal.aborted) throw new Error("cancelled");
       await rename(toExtendedLength(stage), toExtendedLength(output));
+      if (sidecar !== undefined && sidecarStage !== null && sidecarOutput !== null) {
+        await rename(toExtendedLength(sidecarStage), toExtendedLength(sidecarOutput));
+        return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
+      }
       return { status: "done" as const, output: `exports/${outName}` };
     } catch (err) {
       await rm(toExtendedLength(stage), { force: true }).catch(() => {});
+      if (sidecarStage !== null) await rm(toExtendedLength(sidecarStage), { force: true }).catch(() => {});
       if (controller.signal.aborted) return { status: "cancelled" as const };
       return { status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
     }

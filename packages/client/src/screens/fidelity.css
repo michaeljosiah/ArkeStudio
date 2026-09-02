@@ -5991,6 +5991,29 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-artrow__add { flex: none; border: 1px solid var(--border); background: transparent; color: var(--foreground); border-radius: 5px; padding: 3px 7px; font: 500 9.5px var(--font-sans); cursor: pointer; }
 .fy-artrow__add:hover:not(:disabled) { background: var(--accent); }
 .fy-artrow__add:disabled { color: var(--neutral-400); cursor: default; }
+/* ---- Subtitles: cues on the lane, words in the Inspector (SPEC-038 R-21..R-26, issue 683) ---- */
+.fy-track[data-track="subtitles"] .fy-cuelane { height: 26px; }
+.fy-cue { background: var(--secondary); font: 400 8px var(--font-mono); }
+.fy-cue--stale { border-style: dashed; }
+.fy-track__tail { flex: none; display: flex; align-items: center; padding: 0 4px; }
+.fy-trackbtns__add { width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted-foreground); font: 600 11px var(--font-sans); cursor: pointer; }
+.fy-trackbtns__add:disabled { opacity: .4; cursor: default; }
+.fy-cue__field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.fy-cue__field textarea, .fy-cue__field input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); padding: 6px 8px; font: 400 11px/1.4 var(--font-sans); }
+.fy-cue__stale { color: var(--warning); }
+.fy-subsources { margin-top: 14px; }
+.fy-subsources select, .fy-subsources input { max-width: 150px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }
+.fy-subsources__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* Over the black stage, so the neutral ramp rather than the theme: white words in either mode. */
+.fy-cutviewer__cue { position: absolute; left: 8%; right: 8%; bottom: 46px; text-align: center; color: var(--neutral-50); font: 500 15px/1.35 var(--font-sans); text-shadow: 0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950); white-space: pre-line; pointer-events: none; }
+.fy-cutviewer__cue--box { background: color-mix(in srgb, var(--neutral-950) 60%, transparent); border-radius: 4px; padding: 4px 8px; margin: 0 auto; display: table; text-shadow: none; }
+.fy-subtitle-delivery { margin: 12px 0 4px; }
+.fy-subtitle-delivery__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 6px; font: 400 11px var(--font-sans); }
+.fy-subtitle-delivery__row label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.fy-subtitle-delivery__row select { border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }
+.fy-subtitle-delivery__modes { display: inline-flex; gap: 2px; padding: 1px; border: 1px solid var(--border); border-radius: 6px; }
+.fy-subtitle-delivery__modes button { border: 0; background: transparent; color: var(--muted-foreground); padding: 3px 8px; border-radius: 5px; font: 500 10.5px var(--font-sans); cursor: pointer; }
+.fy-subtitle-delivery__modes button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
 .fy-clanes { position: relative; }
 .fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
 .fy-ovclip { cursor: grab; user-select: none; touch-action: none; }

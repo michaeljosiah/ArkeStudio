@@ -188,7 +188,7 @@ function ffmpegPictureAtSec(args: string[], sec: number): GraphPicture | null {
     const end = Number(window[2]);
     if (sec >= start && sec < end) {
       const source = inputs[overlay.input]!;
-      picture = { path: source.path.replace(/^\/w\//, ""), layer: overlay.layer, sourceSec: source.still ? 0 : sec - start };
+      picture = { path: source.path.replace(/^\/w\//, ""), layer: overlay.layer, sourceSec: source.still ? 0 : source.inSec + (sec - start) };
     }
   }
   return picture;
@@ -348,16 +348,57 @@ describe("one render plan for preview and export (#680)", () => {
     assert.deepEqual(ffmpegPictureAtSec(args, 1.3), { path: `productions/bell-watch/takes/${TAKE}/clip.mp4`, layer: 0, sourceSec: 1.3 });
   });
 
-  it("keeps placed work that outlives the last Picture clip inside the film", () => {
+  it("keeps placed picture past the last clip inside the film, and conforms sound to it", () => {
     const value = production({
       cut: {
         audio: [],
-        overlays: [{ id: "ov_01J8G0000000000000000000B9", artifactId: BELLS, startSec: 6, endSec: 12, lane: 0, audio: "keep" }],
+        overlays: [
+          { id: "ov_01J8G0000000000000000000B8", artifactId: PLATE, startSec: 9, endSec: 12, lane: 1, audio: "keep" },
+          { id: "ov_01J8G0000000000000000000B9", artifactId: BELLS, startSec: 6, endSec: 20, lane: 0, audio: "keep" },
+        ],
       },
     });
     const plan = planOf(buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: seedStoryPictureTimeline(value) }, scope: { kind: "production" }, preset: "master" }));
-    assert.equal(plan.totalSec, 12);
+    assert.equal(plan.totalSec, 12, "the placed plate reaches 12s; the bells do not lengthen anything");
     assert.deepEqual(plan.items.at(-1), { type: "black", durationSec: 4.48 }, "from the frame-quantised 7.52s end of the picture");
+    assert.deepEqual(plan.audio.map((clip) => [clip.startSec, clip.endSec]), [[6, 12]], "sound is conformed to the picture's end");
     assert.deepEqual(plan.range, { startSec: 0, endSec: 12 });
+  });
+
+  it("plays a trimmed upper-track video from its source in-point in both executors", () => {
+    const value = production({ cut: { audio: [], overlays: [] } });
+    const seeded = seedStoryPictureTimeline(value);
+    const trimmed = applyTimelineCommands(
+      {
+        ...seeded,
+        tracks: [
+          ...seeded.tracks,
+          {
+            id: "tr_inserts" as const,
+            kind: "picture" as const,
+            name: "Inserts",
+            order: 1,
+            muted: false,
+            clips: [{ id: "cl_ins" as const, startFrame: 25, durationFrames: 50, sourceInFrames: 0, source: { kind: "artifact" as const, artifactId: INSERT, label: "insert.mp4" } }],
+          },
+        ],
+      },
+      [{ kind: "trim", clipId: "cl_ins", edge: "start", deltaFrames: 10 }],
+    );
+    const plan = planOf(buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: trimmed }, scope: { kind: "production" }, preset: "review-cut" }));
+    assert.deepEqual(plan.overlays, [{ path: "artifacts/insert.mp4", startSec: 1.4, endSec: 3, still: false, sourceInSec: 0.4 }]);
+    assert.equal(pictureAtSec(plan, 2)?.sourceSec, 1, "0.4s into the source at its window's start, 0.6s later");
+    const args = buildFfmpegArgs(plan, "/w", "/out.mp4", "/fonts/Geist-Regular.ttf");
+    assert.deepEqual(ffmpegPictureAtSec(args, 2), { path: "artifacts/insert.mp4", layer: 1, sourceSec: 1 });
+    assert.equal(args[args.indexOf("/w/artifacts/insert.mp4") - 3], "-ss", "the input is sought to the in-point");
+  });
+
+  it("lets a muted base Picture track contribute no picture while keeping the film's length", () => {
+    const value = production({ cut: { audio: [], overlays: [] } });
+    const seeded = seedStoryPictureTimeline(value);
+    const muted = applyTimelineCommands(seeded, [{ kind: "set-track", trackId: "tr_picture", muted: true }]);
+    const plan = planOf(buildRenderPlan({ production: value, artifacts, timeline: { status: "ready", timeline: muted }, scope: { kind: "production" }, preset: "review-cut" }));
+    assert.deepEqual(plan.items.map((item) => item.type), ["black", "black", "black"]);
+    assert.equal(plan.totalSec, 7.52);
   });
 });

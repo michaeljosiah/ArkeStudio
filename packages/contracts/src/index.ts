@@ -49,6 +49,7 @@ export * from "./cut.js";
 export * from "./timeline.js";
 export * from "./render-plan.js";
 export * from "./timeline-migration.js";
+export * from "./subtitles.js";
 export * from "./ffmpeg-filter.js";
 export * from "./activity.js";
 export * from "./art-direction.js";

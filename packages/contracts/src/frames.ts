@@ -8,7 +8,9 @@ import {
   TimelineCommandSchema,
   TimelineMoveDirectionSchema,
   TimelineSourceFingerprintSchema,
+  TimelineTrackIdSchema,
 } from "./timeline.js";
+import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
@@ -2174,6 +2176,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** The saved timeline revision shown when this export was requested; null means legacy derivation. */
       timelineRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
       preset: z.enum(["review-cut", "master", "social-excerpt"]),
+      /** Which subtitle track to deliver and how (SPEC-038 R-27); absent delivers none. */
+      subtitles: z
+        .object({
+          trackId: TimelineTrackIdSchema,
+          mode: SubtitleOutputModeSchema,
+          sidecar: SidecarFormatSchema.optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  /**
+   * SPEC-038 R-25 (issue 683): draft a subtitle track from the Dialogue clips' speech. Explicit,
+   * never automatic, and ordinary editable text once it exists; the draft records the model that
+   * heard it without making that model the subtitle authority.
+   */
+  z
+    .object({
+      kind: z.literal("timeline-transcribe"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      baseRevision: z.number().int().min(0),
+      language: LanguageTagSchema,
+      trackId: TimelineTrackIdSchema,
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),

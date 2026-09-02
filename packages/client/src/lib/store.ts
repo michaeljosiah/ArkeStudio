@@ -1272,6 +1272,7 @@ function handleFrame(json: string): void {
           status: event.status,
           percent: event.percent,
           output: event.output,
+          ...(event.sidecar !== undefined ? { sidecar: event.sidecar } : {}),
           error: event.error,
         },
       };
@@ -3200,6 +3201,7 @@ export function exportCut(
   preset: "review-cut" | "master" | "social-excerpt",
   timelineRevision: number | null,
   episodeId?: string,
+  subtitles?: { trackId: `tr_${string}`; mode: "none" | "burn-in" | "sidecar" | "burn-in+sidecar"; sidecar?: "srt" | "vtt" },
 ): void {
   send({
     kind: "export-cut",
@@ -3208,7 +3210,19 @@ export function exportCut(
     preset,
     timelineRevision,
     ...(episodeId !== undefined ? { episodeId } : {}),
+    ...(subtitles !== undefined && subtitles.mode !== "none" ? { subtitles } : {}),
   });
+}
+
+/** Draft a subtitle track from the Dialogue clips (SPEC-038 R-25): explicit, and one fenced batch. */
+export function sendTimelineTranscribe(
+  worldId: string,
+  productionId: string,
+  baseRevision: number,
+  trackId: `tr_${string}`,
+  language: string,
+): void {
+  send({ kind: "timeline-transcribe", worldId, productionId, baseRevision, trackId, language });
 }
 
 export function cancelExport(worldId: string, exportId: string): void {
@@ -3226,6 +3240,8 @@ export interface ExportState {
   status: "running" | "done" | "cancelled" | "failed";
   percent: number;
   output: string | null;
+  /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
+  sidecar?: string;
   error: string | null;
 }
 

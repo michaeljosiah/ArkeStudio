@@ -27,6 +27,7 @@ import {
   type TimelineTrack,
 } from "./timeline.js";
 import { productionFrameRate, type FrameRate } from "./world.js";
+import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleOutputMode, type SubtitleStyle } from "./subtitles.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -60,6 +61,30 @@ export interface SpeechRegion {
   endSec: number;
 }
 
+export interface RenderCue {
+  id: string;
+  text: string;
+  startSec: number;
+  endSec: number;
+  speaker?: string;
+}
+
+/** The subtitle track a plan shows and delivers (R-26, R-27): one language at a time. */
+export interface RenderSubtitles {
+  trackId: string;
+  language: string;
+  style: SubtitleStyle;
+  cues: RenderCue[];
+  mode: SubtitleOutputMode;
+  sidecar: SidecarFormat;
+}
+
+export interface SubtitleChoice {
+  trackId: string;
+  mode: SubtitleOutputMode;
+  sidecar?: SidecarFormat;
+}
+
 export interface RenderPlan extends ExportPlan {
   /** The saved timeline revision this plan was frozen from; null for legacy derivation. */
   revision: number | null;
@@ -70,6 +95,8 @@ export interface RenderPlan extends ExportPlan {
   mix: MixSettings;
   /** Where speech is expected (R-16): the Dialogue clip windows, merged. */
   speech: SpeechRegion[];
+  /** The chosen subtitle track, or null when none is viewed or delivered. */
+  subtitles: RenderSubtitles | null;
 }
 
 export type RenderPlanResult = { ok: true; plan: RenderPlan } | { ok: false; reason: string };
@@ -88,6 +115,8 @@ export interface RenderPlanInput {
   timeline: TimelineState | undefined;
   scope: RenderScope;
   preset: ExportPreset;
+  /** Which subtitle track to show and how to deliver it; absent means none (R-26, R-27). */
+  subtitles?: SubtitleChoice;
 }
 
 const STILL_KINDS: ReadonlySet<string> = new Set(["image", "board"]);
@@ -106,7 +135,51 @@ function withRender(plan: ExportPlan, scope: RenderScope, revision: number | nul
     scope,
     mix,
     speech: [],
+    subtitles: null,
   };
+}
+
+/**
+ * The chosen subtitle track as the plan carries it (R-26, R-27). Only a visible track is viewed or
+ * delivered; a muted one is a named refusal rather than a quietly empty output. Cues past the
+ * film are clipped to it, and a cue wholly past it is not delivered (R-19's rule for sound).
+ */
+function subtitlesFromTimeline(
+  timeline: ProductionTimeline,
+  choice: SubtitleChoice | undefined,
+  frameRate: FrameRate,
+  totalSec: number,
+): { ok: true; subtitles: RenderSubtitles | null } | { ok: false; reason: string } {
+  if (choice === undefined) return { ok: true, subtitles: null };
+  const track = timeline.tracks.find((candidate) => candidate.id === choice.trackId);
+  if (track === undefined) return { ok: false, reason: `subtitle track ${choice.trackId} is not on the timeline` };
+  if (track.kind !== "subtitle") return { ok: false, reason: `${track.name} is not a Subtitle track` };
+  if (track.muted) return { ok: false, reason: `${track.name} is muted; unmute it or choose another subtitle track` };
+  const cues: RenderCue[] = orderedCues(track.cues ?? [])
+    .map((cue) => ({
+      id: cue.id,
+      text: cue.text,
+      startSec: framesToSeconds(cue.startFrame, frameRate),
+      endSec: Math.min(framesToSeconds(cue.endFrame, frameRate), totalSec),
+      ...(cue.speaker !== undefined ? { speaker: cue.speaker } : {}),
+    }))
+    .filter((cue) => cue.endSec > cue.startSec);
+  return {
+    ok: true,
+    subtitles: {
+      trackId: track.id,
+      language: track.language ?? "und",
+      style: track.style ?? DEFAULT_SUBTITLE_STYLE,
+      cues,
+      mode: choice.mode,
+      sidecar: choice.sidecar ?? "srt",
+    },
+  };
+}
+
+/** The cue showing at a moment, if the plan carries subtitles (R-26). */
+export function cueAtSec(plan: Pick<RenderPlan, "subtitles">, sec: number): RenderCue | null {
+  return plan.subtitles?.cues.find((cue) => sec >= cue.startSec && sec < cue.endSec) ?? null;
 }
 
 /**
@@ -164,7 +237,8 @@ function overlaysFromTimeline(
       }
       const startSec = framesToSeconds(clip.startFrame, frameRate);
       const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
-      overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still });
+      const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
+      overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
       if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
         sound.push({
@@ -236,7 +310,7 @@ function audioFromTimeline(
  * track above the base lands as an overlay at its frame window.
  */
 export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
-  const { production, artifacts, timeline, scope, preset } = input;
+  const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (production.spine !== null) {
     return { ok: false, reason: "music-timed delivery renders through the spine plan until its timeline is materialised" };
@@ -254,6 +328,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   }
 
   if (timeline === undefined || timeline.status === "absent") {
+    if (subtitleChoice !== undefined) return { ok: false, reason: "subtitles live on the saved timeline; there is none yet" };
     const overlays = exportOverlays(production.cut.overlays, artifacts);
     const audio = exportAudioClips(production.cut.overlays, artifacts);
     const plan = buildExportPlan(deriveCut(production), preset, overlays, audio, frameRate);
@@ -293,7 +368,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   for (const entry of cut.entries) {
     const startSec = cursorSec;
     cursorSec += entry.durationSec;
-    if (entry.hole === true) {
+    // A muted base track contributes no picture (R-6): its time stays, black, so nothing above
+    // it moves and the film keeps its length.
+    if (entry.hole === true || base?.muted === true) {
       items.push({ type: "black", durationSec: entry.durationSec });
       continue;
     }
@@ -344,13 +421,25 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   }
 
   const overlays = [...stillOverlays, ...legacyOverlays, ...upper.overlays];
-  const audio = [...legacySound, ...baseSound, ...upper.sound, ...typed.audio];
-  const totalSec = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), ...audio.map((clip) => clip.endSec), 0);
+  const placedSound = [...legacySound, ...baseSound, ...upper.sound, ...typed.audio];
+  /*
+   * The picture decides how long the film is (R-19, SPEC-037 R-32): placed picture reaching past
+   * the last clip is still in the film, but sound never lengthens it — a bed that runs long is
+   * conformed to the picture's end, not answered with black. Only a film with no picture at all
+   * runs as long as what was placed on it, exactly as a media-only production always did.
+   */
+  const pictureEnd = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), 0);
+  const totalSec = pictureEnd > 0 ? pictureEnd : Math.max(...placedSound.map((clip) => clip.endSec), 0);
+  const audio = placedSound
+    .filter((clip) => clip.startSec < totalSec)
+    .map((clip) => (clip.endSec > totalSec ? { ...clip, endSec: totalSec } : clip));
   if (totalSec > cut.totalSec && items.length > 0) {
-    // Placed work reaching past the last Picture clip is still in the film (R-2, SPEC-037 R-32).
     items.push({ type: "black", durationSec: totalSec - cut.totalSec });
   }
   if (items.length === 0 && totalSec > 0) items.push({ type: "black", durationSec: totalSec });
+  const subtitles = subtitlesFromTimeline(record, subtitleChoice, frameRate, totalSec);
+  if (!subtitles.ok) return subtitles;
+  const burnIn = subtitles.subtitles !== null && (subtitles.subtitles.mode === "burn-in" || subtitles.subtitles.mode === "burn-in+sidecar");
   const plan: RenderPlan = {
     preset,
     frameRate,
@@ -364,6 +453,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     mix: record.mix,
     // Sound cannot extend the delivery range (R-19): a speech window is clipped to the film.
     speech: record.mix.speechFirst ? typed.speech.map((region) => ({ startSec: region.startSec, endSec: Math.min(region.endSec, totalSec) })) : [],
+    subtitles: subtitles.subtitles,
+    // Burned pixels are an output (R-27, D4): the builder reads this and never the cues' source.
+    ...(burnIn && subtitles.subtitles !== null
+      ? { burnIn: { style: subtitles.subtitles.style, cues: subtitles.subtitles.cues.map(({ text, startSec, endSec }) => ({ text, startSec, endSec })) } }
+      : {}),
   };
   return { ok: true, plan };
 }
@@ -388,7 +482,7 @@ export function pictureAtSec(plan: ExportPlan, sec: number): VisiblePicture | nu
       return {
         path: overlay.path,
         still: overlay.still,
-        sourceSec: overlay.still ? 0 : sec - overlay.startSec,
+        sourceSec: overlay.still ? 0 : (overlay.sourceInSec ?? 0) + (sec - overlay.startSec),
         label: overlay.path.split("/").pop() ?? overlay.path,
         layer: index + 1,
       };

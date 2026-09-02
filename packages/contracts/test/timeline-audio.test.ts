@@ -312,10 +312,10 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
     const song = plan.audio.find((clip) => clip.clipId === "cl_song")!;
     assert.equal(audioGainDbAt(plan, song, 1), -6, "a non-overlapping clip changes nothing about an existing one");
     assert.match(graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf")), /amix=inputs=3:normalize=0/);
-    assert.equal(plan.totalSec, 10, "sound reaching past the picture is inside the film, as placed work always was");
-    const tail = plan.items.at(-1)!;
-    assert.equal(tail.type, "black");
-    assert.equal(Math.round(tail.durationSec * 1000) / 1000, 2.48);
+    assert.equal(plan.totalSec, 7.52, "sound reaching past the picture cannot lengthen the film (R-19)");
+    const bells = plan.audio.find((clip) => clip.clipId === "cl_bells")!;
+    assert.equal(bells.endSec, 7.52, "it is conformed to the picture's end instead");
+    assert.notEqual(plan.items.at(-1)!.type, "black", "and no black tail is invented for it");
 
     const muted = valid(apply(withBells, { kind: "set-track", trackId: "tr_music", muted: true }));
     const mutedPlan = buildRenderPlan({ production: production(), artifacts, timeline: { status: "ready", timeline: muted }, scope: { kind: "production" }, preset: "review-cut" });

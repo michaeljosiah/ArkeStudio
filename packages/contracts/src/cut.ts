@@ -338,6 +338,8 @@ export interface ExportOverlay {
   startSec: number;
   endSec: number;
   still: boolean;
+  /** Seconds into a video source where its window begins; absent reads as the top of the file. */
+  sourceInSec?: number;
 }
 
 export interface ExportPlan {
@@ -356,6 +358,14 @@ export interface ExportPlan {
    */
   mix?: { speechFirst: boolean; duckingDb: number; lookAheadMs: number; releaseMs: number; limiterCeilingDb: number };
   speech?: Array<{ startSec: number; endSec: number }>;
+  /**
+   * Cues to burn into the picture (SPEC-038 R-27): pixels in the output only. Absent on every
+   * plan that delivers no burn-in, which leaves the video chain exactly as it was.
+   */
+  burnIn?: {
+    style: { fontFamily: string; relativeSize: number; color: string; background: "none" | "box" | "outline"; bottomMargin: number };
+    cues: Array<{ text: string; startSec: number; endSec: number }>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -659,6 +669,8 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     const index = plan.items.length + i;
     // A still has one frame: held for the film's length, so its window has something to show.
     if (overlay.still) args.push("-loop", "1", "-t", String(plan.totalSec));
+    // A trimmed video starts inside its source: input seeking, the same `-ss` a shot's take uses.
+    if (!overlay.still && overlay.sourceInSec !== undefined && overlay.sourceInSec > 0) args.push("-ss", String(overlay.sourceInSec));
     args.push("-i", `${worldDir}/${overlay.path}`);
     // A clip carries its own timeline and must be moved to where it was placed, or it plays from
     // the top of the film and the window shows the wrong seconds of it.
@@ -670,6 +682,39 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     );
     last = next;
   });
+
+  /*
+   * Burned-in subtitles (SPEC-038 R-27, §2.3). Each cue is one drawtext confined to its window,
+   * chained after the overlays so it sits over everything the film shows. The face is the one
+   * bundled slate font, verified glyph by glyph before the encode rather than substituted; a cue
+   * it cannot draw refuses by name. Size and margin are fractions of the picture, so the same
+   * style reads the same at every preset.
+   */
+  const burnIn = plan.burnIn;
+  if (burnIn !== undefined) {
+    const style = burnIn.style;
+    const fontsize = Math.max(8, Math.round(p.height * style.relativeSize));
+    const margin = Math.round(p.height * style.bottomMargin);
+    const colour = style.color.replace(/^#/, "0x");
+    const decoration =
+      style.background === "box"
+        ? ":box=1:boxcolor=black@0.6:boxborderw=8"
+        : style.background === "outline"
+          ? ":borderw=2:bordercolor=black"
+          : "";
+    burnIn.cues.forEach((cue, i) => {
+      // One line per burned cue: drawtext takes its text through the filter graph, where a
+      // newline is a separator, so line breaks become spaces on the way to the pixels.
+      const flat = cue.text.replace(/\s*\n\s*/g, " ");
+      assertSlateLabelSupported(flat);
+      const text = flat.replace(/[':\\]/g, " ").replace(/[;,[\]]/g, " ");
+      const next = `st${i}`;
+      filters.push(
+        `[${last}]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=${colour}:fontsize=${fontsize}:x=(w-tw)/2:y=h-th-${margin}${decoration}:enable='between(t,${cue.startSec},${cue.endSec})'[${next}]`,
+      );
+      last = next;
+    });
+  }
 
   /*
    * Sound (lanes). Every clip that carries any is delayed to where it was placed and mixed under

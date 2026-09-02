@@ -8,6 +8,7 @@ import {
   exportOverlays,
   isMediaOnly,
   mediaCanvasSec,
+  MEDIA_CANVAS_HEADROOM_SEC,
   placedExtentSec,
   placedFilmSec,
   episodeExportRefusals,
@@ -56,6 +57,9 @@ import {
   storyOrderDrift,
   ulid,
   AUDIO_TRACK_KINDS,
+  cueAtSec,
+  type RenderCue,
+  type SubtitleStyle,
   type TimelineTrack,
   type Sheet,
   type WorldBundle,
@@ -126,6 +130,7 @@ import {
   type PictureClipView,
 } from "./editor-timeline.js";
 import { ARTIFACT_DRAG_TYPE, ClipGain, MixPanel, TypedTrackRows, type TrackDrop } from "./editor-audio.js";
+import { CueInspector, SubtitleSources, SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
 import {
   acceptTake,
@@ -146,6 +151,7 @@ import {
   moveTimelineHistory,
   moveTimelinePictureClip,
   sendTimelineCommands,
+  sendTimelineTranscribe,
   rejoinOverlayAudio,
   splitOverlayAudio,
   uploadArtifacts,
@@ -3509,6 +3515,8 @@ function CutPreview({
   soundSec = 0,
   restartToken,
   transport,
+  cue = null,
+  cueStyle = null,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
@@ -3517,6 +3525,9 @@ function CutPreview({
   soundSec?: number;
   restartToken: number;
   transport: Transport;
+  /** The subtitle showing now, from the same plan the export burns (SPEC-038 R-26). */
+  cue?: RenderCue | null;
+  cueStyle?: SubtitleStyle | null;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const { playing, time, timeRef, setPlaying, seek } = transport;
@@ -3646,6 +3657,11 @@ function CutPreview({
       {showing === null && (
         <span className="fy-cutviewer__empty">
           {current ? current.label : soundOnly ? "sound only" : "nothing here yet"}
+        </span>
+      )}
+      {cue !== null && (
+        <span className={cx("fy-cutviewer__cue", cueStyle?.background === "box" && "fy-cutviewer__cue--box")} data-cue={cue.id} aria-live="off">
+          {cue.text}
         </span>
       )}
       <button
@@ -3833,7 +3849,7 @@ function SpineCutTrack({
   );
 }
 
-type CutSelection = { kind: "picture"; id: string } | { kind: "overlay"; id: string };
+type CutSelection = { kind: "picture"; id: string } | { kind: "overlay"; id: string } | { kind: "cue"; id: string };
 
 function EmptyEditorTrack({ label, detail, kind }: { label: string; detail: string; kind: string }) {
   return (
@@ -3900,6 +3916,9 @@ function CutInspector({
   commandsDisabled,
   onCommands,
   timeline,
+  subtitleView,
+  onViewSubtitles,
+  onTranscribe,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
@@ -3918,7 +3937,19 @@ function CutInspector({
   commandsDisabled: boolean;
   onCommands: (commands: TimelineCommand[], label?: string) => void;
   timeline: ProductionTimeline | null;
+  subtitleView: TimelineTrackId | null;
+  onViewSubtitles: (trackId: TimelineTrackId | null) => void;
+  onTranscribe: ((trackId: TimelineTrackId, language: string) => void) | null;
 }) {
+  const selectedCue =
+    selection?.kind === "cue" && timeline !== null
+      ? (timeline.tracks
+          .flatMap((track) => (track.cues ?? []).map((cue) => ({ track, cue })))
+          .find(({ cue }) => cue.id === selection.id) ?? null)
+      : null;
+  if (selectedCue !== null && production) {
+    return <CueInspector track={selectedCue.track} cue={selectedCue.cue} frameRate={frameRate} production={production} disabled={commandsDisabled} onCommands={onCommands} />;
+  }
   const selectedOverlay =
     selection?.kind === "overlay"
       ? (production?.cut.overlays.find((clip) => clip.id === selection.id) ?? null)
@@ -4087,6 +4118,17 @@ function CutInspector({
         <InspectorRow label="Export preset">Review cut</InspectorRow>
       </div>
       {timeline !== null && <MixPanel mix={timeline.mix} disabled={commandsDisabled} onCommands={onCommands} />}
+      {timeline !== null && (
+        <SubtitleSources
+          timeline={timeline}
+          frameRate={frameRate}
+          viewedTrackId={subtitleView}
+          onViewTrack={onViewSubtitles}
+          disabled={commandsDisabled}
+          onCommands={onCommands}
+          onTranscribe={onTranscribe}
+        />
+      )}
       <p className="fy-cutinspect__note">Select a Picture or overlay clip to inspect its real source and supported timing controls.</p>
     </div>
   );
@@ -4139,6 +4181,11 @@ export function CutScreen() {
   const [tool, setTool] = useState<EditorTool>("select");
   const [snap, setSnap] = useState(true);
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
+  /** Which language is viewed (SPEC-038 R-26): local view state; the first track until chosen. */
+  const [subtitleChoice, setSubtitleChoice] = useState<TimelineTrackId | null>(null);
+  const subtitleTracks = timelineState.status === "ready" ? subtitleTracksOf(timelineState.timeline) : [];
+  const subtitleView: TimelineTrackId | null =
+    subtitleChoice !== null && subtitleTracks.some((track) => track.id === subtitleChoice) ? subtitleChoice : (subtitleTracks[0]?.id ?? null);
   const libraryToggleRef = useRef<HTMLButtonElement>(null);
   const libraryPanelRef = useRef<HTMLElement>(null);
   const rightToggleRef = useRef<HTMLButtonElement>(null);
@@ -4228,16 +4275,32 @@ export function CutScreen() {
    */
   const renderPlan =
     production && !production.spine && timelineError === null
-      ? buildRenderPlan({ production, artifacts, timeline: timelineState, scope: { kind: "production" }, preset: "review-cut" })
+      ? buildRenderPlan({
+          production,
+          artifacts,
+          timeline: timelineState,
+          scope: { kind: "production" },
+          preset: "review-cut",
+          ...(subtitleView !== null ? { subtitles: { trackId: subtitleView, mode: "none" } } : {}),
+        })
       : null;
-  if (renderPlan !== null && !renderPlan.ok && timelineError === null) timelineError = renderPlan.reason;
+  /*
+   * A plan the projection refuses — a placed artifact the world no longer has, say — blocks the
+   * preview and the export by name, and nothing else (SPEC-039 R-39, R-40): the editor stays
+   * editable so the clip can be removed, and Undo still works. Only an invalid or unresolvable
+   * timeline record blocks editing.
+   */
+  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
+  const timelineOwnsFilm = timelineState.status === "ready";
   const canvasSec = spineCut
     ? spineCut.trackDurationSec
-    : mediaOnly
+    : mediaOnly && !timelineOwnsFilm
       ? mediaCanvasSec(overlays)
-      : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0);
-  const filmSec = mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : (planTotalSec ?? canvasSec);
+      : Math.max(cut?.totalSec ?? 0, planTotalSec ?? 0, mediaOnly ? (planTotalSec ?? 0) + MEDIA_CANVAS_HEADROOM_SEC : 0);
+  // Once the timeline owns the film, the plan's length is the film's; the legacy lanes no
+  // longer say anything about a placement that lives on a typed track.
+  const filmSec = timelineOwnsFilm && planTotalSec !== null ? planTotalSec : mediaOnly ? placedExtentSec([...placedPicture, ...placedSound]) : (planTotalSec ?? canvasSec);
   /** Lane layout and scrubbing get the canvas; playback and the readout get the film. */
   const totalSec = canvasSec;
   const transport = useCutTransport(filmSec);
@@ -4287,6 +4350,7 @@ export function CutScreen() {
   const firstPictureId = spineCut
     ? (spineCut.segments.find((segment) => segment.kind === "clip" && segment.shotId)?.shotId ?? null)
     : (orderedPictureClips[0]?.id ?? null);
+  const allCues = editableTimeline ? editableTimeline.tracks.flatMap((track) => (track.cues ?? []).map((cue) => ({ cue, track }))) : [];
   const selectedExists =
     selected?.kind === "picture"
       ? spineCut
@@ -4294,7 +4358,9 @@ export function CutScreen() {
         : allClips.some(({ clip }) => clip.id === selected.id)
       : selected?.kind === "overlay"
         ? overlays.some((clip) => clip.id === selected.id)
-        : false;
+        : selected?.kind === "cue"
+          ? allCues.some(({ cue }) => cue.id === selected.id)
+          : false;
   const activeSelection: CutSelection | null = selectedExists
     ? selected
     : selectionCleared
@@ -4329,6 +4395,12 @@ export function CutScreen() {
     const clip = orderedPictureClips.find((candidate) => candidate.source.kind === "shot" && candidate.source.shotId === shotId);
     if (clip) selectPicture(clip.id);
   };
+  const selectCue = (id: string) => {
+    setSelected({ kind: "cue", id });
+    setSelectionCleared(false);
+    revealDetails();
+  };
+  const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   const selectOverlay = (id: string) => {
     setSelected({ kind: "overlay", id });
     setSelectionCleared(false);
@@ -4418,6 +4490,25 @@ export function CutScreen() {
   const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number) => {
     if (!editableTimeline) return;
     const still = artifact.kind === "image" || artifact.kind === "board";
+    // Refused here, in the words the coordinator would use, rather than written and then refused
+    // by every render: a document has no picture and no sound, an image has no sound, and a
+    // video is only sound when it is known to carry some (SPEC-037 R-22).
+    const targetTrack = trackId === null ? null : (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null);
+    const audioTarget = targetTrack !== null ? AUDIO_TRACK_KINDS.has(targetTrack.kind) : artifact.kind === "audio";
+    const carriesSound = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
+    const carriesPicture = still || artifact.kind === "video";
+    if (targetTrack !== null && targetTrack.kind === "subtitle") {
+      setTimelineCommandError(`${targetTrack.name} holds subtitles, not media`);
+      return;
+    }
+    if (audioTarget && !carriesSound) {
+      setTimelineCommandError(`${artifact.file.split("/").pop()} is not known to carry sound; it cannot go on ${targetTrack?.name ?? "an audio track"}`);
+      return;
+    }
+    if (!audioTarget && !carriesPicture) {
+      setTimelineCommandError(`${artifact.file.split("/").pop()} is ${artifact.kind} and has no picture to place`);
+      return;
+    }
     const measured = artifact.mediaInfo?.durationSec;
     const durationFrames = Math.max(1, secondsToFrames(still ? CLIP_DEFAULT_SEC : (measured ?? CLIP_DEFAULT_SEC), frameRate));
     const label = artifact.file.split("/").pop() ?? artifact.file;
@@ -4450,7 +4541,18 @@ export function CutScreen() {
     const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
     if (artifact) placeArtifact(artifact, drop.trackId, drop.frame);
   };
+  /** An explicit draft from speech (SPEC-038 R-25): fenced like every other write. */
+  const transcribe = (trackId: TimelineTrackId, language: string) => {
+    if (!worldId || !prodId || timelineRevision === null || commandPending) return;
+    setTimelineCommandError(null);
+    setInFlight({ revision: timelineRevision, since: Date.now() });
+    sendTimelineTranscribe(worldId, prodId, timelineRevision, trackId, language);
+  };
   const selectedAction = (action: "split" | "duplicate" | "delete" | "ripple") => {
+    if (action === "delete" && selectedCueId !== null) {
+      sendCommands([{ kind: "delete-cue", cueId: selectedCueId as `cu_${string}` }], "Delete subtitle");
+      return;
+    }
     const target = selectedAny?.clip ?? selectedPictureClip;
     if (!target) return;
     const clipId = target.id;
@@ -4465,8 +4567,8 @@ export function CutScreen() {
    * platform, and Delete removes the selection when focus is not already on a clip that handles
    * its own keys. Every one of them has a labelled control in the toolbar.
    */
-  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip, commandsDisabled });
-  shortcuts.current = { canUndo, canRedo, selectedPictureClip, commandsDisabled };
+  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled });
+  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled };
   const shortcutActions = useRef({ sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing) });
   shortcutActions.current = { sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing) };
   useEffect(() => {
@@ -4483,8 +4585,8 @@ export function CutScreen() {
       } else if (key === " " && !meta) {
         actions.toggle();
       } else if ((key === "Delete" || key === "Backspace") && !meta) {
-        if (event.target instanceof HTMLElement && event.target.closest("[data-clip]")) return;
-        if (state.selectedPictureClip && !state.commandsDisabled) actions.selectedAction(event.shiftKey ? "ripple" : "delete");
+        if (event.target instanceof HTMLElement && event.target.closest("[data-clip], [data-cue]")) return;
+        if ((state.selectedPictureClip || state.selectedCueId !== null) && !state.commandsDisabled) actions.selectedAction(event.shiftKey ? "ripple" : "delete");
         else return;
       } else {
         return;
@@ -4548,7 +4650,7 @@ export function CutScreen() {
           <Button
             size="sm"
             variant="primary"
-            disabled={timelineError !== null}
+            disabled={timelineError !== null || renderError !== null}
             onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}
           >
             Export film
@@ -4597,6 +4699,9 @@ export function CutScreen() {
         </div>
         <div className="fy-cutpreview-wrap">
           {timelineError && <div className="fy-cuttimeline-error">Timeline unavailable · {timelineError}</div>}
+          {timelineError === null && renderError !== null && (
+            <div className="fy-cuttimeline-error" role="status">Preview and export unavailable · {renderError}</div>
+          )}
           <CutPreview
             slug={slug}
             spans={spans}
@@ -4604,6 +4709,8 @@ export function CutScreen() {
             soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
             restartToken={watchToken}
             transport={transport}
+            cue={renderPlan?.ok ? cueAtSec(renderPlan.plan, transport.time) : null}
+            cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
           />
         </div>
         <section className="fy-timeline" aria-label="Timeline">
@@ -4698,7 +4805,24 @@ export function CutScreen() {
                   aria-hidden
                 />
               )}
-              <EmptyEditorTrack label="Subtitles" detail="No subtitle track yet" kind="subtitles" />
+              {editableTimeline && production && subtitleTracksOf(editableTimeline).length > 0 ? (
+                subtitleTracksOf(editableTimeline).map((track) => (
+                  <SubtitleTrackRow
+                    key={track.id}
+                    track={track}
+                    totalFrames={totalFrames}
+                    frameRate={frameRate}
+                    production={production}
+                    selectedCueId={selectedCueId}
+                    onSelectCue={selectCue}
+                    onCommands={sendCommands}
+                    disabled={commandsDisabled}
+                    playheadFrame={playheadFrame}
+                  />
+                ))
+              ) : (
+                <EmptyEditorTrack label="Subtitles" detail={editableTimeline ? "Add a subtitle track in the Inspector" : "No subtitle track yet"} kind="subtitles" />
+              )}
               {production && cut ? (
                 spineCut ? (
                   <SpineCutTrack
@@ -4870,6 +4994,9 @@ export function CutScreen() {
               selectedClip={selectedAny?.clip ?? null}
               selectedTrack={selectedAny?.track ?? null}
               timeline={editableTimeline}
+              subtitleView={subtitleView}
+              onViewSubtitles={setSubtitleChoice}
+              onTranscribe={timelineRevision !== null && !commandsDisabled ? transcribe : null}
               filmSec={filmSec}
               clipCount={clipCount}
               savedPictureOrder={timelineState.status === "ready"}
@@ -5163,6 +5290,19 @@ export function ExportsScreen() {
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
   /*
+   * Subtitle delivery (SPEC-038 R-27): one language track, and none, burned in, a sidecar, or
+   * both. Only a saved timeline holds subtitle tracks, so a legacy production offers nothing here.
+   */
+  const subtitleTracks = timelineState.status === "ready" ? subtitleTracksOf(timelineState.timeline) : [];
+  const [subtitleTrack, setSubtitleTrack] = useState<string>("");
+  const [subtitleMode, setSubtitleMode] = useState<"none" | "burn-in" | "sidecar" | "burn-in+sidecar">("none");
+  const [sidecarFormat, setSidecarFormat] = useState<"srt" | "vtt">("srt");
+  const chosenSubtitleTrack = subtitleTracks.find((track) => track.id === subtitleTrack) ?? subtitleTracks[0] ?? null;
+  const subtitleChoice =
+    chosenSubtitleTrack !== null && subtitleMode !== "none"
+      ? { trackId: chosenSubtitleTrack.id, mode: subtitleMode, sidecar: sidecarFormat }
+      : undefined;
+  /*
    * Runtime, block and refusal all read from the one view, so none can describe a state the screen
    * is not in. The song's length is the runtime wherever there is a song (design 60, binding).
    */
@@ -5310,6 +5450,7 @@ export function ExportsScreen() {
                     {e.status}
                     {e.status === "running" ? ` · ${Math.round(e.percent)}%` : ""}
                     {e.output ? ` · ${e.output}` : ""}
+                    {e.sidecar ? ` · ${e.sidecar}` : ""}
                     {e.error ? ` · ${e.error}` : ""}
                   </div>
                 </div>
@@ -5339,6 +5480,46 @@ export function ExportsScreen() {
                 </button>
               ))}
             </div>
+            {subtitleTracks.length > 0 && (
+              <div className="fy-subtitle-delivery" aria-label="Subtitles">
+                <div className="fy-eyebrow-sm">SUBTITLES</div>
+                <div className="fy-subtitle-delivery__row">
+                  <label>
+                    Track
+                    <select aria-label="Subtitle track" value={chosenSubtitleTrack?.id ?? ""} onChange={(event) => setSubtitleTrack(event.target.value)}>
+                      {subtitleTracks.map((track) => (
+                        <option key={track.id} value={track.id}>
+                          {track.name} · {track.language}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="fy-subtitle-delivery__modes" role="group" aria-label="Subtitle output">
+                    {(
+                      [
+                        ["none", "None"],
+                        ["burn-in", "Burned in"],
+                        ["sidecar", "Sidecar"],
+                        ["burn-in+sidecar", "Both"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button key={value} type="button" aria-pressed={subtitleMode === value} onClick={() => setSubtitleMode(value)}>
+                        {label}
+                      </button>
+                    ))}
+                  </span>
+                  {(subtitleMode === "sidecar" || subtitleMode === "burn-in+sidecar") && (
+                    <label>
+                      Format
+                      <select aria-label="Sidecar format" value={sidecarFormat} onChange={(event) => setSidecarFormat(event.target.value as "srt" | "vtt")}>
+                        <option value="srt">SRT</option>
+                        <option value="vtt">WebVTT</option>
+                      </select>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
             {timelineBlock && (
               <div className="fy-notecard">
                 <span className="fy-dot fy-dot--warn" />
@@ -5427,6 +5608,8 @@ export function ExportsScreen() {
                     prodId,
                     preset,
                     timelineState.status === "ready" ? timelineState.timeline.revision : null,
+                    undefined,
+                    subtitleChoice,
                   )
                 }
               >

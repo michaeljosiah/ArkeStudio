@@ -35,6 +35,10 @@ import {
   ulid,
   CutFileSchema,
   buildRenderPlan,
+  serializeTimedText,
+  orderedTrackClips,
+  storyTimelineFingerprint,
+  type TimelineCommand,
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
@@ -6863,6 +6867,7 @@ export class Coordinator {
           }
 
           let buildArgs: (stage: string) => string[];
+          let sidecarFor: ((stem: string) => { name: string; text: string }) | null = null;
           if (spine && trackFile !== undefined && trackDurationSec !== null) {
             const spineCut = deriveSpineCut(production, spine, trackDurationSec);
             const refusal = spineExportRefusals(spineCut, msg.preset);
@@ -6914,12 +6919,22 @@ export class Coordinator {
               timeline: production.timeline,
               scope: { kind: "production" },
               preset: msg.preset,
+              ...(msg.subtitles !== undefined ? { subtitles: msg.subtitles } : {}),
             });
             if (!projected.ok) {
               emitProgress(attemptId, "failed", 0, null, `timeline is not ready to export: ${projected.reason}`);
               return;
             }
             const plan = projected.plan;
+            // The sidecar is the plan's cues, on the plan's clock, so it names exactly the
+            // windows the burned pixels and the preview show (SPEC-038 R-27, R-28).
+            if (plan.subtitles !== null && (plan.subtitles.mode === "sidecar" || plan.subtitles.mode === "burn-in+sidecar")) {
+              const delivered = plan.subtitles;
+              sidecarFor = (stem) => ({
+                name: `${stem}.${delivered.language}.${delivered.sidecar}`,
+                text: serializeTimedText(delivered.cues, delivered.sidecar),
+              });
+            }
             /*
              * Nothing to render, said before the encode (issue 453).
              *
@@ -6945,12 +6960,14 @@ export class Coordinator {
             .toISOString()
             .replace(/[-:TZ.]/g, "")
             .slice(0, 14);
+          const stem = `${msg.productionId}-${msg.preset}-${stamp}`;
           const handle = runExport(
             store.dir,
             buildArgs,
-            `${msg.productionId}-${msg.preset}-${stamp}.mp4`,
+            `${stem}.mp4`,
             runner,
             (percent) => emitProgress(handle.id, "running", percent, null, null),
+            sidecarFor === null ? undefined : sidecarFor(stem),
           );
           this.exports.set(handle.id, handle);
           emitProgress(handle.id, "running", 0, null, null);
@@ -6961,8 +6978,20 @@ export class Coordinator {
               // Released when the encode ends, not when this handler returns: the claim covers the
               // running export too, or a second click during it launches a duplicate.
               this.exportsInFlight.delete(exportKey);
-              if (result.status === "done") emitProgress(handle.id, "done", 100, result.output, null);
-              else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+              if (result.status === "done") {
+                this.emit({
+                  at: new Date().toISOString(),
+                  type: "export.progress",
+                  worldId: msg.worldId,
+                  productionId: msg.productionId,
+                  exportId: handle.id,
+                  status: "done",
+                  percent: 100,
+                  output: result.output,
+                  ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                  error: null,
+                });
+              } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
               else emitProgress(handle.id, "failed", 0, null, result.error);
             }),
           );
@@ -6973,6 +7002,86 @@ export class Coordinator {
       }
       case "cancel-export": {
         this.exports.get(msg.exportId)?.cancel();
+        return;
+      }
+      /*
+       * A subtitle draft from speech (SPEC-038 R-25, issue 683). One cue per Dialogue clip,
+       * spanning that clip's window, with the words the local model heard; the model is
+       * recorded as provenance and the cues are ordinary editable text from the moment they
+       * land. No sidecar, no draft: the refusal is named where every other timeline refusal is.
+       */
+      case "timeline-transcribe": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const refuse = (reason: string): void => {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "timeline.command-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            reason: reason.slice(0, 500),
+          });
+          this.transport.broadcastSnapshot();
+        };
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          if (!production) return;
+          if (production.timeline?.status !== "ready") throw new Error("speech-to-text needs a saved timeline with Dialogue clips");
+          if (!this.voiceService) throw new Error("Voxa is not running — speech-to-text is off");
+          const record = production.timeline.timeline;
+          const dialogue = record.tracks
+            .filter((track) => track.kind === "dialogue" && !track.muted)
+            .flatMap((track) => orderedTrackClips(track));
+          if (dialogue.length === 0) throw new Error("there are no Dialogue clips to transcribe");
+          const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
+          const commands: TimelineCommand[] = [];
+          if (!record.tracks.some((track) => track.id === msg.trackId)) {
+            commands.push({ kind: "add-subtitle-track", trackId: msg.trackId, name: `Subtitles (${msg.language})`, language: msg.language });
+          }
+          const at = new Date().toISOString();
+          for (const clip of dialogue) {
+            let path: string | null = null;
+            if (clip.source.kind === "take") {
+              const take = takesById.get(clip.source.takeId);
+              if (take?.media !== undefined) path = join(store.dir, "productions", production.meta.id, "takes", take.id, take.media);
+            } else if (clip.source.kind === "artifact") {
+              const artifactId = clip.source.artifactId;
+              const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
+              if (artifact !== undefined) path = join(store.dir, "artifacts", fromPortable(artifact.file));
+            }
+            if (path === null) continue;
+            const extension = path.toLowerCase().split(".").pop() ?? "";
+            const contentType =
+              extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "audio/wav";
+            const audio = await readFile(toExtendedLength(path));
+            const text = (await this.voiceService.transcribe(Uint8Array.from(audio), contentType)).trim();
+            if (text === "") continue;
+            commands.push({
+              kind: "add-cue",
+              trackId: msg.trackId,
+              cue: {
+                id: `cu_${ulid()}`,
+                text: text.slice(0, 500),
+                startFrame: clip.startFrame,
+                endFrame: clip.startFrame + clip.durationFrames,
+                ...(clip.source.kind === "take" && clip.source.sheetId !== undefined ? { speaker: clip.source.sheetId } : {}),
+                citation: { kind: "clip", clipId: clip.id },
+                provenance: { kind: "speech-to-text", model: "voxa", clipId: clip.id, at },
+              },
+            });
+          }
+          if (!commands.some((command) => command.kind === "add-cue")) throw new Error("the model heard no words in the Dialogue clips");
+          await applyTimelineCommand(store, msg.productionId, {
+            kind: "commands",
+            commands,
+            baseRevision: msg.baseRevision,
+            sourceFingerprint: storyTimelineFingerprint(production),
+            label: "Draft subtitles from speech",
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (error) {
+          refuse(error instanceof Error ? error.message : String(error));
+        }
         return;
       }
       case "export-world": {

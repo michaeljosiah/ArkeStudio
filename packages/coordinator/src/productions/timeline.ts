@@ -232,6 +232,9 @@ export async function applyTimelineCommand(
           (candidate): candidate is TimelineClipCommand => candidate.kind !== "switch-take",
         );
         let selectionChanges: TimelineSelectionChange[] = [];
+        // Trim bounds follow the take this batch commits, not the one it replaces: a switch to a
+        // shorter take and a tail trim in one batch must be judged against the shorter source.
+        let boundedBy: ProductionBundle = production;
         if (switches.length > 0) {
           const reviewsRaw = await readOptional(store, reviewsPath);
           const selectionsRaw = await readOptional(store, selectionsPath);
@@ -243,6 +246,7 @@ export async function applyTimelineCommand(
             store.now(),
           );
           selectionChanges = planned.changes;
+          boundedBy = { ...production, selections: planned.selections };
           files.push(
             fileFor(reviewsPath, reviewsRaw, (reviewsRaw ?? "") + planned.decisions.map((decision) => JSON.stringify(decision)).join("\n") + "\n"),
             fileFor(selectionsPath, selectionsRaw, JSON.stringify(planned.selections, null, 2) + "\n"),
@@ -254,7 +258,7 @@ export async function applyTimelineCommand(
         next = applyTimelineCommands(current, clipCommands, {
           label,
           selections: selectionChanges,
-          sourceLength: sourceLengthFramesFor(production, store.getBundle().artifacts),
+          sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
         });
       } else {

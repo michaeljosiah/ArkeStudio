@@ -5,6 +5,18 @@ import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.
 import { orderedShots } from "./scene-flow.js";
 import { ShotSelectionSchema, sortScenes } from "./scene.js";
 import { FrameRateSchema, productionFrameRate, type FrameRate } from "./world.js";
+import {
+  DEFAULT_SUBTITLE_STYLE,
+  LanguageTagSchema,
+  SubtitleCueIdSchema,
+  SubtitleCueSchema,
+  SubtitleProvenanceSchema,
+  SubtitleStyleSchema,
+  cueOverlaps,
+  orderedCues,
+  type SubtitleCue,
+  type SubtitleCueId,
+} from "./subtitles.js";
 
 /** The saved timeline's complete track vocabulary. Only Picture behavior is implemented here. */
 export const TimelineTrackKindSchema = z.enum(["picture", "dialogue", "ambience", "music", "subtitle"]);
@@ -103,6 +115,10 @@ export const TimelineTrackSchema = z
      */
     endFrame: WholeFrameSchema.optional(),
     clips: z.array(TimelineClipSchema).max(MAX_TRACK_CLIPS),
+    /** Subtitle tracks only (SPEC-038 R-21): the language, the shared style and the cues. */
+    language: LanguageTagSchema.optional(),
+    style: SubtitleStyleSchema.optional(),
+    cues: z.array(SubtitleCueSchema).max(MAX_TRACK_CLIPS).optional(),
   })
   .strict();
 export type TimelineTrack = z.infer<typeof TimelineTrackSchema>;
@@ -120,6 +136,8 @@ export const TimelineTrackPropsSchema = z
     muted: z.boolean(),
     solo: z.boolean().optional(),
     endFrame: WholeFrameSchema.optional(),
+    language: LanguageTagSchema.optional(),
+    style: SubtitleStyleSchema.optional(),
   })
   .strict();
 export type TimelineTrackProps = z.infer<typeof TimelineTrackPropsSchema>;
@@ -131,6 +149,8 @@ export function trackProps(track: TimelineTrack): TimelineTrackProps {
     muted: track.muted,
     ...(track.solo !== undefined ? { solo: track.solo } : {}),
     ...(track.endFrame !== undefined ? { endFrame: track.endFrame } : {}),
+    ...(track.language !== undefined ? { language: track.language } : {}),
+    ...(track.style !== undefined ? { style: track.style } : {}),
   };
 }
 
@@ -206,6 +226,17 @@ export const TimelineTrackChangeSchema = z
   .refine((change) => change.before !== null || change.after !== null, "a track change must name a track on at least one side");
 export type TimelineTrackChange = z.infer<typeof TimelineTrackChangeSchema>;
 
+/** One cue as it read before and after a command. */
+export const TimelineCueChangeSchema = z
+  .object({
+    trackId: TimelineTrackIdSchema,
+    before: SubtitleCueSchema.nullable(),
+    after: SubtitleCueSchema.nullable(),
+  })
+  .strict()
+  .refine((change) => change.before !== null || change.after !== null, "a cue change must name a cue on at least one side");
+export type TimelineCueChange = z.infer<typeof TimelineCueChangeSchema>;
+
 /**
  * One completed action, whatever it did (R-24, D5). Recording the exact before and after of every
  * clip it touched is what lets Undo apply the exact inverse (R-25) without a second implementation
@@ -218,13 +249,15 @@ export const TimelineChangeHistoryEntrySchema = z
     clips: z.array(TimelineClipChangeSchema).max(MAX_TRACK_CLIPS * 8),
     selections: z.array(TimelineSelectionChangeSchema).max(MAX_TRACK_CLIPS).default([]),
     tracks: z.array(TimelineTrackChangeSchema).max(200).default([]),
+    cues: z.array(TimelineCueChangeSchema).max(MAX_TRACK_CLIPS * 8).default([]),
     mix: z.object({ before: MixSettingsSchema, after: MixSettingsSchema }).strict().optional(),
     /** Present when the entry landed an Arke editor request (SPEC-039 R-30, R-36). */
     requestId: z.string().min(1).max(80).optional(),
   })
   .strict()
   .refine(
-    (entry) => entry.clips.length > 0 || entry.selections.length > 0 || entry.tracks.length > 0 || entry.mix !== undefined,
+    (entry) =>
+      entry.clips.length > 0 || entry.selections.length > 0 || entry.tracks.length > 0 || entry.cues.length > 0 || entry.mix !== undefined,
     "a history entry must change something",
   );
 export type TimelineChangeHistoryEntry = z.infer<typeof TimelineChangeHistoryEntrySchema>;
@@ -276,6 +309,21 @@ export const ProductionTimelineSchema = z
 
       if (track.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "solo"], message: "only audio tracks solo" });
+      }
+      if (track.kind === "subtitle") {
+        if (track.language === undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "language"], message: "a Subtitle track names its language" });
+        }
+        const cueIds = new Set<string>();
+        for (const [cueIndex, cue] of (track.cues ?? []).entries()) {
+          if (cueIds.has(cue.id)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "cues", cueIndex, "id"], message: "cue ids must be unique" });
+          cueIds.add(cue.id);
+        }
+        for (const overlap of cueOverlaps(track.cues ?? [])) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "cues"], message: overlap });
+        }
+      } else if (track.language !== undefined || track.style !== undefined || track.cues !== undefined) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex], message: "language, style and cues belong to Subtitle tracks" });
       }
       for (const [clipIndex, clip] of track.clips.entries()) {
         const problem = sourceProblem(track.kind, clip);
@@ -369,6 +417,8 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
       muted: z.boolean().optional(),
       solo: z.boolean().optional(),
       order: WholeFrameSchema.optional(),
+      /** Subtitle tracks only. */
+      language: LanguageTagSchema.optional(),
     })
     .strict(),
   z
@@ -383,6 +433,44 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   /** Only an empty track goes; its clips are removed by their own commands first. */
   z.object({ kind: z.literal("remove-track"), trackId: TimelineTrackIdSchema }).strict(),
   z.object({ kind: z.literal("set-mix"), mix: MixSettingsSchema.partial().strict() }).strict(),
+  /** Subtitles (SPEC-038 R-21..R-26): a language track, and the cues on it. */
+  z
+    .object({
+      kind: z.literal("add-subtitle-track"),
+      trackId: TimelineTrackIdSchema,
+      name: z.string().min(1),
+      language: LanguageTagSchema,
+      style: SubtitleStyleSchema.optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("add-cue"), trackId: TimelineTrackIdSchema, cue: SubtitleCueSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("edit-cue"),
+      cueId: SubtitleCueIdSchema,
+      text: z.string().min(1).max(500).optional(),
+      startFrame: WholeFrameSchema.optional(),
+      endFrame: WholeFrameSchema.optional(),
+      /** Null clears the speaker. */
+      speaker: SlugSchema.nullable().optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("delete-cue"), cueId: SubtitleCueIdSchema }).strict(),
+  /**
+   * Cues that already parsed on the frame grid (R-24): the importer reports what it could not
+   * read before this is sent, so the command carries only rows that are cues. `replace` clears
+   * the track first; otherwise the rows join what is there and overlap refuses the whole batch.
+   */
+  z
+    .object({
+      kind: z.literal("import-cues"),
+      trackId: TimelineTrackIdSchema,
+      cues: z.array(SubtitleCueSchema).min(1).max(MAX_TRACK_CLIPS),
+      replace: z.boolean(),
+      provenance: SubtitleProvenanceSchema.optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("set-subtitle-style"), trackId: TimelineTrackIdSchema, style: SubtitleStyleSchema.partial().strict() }).strict(),
 ]);
 export type TimelineCommand = z.infer<typeof TimelineCommandSchema>;
 export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take" }>;
@@ -429,6 +517,18 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Remove track ${command.trackId}`;
     case "set-mix":
       return "Change the mix";
+    case "add-subtitle-track":
+      return `Add ${command.language} subtitles`;
+    case "add-cue":
+      return `Add a subtitle at frame ${command.cue.startFrame}`;
+    case "edit-cue":
+      return `Edit subtitle ${command.cueId}`;
+    case "delete-cue":
+      return `Delete subtitle ${command.cueId}`;
+    case "import-cues":
+      return `Import ${command.cues.length} subtitle${command.cues.length === 1 ? "" : "s"}`;
+    case "set-subtitle-style":
+      return `Change subtitle style on ${command.trackId}`;
   }
 }
 
@@ -632,6 +732,48 @@ interface Working {
   touched: Map<TimelineClipId, { trackId: TimelineTrackId; before: TimelineClip | null }>;
   /** Every track whose properties or existence changed, with what it was before the first touch. */
   touchedTracks: Map<TimelineTrackId, { kind: TimelineTrackKind; before: TimelineTrackProps | null }>;
+  touchedCues: Map<SubtitleCueId, { trackId: TimelineTrackId; before: SubtitleCue | null }>;
+}
+
+function touchCue(working: Working, trackId: TimelineTrackId, cueId: SubtitleCueId, before: SubtitleCue | null): void {
+  if (!working.touchedCues.has(cueId)) working.touchedCues.set(cueId, { trackId, before });
+}
+
+function findCue(working: Working, cueId: SubtitleCueId): { track: TimelineTrack; cue: SubtitleCue } {
+  const matches = working.tracks.filter((track) => (track.cues ?? []).some((cue) => cue.id === cueId));
+  if (matches.length !== 1) throw new TimelineOperationRefused(`timeline does not contain exactly one subtitle ${cueId}`);
+  const track = matches[0]!;
+  return { track, cue: track.cues!.find((cue) => cue.id === cueId)! };
+}
+
+function subtitleTrack(working: Working, trackId: TimelineTrackId): TimelineTrack {
+  const track = working.tracks.find((candidate) => candidate.id === trackId);
+  if (track === undefined) throw new TimelineOperationRefused(`track ${trackId} is not on the timeline`);
+  if (track.kind !== "subtitle") throw new TimelineOperationRefused(`${track.name} is not a Subtitle track`);
+  return track;
+}
+
+/** Replace a Subtitle track's cues, refusing overlap and inverted ranges by name (R-22, R-26). */
+function replaceTrackCues(working: Working, trackId: TimelineTrackId, cues: SubtitleCue[]): void {
+  for (const cue of cues) {
+    if (cue.endFrame <= cue.startFrame) throw new TimelineOperationRefused(`subtitle ${cue.id} must end after it starts`);
+    if (!Number.isSafeInteger(cue.endFrame)) throw new TimelineOperationRefused(`subtitle ${cue.id} would overflow the frame clock`);
+  }
+  const ids = new Set<string>();
+  for (const cue of cues) {
+    if (ids.has(cue.id)) throw new TimelineOperationRefused(`subtitle id ${cue.id} appears twice`);
+    ids.add(cue.id);
+  }
+  const overlaps = cueOverlaps(cues);
+  if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
+  working.tracks = working.tracks.map((track) => (track.id === trackId ? { ...track, cues: orderedCues(cues) } : track));
+}
+
+function assertNewCueId(working: Working, cueId: SubtitleCueId): void {
+  if (working.tracks.some((track) => (track.cues ?? []).some((cue) => cue.id === cueId))) {
+    throw new TimelineOperationRefused(`subtitle id ${cueId} is already on the timeline`);
+  }
+  SubtitleCueIdSchema.parse(cueId);
 }
 
 function touchTrack(working: Working, track: Pick<TimelineTrack, "id" | "kind">, before: TimelineTrackProps | null): void {
@@ -850,6 +992,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       if (command.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${track.name} is not an audio track and cannot solo`);
+      if (command.language !== undefined && track.kind !== "subtitle") throw new TimelineOperationRefused(`${track.name} is not a Subtitle track and has no language`);
       if (command.order !== undefined && working.tracks.some((candidate) => candidate.id !== track.id && candidate.order === command.order)) {
         throw new TimelineOperationRefused(`another track already has order ${command.order}`);
       }
@@ -860,11 +1003,13 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         ...(command.muted !== undefined ? { muted: command.muted } : {}),
         ...(command.solo !== undefined ? { solo: command.solo } : {}),
         ...(command.order !== undefined ? { order: command.order } : {}),
+        ...(command.language !== undefined ? { language: command.language } : {}),
       };
       working.tracks = working.tracks.map((candidate) => (candidate.id === track.id ? next : candidate));
       return;
     }
     case "add-track": {
+      if (command.trackKind === "subtitle") throw new TimelineOperationRefused("a Subtitle track is added with its language");
       if (working.tracks.some((candidate) => candidate.id === command.trackId)) {
         throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
       }
@@ -888,6 +1033,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       if (track.clips.length > 0) throw new TimelineOperationRefused(`${track.name} still holds ${track.clips.length} clip${track.clips.length === 1 ? "" : "s"}`);
+      if ((track.cues ?? []).length > 0) throw new TimelineOperationRefused(`${track.name} still holds ${track.cues!.length} subtitle${track.cues!.length === 1 ? "" : "s"}`);
       if (track.id === PICTURE_TRACK_ID) throw new TimelineOperationRefused("the base Picture track stays");
       touchTrack(working, track, trackProps(track));
       working.tracks = working.tracks.filter((candidate) => candidate.id !== track.id);
@@ -895,6 +1041,75 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     }
     case "set-mix": {
       working.mix = MixSettingsSchema.parse({ ...working.mix, ...command.mix });
+      return;
+    }
+    case "add-subtitle-track": {
+      if (working.tracks.some((candidate) => candidate.id === command.trackId)) {
+        throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
+      }
+      TimelineTrackIdSchema.parse(command.trackId);
+      const order = working.tracks.reduce((high, candidate) => Math.max(high, candidate.order + 1), 0);
+      const track: TimelineTrack = {
+        id: command.trackId,
+        kind: "subtitle",
+        name: command.name,
+        order,
+        muted: false,
+        clips: [],
+        language: command.language,
+        style: command.style ?? DEFAULT_SUBTITLE_STYLE,
+        cues: [],
+      };
+      touchTrack(working, track, null);
+      working.tracks = [...working.tracks, track];
+      return;
+    }
+    case "add-cue": {
+      const track = subtitleTrack(working, command.trackId);
+      assertNewCueId(working, command.cue.id);
+      const cue = SubtitleCueSchema.parse(command.cue);
+      touchCue(working, track.id, cue.id, null);
+      replaceTrackCues(working, track.id, [...(track.cues ?? []), cue]);
+      return;
+    }
+    case "edit-cue": {
+      const { track, cue } = findCue(working, command.cueId);
+      const next: SubtitleCue = {
+        ...cue,
+        ...(command.text !== undefined ? { text: command.text } : {}),
+        ...(command.startFrame !== undefined ? { startFrame: command.startFrame } : {}),
+        ...(command.endFrame !== undefined ? { endFrame: command.endFrame } : {}),
+      };
+      if (command.speaker === null) delete next.speaker;
+      else if (command.speaker !== undefined) next.speaker = command.speaker;
+      touchCue(working, track.id, cue.id, cue);
+      replaceTrackCues(working, track.id, (track.cues ?? []).map((candidate) => (candidate.id === cue.id ? next : candidate)));
+      return;
+    }
+    case "delete-cue": {
+      const { track, cue } = findCue(working, command.cueId);
+      touchCue(working, track.id, cue.id, cue);
+      replaceTrackCues(working, track.id, (track.cues ?? []).filter((candidate) => candidate.id !== cue.id));
+      return;
+    }
+    case "import-cues": {
+      const track = subtitleTrack(working, command.trackId);
+      const kept = command.replace ? [] : (track.cues ?? []);
+      if (command.replace) for (const cue of track.cues ?? []) touchCue(working, track.id, cue.id, cue);
+      const incoming = command.cues.map((cue) => SubtitleCueSchema.parse({ ...cue, ...(command.provenance !== undefined && cue.provenance === undefined ? { provenance: command.provenance } : {}) }));
+      for (const cue of incoming) {
+        if (kept.some((candidate) => candidate.id === cue.id)) throw new TimelineOperationRefused(`subtitle id ${cue.id} is already on the track`);
+        assertNewCueId(working, cue.id);
+        touchCue(working, track.id, cue.id, null);
+      }
+      replaceTrackCues(working, track.id, [...kept, ...incoming]);
+      return;
+    }
+    case "set-subtitle-style": {
+      const track = subtitleTrack(working, command.trackId);
+      touchTrack(working, track, trackProps(track));
+      const style = SubtitleStyleSchema.parse({ ...(track.style ?? DEFAULT_SUBTITLE_STYLE), ...command.style });
+      working.tracks = working.tracks.map((candidate) => (candidate.id === track.id ? { ...candidate, style } : candidate));
       return;
     }
   }
@@ -922,6 +1137,7 @@ export function applyTimelineCommands(
     sourceLength: options.sourceLength ?? (() => undefined),
     touched: new Map(),
     touchedTracks: new Map(),
+    touchedCues: new Map(),
   };
   for (const command of commands) applyClipCommand(working, command);
 
@@ -938,9 +1154,15 @@ export function applyTimelineCommands(
     if (canonical(before) === canonical(after)) continue;
     tracks.push({ trackId, kind, before, after });
   }
+  const cues: TimelineCueChange[] = [];
+  for (const [cueId, { trackId, before }] of working.touchedCues) {
+    const after = working.tracks.find((track) => track.id === trackId)?.cues?.find((cue) => cue.id === cueId) ?? null;
+    if (canonical(before) === canonical(after)) continue;
+    cues.push({ trackId, before, after });
+  }
   const mix = canonical(working.mix) === canonical(timeline.mix) ? undefined : { before: timeline.mix, after: working.mix };
   const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && mix === undefined) {
+  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && cues.length === 0 && mix === undefined) {
     throw new TimelineOperationRefused("the command changes nothing");
   }
 
@@ -951,6 +1173,7 @@ export function applyTimelineCommands(
     clips,
     selections,
     tracks,
+    cues,
     ...(mix !== undefined ? { mix } : {}),
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
   };
@@ -1021,14 +1244,18 @@ function replayChange(
         throw new TimelineOperationRefused(`saved history is not in its ${phase} position for track ${change.trackId}`);
       }
       if (target === null) {
-        if (current !== undefined && current.clips.length > 0) throw new TimelineOperationRefused(`track ${change.trackId} still holds clips`);
+        if (current !== undefined && (current.clips.length > 0 || (current.cues ?? []).length > 0)) {
+          throw new TimelineOperationRefused(`track ${change.trackId} still holds clips`);
+        }
         next = next.filter((track) => track.id !== change.trackId);
       } else if (current === undefined) {
-        next = [...next, { id: change.trackId, kind: change.kind, ...target, clips: [] }];
+        next = [...next, { id: change.trackId, kind: change.kind, ...target, clips: [], ...(change.kind === "subtitle" ? { cues: [] } : {}) }];
       } else {
         // Rebuilt from the recorded properties rather than spread over the live ones, so a
         // property the other side did not have (a remembered end) is gone and not carried.
-        next = next.map((track) => (track.id === change.trackId ? { id: track.id, kind: track.kind, ...target, clips: track.clips } : track));
+        next = next.map((track) =>
+          track.id === change.trackId ? { id: track.id, kind: track.kind, ...target, clips: track.clips, ...(track.cues !== undefined ? { cues: track.cues } : {}) } : track,
+        );
       }
     }
   };
@@ -1047,10 +1274,26 @@ function replayChange(
     if (target !== null) clips.push(target);
     next = next.map((candidate) => (candidate.id === track.id ? { ...candidate, clips: orderedTrackClips({ clips }) } : candidate));
   }
+  for (const change of entry.cues) {
+    const expected = phase === "undo" ? change.after : change.before;
+    const target = phase === "undo" ? change.before : change.after;
+    const track = next.find((candidate) => candidate.id === change.trackId);
+    if (track === undefined) throw new TimelineOperationRefused(`track ${change.trackId} named by history is unavailable`);
+    const cueId = (change.before ?? change.after)!.id;
+    const current = (track.cues ?? []).find((cue) => cue.id === cueId) ?? null;
+    if (canonical(current) !== canonical(expected)) {
+      throw new TimelineOperationRefused(`saved history is not in its ${phase} position for subtitle ${cueId}`);
+    }
+    const cues = (track.cues ?? []).filter((cue) => cue.id !== cueId);
+    if (target !== null) cues.push(target);
+    next = next.map((candidate) => (candidate.id === track.id ? { ...candidate, cues: orderedCues(cues) } : candidate));
+  }
   applyTracks((change) => (phase === "undo" ? change.before : change.after) === null);
   for (const track of next) {
     const overlaps = trackOverlaps(orderedTrackClips(track));
     if (overlaps.length > 0) throw new TimelineOperationRefused(overlaps[0]!);
+    const cueProblems = cueOverlaps(track.cues ?? []);
+    if (cueProblems.length > 0) throw new TimelineOperationRefused(cueProblems[0]!);
   }
   return next;
 }
