@@ -858,7 +858,9 @@ export function assembleSceneCommands(input: {
   if (fresh.length === 0) return { refused: `${scene.title} is already on the timeline` };
   const base = timeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
   const existingIds = new Set(timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
-  let cursor = base === undefined ? 0 : base.clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0);
+  // After the track's whole extent, not only its last clip: a hole a Delete deliberately left at
+  // the tail is kept as the track's `endFrame`, and the next scene goes after it.
+  let cursor = base === undefined ? 0 : Math.max(base.endFrame ?? 0, base.clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0));
   const startFrame = cursor;
   const commands: TimelineClipCommand[] = [];
   const placed: string[] = [];

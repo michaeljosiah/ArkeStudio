@@ -366,6 +366,9 @@ export function MoveToLane({
     ["ambience", "Ambience"],
     ["music", "Music"],
   ];
+  // A split-audio half is tied to its picture twin by id; moving it under a new id would leave
+  // the twin pointing at nothing, so the move waits until the link is undone.
+  const linked = clip.linkedClipId !== undefined;
   const move = (kind: "dialogue" | "ambience" | "music", name: string) => {
     if (kind === track.kind) return;
     const dest = [...timeline.tracks].sort((a, b) => a.order - b.order).find((candidate) => candidate.kind === kind) ?? null;
@@ -386,10 +389,11 @@ export function MoveToLane({
       <span>Kind</span>
       <strong className="fy-movekind__chips" role="group" aria-label="Move to lane">
         {kinds.map(([kind, name]) => (
-          <button key={kind} type="button" className="fy-movekind__chip" aria-pressed={track.kind === kind} disabled={disabled || track.kind === kind} onClick={() => move(kind, name)}>
+          <button key={kind} type="button" className="fy-movekind__chip" aria-pressed={track.kind === kind} disabled={disabled || linked || track.kind === kind} onClick={() => move(kind, name)}>
             {name}
           </button>
         ))}
+        {linked && <span className="fy-mono fy-movekind__note">linked to its picture</span>}
       </strong>
     </div>
   );

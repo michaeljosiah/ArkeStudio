@@ -3012,8 +3012,11 @@ function ArtifactPanel({
     orderedShots(scene)
       .filter((shot) => (shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue") && (shot.audio.line?.trim() ?? "") !== "")
       .map((shot) => {
-        const read = production ? ([...takesForShot(production, shot.id)].reverse().find((take) => take.kind === "voice") ?? null) : null;
-        const status: "read" | "reading…" | "not generated" = read === null ? "not generated" : read.completedAt ? "read" : "reading…";
+        // The newest read that can play: a fresh `Again` still running does not take the last good one away.
+        const voice = production ? [...takesForShot(production, shot.id)].reverse().filter((take) => take.kind === "voice") : [];
+        const read = voice.find((take) => take.completedAt !== undefined && take.media !== undefined) ?? null;
+        const reading = voice.some((take) => take.completedAt === undefined);
+        const status: "read" | "reading…" | "not generated" = read !== null ? "read" : reading ? "reading…" : "not generated";
         const uses = read === null ? [] : usesOf((clip) => clip.source.kind === "take" && clip.source.takeId === read.id);
         return {
           key: `line:${shot.id}`,
@@ -5566,7 +5569,9 @@ export function CutScreen() {
   let notice: React.ReactNode = null;
   if (assembly !== null && noticeKey !== noticeHidden) {
     const shots = assembly.clips.filter((change) => change.before === null && change.after !== null && change.after.source.kind === "shot");
-    const gaps = production ? shots.filter((change) => change.after!.source.kind === "shot" && acceptedTakeId(production, change.after!.source.shotId) === null).length : 0;
+    // A gap is what the cut resolver draws as one — a take without media is a gap however the selection reads.
+    const unplayable = new Set((cut?.entries ?? []).filter((entry) => entry.media === null).map((entry) => entry.shot.id));
+    const gaps = shots.filter((change) => change.after!.source.kind === "shot" && unplayable.has(change.after!.source.shotId)).length;
     const beds = assembly.clips.some((change) => change.before === null && change.after?.source.kind === "artifact");
     const cues = assembly.cues.some((change) => change.before === null && change.after !== null);
     const parts = [`${assembly.label}: ${shots.length - gaps} of ${shots.length} shot${shots.length === 1 ? "" : "s"}`];
