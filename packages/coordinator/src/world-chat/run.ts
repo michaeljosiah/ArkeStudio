@@ -17,7 +17,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
-import type { ModelEditorRequest, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
+import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
@@ -159,6 +159,22 @@ export interface RunDeps {
     requests: readonly ModelEditorRequest[];
     /** Validate everything and write nothing: the pass that runs before the bible is written. */
     dryRun?: boolean;
+  }) => Promise<void>;
+  /**
+   * The version of the scene a scene thread is about, read when the prompt is built (SPEC-036
+   * R-38) — the fence any rename this turn returns is checked against, for the same reason the
+   * bible's version travels with its text. Null for a thread that is not about a scene.
+   */
+  sceneVersion?: (context: WorldChatContext | undefined) => number | null;
+  /**
+   * Land this turn's scene edits, or throw. Straight in, with no card: the coordinator writes
+   * them through the header's own `edit-scene`, and a scene that moved refuses back here as a
+   * corrective problem rather than being overwritten.
+   */
+  applySceneEdits?: (input: {
+    entryContext: WorldChatContext | undefined;
+    edits: readonly ModelSceneEdit[];
+    baseVersion: number | null;
   }) => Promise<void>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
@@ -420,6 +436,10 @@ export class WorldChatRunner {
      * text editor between the two be silently overwritten by an answer that never saw it.
      */
     const bible = (await this.deps.bible?.()) ?? { version: 1, text: "" };
+    // The scene the thread is about, pinned by version now for the same reason as the bible: a
+    // rename this turn returns is checked against what the model was shown, not what is there
+    // by the time it answers.
+    const sceneBaseVersion = this.deps.sceneVersion?.(view.entryContext) ?? null;
     /*
      * What this prompt may spend, from the window of the model that will answer it.
      *
@@ -531,6 +551,7 @@ export class WorldChatRunner {
         linked,
         artDirectionLook,
         bible.version,
+        sceneBaseVersion,
         refusedTools,
       );
       if (!outcome.ok) {
@@ -570,6 +591,7 @@ export class WorldChatRunner {
           linked,
           artDirectionLook,
           bible.version,
+          sceneBaseVersion,
           refusedTools,
         );
       }
@@ -701,6 +723,8 @@ export class WorldChatRunner {
     artDirectionLook: CurrentLook | undefined,
     /** The bible version the prompt was assembled against — see RunDeps.bible. */
     bibleBaseVersion: number,
+    /** The scene version the prompt was assembled against, for a scene thread — see RunDeps.sceneVersion. */
+    sceneBaseVersion: number | null,
     /** Tools the confinement refused while this turn ran, deduplicated by the caller (#506). */
     refusedTools: ReadonlySet<string> = new Set(),
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
@@ -807,6 +831,43 @@ export class WorldChatRunner {
      * `changes.jsonl`, and the history snapshot is there to restore from — where a reply about
      * an edit that never happened is neither.
      */
+    /*
+     * Scene edits land before the bible for the reason the bible lands before the turn is
+     * recorded: a rename that refuses — the scene moved, or the thread is not about one —
+     * leaves the bible untouched, and a rename that landed and then lost the turn is visible
+     * and versioned where a reply about one that never happened is neither.
+     */
+    if (outcome.turn.sceneEdits.length > 0) {
+      if (!this.deps.applySceneEdits) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "scene-edit-unavailable",
+              safeMessage: "The scene cannot be renamed in this conversation. Answer without renaming it.",
+            },
+          ],
+        };
+      }
+      try {
+        await this.deps.applySceneEdits({
+          entryContext: folded.entryContext,
+          edits: outcome.turn.sceneEdits,
+          baseVersion: sceneBaseVersion,
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "scene-edit",
+              safeMessage: (err instanceof Error ? err.message : "The scene could not be renamed. Answer without renaming it this turn.").slice(0, 300),
+            },
+          ],
+        };
+      }
+    }
+
     let bibleEdit: BibleEditRecord | null = null;
     if (outcome.turn.bibleEdits.length > 0) {
       if (!this.deps.applyBibleEdits) {

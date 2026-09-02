@@ -70,6 +70,23 @@ describe("editor requests (issue 684)", () => {
     assert.throws(() => WorldChatTurnResultSchema.parse({ ...typed, editorRequests: [{ summary: "", commands: [] }] }));
   });
 
+  it("a scene edit is a typed rename, bounded to one a turn and never blank (SPEC-036 R-38)", () => {
+    const prose = WorldChatTurnResultSchema.parse({ reply: "I named it for you.", candidateOperations: [], groupOperations: [] });
+    assert.deepEqual(prose.sceneEdits, [], "prose alone renames nothing");
+    const typed = WorldChatTurnResultSchema.parse({
+      reply: "Called it The tide answers.",
+      candidateOperations: [],
+      groupOperations: [],
+      sceneEdits: [{ kind: "rename", title: "  The tide answers  " }],
+    });
+    assert.deepEqual(typed.sceneEdits, [{ kind: "rename", title: "The tide answers" }], "trimmed on the way in");
+    assert.throws(() => WorldChatTurnResultSchema.parse({ ...typed, sceneEdits: [{ kind: "rename", title: "   " }] }), "whitespace is not a name");
+    assert.throws(
+      () => WorldChatTurnResultSchema.parse({ ...typed, sceneEdits: [{ kind: "rename", title: "One" }, { kind: "rename", title: "Two" }] }),
+      "one rename a turn",
+    );
+  });
+
   it("previews a request as a digest and a ghost, without touching the base", () => {
     const before = JSON.stringify(base);
     const preview = previewEditorRequest(base, [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }]);

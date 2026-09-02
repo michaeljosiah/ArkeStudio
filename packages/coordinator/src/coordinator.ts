@@ -213,6 +213,7 @@ import { applySceneCommand, sceneCommandFrom } from "./productions/scene-command
 import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "./productions/editor-requests.js";
+import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -11213,6 +11214,9 @@ export class Coordinator {
       stageEditorRequests: async ({ conversationId, entryContext, requests, dryRun }) => {
         await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), ...(dryRun === true ? { dryRun: true } : {}) });
       },
+      // A rename lands through the header's own fenced write, straight in (SPEC-036 R-38).
+      sceneVersion: (context) => sceneVersionFor(store, context),
+      applySceneEdits: ({ entryContext, edits, baseVersion }) => applySceneEdits(store, { entryContext, edits, baseVersion }),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

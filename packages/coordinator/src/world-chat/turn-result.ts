@@ -5,6 +5,7 @@ import {
   WorldChatTurnResultSchema,
   type BibleEdit,
   type ModelEditorRequest,
+  type ModelSceneEdit,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -81,6 +82,8 @@ export interface AcceptedTurn {
   bibleEdits: readonly BibleEdit[];
   /** Editor requests this turn described, still unstaged (SPEC-039 R-27); the runner validates them against the base. */
   editorRequests: readonly ModelEditorRequest[];
+  /** Scene edits this turn described, still unapplied (SPEC-036 R-38); the runner lands them against the version it showed. */
+  sceneEdits: readonly ModelSceneEdit[];
 }
 
 export type ValidationOutcome =
@@ -387,7 +390,18 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const groups = buildGroups(result, input, idByTemporary, candidates);
   // Carried through untouched: the schema has already bounded them, and whether they *apply* is
   // a question about the file on disk, which only the caller holding the store can answer.
-  return { ok: true, turn: { reply: result.reply, candidates, groups, tombstones, bibleEdits: result.bibleEdits, editorRequests: result.editorRequests } };
+  return {
+    ok: true,
+    turn: {
+      reply: result.reply,
+      candidates,
+      groups,
+      tombstones,
+      bibleEdits: result.bibleEdits,
+      editorRequests: result.editorRequests,
+      sceneEdits: result.sceneEdits,
+    },
+  };
 }
 
 function resolvableMember(

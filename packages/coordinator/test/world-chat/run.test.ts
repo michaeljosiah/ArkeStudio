@@ -571,3 +571,89 @@ describe("what a turn was refused", () => {
     assert.equal(completed.refusedTools, undefined, "and nothing is written to the log either");
   });
 });
+
+describe("a rename lands straight in, fenced by the version the prompt showed (SPEC-036 R-38)", () => {
+  /** A scene thread, with the two deps the rename needs handed in by the test. */
+  async function sceneSetup(
+    adapter: HarnessAdapter,
+    deps: {
+      sceneVersion?: () => number | null;
+      applySceneEdits?: (input: { edits: readonly { kind: "rename"; title: string }[]; baseVersion: number | null }) => Promise<void>;
+    },
+  ) {
+    const worldPath = await tempDir("arke-run-scene-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      {
+        type: "conversation.created",
+        title: "scene talk",
+        entryContext: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const runner = new WorldChatRunner({
+      adapter,
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      now: NOW,
+      ...deps,
+    });
+    const view = async () => {
+      const meta = await store.readMeta();
+      return foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+    };
+    return { runner, store, conversationId, view };
+  }
+  const renaming = (title: string) =>
+    JSON.stringify({ reply: `Called it ${title}.`, candidateOperations: [], groupOperations: [], sceneEdits: [{ kind: "rename", title }] });
+  const plain = JSON.stringify({ reply: "Left the name as it was.", candidateOperations: [], groupOperations: [] });
+
+  it("applies the rename against the version read when the prompt was built, and records the turn", async () => {
+    const applied: Array<{ baseVersion: number | null; titles: string[] }> = [];
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("The tide answers")]), {
+      sceneVersion: () => 3,
+      applySceneEdits: async ({ edits, baseVersion }) => {
+        applied.push({ baseVersion, titles: edits.map((edit) => edit.title) });
+      },
+    });
+    await runner.send(store, conversationId, "Call this one The tide answers");
+    assert.deepEqual(applied, [{ baseVersion: 3, titles: ["The tide answers"] }], "one write, fenced by what the model saw");
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Called it/, "and the reply that landed with it stands");
+  });
+
+  it("a refused rename is the one corrective problem, and the retry that drops it completes", async () => {
+    const prompts: string[] = [];
+    let attempts = 0;
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("From the model"), plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async () => {
+        attempts += 1;
+        throw new Error("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
+      },
+    });
+    await runner.send(store, conversationId, "Name it");
+    assert.equal(attempts, 1, "asked once; the retry carried no rename");
+    assert.ok(prompts.some((prompt) => /changed while you were answering/.test(prompt)), "the refusal reached the model in its own words");
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
+  });
+
+  it("a rename with nowhere to land is refused rather than silently dropped", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await sceneSetup(fakeAdapter([renaming("Anything"), plain], { prompts }), {});
+    await runner.send(store, conversationId, "Name it");
+    assert.ok(prompts.some((prompt) => /cannot be renamed in this conversation/.test(prompt)), "told the model, not swallowed");
+  });
+});

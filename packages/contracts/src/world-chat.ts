@@ -23,7 +23,14 @@ import {
   TurnIdSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
-import { EDITOR_REQUEST_BOUNDS, ModelEditorRequestSchema, type ModelEditorRequest } from "./editor-request.js";
+import {
+  EDITOR_REQUEST_BOUNDS,
+  ModelEditorRequestSchema,
+  ModelSceneEditSchema,
+  SCENE_EDIT_BOUNDS,
+  type ModelEditorRequest,
+  type ModelSceneEdit,
+} from "./editor-request.js";
 import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
@@ -1519,6 +1526,12 @@ export const WorldChatTurnResultSchema = z
      * edits, so a turn that asks for nothing omits it.
      */
     editorRequests: z.array(ModelEditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.perTurn).default([]),
+    /**
+     * Scene edits this turn makes (SPEC-036 R-38): a rename the coordinator lands at once
+     * through the header's own version-fenced write, with no card — a title is a label, and the
+     * person is looking at it. Only in a scene thread. Defaulted like the others.
+     */
+    sceneEdits: z.array(ModelSceneEditSchema).max(SCENE_EDIT_BOUNDS.perTurn).default([]),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -1990,6 +2003,7 @@ const exampleTurnResult = {
   groupOperations: [],
   bibleEdits: [],
   editorRequests: [],
+  sceneEdits: [],
 } satisfies WorldChatTurnResult;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
@@ -2000,6 +2014,9 @@ const exampleEditorRequest = {
     { kind: "trim", clipId: "cl_bell-close", edge: "end", deltaFrames: -12 },
   ],
 } satisfies ModelEditorRequest;
+
+/** Shaped exactly as the coordinator accepts it (SPEC-036 R-38). */
+const exampleSceneEdit = { kind: "rename", title: "The tide answers" } satisfies ModelSceneEdit;
 
 const exampleBibleEdits = {
   "set-section": {
@@ -2196,9 +2213,9 @@ export function worldChatResultShapeGuide(): string {
 
 Return one JSON object and nothing else — no prose around it, no markdown fences:
 
-{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...]}
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}; all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -2313,6 +2330,12 @@ Only in a production, episode or scene thread, and only when the person asks for
 ${JSON.stringify(exampleEditorRequest)}
 
 summary says what moves, what goes and what comes, in their terms — never "improve the cut". kind is one of move-adjacent (clipId, direction earlier|later) | move-to-order (clipId, index from 0) | move-to-frame (clipId, startFrame) | trim (clipId, edge start|end, deltaFrames — negative shortens) | split (clipId, atFrame, newClipId) | duplicate (clipId, newClipId) | delete (clipId) | ripple-delete (clipId) | switch-take (shotId, takeId) | set-clip-gain (clipId, gainDb) | set-track (trackId, then any of name, muted, solo, order). Frames count from zero at the production's frame rate. A newClipId is one you invent, cl_ followed by letters, digits and dashes. Do not repeat a request that is already pending; say that it is waiting for their decision.
+
+### Scene edits
+
+Only in a scene thread, and only that scene: a scene edit renames it, and it lands at once — no card, no accept step — because a title is a label the person is looking at. Rename when they ask for a name, or when the scene is still called Untitled and what they have said makes its name plain; otherwise leave the name alone. The title reads in the header as \`Scene 7 · The tide answers\`, so give the name only, short and in their register. A rename against a scene that changed while you were answering is refused, and a refusal rejects the whole turn.
+
+${JSON.stringify(exampleSceneEdit)}
 
 ### Group operations
 

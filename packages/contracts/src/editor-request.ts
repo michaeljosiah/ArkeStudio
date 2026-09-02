@@ -46,6 +46,32 @@ export type EditorRequestId = z.infer<typeof EditorRequestIdSchema>;
 export const EditorRequestStatusSchema = z.enum(["pending", "accepted", "rejected", "stale"]);
 export type EditorRequestStatus = z.infer<typeof EditorRequestStatusSchema>;
 
+/**
+ * Arke's scene edits (SPEC-036 R-38).
+ *
+ * Unlike an editor request, a scene edit is not carded: a title is a label, not a change anyone
+ * needs to review, and the person is looking at it. The model describes the edit in a typed field,
+ * the coordinator lands it through the same version-fenced `edit-scene` write the header uses, and
+ * a scene that moved between the prompt and the answer refuses back to the model as a corrective
+ * problem — the bible-edit discipline, one record over. Only in a scene thread, only that scene.
+ */
+export const SCENE_EDIT_BOUNDS = {
+  /** Edits one turn may carry; a rename is one, and nothing else is offered yet. */
+  perTurn: 1,
+  title: 200,
+} as const;
+
+export const ModelSceneEditSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("rename"),
+      /** The name as it should read in the header. Whitespace is not a name. */
+      title: z.string().trim().min(1).max(SCENE_EDIT_BOUNDS.title),
+    })
+    .strict(),
+]);
+export type ModelSceneEdit = z.infer<typeof ModelSceneEditSchema>;
+
 /** What the model returns: a summary in the person's terms and the exact commands (R-27, R-34). */
 export const ModelEditorRequestSchema = z
   .object({
