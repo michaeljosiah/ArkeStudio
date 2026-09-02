@@ -19,6 +19,7 @@ import {
   type WorldChatContext,
 } from "@arke-studio/contracts";
 import { applyTimelineCommand, TimelineCommandRefused } from "./timeline.js";
+import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -158,6 +159,23 @@ export async function stageEditorRequests(
     for (const request of input.requests) {
       const preview = previewEditorRequest(base.timeline, request.commands, { sourceLength });
       if (!preview.ok) throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${preview.reason}`);
+      // A take switch is not a clip command; the preview counts it. It is run through the same
+      // acceptance rules Accept will apply, so a switch to a take that does not exist or does
+      // not cover the shot is refused now rather than staged as a card that can never land.
+      let selections = production.selections;
+      for (const command of request.commands) {
+        if (command.kind !== "switch-take") continue;
+        try {
+          selections = applyTakeAcceptance(production, store.getBundle().artifacts, selections, {
+            takeId: command.takeId,
+            shotId: command.shotId,
+            by: "user",
+            at: input.now,
+          }).selections;
+        } catch (error) {
+          throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       /*
        * The same request twice is one record. A turn's corrective retry runs this again with
        * whatever the model repeats, and a model that ignores "do not repeat a pending request"

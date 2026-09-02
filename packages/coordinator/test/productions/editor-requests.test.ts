@@ -212,6 +212,20 @@ describe("Arke's editor requests (issue 684)", () => {
     );
   });
 
+  it("refuses a take switch that could never land, when it is staged (round six)", async () => {
+    const store = await open();
+    await assert.rejects(
+      stageEditorRequests(store, {
+        conversationId: CONVERSATION,
+        entryContext: THREAD,
+        requests: [{ summary: "Use a take that does not exist", commands: [{ kind: "switch-take", shotId: "sh_20", takeId: "tk_01J8F0000000000000000000ZZ" }] }],
+        now: NOW,
+      }),
+      (error: unknown) => error instanceof EditorRequestRefused && /cannot apply/.test(error.reason),
+    );
+    await assert.rejects(readFile(requestsPath(store), "utf8"), { code: "ENOENT" });
+  });
+
   it("refuses a forged decision that names no request (A-11)", async () => {
     const store = await open();
     await assert.rejects(

@@ -938,7 +938,14 @@ function findClip(working: Working, clipId: TimelineClipId): { track: TimelineTr
 }
 
 function touch(working: Working, trackId: TimelineTrackId, clipId: TimelineClipId, before: TimelineClip | null): void {
-  if (!working.touched.has(clipId)) working.touched.set(clipId, { trackId, before });
+  const touched = working.touched.get(clipId);
+  // One track per clip id per entry: a batch that deleted a clip here and placed the same id
+  // there would record only the deletion, and its Undo would restore a clip whose id is already
+  // live on the other track (round six). Moving between tracks is its own batch.
+  if (touched !== undefined && touched.trackId !== trackId) {
+    throw new TimelineOperationRefused(`clip ${clipId} was on ${touched.trackId} earlier in this batch and cannot reappear on ${trackId}`);
+  }
+  if (touched === undefined) working.touched.set(clipId, { trackId, before });
 }
 
 function replaceTrackClips(working: Working, trackId: TimelineTrackId, clips: TimelineClip[]): void {

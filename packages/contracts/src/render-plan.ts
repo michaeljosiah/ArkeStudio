@@ -321,8 +321,6 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   }
 
   if (scope.kind === "episode") {
-    const refusal = episodeExportRefusals(production, scope.episodeId);
-    if (refusal) return { ok: false, reason: `episode export refused: ${refusal.detail}` };
     if (timeline !== undefined && timeline.status === "ready") {
       /*
        * One episode is the production's plan windowed to its validated range (SPEC-037 R-33,
@@ -336,6 +334,10 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       if (!whole.ok) return whole;
       return { ok: true, plan: windowPlan(whole.plan, framesToSeconds(range.startFrame, frameRate), framesToSeconds(range.endFrame, frameRate), scope) };
     }
+    // The legacy refusals — a spine with no episode authority among them — belong to the legacy
+    // cut alone; a saved timeline has its own episode range above (round six).
+    const refusal = episodeExportRefusals(production, scope.episodeId);
+    if (refusal) return { ok: false, reason: `episode export refused: ${refusal.detail}` };
     const plan = buildExportPlan(deriveEpisodeCut(production, scope.episodeId), preset, [], [], frameRate);
     return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
   }

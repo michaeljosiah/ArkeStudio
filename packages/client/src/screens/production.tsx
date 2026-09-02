@@ -23,6 +23,7 @@ import {
   previewEditorRequest,
   editorRequestStaleness,
   timelineSourceFingerprint,
+  storyTimelineFingerprint,
   episodeTimelineRange,
   frameDispatchFor,
   modelCapabilityCopy,
@@ -4392,6 +4393,13 @@ export function CutScreen() {
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
+   * A saved record is fenced by its revision alone; the fingerprint fences only the first
+   * assembly (SPEC-037 R-24). A song whose master lost its measurement must still be editable
+   * once it is on the timeline, so the fence falls back to the story's for a ready record —
+   * the coordinator does not read it there (round six).
+   */
+  const fence = sourceFingerprint ?? (production && timelineState.status === "ready" ? storyTimelineFingerprint(production) : null);
+  /*
    * A ghost (SPEC-039 R-33): a pending request's commands applied to the live base in memory
    * and drawn in its place while the card is previewed. Never saved, and gone the moment the
    * request is decided or the base moves under it.
@@ -4526,23 +4534,23 @@ export function CutScreen() {
     return () => window.clearTimeout(timer);
   }, [inFlight, timelineRevision]);
   const commandsDisabled =
-    timelineError !== null || !worldId || !prodId || !production || editableTimeline === null || commandPending || sourceFingerprint === null;
+    timelineError !== null || !worldId || !prodId || !production || editableTimeline === null || commandPending || fence === null;
   const sourceLength = useMemo(
     () => (production ? sourceLengthFramesFor(production, artifacts) : () => undefined),
     [production, artifacts],
   );
   const sendPictureMove = (direction: "earlier" | "later") => {
-    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || sourceFingerprint === null) return;
+    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || fence === null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
-    moveTimelinePictureClip(worldId, prodId, selectedPictureClip.id, direction, timelineRevision, sourceFingerprint);
+    moveTimelinePictureClip(worldId, prodId, selectedPictureClip.id, direction, timelineRevision, fence);
   };
   /** Every editor action reaches the coordinator through here: one batch, one revision, one Undo step. */
   const sendCommands = (commands: TimelineCommand[], label?: string) => {
-    if (commandsDisabled || !worldId || !prodId || !production || sourceFingerprint === null) return;
+    if (commandsDisabled || !worldId || !prodId || !production || fence === null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
-    sendTimelineCommands(worldId, prodId, commands, timelineRevision, sourceFingerprint, label);
+    sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
   /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
   const openOnTimeline = () => {
@@ -4600,14 +4608,32 @@ export function CutScreen() {
     const durationFrames = Math.max(1, secondsToFrames(still ? CLIP_DEFAULT_SEC : (measured ?? CLIP_DEFAULT_SEC), frameRate));
     const label = artifact.file.split("/").pop() ?? artifact.file;
     const wantsAudio = artifact.kind === "audio";
+    /*
+     * A non-drag placement lands on a same-kind track with room at the playhead, or on a new
+     * one. The first matching track alone was refused for overlap while another sat empty
+     * (round six). An explicit drop keeps its target, and the coordinator's overlap refusal.
+     */
+    const sameKind = (candidate: TimelineTrack) => (wantsAudio ? candidate.kind === "music" : candidate.kind === "picture" && candidate.id !== PICTURE_TRACK_ID);
+    const roomAt = (candidate: TimelineTrack) =>
+      !candidate.clips.some((clip) => clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame);
     const track =
       trackId !== null
         ? (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null)
-        : (editableTimeline.tracks.find((candidate) => (wantsAudio ? candidate.kind === "music" : candidate.kind === "picture" && candidate.id !== PICTURE_TRACK_ID)) ?? null);
+        : (editableTimeline.tracks.find((candidate) => sameKind(candidate) && roomAt(candidate)) ?? null);
     const commands: TimelineCommand[] = [];
-    const target: TimelineTrackId = track?.id ?? (wantsAudio ? "tr_music" : "tr_inserts");
+    const stem = wantsAudio ? "tr_music" : "tr_inserts";
+    const taken = new Set(editableTimeline.tracks.map((candidate) => candidate.id));
+    let fresh: TimelineTrackId = stem;
+    for (let n = 2; taken.has(fresh); n += 1) fresh = `${stem}-${n}`;
+    const target: TimelineTrackId = track?.id ?? fresh;
     if (track === null) {
-      commands.push({ kind: "add-track", trackId: target, trackKind: wantsAudio ? "music" : "picture", name: wantsAudio ? "Music" : "Inserts" });
+      const alike = editableTimeline.tracks.filter(sameKind).length;
+      commands.push({
+        kind: "add-track",
+        trackId: target,
+        trackKind: wantsAudio ? "music" : "picture",
+        name: `${wantsAudio ? "Music" : "Inserts"}${alike > 0 ? ` ${alike + 1}` : ""}`,
+      });
     }
     commands.push({
       kind: "place",

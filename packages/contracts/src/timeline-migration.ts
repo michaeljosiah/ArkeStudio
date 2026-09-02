@@ -200,19 +200,24 @@ export function migrateLegacyCut(
       const id: TimelineClipId = `cl_audio-${trackIndex}-${entryIndex}`;
       if (entry.takeId !== undefined) {
         const take = takesById.get(entry.takeId);
-        if (take?.media === undefined) {
+        // A pass segment has no media of its own: it is a window onto its pass (SPEC-013 R-3).
+        // The clip cites the pass and carries the window as its in-point and length, which is
+        // how the legacy renderer played it (round six).
+        const segment = take?.segment;
+        const source = segment === undefined ? take : takesById.get(segment.passTakeId);
+        if (take === undefined || source?.media === undefined || (segment !== undefined && segment.outSec <= segment.inSec)) {
           dropped.push(`${legacy.label} entry ${entryIndex + 1} cites take ${entry.takeId}, which has no media`);
           return;
         }
-        const measured = production.takeMediaInfo[take.id]?.mediaInfo.durationSec;
+        const measured = segment !== undefined ? segment.outSec - segment.inSec : production.takeMediaInfo[take.id]?.mediaInfo.durationSec;
         clips.push({
           id,
           startFrame,
           durationFrames: Math.max(1, frames(measured ?? DEFAULT_LINE_SEC, frameRate)),
-          sourceInFrames: 0,
+          sourceInFrames: segment === undefined ? 0 : frames(segment.inSec, frameRate),
           source: {
             kind: "take",
-            takeId: take.id,
+            takeId: source.id,
             label: entry.note ?? `${nameFor(legacy.kind)} line`,
             ...(entry.sheetId !== undefined ? { sheetId: entry.sheetId } : {}),
             ...(entry.voiceAssignedAtVersion !== undefined ? { voiceAssignedAtVersion: entry.voiceAssignedAtVersion } : {}),
