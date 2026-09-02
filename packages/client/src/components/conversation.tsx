@@ -6,6 +6,7 @@ import type {
   WorldChatContext,
   WorldChatPoint,
   WorldChatStatus,
+  WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
@@ -349,6 +350,7 @@ export function ProductionConversation({
   openWith,
   dock,
   onSelectShot,
+  subject,
 }: {
   worldId: string | undefined;
   productionId: string | undefined;
@@ -390,6 +392,8 @@ export function ProductionConversation({
    */
   dock?: { title: string; subject: string; thumbnail?: { src: string; alt: string }; conversationFirst?: boolean };
   onSelectShot?: (shotId: string) => void;
+  /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
+  subject?: WorldChatSubject;
 }) {
   const { state } = useStore();
   const navigate = useNavigate();
@@ -412,7 +416,7 @@ export function ProductionConversation({
    */
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
-  const [opening, setOpening] = useState<{ text: string; was: string | null } | null>(null);
+  const [opening, setOpening] = useState<{ text: string; was: string | null; subject?: WorldChatSubject } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
@@ -490,7 +494,7 @@ export function ProductionConversation({
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was) return;
-    sendWorldChat(worldId, opened, opening.text);
+    sendWorldChat(worldId, opened, opening.text, [], opening.subject);
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
@@ -538,11 +542,12 @@ export function ProductionConversation({
      * opening message became a title and the studio never answered it (turn 95).
      */
     if (!conversationId) {
-      setOpening({ text, was: workspace?.conversationId ?? null });
+      // The subject goes with it: the first thing said is the likeliest "move this earlier".
+      setOpening({ text, was: workspace?.conversationId ?? null, ...(subject !== undefined ? { subject } : {}) });
       createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
-    sendWorldChat(worldId, conversationId, text);
+    sendWorldChat(worldId, conversationId, text, [], subject);
   };
 
   const points = loaded?.points ?? [];

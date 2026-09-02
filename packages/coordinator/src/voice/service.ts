@@ -533,6 +533,12 @@ export class VoiceService {
     };
   }
 
+  /** The words in some audio, for a caller that wants them back rather than an event (issue 683). */
+  async transcribe(audio: Uint8Array, contentType: string): Promise<string> {
+    if (!this.deps.sidecar) throw new Error("Voxa is not running — speech-to-text is off");
+    return this.deps.sidecar.transcribe(audio, contentType);
+  }
+
   /** Local dictation (R-17, R-18): loopback transcription; the text lands as editable input. */
   async dictate(requestId: string, audio: Uint8Array, contentType: string): Promise<void> {
     if (!this.deps.sidecar) {

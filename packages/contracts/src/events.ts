@@ -816,6 +816,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       status: z.enum(["running", "done", "cancelled", "failed"]),
       percent: z.number().min(0).max(100),
       output: z.string().nullable(),
+      /** The subtitle sidecar delivered beside the video, when one was (SPEC-038 R-27). */
+      sidecar: z.string().optional(),
       error: z.string().nullable(),
     })
     .strict(),

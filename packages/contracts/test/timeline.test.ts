@@ -91,6 +91,7 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
     selections: { sh_1: { acceptedTakeId: TAKE, trimInSec: 0 } },
     spine: null,
     cut: { audio: [], overlays: [] },
+    editorRequests: [],
     takeMediaInfo: {},
     ...over,
   };
@@ -192,7 +193,7 @@ describe("timeline contracts and first assembly", () => {
     const timeline = seedStoryPictureTimeline(production());
     assert.deepEqual(clipIds(timeline), ["cl_sh-1", "cl_sh-2", "cl_sh-3"]);
     assert.deepEqual(
-      timeline.tracks[0]!.clips.map((clip) => [clip.startFrame, clip.durationFrames, clip.source.shotId]),
+      timeline.tracks[0]!.clips.map((clip) => [clip.startFrame, clip.durationFrames, clip.source.kind === "shot" ? clip.source.shotId : null]),
       [
         [0, 50, "sh_1"],
         [50, 38, "sh_2"],

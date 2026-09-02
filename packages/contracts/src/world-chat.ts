@@ -23,6 +23,7 @@ import {
   TurnIdSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
+import { EDITOR_REQUEST_BOUNDS, ModelEditorRequestSchema, type ModelEditorRequest } from "./editor-request.js";
 import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
 
@@ -1511,6 +1512,13 @@ export const WorldChatTurnResultSchema = z
      * Defaulted rather than required, so a turn that touches nothing may omit it entirely.
      */
     bibleEdits: z.array(BibleEditSchema).max(BIBLE_EDIT_BOUNDS.edits).default([]),
+    /**
+     * Editor requests this turn stages (SPEC-039 R-27, issue 684): exact timeline commands the
+     * coordinator validates against the live base and writes as pending records. The reply is
+     * prose about them; the record is what a person accepts or rejects. Defaulted like the bible
+     * edits, so a turn that asks for nothing omits it.
+     */
+    editorRequests: z.array(ModelEditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.perTurn).default([]),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -1981,7 +1989,17 @@ const exampleTurnResult = {
   ],
   groupOperations: [],
   bibleEdits: [],
+  editorRequests: [],
 } satisfies WorldChatTurnResult;
+
+/** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
+const exampleEditorRequest = {
+  summary: "Swap the two harbour shots and tighten the bell close-up by half a second",
+  commands: [
+    { kind: "move-to-order", clipId: "cl_harbour-wide", index: 0 },
+    { kind: "trim", clipId: "cl_bell-close", edge: "end", deltaFrames: -12 },
+  ],
+} satisfies ModelEditorRequest;
 
 const exampleBibleEdits = {
   "set-section": {
@@ -2178,9 +2196,9 @@ export function worldChatResultShapeGuide(): string {
 
 Return one JSON object and nothing else — no prose around it, no markdown fences:
 
-{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...]}
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}; all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -2287,6 +2305,14 @@ op is one of set-section | append-to-section | remove-section | replace-document
 heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
 
 Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
+
+### Editor requests
+
+Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request stages exact timeline commands for them to accept or reject on a card beside the timeline. Nothing you write in reply changes the timeline. Only their Accept does, and it applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
+
+${JSON.stringify(exampleEditorRequest)}
+
+summary says what moves, what goes and what comes, in their terms — never "improve the cut". kind is one of move-adjacent (clipId, direction earlier|later) | move-to-order (clipId, index from 0) | move-to-frame (clipId, startFrame) | trim (clipId, edge start|end, deltaFrames — negative shortens) | split (clipId, atFrame, newClipId) | duplicate (clipId, newClipId) | delete (clipId) | ripple-delete (clipId) | switch-take (shotId, takeId) | set-clip-gain (clipId, gainDb) | set-track (trackId, then any of name, muted, solo, order). Frames count from zero at the production's frame rate. A newClipId is one you invent, cl_ followed by letters, digits and dashes. Do not repeat a request that is already pending; say that it is waiting for their decision.
 
 ### Group operations
 

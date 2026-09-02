@@ -29,6 +29,7 @@ import {
   SelectionsSchema,
   ProductionSpineSchema,
   ProductionTimelineSchema,
+  EditorRequestFileSchema,
   CutFileSchema,
   TakeMediaInfoRecordSchema,
   type TakeMediaInfoRecord,
@@ -655,6 +656,13 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         )
       : { status: "absent" };
 
+    // editor-requests.json — Arke's staged edits and their audit (SPEC-039 R-35). An invalid file
+    // is a world problem and an empty list, never a reason the production fails to open.
+    const editorRequests =
+      (await exists(join(pdir, "editor-requests.json")))
+        ? ((await tryParse(`productions/${id}/editor-requests.json`, (raw) => EditorRequestFileSchema.parse(JSON.parse(raw))))?.requests ?? [])
+        : [];
+
     // season.json — the season beside its production (SPEC-023 R-10); null when none.
     const season = (await exists(join(pdir, "season.json")))
       ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
@@ -677,6 +685,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       spine,
       cut,
       timeline,
+      editorRequests,
       takeMediaInfo,
     });
   }
