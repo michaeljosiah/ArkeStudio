@@ -114,7 +114,7 @@ import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
-import { mediaTimeFor, videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
 import { planSpans } from "../lib/plan-playback.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
