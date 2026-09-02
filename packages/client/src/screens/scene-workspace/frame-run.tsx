@@ -1,7 +1,10 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import {
+  aspectSupport,
   formatMicroUsd,
   orderedShots,
+  PROVIDERS,
+  resolveCast,
   sceneImageOutput,
   ulid,
   type FrameRunQuote,
@@ -14,6 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
+import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
 import {
   clearFrameRunQuote,
@@ -139,10 +143,13 @@ function GenerateFramesDialogOpen({
   const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");
   const remembered = productionModel(state, production.meta.id, "image");
   const resolved = resolveModel(state, "image", undefined, remembered);
-  const [modelId, setModelId] = useState(remembered ?? resolved.model?.id ?? "");
   const allModels = state?.app.manifest?.models ?? [];
-  const knownModel = allModels.find((candidate) => candidate.id === modelId && candidate.capability === "image") ?? null;
   const usable = usableModels(state, "image");
+  const aspectDefault = remembered === undefined && resolved.stranded === null && resolved.model !== null && !aspectSupport(resolved.model, aspect).ok
+    ? usable.find((candidate) => aspectSupport(candidate, aspect).ok) ?? null
+    : null;
+  const [modelId, setModelId] = useState(remembered ?? aspectDefault?.id ?? resolved.model?.id ?? "");
+  const knownModel = allModels.find((candidate) => candidate.id === modelId && candidate.capability === "image") ?? null;
   const models = knownModel !== null && !usable.some((candidate) => candidate.id === knownModel.id)
     ? [knownModel, ...usable]
     : usable;
@@ -257,6 +264,21 @@ function GenerateFramesDialogOpen({
     quote.signature !== null &&
     quote.estimatedMicroUsd !== null;
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
+  const aspectVerdict = knownModel === null ? null : aspectSupport(knownModel, aspect);
+  const compatibleAlternative = aspectVerdict?.ok === false
+    ? usable.find((candidate) => candidate.id !== modelId && aspectSupport(candidate, aspect).ok) ?? null
+    : null;
+  const alternativeName = compatibleAlternative === null
+    ? null
+    : usable.some((candidate) => candidate.id !== compatibleAlternative.id && candidate.displayName === compatibleAlternative.displayName)
+      ? `${compatibleAlternative.displayName} via ${PROVIDERS[compatibleAlternative.provider].displayName}`
+      : compatibleAlternative.displayName;
+  const displayedBlockedReason = blockedReason !== null && aspectVerdict?.ok === false && blockedReason.includes("cannot deliver")
+    ? `${blockedReason}. ${alternativeName === null
+      ? `No available image model supports ${aspect}; turn one on in Providers.`
+      : `Choose ${alternativeName}, which supports ${aspect}.`}`
+    : blockedReason;
+  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -396,6 +418,29 @@ function GenerateFramesDialogOpen({
           {unavailable ? <p className="fy-swgen__hint">This production still names {knownModel!.displayName}; it has not been replaced by another model.</p> : null}
         </section>
 
+        {references.length === 0 ? null : (
+          <section className="fy-swgen__section">
+            <h3>References</h3>
+            <div className="fy-swgen__references">
+              {references.map((reference) => (
+                <article key={reference.sheet.id} data-riding={reference.ridingSteps > 0 ? "true" : "false"}>
+                  <span className="fy-swgen__reference-image">
+                    <Portrait worldSlug={world.meta.slug} path={reference.path} label={reference.sheet.type} radius={5} />
+                  </span>
+                  <span className="fy-swgen__reference-copy">
+                    <strong>{reference.sheet.name}</strong>
+                    <span>{reference.ridingSteps === reference.citedSteps
+                      ? "rides"
+                      : reference.ridingSteps === 0
+                        ? "citation only"
+                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}</span>
+                  </span>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
         <footer className="fy-swgen__foot">
           <span className="fy-swgen__context" aria-label="Inherited scene context">
             applies the scene context · {contextValues(scene, world, aspect).join(", ")}
@@ -420,7 +465,7 @@ function GenerateFramesDialogOpen({
               </span>
               <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
               {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-              {blockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{blockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
+              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
         </footer>
@@ -489,6 +534,45 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
   return [location, scene.inherits?.timeOfDay ?? null, scene.inherits?.tone ?? null, aspect]
     .filter((value): value is string => value !== null);
+}
+
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
+  const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
+  const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
+  const summary = new Map<string, {
+    sheet: WorldBundle["sheets"][number];
+    path: string | null;
+    citedSteps: number;
+    ridingSteps: number;
+  }>();
+  for (const step of quote.steps) {
+    const cited = new Set<string>();
+    if (scene.inherits?.location !== undefined) cited.add(scene.inherits.location);
+    for (const shotId of step.requestShotIds) {
+      const shot = shotById.get(shotId);
+      if (shot === undefined) continue;
+      for (const entry of resolveCast(shot.description, world.sheets).cast) cited.add(entry.sheet.id);
+    }
+    for (const reference of step.references) cited.add(reference.sheetId);
+    for (const sheetId of cited) {
+      const sheet = sheetById.get(sheetId);
+      if (sheet === undefined) continue;
+      const riding = step.references.find((reference) => reference.sheetId === sheetId);
+      const previous = summary.get(sheetId);
+      summary.set(sheetId, {
+        sheet,
+        path: previous?.path ?? riding?.path ?? null,
+        citedSteps: (previous?.citedSteps ?? 0) + 1,
+        ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
+      });
+    }
+  }
+  return [...summary.values()].map((entry) => ({
+    ...entry,
+    path: entry.path ?? (entry.sheet.type === "location"
+      ? locationPortraitPath(world, entry.sheet.id)
+      : characterPortraitPath(world, entry.sheet.id)),
+  }));
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

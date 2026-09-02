@@ -314,6 +314,9 @@ function quoteFor(message: Extract<ClientMessage, { kind: "frame-run-quote" }>, 
       label: message.shotId === undefined ? "Board A" : `Shot ${message.shotId.replace(/^sh_0*/, "")}`,
       requestShotIds: shotIds,
       updateShotIds: shotIds,
+      references: shotIds.includes("sh_12")
+        ? [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/model-sheet-v4.png" }]
+        : [],
       estimatedMicroUsd,
     }] : [],
     estimatedMicroUsd: blockedReason === null ? estimatedMicroUsd : null,
@@ -448,6 +451,13 @@ describe("frame-run quote authorization", () => {
     assert.doesNotMatch(dialog.textContent ?? "", /~\$/);
     assert.match(dialog.textContent ?? "", /Packing.*2 shots → 1 board.*15s clip limit/);
     assert.match(dialog.textContent ?? "", /1536×864 · 4 refs/);
+    const references = all(item, ".fy-swgen__references article");
+    const maren = references.find((reference) => reference.textContent?.includes("Maren Kest"));
+    const vigil = references.find((reference) => reference.textContent?.includes("The Vigil"));
+    assert.match(maren?.textContent ?? "", /rides/);
+    assert.equal(maren?.dataset.riding, "true");
+    assert.match(vigil?.textContent ?? "", /citation only/);
+    assert.equal(vigil?.dataset.riding, "false");
     await click([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.deepEqual(sent.at(-1), {
       kind: "frame-run-start",
@@ -489,6 +499,7 @@ describe("frame-run quote authorization", () => {
       label: "Shot 13",
       requestShotIds: [targetShotId],
       updateShotIds: [targetShotId],
+      references: [],
       estimatedMicroUsd: 37_000,
     }]);
 
@@ -500,6 +511,35 @@ describe("frame-run quote authorization", () => {
       { shotId: targetShotId, mode: "per-shot", scope: "all" },
     );
     assert.deepEqual(quote.steps.flatMap((step) => step.requestShotIds), [targetShotId], "the quote contains no second shot");
+  });
+
+  it("defaults an unpinned production to a model that can deliver its aspect", async () => {
+    const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
+    const wide = { ...IMAGE_MODEL, id: "wide-image", displayName: "Wide image" };
+    const state = stateWith({ imageModels: [square, wide] });
+    state.app.routing.defaults.image = square.id;
+    const sent: ClientMessage[] = [];
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.equal(request.modelId, wide.id);
+    assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /Wide image/);
+  });
+
+  it("preserves an explicit incompatible model and names a compatible alternative", async () => {
+    const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
+    const wide = { ...IMAGE_MODEL, id: "wide-image", displayName: "Wide image" };
+    const state = stateWith({ imageModels: [square, wide] });
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta.models = { ...production.meta.models, image: square.id };
+    const sent: ClientMessage[] = [];
+    const item = await mount(state, sent, true, "Square image cannot deliver 16:9 - it offers 1:1");
+    await click(named(item, "Generate frames"));
+
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.equal(request.modelId, square.id, "an explicit production choice is never silently replaced");
+    assert.match(one(item, ".fy-swgen__guard")?.textContent ?? "", /Choose Wide image, which supports 16:9/);
   });
 
   it("ignores an unrelated start result", async () => {

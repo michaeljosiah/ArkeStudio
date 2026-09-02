@@ -398,6 +398,7 @@ export const FrameRunQuoteSchema = z.object({
     label: z.string().min(1),
     requestShotIds: z.array(ShotIdSchema).min(1),
     updateShotIds: z.array(ShotIdSchema).min(1),
+    references: FrameStepRequestSchema.shape.references,
     estimatedMicroUsd: z.number().int().min(0),
   }).strict()),
   estimatedMicroUsd: z.number().int().min(0).nullable(),
