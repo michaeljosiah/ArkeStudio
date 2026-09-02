@@ -270,17 +270,29 @@ export function defaultEpisodeFor(
  */
 export function useNewScene(worldId: string | undefined, prodId: string | undefined) {
   const navigate = useNavigate();
+  const connection = useStore().connection;
   const [pendingRequest, setPendingRequest] = useState<string | null>(null);
   useEffect(() => {
     if (pendingRequest === null) return;
     return subscribeSceneCreateResults((result) => {
       if (result.requestId !== pendingRequest) return;
       setPendingRequest(null);
+      // The destination is the result's own world and production, not this route's (codex,
+      // PR 708): the layout stays mounted across a production switch, and a scene made in the
+      // one you left must not be opened under the one you arrived at.
       if (result.disposition === "created" && result.sceneId !== undefined) {
-        navigate(`/w/${worldId}/p/${prodId}/scenes/${encodeURIComponent(result.sceneId)}`);
+        navigate(
+          `/w/${encodeURIComponent(result.worldId)}/p/${encodeURIComponent(result.productionId)}/scenes/${encodeURIComponent(result.sceneId)}`,
+        );
       }
     });
-  }, [pendingRequest, worldId, prodId, navigate]);
+  }, [pendingRequest, navigate]);
+  // A result lost to a dropped connection never arrives — reconnect brings a snapshot, not the
+  // answer — and a press that waited on it would stay disabled for the session (codex, PR 708).
+  // The scene may well exist by then; the rail shows it, and the press is offered again.
+  useEffect(() => {
+    if (connection !== "open") setPendingRequest(null);
+  }, [connection]);
   return {
     pending: pendingRequest !== null,
     create: (episodeId?: string) => {

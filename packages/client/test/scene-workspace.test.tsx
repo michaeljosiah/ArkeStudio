@@ -670,6 +670,38 @@ describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
     assert.equal(newSceneButton(mounted).hasAttribute("disabled"), false, "and the press is offered again");
   });
 
+  it("opens the scene under the production the answer names, not the route it was pressed from (codex round 2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes`);
+    await click(newSceneButton(mounted));
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene");
+    await apply({
+      at: "2026-09-02T10:00:00.000Z",
+      type: "scene.create-result",
+      requestId: create.requestId,
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "the-ledger-of-nights",
+      disposition: "created",
+      sceneId: "sc_untitled",
+    });
+    assert.ok(q(mounted, '[data-screen="scene-detail"]'), "the scene route was opened");
+    assert.notEqual(q(mounted, ".fy-prodrail__switchname")?.textContent, "Saltlight", "under the production the answer named");
+  });
+
+  it("a press lost to a dropped connection is offered again on reconnect (codex round 2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes`);
+    await click(newSceneButton(mounted));
+    assert.equal(newSceneButton(mounted).hasAttribute("disabled"), true);
+    await act(async () => __connectionStatusForTest("closed"));
+    assert.equal(newSceneButton(mounted).hasAttribute("disabled"), false, "the answer is not coming; the press comes back");
+    await act(async () => __connectionStatusForTest("open"));
+    assert.ok(q(mounted, '[data-screen="scenes"]'), "and nothing was opened on its behalf");
+  });
+
   it("a bookmark to the retired brief form lands on the list, and writes nothing", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
