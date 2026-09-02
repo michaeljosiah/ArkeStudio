@@ -8,6 +8,7 @@ import {
   benchSubjectTitle,
   benchTokenFor,
   designatedVoiceSample,
+  effectiveFraming,
   hasOwnFrame,
   mappedReferenceKinds,
   modelForCapability,
@@ -18,6 +19,8 @@ import {
   productionStyleFor,
   promptFor,
   resolveCast,
+  stagingMoveWord,
+  stagingPromptClause,
   type AppSettings,
   type BenchComposer,
   type BenchReferenceToken,
@@ -29,6 +32,7 @@ import {
   type ReferenceKind,
   type SceneRecord,
   type Shot,
+  type ShotStaging,
   type WorldBundle,
 } from "@arke-studio/contracts";
 
@@ -220,6 +224,40 @@ async function voiceTokens(
   return references;
 }
 
+/**
+ * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
+ * is. `when-supported`, because no route today maps a video reference — the tile stays visible
+ * and says it is not riding, while the beats in the brief carry the move regardless.
+ */
+function playblastToken(
+  staging: ShotStaging,
+  world: WorldBundle,
+  shown: { durationSec: number; aspect: string; lens: string | undefined },
+): BenchReferenceToken | null {
+  const pinned = staging.playblast;
+  if (pinned === undefined) return null;
+  const artifact = world.artifacts.find((candidate) => candidate.id === pinned.artifactId);
+  if (artifact === undefined || artifact.kind !== "video") return null;
+  // The recording baked in a staging, a length, an aspect and a lens; any of them moving on
+  // makes it a file of a shot that no longer exists this way, and the tile says so.
+  const moved =
+    pinned.version !== staging.version ||
+    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
+    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
+    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+  const stale = moved ? " · stale" : "";
+  return {
+    token: benchTokenFor("video", 1),
+    kind: "video",
+    source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
+    label: `Staging · Playblast v${pinned.version}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, staging.cast)}${stale}`,
+    ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
+    ride: "when-supported",
+    subjectRole: "reference",
+  };
+}
+
 function admittedTokens(references: readonly BenchReferenceToken[], model: ManifestModel | null): string[] {
   if (model === null) return [];
   const mapped = new Set(mappedReferenceKinds(model.provider));
@@ -337,6 +375,8 @@ export async function prepareBenchSubject(
     productionId: string;
     sceneId: string;
     subject: { kind: "shot"; shotId: string } | { kind: "board"; memberShotIds: string[] };
+    /** A shot opens in image mode unless the Stage asks for the clip (SPEC-036 R-23). */
+    mode?: "image" | "video";
     settings: AppSettings | null;
     manifest: ModelManifest | null;
     sources: SubjectSourceReader;
@@ -354,8 +394,23 @@ export async function prepareBenchSubject(
     const shotId = input.subject.shotId;
     const shot = shots.find((candidate) => candidate.id === shotId);
     if (shot === undefined) return { ok: false, reason: "That shot is no longer in this scene." };
-    const model = subjectModelFor(production, "image", input.settings, input.manifest);
+    const mode = input.mode ?? "image";
+    const model = subjectModelFor(production, mode, input.settings, input.manifest);
     const references = await sheetTokens([shot], world, production, scene, input.sources);
+    // The clip is where the move matters: the playblast rides where a route can carry video,
+    // and the beats ride in the words everywhere. A still has no move to describe.
+    const staging = mode === "video" ? shot.staging : undefined;
+    const playblast = staging === undefined
+      ? null
+      : playblastToken(staging, world, {
+          durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
+          aspect,
+          lens: effectiveFraming(scene, shot).lens,
+        });
+    if (playblast !== null) references.push(playblast);
+    const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
+    const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;
+    const brief = staging === undefined ? prompt : `${prompt}\n\n${stagingPromptClause(staging, nameOf)}`;
     const promptSheetVersions = shot.promptOverride === undefined
       ? assembledPromptSheetVersions([shot], scene, world)
       : { ...shot.promptOverride.sheetVersions };
@@ -377,11 +432,14 @@ export async function prepareBenchSubject(
         title: benchSubjectTitle(subject),
         references,
         composer: {
-          mode: "image",
+          mode,
           provider: model?.provider ?? "",
           model: model?.id ?? "",
-          params: { kind: "image", aspect, count: 1 },
-          brief: promptFor(world.meta, world.sheets, scene, shot, style, undefined, "image").text,
+          params:
+            mode === "video"
+              ? { kind: "video", aspect, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, sound: true }
+              : { kind: "image", aspect, count: 1 },
+          brief,
           ...routing,
         },
       },

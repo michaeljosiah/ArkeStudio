@@ -87,6 +87,15 @@ export const Plus = icon(
     <path d="M12 5v14" />
   </>,
 );
+export const Minus = icon(<path d="M5 12h14" />);
+/** A lamp: the Stage's continuity ghost, lighting the previous shot's positions. */
+export const Lamp = icon(
+  <>
+    <path d="M9 18h6" />
+    <path d="M10 22h4" />
+    <path d="M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2Z" />
+  </>,
+);
 /** A pane with a rail down its left: the control that shows and hides one (71a). */
 export const PanelLeft = icon(
   <>
@@ -100,6 +109,33 @@ export const More = icon(
     <circle cx="12" cy="12" r="1" />
     <circle cx="19" cy="12" r="1" />
     <circle cx="5" cy="12" r="1" />
+  </>,
+);
+/** Six dots in two columns: the band name is a handle, and should read as one before it is dragged. */
+export const Grip = icon(
+  <>
+    <circle cx="9" cy="6" r="1" />
+    <circle cx="15" cy="6" r="1" />
+    <circle cx="9" cy="12" r="1" />
+    <circle cx="15" cy="12" r="1" />
+    <circle cx="9" cy="18" r="1" />
+    <circle cx="15" cy="18" r="1" />
+  </>,
+);
+/** Three ragged lines of text: the one prompt a whole board is sent as (notes §7.4, icons not links). */
+export const Lines = icon(
+  <>
+    <path d="M4 6h16" />
+    <path d="M4 12h10" />
+    <path d="M4 18h13" />
+  </>,
+);
+/** A framed two-by-two: the board sheet, the members seen as one image. */
+export const Grid2x2 = icon(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M3 12h18" />
+    <path d="M12 3v18" />
   </>,
 );
 /** A box with a lid: put away, not thrown away. */
@@ -185,10 +221,25 @@ export const PauseSolid = solid(
     <rect x="14" y="4" width="4" height="16" rx="1.5" />
   </>,
 );
+/** Back to the top: the preview transport's restart, drawn beside the play disc it rewinds. */
+export const RotateCcw = icon(
+  <>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 3v5h5" />
+  </>,
+);
 export const Lock = icon(
   <>
     <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </>,
+);
+// The Arke dock's unpin control and its collapsed rail (SPEC-036): the assistant is pinned beside
+// the work rather than toggled from the toolbar, so the glyph is a pin, not an eye.
+export const Pin = icon(
+  <>
+    <path d="M12 17v5" />
+    <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
   </>,
 );
 
@@ -289,6 +340,25 @@ export const Expand = icon(
     <path d="m3 21 6-6" />
     <path d="M3 8V3h5" />
     <path d="M9 9 3 3" />
+  </>,
+);
+/** Four arrowheads on a cross: the drag handle in a Flow node's hover toolbar (§11.5). */
+export const Move = icon(
+  <>
+    <path d="M12 2v20" />
+    <path d="M2 12h20" />
+    <path d="m8 6 4-4 4 4" />
+    <path d="m8 18 4 4 4-4" />
+    <path d="m6 8-4 4 4 4" />
+    <path d="m18 8 4 4-4 4" />
+  </>,
+);
+/** A ringed i: the details control beside it, which opens what the node stands for. */
+export const Info = icon(
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 16v-4" />
+    <path d="M12 8h.01" />
   </>,
 );
 

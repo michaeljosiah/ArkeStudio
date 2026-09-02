@@ -505,7 +505,9 @@ describe("the notification raised for a request", () => {
 describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
   it("names and locks a shot while keeping unsupported production references visible", async () => {
     const bench = await openBench(subjectSession("shot"));
-    assert.match(bench.container.textContent ?? "", /Saltlight · Scene 4 · The verse rises · Shot 12/);
+    // The chain, as the header now splits it: crumb, then the subject (design 2609-2610).
+    assert.match(bench.container.textContent ?? "", /Saltlight · scene 4/);
+    assert.match(bench.container.textContent ?? "", /Shot 12/);
     assert.match(bench.container.textContent ?? "", /aspect · 16:9/);
     assert.match(bench.container.textContent ?? "", /duration · 4s/);
     assert.match(bench.container.textContent ?? "", /seed · auto/);
@@ -516,7 +518,9 @@ describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
     assert.ok(bench.container.querySelector(".fy-bench__wave"));
     const modes = [...bench.container.querySelectorAll<HTMLButtonElement>('[aria-label="What to make"] button')];
     assert.equal(modes.find((button) => button.textContent === "Image")?.disabled, false);
-    assert.ok(modes.filter((button) => button.textContent !== "Image").every((button) => button.disabled));
+    // A shot offers the two modes the design offers and nothing that makes a sound; the other
+    // tab is a live switch to the shot in that mode (design 2616-2621), not a disabled pill.
+    assert.deepEqual(modes.map((button) => button.textContent), ["Image", "Video"]);
     const square = bench.container.querySelector<HTMLOptionElement>('option[value="fal/square-image"]');
     assert.equal(square?.hasAttribute("disabled"), true, "a locked 16:9 subject cannot spend on a square-only model");
     assert.equal(bench.container.querySelector('[data-testid="bench-keep"]'), null);
@@ -579,7 +583,9 @@ describe("a subject-bound Bench (SPEC-036 R-23..R-25)", () => {
 
   it("states one board pass and files its accepted clip onto every member", async () => {
     const bench = await openBench(subjectSession("board"));
-    assert.match(bench.container.textContent ?? "", /Board A · 2 shots · 10s · one pass/);
+    // The subject and its line are two spans in the header now (design 2610-2611).
+    assert.match(bench.container.textContent ?? "", /Board A/);
+    assert.match(bench.container.textContent ?? "", /2 shots · 10s · one pass/);
     assert.match(bench.container.textContent ?? "", /sound · on/);
     assert.match(bench.container.textContent ?? "", /accepting files the clip onto 2 shots/);
     const video = [...bench.container.querySelectorAll<HTMLButtonElement>('[aria-label="What to make"] button')]

@@ -209,6 +209,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
+import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "./productions/editor-requests.js";
 import {
@@ -6260,6 +6261,51 @@ export class Coordinator {
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
         return;
       }
+      case "stage-playblast": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const refuse = (reason: string) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason,
+          });
+        // One gated write: the bytes land on the shelf and the pin lands on the staging in the
+        // same commit, or neither does — a refusal leaves nothing on the shelf.
+        const outcome = await filePlayblast(store, {
+          productionId: msg.productionId,
+          sceneFile: msg.sceneFile,
+          sceneId: msg.sceneId,
+          baseVersion: msg.baseVersion,
+          shotId: msg.shotId,
+          stagingVersion: msg.stagingVersion,
+          sourcePath: msg.sourcePath,
+          durationSec: msg.durationSec,
+          aspect: msg.aspect,
+          ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
+        }).catch((err: unknown) => ({
+          outcome: "refused" as const,
+          reason: err instanceof Error ? err.message : "the playblast could not be filed",
+        }));
+        if (outcome.outcome === "refused") {
+          refuse(outcome.reason);
+          return;
+        }
+        this.emit({
+          at: new Date().toISOString(),
+          type: "artifact.attached",
+          worldId: msg.worldId,
+          artifactId: outcome.artifact.id,
+          file: outcome.artifact.file,
+          kind: outcome.artifact.kind,
+          deduplicated: false,
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "import-shot-frame": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
@@ -7305,6 +7351,7 @@ export class Coordinator {
             productionId: msg.productionId,
             sceneId: msg.sceneId,
             subject: msg.subject,
+            ...(msg.mode !== undefined ? { mode: msg.mode } : {}),
             settings,
             manifest: this.opts.manifest ?? null,
             sources: {
@@ -7365,6 +7412,9 @@ export class Coordinator {
               subject.kind === "shot"
                 ? { kind: "shot", shotId: subject.shotId }
                 : { kind: "board", memberShotIds: subject.members.map((member) => member.shotId) },
+            // A shot session the Stage opened for the clip rebuilds as the clip, playblast and beats
+            // included; without this a Rebuild would quietly hand it back an image composer.
+            ...(subject.kind === "shot" && bench.session.composer.mode === "video" ? { mode: "video" as const } : {}),
             settings,
             manifest: this.opts.manifest ?? null,
             sources: {

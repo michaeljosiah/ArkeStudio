@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord } from "@arke-studio/contracts";
+import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
   applySceneCommand,
   sceneCommandFrom,
@@ -146,6 +146,33 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
     assert.notEqual(copy.id, source.id, "a fresh id, so nothing that pointed at the original follows");
     assert.equal(copy.description, source.description);
     assert.equal(copy.covers, undefined, "and no claim on footage it has no relationship to");
+
+    // A staged shot's move travels; its playblast pin is output filed for the original and stays.
+    const staging: ShotStaging = {
+      version: 3,
+      cast: [],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -2], l: [0, 1, 0] }],
+      playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 3, durationSec: 4, aspect: "16:9" },
+    };
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: after.version,
+      command: { kind: "edit-shot", shotId: source.id, change: { staging } },
+    });
+    const staged = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: staged.version,
+      command: { kind: "duplicate-shot", shotId: source.id },
+    });
+    const twin = orderedShots(await sceneOnDisk(store))[1]!;
+    assert.deepEqual(twin.staging?.keys, staging.keys, "the blocked move is authored, and travels");
+    assert.equal(twin.staging?.playblast, undefined, "the playblast is output, and does not");
   });
 
   it("refuses against a version that has moved, and writes nothing (R-62)", async () => {
@@ -402,6 +429,53 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     assert.equal(edited.title, target.title);
     assert.deepEqual(shotIds(after), shotIds(before), "an edit is not a move");
     assert.equal(nodeIdOf(after, target.id), nodeIdOf(before, target.id));
+  });
+
+  it("retimes a staged shot's staging with its duration, as a new staging version", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const target = orderedShots(before)[1]!;
+    const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: before.version,
+      command: {
+        kind: "edit-shot",
+        shotId: target.id,
+        change: {
+          durationSec: 4,
+          staging: { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -2], l: [0, 1, 0] }] },
+        },
+      },
+    });
+    const staged = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: staged.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 6 } },
+    });
+    const after = orderedShots(await sceneOnDisk(store))[1]!;
+    assert.equal(after.durationSec, 6);
+    assert.deepEqual(after.staging?.keys.map((key) => key.t), [0, 6], "the end key follows the shot's length");
+    assert.equal(after.staging?.version, 2, "a retime is a staging change, so a playblast of the old length reads stale");
+    // A duration that already fits leaves the staging exactly as it was.
+    const again = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: again.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { title: "Retitled" } },
+    });
+    assert.equal(orderedShots(await sceneOnDisk(store))[1]!.staging?.version, 2, "an edit that is not a retime moves nothing");
+    // A clear said in the same edit as the retime is a clear: present-with-undefined is honoured.
+    const cleared = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: cleared.version,
+      command: sceneCommandFrom({ kind: "edit-shot", shotId: target.id, change: { durationSec: 3 }, clear: ["staging"] }),
+    });
+    const bare = orderedShots(await sceneOnDisk(store))[1]!;
+    assert.equal(bare.durationSec, 3);
+    assert.equal(bare.staging, undefined, "the retime does not resurrect a staging the edit cleared");
   });
 });
 

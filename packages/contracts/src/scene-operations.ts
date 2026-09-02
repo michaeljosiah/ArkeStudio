@@ -257,6 +257,12 @@ export function duplicateShot(
     throw new SceneOperationRefused([`shot ${input.newShotId} is already in this scene`]);
   }
   const copy: Shot = { ...source, id: input.newShotId, number: 0 };
+  // The blocked move is authored and travels; the playblast pin is output, filed for and
+  // linked to the source shot, and a duplicate that carried it would read as staged and filed.
+  if (source.staging !== undefined) {
+    const { playblast: _pin, ...staging } = source.staging;
+    copy.staging = staging;
+  }
   const next = [...shots];
   next.splice(shots.indexOf(source) + 1, 0, copy);
   return complete(record, renumbered(next));

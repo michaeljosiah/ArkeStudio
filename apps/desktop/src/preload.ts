@@ -46,7 +46,21 @@ type AttachTarget =
    */
   | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
-  | { kind: "world-chat-attach"; worldId: string; conversationId: string };
+  | { kind: "world-chat-attach"; worldId: string; conversationId: string }
+  /** A playblast the Stage rendered, filed onto its shot against the scene version it saw. */
+  | {
+      kind: "stage-playblast";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      shotId: string;
+      stagingVersion: number;
+      durationSec: number;
+      aspect: string;
+      lens?: string;
+    };
 
 type FrameListener = (frameJson: string) => void;
 type StatusListener = (status: "connecting" | "open" | "closed") => void;
@@ -215,6 +229,11 @@ const bridge = {
           ? Uint8Array.from(raw as number[])
           : null;
     if (!view) return { ok: false, reason: "the app could not read what was pasted" };
+    // send() drops a frame on a closed socket without a word; a playblast that took the shot's
+    // length to record must not be reported filed when nothing carried it.
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, reason: "not connected to the app — try again in a moment" };
+    }
     const result = (await ipcRenderer
       .invoke("arke:spool", { name, bytes: view })
       .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };

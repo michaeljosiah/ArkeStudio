@@ -470,3 +470,9 @@ SpecOne design system (shadcn neutral). Do not invent values.
 - [ ] Arke narrates every run and reconciles its rows against live state
 - [ ] All overlays cover the whole app frame
 - [ ] No clock accumulates per tick
+
+---
+
+## 17. The Stage (added 2026-09-01)
+
+The prototype gained a fourth tab, **Stage**: a greybox previs of one shot — cast as capsule figures, set as translucent massing, one camera on a motion path — exported as a **playblast** the generator receives beside the sheets and the prompt. Its design, implementation notes and user guide live in `scene-workspace-stage.md` beside this file; the web component it describes is `stage-viewport.js` inside the export. SPEC-036 §1.13 binds what the product builds from it (R-32..R-36), including the two places the product deliberately departs: the staging lives on the shot and lands through `edit-shot`, and the first staging is deterministic rather than an agent turn.

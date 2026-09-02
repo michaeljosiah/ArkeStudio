@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  DEFAULT_SHOT_SEC,
+  effectiveFraming,
   linearizeSceneFlow,
   resolveCast,
+  stagingMoveWord,
   type ArtifactSidecar,
   type ClientMessage,
   type ProductionBundle,
@@ -9,8 +12,12 @@ import {
   type SceneSequenceShot,
   type Sheet,
 } from "@arke-studio/contracts";
+import { Divider, Expand, Info, More, Move, PlaySolid, Plus } from "../../components/icons.js";
+import { Button } from "../../components/ui.js";
+import { sheetPortraitPath } from "../../components/portrait.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
+import { shotFramePath } from "./lightbox.js";
 import type { WorkspaceBoardPack } from "./boards.js";
 import { subjectMatchesBoard, useWorkspaceSelection, type WorkspaceSubject } from "./selection.js";
 
@@ -28,7 +35,7 @@ type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
  * selections, and takes, so the canvas cannot disagree with the rows beside it.
  *
  * Positions are session state and are never written to the record (§1.16 keeps manual
- * coordinates out of v1): dragging arranges your view of the scene, and `Fit` puts it back.
+ * coordinates out of v1): dragging arranges your view of the scene, and `Arrange` puts it back.
  */
 
 /** Context box sizes follow the prototype; compact terminals complete SPEC-029's sequence. */
@@ -38,6 +45,8 @@ const NODE = {
   shot: { w: 232, h: 96 },
   board: { w: 196, h: 86 },
   clip: { w: 208, h: 152 },
+  /** The Stage's staging of a shot: a soft input like a reference, sized as the prototype draws it. */
+  block: { w: 152, h: 92 },
   exit: { w: 112, h: 52 },
 } as const;
 
@@ -50,10 +59,23 @@ interface FlowNode {
   y: number;
   name: string;
   meta: string;
+  /** A shot's title: the line between its name and its camera. */
+  title?: string;
+  /** Length as the card prints it — a shot's or clip's seconds, a board's against its cap. */
+  duration?: string;
   thumb?: string;
   shotId?: string;
   memberShotIds?: string[];
+  /** Whether the clip a board renders to exists yet: the card's meta and its run label. */
+  rendered?: boolean;
   staged: boolean;
+}
+
+interface MenuItem {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  act: () => void;
 }
 
 interface FlowEdge {
@@ -91,6 +113,7 @@ function subjectSelectsNode(subject: WorkspaceSubject, node: FlowNode, currentSh
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 1.4;
 const FIT_PAD = 26;
+const MENU_WIDTH = 196;
 const EMPTY_MOVED: Record<string, { x: number; y: number }> = {};
 
 export function SceneFlow({
@@ -100,6 +123,7 @@ export function SceneFlow({
   artifacts,
   slug,
   boardPack,
+  capSec,
   stagedShotIds,
   newShotIds,
   stagedBoards,
@@ -107,8 +131,12 @@ export function SceneFlow({
   generatorPending,
   onCommand,
   onOpenShotInGenerator,
+  onOpenStage,
   onRenderBoard,
   onTalkToArke,
+  onEditShot,
+  onViewBoardSheet,
+  onShowBoards,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -116,6 +144,8 @@ export function SceneFlow({
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
   boardPack: WorkspaceBoardPack;
+  /** The clip limit a board is packed against; a board card prints its seconds beside it. */
+  capSec?: number;
   stagedShotIds: ReadonlySet<string>;
   newShotIds: ReadonlySet<string>;
   stagedBoards: boolean;
@@ -123,8 +153,17 @@ export function SceneFlow({
   generatorPending: boolean;
   onCommand: (command: Command) => boolean;
   onOpenShotInGenerator: (shotId: string) => void;
+  /** The Stage: a staging node, the shot menu's entry and the board's all lead there. */
+  onOpenStage?: (shotId: string) => void;
   onRenderBoard: (memberShotIds: string[]) => void;
   onTalkToArke: () => void;
+  /*
+   * The menu and toolbar entries below exist only when the workspace wires them: an entry that
+   * did nothing would be a lie, and each leads to a surface this canvas does not own.
+   */
+  onEditShot?: (shotId: string) => void;
+  onViewBoardSheet?: (memberShotIds: string[], trigger: HTMLElement | null) => void;
+  onShowBoards?: () => void;
 }) {
   const sequence = useMemo(() => linearizeSceneFlow(scene), [scene]);
   const { subject, select } = useWorkspaceSelection();
@@ -136,29 +175,34 @@ export function SceneFlow({
   const previousFocusableNodeIds = useRef<string[]>([]);
   const deletePanel = useRef<HTMLDivElement | null>(null);
   const deleteReturnNode = useRef<string | null>(null);
+  const menuPanel = useRef<HTMLDivElement | null>(null);
   const liveShotIds = useRef(new Set<string>());
   const [pan, setPan] = useState({ x: 24, y: 20 });
   const [zoom, setZoom] = useState(1);
   const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number } | null>(null);
   const [linkSource, setLinkSource] = useState<string | null>(null);
+  // Where the pointer is, in layer coordinates, while a link is being chosen: the dashed wire.
+  const [linkPointer, setLinkPointer] = useState<{ x: number; y: number } | null>(null);
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [deleteShotId, setDeleteShotId] = useState<string | null>(null);
+  // One menu at a time: the ground's when nodeId is null, otherwise the node's. Canvas pixels.
+  const [menu, setMenu] = useState<{ nodeId: string | null; left: number; top: number } | null>(null);
 
   const sequenceShots = useMemo(() => sequence.kind === "linear" ? sequence.shots : [], [sequence]);
   const shots = useMemo(() => sequenceShots.map((pair) => pair.shot), [sequenceShots]);
   const compact = canvasSize !== null && canvasSize.width < 700;
   const arrangedGraph = useMemo(
     () => sequence.kind === "linear"
-      ? buildGraph({ sequence, production, sheets, artifacts, slug, moved: EMPTY_MOVED, boardPack, stagedShotIds, newShotIds, stagedBoards, compact })
+      ? buildGraph({ sequence, scene, production, sheets, artifacts, slug, capSec, moved: EMPTY_MOVED, boardPack, stagedShotIds, newShotIds, stagedBoards, compact })
       : { nodes: [], edges: [] },
-    [sequence, production, sheets, artifacts, slug, boardPack, stagedShotIds, newShotIds, stagedBoards, compact],
+    [sequence, scene, production, sheets, artifacts, slug, capSec, boardPack, stagedShotIds, newShotIds, stagedBoards, compact],
   );
   const graph = useMemo(
     () => Object.keys(moved).length === 0 || sequence.kind === "invalid"
       ? arrangedGraph
-      : buildGraph({ sequence, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact }),
-    [arrangedGraph, sequence, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact],
+      : buildGraph({ sequence, scene, production, sheets, artifacts, slug, capSec, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact }),
+    [arrangedGraph, sequence, scene, production, sheets, artifacts, slug, capSec, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact],
   );
   const joins = useMemo(() => {
     const counts = new Map<string, { incoming: number; outgoing: number }>();
@@ -198,7 +242,7 @@ export function SceneFlow({
   liveShotIds.current = new Set(shots.map((shot) => shot.id));
   const deleteOpen = deleteShotId !== null && liveShotIds.current.has(deleteShotId);
 
-  const restoreDeleteFocus = useCallback((nodeId: string | null) => {
+  const restoreNodeFocus = useCallback((nodeId: string | null) => {
     requestAnimationFrame(() => {
       const preferred = nodeId === null ? undefined : nodeControls.current.get(nodeId);
       if (preferred?.isConnected) preferred.focus();
@@ -207,8 +251,12 @@ export function SceneFlow({
   }, []);
   const closeDelete = useCallback((restoreFocus: boolean) => {
     setDeleteShotId(null);
-    if (restoreFocus) restoreDeleteFocus(deleteReturnNode.current);
-  }, [restoreDeleteFocus]);
+    if (restoreFocus) restoreNodeFocus(deleteReturnNode.current);
+  }, [restoreNodeFocus]);
+  const closeMenu = useCallback((restoreFocus: boolean) => {
+    if (restoreFocus && menu !== null) restoreNodeFocus(menu.nodeId);
+    setMenu(null);
+  }, [menu, restoreNodeFocus]);
   const blockDeleteBackground = (event: React.SyntheticEvent) => {
     const panel = deletePanel.current;
     if (
@@ -352,9 +400,41 @@ export function SceneFlow({
     if (deleteShotId === null) return;
     if (!liveShotIds.current.has(deleteShotId)) {
       setDeleteShotId(null);
-      restoreDeleteFocus(deleteReturnNode.current);
+      restoreNodeFocus(deleteReturnNode.current);
     }
-  }, [deleteShotId, restoreDeleteFocus, shots]);
+  }, [deleteShotId, restoreNodeFocus, shots]);
+
+  useEffect(() => {
+    if (linkSource === null) setLinkPointer(null);
+  }, [linkSource]);
+
+  // A menu outlives neither its node nor a click anywhere else; Escape hands focus back.
+  const menuNode = menu === null || menu.nodeId === null ? undefined : graph.nodes.find((node) => node.id === menu.nodeId);
+  useEffect(() => {
+    if (menu !== null && menu.nodeId !== null && (menuNode === undefined || menuNode.staged)) setMenu(null);
+  }, [menu, menuNode]);
+  useLayoutEffect(() => {
+    if (menu === null) return;
+    menuPanel.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+  }, [menu]);
+  useEffect(() => {
+    if (menu === null) return;
+    const outside = (event: Event) => {
+      if (event.target instanceof Node && menuPanel.current?.contains(event.target)) return;
+      setMenu(null);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeMenu(true);
+    };
+    document.addEventListener("mousedown", outside, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", outside, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [closeMenu, menu]);
 
   useEffect(() => {
     if (deleteShotId === null || !liveShotIds.current.has(deleteShotId)) return;
@@ -429,8 +509,11 @@ export function SceneFlow({
     };
   }, [closeDelete, deleteShotId, shots]);
 
+  // A press on the ground or a node dismisses the menu here as well as at the document, because a
+  // node's press stops propagating before the document ever sees it.
   const panFrom = (event: React.MouseEvent) => {
     if (deleteOpen || event.button !== 0) return;
+    setMenu(null);
     const origin = { ...pan };
     const sx = event.clientX;
     const sy = event.clientY;
@@ -446,6 +529,7 @@ export function SceneFlow({
   const dragNode = (node: FlowNode, event: React.MouseEvent) => {
     if (deleteOpen || event.button !== 0) return;
     event.stopPropagation();
+    setMenu(null);
     setActiveNodeId(node.id);
     select(subjectForNode(node));
     const sx = event.clientX;
@@ -508,6 +592,96 @@ export function SceneFlow({
     onCommand({ kind: "move-shot", shotId: linkSource, to: targetShotId === null ? { atStart: true } : { after: targetShotId } });
     setLinkSource(null);
   };
+  const trackLinkPointer = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (linkSource === null) return;
+    const box = event.currentTarget.getBoundingClientRect();
+    setLinkPointer({ x: (event.clientX - box.left - pan.x) / zoom, y: (event.clientY - box.top - pan.y) / zoom });
+  };
+  const linkFrom = linkSource === null ? undefined : graph.nodes.find((node) => node.shotId === linkSource);
+
+  /*
+   * The context menu (the prototype's §11.6). Shots, boards and clips have one; references,
+   * Entry and Exit let a right-click fall through to the ground's. The ground offers `Add shot`
+   * at the end rather than "here": positions are session state (§1.16), so a click point is
+   * nothing the record could keep. Reference attach and detach are the storyboard's, not this
+   * surface's, and are not offered.
+   */
+  const hasMenu = (node: FlowNode) => !node.staged && (node.kind === "shot" || node.kind === "board" || node.kind === "clip");
+  const menuItemsFor = (node: FlowNode | undefined): MenuItem[] => {
+    if (node === undefined) {
+      const last = shots.at(-1);
+      return [
+        {
+          label: "Add shot",
+          disabled: locked,
+          act: () => {
+            closeMenu(false);
+            onCommand({
+              kind: "insert-shot",
+              at: last === undefined ? { atStart: true } : { after: last.id },
+              shot: { title: "Untitled shot", description: "" },
+            });
+          },
+        },
+        { label: "Arrange", act: () => { closeMenu(true); setMoved({}); fitNodes(arrangedGraph.nodes); } },
+      ];
+    }
+    if (node.kind === "shot" && node.shotId !== undefined) {
+      const shotId = node.shotId;
+      return [
+        { label: "Open in generator", disabled: locked || generatorPending, act: () => { closeMenu(false); onOpenShotInGenerator(shotId); } },
+        ...(onOpenStage === undefined ? [] : [{ label: "Stage this shot", act: () => { closeMenu(false); onOpenStage(shotId); } }]),
+        ...(onEditShot === undefined ? [] : [{ label: "Advanced", disabled: locked, act: () => { closeMenu(false); onEditShot(shotId); } }]),
+        { label: "Duplicate", disabled: locked, act: () => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId }); } },
+        {
+          label: "Delete",
+          danger: true,
+          disabled: locked,
+          // The confirmation takes focus itself and returns it to the node when it closes.
+          act: () => { closeMenu(false); deleteReturnNode.current = node.id; setDeleteShotId(shotId); },
+        },
+      ];
+    }
+    if ((node.kind === "board" || node.kind === "clip") && node.memberShotIds !== undefined) {
+      const members = [...node.memberShotIds];
+      return [
+        // Staging is per shot (board scope is deferred), so only a board of one offers it — as the shot it is.
+        ...(onOpenStage === undefined || members.length !== 1 ? [] : [{ label: "Stage this shot", act: () => { closeMenu(false); onOpenStage(members[0]!); } }]),
+        { label: "Render board", disabled: locked || generatorPending, act: () => { closeMenu(false); onRenderBoard(members); } },
+        ...(onViewBoardSheet === undefined
+          ? []
+          : [{ label: "View board sheet", act: () => { closeMenu(false); onViewBoardSheet(members, nodeControls.current.get(node.id) ?? null); } }]),
+        ...(onShowBoards === undefined ? [] : [{ label: "Show boards", act: () => { closeMenu(false); onShowBoards(); } }]),
+      ];
+    }
+    return [];
+  };
+  /** The prototype's fitMenu: the menu sits in a clipping box, so it slides in from the edges. */
+  const openMenu = (nodeId: string | null, x: number, y: number) => {
+    const node = nodeId === null ? undefined : graph.nodes.find((candidate) => candidate.id === nodeId);
+    const box = canvas.current?.getBoundingClientRect();
+    const width = box !== undefined && box.width > 0 ? box.width : 900;
+    const height = box !== undefined && box.height > 0 ? box.height : 600;
+    const pad = 8;
+    const tall = 44 + menuItemsFor(node).length * 30;
+    setMenu({
+      nodeId,
+      left: Math.max(pad, Math.min(Number.isFinite(x) ? x : 0, width - MENU_WIDTH - 10 - pad)),
+      top: Math.max(pad, Math.min(Number.isFinite(y) ? y : 0, height - tall - pad)),
+    });
+  };
+  const openNodeMenu = (node: FlowNode, clientX: number, clientY: number) => {
+    setActiveNodeId(node.id);
+    select(subjectForNode(node));
+    const box = canvas.current?.getBoundingClientRect();
+    openMenu(node.id, clientX - (box?.left ?? 0), clientY - (box?.top ?? 0));
+  };
+  const openNodeMenuFrom = (node: FlowNode, trigger: HTMLElement) => {
+    const anchor = trigger.getBoundingClientRect();
+    openNodeMenu(node, anchor.left, anchor.bottom + 4);
+  };
+  const menuItems = menu === null ? [] : menuItemsFor(menuNode);
+  const menuTitle = menuNode?.name ?? "canvas";
   return (
     <div
       className="fy-swcanvas"
@@ -518,6 +692,14 @@ export function SceneFlow({
       onMouseDownCapture={blockDeleteBackground}
       onClickCapture={blockDeleteBackground}
       onMouseDown={panFrom}
+      onMouseMove={trackLinkPointer}
+      onDragOver={trackLinkPointer}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        if (deleteOpen) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        openMenu(null, event.clientX - box.left, event.clientY - box.top);
+      }}
       onFocusCapture={() => { flowOwnsFocus.current = true; }}
       onBlurCapture={(event) => {
         if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
@@ -543,6 +725,17 @@ export function SceneFlow({
               data-staged={edge.staged ? "true" : undefined}
             />
           ))}
+          {linkFrom === undefined || linkPointer === null ? null : (
+            <path
+              data-testid="flow-link-wire"
+              d={`M${linkFrom.x + NODE.shot.w},${linkFrom.y + NODE.shot.h / 2} L${linkPointer.x},${linkPointer.y}`}
+              fill="none"
+              stroke="var(--foreground)"
+              strokeWidth={1.5}
+              strokeDasharray="3 3"
+              style={{ pointerEvents: "none" }}
+            />
+          )}
         </svg>
         {/*
           A div carries the drag, but every node is a real control besides: focusable, named, and
@@ -575,6 +768,12 @@ export function SceneFlow({
             aria-disabled={node.staged ? "true" : undefined}
             aria-current={subjectSelectsNode(subject, node, current) ? "true" : undefined}
             onMouseDown={(event) => !node.staged && dragNode(node, event)}
+            onContextMenu={(event) => {
+              if (deleteOpen || !hasMenu(node)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              openNodeMenu(node, event.clientX, event.clientY);
+            }}
             onDragOver={(event) => {
               if ((node.kind === "entry" || node.shotId !== undefined) && linkSource !== null) event.preventDefault();
             }}
@@ -592,12 +791,18 @@ export function SceneFlow({
               focusNode(node.id);
             }}
             onKeyDown={(event) => {
-              if (deleteOpen || node.staged) return;
+              // Keys typed on a toolbar button or the run button are that control's, not the node's.
+              if (deleteOpen || node.staged || event.target !== event.currentTarget) return;
               if (
                 ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
               ) {
                 event.preventDefault();
                 moveFocus(node.id, event.key);
+                return;
+              }
+              if ((event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) && hasMenu(node)) {
+                event.preventDefault();
+                openNodeMenuFrom(node, event.currentTarget);
                 return;
               }
               if (node.shotId !== undefined && event.key === "Delete") {
@@ -613,17 +818,15 @@ export function SceneFlow({
                 return;
               }
               select(subjectForNode(node));
-              if (event.key === "Enter" && node.kind === "shot" && node.shotId !== undefined && !locked && !generatorPending) {
+              if (event.key === "Enter" && node.kind === "block" && node.shotId !== undefined) {
+                onOpenStage?.(node.shotId);
+              } else if (event.key === "Enter" && node.kind === "shot" && node.shotId !== undefined && !locked && !generatorPending) {
                 onOpenShotInGenerator(node.shotId);
               }
             }}
           >
-            {node.thumb === undefined ? null : (
-              <span className="fy-swnode__thumb" style={{ backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />
-            )}
-            <span className="fy-swnode__name">{node.name}</span>
-            <span className="fy-swnode__meta">{node.meta}</span>
-            {node.staged ? <span className="fy-swnode__staged">staged</span> : null}
+            {nodeTools(node)}
+            {nodeBody(node)}
           </div>
         ))}
         {graph.nodes.flatMap((node) => {
@@ -634,7 +837,7 @@ export function SceneFlow({
                 key={`in:${node.id}`}
                 className="fy-swnode__socket"
                 data-port="in"
-                style={{ left: node.x - 6, top: node.y + NODE[node.kind].h / 2 - 6 }}
+                style={{ left: node.x - 7, top: node.y + NODE[node.kind].h / 2 - 7 }}
                 aria-hidden="true"
               />,
             );
@@ -645,7 +848,7 @@ export function SceneFlow({
                 key={`out:${node.id}`}
                 className="fy-swnode__socket"
                 data-port="out"
-                style={{ left: node.x + NODE.entry.w - 6, top: node.y + NODE.entry.h / 2 - 6 }}
+                style={{ left: node.x + NODE.entry.w - 7, top: node.y + NODE.entry.h / 2 - 7 }}
                 aria-hidden="true"
               />,
             );
@@ -660,7 +863,7 @@ export function SceneFlow({
                   key={`port:${node.id}`}
                   type="button"
                   className="fy-swnode__port"
-                  style={{ left: node.x + NODE.shot.w - 8, top: node.y + NODE.shot.h / 2 - 8 }}
+                  style={{ left: node.x + NODE.shot.w - 7, top: node.y + NODE.shot.h / 2 - 7 }}
                   draggable={!locked && !node.staged}
                   disabled={deleteOpen || locked || node.staged}
                   aria-pressed={linkSource === node.shotId}
@@ -675,56 +878,88 @@ export function SceneFlow({
                 />,
               ],
         )}
-        {graph.nodes.flatMap((node) => {
-          const opensShot = node.kind === "shot" && node.shotId !== undefined;
-          const rendersBoard = node.kind === "board" && node.memberShotIds !== undefined;
-          if (!opensShot && !rendersBoard) return [];
-          const label = opensShot ? "Open in generator" : "Render board";
-          return [
-            <button
-              key={`generate:${node.id}`}
-              type="button"
-              className="fy-swnode__generate"
-              style={{ left: node.x, top: node.y - 27 }}
-              disabled={deleteOpen || locked || node.staged || generatorPending}
-              aria-label={`${label} for ${node.name}`}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (opensShot) onOpenShotInGenerator(node.shotId!);
-                else onRenderBoard([...node.memberShotIds!]);
-              }}
-            >
-              {generatorPending ? "Opening…" : label}
-            </button>,
-          ];
-        })}
       </div>
 
+      <span className="fy-swcanvas__hint" aria-hidden="true">right-click for actions</span>
+
+      {menu === null ? null : (
+        <div
+          ref={menuPanel}
+          className="fy-swcanvas__menu"
+          role="menu"
+          aria-label={`Actions for ${menuTitle}`}
+          style={{ left: menu.left, top: menu.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); }}
+          onKeyDown={(event) => {
+            const items = [...(menuPanel.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+            const current = items.indexOf(document.activeElement as HTMLButtonElement);
+            let next: number | null = null;
+            if (event.key === "ArrowDown") next = (current + 1) % items.length;
+            else if (event.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+            else if (event.key === "Home") next = 0;
+            else if (event.key === "End") next = items.length - 1;
+            else if (event.key === "Tab") {
+              event.preventDefault();
+              closeMenu(true);
+              return;
+            }
+            const item = next === null ? undefined : items[next];
+            if (item === undefined) return;
+            event.preventDefault();
+            event.stopPropagation();
+            item.focus();
+          }}
+        >
+          <div className="fy-swcanvas__menu-title">{menuTitle}</div>
+          {menuItems.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              className={item.danger ? "fy-swcanvas__danger" : undefined}
+              disabled={item.disabled}
+              onClick={item.act}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {shots.length === 0 ? (
-        <div className="fy-swflow__empty" onMouseDown={(event) => event.stopPropagation()}>
-          <span>Entry goes straight to Exit.</span>
-          <button
-            type="button"
-            disabled={deleteOpen || locked}
-            onClick={() => onCommand({
-              kind: "insert-shot",
-              at: { atStart: true },
-              shot: { title: "Untitled shot", description: "" },
-            })}
-          >
-            Add first shot
-          </button>
-          <button
-            type="button"
-            disabled={deleteOpen}
-            onClick={() => {
-              select({ kind: "scene" });
-              onTalkToArke();
-            }}
-          >
-            Talk to Arke
-          </button>
+        // The design's empty scene, drawn over the canvas so Entry → Exit stays reachable (R-29).
+        <div className="fy-sw__empty fy-swflow__empty" onMouseDown={(event) => event.stopPropagation()}>
+          <div>
+            <h2>Build this scene</h2>
+            <p>Tell Arke what happens, or start adding shots yourself. Nothing here needs the assistant.</p>
+            <div>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={deleteOpen}
+                onClick={() => {
+                  select({ kind: "scene" });
+                  onTalkToArke();
+                }}
+              >
+                Talk to Arke
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={deleteOpen || locked}
+                onClick={() => onCommand({
+                  kind: "insert-shot",
+                  at: { atStart: true },
+                  shot: { title: "Untitled shot", description: "" },
+                })}
+              >
+                Add first shot
+              </Button>
+            </div>
+          </div>
         </div>
       ) : null}
 
@@ -784,24 +1019,204 @@ export function SceneFlow({
 
       {/* The zoom control, bottom-left, swallowing its own mousedown so it never pans. */}
       <div className="fy-swzoom" onMouseDown={(event) => event.stopPropagation()}>
-        <button type="button" aria-label="Zoom out" disabled={deleteOpen || zoom <= ZOOM_MIN} onClick={() => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - 0.1) * 10) / 10))}>
-          −
+        <button type="button" aria-label="Zoom out" title="Zoom out" disabled={deleteOpen || zoom <= ZOOM_MIN} onClick={() => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - 0.1) * 10) / 10))}>
+          <Divider size={13} />
         </button>
         <span className="fy-swzoom__label">{Math.round(zoom * 100)}%</span>
-        <button type="button" aria-label="Zoom in" disabled={deleteOpen} onClick={() => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((z + 0.1) * 10) / 10)))}>
-          +
+        <button type="button" aria-label="Zoom in" title="Zoom in" disabled={deleteOpen} onClick={() => setZoom((z) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round((z + 0.1) * 10) / 10)))}>
+          <Plus size={13} />
         </button>
-        <button type="button" className="fy-swzoom__fit" disabled={deleteOpen} onClick={() => { setMoved({}); fitNodes(arrangedGraph.nodes); }}>
-          Fit
+        <span className="fy-swzoom__divider" aria-hidden="true" />
+        <button type="button" className="fy-swzoom__fit" title="Reset the layout" disabled={deleteOpen} onClick={() => { setMoved({}); fitNodes(arrangedGraph.nodes); }}>
+          Arrange
         </button>
       </div>
     </div>
   );
+
+  /*
+   * The hover toolbar (§11.5): a drag handle, then details, open larger and the menu, each only
+   * when the node has somewhere for it to go. It hangs above the card and is shown by CSS on
+   * hover or focus-within, so the buttons are real tab stops after the node itself.
+   */
+  function nodeTools(node: FlowNode): ReactNode {
+    if (node.staged) return null;
+    const members = node.memberShotIds;
+    const sheetOpener = (node.kind === "board" || node.kind === "clip") && members !== undefined && onViewBoardSheet !== undefined
+      ? (trigger: HTMLElement) => onViewBoardSheet([...members], trigger)
+      : null;
+    const details = node.kind === "shot" && node.shotId !== undefined && onEditShot !== undefined
+      ? { disabled: deleteOpen || locked, act: () => onEditShot(node.shotId!) }
+      : node.kind === "block" && node.shotId !== undefined && onOpenStage !== undefined
+        ? { disabled: deleteOpen, act: () => onOpenStage(node.shotId!) }
+        : sheetOpener === null
+          ? null
+          : { disabled: deleteOpen, act: sheetOpener };
+    return (
+      <span className="fy-swnode__tools" onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+        <span className="fy-swnode__tool fy-swnode__tool--move" title="Drag to move" aria-hidden="true" onMouseDown={(event) => dragNode(node, event)}>
+          <Move size={12} />
+        </span>
+        {details === null ? null : (
+          <button
+            type="button"
+            className="fy-swnode__tool"
+            title="Details"
+            aria-label={`Details of ${node.name}`}
+            disabled={details.disabled}
+            onClick={(event) => details.act(event.currentTarget)}
+          >
+            <Info size={12} />
+          </button>
+        )}
+        {sheetOpener === null ? null : (
+          <button
+            type="button"
+            className="fy-swnode__tool"
+            title="Open larger"
+            aria-label={`Open ${node.name} larger`}
+            disabled={deleteOpen}
+            onClick={(event) => sheetOpener(event.currentTarget)}
+          >
+            <Expand size={12} />
+          </button>
+        )}
+        {hasMenu(node) ? (
+          <button
+            type="button"
+            className="fy-swnode__tool"
+            title="More"
+            aria-label={`More actions for ${node.name}`}
+            aria-haspopup="menu"
+            aria-expanded={menu?.nodeId === node.id}
+            disabled={deleteOpen}
+            onClick={(event) => openNodeMenuFrom(node, event.currentTarget)}
+          >
+            <More size={12} />
+          </button>
+        ) : null}
+      </span>
+    );
+  }
+
+  /** The card by kind — the prototype's shot strip, board summary and clip reel (§11.1). */
+  function nodeBody(node: FlowNode): ReactNode {
+    const staged = node.staged ? <span className="fy-swnode__staged">staged</span> : null;
+    const runs = node.kind === "shot" ? node.shotId !== undefined : node.memberShotIds !== undefined;
+    const runLabel = node.kind === "shot"
+      ? node.thumb === undefined ? "Generate" : "Regenerate"
+      : node.kind === "board"
+        ? "Render"
+        : node.rendered === true ? "Re-render" : "Render clip";
+    const run = !runs ? null : (
+      <button
+        type="button"
+        className="fy-swnode__run"
+        disabled={deleteOpen || locked || node.staged || generatorPending}
+        aria-label={`${runLabel} for ${node.name}`}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (node.kind === "shot") onOpenShotInGenerator(node.shotId!);
+          else onRenderBoard([...node.memberShotIds!]);
+        }}
+      >
+        {generatorPending ? "Opening…" : runLabel}
+      </button>
+    );
+    if (node.kind === "shot") {
+      return (
+        <>
+          <span className="fy-swnode__strip" data-empty={node.thumb === undefined ? "true" : undefined}>
+            {node.thumb === undefined ? null : (
+              <span className="fy-swnode__frame" role="img" aria-label={node.title ?? node.name} style={{ backgroundImage: `url(${node.thumb})` }} />
+            )}
+          </span>
+          <span className="fy-swnode__text">
+            <span className="fy-swnode__head">
+              <span className="fy-swnode__name">{node.name}</span>
+              <span className="fy-swnode__dur">{node.duration}</span>
+            </span>
+            <span className="fy-swnode__title">{node.title}</span>
+            <span className="fy-swnode__foot">
+              <span className="fy-swnode__meta">{node.meta}</span>
+              {run}
+            </span>
+            {staged}
+          </span>
+        </>
+      );
+    }
+    // The Stage's staging of a shot: the prototype's three figures on a floor, and the way in.
+    if (node.kind === "block" && node.shotId !== undefined) {
+      const shotId = node.shotId;
+      return (
+        <>
+          <span className="fy-swnode__figures" aria-hidden="true"><i /><i /><i /></span>
+          <span className="fy-swnode__foot">
+            <span className="fy-swnode__text">
+              <span className="fy-swnode__name">{node.name}</span>
+              <span className="fy-swnode__meta">{node.meta}</span>
+              {staged}
+            </span>
+            <button
+              type="button"
+              className="fy-swnode__run"
+              disabled={deleteOpen || node.staged || onOpenStage === undefined}
+              aria-label={`Open the staging of ${node.name}`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenStage?.(shotId);
+              }}
+            >
+              Stage
+            </button>
+          </span>
+        </>
+      );
+    }
+    if (node.kind === "clip") {
+      return (
+        <>
+          <span className="fy-swnode__reel">
+            {node.thumb === undefined
+              ? <span className="fy-swnode__noframes">no frames yet</span>
+              : <span className="fy-swnode__frame" role="img" aria-label={node.name} style={{ backgroundImage: `url(${node.thumb})` }} />}
+            <span className="fy-swnode__play" aria-hidden="true"><span><PlaySolid size={12} /></span></span>
+            <span className="fy-swnode__corner">{node.duration}</span>
+          </span>
+          <span className="fy-swnode__foot">
+            <span className="fy-swnode__text">
+              <span className="fy-swnode__name">{node.name}</span>
+              <span className="fy-swnode__meta">{node.meta}</span>
+              {staged}
+            </span>
+            {run}
+          </span>
+        </>
+      );
+    }
+    return (
+      <>
+        {node.thumb === undefined ? null : (
+          <span className="fy-swnode__thumb" style={{ backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />
+        )}
+        <span className="fy-swnode__name">{node.name}</span>
+        <span className="fy-swnode__meta">{node.meta}</span>
+        {node.duration === undefined ? null : <span className="fy-swnode__dur">{node.duration}</span>}
+        {run}
+        {staged}
+      </>
+    );
+  }
 }
 
 /** What a node announces: its kind, what it is, and how it is joined (R-63). */
 function ariaFor(node: FlowNode, joins: { incoming: number; outgoing: number } | undefined): string {
-  return `${node.name}, ${node.kind}, ${node.meta}, ${joins?.incoming ?? 0} in, ${joins?.outgoing ?? 0} out`;
+  const said = [node.name, node.kind, node.title, node.meta, node.duration]
+    .filter((part): part is string => part !== undefined && part !== "");
+  return `${said.join(", ")}, ${joins?.incoming ?? 0} in, ${joins?.outgoing ?? 0} out`;
 }
 
 /** The bezier the prototype draws: out of the right edge, into the left edge, eased by dx. */
@@ -823,10 +1238,12 @@ function pathFor(edge: FlowEdge): string {
  */
 function buildGraph(input: {
   sequence: { entryNodeId: string; exitNodeId: string; shots: readonly SceneSequenceShot[] };
+  scene: SceneRecord;
   production: ProductionBundle;
   sheets: readonly Sheet[];
   artifacts: readonly ArtifactSidecar[];
   slug: string | undefined;
+  capSec: number | undefined;
   boardPack: WorkspaceBoardPack;
   moved: Record<string, { x: number; y: number }>;
   stagedShotIds: ReadonlySet<string>;
@@ -834,16 +1251,16 @@ function buildGraph(input: {
   stagedBoards: boolean;
   compact: boolean;
 }): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const { sequence, production, sheets, artifacts, slug, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact } = input;
+  const { sequence, scene, production, sheets, artifacts, slug, capSec, moved, boardPack, stagedShotIds, newShotIds, stagedBoards, compact } = input;
   const shots = sequence.shots.map((pair) => pair.shot);
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
   const at = (id: string, x: number, y: number) => moved[id] ?? { x, y };
   const shotX = compact ? 20 : 400;
-  // The generator control occupies the lane above each Shot; these gaps keep it clear of Entry
-  // and of the preceding node instead of placing an interactive control over another target.
+  // The prototype's pitch: the hover toolbar overlaps its card, so it needs no lane of its own.
+  // The start offset is ours, clearing Entry, which the prototype does not draw.
   const shotStartY = 104;
-  const shotPitch = 138;
+  const shotPitch = 118;
 
   // References use the prototype's two-column lane wide and one compact context lane narrow.
   const cited: string[] = [];
@@ -871,6 +1288,8 @@ function buildGraph(input: {
       name: sheet.name,
       meta: sheet.type,
       staged: false,
+      // The portrait every other screen shows for a sheet; a sheet without one keeps the well.
+      ...(slug === undefined ? {} : { thumb: mediaUrl(slug, sheetPortraitPath(sheet.id)) }),
     });
   });
 
@@ -887,23 +1306,68 @@ function buildGraph(input: {
     staged: false,
   });
   const shotAt = new Map<string, { x: number; y: number }>();
+  const shotFrame = new Map<string, string>();
   sequence.shots.forEach(({ nodeId, shot }, index) => {
     const point = at(nodeId, shotX, shotStartY + index * shotPitch);
     shotAt.set(shot.id, point);
-    const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
-    const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
+    // The picture the rows, Preview and the lightbox show: a filed frame, else the poster of
+    // the take standing in for one — a migrated production with only an accepted still is not
+    // a shot with nothing to show.
+    const framePath = newShotIds.has(shot.id) ? null : shotFramePath(production, artifacts, shot.id);
+    const frame = framePath !== null && slug !== undefined ? mediaUrl(slug, framePath) : undefined;
+    if (frame !== undefined) shotFrame.set(shot.id, frame);
+    const framing = effectiveFraming(scene, shot);
     nodes.push({
       id: nodeId,
       kind: "shot",
       x: point.x,
       y: point.y,
       name: `Shot ${shot.number}`,
-      meta: shot.title,
+      title: shot.title,
+      // Size and lens, as the prototype's card says it: the two camera facts a strip this small
+      // can carry, and nothing when neither is set — an absent lens is not "default lens".
+      meta: [framing.size, framing.lens].filter((value) => value !== undefined && value.trim() !== "").join(" · "),
+      duration: `${(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s`,
       shotId: shot.id,
       staged: stagedShotIds.has(shot.id),
-      ...(!newShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
-        ? { thumb: mediaUrl(slug, `artifacts/${artifact.file}`) }
-        : {}),
+      ...(frame === undefined ? {} : { thumb: frame }),
+    });
+  });
+  // A staged shot's blocking, drawn where a reference would go next: it is an input to the shot
+  // the way a sheet is, and the reference grid already keeps things clear of one another.
+  let contextSlot = cited.length;
+  sequence.shots.forEach(({ nodeId, shot }) => {
+    if (shot.staging === undefined) return;
+    const slot = contextSlot;
+    contextSlot += 1;
+    const point = at(
+      `k:${shot.id}`,
+      compact ? 280 : 20 + (slot % 2) * 172,
+      compact ? 24 + slot * 196 : 24 + Math.floor(slot / 2) * 196,
+    );
+    nodes.push({
+      id: `k:${shot.id}`,
+      kind: "block",
+      x: point.x,
+      y: point.y,
+      name: `Staging · shot ${shot.number}`,
+      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys, shot.staging.cast)} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
+      shotId: shot.id,
+      staged: stagedShotIds.has(shot.id),
+    });
+    edges.push({
+      id: `e:k:${shot.id}`,
+      fromNodeId: `k:${shot.id}`,
+      toNodeId: nodeId,
+      from: point,
+      fromKind: "block",
+      to: shotAt.get(shot.id)!,
+      toKind: "shot",
+      soft: true,
+      label: `The staging of shot ${shot.number} guides shot ${shot.number}`,
+      fromShotId: null,
+      toShotId: shot.id,
+      staged: stagedShotIds.has(shot.id),
     });
   });
   const exitPoint = at(sequence.exitNodeId, shotX, shotStartY + shots.length * shotPitch);
@@ -1011,13 +1475,20 @@ function buildGraph(input: {
         compact ? 280 : 700,
         compact ? contextFloor + boardIndex * 296 : mid + 4,
       );
+      const numbers = board.memberShotIds.flatMap((shotId) => {
+        const number = shots.find((shot) => shot.id === shotId)?.number;
+        return number === undefined ? [] : [number];
+      });
+      const range = numbers.length > 1 ? `shots ${numbers[0]}–${numbers.at(-1)}` : `shot ${numbers[0] ?? "?"}`;
+      const seconds = `${board.durationSec.toFixed(1)}s`;
       nodes.push({
         id: boardId,
         kind: "board",
         x: point.x,
         y: point.y,
         name: `Board ${board.letter}`,
-        meta: `${board.memberShotIds.length} cells`,
+        meta: `${range} · ${board.memberShotIds.length} cells`,
+        duration: capSec === undefined ? seconds : `${seconds} / ${capSec}s`,
         memberShotIds: [...board.memberShotIds],
         staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
       });
@@ -1037,20 +1508,37 @@ function buildGraph(input: {
           staged: stagedBoards || stagedShotIds.has(member.shotId),
         });
       }
-      const rendered = board.memberShotIds.some((shotId: string) => {
-        if (newShotIds.has(shotId)) return false;
+      // Rendered means the whole board is: every member holds an accepted clip, and they are
+      // segments of one pass (a lone shot render or a leftover from an older boundary covers a
+      // member, not the board).
+      const clips = board.memberShotIds.map((shotId: string) => {
+        if (newShotIds.has(shotId)) return null;
         const accepted = acceptedTakeId(production, shotId);
-        return accepted !== null && production.takes.find((take) => take.id === accepted)?.kind === "clip";
+        const take = accepted === null ? undefined : production.takes.find((candidate) => candidate.id === accepted);
+        return take?.kind === "clip" ? take : null;
       });
+      const passIds = new Set(clips.map((take) => take?.segment?.passTakeId ?? null));
+      const pass = passIds.size === 1 && clips.length > 1 ? production.takes.find((take) => take.id === [...passIds][0]) : undefined;
+      const rendered = clips.every((take) => take !== null)
+        && (clips.length === 1
+          || (pass !== undefined
+            && pass.coversShots.length === board.memberShotIds.length
+            && pass.coversShots.every((shotId, index) => shotId === board.memberShotIds[index])));
       const clipPoint = at(clipId, compact ? 280 : 960, compact ? point.y + 102 : point.y + 6);
+      // The first member frame stands for the clip, the way the prototype's reel opens on it.
+      const frame = board.memberShotIds.map((shotId) => shotFrame.get(shotId)).find((url) => url !== undefined);
       nodes.push({
         id: clipId,
         kind: "clip",
         x: clipPoint.x,
         y: clipPoint.y,
         name: `Clip ${board.letter}`,
-        meta: rendered ? "rendered" : "not rendered",
+        meta: `${rendered ? "rendered" : "not rendered"} · ${seconds}`,
+        duration: seconds,
+        rendered,
+        memberShotIds: [...board.memberShotIds],
         staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),
+        ...(frame === undefined ? {} : { thumb: frame }),
       });
       edges.push({
         id: `e:${boardId}:${clipId}`,

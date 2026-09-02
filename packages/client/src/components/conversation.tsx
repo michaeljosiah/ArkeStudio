@@ -31,8 +31,8 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { Working } from "./working.js";
-import { Badge, Button, cx } from "./ui.js";
-import { More } from "./icons.js";
+import { Badge, Button, IconButton, cx } from "./ui.js";
+import { More, Pin } from "./icons.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -58,6 +58,7 @@ export function ConversationTranscript({
   onUndoBible,
   frameRuns = [],
   onSelectShot,
+  shotLabel,
   empty,
 }: {
   workspace: WorldChatWorkspace | null;
@@ -71,6 +72,8 @@ export function ConversationTranscript({
   onUndoBible?: (fromVersion: number) => void;
   frameRuns?: readonly FrameRunState[];
   onSelectShot?: (shotId: string) => void;
+  /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
+  shotLabel?: (shotId: string) => string;
   /** What stands in for the transcript before anything has been said. */
   empty?: React.ReactNode;
 }) {
@@ -121,23 +124,29 @@ export function ConversationTranscript({
             </div>
           )}
           {m.benchOutcome && (
-            <div className="fy-chat__benchreport" aria-label="Filed production takes">
+            /*
+             * The same card as a frame run's report: a filed take is one more thing that came
+             * back, and the shot is the whole of what a person needs to find it — the id under
+             * the number only ever said which record, which nobody reads a transcript for.
+             */
+            <div className="fy-chat__runreport" aria-label="Filed production takes">
               {m.benchOutcome.rows.map((row) => (
-                <button
-                  key={row.shotId}
-                  type="button"
-                  onClick={() => {
-                    if (worldId === undefined) return;
-                    void navigate(
-                      `/w/${worldId}/p/${m.benchOutcome!.productionId}/scenes/${m.benchOutcome!.sceneId}?shot=${row.shotId}`,
-                    );
-                  }}
-                >
-                  <span>Shot {row.shotNumber}</span>
-                  <span className="fy-mono">
-                    {row.artifactId === undefined ? row.productionTakeId : row.artifactId}
-                  </span>
-                </button>
+                <div key={row.shotId} className="fy-chat__runreport-row" data-kind="filed" data-state="complete">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (worldId === undefined) return;
+                      void navigate(
+                        `/w/${worldId}/p/${m.benchOutcome!.productionId}/scenes/${m.benchOutcome!.sceneId}?shot=${row.shotId}`,
+                      );
+                    }}
+                  >
+                    <span className="fy-chat__runreport-dot" aria-hidden="true" />
+                    <span className="fy-chat__runreport-key">shot {row.shotNumber}</span>
+                    {/* A filed still carries its artifact; a clip has only the take behind it. */}
+                    <span>{row.artifactId === undefined ? "clip filed" : "frame filed"}</span>
+                  </button>
+                </div>
               ))}
             </div>
           )}
@@ -153,6 +162,7 @@ export function ConversationTranscript({
               sceneId={m.frameRunOutcome.sceneId}
               navigate={navigate}
               onSelectShot={onSelectShot}
+              {...(shotLabel === undefined ? {} : { shotLabel })}
             />
           )}
         </div>
@@ -183,6 +193,8 @@ export function ConversationTranscript({
 }
 
 const REPORT_FAILURE_STATUSES = new Set(["failed", "missing", "needs-reconciliation"]);
+/** What actually came back: a frame filed by the run, or one reconciled from a job it lost sight of. */
+const REPORT_RETURNED_STATUSES = new Set(["succeeded", "reconciled"]);
 
 function FrameRunReport({
   run,
@@ -191,6 +203,7 @@ function FrameRunReport({
   sceneId,
   navigate,
   onSelectShot,
+  shotLabel,
 }: {
   run: FrameRunState | null;
   worldId: string | undefined;
@@ -198,6 +211,7 @@ function FrameRunReport({
   sceneId: string;
   navigate: NavigateFunction;
   onSelectShot?: (shotId: string) => void;
+  shotLabel?: (shotId: string) => string;
 }) {
   if (run === null) {
     return <div className="fy-chat__runreport" data-state="loading">Loading run report…</div>;
@@ -209,48 +223,63 @@ function FrameRunReport({
       void navigate(`/w/${worldId}/p/${productionId}/scenes/${sceneId}?shot=${shotId}`);
     }
   };
+  /*
+   * Every step first, then every failure (design 3195-3201). A failure wedged under its own board
+   * broke the count the eye was keeping down the card, and a run is read as what came back
+   * before what did not.
+   */
+  const stepRows: React.ReactNode[] = [];
+  const failureRows: React.ReactNode[] = [];
+  run.run.steps.forEach((step, index) => {
+    const state = run.steps[index];
+    if (state === undefined) return;
+    const failed = REPORT_FAILURE_STATUSES.has(state.status);
+    const pending = ["not-enqueued", "queued", "submitting", "running"].includes(state.status);
+    // What came back, not what was asked for: a board with one dark member reads "2 frames"
+    // beside that member's failure row rather than claiming all three.
+    const kept = state.shots.filter((shot) => REPORT_RETURNED_STATUSES.has(shot.status)).length;
+    const board = run.run.mode === "board" && step.dispatch.target.kind === "board-sheet";
+    const value = pending
+      ? `running${step.grain === "initial" ? "" : " · retry"}`
+      : `${kept} frame${kept === 1 ? "" : "s"}${board && kept > 1 ? " · one pass" : ""}${step.grain === "initial" ? "" : " · retry"}`;
+    stepRows.push(
+      <div key={`step:${index}`} className="fy-chat__runreport-row" data-kind="step" data-state={failed ? "failed" : pending ? "pending" : "complete"}>
+        <button type="button" onClick={() => selectShot(step.updateShotIds[0]!)}>
+          <span className="fy-chat__runreport-dot" aria-hidden="true" />
+          <span className="fy-chat__runreport-key">{step.label.toLowerCase()}</span>
+          <span>{value}</span>
+        </button>
+      </div>,
+    );
+    for (const shot of state.shots) {
+      const historicalFailure = shot.status === "reconciled" && shot.failureClass !== null;
+      if (!historicalFailure && !REPORT_FAILURE_STATUSES.has(shot.status)) continue;
+      const retried = shot.status === "reconciled";
+      const retry = retried || run.run.cancelled
+        ? null
+        : state.canRetry
+          ? () => frameRunCommand({ kind: "frame-run-retry-step", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index })
+          : shot.canRetryCell
+            ? () => frameRunCommand({ kind: "frame-run-retry-cell", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index, shotId: shot.shotId })
+            : null;
+      const words = `${frameRunFailureCopy(shot)}${retried ? " · retried" : ""}`;
+      failureRows.push(
+        <div key={`failure:${index}:${shot.shotId}`} className="fy-chat__runreport-row" data-kind="failure" data-state={retried ? "complete" : "failed"}>
+          <button type="button" onClick={() => selectShot(shot.shotId)}>
+            <span className="fy-chat__runreport-dot" aria-hidden="true" />
+            {/* The shot, so two dark members of one board stay apart; the step is all the run state can name on its own. */}
+            <span className="fy-chat__runreport-key">{shotLabel?.(shot.shotId) ?? step.label.toLowerCase()}</span>
+            <span>{words}</span>
+          </button>
+          {retry === null ? null : <button type="button" className="fy-chat__runreport-retry" onClick={retry}>Retry</button>}
+        </div>,
+      );
+    }
+  });
   return (
     <div className="fy-chat__runreport" aria-label="Frame run report">
-      {run.run.steps.flatMap((step, index) => {
-        const state = run.steps[index];
-        if (state === undefined) return [];
-        const failed = REPORT_FAILURE_STATUSES.has(state.status);
-        const pending = ["not-enqueued", "queued", "submitting", "running"].includes(state.status);
-        const stepCopy = run.run.mode === "board" && step.dispatch.target.kind === "board-sheet"
-          ? `${step.label} · ${step.updateShotIds.length} frame${step.updateShotIds.length === 1 ? "" : "s"} · one pass`
-          : `${step.label} · one frame${step.grain === "initial" ? "" : " · retry"}`;
-        const rows: React.ReactNode[] = [
-          <div key={`step:${index}`} className="fy-chat__runreport-row" data-kind="step" data-state={failed ? "failed" : pending ? "pending" : "complete"}>
-            <button type="button" onClick={() => selectShot(step.updateShotIds[0]!)}>
-              <span className="fy-chat__runreport-dot" aria-hidden="true" />
-              <span>{stepCopy}</span>
-            </button>
-          </div>,
-        ];
-        for (const shot of state.shots) {
-          const historicalFailure = shot.status === "reconciled" && shot.failureClass !== null;
-          if (!historicalFailure && !REPORT_FAILURE_STATUSES.has(shot.status)) continue;
-          const retried = shot.status === "reconciled";
-          const retry = retried || run.run.cancelled
-            ? null
-            : state.canRetry
-              ? () => frameRunCommand({ kind: "frame-run-retry-step", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index })
-              : shot.canRetryCell
-                ? () => frameRunCommand({ kind: "frame-run-retry-cell", worldId: run.worldId, productionId, runId: run.run.id, stepIndex: index, shotId: shot.shotId })
-                : null;
-          const words = `${frameRunFailureCopy(shot)}${retried ? " · retried" : ""}`;
-          rows.push(
-            <div key={`failure:${index}:${shot.shotId}`} className="fy-chat__runreport-row" data-kind="failure" data-state={retried ? "complete" : "failed"}>
-              <button type="button" onClick={() => selectShot(shot.shotId)}>
-                <span className="fy-chat__runreport-dot" aria-hidden="true" />
-                <span>{words}</span>
-              </button>
-              {retry === null ? null : <button type="button" className="fy-chat__runreport-retry" onClick={retry}>Retry</button>}
-            </div>,
-          );
-        }
-        return rows;
-      })}
+      {stepRows}
+      {failureRows}
     </div>
   );
 }
@@ -390,7 +419,25 @@ export function ProductionConversation({
    * the composer. There is no room for a rail beside a 360px column, and no need for one: the
    * change a proposal makes is drawn on the page beside it.
    */
-  dock?: { title: string; subject: string; thumbnail?: { src: string; alt: string }; conversationFirst?: boolean };
+  dock?: {
+    title: string;
+    subject: string;
+    thumbnail?: { src: string; alt: string };
+    conversationFirst?: boolean;
+    /** Puts the assistant away. The head draws its pin only when there is somewhere to go. */
+    onPutAway?: () => void;
+    /** Flips the subject between the shot and the whole scene; the title is a button when set. */
+    onToggleSubject?: () => void;
+    /** Quick asks above the composer, each said as it stands. */
+    prompts?: readonly string[];
+    /**
+     * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
+     * so the shot the dock names has to be in the words themselves or the studio never hears it.
+     */
+    subjectPrefix?: string;
+    /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
+    shotLabel?: (shotId: string) => string;
+  };
   onSelectShot?: (shotId: string) => void;
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
   subject?: WorldChatSubject;
@@ -532,10 +579,12 @@ export function ProductionConversation({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openWith, worldId, productionId, conversationId]);
 
-  const submit = () => {
-    const text = message.trim();
+  /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
+  const say = (text: string) => {
     if (!text || !worldId || !productionId) return;
-    setMessage("");
+    // A second line said while the first is still opening its thread would open a second one,
+    // and one said over a running turn starts a second turn the first can no longer stop.
+    if (opening || running) return;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
@@ -548,6 +597,15 @@ export function ProductionConversation({
       return;
     }
     sendWorldChat(worldId, conversationId, text, [], subject);
+  };
+  const submit = () => {
+    const text = message.trim();
+    if (!text || !worldId || !productionId) return;
+    // The field keeps its words while a thread is still opening; say() would drop them.
+    if (opening) return;
+    setMessage("");
+    const prefix = dock?.subjectPrefix;
+    say(prefix === undefined ? text : `${prefix} ${text}`);
   };
 
   const points = loaded?.points ?? [];
@@ -578,6 +636,7 @@ export function ProductionConversation({
       canRetry={!wrapping}
       frameRuns={state?.frameRuns ?? []}
       onSelectShot={onSelectShot}
+      {...(dock?.shotLabel === undefined ? {} : { shotLabel: dock.shotLabel })}
       {...(worldId && conversationId ? { onStop: () => cancelWorldChat(worldId, conversationId) } : {})}
       {...(worldId && conversationId
         ? { onRetry: (turnId: string) => retryWorldChatTurn(worldId, conversationId, turnId) }
@@ -611,11 +670,27 @@ export function ProductionConversation({
         data-conversation-first={dock.conversationFirst ? "true" : undefined}
       >
         <div className="fy-arke__head">
-          {dock.thumbnail === undefined ? null : <img className="fy-arke__thumb" src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
-          <span className="fy-arke__who">
-            <span className="fy-arke__name">{dock.title}</span>
-            {dock.conversationFirst ? null : <span className="fy-mono">{dock.subject}</span>}
+          {/* The slot stays whether or not there is a frame to show in it, so the title does
+              not shift left the moment the subject is the scene, a board, or a frameless shot. */}
+          <span className="fy-arke__thumb">
+            {dock.thumbnail === undefined ? null : <img src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
           </span>
+          {dock.onToggleSubject === undefined ? (
+            <span className="fy-arke__who">
+              <span className="fy-arke__name">{dock.title}</span>
+              <span className="fy-mono">{dock.subject}</span>
+            </span>
+          ) : (
+            <button type="button" className="fy-arke__who" title="Switch between the shot and the whole scene" onClick={dock.onToggleSubject}>
+              <span className="fy-arke__name">{dock.title}</span>
+              <span className="fy-mono">{dock.subject}</span>
+            </button>
+          )}
+          {dock.onPutAway === undefined ? null : (
+            <IconButton className="fy-arke__pin" label="Unpin the assistant" onClick={dock.onPutAway}>
+              <Pin size={13} />
+            </IconButton>
+          )}
         </div>
         <div className="fy-arke__log" aria-live="polite">
           {transcript}
@@ -666,18 +741,27 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
+          {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
+            <div className="fy-arke__prompts">
+              {dock.prompts.map((prompt) => (
+                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running} onClick={() => say(prompt)}>
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
           <Composer
             value={message}
             onChange={setMessage}
             onSubmit={submit}
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
-            busy={running}
-            busyLabel="reading the world…"
+            busy={running || opening !== null}
+            busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
-          {dock.conversationFirst ? null : <div className="fy-mono">talking changes nothing · a change waits for your yes</div>}
+          <div className="fy-mono">talking changes nothing · a change waits for your yes</div>
         </div>
       </aside>
     );

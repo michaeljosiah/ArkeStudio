@@ -615,6 +615,34 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       }),
       { ok: false, reason: "Default Duration Video does not offer a fixed duration for this board." },
     );
+
+    // A shot's clip is filed as covering the shot's length, so it is held to the same rule.
+    const shotPrepared = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: { ...MANIFEST, models: [IMAGE_MODEL, model] },
+      sources: sourceReader,
+    });
+    assert.ok(shotPrepared.ok);
+    if (!shotPrepared.ok) return;
+    const shotSession = {
+      ...session,
+      id: newId("sess"),
+      ...shotPrepared.prefill,
+      tokenRegistry: shotPrepared.prefill.references,
+      subjectTokens: shotPrepared.prefill.references.map((reference) => reference.token),
+    } as BenchSession;
+    assert.deepEqual(
+      planBenchDispatch(shotSession, world, { ...MANIFEST, models: [IMAGE_MODEL, model] }, {
+        worldId: store.worldId,
+        requestId: "default-duration-shot",
+        at: CLOCK(),
+      }),
+      { ok: false, reason: "Default Duration Video does not offer a fixed duration for this shot." },
+    );
   });
 
   it("recomputes subject riding lanes for the newly chosen model", async () => {
@@ -722,6 +750,155 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       activeTokens: ["Image 3"],
       keyframeTokens: ["Image 4"],
     });
+  });
+});
+
+describe("the Stage's handoff to the bench", () => {
+  it("opens a staged shot in video mode with the playblast riding and the move written as beats", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    world.artifacts.push({
+      id: "ar_01J8G0000000000000000000A1",
+      kind: "video",
+      file: "playblast.webm",
+      hash: "sha256:0123456789abcdef",
+      origin: { by: "user" },
+      links: ["sh_12"],
+      production: "saltlight",
+      mediaInfo: { durationSec: 4, hasAudio: false },
+      created: CLOCK(),
+    });
+    shot.staging = {
+      version: 2,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0 }],
+      sets: [],
+      keys: [
+        { t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+        { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
+      ],
+      playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 2 },
+    };
+
+    const video = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    assert.equal(video.prefill.composer.mode, "video");
+    assert.equal(video.prefill.composer.params.kind, "video");
+    assert.equal(video.prefill.composer.params.durationSec, 4);
+    const playblast = video.prefill.references.find((reference) => reference.kind === "video");
+    assert.equal(playblast?.label, "Staging · Playblast v2");
+    assert.equal(playblast?.detail, "2 keys · dolly");
+    assert.equal(playblast?.durationSec, 4);
+    assert.equal(playblast?.ride, "when-supported");
+    assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A1", hash: "sha256:0123456789abcdef" });
+    assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
+    // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
+    assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
+    // No route maps a video reference yet, so the tile shows and says it is not riding.
+    assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+
+    // The ordinary handoff is a still, and a still has no move to describe.
+    const image = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(image.ok);
+    if (!image.ok) return;
+    assert.equal(image.prefill.composer.mode, "image");
+    assert.equal(image.prefill.references.some((reference) => reference.kind === "video"), false);
+    assert.doesNotMatch(image.prefill.composer.brief, /Camera move/);
+  });
+
+  it("dispatches a shot's clip as a board of one and files it onto the shot's clip slot", async () => {
+    const { dir, store } = await openWorld();
+    const world = store.getBundle();
+    const prepared = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(prepared.ok);
+    if (!prepared.ok) return;
+    const session = {
+      schemaVersion: 1,
+      id: newId("sess"),
+      ...prepared.prefill,
+      tokenRegistry: prepared.prefill.references,
+      subjectTokens: prepared.prefill.references.map((reference) => reference.token),
+      nextToken: { image: 2, video: 1, audio: 1 },
+      nextTake: 1,
+      takes: [],
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    } as BenchSession;
+    const plan = planBenchDispatch(session, store.getBundle(), MANIFEST, {
+      worldId: store.worldId,
+      requestId: "shot-clip-dispatch",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? "" : plan.reason);
+    if (!plan.ok) return;
+    const snapshot = plan.reserved[0]!.request;
+    assert.equal(snapshot.mode, "video");
+    assert.equal(snapshot.filing?.kind, "board", "a shot's clip files like a board of one");
+    if (snapshot.filing?.kind !== "board") return;
+    assert.deepEqual(
+      snapshot.filing.members.map((member) => [member.shotId, member.startSec, member.endSec]),
+      [["sh_12", 0, 4]],
+    );
+
+    // The same rules a board is held to: a longer clip than the shot is refused before spend.
+    const stretched = planBenchDispatch(
+      { ...session, composer: { ...session.composer, params: { kind: "video", aspect: "16:9", durationSec: 6, sound: true } } },
+      store.getBundle(),
+      MANIFEST,
+      { worldId: store.worldId, requestId: "shot-clip-long", at: CLOCK() },
+    );
+    assert.equal(stretched.ok, false);
+    if (!stretched.ok) assert.match(stretched.reason, /authored duration/);
+
+    const takeId = newId("tk") as BenchTake["id"];
+    const { session: filingSession, take } = sessionWithTake({
+      subject: session.subject,
+      takeId,
+      request: snapshot,
+      media: "take.mp4",
+      cost: { estimatedMicroUsd: 100_000, actualMicroUsd: null },
+    });
+    await mkdir(join(dir, sessionMediaDir(filingSession.id, take.id)), { recursive: true });
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), take.media!.file), "clip bytes");
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), "frame.png"), "poster bytes");
+    const filed = await fileBenchSubjectTake(store, filingSession, take);
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const parentId = snapshot.filing.productionTakeId;
+    const childId = snapshot.filing.members[0]!.takeId;
+    const parent = production.takes.find((candidate) => candidate.id === parentId)!;
+    const child = production.takes.find((candidate) => candidate.id === childId)!;
+    assert.equal(parent.kind, "clip");
+    assert.deepEqual([...parent.coversShots], ["sh_12"]);
+    assert.equal(child.kind, "clip");
+    assert.deepEqual(child.segment, { passTakeId: parent.id, inSec: 0, outSec: 4 });
+    assert.equal(production.selections["sh_12"]?.acceptedTakeId, child.id, "the shot selects its own segment, never the parent");
+    assert.deepEqual(filed.affectedShotIds, ["sh_12"]);
   });
 });
 

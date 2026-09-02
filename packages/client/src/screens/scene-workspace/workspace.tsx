@@ -6,6 +6,7 @@ import {
   legacySceneView,
   type ClientMessage,
   type ArtifactSidecar,
+  type FrameRunState,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
@@ -32,8 +33,10 @@ import { SceneFlow } from "./flow.js";
 import { StoryboardRows } from "./rows.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
 import { boardsForScene, shotHasFrame } from "./boards.js";
-import { FrameRunBar, FrameRunBoardFailures, FrameRunReview, GenerateFramesDialog } from "./frame-run.js";
+import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
+import { ShotLightbox } from "./lightbox.js";
 import { Button } from "../../components/ui.js";
+import { Pin } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { SceneStage } from "./stage.js";
@@ -71,7 +74,9 @@ export function SceneWorkspace({
   const digests = useBlockDigests(legacySceneView(scene));
   const [view, setView] = useState<"storyboard" | "flow" | "stage" | "preview">("storyboard");
   const [showBoards, setShowBoards] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
+  // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
+  // and its arrows walk the scene's shots carrying the selection with them.
+  const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
   const [generateTarget, setGenerateTarget] = useState<{ shotId?: string } | null>(null);
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
@@ -91,6 +96,9 @@ export function SceneWorkspace({
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useState(true);
+  // The dock title toggles between the shot and the whole scene; this remembers which shot to
+  // come back to, since the scene subject carries none.
+  const lastShotSubject = useRef<string | null>(null);
   const linkedShotId = searchParams.get("shot");
   const [subject, setSubject] = useState<WorkspaceSubject>(() =>
     linkedShotId !== null && orderedShots(scene).some((shot) => shot.id === linkedShotId)
@@ -159,6 +167,17 @@ export function SceneWorkspace({
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
   const focused = focus === null ? undefined : workingShots.find((shot) => shot.id === focus);
+  if (focus !== null) lastShotSubject.current = focus;
+  const shotLabel = (shotId: string) => {
+    const shot = workingShots.find((candidate) => candidate.id === shotId);
+    return shot === undefined ? shotId : `shot ${shot.number}`;
+  };
+  const talkToArke = () => {
+    setDock(true);
+    requestAnimationFrame(() => {
+      (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
+    });
+  };
   const sceneRuns = [...(state?.frameRuns ?? [])]
     .filter((candidate) =>
       candidate.worldId === world.meta.worldId &&
@@ -166,7 +185,26 @@ export function SceneWorkspace({
       candidate.run.sceneId === scene.id)
     .sort((left, right) => right.run.createdAt.localeCompare(left.run.createdAt));
   const visibleSceneRuns = sceneRuns.filter((candidate) => candidate.run.dismissed !== true);
-  const frameRun = visibleSceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused") ?? visibleSceneRuns[0] ?? null;
+  // Cancel returns the row to idle at once, so a cancelled run never becomes the bar. The
+  // coordinator keeps the record until it is dismissed, and that dismiss is sent below — once
+  // per run, and only once it was actually delivered.
+  const frameRun = visibleSceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused")
+    ?? visibleSceneRuns.find((candidate) => candidate.status === "completed")
+    ?? null;
+  const reviewShotId = frameRun === null ? null : firstProducedShot(frameRun, artifacts);
+  const dismissedCancelled = useRef(new Set<string>());
+  useEffect(() => {
+    for (const candidate of visibleSceneRuns) {
+      if (candidate.status !== "cancelled" || dismissedCancelled.current.has(candidate.run.id)) continue;
+      const sent = frameRunCommand({
+        kind: "frame-run-dismiss",
+        worldId: world.meta.worldId,
+        productionId: production.meta.id,
+        runId: candidate.run.id,
+      });
+      if (sent) dismissedCancelled.current.add(candidate.run.id);
+    }
+  });
   const boardsVisible = showBoards || frameRun?.run.mode === "board";
   const selectedBoard = boardSheetKey === null || !boardPack.ok
     ? null
@@ -294,13 +332,17 @@ export function SceneWorkspace({
     pendingPlan.current = null;
     setPlanError("Connection lost - try again.");
   }, [connection]);
-  const openGenerator = (subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"]) => {
+  const openGenerator = (
+    subject: Extract<ClientMessage, { kind: "bench-open-subject" }>["subject"],
+    mode?: "image" | "video",
+  ) => {
     if (pendingGenerator.current !== null) return;
     const requestId = sendBenchOpenSubject({
       worldId: world.meta.worldId,
       productionId: production.meta.id,
       sceneId: scene.id,
       subject,
+      ...(mode === undefined ? {} : { mode }),
     });
     if (requestId !== null) {
       pendingGenerator.current = { requestId, sceneKey };
@@ -309,6 +351,12 @@ export function SceneWorkspace({
     } else {
       setGeneratorError("Not connected - try again.");
     }
+  };
+  // The Stage is reached from a row's menu and a Flow staging node as well as its tab: one
+  // gesture selects the shot and changes the view, so the tab opens on the shot that asked.
+  const openStage = (shotId: string) => {
+    setSubject({ kind: "shot", shotId: shotId as never });
+    setView("stage");
   };
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
@@ -349,10 +397,10 @@ export function SceneWorkspace({
                 Scene {scene.number} · {scene.title}
               </h1>
               <div className="fy-sw__actions">
-                <Button variant="outline" onClick={() => setSceneReviewOpen((open) => !open)}>Review scene</Button>
+                <Button variant="outline" size="sm" onClick={() => setSceneReviewOpen((open) => !open)}>Review scene</Button>
                 <Button
                   variant="primary"
-                  disabled={frameRun?.status === "active" || frameRun?.status === "paused"}
+                  size="sm"
                   onClick={(event) => {
                     generateReturnFocus.current = event.currentTarget;
                     setGenerateTarget({});
@@ -366,7 +414,7 @@ export function SceneWorkspace({
               scene={legacySceneView(scene)}
               onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
             />
-            <div className="fy-sw__context" aria-label="Scene context">
+            <div className="fy-sw__context" aria-label="Scene context" title="Every shot inherits these unless it overrides them">
               {locationName === null ? null : <span>{locationName}</span>}
               {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
               {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
@@ -399,37 +447,39 @@ export function SceneWorkspace({
                 </button>
               ))}
             </div>
-            <span className="fy-sw__coverage">
-              {shots.length - framed} of {shots.length} without a frame
-            </span>
-            <button
-              type="button"
-              className="fy-sw__boards-toggle"
-              aria-pressed={showBoards}
-              onClick={() => setShowBoards((shown) => !shown)}
-            >
-              <span className="fy-sw__toggle-track" aria-hidden="true"><span /></span>
-              Show boards
-            </button>
-            <button
-              type="button"
-              className="fy-sw__put"
-              aria-pressed={!dock}
-              onClick={() => setDock((on) => !on)}
-            >
-              {dock ? "Hide Arke" : "Show Arke"}
-            </button>
-          </div>
-          {frameRun === null ? null : (
-            <div className="fy-sw__runstrip">
+            <span className="fy-sw__spacer" />
+            {/*
+              A run owns the row (R-4, R-17): the bar stands where the coverage line was, and
+              the boards toggle waits until the run has finished.
+            */}
+            {frameRun !== null ? (
               <FrameRunBar
                 run={frameRun}
                 worldId={world.meta.worldId}
                 productionId={production.meta.id}
-                onReview={() => setReviewOpen(true)}
+                // Review opens the first frame THIS run put down, in the lightbox, to arrow through
+                // (R-19): a frame is the run's when one of its own jobs produced the artifact, so a
+                // shot whose retry failed over an older frame is never shown as new output, and a
+                // run that put down nothing has nothing to review.
+                {...(reviewShotId === null ? {} : { onReview: () => setLightboxShotId(reviewShotId) })}
               />
-            </div>
-          )}
+            ) : shots.length === 0 ? null : (
+              <span className="fy-sw__coverage">
+                {shots.length - framed === 0 ? "every shot has a frame" : `${shots.length - framed} of ${shots.length} without a frame`}
+              </span>
+            )}
+            {frameRun === null || frameRun.status === "completed" ? (
+              <button
+                type="button"
+                className="fy-sw__boards-toggle"
+                aria-pressed={showBoards}
+                title="Group shots into boards that fit the clip limit"
+                onClick={() => setShowBoards((shown) => !shown)}
+              >
+                {showBoards ? "Boards on" : "Show boards"}
+              </button>
+            ) : null}
+          </div>
           {frameRun === null ? null : <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />}
 
           {view === "storyboard" ? (
@@ -465,6 +515,9 @@ export function SceneWorkspace({
               }}
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onStageShot={openStage}
+              onPreviewShot={setLightboxShotId}
+              onTalkToArke={talkToArke}
               onPlanVideo={planVideo}
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
             />
@@ -476,6 +529,7 @@ export function SceneWorkspace({
               artifacts={artifacts}
               slug={world.meta.slug}
               boardPack={boardPack}
+              capSec={capSec}
               stagedShotIds={stagedShotIds}
               newShotIds={newShotIds}
               stagedBoards={stagedBoards}
@@ -483,19 +537,31 @@ export function SceneWorkspace({
               onCommand={write}
               generatorPending={generatorPending}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
-              onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
-              onTalkToArke={() => {
-                setDock(true);
-                requestAnimationFrame(() => {
-                  (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
-                });
+              onOpenStage={openStage}
+              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onViewBoardSheet={(memberShotIds, trigger) => {
+                setBoardSheetTrigger(trigger);
+                setBoardSheetKey(JSON.stringify(memberShotIds));
               }}
+              onShowBoards={() => {
+                setShowBoards(true);
+                setView("storyboard");
+              }}
+              onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
+              onTalkToArke={talkToArke}
             />
           ) : view === "stage" ? (
             <SceneStage
               scene={workingScene}
-              sheets={world.sheets}
+              production={production}
+              world={world}
               aspect={aspect}
+              sceneFile={sceneFile}
+              locked={staged !== undefined || sceneFile === undefined || commandPending}
+              generatorPending={generatorPending}
+              refusalVersion={refusalVersion}
+              onCommand={write}
+              onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
             />
           ) : (
             <ScenePreview
@@ -506,6 +572,8 @@ export function SceneWorkspace({
               boards={acceptedBoardPack.ok ? acceptedBoardPack.boards : []}
               worldSlug={world.meta.slug}
               aspect={aspect}
+              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
             />
           )}
           <PlansPanel
@@ -537,10 +605,23 @@ export function SceneWorkspace({
               ...(thumbnailSrc === null || focused === undefined
                 ? {}
                 : { thumbnail: { src: thumbnailSrc, alt: `Frame for shot ${focused.number}` } }),
+              onPutAway: () => setDock(false),
+              // The title flips between the shot in hand and the whole scene (§10 of the notes).
+              onToggleSubject: () => {
+                if (focused !== undefined) setSubject({ kind: "scene" });
+                else if (lastShotSubject.current !== null && workingShots.some((shot) => shot.id === lastShotSubject.current)) {
+                  setSubject({ kind: "shot", shotId: lastShotSubject.current as never });
+                }
+              },
+              prompts: focused === undefined
+                ? ["What is missing from this scene?", "Which shots need a frame?"]
+                : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
+              shotLabel,
+              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
-            placeholder="Ask about this scene · @ to reference"
+            placeholder={`Ask about ${focused === undefined ? `scene ${scene.number}` : `shot ${focused.number}`} · @ to reference`}
             onSelectShot={(shotId) => setSubject({ kind: "shot", shotId })}
             {...(staged === undefined
               ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }
@@ -564,7 +645,14 @@ export function SceneWorkspace({
                   ),
                 })}
           />
-        ) : null}
+        ) : (
+          // Put away, the assistant leaves a slim rail: a way back, and the word that it is here.
+          <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>
+            <span className="fy-sw__rail-dot" aria-hidden="true" />
+            <span className="fy-sw__rail-label">Ask Arke</span>
+            <span className="fy-sw__rail-pin"><Pin size={13} /></span>
+          </button>
+        )}
         <GenerateFramesDialog
           open={generateTarget !== null}
           state={state}
@@ -577,16 +665,21 @@ export function SceneWorkspace({
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
         />
-        {frameRun === null ? null : (
-          <FrameRunReview
-            run={frameRun}
-            scene={scene}
-            artifacts={artifacts}
-            worldSlug={world.meta.slug}
-            open={reviewOpen}
-            onClose={() => setReviewOpen(false)}
-          />
-        )}
+        <ShotLightbox
+          scene={scene}
+          production={production}
+          artifacts={artifacts}
+          worldSlug={world.meta.slug}
+          aspect={aspect}
+          shotId={lightboxShotId}
+          onClose={() => setLightboxShotId(null)}
+          onSelectShot={(shotId) => {
+            setLightboxShotId(shotId);
+            setSubject({ kind: "shot", shotId: shotId as never });
+          }}
+          onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+          onOpenInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+        />
         <BoardSheet
           board={selectedBoard}
           scene={workingScene}
@@ -594,6 +687,7 @@ export function SceneWorkspace({
           artifacts={artifacts}
           runs={sceneRuns}
           aspect={aspect}
+          capSec={capSec}
           worldId={world.meta.worldId}
           worldSlug={world.meta.slug}
           returnFocus={boardSheetTrigger}
@@ -601,5 +695,20 @@ export function SceneWorkspace({
         />
       </div>
     </SelectionProvider>
+  );
+}
+
+/** The first shot, in run order, that one of the run's OWN jobs put a frame on — or null when it put down none. */
+function firstProducedShot(run: FrameRunState, artifacts: readonly ArtifactSidecar[]): string | null {
+  const jobs = new Set(run.run.steps.flatMap((step) => (step.jobId === null ? [] : [`frame-run:${step.jobId}`])));
+  return (
+    run.run.steps
+      .flatMap((step) => step.updateShotIds)
+      .find((shotId) =>
+        artifacts.some(
+          (artifact) =>
+            artifact.kind === "image" && artifact.origin.by === "system" && jobs.has(artifact.origin.producedBy) && artifact.links.includes(shotId),
+        ),
+      ) ?? null
   );
 }

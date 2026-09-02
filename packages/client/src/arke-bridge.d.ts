@@ -68,7 +68,21 @@ export type AttachTarget =
   /** `production` is SPEC-020 ownership; `null` is the world stated out loud. Mirrors preload.ts. */
   | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
-  | { kind: "world-chat-attach"; worldId: string; conversationId: string };
+  | { kind: "world-chat-attach"; worldId: string; conversationId: string }
+  /** A playblast the Stage rendered, filed onto its shot against the scene version it saw. */
+  | {
+      kind: "stage-playblast";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      shotId: string;
+      stagingVersion: number;
+      durationSec: number;
+      aspect: string;
+      lens?: string;
+    };
 
 declare global {
   interface Window {

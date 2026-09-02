@@ -184,6 +184,19 @@ describe("the fold", () => {
     assert.equal(session.title, "Tide Clock · Episode 1 · Low Water · Scene 4 · The Causeway · Shot 15");
     assert.equal(session.tokenRegistry[0]!.sheetVersion, 3);
     assert.deepEqual(session.composer.activeTokens, ["Image 1"]);
+    // A shot opens in image mode and may switch to video (the Stage's Render with this); no
+    // other mode has a tab for it, so no other mode can be persisted on it.
+    const video = BenchSessionSchema.safeParse({
+      ...session,
+      composer: { ...session.composer, mode: "video", model: "test-video", params: { kind: "video", aspect: "16:9", durationSec: 4.5, sound: true } },
+    });
+    assert.equal(video.success, true, "video is the shot's other mode");
+    const voice = BenchSessionSchema.safeParse({
+      ...session,
+      composer: { ...session.composer, mode: "voice", params: { kind: "voice", count: 1 } },
+    });
+    assert.equal(voice.success, false);
+    assert.ok(!voice.success && voice.error.issues.some((issue) => issue.message === "a shot subject uses image or video mode"));
     assert.deepEqual(benchSessionSummary(session).subject, subject);
 
     const removed = foldBenchSession({ ...META, subject }, [

@@ -42,6 +42,7 @@ import {
   sendBenchKeep,
   sendBenchNewSession,
   sendBenchOpen,
+  sendBenchOpenSubject,
   sendBenchPresetDelete,
   sendBenchPresetSave,
   sendBenchRebuildSubject,
@@ -75,6 +76,7 @@ import {
   Home,
   ImageMark,
   Message,
+  PlaySolid,
   Plus,
   Scroll,
   Speaker,
@@ -117,6 +119,11 @@ import {
  * Layout is the master's: a fixed workspace with its own breadcrumb chrome — a 44px
  * destination rail, a 380px composer, the wall, a 116px take strip — never the
  * hero-and-scroll shape the world pages use.
+ *
+ * Under a production subject (SPEC-036 R-23..R-25) the same screen wears the scene
+ * workspace's generation-session dress: no rail (the chrome's back is the way out), a
+ * 392px column, and a 152px rail of thumbnails. Every one of those differences is keyed on
+ * `session.subject`, because R-23 binds the world bench to change by nothing.
  */
 export function BenchScreen() {
   const { worldId, sessionId } = useParams();
@@ -142,6 +149,51 @@ export function BenchScreen() {
     }
   }, [worldId, sessionId, bench, navigate]);
 
+  /**
+   * A subject session's other mode is a different session (SPEC-036 R-23): the Image / Video
+   * tabs ask the coordinator to prepare the shot in that mode and move there when it answers.
+   * The wait lives here rather than in the workspace because the coordinator broadcasts the
+   * prepared session BEFORE its correlated answer — the moment it does, the address below no
+   * longer names the session in the store, the workspace that asked is unmounted, and a
+   * listener kept there would never hear the id it was waiting for. This component stays.
+   */
+  const connection = useStore().connection;
+  const pendingSubjectOpen = useRef<string | null>(null);
+  const [subjectOpening, setSubjectOpening] = useState(false);
+  const [subjectOpenNote, setSubjectOpenNote] = useState<string | null>(null);
+  useEffect(
+    () =>
+      subscribeBenchSubjectOpened((answer) => {
+        if (answer.worldId !== worldId || answer.requestId !== pendingSubjectOpen.current) return;
+        pendingSubjectOpen.current = null;
+        setSubjectOpening(false);
+        if (answer.sessionId === null) {
+          setSubjectOpenNote(answer.reason ?? "That mode could not be opened.");
+          return;
+        }
+        setSubjectOpenNote(null);
+        void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+      }),
+    [worldId, navigate],
+  );
+  useEffect(() => {
+    if (connection === "open" || pendingSubjectOpen.current === null) return;
+    pendingSubjectOpen.current = null;
+    setSubjectOpening(false);
+    setSubjectOpenNote("Connection lost - try again.");
+  }, [connection]);
+  const openSubject = (input: Parameters<typeof sendBenchOpenSubject>[0]) => {
+    if (pendingSubjectOpen.current !== null) return;
+    const requestId = sendBenchOpenSubject(input);
+    if (requestId === null) {
+      setSubjectOpenNote("Not connected - try again.");
+      return;
+    }
+    pendingSubjectOpen.current = requestId;
+    setSubjectOpening(true);
+    setSubjectOpenNote(null);
+  };
+
   const session =
     bench !== null &&
     bench.worldId === worldId &&
@@ -161,6 +213,7 @@ export function BenchScreen() {
       worldId={worldId}
       session={session}
       manifest={state?.app.manifest ?? null}
+      subjectOpen={{ open: openSubject, pending: subjectOpening, note: subjectOpenNote }}
     />
   );
 }
@@ -181,10 +234,17 @@ function BenchWorkspace({
   worldId,
   session,
   manifest,
+  subjectOpen,
 }: {
   worldId: string;
   session: BenchSession;
   manifest: NonNullable<ReturnType<typeof useClientState>>["app"]["manifest"] | null;
+  /** The screen's own wait for a subject opened in another mode — see BenchScreen for why it is not here. */
+  subjectOpen: {
+    open: (input: Parameters<typeof sendBenchOpenSubject>[0]) => void;
+    pending: boolean;
+    note: string | null;
+  };
 }) {
   const world = useWorld();
   const state = useClientState();
@@ -237,6 +297,30 @@ function BenchWorkspace({
     pendingRebuild.current = null;
     setRebuildNote("Connection lost - try again.");
   }, [connection]);
+  /**
+   * The Image / Video tabs of a subject session (R-23; design 2616). The off tab is not a
+   * mode change on this session: the shot in the other mode is a different prefill — its
+   * video words carry the staging beats and the playblast rides — so the tab asks the
+   * coordinator for that session, the way the Stage's "Render with this" does, and the
+   * screen moves there when it answers. A board is video by definition and has no other tab.
+   */
+  const switchSubjectMode = (mode: "image" | "video") => {
+    if (subject?.kind !== "shot" || mode === draft.mode) return;
+    // Words typed in the last third of a second are still waiting on the debounce; they go now,
+    // or the tab drops them on the floor.
+    if (pushTimer.current) {
+      clearTimeout(pushTimer.current);
+      pushTimer.current = null;
+      sendBenchCompose(worldId, session.id, draft);
+    }
+    subjectOpen.open({
+      worldId,
+      productionId: subject.productionId,
+      sceneId: subject.sceneId,
+      subject: { kind: "shot", shotId: subject.shotId },
+      mode,
+    });
+  };
   useEffect(() => {
     if (rebuiltSession !== session.id) return;
     // The coordinator broadcasts the rebuilt workspace before its correlated answer. Applying
@@ -261,7 +345,9 @@ function BenchWorkspace({
     if (!aspectSupport(candidate, subject.aspect).ok) {
       return `does not make ${subject.aspect}`;
     }
-    if (subject.kind === "board") {
+    // A board, and a shot in video mode, are filed as covering an authored length: a model that
+    // cannot make that length is a fault here, not a refusal after the button.
+    if (subject.kind === "board" || (subject.kind === "shot" && draft.mode === "video")) {
       const duration = dispatchDuration(candidate, subject.durationSec, {
         withReferences:
           session.composer.activeTokens.length > 0 || session.composer.keyframeTokens.length > 0,
@@ -704,15 +790,20 @@ function BenchWorkspace({
   };
 
   // ---- the estimate, from the manifest row and the controls above it ----
-  const estimate = useMemo(() => {
-    if (!model) return null;
+  /**
+   * A function of the row rather than a number for the chosen one, because a subject session
+   * prices every model it offers (R-23's priced presets): each option in the select carries
+   * what one take would cost under it, and the figure beside Generate is this same function
+   * applied to the chosen row — so the two cannot disagree (R-25).
+   */
+  const estimateFor = (candidate: ManifestModel): number => {
     if (draft.params.kind === "image") {
-      const output = imageOutputFor(model, {
+      const output = imageOutputFor(candidate, {
         landscape: true,
         ...(draft.params.tier !== undefined ? { tier: draft.params.tier } : {}),
         ...(draft.params.aspect !== undefined ? { aspect: draft.params.aspect } : {}),
       });
-      const each = estimateMicroUsd(model, {
+      const each = estimateMicroUsd(candidate, {
         images: 1,
         megapixels: (output.width * output.height) / 1_000_000,
         referenceImages: carried.length,
@@ -722,19 +813,20 @@ function BenchWorkspace({
     }
     if (draft.params.kind === "voice") {
       // Exact, not a ceiling: speech bills per character and the characters are already typed.
-      return estimateMicroUsd(model, { characters: draft.brief.length }) * draft.params.count;
+      return estimateMicroUsd(candidate, { characters: draft.brief.length }) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper
       // bound and stops when the song is done, so this is what the take can cost at most.
-      return estimateMicroUsd(model, { durationSec: MUSIC_DURATION_SEC }) * draft.params.count;
+      return estimateMicroUsd(candidate, { durationSec: MUSIC_DURATION_SEC }) * draft.params.count;
     }
-    const seconds = draft.params.durationSec ?? model.limits.maxDurationSec ?? 5;
-    return estimateMicroUsd(model, {
-      durationSec: pricedDuration(model, seconds),
+    const seconds = draft.params.durationSec ?? candidate.limits.maxDurationSec ?? 5;
+    return estimateMicroUsd(candidate, {
+      durationSec: pricedDuration(candidate, seconds),
       ...(draft.params.resolution !== undefined ? { resolution: draft.params.resolution } : {}),
     });
-  }, [model, draft.params, carried.length]);
+  };
+  const estimate = model === null ? null : estimateFor(model);
 
   const promptCap = model?.limits.maxPromptChars;
   const overCap = promptCap !== undefined && draft.brief.length > promptCap;
@@ -951,6 +1043,29 @@ function BenchWorkspace({
   );
   const sessionTitle =
     subject === undefined ? (session.title ?? "Untitled session") : (session.title ?? benchSubjectTitle(subject));
+  /**
+   * The chain as the design splits it (R-24; design 2609-2612): a mono crumb, the subject, its
+   * own line, and what this screen is. One bold string in a switcher button was the world
+   * bench's shape; a subject session has no sessions to switch between, so the slot names
+   * where you are instead.
+   */
+  const provenance =
+    subject === undefined
+      ? null
+      : {
+          crumb: [
+            subject.productionTitle,
+            subject.episode ? `episode ${subject.episode.order}` : null,
+            `scene ${subject.sceneNumber}`,
+          ]
+            .filter((part): part is string => part !== null)
+            .join(" · "),
+          title: subject.kind === "shot" ? `Shot ${subject.shotNumber}` : `Board ${subject.letter}`,
+          sub:
+            subject.kind === "shot"
+              ? subject.shotTitle
+              : `${subject.members.length} shots · ${subject.durationSec}s · one pass`,
+        };
   const back =
     subject === undefined
       ? { label: world?.meta.name ?? "Artifacts", to: `/w/${worldId}/artifacts` }
@@ -976,16 +1091,53 @@ function BenchWorkspace({
         ];
   const registryEntry = (token: string): BenchReferenceToken | undefined =>
     session.tokenRegistry.find((entry) => entry.token === token);
-  const referenceCaption = (entry: BenchReferenceToken | undefined, riding: boolean): ReactNode =>
-    subject !== undefined && entry?.label !== undefined ? (
-      <span className="fy-bench__refcaption">
-        <strong>{entry.label}</strong>
-        {entry.detail !== undefined && <span>{entry.detail}</span>}
-        <span>{`${entry.token}${entry.sheetVersion === undefined || entry.label.includes(`v${entry.sheetVersion}`) ? "" : ` · v${entry.sheetVersion}`} · ${riding ? "riding" : "not riding"}`}</span>
-      </span>
-    ) : entry === undefined ? null : (
-      <span className="fy-bench__tokenchip">{entry.token}</span>
+  /** The corner chip: the token, which is also the name the brief cites the picture by. */
+  const refChip = (entry: BenchReferenceToken | undefined): ReactNode =>
+    entry === undefined ? null : <span className="fy-bench__tokenchip">{entry.token}</span>;
+  /**
+   * Under a subject session's tile (design 2655): the name with its sheet version, then the
+   * detail. R-23 asks for a reference the route cannot carry to be *named* as not riding, never
+   * merely dimmed, so that word stays on the second line even though the design draws none.
+   */
+  const refName = (entry: BenchReferenceToken | undefined, riding: boolean): ReactNode => {
+    if (subject === undefined || entry?.label === undefined) return null;
+    const version =
+      entry.sheetVersion === undefined || entry.label.includes(`v${entry.sheetVersion}`)
+        ? ""
+        : ` · v${entry.sheetVersion}`;
+    const meta = [entry.detail, riding ? undefined : "not riding"].filter(
+      (part): part is string => part !== undefined,
     );
+    return (
+      <span className="fy-bench__refname">
+        <span className="fy-bench__reflabel">{`${entry.label}${version}`}</span>
+        {meta.length > 0 && <span className="fy-bench__refmeta">{meta.join(" · ")}</span>}
+      </span>
+    );
+  };
+  /** A tile in a subject session is a column — the box, then its name — where the world bench's is the box alone. */
+  const refColumn = (token: string, riding: boolean, tile: ReactNode, name: ReactNode): ReactNode =>
+    subject === undefined ? (
+      tile
+    ) : (
+      <div key={token} className="fy-bench__ref" data-riding={riding ? "true" : "false"}>
+        {tile}
+        {name}
+      </div>
+    );
+  /** The design groups the references and the prompt with their eyebrows; the world bench has neither. */
+  const subjectGroup = (children: ReactNode, extra?: string): ReactNode =>
+    subject === undefined ? children : <div className={cx("fy-bench__group", extra)}>{children}</div>;
+  const rebuild = () => {
+    if (pushTimer.current) clearTimeout(pushTimer.current);
+    const requestId = sendBenchRebuildSubject(worldId, session.id);
+    if (requestId === null) {
+      setRebuildNote("Not connected - try again.");
+      return;
+    }
+    pendingRebuild.current = requestId;
+    setRebuildNote("Rebuilding…");
+  };
 
   return (
     <div
@@ -995,6 +1147,15 @@ function BenchWorkspace({
       <AppChrome
         back={back}
         menu={
+          provenance !== null ? (
+            <span className="fy-bench__crumb fy-bench__crumb--subject" data-testid="bench-provenance">
+              <span className="fy-bench__crumbsep">/</span>
+              <span className="fy-bench__provenance">{provenance.crumb}</span>
+              <span className="fy-bench__subjectname">{provenance.title}</span>
+              <span className="fy-bench__subjectsub">{provenance.sub}</span>
+              <span className="fy-bench__sessionkind">generation session</span>
+            </span>
+          ) : (
           <span className="fy-bench__crumb">
             <span className="fy-bench__crumbsep">/</span>
             <span style={{ position: "relative", display: "inline-flex" }}>
@@ -1068,10 +1229,13 @@ function BenchWorkspace({
               )}
             </span>
           </span>
+          )
         }
       />
-      <div className="fy-bench">
-        {/* ---- the destination rail --------------------------------------- */}
+      <div className={cx("fy-bench", subject !== undefined && "fy-bench--subject")}>
+        {/* ---- the destination rail — the world's places; a subject session's way out is the
+            chrome's back, so it has none (design 2614) ------------------------ */}
+        {subject === undefined && (
         <nav className="fy-bench__rail" aria-label="World destinations">
           <button
             type="button"
@@ -1097,18 +1261,34 @@ function BenchWorkspace({
             </button>
           ))}
         </nav>
+        )}
 
         {/* ---- composer -------------------------------------------------- */}
         <div className="fy-bench__composer">
           <div className="fy-bench__composerbar">
+            {subject !== undefined ? (
+              /* Two text tabs on the design's track (2616-2621). A shot's other tab opens the
+                 shot in that mode; a board has only the one. */
+              <div className="fy-bench__mode fy-bench__mode--subject" role="group" aria-label="What to make">
+                {(subject.kind === "shot" ? (["image", "video"] as const) : (["video"] as const)).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={draft.mode === mode}
+                    disabled={subjectOpen.pending && draft.mode !== mode}
+                    onClick={() => switchSubjectMode(mode)}
+                  >
+                    {MODE_LABELS[mode]}
+                  </button>
+                ))}
+              </div>
+            ) : (
             <div className="fy-bench__mode" role="group" aria-label="What to make">
               {(["image", "video", "voice", "music"] as const).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   aria-pressed={draft.mode === mode}
-                  disabled={subject !== undefined && draft.mode !== mode}
-                  title={subject !== undefined && draft.mode !== mode ? "The production subject fixes this mode" : undefined}
                   onClick={() => switchMode(mode)}
                 >
                   {mode === "image" ? (
@@ -1124,46 +1304,21 @@ function BenchWorkspace({
                 </button>
               ))}
             </div>
-            <span style={{ flex: 1 }} />
-            {subject === undefined ? (
-              <button
-                type="button"
-                className="fy-bench__clear"
-                title="Clear the bench — a new session; this one keeps running"
-                onClick={() => sendBenchNewSession(worldId)}
-              >
-                ⟲
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="fy-bench__rebuild"
-                data-testid="bench-rebuild"
-                disabled={pendingRebuild.current !== null}
-                onClick={() => {
-                  if (pushTimer.current) clearTimeout(pushTimer.current);
-                  const requestId = sendBenchRebuildSubject(worldId, session.id);
-                  if (requestId === null) {
-                    setRebuildNote("Not connected - try again.");
-                    return;
-                  }
-                  pendingRebuild.current = requestId;
-                  setRebuildNote("Rebuilding…");
-                }}
-              >
-                Rebuild
-              </button>
+            )}
+            {subject === undefined && (
+              <>
+                <span style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  className="fy-bench__clear"
+                  title="Clear the bench — a new session; this one keeps running"
+                  onClick={() => sendBenchNewSession(worldId)}
+                >
+                  ⟲
+                </button>
+              </>
             )}
           </div>
-
-          {subject !== undefined && (
-            <div className="fy-bench__subjectcontext" data-testid="bench-subject-context" aria-label="Production context">
-              <span>{`aspect · ${subject.aspect}`}</span>
-              <span>{`duration · ${subject.durationSec}s`}</span>
-              <span>{subject.kind === "shot" ? "seed · auto" : "sound · on"}</span>
-              {rebuildNote !== null && <span className="fy-bench__subjectnote">{rebuildNote}</span>}
-            </div>
-          )}
 
           {/* The lane tabs (issue 305 §3): Keyframe exists only where the model verifies a
               frame task mode; a model that takes no keyframes shows no tab, and the composer
@@ -1188,13 +1343,20 @@ function BenchWorkspace({
           )}
 
           {/* reference tiles */}
-          {lane === "reference" && !soundOnly && (
+          {lane === "reference" && !soundOnly && subjectGroup(
+            <>
+              {subject !== undefined && (
+                <div className="fy-bench__eyebrow fy-bench__eyebrow--refs" data-testid="bench-references-eyebrow">
+                  References
+                  <span className="fy-bench__refcount">{`${referenceTokens.length} referenced`}</span>
+                </div>
+              )}
             <div className="fy-bench__refgrid">
               {referenceTokens.map((token) => {
                 const source = tokenSources.find((s) => s.existingToken === token);
                 const entry = registryEntry(token);
                 const riding = session.composer.activeTokens.includes(token);
-                return (
+                const tile = (
                   <div key={token} className="fy-bench__reftile" data-riding={riding ? "true" : "false"}>
                     {source?.imagePath ? (
                       <Portrait
@@ -1210,10 +1372,19 @@ function BenchWorkspace({
                         <span aria-hidden="true" />
                         <span aria-hidden="true" />
                       </span>
+                    ) : entry?.kind === "video" && subject !== undefined ? (
+                      /* A clip has no poster on the shelf. The staging playblast is the one
+                         that reaches a subject session, and the design draws it as three
+                         greybox figures on a floor (2634-2641) rather than the word "video". */
+                      <span className="fy-bench__blockstand" role="img" aria-label={entry.label ?? "video reference"}>
+                        <i />
+                        <i />
+                        <i />
+                      </span>
                     ) : (
                       <span className="fy-bench__takestate">{source?.kind ?? "missing"}</span>
                     )}
-                    {referenceCaption(entry, riding)}
+                    {refChip(entry)}
                     {riding && (
                       <button
                         type="button"
@@ -1226,6 +1397,7 @@ function BenchWorkspace({
                     )}
                   </div>
                 );
+                return refColumn(token, riding, tile, refName(entry, riding));
               })}
               <button
                 type="button"
@@ -1233,10 +1405,11 @@ function BenchWorkspace({
                 onClick={() => openPicker("reference")}
                 data-testid="bench-add-reference"
               >
-                <ImageMark size={14} />
-                Reference
+                {subject !== undefined ? <Plus size={14} /> : <ImageMark size={14} />}
+                {subject !== undefined ? "reference" : "Reference"}
               </button>
             </div>
+            </>,
           )}
 
           {/* keyframe tiles — the pictures the shot must pass through, in order */}
@@ -1246,7 +1419,7 @@ function BenchWorkspace({
                 {frames.map((token, index) => {
                   const source = tokenSources.find((s) => s.existingToken === token);
                   const entry = registryEntry(token);
-                  return (
+                  const tile = (
                     <div key={token} className="fy-bench__reftile">
                       {source?.imagePath ? (
                         <Portrait worldSlug={worldSlug} path={source.imagePath} label={token} radius={0} />
@@ -1256,7 +1429,7 @@ function BenchWorkspace({
                       {frames.length <= 2 && (
                         <span className="fy-bench__slotchip">{index === 0 ? "start" : "end"}</span>
                       )}
-                      {referenceCaption(entry, true)}
+                      {refChip(entry)}
                       <button
                         type="button"
                         className="fy-bench__tokenremove"
@@ -1267,6 +1440,7 @@ function BenchWorkspace({
                       </button>
                     </div>
                   );
+                  return refColumn(token, true, tile, refName(entry, true));
                 })}
                 {/* At the lane's ceiling the tile leaves — absent, not disabled (§3). */}
                 {model !== null && keyframeAddable(model, frames.length) && (
@@ -1293,7 +1467,25 @@ function BenchWorkspace({
           {/* A song asks for two things and no more (design turn 73). This is the first: the
               STYLE, which is a description, and so rides in the brief every other mode uses. */}
           {singing && <div className="fy-bench__eyebrow">STYLE</div>}
-          {/* brief — tokens the session knows render as chips inline (issue 305 §3) */}
+          {/* brief — tokens the session knows render as chips inline (issue 305 §3). Under a
+              subject it wears the design's eyebrow, with Rebuild at its right, and says
+              once beneath the box that @ reaches the world (2665-2670). */}
+          {subjectGroup(
+            <>
+              {subject !== undefined && (
+                <div className="fy-bench__eyebrow fy-bench__eyebrow--refs">
+                  Prompt
+                  <button
+                    type="button"
+                    className="fy-sblink"
+                    data-testid="bench-rebuild"
+                    disabled={pendingRebuild.current !== null}
+                    onClick={rebuild}
+                  >
+                    Rebuild
+                  </button>
+                </div>
+              )}
           <div className={cx("fy-bench__brief", singing && "fy-bench__brief--style")}>
             <BenchBrief
               value={draft.brief}
@@ -1425,6 +1617,12 @@ function BenchWorkspace({
               )}
             </div>
           </div>
+              {subject !== undefined && (
+                <span className="fy-bench__athint">type @ to bring in anything from the world</span>
+              )}
+            </>,
+            "fy-bench__group--prompt",
+          )}
           {/* Said here rather than at dispatch: the coordinator refuses this, and a refusal that
               only arrives on the press is a refusal the author could not have seen coming. */}
           {lostMentions.length > 0 && (
@@ -1478,9 +1676,23 @@ function BenchWorkspace({
             </div>
           )}
 
-          {/* the mode's settings row */}
-          <div className="fy-bench__settings">
-            {!soundOnly && (
+          {/* the mode's settings row. Under a subject the production's context chips lead it
+              (design 2672-2676) and the add-reference chip is absent — the dashed tile above
+              is the add there. */}
+          <div
+            className={subject === undefined ? "fy-bench__settings" : "fy-bench__subjectcontext"}
+            {...(subject !== undefined
+              ? { "data-testid": "bench-subject-context", "aria-label": "Production context" }
+              : {})}
+          >
+            {subject !== undefined && (
+              <>
+                <span>{`aspect · ${subject.aspect}`}</span>
+                <span>{`duration · ${subject.durationSec}s`}</span>
+                <span>{draft.mode === "video" ? "sound · on" : "seed · auto"}</span>
+              </>
+            )}
+            {subject === undefined && !soundOnly && (
               <button
                 type="button"
                 className="fy-bench__chip fy-bench__chip--refs"
@@ -1693,6 +1905,9 @@ function BenchWorkspace({
                 )}
               </>
             )}
+            {subject !== undefined && (rebuildNote ?? subjectOpen.note) !== null && (
+              <span className="fy-bench__subjectnote">{rebuildNote ?? subjectOpen.note}</span>
+            )}
           </div>
 
           {/* dispatch row */}
@@ -1845,13 +2060,16 @@ function BenchWorkspace({
                   </option>
                   {models.map((candidate) => {
                     const fault = subjectModelFault(candidate);
+                    // Each row a subject session can spend on carries its price (R-23, R-25).
+                    const price =
+                      subject !== undefined && fault === null ? ` · ~${formatMicroUsd(estimateFor(candidate))}` : "";
                     return (
                       <option
                         key={`${candidate.provider}/${candidate.id}`}
                         value={`${candidate.provider}/${candidate.id}`}
                         disabled={fault !== null}
                       >
-                        {candidate.displayName}{fault === null ? "" : ` · ${fault}`}
+                        {candidate.displayName}{fault === null ? price : ` · ${fault}`}
                       </option>
                     );
                   })}
@@ -1873,12 +2091,14 @@ function BenchWorkspace({
               <span data-testid="bench-estimate" className="fy-bench__estimate">
                 {/* Exact for speech, because the characters are already typed. A ceiling for a
                     song, because the route stops when the song is done — and a tilde would read
-                    as "about", when the truth is "at most". */}
-                {estimateCopy}
+                    as "about", when the truth is "at most". A subject session says what the
+                    figure is for (design 2684). */}
+                {subject === undefined ? estimateCopy : `${estimateCopy} a take`}
               </span>
             )}
             <Button
               variant="primary"
+              size={subject === undefined ? "default" : "sm"}
               data-testid="bench-generate"
               disabled={
                 model === null ||
@@ -1911,8 +2131,17 @@ function BenchWorkspace({
         {/* ---- the wall --------------------------------------------------- */}
         <div className="fy-bench__wall">
           <div className="fy-bench__wallbar">
-            {(["all", "filed", "discarded", ...(hasVideoTakes ? (["4k"] as const) : [])] as const).map(
-              (f) => (
+            {/* R-24: a subject session's filter is All / Filed / Discarded, on the design's
+                track (2690-2695); the world bench keeps 4K where it has video to answer for it. */}
+            {subjectGroup(
+              (
+                [
+                  "all",
+                  "filed",
+                  "discarded",
+                  ...(hasVideoTakes && subject === undefined ? (["4k"] as const) : []),
+                ] as const
+              ).map((f) => (
                 <button
                   key={f}
                   type="button"
@@ -1921,7 +2150,8 @@ function BenchWorkspace({
                 >
                   {f === "all" ? "All" : f === "filed" ? "Filed" : f === "discarded" ? "Discarded" : "4K"}
                 </button>
-              ),
+              )),
+              "fy-bench__filters",
             )}
           </div>
 
@@ -2060,9 +2290,26 @@ function BenchWorkspace({
                   aria-hidden
                 />
               )}
-              <strong style={{ font: "600 15px var(--font-sans)" }}>
-                {selected ? statusLine(liveStatus(selected), selected) : "The bench is empty"}
-              </strong>
+              {subject === undefined ? (
+                <strong style={{ font: "600 15px var(--font-sans)" }}>
+                  {selected ? statusLine(liveStatus(selected), selected) : "The bench is empty"}
+                </strong>
+              ) : selected === null ? (
+                /* The design's two mono states (2704-2715): nothing yet, and rendering. */
+                <>
+                  <ImageMark size={22} />
+                  <span className="fy-bench__emptyline">no takes yet · generate to see one here</span>
+                </>
+              ) : inFlight(liveStatus(selected)) ? (
+                <span className="fy-bench__rendering" data-testid="bench-rendering">
+                  <span className="fy-bench__emptyline">rendering…</span>
+                  <span className="fy-bench__emptysub">
+                    {`${modelName(selected.request.provider, selected.request.model)} · take ${selected.n}`}
+                  </span>
+                </span>
+              ) : (
+                <span className="fy-bench__emptyline">{statusLine(liveStatus(selected), selected)}</span>
+              )}
               {selected?.error !== undefined && (
                 <span
                   style={{ font: "400 11.5px var(--font-sans)", color: "var(--destructive)", maxWidth: 420 }}
@@ -2088,7 +2335,7 @@ function BenchWorkspace({
             {subject !== undefined && selected?.disposition === "open" && selected.media !== undefined && (
               <span className="fy-bench__acceptoutcome">
                 {subject.kind === "shot"
-                  ? `accepting files the frame onto shot ${subject.shotNumber}`
+                  ? `accepting files the ${draft.mode === "video" ? "clip" : "frame"} onto shot ${subject.shotNumber}`
                   : `accepting files the clip onto ${subject.members.length} shots`}
               </span>
             )}
@@ -2105,8 +2352,11 @@ function BenchWorkspace({
             {selected && selected.disposition === "discarded" && <Badge tone="neutral">discarded</Badge>}
             {selected && selected.disposition === "open" && selected.media && (
               <>
+                {/* Under a subject, Discard is the quiet text beside a small Accept (design
+                    2743-2744): it files nothing anywhere, and its weight says so. */}
                 <Button
-                  variant="outline"
+                  variant={subject === undefined ? "outline" : "ghost"}
+                  size={subject === undefined ? "default" : "sm"}
                   disabled={pendingAccept?.takeId === selected.id}
                   onClick={() => sendBenchDiscard(worldId, session.id, selected.id)}
                 >
@@ -2123,6 +2373,7 @@ function BenchWorkspace({
                 ) : (
                   <Button
                     variant="primary"
+                    size="sm"
                     data-testid="bench-accept"
                     disabled={
                       selected.request.filing === undefined || pendingAccept?.takeId === selected.id
@@ -2164,17 +2415,32 @@ function BenchWorkspace({
                 aria-current={take.id === selected?.id}
                 onClick={() => sendBenchSelectTake(worldId, session.id, take.id)}
               >
-                <span className="fy-bench__taken">{take.n}</span>
-                <span className="fy-bench__takeframe">
+                {subject === undefined && <span className="fy-bench__taken">{take.n}</span>}
+                <span
+                  className="fy-bench__takeframe"
+                  data-inflight={subject !== undefined && inFlight(status) ? "true" : undefined}
+                >
                   {take.media ? (
-                    // Its first frame, not the clip: an <img> pointed at an .mp4 cannot decode,
-                    // and every video take on this strip was a grey box with a label in it.
-                    <Portrait
-                      worldSlug={worldSlug}
-                      path={`.sessions/${session.id}/media/${take.id}/${posterNameFor(take.media.file)}`}
-                      label={`take ${take.n}`}
-                      radius={0}
-                    />
+                    <>
+                      {/* Its first frame, not the clip: an <img> pointed at an .mp4 cannot decode,
+                          and every video take on this strip was a grey box with a label in it. */}
+                      <Portrait
+                        worldSlug={worldSlug}
+                        path={`.sessions/${session.id}/media/${take.id}/${posterNameFor(take.media.file)}`}
+                        label={`take ${take.n}`}
+                        radius={0}
+                      />
+                      {subject !== undefined && take.request.mode === "video" && (
+                        <span className="fy-bench__takeplay" aria-hidden="true">
+                          <span>
+                            <PlaySolid size={11} />
+                          </span>
+                        </span>
+                      )}
+                    </>
+                  ) : subject !== undefined && inFlight(status) ? (
+                    /* R-24: a generating take is a hatched placeholder with a spinner. */
+                    <span className="fy-bench__takespin" role="img" aria-label="rendering" />
                   ) : (
                     <span
                       className={cx(
@@ -2187,6 +2453,14 @@ function BenchWorkspace({
                     </span>
                   )}
                 </span>
+                {subject !== undefined && (
+                  <span className="fy-bench__takeline">
+                    <span className="fy-bench__taken">{`take ${take.n}`}</span>
+                    <span className="fy-bench__takestatus">
+                      {inFlight(status) ? "rendering" : status === "succeeded" ? "ready" : status}
+                    </span>
+                  </span>
+                )}
               </button>
             );
           })}
