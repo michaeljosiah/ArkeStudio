@@ -85,7 +85,7 @@ async function close(screen: MountedCut): Promise<void> {
 
 function button(screen: MountedCut, label: string): HTMLButtonElement {
   const found = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent?.trim() === label,
+    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label,
   );
   assert.ok(found, `${label} is rendered`);
   return found;

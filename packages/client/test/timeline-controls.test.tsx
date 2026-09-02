@@ -87,7 +87,7 @@ async function close(screen: MountedCut): Promise<void> {
 
 function button(screen: MountedCut, label: string): HTMLButtonElement {
   const found = [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) => candidate.textContent?.trim() === label,
+    (candidate) => candidate.textContent?.trim() === label || candidate.getAttribute("aria-label") === label,
   );
   assert.ok(found, `${label} is rendered`);
   return found;
@@ -144,11 +144,19 @@ describe("durable Picture controls (#678)", () => {
         toggle.click();
         await Promise.resolve();
       });
-      const take = panel.querySelector<HTMLButtonElement>(".fy-artrow--take");
+      // Picking a Library row shows its actions; Locate is what selects on the timeline and
+      // opens the details (SPEC-039 R-11, R-16).
+      const take = panel.querySelector<HTMLButtonElement>('[data-library-item="shot:sh_12"] .fy-artrow__pick');
       const details = screen.container.querySelector<HTMLElement>("#cut-right-pane");
       assert.ok(take && details);
       await act(async () => {
         take.click();
+        await Promise.resolve();
+      });
+      const locate = [...panel.querySelectorAll<HTMLButtonElement>(".fy-artrow__actions button")].find((button) => button.textContent?.includes("Locate in timeline"));
+      assert.ok(locate, "a shot in the cut offers Locate");
+      await act(async () => {
+        locate.click();
         await Promise.resolve();
       });
       assert.equal(panel.getAttribute("data-open"), "false");

@@ -153,18 +153,12 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.doesNotMatch(html, /Filing arrives with/, "no longer a promise of a later screen");
   });
 
-  it("draws empty lanes, because a lane that is not there cannot be dropped on", () => {
+  it("draws no legacy lane until something legacy is placed; the typed tracks are the drop targets", () => {
+    // The target timeline has no numbered overlay lanes (SPEC-039 R-19c). A lane that is not
+    // there cannot be dropped on, so the typed tracks take the drop instead.
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
-    assert.match(html, /fy-ovlane/);
-    assert.match(html, /drop an artifact to place it/);
-  });
-
-  it("rests at two lanes: one to place a picture on and one under it for the sound", () => {
-    const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
-    assert.equal((html.match(/fy-track__label">Overlay L\d/g) ?? []).length, 2);
-    assert.match(html, /Overlay L1[\s\S]*Overlay L0/, "the higher lane is drawn first, because it sits nearer the viewer");
-    // React escapes the apostrophe on the way out, so the bottom lane is matched by its words.
-    assert.match(html, /drop a bed here, or split a clip.{1,8}s sound down to it/, "and the bottom one says so");
+    assert.doesNotMatch(html, /fy-ovlane/);
+    assert.match(html, /data-track="music"/, "a typed lane stands where the legacy lane was");
   });
 
   it("draws a lane for the highest one a clip actually uses", () => {

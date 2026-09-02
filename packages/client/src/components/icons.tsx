@@ -482,3 +482,14 @@ export const TableMark = icon(
   </>,
 );
 export const Divider = icon(<path d="M5 12h14" />);
+
+// ---- Editor toolbar (SPEC-039 R-14, R-19c) ---------------------------------------------------
+export const Pointer = icon(<><path d="M4 4l7.07 17 2.51-7.39L21 11.07z" /></>);
+export const Scissors = icon(<><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.12 15.88" /><path d="M14.47 14.48 20 20" /><path d="M8.12 8.12 12 12" /></>);
+export const Hand = icon(<><path d="M18 11V6a2 2 0 0 0-4 0v1" /><path d="M14 10V4a2 2 0 0 0-4 0v2" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></>);
+export const RotateCw = icon(<><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>);
+export const Trash = icon(<><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></>);
+export const Collapse = icon(<><path d="M10 6 4 12l6 6" /><path d="m14 6 6 6-6 6" /><path d="M4 12h6" /><path d="M14 12h6" /></>);
+export const Snap = icon(<><path d="M9 3v18" /><path d="M15 3v18" /></>);
+export const Duck = icon(<><path d="M2 12h3l3-8 4 16 3-8h5" /></>);
+export const Locate = icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /></>);
