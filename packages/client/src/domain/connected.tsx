@@ -7,6 +7,7 @@ import {
   markProposalSeen,
   rebaseProposal,
   resolveProposalConflict,
+  resolveProposalChoice,
   useAuthoring,
   useGateNotices,
   sendProposalBack,
@@ -58,6 +59,12 @@ export function ConnectedProposalPanel({ staged }: { staged: StagedProposal }) {
           : {})}
         onRebase={() => rebaseProposal(worldId, id)}
         onResolve={(path, field, choice) => resolveProposalConflict(worldId, id, path, field, choice)}
+        onResolveChoice={
+          running
+            ? undefined
+            : (choiceId, optionId) =>
+                resolveProposalChoice(worldId, id, choiceId, optionId, staged.proposal.draftRevision)
+        }
         onMarkSeen={() => markProposalSeen(worldId, id)}
         disabledReason={running ? "the studio is still drafting — cancel first if you need to act now" : undefined}
       />

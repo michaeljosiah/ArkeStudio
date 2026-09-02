@@ -91,11 +91,11 @@ const DEVELOPMENT_PROPOSAL_KIND: Partial<Record<string, "story-overview" | "seas
  */
 function openChoiceFor(candidate: WorldChangeCandidate): ProposalOpenChoice | null {
   if (candidate.classification !== "canon.create") return null;
-  const duplicates = candidate.checks.likelyDuplicates;
+  // Only Canon entries can receive a canon.create payload as an amendment. Offering a sheet or
+  // production here promised a rematerialisation the writer has no representation for.
+  const duplicates = candidate.checks.likelyDuplicates.filter((ref) => ref.kind === "canon");
   if (duplicates.length === 0) return null;
-  const named = duplicates
-    .map((ref) => (ref.kind === "canon" ? ref.entryId : ref.kind === "sheet" ? ref.sheetId : "the world"))
-    .slice(0, 3);
+  const named = duplicates.map((ref) => ref.entryId).slice(0, 3);
   return {
     choiceId: `duplicate-or-amend:${candidate.id}`,
     kind: "duplicate-or-amend",

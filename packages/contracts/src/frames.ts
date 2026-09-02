@@ -335,6 +335,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("proposal-mark-seen"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
+  /** Answer a proposal-local question against the exact draft revision shown on Approvals. */
+  z
+    .object({
+      kind: z.literal("proposal-resolve-choice"),
+      worldId: UlidSchema,
+      requestId: z.string().min(1),
+      proposalId: z.string().min(1),
+      choiceId: z.string().min(1),
+      optionId: z.string().min(1),
+      expectedDraftRevision: z.number().int().min(1),
+    })
+    .strict(),
   /**
    * #70 §11.4.1, §12.1: change one field of a staged proposal before accepting it.
    *

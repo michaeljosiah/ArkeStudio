@@ -467,6 +467,33 @@ describe("attaching a document to a conversation", () => {
 
     assert.doesNotMatch(html, /elsewhere\.png/, "attachment linkage is scoped to one conversation (§13.1)");
   });
+
+  it("shows non-empty authoritative ripples as dismissible news at the accepting conversation", () => {
+    renderConversation();
+    __applyEventForTest({
+      at: AT,
+      type: "world-chat.ripples",
+      worldId: FIXTURE_WORLD_ID,
+      conversationId: CONVERSATION_ID,
+      requestId: "save-1",
+      items: [
+        {
+          kind: "gains-cross-reference",
+          summary: "CANON-018 gains one cross-reference",
+          targets: ["CANON-018"],
+        },
+      ],
+    });
+    const html = renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+        <App />
+      </MemoryRouter>,
+    ).replaceAll("<!-- -->", "");
+
+    assert.match(html, /What changed elsewhere/);
+    assert.match(html, /CANON-018 gains one cross-reference/);
+    assert.match(html, /Dismiss/, "the notice is news, not a persistent task");
+  });
 });
 
 /**

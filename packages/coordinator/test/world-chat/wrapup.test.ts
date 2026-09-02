@@ -16,6 +16,7 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { recoverWrapUps } from "../../src/world-chat/wrapup-recovery.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
 import { recordResolution } from "../../src/world-chat/resolution.js";
+import { materialiseDuplicateChoice } from "../../src/world-chat/materialise.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -1318,6 +1319,7 @@ describe("what accept all leaves behind", () => {
   it("marks a proposal that asks a question, so a press cannot answer it", async () => {
     const w = await world();
     closeOnCleanup(() => w.store.close());
+    const entryId = w.store.getBundle().canon[0]!.id;
     /*
      * A canon.create that looks like something already in the world. The gate attaches the
      * duplicate-or-amend question to that proposal and no other, which is what lets the rest be
@@ -1328,7 +1330,7 @@ describe("what accept all leaves behind", () => {
       draft: { type: "lore", title: "Bray Half-Hitch", statement: "He keeps the lock.", links: [] },
       checks: {
         ...candidate().checks,
-        likelyDuplicates: [{ kind: "sheet", sheetKind: "character", sheetId: "bray-half-hitch" }],
+        likelyDuplicates: [{ kind: "canon", entryId }],
       },
     } as Partial<WorldChangeCandidate>);
     const seq = await withCandidates(w.log, [candidate(), looksFamiliar]);
@@ -1350,6 +1352,59 @@ describe("what accept all leaves behind", () => {
       result.proposalIds.includes(asking.proposalId),
       "the question travels with its own proposal, so the others stay acceptable",
     );
+    assert.deepEqual(
+      asking.options.map((option) => option.optionId),
+      ["create", `amend:${entryId}`],
+      "only a canonical reference the rematerializer supports is offered as an amendment",
+    );
+  });
+
+  it("does not offer a Canon amendment to a similar sheet", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const looksLikeASheet = candidate({
+      checks: {
+        ...candidate().checks,
+        likelyDuplicates: [{ kind: "sheet", sheetKind: "character", sheetId: "maren-kest" }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const seq = await withCandidates(w.log, [looksLikeASheet]);
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-sheet-match",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+    assert.deepEqual(result.openChoices, []);
+  });
+
+  it("rematerialises the same questioned payload as create or canonical amend", async () => {
+    const w = await world();
+    closeOnCleanup(() => w.store.close());
+    const entryId = w.store.getBundle().canon[0]!.id;
+    const questioned = candidate({
+      checks: {
+        ...candidate().checks,
+        likelyDuplicates: [{ kind: "canon", entryId }],
+      },
+    } as Partial<WorldChangeCandidate>);
+
+    const created = materialiseDuplicateChoice(questioned, "create", "CANON-999", w.store.getBundle(), AT);
+    assert.equal(created.action, "create");
+    assert.equal(created.targets[0]!.path, "canon/CANON-999.md");
+
+    const amended = materialiseDuplicateChoice(
+      questioned,
+      `amend:${entryId}`,
+      "CANON-999",
+      w.store.getBundle(),
+      AT,
+    );
+    assert.equal(amended.action, "amend");
+    assert.equal(amended.targets[0]!.path, `canon/${entryId}.md`);
+    assert.match(amended.targets[0]!.content, /The bells may pass sideways\./);
   });
 });
 

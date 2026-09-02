@@ -133,7 +133,15 @@ describe("the approvals screen head", () => {
         },
       ],
     });
-    assert.match(render(stateWith([withChoice])), /still asking a question/);
+    const html = render(stateWith([withChoice]));
+    assert.match(html, /still asking a question/);
+    assert.match(html, /Is it new, or a change to CANON-018\?/);
+    assert.match(html, /Changes CANON-018/, "the question can be answered where it is shown");
+    assert.match(
+      html,
+      /title="Answer the question above before accepting"[^>]*disabled|disabled=""[^>]*title="Answer the question above before accepting"/,
+      "the proposal's own Accept is blocked as well as Accept all",
+    );
   });
 });
 
