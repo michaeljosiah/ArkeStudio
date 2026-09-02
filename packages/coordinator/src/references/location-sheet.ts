@@ -216,9 +216,9 @@ export function composeLocationSheet(panels: readonly LocationSheetPanel[]): Loc
     );
 
     digest.update(panel.id, "utf8");
-    digest.update(" ");
+    digest.update("\0");
     digest.update(label, "utf8");
-    digest.update(" ");
+    digest.update("\0");
   });
 
   // The rendered file, hashed as the file. Hashing the *source* pixels instead left the name
