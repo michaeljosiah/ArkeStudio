@@ -1,13 +1,30 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captureProviderClient } from "../src/capture.js";
-import type { CommandRunner, ProviderCallCapture, ProviderClient } from "../src/types.js";
+import { ProviderTransportError } from "../src/transport.js";
+import type {
+  CommandRunner,
+  ProviderCallCapture,
+  ProviderClient,
+  ProviderTransport,
+  ProviderTransportScope,
+} from "../src/types.js";
+
+function fetchFailed(code: string): TypeError {
+  return new TypeError("fetch failed", { cause: Object.assign(new Error(code), { code }) });
+}
 
 function recorder() {
   const started: Parameters<ProviderCallCapture["start"]>[0][] = [];
+  const responded: Parameters<ProviderCallCapture["respond"]>[1][] = [];
   const finished: Parameters<ProviderCallCapture["finish"]>[1][] = [];
-  const failed: unknown[] = [];
+  const failed: Array<{ error: unknown; diagnostic: Parameters<ProviderCallCapture["fail"]>[2] }> = [];
+  const tracked = new Set<Promise<void>>();
   const capture: ProviderCallCapture = {
+    track(task) {
+      tracked.add(task);
+      void task.finally(() => tracked.delete(task)).catch(() => {});
+    },
     async start(input) {
       started.push(input);
       return `pc_${"0".repeat(26)}`;
@@ -15,11 +32,14 @@ function recorder() {
     async finish(_id, input) {
       finished.push(input);
     },
-    async fail(_id, error) {
-      failed.push(error);
+    async respond(_id, input) {
+      responded.push(input);
+    },
+    async fail(_id, error, diagnostic) {
+      failed.push({ error, diagnostic });
     },
   };
-  return { capture, started, finished, failed };
+  return { capture, started, responded, finished, failed, drain: () => Promise.allSettled(tracked) };
 }
 
 function client(fetchImpl: typeof fetch): ProviderClient {
@@ -68,7 +88,7 @@ describe("provider call capture", () => {
       { model: "gpt-image-2", capability: "image", params: { prompt: "portrait" } },
       { jobId: `jb_${"0".repeat(26)}`, attempt: 2, model: "gpt-image-2" },
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await seen.drain();
     assert.equal(seen.started[0]?.operation, "submit");
     assert.equal(seen.started[0]?.endpoint, "https://api.openai.com/v1/images/edits");
     assert.deepEqual(seen.started[0]?.headers, {});
@@ -76,6 +96,7 @@ describe("provider call capture", () => {
     assert.equal(request.multipart[1]?.value, "portrait");
     assert.equal(request.multipart[2]?.sizeBytes, 3);
     assert.match(String(request.multipart[2]?.sha256), /^sha256:/);
+    assert.equal(seen.responded[0]?.status, 200);
     assert.deepEqual(seen.finished[0]?.headers, {
       "content-type": "application/json",
       "x-request-id": "req-1",
@@ -104,6 +125,139 @@ describe("provider call capture", () => {
     );
     assert.equal(seen.finished.length, 0);
     assert.equal(seen.failed.length, 1);
+    assert.equal(seen.failed[0]?.diagnostic?.category, "connection-reset");
+    assert.equal(seen.failed[0]?.diagnostic?.code, "ECONNRESET");
+  });
+
+  it("records that response headers were witnessed when the body transport then fails", async () => {
+    const seen = recorder();
+    const bodyFailure = fetchFailed("UND_ERR_BODY_TIMEOUT");
+    const wrapped = captureProviderClient(
+      "openai",
+      (observed) => client(observed),
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(bodyFailure);
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      seen.capture,
+    );
+    await wrapped.submit("secret", { model: "gpt-image-2", capability: "image", params: { prompt: "portrait" } });
+    await seen.drain();
+    assert.equal(seen.responded[0]?.status, 200);
+    assert.equal(seen.failed[0]?.diagnostic?.category, "body-timeout");
+  });
+
+  it("records an operation deadline after diagnostic capture gives up", async () => {
+    const seen = recorder();
+    const bodyFailure = fetchFailed("UND_ERR_BODY_TIMEOUT");
+    const delayedFetch: typeof fetch = async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            setTimeout(() => controller.error(bodyFailure), 5_200);
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const transport: ProviderTransport = {
+      run(_scope, operation) {
+        const running = operation(delayedFetch);
+        return Promise.race([
+          running,
+          new Promise<never>((_resolve, reject) => {
+            setTimeout(
+              () =>
+                reject(
+                  new ProviderTransportError(new Error("deadline"), {
+                    category: "configured-deadline",
+                    deadline: { kind: "operation", ms: 5_100 },
+                  }),
+                ),
+              5_100,
+            );
+          }),
+        ]);
+      },
+    };
+    const wrapped = captureProviderClient(
+      "openai",
+      (observed) => {
+        const base = client(observed);
+        return {
+          ...base,
+          submit: async () => {
+            const response = await observed("https://api.openai.com/v1/images/generations");
+            await response.text();
+            throw new Error("unreachable");
+          },
+        };
+      },
+      async () => {
+        throw new Error("the host transport was bypassed");
+      },
+      seen.capture,
+      undefined,
+      transport,
+    );
+    await assert.rejects(() =>
+      wrapped.submit("secret", { model: "gpt-image-2", capability: "image", params: { prompt: "portrait" } }),
+    );
+    await seen.drain();
+    assert.equal(seen.finished.length, 0);
+    assert.equal(seen.failed[0]?.diagnostic?.category, "configured-deadline");
+  });
+
+  it("exposes operation and capability to host policy even when payload capture is disabled", async () => {
+    const scopes: ProviderTransportScope[] = [];
+    const transport: ProviderTransport = {
+      run(scope, operation) {
+        scopes.push(scope);
+        return operation(async () => new Response("", { status: 200 }));
+      },
+    };
+    const wrapped = captureProviderClient(
+      "openai",
+      (observed) => client(observed),
+      async () => {
+        throw new Error("the host transport was bypassed");
+      },
+      undefined,
+      undefined,
+      transport,
+    );
+    await wrapped.submit("secret", { model: "gpt-image-2", capability: "image", params: { prompt: "portrait" } });
+    assert.deepEqual(scopes, [{ provider: "openai", operation: "submit", model: "gpt-image-2", capability: "image" }]);
+  });
+
+  it("keeps diagnostic persistence off the public provider result path", async () => {
+    let tracked = false;
+    const capture: ProviderCallCapture = {
+      track() {
+        tracked = true;
+      },
+      start: async () => `pc_${"0".repeat(26)}`,
+      respond: () => new Promise<void>(() => {}),
+      finish: async () => {},
+      fail: async () => {},
+    };
+    const wrapped = captureProviderClient(
+      "openai",
+      (observed) => client(observed),
+      async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      capture,
+    );
+    const result = await wrapped.submit("secret", {
+      model: "gpt-image-2",
+      capability: "image",
+      params: { prompt: "portrait" },
+    });
+    assert.equal(result.remoteId, "remote");
+    assert.equal(tracked, true);
   });
 });
 

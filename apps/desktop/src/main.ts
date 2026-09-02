@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
+import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, createReadStream, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -191,7 +192,14 @@ let windowReady = false;
 let windowShowFallback: ReturnType<typeof setTimeout> | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
+let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
+
+async function closeProviderTransport(): Promise<void> {
+  const transport = providerTransport;
+  providerTransport = null;
+  await transport?.close();
+}
 
 function showWindowWhenThemed(): void {
   if (!windowReady || !rendererThemeReady || !window || window.isDestroyed()) return;
@@ -542,6 +550,7 @@ async function initialize(): Promise<{ port: number }> {
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
+  providerTransport = new CloudProviderTransport();
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
   // question rather than a credential one. Absent is a legitimate answer: the client then
   // fails every call with the remedy, and Settings can offer to fetch it.
@@ -689,6 +698,7 @@ async function initialize(): Promise<{ port: number }> {
   }));
   const providerClients = createProviderClients({
     fetch: (url, init) => fetch(url, init),
+    transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
     voxa: voxaBaseUrl,
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
@@ -1252,7 +1262,13 @@ async function shutdownConfirmed(): Promise<void> {
   if (shuttingDown) throw new Error("shutdown is already in progress");
   shuttingDown = true;
   backgroundNotifications.stop();
-  const stop = coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve();
+  const stop = (async () => {
+    try {
+      await (coordinator?.stop() ?? startupProvider?.close() ?? Promise.resolve());
+    } finally {
+      await closeProviderTransport();
+    }
+  })();
   let timer: ReturnType<typeof setTimeout> | null = null;
   try {
     await Promise.race([
@@ -1288,8 +1304,12 @@ if (!gotLock) {
         const provider = startupProvider;
         coordinator = null;
         startupProvider = null;
-        if (started) await started.stop();
-        else await provider?.close();
+        try {
+          if (started) await started.stop();
+          else await provider?.close();
+        } finally {
+          await closeProviderTransport();
+        }
       },
       publish: publishStartup,
       report: (error) => {

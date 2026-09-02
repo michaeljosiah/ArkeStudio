@@ -10,7 +10,7 @@ import { HiggsfieldClient } from "../src/clients/higgsfield.js";
 import { OllamaClient } from "../src/clients/ollama.js";
 import { OpenAiClient } from "../src/clients/openai.js";
 import { higgsfieldSelectWorkspace, higgsfieldWorkspaces, lazyHiggsfieldRunner } from "../src/higgsfield-cli.js";
-import { ProviderAuthError, type CommandRunner, type FetchLike } from "../src/types.js";
+import { ProviderAuthError, type CommandRunner, type FetchLike, type ProviderTransportScope } from "../src/types.js";
 import { KokoroClient } from "../src/clients/kokoro.js";
 import { WhisperCppClient } from "../src/clients/whispercpp.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
@@ -274,6 +274,52 @@ describe("queue cancellation reaches the synchronous paid submits (issue 95)", (
     await new FalClient(fetchImpl).submit("k", { model: "nano-banana-2", capability: "image", params: { prompt: "x" } });
     assert.ok(init !== undefined);
     assert.ok(!("signal" in init));
+  });
+});
+
+describe("witnessed paid submission responses stay distinct from transport failures (issue 95)", () => {
+  const rejected = async (submit: (fetchImpl: FetchLike) => Promise<unknown>, status: number, marked: boolean) => {
+    await assert.rejects(
+      submit(async () => new Response(JSON.stringify({ error: "rejected" }), { status })),
+      (error: Error & { submissionRejected?: boolean }) => {
+        assert.equal(error.submissionRejected === true, marked);
+        return true;
+      },
+    );
+  };
+
+  const submissions = [
+    (fetchImpl: FetchLike) =>
+      new OpenAiClient(fetchImpl).submit("k", {
+        model: "gpt-5.2",
+        capability: "llm",
+        params: { messages: [{ role: "user", content: "x" }] },
+      }),
+    (fetchImpl: FetchLike) =>
+      new AnthropicClient(fetchImpl).submit("k", {
+        model: "claude-opus-5",
+        capability: "llm",
+        params: { messages: [{ role: "user", content: "x" }] },
+      }),
+    (fetchImpl: FetchLike) =>
+      new ElevenLabsClient(fetchImpl).submit("k", {
+        model: "eleven_multilingual_v2",
+        capability: "voice-tts",
+        params: { voiceId: "v1", text: "x" },
+      }),
+    (fetchImpl: FetchLike) =>
+      new FalClient(fetchImpl).submit("k", {
+        model: "nano-banana-2",
+        capability: "image",
+        params: { prompt: "x", output: { width: 1024, height: 1024 } },
+      }),
+  ];
+
+  it("marks 4xx responses as rejections and leaves 5xx outcomes ambiguous", async () => {
+    for (const submit of submissions) {
+      await rejected(submit, 400, true);
+      await rejected(submit, 503, false);
+    }
   });
 });
 
@@ -1582,5 +1628,56 @@ describe("the provider table and the registry cannot drift apart (issue 462)", (
 
     assert.equal(comfyCalls, 1);
     assert.equal(sharedCalls, 0);
+  });
+
+  it("applies host transport only to cloud clients, never Ollama or another local engine", async () => {
+    const scopes: ProviderTransportScope[] = [];
+    let localCalls = 0;
+    const clients = createProviderClients({
+      fetch: async () => {
+        localCalls += 1;
+        return new Response(JSON.stringify({ models: [{ name: "llama3.1" }] }), { status: 200 });
+      },
+      transport: {
+        run(scope, operation) {
+          scopes.push(scope);
+          return operation(async () =>
+            new Response(JSON.stringify({ data: [{ id: "gpt-5.2" }, { id: "gpt-image-2" }] }), { status: 200 }),
+          );
+        },
+      },
+    });
+    await clients.openai!.validateKey("k");
+    await clients.ollama!.validateKey("");
+    assert.deepEqual(scopes, [{ provider: "openai", operation: "validate" }]);
+    assert.equal(localCalls, 1);
+  });
+
+  it("applies the HTTP transport to Higgsfield downloads, never its CLI calls", async () => {
+    const scopes: ProviderTransportScope[] = [];
+    const clients = createProviderClients({
+      fetch: async () => {
+        throw new Error("Higgsfield's download bypassed the host transport");
+      },
+      higgsfield: async (args) => ({
+        code: 0,
+        stdout: JSON.stringify(args[0] === "account" ? { credits: 1 } : { result_url: "https://result.example/out.png" }),
+        stderr: "",
+      }),
+      transport: {
+        run(scope, operation) {
+          scopes.push(scope);
+          return operation(async () =>
+            new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { "content-type": "image/png" } }),
+          );
+        },
+      },
+    });
+
+    await clients.higgsfield!.validateKey("");
+    assert.deepEqual(scopes, []);
+    const artifacts = await clients.higgsfield!.fetchArtifacts("", "job-1");
+    assert.equal(artifacts[0]?.contentType, "image/png");
+    assert.deepEqual(scopes, [{ provider: "higgsfield", operation: "fetch-artifacts" }]);
   });
 });

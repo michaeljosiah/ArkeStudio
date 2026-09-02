@@ -7,6 +7,8 @@ import {
   newId,
   type ProviderCallRecord,
   type ProviderId,
+  type ProviderTransportDiagnostic,
+  type ProviderTransportFailureRecord,
 } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import { REDACTED, type SecretRegistry } from "../redact.js";
@@ -65,13 +67,17 @@ function sanitize(value: unknown, secrets: SecretRegistry, key = "", depth = 0):
   return value;
 }
 
-function safeError(error: unknown, secrets: SecretRegistry): ProviderCallRecord["error"] {
+function safeError(
+  error: unknown,
+  secrets: SecretRegistry,
+  diagnostic?: ProviderTransportDiagnostic,
+): ProviderCallRecord["error"] {
   const item = error instanceof Error ? error : new Error(String(error));
   const cause = item.cause as { code?: unknown } | undefined;
   return {
     name: item.name,
     message: secrets.scrub(item.message).slice(0, 4000),
-    code: typeof cause?.code === "string" ? cause.code : null,
+    code: diagnostic?.code ?? (typeof cause?.code === "string" ? cause.code : null),
   };
 }
 
@@ -79,13 +85,24 @@ function safeError(error: unknown, secrets: SecretRegistry): ProviderCallRecord[
 export class ProviderCallStore {
   private readonly queue = new WriteQueue();
   private readonly current = new Map<string, ProviderCallRecord>();
+  private readonly captureTasks = new Set<Promise<void>>();
   private loaded = false;
   private aclSet = false;
+  private transportFailureSink: ((record: ProviderTransportFailureRecord) => void) | null = null;
 
   constructor(
     readonly path: string,
     private readonly secrets: SecretRegistry,
   ) {}
+
+  setTransportFailureSink(sink: (record: ProviderTransportFailureRecord) => void): void {
+    this.transportFailureSink = sink;
+  }
+
+  track(task: Promise<void>): void {
+    this.captureTasks.add(task);
+    void task.finally(() => this.captureTasks.delete(task)).catch(() => {});
+  }
 
   private async load(): Promise<void> {
     if (this.loaded) return;
@@ -107,48 +124,51 @@ export class ProviderCallStore {
   }
 
   private append(record: ProviderCallRecord): Promise<void> {
-    return this.queue.enqueue(async () => {
-      await this.load();
-      let clean = ProviderCallRecordSchema.parse(sanitize(record, this.secrets));
-      if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
-        clean = ProviderCallRecordSchema.parse({
-          ...clean,
-          response: clean.response
-            ? {
-                ...clean.response,
-                body: { truncated: true, reason: "provider response exceeded the 512 KiB call-record limit" },
-              }
-            : null,
-        });
-      }
-      // The request branch has to come BEFORE the throw, or it can never run: a record still
-      // oversized after the response truncation used to throw here, so an oversized *request*
-      // body — a big graph, a large upload manifest — lost its whole call record instead of
-      // being truncated like the response (found in issue 354's review).
-      if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
-        clean = ProviderCallRecordSchema.parse({
-          ...clean,
-          request: {
-            ...clean.request,
-            body: { truncated: true, reason: "provider request exceeded the 512 KiB call-record limit" },
-          },
-        });
-      }
-      if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
-        throw new Error("provider call metadata exceeded the 512 KiB record limit");
-      }
-      await mkdir(dirname(this.path), { recursive: true });
-      await appendFile(this.path, `${JSON.stringify(clean)}\n`, "utf8");
-      if (!this.aclSet) {
-        await lockDown(this.path);
-        this.aclSet = true;
-      }
-      this.current.set(clean.id, clean);
-      const size = await stat(this.path)
-        .then((item) => item.size)
-        .catch(() => 0);
-      if (this.current.size > MAX_CALLS || size > MAX_FILE_BYTES) await this.compact();
-    });
+    return this.queue.enqueue(() => this.write(record));
+  }
+
+  /** Called only while holding `queue`; transition reads and writes must share that same turn. */
+  private async write(record: ProviderCallRecord): Promise<void> {
+    await this.load();
+    let clean = ProviderCallRecordSchema.parse(sanitize(record, this.secrets));
+    if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
+      clean = ProviderCallRecordSchema.parse({
+        ...clean,
+        response: clean.response
+          ? {
+              ...clean.response,
+              body: { truncated: true, reason: "provider response exceeded the 512 KiB call-record limit" },
+            }
+          : null,
+      });
+    }
+    // The request branch has to come BEFORE the throw, or it can never run: a record still
+    // oversized after the response truncation used to throw here, so an oversized *request*
+    // body — a big graph, a large upload manifest — lost its whole call record instead of
+    // being truncated like the response (found in issue 354's review).
+    if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
+      clean = ProviderCallRecordSchema.parse({
+        ...clean,
+        request: {
+          ...clean.request,
+          body: { truncated: true, reason: "provider request exceeded the 512 KiB call-record limit" },
+        },
+      });
+    }
+    if (Buffer.byteLength(JSON.stringify(clean), "utf8") > MAX_RECORD_BYTES) {
+      throw new Error("provider call metadata exceeded the 512 KiB record limit");
+    }
+    await mkdir(dirname(this.path), { recursive: true });
+    await appendFile(this.path, `${JSON.stringify(clean)}\n`, "utf8");
+    if (!this.aclSet) {
+      await lockDown(this.path);
+      this.aclSet = true;
+    }
+    this.current.set(clean.id, clean);
+    const size = await stat(this.path)
+      .then((item) => item.size)
+      .catch(() => 0);
+    if (this.current.size > MAX_CALLS || size > MAX_FILE_BYTES) await this.compact();
   }
 
   private async compact(): Promise<void> {
@@ -204,9 +224,9 @@ export class ProviderCallStore {
 
   /**
    * A call came back. HTTP calls carry `status`; a subprocess carries `exitCode` instead, and
-   * whichever is present decides whether the provider rejected the request — a non-2xx status
-   * or a non-zero exit. A process that produced neither (spawn failure, timeout) is a transport
-   * failure, not a rejection, and reaches `fail` rather than here.
+   * whichever is present decides the recorded outcome — 4xx and non-zero exit are rejections,
+   * while 5xx remains a server error because it proves nothing about paid acceptance. A process
+   * that produced neither (spawn failure, timeout) is a transport failure and reaches `fail`.
    */
   async finish(
     id: string,
@@ -217,34 +237,77 @@ export class ProviderCallStore {
       body: unknown;
     },
   ): Promise<void> {
-    await this.load();
-    const record = this.current.get(id);
-    if (!record) return;
-    const completedAt = new Date().toISOString();
-    const rejected = input.status !== undefined ? input.status >= 400 : input.exitCode !== 0;
-    await this.append({
-      ...record,
-      completedAt,
-      elapsedMs: Math.max(0, Date.parse(completedAt) - Date.parse(record.startedAt)),
-      status: rejected ? "rejected" : record.operation === "submit" ? "accepted" : "succeeded",
-      httpStatus: input.status ?? null,
-      exitCode: input.exitCode ?? null,
-      response: { headers: input.headers, body: input.body },
-      error: null,
+    await this.queue.enqueue(async () => {
+      await this.load();
+      const record = this.current.get(id);
+      if (!record || record.status !== "pending") return;
+      const completedAt = new Date().toISOString();
+      const rejected = input.status !== undefined ? input.status >= 400 && input.status < 500 : input.exitCode !== 0;
+      const serverError = input.status !== undefined && input.status >= 500;
+      await this.write({
+        ...record,
+        completedAt,
+        elapsedMs: Math.max(0, Date.parse(completedAt) - Date.parse(record.startedAt)),
+        status: rejected ? "rejected" : serverError ? "server-error" : record.operation === "submit" ? "accepted" : "succeeded",
+        httpStatus: input.status ?? null,
+        exitCode: input.exitCode ?? null,
+        response: { headers: input.headers, body: input.body },
+        error: null,
+      });
     });
   }
 
-  async fail(id: string, error: unknown): Promise<void> {
-    await this.load();
-    const record = this.current.get(id);
-    if (!record || record.status !== "pending") return;
-    const completedAt = new Date().toISOString();
-    await this.append({
-      ...record,
-      completedAt,
-      elapsedMs: Math.max(0, Date.parse(completedAt) - Date.parse(record.startedAt)),
-      status: "transport-failed",
-      error: safeError(error, this.secrets),
+  async respond(id: string, input: { status: number; headers: Record<string, string> }): Promise<void> {
+    await this.queue.enqueue(async () => {
+      await this.load();
+      const record = this.current.get(id);
+      if (!record || record.status !== "pending") return;
+      await this.write({
+        ...record,
+        httpStatus: input.status,
+        response: { headers: input.headers, body: null },
+      });
+    });
+  }
+
+  async fail(id: string, error: unknown, diagnostic?: ProviderTransportDiagnostic): Promise<void> {
+    await this.queue.enqueue(async () => {
+      await this.load();
+      const record = this.current.get(id);
+      if (!record || record.status !== "pending") return;
+      const completedAt = new Date().toISOString();
+      const elapsedMs = Math.max(0, Date.parse(completedAt) - Date.parse(record.startedAt));
+      await this.write({
+        ...record,
+        completedAt,
+        elapsedMs,
+        status: "transport-failed",
+        error: safeError(error, this.secrets, diagnostic),
+      });
+      if (diagnostic && this.transportFailureSink) {
+        try {
+          this.transportFailureSink({
+            kind: "provider.transport-failed",
+            provider: record.provider,
+            operation: record.operation,
+            method: record.method,
+            category: diagnostic.category,
+            code: diagnostic.code,
+            syscall: diagnostic.syscall,
+            elapsedMs,
+            outcomeWitnessed: record.httpStatus !== null,
+            error: {
+              name: diagnostic.errorName,
+              message: diagnostic.safeMessage,
+              causes: diagnostic.causes,
+            },
+            deadline: diagnostic.deadline,
+            policy: diagnostic.policy,
+          });
+        } catch {
+          /* operational logging cannot replace the provider failure */
+        }
+      }
     });
   }
 
@@ -264,7 +327,8 @@ export class ProviderCallStore {
       .map((record) => ProviderCallRecordSchema.parse(sanitize(record, this.secrets)));
   }
 
-  drain(): Promise<void> {
-    return this.queue.drain();
+  async drain(): Promise<void> {
+    while (this.captureTasks.size > 0) await Promise.allSettled(this.captureTasks);
+    await this.queue.drain();
   }
 }

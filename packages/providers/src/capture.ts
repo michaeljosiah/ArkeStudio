@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import type { ProviderId } from "@arke-studio/contracts";
+import type { Capability, ProviderId } from "@arke-studio/contracts";
 import { redactComfyUiBody } from "./comfyui/redact.js";
+import {
+  diagnoseProviderTransportError,
+  providerResponseTransportError,
+  ProviderTransportError,
+} from "./transport.js";
 import type {
   CommandResult,
   CommandRunner,
@@ -9,11 +14,19 @@ import type {
   ProviderCallCapture,
   ProviderCallContext,
   ProviderClient,
+  ProviderOperation,
+  ProviderTransport,
 } from "./types.js";
 
 interface Scope extends ProviderCallContext {
-  operation: string;
+  operation: ProviderOperation;
+  capability?: Capability;
+  operationSettled: boolean;
+  settleResponses: Set<(error?: unknown) => void>;
 }
+
+const RESPONSE_CAPTURE_MS = 5_000;
+const CAPTURE_DEADLINE = Symbol("capture-deadline");
 
 const SAFE_RESPONSE_HEADERS = new Set([
   "content-length",
@@ -118,25 +131,109 @@ function summarizeMedia(value: unknown, key = ""): unknown {
   return value;
 }
 
-async function responseBody(response: Response): Promise<unknown> {
+async function responseBytes(response: Response): Promise<Uint8Array | null> {
+  if (response.body === null) return new Uint8Array();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<typeof CAPTURE_DEADLINE>((resolve) => {
+    timer = setTimeout(() => resolve(CAPTURE_DEADLINE), RESPONSE_CAPTURE_MS);
+    timer.unref?.();
+  });
+  try {
+    for (;;) {
+      const read = await Promise.race([reader.read(), deadline]);
+      if (read === CAPTURE_DEADLINE) {
+        void reader.cancel().catch(() => {});
+        return null;
+      }
+      if (read.done) break;
+      chunks.push(read.value);
+      size += read.value.byteLength;
+    }
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+    try {
+      reader.releaseLock();
+    } catch {
+      /* cancellation can retain the lock until the pending read rejects */
+    }
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+interface CapturedResponseBody {
+  body: unknown;
+  complete: boolean;
+}
+
+async function responseBody(response: Response): Promise<CapturedResponseBody> {
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   const length = Number(response.headers.get("content-length"));
-  if (!contentType.includes("json") && !contentType.startsWith("text/")) {
-    const bytes = new Uint8Array(await response.arrayBuffer());
+  const bytes = await responseBytes(response);
+  if (bytes === null) {
     return {
-      binary: true,
-      contentType: contentType || "application/octet-stream",
-      sizeBytes: bytes.byteLength || (Number.isFinite(length) ? length : null),
-      sha256: sha256(bytes),
+      body: { truncated: true, reason: "provider response capture exceeded 5 seconds" },
+      complete: false,
     };
   }
-  const text = await response.text();
-  if (text.length === 0) return null;
-  try {
-    return summarizeMedia(JSON.parse(text));
-  } catch {
-    return text;
+  if (!contentType.includes("json") && !contentType.startsWith("text/")) {
+    return {
+      body: {
+        binary: true,
+        contentType: contentType || "application/octet-stream",
+        sizeBytes: bytes.byteLength || (Number.isFinite(length) ? length : null),
+        sha256: sha256(bytes),
+      },
+      complete: true,
+    };
   }
+  const text = new TextDecoder().decode(bytes);
+  if (text.length === 0) return { body: null, complete: true };
+  try {
+    return { body: summarizeMedia(JSON.parse(text)), complete: true };
+  } catch {
+    return { body: text, complete: true };
+  }
+}
+
+const BODY_READ_METHODS = new Set<PropertyKey>(["arrayBuffer", "blob", "bytes", "formData", "json", "text"]);
+
+function observeResponseBody(response: Response, succeeded: () => void, failed: (error: unknown) => void): Response {
+  return new Proxy(response, {
+    get(target, property) {
+      if (property === "clone") return () => observeResponseBody(target.clone(), succeeded, failed);
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      if (BODY_READ_METHODS.has(property)) {
+        return (...args: unknown[]) => {
+          try {
+            return Promise.resolve(Reflect.apply(value, target, args)).then(
+              (result) => {
+                succeeded();
+                return result;
+              },
+              (error) => {
+                failed(error);
+                throw error;
+              },
+            );
+          } catch (error) {
+            failed(error);
+            throw error;
+          }
+        };
+      }
+      return value.bind(target);
+    },
+  });
 }
 
 /**
@@ -180,9 +277,11 @@ export function captureProviderClient(
   fetchImpl: FetchLike,
   capture?: ProviderCallCapture,
   runImpl: CommandRunner = noRunner,
+  transport?: ProviderTransport,
+  transportOperation?: (operation: ProviderOperation) => boolean,
 ): ProviderClient {
-  if (!capture) return factory(fetchImpl, runImpl);
   const scope = new AsyncLocalStorage<Scope>();
+  const activeFetch = new AsyncLocalStorage<FetchLike>();
   // Graph confidentiality (SPEC-021 §2.10): a ComfyUI /prompt request IS the recipe's graph,
   // and history/queue responses can carry it back. What persists is a summary — digest, node
   // count, byte count — because payload history is displayed and copied in Activity, and R-1
@@ -190,7 +289,13 @@ export function captureProviderClient(
   const redact = (direction: "request" | "response", endpoint: string, body: unknown): unknown =>
     provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body) : body;
   const observedFetch: FetchLike = async (url, init) => {
-    const current = scope.getStore() ?? { operation: "provider" };
+    const request = activeFetch.getStore() ?? fetchImpl;
+    if (!capture) return request(url, init);
+    const current = scope.getStore() ?? {
+      operation: "provider",
+      operationSettled: false,
+      settleResponses: new Set<(error?: unknown) => void>(),
+    };
     const endpoint = endpointOf(url);
     const id = await capture.start({
       provider,
@@ -202,20 +307,69 @@ export function captureProviderClient(
       body: redact("request", endpoint, await requestBody(init?.body)),
     });
     try {
-      const response = await fetchImpl(url, init);
+      const response = await request(url, init);
       const clone = response.clone();
-      void responseBody(clone)
-        .then((body) =>
-          capture.finish(id, {
-            status: response.status,
-            headers: headersOf(response.headers),
-            body: redact("response", endpoint, body),
-          }),
-        )
-        .catch((error) => capture.fail(id, error));
-      return response;
+      const responded = capture.respond(id, { status: response.status, headers: headersOf(response.headers) }).catch(() => {});
+      let finalized = false;
+      let captureTimedOut = false;
+      let originalBodySucceeded = false;
+      const track = (task: Promise<void>): Promise<void> => {
+        capture.track?.(task);
+        return task;
+      };
+      const finish = (body: unknown): Promise<void> => {
+        if (finalized) return Promise.resolve();
+        finalized = true;
+        current.settleResponses.delete(settle);
+        return track(
+          responded.then(() =>
+            capture.finish(id, {
+              status: response.status,
+              headers: headersOf(response.headers),
+              body: redact("response", endpoint, body),
+            }).catch(() => {}),
+          ),
+        );
+      };
+      const fail = (error: unknown): Promise<void> => {
+        if (finalized) return Promise.resolve();
+        finalized = true;
+        current.settleResponses.delete(settle);
+        const failure = providerResponseTransportError(response, error);
+        return track(
+          responded.then(() =>
+            capture
+              .fail(id, failure ?? error, failure?.diagnostic ?? diagnoseProviderTransportError(error))
+              .catch(() => {}),
+          ),
+        );
+      };
+      const truncatedBody = { truncated: true, reason: "provider response capture exceeded 5 seconds" };
+      const settle = (operationError?: unknown) => {
+        if (!captureTimedOut) return;
+        if (operationError instanceof ProviderTransportError) void fail(operationError);
+        else if (current.operationSettled || originalBodySucceeded) void finish(truncatedBody);
+      };
+      current.settleResponses.add(settle);
+      const bodyCapture = responseBody(clone).then(
+        (captured) => {
+          if (captured.complete) return finish(captured.body);
+          captureTimedOut = true;
+          settle();
+        },
+        (error) => fail(error),
+      );
+      capture.track?.(bodyCapture);
+      return observeResponseBody(
+        response,
+        () => {
+          originalBodySucceeded = true;
+          settle();
+        },
+        (error) => void fail(error),
+      );
     } catch (error) {
-      await capture.fail(id, error);
+      await capture.fail(id, error, diagnoseProviderTransportError(error)).catch(() => {});
       throw error;
     }
   };
@@ -225,7 +379,12 @@ export function captureProviderClient(
    * only calls that would appear are the artifact downloads at the end.
    */
   const observedRun: CommandRunner = async (args, options) => {
-    const current = scope.getStore() ?? { operation: "provider" };
+    if (!capture) return runImpl(args, options);
+    const current = scope.getStore() ?? {
+      operation: "provider",
+      operationSettled: false,
+      settleResponses: new Set<(error?: unknown) => void>(),
+    };
     const id = await capture.start({
       provider,
       operation: current.operation,
@@ -243,9 +402,10 @@ export function captureProviderClient(
         await capture.fail(id, new Error(result.stderr.trim() || "the process produced no exit status"));
         return result;
       }
-      void capture
+      const finish = capture
         .finish(id, { exitCode: result.code, headers: {}, body: commandResponseBody(result) })
         .catch(() => {});
+      capture.track?.(finish);
       return result;
     } catch (error) {
       await capture.fail(id, error);
@@ -253,13 +413,52 @@ export function captureProviderClient(
     }
   };
   const client = factory(observedFetch, observedRun);
-  const run = <T>(operation: string, context: ProviderCallContext | undefined, fn: () => Promise<T>) =>
-    scope.run({ operation, ...context }, fn);
+  const run = <T>(
+    operation: ProviderOperation,
+    context: (ProviderCallContext & { capability?: Capability }) | undefined,
+    fn: () => Promise<T>,
+  ) => {
+    const current = {
+      operation,
+      ...context,
+      operationSettled: false,
+      settleResponses: new Set<(error?: unknown) => void>(),
+    } as Scope;
+    const invoke = (fetch: FetchLike) => activeFetch.run(fetch, () => scope.run(current, fn));
+    const executed = transport && (transportOperation?.(operation) ?? true)
+      ? transport.run(
+          {
+            provider,
+            operation,
+            ...(current.jobId !== undefined ? { jobId: current.jobId } : {}),
+            ...(current.attempt !== undefined ? { attempt: current.attempt } : {}),
+            ...(current.model !== undefined ? { model: current.model } : {}),
+            ...(current.capability !== undefined ? { capability: current.capability } : {}),
+          },
+          invoke,
+        )
+      : invoke(fetchImpl);
+    return executed.then(
+      (value) => {
+        current.operationSettled = true;
+        for (const settle of current.settleResponses) settle();
+        return value;
+      },
+      (error) => {
+        current.operationSettled = true;
+        for (const settle of current.settleResponses) settle(error);
+        throw error;
+      },
+    );
+  };
   const wrapped = {
     id: client.id,
     declarations: client.declarations,
     validateKey: (key) => run("validate", undefined, () => client.validateKey(key)),
-    submit: (key, request, context) => run("submit", context, () => client.submit(key, request, context)),
+    submit: (key, request, context) =>
+      run("submit", { ...context, model: request.model, capability: request.capability }, () =>
+        client.submit(key, request, context),
+      ),
     poll: (key, remoteId, context) => run("poll", context, () => client.poll(key, remoteId, context)),
     fetchArtifacts: (key, remoteId, context) =>
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),

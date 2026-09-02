@@ -59,10 +59,17 @@ export {
   type HiggsfieldDiscoveryOptions,
 } from "./higgsfield-cli.js";
 export { captureProviderClient } from "./capture.js";
+export {
+  diagnoseProviderTransportError,
+  providerResponseTransportError,
+  PROVIDER_RESPONSE_ERROR,
+  ProviderTransportError,
+} from "./transport.js";
 export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
+  ProviderBusyError,
   ProviderRequestRejectedError,
   type CommandResult,
   type CommandRunner,
@@ -73,6 +80,9 @@ export {
   type ProviderClient,
   type ProviderCallCapture,
   type ProviderCallContext,
+  type ProviderOperation,
+  type ProviderTransport,
+  type ProviderTransportScope,
   type VoiceCatalogueClient,
   type SubmitRequest,
   type SubmitResult,

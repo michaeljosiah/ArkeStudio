@@ -8,14 +8,15 @@ import {
   FAL_ENDPOINTS as ENDPOINTS,
   FAL_MODELS,
 } from "../fal-catalogue.generated.js";
-import type {
-  FetchedArtifact,
-  FetchLike,
-  PollResult,
-  PreparedImageReference,
-  ProviderClient,
-  SubmitRequest,
-  SubmitResult,
+import {
+  ProviderRequestRejectedError,
+  type FetchedArtifact,
+  type FetchLike,
+  type PollResult,
+  type PreparedImageReference,
+  type ProviderClient,
+  type SubmitRequest,
+  type SubmitResult,
 } from "../types.js";
 
 /**
@@ -309,7 +310,9 @@ export class FalClient implements ProviderClient {
       // there is no long local wait here to save, which is the thing abort exists for.
     });
     const requestId = (body as { request_id?: string } | null)?.request_id;
-    if (status >= 400 || !requestId) throw new Error(`fal: submit failed (HTTP ${status})`);
+    if (status >= 500) throw new Error(`fal: submit failed (HTTP ${status})`);
+    if (status >= 400) throw new ProviderRequestRejectedError(`fal: submit failed (HTTP ${status})`);
+    if (!requestId) throw new Error(`fal: submit response carried no request id (HTTP ${status})`);
     // The remote id carries its endpoint — polling is endpoint-scoped on FAL.
     return { remoteId: `${endpoint}::${requestId}`, acceptedAt: new Date().toISOString() };
   }

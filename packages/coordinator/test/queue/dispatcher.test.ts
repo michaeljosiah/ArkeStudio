@@ -52,6 +52,10 @@ async function makeHarness(
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     admit?: JobQueueOptions["admit"];
+    backoffBaseMs?: number;
+    backoffCapMs?: number;
+    rng?: () => number;
+    baseIntervalMs?: number;
   } = {},
 ): Promise<Harness> {
   const dir = await tempDir("arke-queue-");
@@ -73,6 +77,10 @@ function build(
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     admit?: JobQueueOptions["admit"];
+    backoffBaseMs?: number;
+    backoffCapMs?: number;
+    rng?: () => number;
+    baseIntervalMs?: number;
   },
 ): Harness {
   const events: DomainEvent[] = [];
@@ -119,6 +127,10 @@ function build(
     baseIntervalMs: 1,
     ...(opts.baseConcurrency !== undefined ? { baseConcurrency: opts.baseConcurrency } : {}),
     ...(opts.providerConcurrency !== undefined ? { providerConcurrency: opts.providerConcurrency } : {}),
+    ...(opts.backoffBaseMs !== undefined ? { backoffBaseMs: opts.backoffBaseMs } : {}),
+    ...(opts.backoffCapMs !== undefined ? { backoffCapMs: opts.backoffCapMs } : {}),
+    ...(opts.rng !== undefined ? { rng: opts.rng } : {}),
+    ...(opts.baseIntervalMs !== undefined ? { baseIntervalMs: opts.baseIntervalMs } : {}),
   });
   const harness: Harness = {
     queue,
@@ -1491,6 +1503,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     await g2.queue.start();
     await g2.queue.resolveHeld(job2.id, "discard");
     assert.equal(foldedJob(g2, job2.id)?.status, "cancelled");
+    assert.match(foldedJob(g2, job2.id)?.error ?? "", /may still complete or charge/);
     assert.equal(g2.ledger.entries.length, 1);
     assert.equal(g2.ledger.entries[0]!.outcome, "cancelled");
     assert.equal(g2.ledger.entries[0]!.actualMicroUsd, null, "the charge is unknown, not zero");
@@ -1562,7 +1575,7 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
-  it("a witnessed provider-fault submission rejection pauses before queued siblings can submit", async () => {
+  it("a witnessed provider-fault submission rejection pauses and queues the work for credential repair", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 402 payment required: quota exhausted");
     fake.submissionRejected = true;
@@ -1570,12 +1583,14 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     const siblings = await Promise.all(Array.from({ length: 4 }, () => h.queue.enqueue(INPUT)));
-    await until(() => foldedJob(h, first.id)?.status === "failed", "the witnessed rejection to terminalize", FOLD_MS);
+    await until(() => h.queue.queueStatus("fake").paused, "the witnessed provider fault to pause the lane", FOLD_MS);
+    assert.equal(foldedJob(h, first.id)?.status, "queued");
     assert.equal(foldedJob(h, first.id)?.failureClass, "provider-fault");
     assert.equal(h.queue.queueStatus("fake").paused, true);
     assert.equal(h.faults.length, 1);
     assert.equal(fake.submitCount, 1, "the lane pauses before runJob's finally can pump a sibling");
     assert.ok(siblings.every((job) => foldedJob(h, job.id)?.status === "queued"));
+    assert.equal(h.ledger.entries.length, 0, "credential repair can resume the original work");
     h.queue.dispose();
   });
 
@@ -1630,6 +1645,7 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
   it("a 401 with forty queued jobs: paused, told once, zero failed, others keep running", async () => {
     const bad = new FakeProvider({ supportsIdempotencyKey: true });
     bad.submitError = new Error("HTTP 401 the credential was rejected");
+    bad.submissionRejected = true;
     const good = new FakeProvider({});
     const h = await makeHarness({ bad, good }, { baseConcurrency: 1 });
     await h.queue.start();
@@ -1682,6 +1698,19 @@ describe("retry classification (R-7, R-9, D5)", () => {
     h.queue.dispose();
   });
 
+  it("a witnessed 5xx still reconciles when the paid outcome is ambiguous", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("HTTP 503 unavailable");
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation", "the ambiguous response to hold", FOLD_MS);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.attempt, 1);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may have accepted and charged/);
+    h.queue.dispose();
+  });
+
   it("a content-policy rejection is not retried and the reason surfaces", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 400 content policy violation: depicts a real person");
@@ -1717,6 +1746,145 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.equal(fake.submitCount, 3);
     assert.equal(foldedJob(h, job.id)?.attempt, 3);
     assert.deepEqual(new Set(fake.submittedKeys).size, 1, "every safe retry carries the same persisted key");
+    h.queue.dispose();
+  });
+
+  it("an error that declares itself transient is backed off, and the class survives giving up", async () => {
+    // A local engine whose card has no room for the recipe (#692). Its message matches no
+    // pattern, so only the class the client declared makes it a retry — and the failed row has
+    // to keep that class, because it is what every frame-run surface offers Retry on.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = Object.assign(
+      new Error("comfyui: Draft Image needs 5.9 GB of free graphics memory and this machine has 2.0 GB free. Close other programs using the graphics card, then try again."),
+      { failureClass: "transient" },
+    );
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the job to fold to failed", FOLD_MS);
+    assert.equal(fake.submitCount, 3, "a busy engine is retried, bounded");
+    assert.equal(foldedJob(h, job.id)?.attempt, 3);
+    assert.equal(foldedJob(h, job.id)?.failureClass, "transient", "an exhausted transient keeps a live Retry (SPEC-036 R-18)");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /^gave up after 3 attempts: comfyui: Draft Image needs/);
+    h.queue.dispose();
+  });
+
+  it("waits out the backoff before resubmitting, even when the attempt outlasted the interval", async () => {
+    // The lane timer alone never held a retry: the failing attempt's own completion pumps the
+    // lane, and an attempt longer than the dispatch interval met an open gate. Every real
+    // provider call is longer than the interval, so every retry went straight back out.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 30;
+    const h = await makeHarness({ fake }, { backoffBaseMs: 200, backoffCapMs: 200, rng: () => 1 });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "the job to fold to succeeded", FOLD_MS);
+    assert.equal(fake.submitCount, 2);
+    const gap = fake.submitStartedAt[1]! - fake.submitStartedAt[0]!;
+    assert.ok(gap >= 200, `resubmitted ${gap} ms after the first attempt began; the backoff is 200 ms`);
+    h.queue.dispose();
+  });
+
+  it("holds only the job that is backing off, never a sibling queued behind it", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 10;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 300, backoffCapMs: 300, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    await until(() => [first.id, second.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both jobs to succeed", FOLD_MS);
+    assert.equal(fake.submitCount, 3);
+    const [a, b, aAgain] = fake.submittedKeys;
+    assert.notEqual(b, a, "the sibling went out while the first job waited");
+    assert.equal(aAgain, a, "the first job went out last, after its backoff");
+    const held = fake.submitStartedAt[2]! - fake.submitStartedAt[0]!;
+    assert.ok(held >= 300, `the retry waited ${held} ms; the backoff is 300 ms`);
+    h.queue.dispose();
+  });
+
+  it("lets siblings ride the lane's interval while a retry's long backoff timer is armed", async () => {
+    // With a retry sitting out its backoff, the lane timer is armed for the end of it, and every
+    // wakeup asked for in the meantime — the interval after a sibling's dispatch, the interval
+    // after it finished — was dropped because a timer already existed. The job behind that
+    // sibling then waited out a backoff that was never its own.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 40;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 1200, backoffCapMs: 1200, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    // Let the interval wakeup from the failed attempt fire and re-arm the timer for the backoff.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    await until(() => [second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "both siblings to succeed", FOLD_MS);
+    const [a, b, c] = fake.submittedKeys;
+    assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
+    const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
+    assert.ok(gap < 600, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 1200 ms backoff`);
+    await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
+    h.queue.dispose();
+  });
+
+  it("reports queue positions in the order the pump will take, not the raw FIFO", async () => {
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    fake.submitDelayMs = 80;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 400, backoffCapMs: 400, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    assert.equal(h.queue.queuePosition(third.id), 0, "next up, although the retry precedes it in the FIFO");
+    assert.equal(h.queue.queuePosition(first.id), 1, "the retry takes its turn once its backoff ends");
+    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
+    h.queue.dispose();
+  });
+
+  it("places a retry whose backoff ends between two gates ahead of the FIFO behind it", async () => {
+    // The pump dispatches one job per lane interval and re-reads eligibility at each gate. A
+    // one-off split into ready and waiting reported B, C, A here; the pump takes B, then finds
+    // A's backoff over at the next gate and takes A before C.
+    const fake = new FakeProvider({ supportsIdempotencyKey: true });
+    fake.submitError = new Error("HTTP 503 unavailable");
+    fake.submitErrorTimes = 1;
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 600, backoffBaseMs: 900, backoffCapMs: 900, rng: () => 1 });
+    await h.queue.start();
+    const first = await h.queue.enqueue(INPUT);
+    await until(
+      () => foldedJob(h, first.id)?.status === "queued" && foldedJob(h, first.id)?.attempt === 1,
+      "the first job to be requeued on its backoff",
+      FOLD_MS,
+    );
+    const second = await h.queue.enqueue(INPUT);
+    const third = await h.queue.enqueue(INPUT);
+    assert.equal(h.queue.queuePosition(second.id), 0, "goes out at the next gate, while the retry is still backing off");
+    assert.equal(h.queue.queuePosition(first.id), 1, "its backoff is over by the gate after that, and it precedes the third job in the FIFO");
+    assert.equal(h.queue.queuePosition(third.id), 2);
+    await until(() => [first.id, second.id, third.id].every((id) => foldedJob(h, id)?.status === "succeeded"), "all three to succeed", FOLD_MS);
+    const [a, b, aAgain, c] = fake.submittedKeys;
+    assert.ok(b !== a && aAgain === a && c !== a && c !== b, "the pump took them in the order it reported");
     h.queue.dispose();
   });
 });
@@ -1829,6 +1997,43 @@ describe("offline holds rather than fails (R-17, D13)", () => {
     h2.queue.dispose();
   });
 
+  it("requeues a witnessed rejection after restart instead of inventing uncertainty", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake });
+    const now = new Date().toISOString();
+    const submitting: Job = {
+      id: `jb_${"8".repeat(26)}`,
+      idempotencyKey: "01J8E100000000000000000J94",
+      worldId: WORLD,
+      target: { kind: "character-sheet", id: "maren-kest/witnessed" },
+      capability: "image",
+      provider: "fake",
+      model: "gpt-image-2",
+      params: {},
+      estimatedMicroUsd: 40000,
+      status: "submitting",
+      providerJobId: null,
+      attempt: 1,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const rejected: Job = {
+      ...submitting,
+      status: "queued",
+      submissionRejected: true,
+      failureClass: "transient",
+      error: "HTTP 429 rate limit",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(submitting)}\n${JSON.stringify(rejected)}\n`, "utf8");
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((row) => row.jobId === submitting.id)?.action, "requeued");
+    await until(() => foldedJob(h2, submitting.id)?.status === "succeeded", "the rejected attempt to retry", FOLD_MS);
+    assert.equal(fake.submitCount, 1);
+    h2.queue.dispose();
+  });
+
   it("a guaranteed-idempotent offline submission retries with one key and a hard ceiling", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("fetch failed: ENOTFOUND queue.fal.run");
@@ -1932,6 +2137,36 @@ describe("artifact verification (R-12, R-13, D12)", () => {
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
+  it("does not warn about a charge when queued remote work never reached the provider", async () => {
+    const fake = new FakeProvider({});
+    fake.pollState = "running";
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    await h.queue.start();
+    const blocker = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, blocker.id)?.status === "running", "the first job to hold the lane", FOLD_MS);
+    const job = await h.queue.enqueue(INPUT);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    assert.equal(fake.submitCount, 1, "only the lane-blocking job reached the provider");
+    h.queue.dispose();
+  });
+
+  it("does not warn after a witnessed rejection left the job queued", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("HTTP 402 payment required");
+    fake.submissionRejected = true;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => h.queue.queueStatus("fake").paused, "the rejected attempt to pause the lane", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.submissionRejected, true);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    h.queue.dispose();
+  });
+
   it("cancelling a running job attempts the remote cancel and still writes a ledger entry", async () => {
     const fake = new FakeProvider({ reportsCost: true });
     fake.pollState = "running"; // the remote work never finishes on its own
@@ -1941,6 +2176,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => foldedJob(h, job.id)?.status === "running", "the job to fold to running", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
     assert.equal(fake.cancelCount, 1);
     assert.equal(h.ledger.entries.length, 1);
     assert.equal(h.ledger.entries[0]!.outcome, "cancelled");
@@ -1971,6 +2207,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await h.queue.cancel(job.id);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null, "local cancellation makes no remote-charge claim");
     assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
@@ -2003,6 +2240,8 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => h.ledger.entries.at(-1)?.outcome === "cancelled", "the cancellation to reach the ledger", FOLD_MS);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
+    assert.equal(foldedJob(h, job.id)?.failureClass, null);
     assert.equal(submits, 1);
     h.queue.dispose();
   });
@@ -2031,6 +2270,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => release !== undefined, "the provider to hold the in-flight submission", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
     assert.equal(fake.cancelCount, 0, "there is nothing to cancel remotely until the id comes back");
     release!();
     await until(() => fake.cancelCount === 1, "the cancellation to reach the provider", FOLD_MS);

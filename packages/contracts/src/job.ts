@@ -146,6 +146,8 @@ export const JobSchema = z
     providerJobId: z.string().nullable().default(null),
     /** Physical submission calls authorized, persisted before provider I/O (SPEC-009 R-9). */
     attempt: z.number().int().min(0).default(0),
+    /** The last submit response proved that attempt was rejected, so cancellation cannot imply a charge. */
+    submissionRejected: z.boolean().optional(),
     /** Where artifacts land, world-relative — the caller's meaning, not this spec's (§1.2). */
     landing: z
       .object({

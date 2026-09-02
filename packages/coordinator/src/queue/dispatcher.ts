@@ -213,8 +213,12 @@ interface Lane {
   maxConcurrent: number;
   minIntervalMs: number;
   nextAllowedAt: number;
+  /** Earliest dispatch time per queued job — a retry's backoff (R-9), held by the job itself. */
+  notBefore: Map<string, number>;
   successStreak: number;
   timer: NodeJS.Timeout | null;
+  /** When `timer` fires, so an earlier request can replace it. */
+  timerAt: number;
   recoveryGate: Promise<void> | null;
   recoveryBlocked: boolean;
   deferredRecovery: Array<() => Promise<void>>;
@@ -354,8 +358,10 @@ export class JobQueue {
         maxConcurrent: this.concurrencyFor(provider),
         minIntervalMs: this.baseIntervalMs,
         nextAllowedAt: 0,
+        notBefore: new Map(),
         successStreak: 0,
         timer: null,
+        timerAt: 0,
         recoveryGate: null,
         recoveryBlocked: false,
         deferredRecovery: [],
@@ -426,9 +432,32 @@ export class JobQueue {
   queuePosition(jobId: string): number | null {
     const job = this.jobs.get(jobId);
     if (!job || job.status !== "queued") return null;
-    const lane = this.lane(job.provider);
-    const i = lane.fifo.indexOf(jobId);
+    const i = this.dispatchOrder(this.lane(job.provider)).indexOf(jobId);
     return i === -1 ? null : i;
+  }
+
+  /**
+   * The FIFO as the pump will take it, walked gate by gate: the pump dispatches one job per
+   * lane interval, taking the first queued job whose backoff has ended by that gate, so a retry
+   * whose backoff ends between two gates goes out ahead of the FIFO entries behind it. The raw
+   * FIFO put a backing-off retry ahead of the job that was actually next, and a one-off split
+   * into ready and waiting put it behind jobs it would in fact precede; "0 = next up" (R-11)
+   * was wrong either way for the length of every backoff.
+   */
+  private dispatchOrder(lane: Lane): string[] {
+    const remaining = lane.fifo.filter((id) => this.jobs.get(id)?.status === "queued");
+    const order: string[] = [];
+    let gate = Math.max(Date.now(), lane.nextAllowedAt);
+    while (remaining.length > 0) {
+      const at = remaining.findIndex((id) => (lane.notBefore.get(id) ?? 0) <= gate);
+      if (at === -1) {
+        gate = Math.min(...remaining.map((id) => lane.notBefore.get(id) ?? 0));
+        continue;
+      }
+      order.push(remaining.splice(at, 1)[0]!);
+      gate += lane.minIntervalMs;
+    }
+    return order;
   }
 
   listJobs(): Job[] {
@@ -542,9 +571,9 @@ export class JobQueue {
       return;
     }
     while (lane.inFlight.size < lane.maxConcurrent && lane.fifo.length > 0) {
-      const jobId = lane.fifo.shift()!;
-      const job = this.jobs.get(jobId);
-      if (!job || job.status !== "queued") continue;
+      const jobId = this.nextDispatchable(lane);
+      if (jobId === null) break;
+      const job = this.jobs.get(jobId)!;
       const runKey = this.engineRunKey(job);
       lane.inFlight.add(runKey);
       lane.nextAllowedAt = Date.now() + lane.minIntervalMs;
@@ -564,12 +593,61 @@ export class JobQueue {
     }
   }
 
+  /**
+   * The first job in the FIFO whose turn has come, taken out of it — or null, with a pump
+   * scheduled for the earliest one still waiting out its backoff.
+   *
+   * A retry used to go back into the FIFO with only a lane timer to hold it, and the timer held
+   * nothing: the failing attempt's own completion pumps the lane, and an attempt that outlasted
+   * the dispatch interval — every real provider call — met an open gate and went straight back
+   * out. R-9's backoff was computed and never waited on, and a card still putting a model down
+   * (#692) was asked four times over in the time it takes to ask once. The wait belongs to the
+   * job rather than the lane: the sibling behind it is not what failed, and holding the whole
+   * lane for one retry's backoff would let a single 503 stall everything queued behind it.
+   */
+  private nextDispatchable(lane: Lane): string | null {
+    const now = Date.now();
+    let earliest = Infinity;
+    for (let i = 0; i < lane.fifo.length; i += 1) {
+      const jobId = lane.fifo[i]!;
+      const job = this.jobs.get(jobId);
+      if (!job || job.status !== "queued") {
+        lane.fifo.splice(i, 1);
+        lane.notBefore.delete(jobId);
+        i -= 1;
+        continue;
+      }
+      const at = lane.notBefore.get(jobId) ?? 0;
+      if (at <= now) {
+        lane.fifo.splice(i, 1);
+        lane.notBefore.delete(jobId);
+        return jobId;
+      }
+      earliest = Math.min(earliest, at);
+    }
+    if (earliest !== Infinity) this.schedule(lane, earliest - now);
+    return null;
+  }
+
+  /**
+   * Wake the pump `delayMs` from now. A timer is a promise to wake by a time, so an earlier
+   * request replaces a later one: with a retry sitting out a thirty-second backoff, the lane's
+   * own interval wakeup and a sibling's enqueue were both dropped because a timer already
+   * existed, and every ready job waited out a backoff that was never theirs.
+   */
   private schedule(lane: Lane, delayMs: number): void {
-    if (this.disposed || lane.timer) return;
+    if (this.disposed) return;
+    const delay = Math.max(1, delayMs);
+    const at = Date.now() + delay;
+    if (lane.timer) {
+      if (at >= lane.timerAt) return;
+      clearTimeout(lane.timer);
+    }
+    lane.timerAt = at;
     lane.timer = setTimeout(() => {
       lane.timer = null;
       this.pump(lane.provider);
-    }, Math.max(1, delayMs));
+    }, delay);
     lane.timer.unref?.();
   }
 
@@ -733,7 +811,13 @@ export class JobQueue {
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
-    const submitting: Job = { ...job, status: "submitting", attempt: job.attempt + 1, updatedAt: this.clock() };
+    const submitting: Job = {
+      ...job,
+      status: "submitting",
+      attempt: job.attempt + 1,
+      submissionRejected: undefined,
+      updatedAt: this.clock(),
+    };
     await this.transition(submitting);
     if (this.disposed) return;
     if (!this.stillSubmitting(submitting)) return;
@@ -815,15 +899,16 @@ export class JobQueue {
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
-    if (typeof err === "object" && err !== null && "submissionRejected" in err) {
-      // Witnessed rejection is terminal for this attempt. Credential/quota/billing rejection also
-      // poisons the lane: pause before terminalization returns to runJob's finally, or that finally
-      // can pump the queued sibling immediately through the same known-bad provider state.
-      if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
+    const submissionRejected =
+      typeof err === "object" && err !== null && (err as { submissionRejected?: unknown }).submissionRejected === true;
+    if (submissionRejected && klass === "terminal") {
+      // A witnessed request/content rejection is terminal. A witnessed 429 still takes the
+      // transient branch below, and a credential fault returns to queued behind a paused lane.
+      // A 5xx never reaches this branch: a response alone does not prove paid work was rejected.
       await this.terminalize(job, "failed", message, undefined, klass);
       return;
     }
-    if (!local && !client.declarations.supportsIdempotencyKey) {
+    if (!submissionRejected && !local && !client.declarations.supportsIdempotencyKey) {
       await this.holdForUser(job, klass);
       if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
       return;
@@ -831,30 +916,60 @@ export class JobQueue {
     switch (klass) {
       case "provider-fault": {
         // The job was never wrong — the credential was (R-8). Back to queued, lane paused.
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "fault", message);
         return;
       }
       case "offline": {
         if (job.attempt >= this.maxAttempts) {
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "offline", "offline — jobs stay queued and resume with connectivity");
         return;
       }
       case "transient": {
         if (job.attempt >= this.maxAttempts) {
-          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`);
+          // The class the queue retried on is the class the failed row keeps: an exhausted
+          // transient reads `came back dark · Retry` (SPEC-036 R-18), and re-reading the wrapped
+          // message would lose a class that was only ever declared on the error object (#692).
+          await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         const lane = this.lane(job.provider);
+        const wait = backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng);
+        // The gate is the job's own (nextDispatchable), and the pump that follows this return
+        // arms the wakeup for it; a timer armed here for the whole backoff used to outrank the
+        // lane's interval wakeup and hold every ready sibling. A 429 is deliberately not pushed
+        // onto the lane-wide gate as well: noteRateLimit has already widened the lane's interval
+        // (R-10), which is the lane's answer to it, and this backoff is the job's.
+        lane.notBefore.set(job.id, Date.now() + wait);
         lane.fifo.push(job.id);
-        this.schedule(lane, backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
         return;
       }
       case "terminal": {
@@ -1239,6 +1354,7 @@ export class JobQueue {
   private async cancelInner(jobId: string, job: Job): Promise<void> {
     const lane = this.lane(job.provider);
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
+    lane.notBefore.delete(jobId);
     const submitAbort = this.submitAborts.get(jobId);
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
@@ -1262,8 +1378,19 @@ export class JobQueue {
           .catch(() => {});
       }
     }
+    // A local abort ends our wait, not necessarily the provider's work. Preserve that distinction
+    // without turning a deliberate cancellation into a reconciliation hold.
+    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+    const outcomeMayBeRemote =
+      !local &&
+      (job.status === "submitting" ||
+        job.providerJobId != null ||
+        (job.attempt > 0 && job.submissionRejected !== true));
+    const reason = outcomeMayBeRemote
+      ? "Cancelled in Arke. The provider may still complete or charge for this request."
+      : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", null);
+    await this.terminalize(job, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
@@ -1403,7 +1530,12 @@ export class JobQueue {
         }
         const client = this.opts.clients[job.provider];
         const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
-        if (!local && !client?.declarations.supportsIdempotencyKey && prior?.status === "submitting") {
+        if (
+          !local &&
+          !client?.declarations.supportsIdempotencyKey &&
+          prior?.status === "submitting" &&
+          job.submissionRejected !== true
+        ) {
           const action = await this.holdForUser(job);
           report.push(action);
           continue;
@@ -1706,6 +1838,7 @@ export class JobQueue {
     for (const job of orphans) {
       const lane = this.lane(job.provider);
       lane.fifo = lane.fifo.filter((id) => id !== job.id);
+      lane.notBefore.delete(job.id);
       const replacement = requeueAs?.(job) ?? null;
       if (replacement !== null) {
         const retiredRun = this.engineRunKey(job);
@@ -1761,7 +1894,11 @@ export class JobQueue {
         return;
       }
       // Abandoned — but the ledger still records it (R-15): the charge is unknown, not zero.
-      await this.terminalize(job, "cancelled", "abandoned after an unwitnessed submission");
+      await this.terminalize(
+        job,
+        "cancelled",
+        "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
+      );
       this.emitQueueStatus(job.provider);
     } finally {
       this.resolvingHeld.delete(jobId);

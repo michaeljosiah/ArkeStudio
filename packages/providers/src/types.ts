@@ -3,6 +3,7 @@ import type {
   CapabilityProbe,
   ClientDeclarations,
   ProviderId,
+  ProviderTransportDiagnostic,
   RecipeIdentity,
 } from "@arke-studio/contracts";
 
@@ -122,6 +123,8 @@ export interface FetchedArtifact {
 
 /** A credential failure is a provider fault, never a work failure (R-4). */
 export class ProviderAuthError extends Error {
+  readonly submissionRejected = true;
+
   constructor(
     readonly provider: ProviderId,
     message: string,
@@ -138,6 +141,27 @@ export class ProviderRequestRejectedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ProviderRequestRejectedError";
+  }
+}
+
+/**
+ * The provider cannot take the request right now, and nothing about the request is why — a
+ * graphics card without room for the recipe, most likely, with another job's model still on it.
+ * The same request is expected to succeed later, so this is SPEC-009's transient: the queue
+ * backs off and retries it, bounded, and a failure it gives up on keeps a live Retry (SPEC-036
+ * R-18). A rejection of the request itself is `ProviderRequestRejectedError`, and terminal.
+ *
+ * Found by a run of six local frames (#692): the card ran short on alternate shots, the message
+ * told the user to try again, and the queue had classed the failure terminal — so no surface
+ * could offer the retry the message promised. The class is declared here, where the condition
+ * is witnessed, because no reading of the message can tell it from a refusal.
+ */
+export class ProviderBusyError extends Error {
+  readonly failureClass = "transient" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderBusyError";
   }
 }
 
@@ -166,7 +190,31 @@ export interface ProviderCallContext {
   model?: string;
 }
 
+export type ProviderOperation =
+  | "provider"
+  | "validate"
+  | "submit"
+  | "poll"
+  | "fetch-artifacts"
+  | "cancel"
+  | "lookup-by-key"
+  | "list-recent"
+  | "list-voices";
+
+export interface ProviderTransportScope extends ProviderCallContext {
+  provider: ProviderId;
+  operation: ProviderOperation;
+  capability?: Capability;
+}
+
+/** Host-owned operation policy. Provider clients continue to receive an ordinary FetchLike. */
+export interface ProviderTransport {
+  run<T>(scope: ProviderTransportScope, operation: (fetch: FetchLike) => Promise<T>): Promise<T>;
+}
+
 export interface ProviderCallCapture {
+  /** Keep detached response-body capture alive through the host's final drain. */
+  track(task: Promise<void>): void;
   start(input: {
     provider: ProviderId;
     operation: string;
@@ -177,12 +225,14 @@ export interface ProviderCallCapture {
     headers: Record<string, string>;
     body: unknown;
   }): Promise<string>;
+  /** Response headers arrived. Persist this before a body timeout can erase that fact. */
+  respond(id: string, input: { status: number; headers: Record<string, string> }): Promise<void>;
   /** `status` for HTTP, `exitCode` for a subprocess — whichever the call actually produced. */
   finish(
     id: string,
     input: { status?: number; exitCode?: number | null; headers: Record<string, string>; body: unknown },
   ): Promise<void>;
-  fail(id: string, error: unknown): Promise<void>;
+  fail(id: string, error: unknown, diagnostic?: ProviderTransportDiagnostic): Promise<void>;
 }
 
 export interface VoiceCatalogueClient extends ProviderClient {

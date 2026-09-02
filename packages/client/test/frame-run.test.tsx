@@ -704,6 +704,26 @@ describe("durable run projections", () => {
     assert.equal([...firstRow.querySelectorAll("button")].some((button) => button.textContent === "Retry"), false);
   });
 
+  it("drops the lane-held suffix once an offline job has given up", async () => {
+    // A queued offline job is genuinely held: the dispatcher paused the lane and resumes it with
+    // connectivity. The exhausted job is terminal and nothing is paused, so its row must not
+    // promise a resume (issue 697).
+    const queued = frameState({ first: { status: "queued", failureClass: "offline", error: "fetch failed", etaSec: null } });
+    const item = await mount(stateWith({ runs: [queued] }));
+    const firstRow = one(item, '[data-testid="workspace-row-sh_12"]')!;
+    assert.match(firstRow.textContent ?? "", /fetch failed · lane held/);
+
+    const exhausted = { status: "failed" as const, failureClass: "offline" as const, error: "gave up after 4 attempts: fetch failed", etaSec: null };
+    await act(async () => __setStateForTest(stateWith({ runs: [frameState({ first: exhausted })] })));
+    assert.match(firstRow.textContent ?? "", /gave up after 4 attempts: fetch failed/);
+    assert.doesNotMatch(firstRow.textContent ?? "", /lane held/);
+
+    await act(async () => __setStateForTest(stateWith({ runs: [frameState({ mode: "board", first: exhausted })] })));
+    const durableFailure = one(item, ".fy-swrunboards")!;
+    assert.match(durableFailure.textContent ?? "", /Board A.*gave up after 4 attempts: fetch failed/);
+    assert.doesNotMatch(durableFailure.textContent ?? "", /lane held/);
+  });
+
   it("reviews this run's filed artifact with the shot in its accessible name and dismisses", async () => {
     const sent: ClientMessage[] = [];
     const complete = frameState({ first: { status: "succeeded", finalization: "complete", etaSec: null }, firstLanding: "filed", second: { status: "failed", failureClass: "terminal", error: "invalid parameters", etaSec: null } });
@@ -775,6 +795,18 @@ describe("durable frame-run reports in Arke", () => {
     const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
     assert.match(failure.textContent ?? "", /content policy/);
     assert.equal(failure.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
+  it("names an exhausted offline failure without claiming the lane is held", async () => {
+    const offline = frameState({
+      first: { status: "failed", failureClass: "offline", error: "gave up after 4 attempts: fetch failed", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      secondLanding: "filed",
+    });
+    const item = await mountReport([offline]);
+    const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
+    assert.match(failure.textContent ?? "", /gave up after 4 attempts: fetch failed/);
+    assert.doesNotMatch(failure.textContent ?? "", /lane held/);
   });
 });
 

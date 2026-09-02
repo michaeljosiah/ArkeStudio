@@ -255,9 +255,18 @@ function FrameRunReport({
   );
 }
 
-function frameRunFailureCopy(state: { failureClass: string | null; error: string | null }): string {
+function frameRunFailureCopy(state: { status: string; failureClass: string | null; error: string | null }): string {
   if (state.failureClass === "provider-fault") return state.error === null ? "provider fault · lane held" : `${state.error} · lane held`;
-  if (state.failureClass === "offline") return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  if (state.failureClass === "offline") {
+    // Offline holds the lane only while the job is still queued or running. The report names
+    // shots that have already failed, and a job that gave up after its last attempt is terminal
+    // with nothing paused behind it — so "lane held" here promised a resume that was never
+    // coming (issue 697). Provider-fault keeps the suffix: a credential rejection pauses the
+    // lane even as it terminalizes the job.
+    const held = state.status === "queued" || state.status === "submitting" || state.status === "running";
+    if (!held) return state.error ?? "offline";
+    return state.error === null ? "offline · lane held" : `${state.error} · lane held`;
+  }
   if (state.failureClass === "terminal") return state.error ?? "the provider refused this request";
   return state.error ?? "came back dark";
 }
