@@ -165,6 +165,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** One sheet form press: accepted, merged into the proposal already there, undone, or refused. */
+  z
+    .object({
+      ...base,
+      type: z.literal("sheet.edit-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      action: z.enum(["edit", "undo"]),
+      disposition: z.enum(["accepted", "merged", "restored", "refused"]),
+      proposalId: ProposalIdSchema.optional(),
+      reason: z.string().min(1).optional(),
+      ripples: z.array(RippleItemSchema).optional(),
+      undoVersion: z.number().int().min(1).optional(),
+    })
+    .strict(),
+
   /**
    * The correlated answer to one create-scene request: the scene is durable and this is its id,
    * or nothing was written and this is why.

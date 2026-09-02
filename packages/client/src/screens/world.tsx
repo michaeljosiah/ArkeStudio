@@ -15,6 +15,7 @@ import {
   type FrameRate,
   type Job,
   type PendingSheet,
+  type RippleItem,
   type Sheet,
   type WorldBundle,
   DEFAULT_NARRATOR,
@@ -58,6 +59,7 @@ import {
   askCanon,
   assignVoice,
   subscribeVoiceAssignmentResults,
+  subscribeSheetEditResults,
   subscribeVoiceUploadConfirmations,
   createProduction,
   subscribeProductionCreateResults,
@@ -84,6 +86,7 @@ import {
   stageCanonAmendment as stageAmendmentMsg,
   stageCanonEntry as stageEntryMsg,
   stageSheetEdit,
+  restoreSheetVersion,
   extractArtifact,
   fileArtifactMsg,
   importFolder,
@@ -2074,9 +2077,15 @@ export const LocationDetailScreen = () => <SheetDetail screenId="location-detail
 export function CharacterEditScreen() {
   const { worldId, sheetId } = useParams();
   const sheet = useSheet(worldId, sheetId);
-  const navigate = useNavigate();
   const [edited, setEdited] = useState<Record<string, string>>({});
-  const [stagedAt, setStagedAt] = useState<number | null>(null);
+  const [stagedAt, setStagedAt] = useState<string | null>(null);
+  const [editResult, setEditResult] = useState<{
+    disposition: "accepted" | "merged" | "restored" | "refused";
+    reason?: string;
+    ripples: RippleItem[];
+    undoVersion?: number;
+  } | null>(null);
+  const undoRequest = useRef<string | null>(null);
   const [instruction, setInstruction] = useState("");
   const { state } = useStore();
   const harnessReady = state?.app.health.harness.status === "healthy";
@@ -2103,13 +2112,44 @@ export function CharacterEditScreen() {
   // The sheet's open studio conversation, if one is staged — sends continue it.
   const sheetDir = sheet ? (sheet.type === "character" ? "characters" : `${sheet.type}s`) : "characters";
   const chatPath = sheet ? `${sheetDir}/${sheet.id}.md` : null;
-  const chatProposal =
+  const targetProposal =
     chatPath === null
       ? null
       : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
+  const chatProposal = targetProposal?.proposal.source.startsWith("chat:") ? targetProposal : null;
   const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
   const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
   const chatRunning = chatActivity?.status === "running";
+  useEffect(
+    () =>
+      subscribeSheetEditResults((result) => {
+        if (result.worldId !== worldId || result.path !== chatPath) return;
+        if (result.action === "edit") {
+          if (result.requestId !== stagedAt) return;
+          setStagedAt(null);
+          setEditResult({
+            disposition: result.disposition,
+            ripples: result.ripples ?? [],
+            ...(result.reason !== undefined ? { reason: result.reason } : {}),
+            ...(result.undoVersion !== undefined ? { undoVersion: result.undoVersion } : {}),
+          });
+          if (result.disposition === "accepted" || result.disposition === "merged") {
+            setEdited({});
+            setEditedRole(null);
+          }
+          if (result.disposition === "merged" && result.proposalId === chatProposal?.proposal.id) setMode("chat");
+          return;
+        }
+        if (result.requestId !== undoRequest.current) return;
+        undoRequest.current = null;
+        setEditResult({
+          disposition: result.disposition,
+          ripples: [],
+          ...(result.reason !== undefined ? { reason: result.reason } : {}),
+        });
+      }),
+    [chatPath, chatProposal?.proposal.id, stagedAt, worldId],
+  );
   const sendToStudio = () => {
     if (!sheet || !worldId || !chatPath || instruction.trim().length === 0) return;
     if (chatProposal) {
@@ -2135,7 +2175,7 @@ export function CharacterEditScreen() {
                   />
                   <span className="fy-mono">
                     {sheet.status === "locked"
-                      ? "canon locked, edits are proposed"
+                      ? "canon locked · edits stay versioned"
                       : "sketch — still yours to shape"}
                   </span>
                 </span>
@@ -2165,6 +2205,46 @@ export function CharacterEditScreen() {
           </span>
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
+          {editResult && (
+            <div className="dom-proposal__notice" role={editResult.disposition === "refused" ? "alert" : "status"}>
+              <strong>
+                {editResult.disposition === "refused"
+                  ? "This edit was not written."
+                  : editResult.disposition === "merged"
+                    ? "Your fields joined the proposal already here."
+                    : editResult.disposition === "restored"
+                      ? "The previous sheet version is restored."
+                      : "The sheet is updated."}
+              </strong>{" "}
+              {editResult.reason}
+              {editResult.ripples.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div className="fy-mono">What this changed elsewhere</div>
+                  {editResult.ripples.map((ripple, index) => (
+                    <div key={`${ripple.kind}-${index}`} className="fy-ripplerow">
+                      <span className="fy-dot fy-dot--warn" />
+                      {ripple.summary}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="dom-proposal__noticeactions">
+                {editResult.disposition === "accepted" && editResult.undoVersion !== undefined && chatPath && worldId && (
+                  <Button
+                    onClick={() => {
+                      undoRequest.current = restoreSheetVersion(worldId, chatPath, editResult.undoVersion!);
+                    }}
+                    disabled={undoRequest.current !== null}
+                  >
+                    Undo edit
+                  </Button>
+                )}
+                <Button variant="ghost" onClick={() => setEditResult(null)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          )}
           {mode === "form" ? (
             <>
               {editsRole && (
@@ -2233,6 +2313,7 @@ export function CharacterEditScreen() {
                   />
                 </div>
               )}
+              {chatProposal && <ConnectedProposalPanel key={chatProposal.proposal.id} staged={chatProposal} />}
               <div style={{ marginTop: "auto" }}>
                 <Textarea
                   placeholder={
@@ -2254,12 +2335,6 @@ export function CharacterEditScreen() {
                   <DictationButton
                     onText={(text) => setInstruction((prev) => (prev ? `${prev} ${text}` : text))}
                   />
-                  {chatProposal && (
-                    <span className="fy-mono">
-                      conversation on proposal {chatProposal.proposal.id.slice(0, 10)}… · accept or discard it
-                      on the sheet page
-                    </span>
-                  )}
                   <span className="fy-h1row__push" />
                   <Button
                     variant="primary"
@@ -2280,7 +2355,7 @@ export function CharacterEditScreen() {
       </div>
       <div className="fy-gate__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <div style={{ font: "600 15px var(--font-sans)" }}>Proposed sheet</div>
+          <div style={{ font: "600 15px var(--font-sans)" }}>Sheet edit</div>
           <span className="fy-mono" style={{ color: dirty ? "var(--warning)" : undefined }}>
             {sheet
               ? `v${sheet.version + 1} draft · ${changedCount} field${changedCount === 1 ? "" : "s"} changed`
@@ -2346,24 +2421,14 @@ export function CharacterEditScreen() {
           ))}
           {changedCount === 0 && (
             <div className="fy-mono" style={{ marginTop: 12 }}>
-              nothing changed yet — edits preview here before they stage
+              nothing changed yet — edits preview here before they save
             </div>
           )}
         </div>
         <div className="fy-draftcard">
-          <div style={{ font: "600 13px var(--font-sans)" }}>Ripples</div>
-          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-            <span className="fy-ripplerow">
-              <span className="fy-dot fy-dot--warn" />
-              reference tiles made against v{sheet?.version ?? "…"} will age
-            </span>
-            <span className="fy-ripplerow">
-              <span className="fy-dot fy-dot--sketch" />
-              productions pick the change up on their next dispatch
-            </span>
-          </div>
+          <div style={{ font: "600 13px var(--font-sans)" }}>After save</div>
           <div className="fy-mono" style={{ marginTop: 10 }}>
-            computed precisely on the staged proposal · nothing lands until you accept
+            ripples are computed under the world lock · any non-empty result appears here after the edit lands
           </div>
         </div>
         <div style={{ flex: 1, minHeight: 16 }} />
@@ -2375,19 +2440,21 @@ export function CharacterEditScreen() {
             onClick={() => {
               if (!sheet || !worldId) return;
               const dir = sheet.type === "character" ? "characters" : `${sheet.type}s`;
-              stageSheetEdit(
+              const requestId = stageSheetEdit(
                 worldId,
                 `${dir}/${sheet.id}.md`,
                 `Edit ${sheet.name}`,
                 sections,
+                changed.map((section) => section.heading),
                 roleChanged ? role.trim() : undefined,
               );
-              setStagedAt(Date.now());
-              const base = sheet.type === "character" ? "cast" : `${sheet.type}s`;
-              navigate(`/w/${worldId}/${base}/${sheet.id}`);
+              if (requestId !== null) {
+                setStagedAt(requestId);
+                setEditResult(null);
+              }
             }}
           >
-            {stagedAt ? "Staging…" : `Stage proposal · the sheet becomes v${(sheet?.version ?? 0) + 1}`}
+            {stagedAt ? "Saving…" : `Save edit · the sheet becomes v${(sheet?.version ?? 0) + 1}`}
           </Button>
           <Button
             variant="ghost"
@@ -3794,10 +3861,11 @@ export function CanonThreadScreen() {
 
   // Draft-in-context (18a): the thread's conversation runs on a proposal over the entry file.
   const chatPath = entry ? `canon/${entry.id}.md` : null;
-  const chatProposal =
+  const targetProposal =
     chatPath === null
       ? null
       : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
+  const chatProposal = targetProposal?.proposal.source.startsWith("chat:") ? targetProposal : null;
   const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
   const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
   const chatRunning = chatActivity?.status === "running";
@@ -3853,6 +3921,7 @@ export function CanonThreadScreen() {
               />
             </div>
           )}
+          {chatProposal && <ConnectedProposalPanel key={chatProposal.proposal.id} staged={chatProposal} />}
           <div style={{ marginTop: 2 }}>
             <Composer
               value={message}
