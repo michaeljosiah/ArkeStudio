@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ART_DIRECTION_PATH, ArtDirectionRecordSchema } from "@arke-studio/contracts";
-import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
+import { acceptDecided, explainAcceptRefusal, ProposalManager } from "../../src/gate/proposals.js";
 import { editSheetContent } from "../../src/sheets/authoring.js";
 import { projectReview } from "../../src/gate/review.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -837,8 +837,18 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
     await store.reload();
     await store.reconcileExternalEdit("references/maren-kest/kit.json");
 
+    const blocked = await gate.accept(a.id);
+    assert.equal(blocked.status, "needs-reconfirm");
     const outcome = await acceptDecided(gate, a.id);
     assert.equal(outcome.status, "accepted", "the press writes rather than asking a question nobody posed");
+    if (outcome.status === "accepted") {
+      assert.ok(outcome.ripples.length > 0, "the exact authoritative set survives the accept that computed it");
+      assert.deepEqual(
+        outcome.ripples,
+        blocked.status === "needs-reconfirm" ? blocked.authoritative.items : [],
+        "the caller receives the governing items rather than a second projection",
+      );
+    }
     await store.close();
   });
 
@@ -859,6 +869,35 @@ describe("ripples: preview and authority (R-8..R-10)", () => {
 
     const outcome = await acceptDecided(gate, a.id);
     assert.equal(outcome.status, "stale", "the staleness guard is not what this press waives");
+    await store.close();
+  });
+
+  it("refuses every accept while a proposal still carries an unanswered choice", async () => {
+    const { store, gate } = await openGate();
+    const proposal = await gate.stage({
+      kind: "sheet-edit",
+      summary: "questioned edit",
+      source: "world-chat:test",
+      targets: [{ path: MAREN }],
+      openChoices: [
+        {
+          choiceId: "duplicate-or-amend:cand_test",
+          kind: "duplicate-or-amend",
+          question: "Is this new or an amendment?",
+          options: [
+            { optionId: "create", label: "Keep it separate" },
+            { optionId: "amend:CANON-001", label: "Amend CANON-001" },
+          ],
+        },
+      ],
+    });
+
+    const ordinary = await gate.accept(proposal.id);
+    const decided = await acceptDecided(gate, proposal.id);
+    assert.deepEqual(ordinary, { status: "open-choices", count: 1 });
+    assert.deepEqual(decided, ordinary, "acceptDecided does not bypass a question");
+    assert.match(explainAcceptRefusal(ordinary), /answered on the approvals screen/);
+    assert.ok((await gate.listOpen()).some((one) => one.id === proposal.id), "the draft stays recoverable");
     await store.close();
   });
 });

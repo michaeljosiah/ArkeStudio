@@ -190,6 +190,7 @@ export interface ProposalGateNotice {
     | "no-op"
     | "pending-review"
     | "unresolved-conflicts"
+    | "open-choices"
     | "target-retired"
     | "invalid"
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown; accepting is not offered. */
@@ -206,6 +207,7 @@ const NOTICE_TITLES: Record<ProposalGateNotice["reason"], string> = {
   "no-op": "Nothing to accept",
   "pending-review": "Review the merged result",
   "unresolved-conflicts": "Conflicted fields await a choice",
+  "open-choices": "A question still needs your answer",
   "target-retired": "The target was retired",
   invalid: "This draft cannot be written as it stands",
   "draft-unresolved": "An edit to this proposal did not finish",
@@ -242,6 +244,7 @@ export function ProposalPanel({
   onDiscard,
   onRebase,
   onResolve,
+  onResolveChoice,
   onMarkSeen,
   onSendBack,
   disabledReason,
@@ -252,6 +255,7 @@ export function ProposalPanel({
   onDiscard?: () => void;
   onRebase?: () => void;
   onResolve?: (path: string, field: string, choice: "mine" | "theirs") => void;
+  onResolveChoice?: (choiceId: string, optionId: string) => void;
   onMarkSeen?: () => void;
   /** Present only for a proposal that came from a conversation there is still somewhere to send it to. */
   onSendBack?: () => void;
@@ -260,6 +264,7 @@ export function ProposalPanel({
   const { proposal, ripple } = staged;
   const conflicts = proposal.conflicts ?? [];
   const unresolved = conflicts.filter((c) => c.resolution === undefined);
+  const openChoices = proposal.openChoices ?? [];
   return (
     <Card className="dom-proposal">
       <div className="dom-proposal__head">
@@ -360,6 +365,28 @@ export function ProposalPanel({
           ))}
         </div>
       )}
+      {openChoices.length > 0 && (
+        <div className="dom-proposal__conflicts">
+          {openChoices.map((choice) => (
+            <div key={choice.choiceId} className="dom-conflict">
+              <div className="dom-conflict__field">{choice.question}</div>
+              <div className="dom-conflict__choices">
+                {choice.options.map((option) => (
+                  <button
+                    key={option.optionId}
+                    type="button"
+                    className="dom-conflict__choice"
+                    disabled={!onResolveChoice}
+                    onClick={() => onResolveChoice?.(choice.choiceId, option.optionId)}
+                  >
+                    <span className="dom-conflict__value">{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       <RippleList ripple={ripple} />
       <div className="dom-proposal__actions">
         {proposal.pendingReview ? (
@@ -370,8 +397,8 @@ export function ProposalPanel({
           <Button
             variant="primary"
             onClick={() => onAccept?.()}
-            disabled={!onAccept || unresolved.length > 0}
-            title={disabledReason}
+            disabled={!onAccept || unresolved.length > 0 || openChoices.length > 0}
+            title={openChoices.length > 0 ? "Answer the question above before accepting" : disabledReason}
           >
             Accept
           </Button>

@@ -1,6 +1,7 @@
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
+  CanonIdSchema,
   CanonEntrySchema,
   editShot,
   EpisodeSchema,
@@ -20,6 +21,7 @@ import {
   type Shot,
   type WorldBundle,
   type WorldChangeCandidate,
+  WorldChangeCandidateSchema,
   type WorldChatLinkRef,
 } from "@arke-studio/contracts";
 import { ZodError } from "zod";
@@ -78,6 +80,46 @@ export interface Materialised {
   /** Which fields this proposition actually changes, for the origin record. */
   fields: string[];
   reservedCanonIds: string[];
+}
+
+export interface ChoiceMaterialised extends Materialised {
+  action: "create" | "amend";
+}
+
+/** Rebuild a questioned Canon create as the create or canonical amendment the person selected. */
+export function materialiseDuplicateChoice(
+  candidate: WorldChangeCandidate,
+  optionId: string,
+  reservedCanonId: string,
+  bundle: WorldBundle,
+  at: string,
+): ChoiceMaterialised {
+  if (candidate.classification !== "canon.create") {
+    throw new MaterialiseError(candidate.id, "this question no longer belongs to a new Canon rule");
+  }
+  if (optionId === "create") {
+    const id = CanonIdSchema.parse(reservedCanonId);
+    const built = materialiseCandidate(
+      candidate,
+      { canonIds: [id], slugBy: new Map(), canonIdBy: new Map([[candidate.id, id]]) },
+      bundle,
+      at,
+    );
+    return { ...built, action: "create" };
+  }
+
+  const match = /^amend:(CANON-[0-9]+)$/.exec(optionId);
+  if (!match) throw new MaterialiseError(candidate.id, "that answer cannot be turned into a Canon change");
+  const entryId = CanonIdSchema.parse(match[1]);
+  if (!candidate.checks.likelyDuplicates.some((ref) => ref.kind === "canon" && ref.entryId === entryId)) {
+    throw new MaterialiseError(candidate.id, `${entryId} was not one of this question's Canon matches`);
+  }
+  const amendment = WorldChangeCandidateSchema.parse({
+    ...candidate,
+    classification: "canon.amend",
+    target: { kind: "canon", entryId },
+  });
+  return { ...materialiseCandidate(amendment, { canonIds: [], slugBy: new Map(), canonIdBy: new Map() }, bundle, at), action: "amend" };
 }
 
 /**

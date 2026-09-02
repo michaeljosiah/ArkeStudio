@@ -69,6 +69,7 @@ import {
   orderedLocationViews,
   type QueueCommand,
   type RuntimeProbes,
+  type RippleItem,
   type VoiceCandidate,
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
@@ -376,6 +377,7 @@ import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
 import { acceptDecided, explainAcceptRefusal, landed } from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
+import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
 import { recoverWrapUps } from "./world-chat/wrapup-recovery.js";
 import { cleanTitle, namingBrief, titleFrom } from "./world-chat/title.js";
@@ -1875,6 +1877,8 @@ export class Coordinator {
       parsed.type !== "appearance.changed" &&
       parsed.type !== "update.status" &&
       parsed.type !== "voice.runtime-test" &&
+      // This is after-the-fact UI news derived from the accept result, not a second domain record.
+      parsed.type !== "world-chat.ripples" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
       parsed.type !== "vendor-auth.status" &&
@@ -3545,6 +3549,8 @@ export class Coordinator {
                       ? "pending-review"
                       : outcome.status === "unresolved-conflicts"
                         ? "unresolved-conflicts"
+                        : outcome.status === "open-choices"
+                          ? "open-choices"
                         : outcome.status === "invalid"
                           ? "invalid"
                           : outcome.status === "draft-unresolved"
@@ -3555,6 +3561,8 @@ export class Coordinator {
                   ? `moved since drafting: ${outcome.stalePaths.join(", ")}`
                   : outcome.status === "unresolved-conflicts"
                     ? `${outcome.count} conflicted field${outcome.count === 1 ? "" : "s"} await a choice`
+                    : outcome.status === "open-choices"
+                      ? `${outcome.count} question${outcome.count === 1 ? "" : "s"} must be answered below before this can be accepted`
                     : outcome.status === "target-retired"
                       ? `retired: ${outcome.paths.join(", ")}`
                       : outcome.status === "invalid"
@@ -3620,6 +3628,67 @@ export class Coordinator {
         const gate = this.opts.provider.gate?.();
         if (!gate) return;
         await gate.markSeen(msg.proposalId).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "proposal-resolve-choice": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        if (!store || !gate) return;
+        if (this.refuseWhileDrafting(msg.worldId, msg.proposalId)) return;
+        let detail: string | null = null;
+        try {
+          const proposal = await gate.readManifest(msg.proposalId);
+          const candidateId = msg.choiceId.startsWith("duplicate-or-amend:")
+            ? msg.choiceId.slice("duplicate-or-amend:".length)
+            : null;
+          const origin = candidateId
+            ? (proposal.worldChatOrigins ?? []).find((one) => one.candidateId === candidateId)
+            : undefined;
+          if (!candidateId || !origin) throw new Error("The point behind this question is no longer available.");
+          const loaded = await new WorldChatService(store.dir).load(origin.conversationId as ConversationId);
+          const candidate = loaded?.candidates.find(
+            (one) => one.id === candidateId && one.revision === origin.candidateRevision,
+          );
+          if (!candidate) throw new Error("The conversation point changed, so this answer cannot be applied.");
+          const reservedId = /^canon\/(CANON-[0-9]+)\.md$/.exec(origin.targetPaths[0] ?? "")?.[1] ?? "";
+          const outcome = await gate.resolveOpenChoice(msg, (_current, bundle, at) => {
+            const built = materialiseDuplicateChoice(candidate, msg.optionId, reservedId, bundle, at);
+            return {
+              candidateId,
+              action: built.action,
+              targets: built.targets,
+              fields: built.fields,
+            };
+          });
+          if (outcome.status !== "updated") {
+            detail =
+              outcome.status === "stale"
+                ? "This proposal changed while you were answering. Review the latest version and answer again."
+                : outcome.status === "draft-unresolved"
+                  ? "An earlier edit did not finish, so this answer cannot safely be applied."
+                  : outcome.status === "rejected"
+                    ? outcome.message
+                    : outcome.status === "invalid-option"
+                      ? "That answer is not offered for this question."
+                      : "That question has already been answered or removed.";
+          }
+        } catch (err) {
+          detail =
+            err instanceof Error
+              ? err.message
+              : "This answer could not be applied, so the proposal was left alone.";
+        }
+        if (detail) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "proposal.blocked",
+            worldId: msg.worldId,
+            proposalId: msg.proposalId,
+            reason: "invalid",
+            detail,
+          });
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -3747,6 +3816,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const gate = this.opts.provider.gate?.();
         if (!store || !gate) return;
+        const ripples: RippleItem[] = [];
         try {
           /*
            * Staged and accepted in one motion — the assign-voice rule, which the art-direction
@@ -3794,6 +3864,7 @@ export class Coordinator {
               continue;
             }
             const outcome = await acceptDecided(gate, proposalId);
+            if (outcome.status === "accepted") ripples.push(...outcome.ripples);
             const at = new Date().toISOString();
             if (landed(outcome) && staged) {
               // The conversation's own account of what became of its propositions (§6.5).
@@ -3849,6 +3920,16 @@ export class Coordinator {
             detail: refusalDetail(
               err instanceof WrapUpError ? err.message : "This could not be written, so nothing was.",
             ),
+          });
+        }
+        if (ripples.length > 0) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.ripples",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            items: ripples,
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -3978,6 +4059,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const gate = this.opts.provider.gate?.();
         if (!store || !gate) return;
+        const ripples: RippleItem[] = [];
         try {
           await wrapUp({
             store,
@@ -4004,6 +4086,7 @@ export class Coordinator {
               const staged = await gate.readManifest(proposalId).catch(() => null);
               if (staged?.openChoices?.length) return null;
               const outcome = await acceptDecided(gate, proposalId);
+              if (outcome.status === "accepted") ripples.push(...outcome.ripples);
               const at = new Date().toISOString();
               // The gate's own words, carried out to the rail. Discarding them left the person
               // with a count and no cause, and left this path undiagnosable from a log.
@@ -4048,6 +4131,16 @@ export class Coordinator {
                 ? err.message
                 : "This did not finish. Check the proposals before trying again — some of them may already be there.",
             ),
+          });
+        }
+        if (ripples.length > 0) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "world-chat.ripples",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            requestId: msg.requestId,
+            items: ripples,
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);

@@ -23,6 +23,7 @@ import {
   type SizeTier,
   type QueueCommand,
   type RankedVoice,
+  type RippleItem,
   type ReconcileAction,
   type WorldChatContext,
   type BenchMode,
@@ -61,6 +62,7 @@ export interface GateNotice {
     | "no-op"
     | "pending-review"
     | "unresolved-conflicts"
+    | "open-choices"
     | "target-retired"
     | "invalid"
     /** #70 SS11.4.1: an in-place edit whose outcome is unknown, so accepting is not offered. */
@@ -219,6 +221,8 @@ interface StoreState {
    * and a second window's refusal must not end the first window's wait.
    */
   worldChatWrapUpRefusals: Record<string, { requestId: string; detail: string }>;
+  /** Last no-preview accept consequence per conversation; transient and dismissible. */
+  worldChatRipples: Record<string, { requestId: string; items: RippleItem[] }>;
   /**
    * What the studio is doing right now, by conversation (#70 §15.3).
    *
@@ -314,6 +318,7 @@ let current: StoreState = {
   dictation: {},
   worldChatRefusals: {},
   worldChatWrapUpRefusals: {},
+  worldChatRipples: {},
   worldChatProgress: {},
   voiceSidecar: null,
   voiceRuntimeTest: null,
@@ -1112,6 +1117,7 @@ function handleFrame(json: string): void {
     let dictation = current.dictation;
     let worldChatRefusals = current.worldChatRefusals;
     let worldChatWrapUpRefusals = current.worldChatWrapUpRefusals;
+    let worldChatRipples = current.worldChatRipples;
     let worldChatProgress = current.worldChatProgress;
     let voiceSidecar = current.voiceSidecar;
     let voiceRuntimeTest = current.voiceRuntimeTest;
@@ -1183,6 +1189,11 @@ function handleFrame(json: string): void {
       worldChatWrapUpRefusals = {
         ...worldChatWrapUpRefusals,
         [event.conversationId]: { requestId: event.requestId, detail: event.detail },
+      };
+    } else if (event.type === "world-chat.ripples") {
+      worldChatRipples = {
+        ...worldChatRipples,
+        [event.conversationId]: { requestId: event.requestId, items: event.items },
       };
     } else if (event.type === "world-chat.progress") {
       worldChatProgress = {
@@ -1364,6 +1375,7 @@ function handleFrame(json: string): void {
       dictation,
       worldChatRefusals,
       worldChatWrapUpRefusals,
+      worldChatRipples,
       worldChatProgress,
       voiceSidecar,
       voiceRuntimeTest,
@@ -1750,6 +1762,24 @@ export function resolveProposalConflict(
 
 export function markProposalSeen(worldId: string, proposalId: string): void {
   send({ kind: "proposal-mark-seen", worldId, proposalId });
+}
+
+export function resolveProposalChoice(
+  worldId: string,
+  proposalId: string,
+  choiceId: string,
+  optionId: string,
+  expectedDraftRevision: number,
+): void {
+  send({
+    kind: "proposal-resolve-choice",
+    worldId,
+    requestId: crypto.randomUUID(),
+    proposalId,
+    choiceId,
+    optionId,
+    expectedDraftRevision,
+  });
 }
 
 export function useGateNotices(): Record<string, GateNotice> {
@@ -3523,6 +3553,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     dictation: {},
     worldChatRefusals: {},
     worldChatWrapUpRefusals: {},
+    worldChatRipples: {},
     worldChatProgress: {},
     voiceSidecar: null,
     voiceRuntimeTest: null,
@@ -3660,6 +3691,11 @@ export function saveWorldChatPoint(
     delete cleared[conversationId];
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
+  if (sent && current.worldChatRipples[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatRipples };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatRipples: cleared });
+  }
   return sent ? requestId : null;
 }
 
@@ -3687,6 +3723,11 @@ export function rejectWorldChatPoint(
     const cleared = { ...current.worldChatWrapUpRefusals };
     delete cleared[conversationId];
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
+  }
+  if (sent && current.worldChatRipples[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatRipples };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatRipples: cleared });
   }
   return sent;
 }
@@ -3739,6 +3780,11 @@ export function wrapUpWorldChat(
     delete cleared[conversationId];
     emitChange({ ...current, worldChatWrapUpRefusals: cleared });
   }
+  if (sent && current.worldChatRipples[conversationId] !== undefined) {
+    const cleared = { ...current.worldChatRipples };
+    delete cleared[conversationId];
+    emitChange({ ...current, worldChatRipples: cleared });
+  }
   return sent ? requestId : null;
 }
 
@@ -3782,6 +3828,20 @@ export function useWorldChatWrapUpRefusal(
 ): { requestId: string; detail: string } | null {
   const refusals = useStore().worldChatWrapUpRefusals;
   return conversationId ? (refusals[conversationId] ?? null) : null;
+}
+
+export function useWorldChatRipples(
+  conversationId: string | undefined,
+): { requestId: string; items: RippleItem[] } | null {
+  const notices = useStore().worldChatRipples;
+  return conversationId ? (notices[conversationId] ?? null) : null;
+}
+
+export function dismissWorldChatRipples(conversationId: string): void {
+  if (current.worldChatRipples[conversationId] === undefined) return;
+  const next = { ...current.worldChatRipples };
+  delete next[conversationId];
+  emitChange({ ...current, worldChatRipples: next });
 }
 
 /**

@@ -5,8 +5,9 @@ import { describe, it } from "node:test";
 import { DraftUnresolvedError, ProposalManager } from "../../src/gate/proposals.js";
 import { draftRecordPath, draftStagingPath, DRAFT_JOURNAL_DIR } from "../../src/gate/draft-journal.js";
 import { WorldStore } from "../../src/world/store.js";
-import { MarkdownFile } from "../../src/world/text-files.js";
+import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup } from "../tmp.js";
 
 /**
  * In-place edits on the approvals screen, and what survives a crash (#70 §11.4.1).
@@ -178,6 +179,87 @@ describe("an edit against a revision somebody else moved on", () => {
     });
     assert.equal(outcome.status, "unknown-target");
     await store.close();
+  });
+});
+
+describe("an open-choice answer rematerialises through the draft journal", () => {
+  it("replaces a reserved create with an amendment, refreshes its base, and is idempotent", async () => {
+    const { dir, store, gate } = await openGate();
+    closeOnCleanup(() => store.close());
+    const existing = store.getBundle().canon[0]!;
+    const existingPath = `canon/${existing.id}.md`;
+    const live = await readFile(join(dir, existingPath), "utf8");
+    const amended = MarkdownFile.parse(live);
+    amended.setBody("The amended rule governs the western bell.");
+    const candidateId = "cand_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    const createdPath = "canon/CANON-999.md";
+    const proposal = await gate.stage({
+      kind: "worldbuilding",
+      summary: "The western bell",
+      source: "world-chat:cv_1",
+      preReservedCanonIds: ["CANON-999"],
+      targets: [
+        {
+          path: createdPath,
+          content: "---\nid: CANON-999\ntype: rule\ntitle: The western bell\nstatus: settled\nintroducedAt: 0\nlinks: []\n---\n\nThe western bell is separate.\n",
+        },
+      ],
+      worldChatOrigins: [
+        {
+          requestId: "wrap-1",
+          conversationId: "cv_1",
+          candidateId,
+          candidateRevision: 1,
+          targetPaths: [createdPath],
+          fields: ["title", "statement"],
+        },
+      ],
+      openChoices: [
+        {
+          choiceId: `duplicate-or-amend:${candidateId}`,
+          kind: "duplicate-or-amend",
+          question: `Is this new, or a change to ${existing.id}?`,
+          options: [
+            { optionId: "create", label: "It is new" },
+            { optionId: `amend:${existing.id}`, label: `It changes ${existing.id}` },
+          ],
+        },
+      ],
+    });
+    const answer = {
+      proposalId: proposal.id,
+      requestId: "choice-1",
+      choiceId: `duplicate-or-amend:${candidateId}`,
+      optionId: `amend:${existing.id}`,
+      expectedDraftRevision: 1,
+    };
+
+    const outcome = await gate.resolveOpenChoice(answer, () => ({
+      candidateId,
+      action: "amend",
+      targets: [{ path: existingPath, content: amended.serialize() }],
+      fields: ["statement"],
+    }));
+    assert.equal(outcome.status, "updated");
+    const manifest = await gate.readManifest(proposal.id);
+    assert.equal(manifest.draftRevision, 2);
+    assert.deepEqual(manifest.openChoices, []);
+    assert.deepEqual(manifest.targets.map((target) => target.path), [existingPath]);
+    assert.equal(manifest.targets[0]!.baseHash, sha256(live), "the amendment is based on the live entry now");
+    assert.equal(
+      await readFile(join(proposalDir(dir, proposal.id), "_base", existingPath), "utf8"),
+      live,
+      "the refreshed base travels with the proposal",
+    );
+    assert.match(await readFile(join(proposalDir(dir, proposal.id), existingPath), "utf8"), /amended rule/);
+    assert.ok(await readFile(join(proposalDir(dir, proposal.id), "ripple.json"), "utf8"), "the ripple preview refreshed");
+
+    const retry = await gate.resolveOpenChoice(answer, () => {
+      throw new Error("an idempotent retry must not rematerialise");
+    });
+    assert.equal(retry.status, "updated");
+    assert.equal((await gate.readManifest(proposal.id)).draftRevision, 2, "the answer lands once");
+    assert.deepEqual(await journalEntries(dir, proposal.id), [], "the settled answer leaves no journal behind");
   });
 });
 

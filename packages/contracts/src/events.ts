@@ -27,6 +27,7 @@ import {
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema, ReconcileActionSchema } from "./job.js";
 import { ProviderIdSchema, ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import { ProviderCallRecordSchema } from "./provider-call.js";
+import { RippleItemSchema } from "./proposal.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
   LocalRuntimeStatusSchema,
@@ -149,6 +150,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       productionId: SlugSchema,
       sceneFile: z.string().min(1),
       reason: z.string().min(1),
+    })
+    .strict(),
+
+  /** Authoritative consequences of a no-preview World Chat accept; transient news, never a task. */
+  z
+    .object({
+      ...base,
+      type: z.literal("world-chat.ripples"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      requestId: z.string().min(1),
+      items: z.array(RippleItemSchema).min(1),
     })
     .strict(),
 
@@ -334,6 +347,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
         "no-op",
         "pending-review",
         "unresolved-conflicts",
+        "open-choices",
         "target-retired",
         /** Authored content broke a bound the gate enforces, e.g. an over-long role (SPEC-007 R-18). */
         "invalid",

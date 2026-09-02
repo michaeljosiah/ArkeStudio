@@ -1150,6 +1150,39 @@ describe("domain events and frames", () => {
     assert.throws(() => ClientMessageSchema.parse({ ...edit, targetPath: "../../etc/passwd" }));
   });
 
+  it("strictly correlates an open-choice answer to the draft shown", () => {
+    const answer = {
+      kind: "proposal-resolve-choice",
+      worldId: WORLD_ID,
+      requestId: "req-choice-1",
+      proposalId: "pr_1",
+      choiceId: "duplicate-or-amend:cand_1",
+      optionId: "amend:CANON-018",
+      expectedDraftRevision: 1,
+    };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(answer));
+    for (const missing of ["requestId", "choiceId", "optionId", "expectedDraftRevision"]) {
+      const { [missing]: _dropped, ...without } = answer as Record<string, unknown>;
+      assert.throws(() => ClientMessageSchema.parse(without), `${missing} must be required`);
+    }
+    assert.throws(() => ClientMessageSchema.parse({ ...answer, expectedDraftRevision: 0 }));
+    assert.throws(() => ClientMessageSchema.parse({ ...answer, targetPath: "canon/CANON-018.md" }));
+  });
+
+  it("carries non-empty authoritative World Chat ripples as transient news", () => {
+    const event = {
+      at: "2026-08-04T08:00:00Z",
+      type: "world-chat.ripples",
+      worldId: WORLD_ID,
+      conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      requestId: "req-save-1",
+      items: [{ kind: "gains-cross-reference", summary: "CANON-018 gains one reference", targets: ["CANON-018"] }],
+    };
+    assert.doesNotThrow(() => DomainEventSchema.parse(event));
+    assert.throws(() => DomainEventSchema.parse({ ...event, items: [] }), "empty sets emit no event");
+    assert.throws(() => DomainEventSchema.parse({ ...event, durable: true }), "the event contract is strict");
+  });
+
   it("validates client messages", () => {
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "hello", lastSeq: 12 }));
     assert.doesNotThrow(() => ClientMessageSchema.parse({ kind: "open-world", worldId: WORLD_ID }));

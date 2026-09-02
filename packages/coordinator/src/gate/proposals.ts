@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -23,6 +23,7 @@ import {
   type ProposalConflict,
   type ProposalOpenChoice,
   type ProposalSkill,
+  type WorldBundle,
   type WorldChatProposalOrigin,
   type RippleItem,
   type RipplePreview,
@@ -114,6 +115,29 @@ export interface UpdateFieldInput {
   expectedDraftRevision: number;
 }
 
+export interface ResolveOpenChoiceInput {
+  proposalId: string;
+  requestId: string;
+  choiceId: string;
+  optionId: string;
+  expectedDraftRevision: number;
+}
+
+export interface ChoiceMaterialisation {
+  candidateId: string;
+  action: "create" | "amend";
+  targets: Array<{ path: string; content: string }>;
+  fields: string[];
+}
+
+export type ResolveOpenChoiceOutcome =
+  | { status: "updated"; proposal: Proposal }
+  | { status: "stale"; currentDraftRevision: number }
+  | { status: "unknown-choice" }
+  | { status: "invalid-option" }
+  | { status: "rejected"; message: string }
+  | { status: "draft-unresolved"; records: string[] };
+
 export type UpdateFieldOutcome =
   | { status: "updated"; proposal: Proposal }
   /** Somebody else moved it on. Carries what it now is, so the screen can reload rather than guess. */
@@ -155,12 +179,13 @@ export class DraftUnresolvedError extends Error {
 }
 
 export type AcceptOutcome =
-  | { status: "accepted"; result: CommitResult }
+  | { status: "accepted"; result: CommitResult; ripples: RippleItem[] }
   | { status: "no-op" }
   | { status: "stale"; stalePaths: string[] }
   | { status: "needs-reconfirm"; authoritative: RipplePreview; signature: string }
   | { status: "pending-review" }
   | { status: "unresolved-conflicts"; count: number }
+  | { status: "open-choices"; count: number }
   | { status: "target-retired"; paths: string[] }
   /** An in-place edit whose outcome could not be determined; accepting past it is not offered. */
   | { status: "draft-unresolved"; records: string[] }
@@ -242,6 +267,8 @@ export function explainAcceptRefusal(outcome: AcceptOutcome): string {
       return "it was rebased onto newer work and has to be read before it can be written";
     case "unresolved-conflicts":
       return `${outcome.count} of its fields conflict with a change made since, and only a person can choose between them`;
+    case "open-choices":
+      return `${outcome.count} question${outcome.count === 1 ? "" : "s"} must be answered on the approvals screen before this can be written`;
     case "target-retired":
       return `${outcome.paths.join(", ")} has been retired, so it can no longer be changed`;
     case "draft-unresolved":
@@ -587,6 +614,99 @@ export class ProposalManager {
     });
   }
 
+  /** Answer one proposal-local question and replace that candidate's targets as one journalled edit. */
+  async resolveOpenChoice(
+    input: ResolveOpenChoiceInput,
+    materialise: (proposal: Proposal, bundle: WorldBundle, at: string) => ChoiceMaterialisation,
+  ): Promise<ResolveOpenChoiceOutcome> {
+    return this.store.gateOp(async () => {
+      const recovery = await this.recoverDrafts(input.proposalId);
+      if (recovery.status === "blocked") return { status: "draft-unresolved", records: recovery.unreadable };
+
+      const proposal = await this.readManifest(input.proposalId);
+      if (proposal.lastDraftRequestId === input.requestId) return { status: "updated", proposal };
+      if (proposal.draftRevision !== input.expectedDraftRevision) {
+        return { status: "stale", currentDraftRevision: proposal.draftRevision };
+      }
+
+      const choice = (proposal.openChoices ?? []).find((one) => one.choiceId === input.choiceId);
+      if (!choice) return { status: "unknown-choice" };
+      if (!choice.options.some((option) => option.optionId === input.optionId)) return { status: "invalid-option" };
+
+      const at = this.store.now();
+      const replacement = materialise(proposal, this.store.getBundle(), at);
+      if (
+        choice.kind === "duplicate-or-amend" &&
+        replacement.candidateId !== choice.choiceId.slice("duplicate-or-amend:".length)
+      ) {
+        return { status: "rejected", message: "the answer no longer matches the point that asked the question" };
+      }
+      const origin = (proposal.worldChatOrigins ?? []).find((one) => one.candidateId === replacement.candidateId);
+      if (!origin) return { status: "rejected", message: "the point behind this question is no longer attached to the proposal" };
+      if (replacement.targets.length === 0) return { status: "rejected", message: "the answer produced no change to review" };
+
+      const replacedPaths = new Set(origin.targetPaths);
+      const untouched = proposal.targets.filter((target) => !replacedPaths.has(target.path));
+      const occupied = new Set(untouched.map((target) => target.path));
+      const nextTargets: Proposal["targets"] = [];
+      const files: DraftOperation["files"] = [];
+      for (const target of replacement.targets) {
+        if (occupied.has(target.path) || nextTargets.some((one) => one.path === target.path)) {
+          return { status: "rejected", message: `${target.path} is already changed elsewhere in this proposal` };
+        }
+        const live = await this.readLive(target.path);
+        if (replacement.action === "create" && live !== null) {
+          return { status: "rejected", message: `${target.path} now exists, so this can no longer be created safely` };
+        }
+        if (replacement.action === "amend" && live === null) {
+          return { status: "rejected", message: `${target.path} no longer exists, so it cannot be amended` };
+        }
+        nextTargets.push({
+          path: target.path,
+          baseVersion: live === null ? null : readVersion(target.path, live),
+          baseHash: live === null ? null : sha256(live),
+        });
+        files.push({ path: target.path, content: target.content });
+        if (live !== null) files.push({ path: `_base/${target.path}`, content: live });
+      }
+
+      const origins = (proposal.worldChatOrigins ?? []).map((one) =>
+        one.candidateId === replacement.candidateId
+          ? { ...one, targetPaths: replacement.targets.map((target) => target.path), fields: replacement.fields }
+          : one,
+      );
+      const nextManifest: Proposal = {
+        ...proposal,
+        targets: [...untouched, ...nextTargets],
+        baseCanonRevision: this.store.getBundle().meta.canonRevision,
+        draftRevision: proposal.draftRevision + 1,
+        lastDraftRequestId: input.requestId,
+        worldChatOrigins: origins,
+        openChoices: (proposal.openChoices ?? []).filter((one) => one.choiceId !== input.choiceId),
+      };
+      const op: DraftOperation = {
+        operationId: newId("dop"),
+        requestId: input.requestId,
+        proposalId: input.proposalId,
+        expectedDraftRevision: input.expectedDraftRevision,
+        currentDraftRevision: proposal.draftRevision,
+        nextDraftRevision: nextManifest.draftRevision,
+        state: "prepared",
+        files,
+        nextManifest: ProposalSchema.parse(nextManifest) as Record<string, unknown>,
+        at,
+      };
+      const dir = this.proposalDir(input.proposalId);
+      await writeDraftRecord(dir, op);
+      for (const file of op.files) {
+        await atomicWriteFile(draftStagingPath(dir, op.operationId, file.path), file.content);
+      }
+      await writeDraftRecord(dir, { ...op, state: "committing" });
+      await this.commitDraft(dir, { ...op, state: "committing" });
+      return { status: "updated", proposal: nextManifest };
+    });
+  }
+
   /**
    * Steps 4-7, written so that running them twice is the same as running them once.
    *
@@ -597,6 +717,9 @@ export class ProposalManager {
     for (const file of op.files) {
       const staged = draftStagingPath(dir, op.operationId, file.path);
       const target = join(dir, fromPortable(file.path));
+      // A choice can replace a proposed create with an amendment whose `_base/` tree did not
+      // exist when the proposal was staged. Recovery must be able to create it too.
+      await mkdir(dirname(target), { recursive: true });
       try {
         // 4. rename, not copy: the target is never briefly half-written.
         await renameWithRetry(staged, target);
@@ -671,6 +794,8 @@ export class ProposalManager {
 
       const proposal = await this.readManifest(proposalId);
 
+      const openChoices = proposal.openChoices ?? [];
+      if (openChoices.length > 0) return { status: "open-choices", count: openChoices.length };
       if (proposal.pendingReview) return { status: "pending-review" };
       const unresolved = (proposal.conflicts ?? []).filter((c) => c.resolution === undefined);
       if (unresolved.length > 0) return { status: "unresolved-conflicts", count: unresolved.length };
@@ -829,7 +954,7 @@ export class ProposalManager {
         ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
       await this.retire(proposalId, result.commitId);
-      return { status: "accepted", result };
+      return { status: "accepted", result, ripples: authoritative.items };
     });
   }
 

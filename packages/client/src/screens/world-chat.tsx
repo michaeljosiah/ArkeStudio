@@ -18,12 +18,14 @@ import {
   hostCanAttach,
   retryWorldChatTurn,
   createWorldChat,
+  dismissWorldChatRipples,
   openWorldChat,
   openWorldChatMedia,
   sendWorldChat,
   unarchiveWorldChat,
   useStore,
   useWorldChatProgress,
+  useWorldChatRipples,
   rejectWorldChatPoint,
   saveWorldChatPoint,
   subscribeWorldChatMediaOpened,
@@ -443,6 +445,7 @@ export function WorldChatScreen() {
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const refusals = useWorldChatRefusals(conversationId);
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
+  const rippleNotice = useWorldChatRipples(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
   const [wrappingUp, setWrappingUp] = useState(false);
   /**
@@ -597,6 +600,8 @@ export function WorldChatScreen() {
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
   const asked = useRef<string | null>(null);
+  /** A mixed Accept all shows its landed ripples here before carrying its unanswered point away. */
+  const proposalsAfterNews = useRef(false);
   const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
   /**
    * Go to the proposals once there are proposals to go to.
@@ -628,11 +633,17 @@ export function WorldChatScreen() {
        * can answer — and that is worth going to, because it is the one thing this press could
        * not decide for them.
        */
-      if ((row?.openProposalCount ?? 0) > 0) navigate(`/w/${worldId}/proposals`);
+      if ((row?.openProposalCount ?? 0) > 0) {
+        if (rippleNotice) proposalsAfterNews.current = true;
+        else navigate(`/w/${worldId}/proposals`);
+      }
+    } else if (proposalsAfterNews.current && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
+      proposalsAfterNews.current = false;
+      navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount]);
+  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice]);
 
   const rows = useMemo(
     () => [...(world?.conversations ?? [])].sort(byPendingConsequence),
@@ -921,6 +932,17 @@ export function WorldChatScreen() {
             {wrapUpRefusal && !wrappingUp && (
               <div className="fy-panel__refused" role="status">
                 {wrapUpRefusal.detail}
+              </div>
+            )}
+            {rippleNotice && (
+              <div className="fy-panel__refused" role="status">
+                <strong>What changed elsewhere</strong>
+                {rippleNotice.items.map((item, index) => (
+                  <div key={`${item.kind}:${index}`}>{item.summary}</div>
+                ))}
+                <Button variant="ghost" onClick={() => dismissWorldChatRipples(conversationId!)}>
+                  Dismiss
+                </Button>
               </div>
             )}
             <div className="fy-panel__caption">
