@@ -5531,7 +5531,9 @@ export function ExportsScreen() {
                 if (!worldId || !prodId || episodeTimelineBlock !== null) return;
                 for (const episode of production.episodes) {
                   const range = episodeRange(episode.id);
-                  if (episodeExportRefusals(production, episode.id) === null && (range === null || range.ok)) {
+                  // The legacy refusals belong to the legacy cut; a saved timeline judges an
+                  // episode by its own range (round seven).
+                  if (range !== null ? range.ok : episodeExportRefusals(production, episode.id) === null) {
                     exportCut(worldId, prodId, preset, timelineState.status === "ready" ? timelineState.timeline.revision : null, episode.id, subtitleChoice);
                   }
                 }
@@ -5545,7 +5547,11 @@ export function ExportsScreen() {
             const range = episodeRange(episode.id);
             const episodeRefusal = episodeTimelineBlock
               ? { detail: episodeTimelineBlock }
-              : (episodeExportRefusals(production, episode.id) ?? (range !== null && !range.ok ? { detail: range.reason } : null));
+              : range !== null
+                ? range.ok
+                  ? null
+                  : { detail: range.reason }
+                : episodeExportRefusals(production, episode.id);
             const frameRate = productionFrameRate(production.meta);
             const rangeSec = range !== null && range.ok ? (range.endFrame - range.startFrame) / frameRate : null;
             return (

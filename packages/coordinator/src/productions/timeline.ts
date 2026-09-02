@@ -1,8 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AUDIO_TRACK_KINDS,
   ProductionTimelineSchema,
   TimelineOperationRefused,
+  orderedShots,
   applyTimelineCommands,
   describeTimelineCommand,
   historySelectionChanges,
@@ -279,6 +281,7 @@ export async function applyTimelineCommand(
         const label =
           command.label ??
           (command.commands.length === 1 ? describeTimelineCommand(command.commands[0]!) : `${command.commands.length} edits`);
+        refuseUnrenderablePlacements(clipCommands, current, boundedBy, store.getBundle().artifacts);
         next = applyTimelineCommands(current, clipCommands, {
           label,
           selections: selectionChanges,
@@ -326,6 +329,48 @@ export async function applyTimelineCommand(
     });
     return { dropped };
   });
+}
+
+/**
+ * Refuse a placement the world could not render (round seven): a source that is not in this
+ * world, or one with no picture or sound for the track it lands on. The command layer checks
+ * the shape; this is the check against the bundle, run before anything is written, so a
+ * timeline never commits a clip every render would then refuse whole.
+ */
+export function refuseUnrenderablePlacements(
+  commands: readonly TimelineCommand[],
+  timeline: Pick<ProductionTimeline, "tracks">,
+  production: ProductionBundle,
+  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; mediaInfo?: { hasAudio: boolean; durationSec: number } }>,
+): void {
+  const kinds = new Map(timeline.tracks.map((track) => [track.id, track.kind] as const));
+  const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
+  const refuse = (reason: string): never => {
+    throw new TimelineCommandRefused(reason);
+  };
+  for (const command of commands) {
+    if (command.kind === "add-track") kinds.set(command.trackId, command.trackKind);
+    if (command.kind === "add-subtitle-track") kinds.set(command.trackId, "subtitle");
+    if (command.kind !== "place") continue;
+    const kind = kinds.get(command.trackId);
+    const audio = kind !== undefined && AUDIO_TRACK_KINDS.has(kind);
+    const source = command.clip.source;
+    if (source.kind === "artifact") {
+      const artifact = artifacts.find((candidate) => candidate.id === source.artifactId);
+      if (artifact === undefined) throw new TimelineCommandRefused(`${command.clip.id} cites artifact ${source.artifactId}, which this world does not have`);
+      const carriesSound = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
+      const carriesPicture = artifact.kind === "image" || artifact.kind === "board" || artifact.kind === "video";
+      if (audio && !carriesSound) refuse(`${command.clip.id} cites ${artifact.file}, which is not known to carry sound`);
+      if (!audio && kind !== "subtitle" && !carriesPicture) refuse(`${command.clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture`);
+    } else if (source.kind === "take") {
+      const take = takesById.get(source.takeId);
+      const segment = take?.segment;
+      const media = take === undefined ? undefined : segment === undefined ? take.media : takesById.get(segment.passTakeId)?.media;
+      if (media === undefined) refuse(`${command.clip.id} cites take ${source.takeId}, which has no media`);
+    } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
+      refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
+    }
+  }
 }
 
 /** True once the timeline owns every placement, so a legacy `cut.json` write must refuse (R-30). */

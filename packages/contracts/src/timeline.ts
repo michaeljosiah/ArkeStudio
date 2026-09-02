@@ -710,6 +710,17 @@ export type EpisodeRange = { ok: true; startFrame: number; endFrame: number } | 
 export function episodeTimelineRange(production: ProductionBundle, timeline: ProductionTimeline, episodeId: string): EpisodeRange {
   const episode = production.episodes.find((candidate) => candidate.id === episodeId);
   if (episode === undefined) return { ok: false, reason: `${episodeId} is not an episode of this production` };
+  // A scene belongs to one episode; one listed in two would hand its footage to whichever came
+  // later in the season file. Every episode that shares it refuses until the season is fixed.
+  const owners = new Map<string, string[]>();
+  for (const candidate of production.episodes) {
+    for (const sceneId of candidate.scenes) owners.set(sceneId, [...(owners.get(sceneId) ?? []), candidate.id]);
+  }
+  const shared = episode.scenes.find((sceneId) => (owners.get(sceneId)?.length ?? 0) > 1);
+  if (shared !== undefined) {
+    const others = (owners.get(shared) ?? []).filter((id) => id !== episode.id);
+    return { ok: false, reason: `${episode.title} shares ${shared} with ${others.join(", ")}; a scene belongs to one episode` };
+  }
   const owner = new Map<string, string>();
   for (const candidate of production.episodes) {
     for (const sceneId of candidate.scenes) {
@@ -926,6 +937,17 @@ function touchTrack(working: Working, track: Pick<TimelineTrack, "id" | "kind">,
     throw new TimelineOperationRefused(`track ${track.id} was a ${touched.kind} track earlier in this batch and cannot return as ${track.kind}`);
   }
   if (touched === undefined) working.touchedTracks.set(track.id, { kind: track.kind, before });
+}
+
+/**
+ * The base Picture track composites under every other Picture track (SPEC-038 R-8), whatever
+ * the saved order says — so the saved order is not allowed to say otherwise (round seven).
+ */
+function assertBaseBelowOverlays(tracks: readonly TimelineTrack[]): void {
+  const base = tracks.find((track) => track.id === PICTURE_TRACK_ID);
+  if (base === undefined) return;
+  const under = tracks.find((track) => track.kind === "picture" && track.id !== PICTURE_TRACK_ID && track.order < base.order);
+  if (under !== undefined) throw new TimelineOperationRefused(`the base Picture track stays below every other Picture track; ${under.name} would sit under it`);
 }
 
 function findClip(working: Working, clipId: TimelineClipId): { track: TimelineTrack; clip: TimelineClip; ordered: TimelineClip[]; index: number } {
@@ -1161,6 +1183,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         ...(command.language !== undefined ? { language: command.language } : {}),
       };
       working.tracks = working.tracks.map((candidate) => (candidate.id === track.id ? next : candidate));
+      if (command.order !== undefined) assertBaseBelowOverlays(working.tracks);
       return;
     }
     case "add-track": {
@@ -1182,6 +1205,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       };
       touchTrack(working, track, null);
       working.tracks = [...working.tracks, track];
+      if (track.kind === "picture") assertBaseBelowOverlays(working.tracks);
       return;
     }
     case "remove-track": {

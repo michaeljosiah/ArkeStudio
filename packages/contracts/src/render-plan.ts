@@ -421,6 +421,29 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       }
       continue;
     }
+    if (clip !== undefined && clip.source.kind === "take") {
+      // A take placed on the base track plays its media like a shot's accepted take would: the
+      // pass's file for a segment, windowed to the segment (round seven).
+      const takeId = clip.source.takeId;
+      const take = production.takes.find((candidate) => candidate.id === takeId);
+      const segment = take?.segment;
+      const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
+      if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+      const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
+      const inSec = (segment?.inSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
+      items.push({
+        type: "clip",
+        path,
+        ...(inSec > 0 ? { inSec } : {}),
+        ...(segment !== undefined ? { outSec: segment.outSec } : {}),
+        durationSec: entry.durationSec,
+        label: entry.label,
+      });
+      if (baseAudible && clip.audio !== "mute" && production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio === true) {
+        baseSound.push({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id });
+      }
+      continue;
+    }
     if (entry.media) {
       items.push({
         type: "clip",

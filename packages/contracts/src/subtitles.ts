@@ -177,12 +177,18 @@ const STAMP = /^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/;
 const SHORT_STAMP = /^(\d{1,2}):(\d{2})[,.](\d{1,3})$/;
 
 function stampToMs(stamp: string): number | null {
+  // Minutes and seconds below 60, or the row is reported rather than quietly normalised to a
+  // time nobody wrote (round seven).
   const long = STAMP.exec(stamp.trim());
   if (long) {
+    if (Number(long[2]) >= 60 || Number(long[3]) >= 60) return null;
     return (Number(long[1]) * 3600 + Number(long[2]) * 60 + Number(long[3])) * 1000 + Number(long[4]!.padEnd(3, "0"));
   }
   const short = SHORT_STAMP.exec(stamp.trim());
-  if (short) return (Number(short[1]) * 60 + Number(short[2])) * 1000 + Number(short[3]!.padEnd(3, "0"));
+  if (short) {
+    if (Number(short[2]) >= 60) return null;
+    return (Number(short[1]) * 60 + Number(short[2])) * 1000 + Number(short[3]!.padEnd(3, "0"));
+  }
   return null;
 }
 

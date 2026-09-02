@@ -18,7 +18,7 @@ import {
   type ProductionTimeline,
   type WorldChatContext,
 } from "@arke-studio/contracts";
-import { applyTimelineCommand, TimelineCommandRefused } from "./timeline.js";
+import { applyTimelineCommand, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -152,30 +152,40 @@ export async function stageEditorRequests(
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
     const base = requestBase(store, production);
-    const sourceLength = sourceLengthFramesFor(production, store.getBundle().artifacts);
+    const artifacts = store.getBundle().artifacts;
     const { raw, file } = await readRequests(store, productionId);
     const staged: EditorRequest[] = [];
     const added: EditorRequest[] = [];
     for (const request of input.requests) {
-      const preview = previewEditorRequest(base.timeline, request.commands, { sourceLength });
-      if (!preview.ok) throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${preview.reason}`);
+      const cannot = (reason: string): never => {
+        throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${reason}`);
+      };
       // A take switch is not a clip command; the preview counts it. It is run through the same
       // acceptance rules Accept will apply, so a switch to a take that does not exist or does
-      // not cover the shot is refused now rather than staged as a card that can never land.
+      // not cover the shot is refused now rather than staged as a card that can never land —
+      // and the takes it lands are the ones the trims below are judged against (round seven).
       let selections = production.selections;
       for (const command of request.commands) {
         if (command.kind !== "switch-take") continue;
         try {
-          selections = applyTakeAcceptance(production, store.getBundle().artifacts, selections, {
+          selections = applyTakeAcceptance(production, artifacts, selections, {
             takeId: command.takeId,
             shotId: command.shotId,
             by: "user",
             at: input.now,
           }).selections;
         } catch (error) {
-          throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${error instanceof Error ? error.message : String(error)}`);
+          cannot(error instanceof Error ? error.message : String(error));
         }
       }
+      const bounded: ProductionBundle = { ...production, selections };
+      try {
+        refuseUnrenderablePlacements(request.commands, base.timeline, bounded, artifacts);
+      } catch (error) {
+        cannot(error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error));
+      }
+      const preview = previewEditorRequest(base.timeline, request.commands, { sourceLength: sourceLengthFramesFor(bounded, artifacts) });
+      if (!preview.ok) cannot(preview.reason);
       /*
        * The same request twice is one record. A turn's corrective retry runs this again with
        * whatever the model repeats, and a model that ignores "do not repeat a pending request"

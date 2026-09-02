@@ -226,6 +226,25 @@ describe("Arke's editor requests (issue 684)", () => {
     await assert.rejects(readFile(requestsPath(store), "utf8"), { code: "ENOENT" });
   });
 
+  it("refuses a placement the world cannot render, when staged and when written (round seven)", async () => {
+    const store = await open();
+    const ghost = {
+      kind: "place" as const,
+      trackId: "tr_music" as const,
+      clip: { id: "cl_ghost" as const, startFrame: 0, durationFrames: 10, sourceInFrames: 0, source: { kind: "artifact" as const, artifactId: "ar_01J8G0000000000000000000ZZ", label: "nowhere" } },
+    };
+    const commands: TimelineCommand[] = [{ kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" }, ghost];
+    await assert.rejects(
+      stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [{ summary: "Place a ghost", commands }], now: NOW }),
+      (error: unknown) => error instanceof EditorRequestRefused && /does not have/.test(error.reason),
+    );
+    await assert.rejects(
+      applyTimelineCommand(store, PRODUCTION, { kind: "commands", commands, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(productionOf(store)) }),
+      /does not have/,
+    );
+    await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
+  });
+
   it("refuses a forged decision that names no request (A-11)", async () => {
     const store = await open();
     await assert.rejects(
