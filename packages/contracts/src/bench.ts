@@ -784,6 +784,7 @@ export const BenchSessionSummarySchema = z
     takeCount: z.number().int().min(0),
     runningCount: z.number().int().min(0),
     failedCount: z.number().int().min(0),
+    waitingCount: z.number().int().min(0),
   })
   .strict();
 export type BenchSessionSummary = z.infer<typeof BenchSessionSummarySchema>;
@@ -1177,6 +1178,9 @@ export function benchSessionSummary(session: BenchSession): BenchSessionSummary 
     (t) => t.status === "allocating" || t.status === "queued" || t.status === "submitting" || t.status === "running",
   ).length;
   const failed = session.takes.filter((t) => t.status === "failed" || t.status === "needs-reconciliation").length;
+  const waiting = session.takes.filter(
+    (t) => t.status === "succeeded" && t.media !== undefined && t.disposition === "open",
+  ).length;
   return {
     id: session.id,
     ...(session.subject !== undefined ? { subject: session.subject } : {}),
@@ -1186,6 +1190,7 @@ export function benchSessionSummary(session: BenchSession): BenchSessionSummary 
     takeCount: session.takes.length,
     runningCount: running,
     failedCount: failed,
+    waitingCount: waiting,
   };
 }
 

@@ -656,6 +656,36 @@ describe("the summary", () => {
     assert.equal(summary.takeCount, 2);
     assert.equal(summary.failedCount, 1);
     assert.equal(summary.runningCount, 1); // the sibling still allocating counts as running
+    assert.equal(summary.waitingCount, 0);
+  });
+
+  it("counts completed media until it is filed or discarded", () => {
+    const completed = [
+      env(1, {
+        type: "takes-reserved" as const,
+        takes: [{ id: TK as never, n: 1, requestId: "r1", request: SNAPSHOT, createdAt: "2026-08-16T10:00:01.000Z" }],
+      }),
+      env(2, {
+        type: "take-completed" as const,
+        takeId: TK as never,
+        media: { file: "take.png", hash: "sha256:beefbeef" as never },
+        completedAt: "2026-08-16T10:00:02.000Z",
+      }),
+    ];
+    assert.equal(benchSessionSummary(foldBenchSession(META, completed)).waitingCount, 1);
+    assert.equal(
+      benchSessionSummary(foldBenchSession(META, [...completed, env(3, { type: "take-cleared", takeId: TK as never })])).waitingCount,
+      1,
+      "clearing a take from the wall is not a decision",
+    );
+    assert.equal(
+      benchSessionSummary(foldBenchSession(META, [...completed, env(3, { type: "take-filed", takeId: TK as never, artifactId: AR as never })])).waitingCount,
+      0,
+    );
+    assert.equal(
+      benchSessionSummary(foldBenchSession(META, [...completed, env(3, { type: "take-discarded", takeId: TK as never })])).waitingCount,
+      0,
+    );
   });
 });
 
