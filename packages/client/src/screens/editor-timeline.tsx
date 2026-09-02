@@ -23,6 +23,8 @@ import {
   previewTimeline,
   type PictureGesture,
 } from "../lib/picture-edit.js";
+import { Film } from "../components/icons.js";
+import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
 
 /**
  * The Picture track as an editable sequence (SPEC-037 R-19..R-23, SPEC-039 R-13..R-18).
@@ -97,6 +99,7 @@ export function PictureTrack({
   disabled,
   mintClipId,
   sourceLength,
+  onDrop,
 }: {
   timeline: ProductionTimeline;
   views: readonly PictureClipView[];
@@ -113,8 +116,12 @@ export function PictureTrack({
   mintClipId: () => TimelineClipId;
   /** Measured source lengths, so a tail drag stops where the source does. */
   sourceLength: SourceLengthFrames;
+  /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
+  onDrop?: (drop: { artifactId: string; frame: number }) => void;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
+  const [over, setOver] = useState(false);
+  const [refused, setRefused] = useState(false);
   const clips = views.map((view) => view.clip);
 
   useEffect(() => {
@@ -266,12 +273,41 @@ export function PictureTrack({
 
   return (
     <div className="fy-track" data-track="picture">
-      <span className="fy-track__label">Picture</span>
+      <span className="fy-track__label">
+        <span className="fy-track__icon" aria-hidden="true"><Film size={11} /></span>
+        <span className="fy-track__name">Picture</span>
+      </span>
       <div
-        className={cx("fy-track__lane", "fy-pictlane", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
+        className={cx("fy-track__lane", "fy-pictlane", over && "fy-typedlane--over", refused && "fy-typedlane--refuse", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
         onPointerDown={onLanePointerDown}
+        onDragOver={(event) => {
+          if (onDrop === undefined || disabled) return;
+          if (!dragAccepts(event.dataTransfer.types, false)) {
+            event.dataTransfer.dropEffect = "none";
+            setRefused(true);
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setOver(true);
+        }}
+        onDragLeave={() => {
+          setOver(false);
+          setRefused(false);
+        }}
+        onDrop={(event) => {
+          if (onDrop === undefined) return;
+          event.preventDefault();
+          setOver(false);
+          setRefused(false);
+          const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
+          if (!artifactId || disabled) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          onDrop({ artifactId, frame: frameAtPixel(event.clientX - box.left, box.width, span) });
+        }}
       >
-        {views.length === 0 && <span className="fy-track__empty">No picture yet</span>}
+        {views.length === 0 && !refused && <span className="fy-track__empty">{onDrop === undefined ? "No picture yet" : "drop a picture here, or add a scene from the Library"}</span>}
+        {refused && <span className="fy-track__refuse">picture lanes take picture</span>}
         {views.map((view) => {
           const { clip } = view;
           const selected = clip.id === selectedClipId;

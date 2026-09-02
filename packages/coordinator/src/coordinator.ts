@@ -36,8 +36,10 @@ import {
   CutFileSchema,
   buildRenderPlan,
   serializeTimedText,
+  assembleSceneCommands,
   audibleTracks,
   orderedTrackClips,
+  seedFirstPictureTimeline,
   storyTimelineFingerprint,
   type TimelineCommand,
   productionFrameRate,
@@ -7197,6 +7199,50 @@ export class Coordinator {
        * recorded as provenance and the cues are ordinary editable text from the moment they
        * land. No sidecar, no draft: the refusal is named where every other timeline refusal is.
        */
+      case "timeline-assemble": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const refuse = (reason: string): void => {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "timeline.command-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            reason: reason.slice(0, 500),
+          });
+          this.transport.broadcastSnapshot();
+        };
+        try {
+          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
+          if (!production) return;
+          if (production.spine !== null) throw new Error("this production is cut to a song; open it on the timeline and place its shots there");
+          const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
+          const scene = production.scenes.find((candidate) => candidate.id === msg.sceneId);
+          if (scene === undefined) throw new Error(`${msg.sceneId} is not a scene of this production`);
+          const assembly = assembleSceneCommands({ production, timeline, sceneId: msg.sceneId, artifacts: store.getBundle().artifacts });
+          if ("refused" in assembly) throw new Error(assembly.refused);
+          const { dropped } = await applyTimelineCommand(store, msg.productionId, {
+            kind: "commands",
+            commands: assembly.commands,
+            baseRevision: msg.baseRevision,
+            sourceFingerprint: msg.sourceFingerprint,
+            label: `Arke assembled ${scene.title}`,
+            notes: assembly.notes,
+          });
+          // The first write may fold cut.json; what it could not carry is named, as the command handler names it.
+          for (const placement of dropped) {
+            void this.appLog?.append({
+              kind: "timeline.migration-dropped",
+              reason: placement,
+              detail: { productionId: msg.productionId },
+            });
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+        } catch (error) {
+          refuse(error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
       case "timeline-transcribe": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;

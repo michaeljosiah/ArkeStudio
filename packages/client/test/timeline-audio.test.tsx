@@ -100,7 +100,11 @@ async function advance(state: ClientState): Promise<void> {
   await act(async () => __setStateForTest(structuredClone(state) as ClientState));
 }
 
-/** The fixture with its bells placed on a lane, then migrated: one Ambience track, no lanes. */
+/**
+ * The fixture with its bells placed on a lane, then migrated: one Ambience track, no lanes. The
+ * migration folds the placement in but says nothing about the Library, which lists only what the
+ * record holds (R-8, amended 2026-09-02) — so the bells are added to it here, as a person would.
+ */
 function migratedState(): { state: ClientState; timeline: ProductionTimeline } {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
@@ -109,7 +113,10 @@ function migratedState(): { state: ClientState; timeline: ProductionTimeline } {
     overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: BELLS, startSec: 1, endSec: 3, lane: 0, audio: "keep" }],
   } as typeof production.cut;
   const migrated = migrateLegacyCut(seedStoryPictureTimeline(production), production, state.world!.artifacts).timeline;
-  const timeline = applyTimelineCommands(migrated, [{ kind: "move-adjacent", clipId: "cl_sh-13", direction: "earlier" }]);
+  const timeline = applyTimelineCommands(migrated, [
+    { kind: "add-to-library", items: [{ kind: "artifact", artifactId: BELLS }] },
+    { kind: "move-adjacent", clipId: "cl_sh-13", direction: "earlier" },
+  ]);
   production.timeline = { status: "ready", timeline };
   return { state, timeline };
 }
@@ -147,7 +154,11 @@ describe("typed tracks on the editor (issue 681)", () => {
     const { state } = migratedState();
     const screen = await mountCut(state);
     try {
-      await act(async () => byLabel(screen, "Add harbour-bells.wav to timeline").click());
+      // The non-drag path (SPEC-039 R-10): pick the row, then its Add to timeline action.
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(`[data-library-item="artifact:${BELLS}"] .fy-artrow__pick`)!.click());
+      const add = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artrow__actions button")].find((button) => button.textContent?.includes("Add to timeline"));
+      assert.ok(add, "the bells offer Add to timeline");
+      await act(async () => add.click());
       const sent = commandsSent(screen).at(-1);
       assert.ok(sent);
       assert.equal(sent.commands.length, 2, "no Music track exists yet, so one is added in the same batch");
@@ -194,6 +205,11 @@ describe("typed tracks on the editor (issue 681)", () => {
 
   it("keeps the legacy lanes while the timeline has not absorbed them", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
+    // Only a cut that still holds a legacy placement draws its lanes (the target has none).
+    state.world!.productions[0]!.cut = {
+      audio: [],
+      overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: BELLS, startSec: 1, endSec: 3, lane: 0, audio: "keep" }],
+    } as never;
     const screen = await mountCut(state);
     try {
       assert.ok(screen.container.querySelector(".fy-clanes"), "an unsaved cut still edits on lanes");

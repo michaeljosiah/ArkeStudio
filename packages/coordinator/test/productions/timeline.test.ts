@@ -4,8 +4,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProductionTimelineSchema,
+  orderedShots,
   orderedTrackClips,
-  seedStoryPictureTimeline,
+  sortScenes,
   storyTimelineFingerprint,
   type Selections,
 } from "@arke-studio/contracts";
@@ -16,6 +17,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { assembleStory, sceneAssembly } from "./assemble.js";
 
 const CLOCK = () => "2026-09-01T12:00:00.000Z";
 const PRODUCTION = "saltlight";
@@ -44,29 +46,28 @@ describe("the saved Picture timeline (#678)", () => {
     assert.equal(store.getBundle().meta.schemaVersion, 5);
   });
 
-  it("keeps a legacy open byte-stable and materialises the first move atomically", async () => {
+  it("keeps a legacy open byte-stable and materialises the first assembly atomically", async () => {
     const store = await open();
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.deepEqual(production.timeline, { status: "absent" });
     await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
 
-    const seeded = seedStoryPictureTimeline(production);
-    const clips = seeded.tracks[0]!.clips;
-    assert.ok(clips.length > 1, "the fixture has adjacent Picture clips to move");
-    const moving = clips[1]!;
-
+    // The first state is empty; the first write is Arke's assembly of one scene against it.
+    const scene = sortScenes(production.scenes)[0]!;
+    const assembly = sceneAssembly(store, PRODUCTION, scene.id);
     await applyTimelineCommand(store, PRODUCTION, {
-      kind: "move-picture",
-      clipId: moving.id,
-      direction: "earlier",
+      kind: "commands",
+      commands: assembly.commands,
       baseRevision: null,
       sourceFingerprint: storyTimelineFingerprint(production),
+      label: `Arke assembled ${scene.title}`,
+      notes: assembly.notes,
     });
 
     const saved = ProductionTimelineSchema.parse(JSON.parse(await readFile(timelinePath(store), "utf8")));
     assert.deepEqual(
-      saved.tracks[0]!.clips.map((clip) => clip.id),
-      [moving.id, clips[0]!.id, ...clips.slice(2).map((clip) => clip.id)],
+      orderedTrackClips(saved.tracks[0]!).map((clip) => clip.id),
+      orderedShots(scene).map((shot) => `cl_${shot.id.replace("_", "-")}`),
     );
     assert.equal(saved.revision, 1);
     assert.equal(saved.history.undo.length, 1);
@@ -78,14 +79,11 @@ describe("the saved Picture timeline (#678)", () => {
   it("refuses stale source and revision without changing timeline bytes", async () => {
     const store = await open();
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
-    const seeded = seedStoryPictureTimeline(production);
-    const moving = seeded.tracks[0]!.clips[1]!;
 
     await assert.rejects(
       applyTimelineCommand(store, PRODUCTION, {
-        kind: "move-picture",
-        clipId: moving.id,
-        direction: "earlier",
+        kind: "commands",
+        commands: sceneAssembly(store, PRODUCTION, sortScenes(production.scenes)[0]!.id).commands,
         baseRevision: null,
         sourceFingerprint: "a source order the production never had",
       }),
@@ -93,11 +91,13 @@ describe("the saved Picture timeline (#678)", () => {
     );
     await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
 
+    const assembled = await assembleStory(store, PRODUCTION);
+    const moving = orderedTrackClips(assembled.tracks[0]!)[1]!;
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "move-picture",
       clipId: moving.id,
       direction: "earlier",
-      baseRevision: null,
+      baseRevision: assembled.revision,
       sourceFingerprint: storyTimelineFingerprint(production),
     });
     const before = await readFile(timelinePath(store), "utf8");
@@ -106,10 +106,10 @@ describe("the saved Picture timeline (#678)", () => {
         kind: "move-picture",
         clipId: moving.id,
         direction: "later",
-        baseRevision: 0,
+        baseRevision: assembled.revision,
         sourceFingerprint: storyTimelineFingerprint(production),
       }),
-      /moved from revision 0 to 1/,
+      new RegExp(`moved from revision ${assembled.revision} to ${assembled.revision + 1}`),
     );
     assert.equal(await readFile(timelinePath(store), "utf8"), before);
   });
@@ -117,34 +117,34 @@ describe("the saved Picture timeline (#678)", () => {
   it("persists Undo and Redo across a restart", async () => {
     let store: WorldStore | null = await open();
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
-    const seeded = seedStoryPictureTimeline(production);
-    const moving = seeded.tracks[0]!.clips[1]!;
+    const assembled = await assembleStory(store, PRODUCTION);
+    const moving = orderedTrackClips(assembled.tracks[0]!)[1]!;
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "move-picture",
       clipId: moving.id,
       direction: "earlier",
-      baseRevision: null,
+      baseRevision: assembled.revision,
       sourceFingerprint: storyTimelineFingerprint(production),
     });
-    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: 1 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: assembled.revision + 1 });
     await store.close();
 
     store = await WorldStore.open(store.dir, { clock: CLOCK });
     closeOnCleanup(() => store?.close());
     const reopened = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.equal(reopened.timeline?.status, "ready");
-    assert.equal(reopened.timeline?.status === "ready" ? reopened.timeline.timeline.revision : -1, 2);
+    assert.equal(reopened.timeline?.status === "ready" ? reopened.timeline.timeline.revision : -1, assembled.revision + 2);
     assert.deepEqual(
       reopened.timeline?.status === "ready"
-        ? reopened.timeline.timeline.tracks[0]!.clips.map((clip) => clip.id)
+        ? orderedTrackClips(reopened.timeline.timeline.tracks[0]!).map((clip) => clip.id)
         : [],
-      seeded.tracks[0]!.clips.map((clip) => clip.id),
+      orderedTrackClips(assembled.tracks[0]!).map((clip) => clip.id),
     );
 
-    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: 2 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: assembled.revision + 2 });
     const redone = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.timeline;
-    assert.equal(redone?.status === "ready" ? redone.timeline.revision : -1, 3);
-    assert.equal(redone?.status === "ready" ? redone.timeline.history.undo.length : 0, 1);
+    assert.equal(redone?.status === "ready" ? redone.timeline.revision : -1, assembled.revision + 3);
+    assert.equal(redone?.status === "ready" ? redone.timeline.history.undo.length : 0, assembled.history.undo.length + 1);
   });
 
   it("scans malformed saved state as invalid instead of deriving another film", async () => {
@@ -165,8 +165,9 @@ describe("semantic Picture commands (#679)", () => {
   it("lands a batch as one revision and one Undo entry, or not at all", async () => {
     const store = await open();
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
-    const seeded = seedStoryPictureTimeline(production);
-    const [first, second, third] = orderedTrackClips(seeded.tracks[0]!);
+    const assembled = await assembleStory(store, PRODUCTION);
+    const [first, second, third] = orderedTrackClips(assembled.tracks[0]!);
+    const before = await readFile(timelinePath(store), "utf8");
 
     await assert.rejects(
       applyTimelineCommand(store, PRODUCTION, {
@@ -175,12 +176,12 @@ describe("semantic Picture commands (#679)", () => {
           { kind: "delete", clipId: first!.id },
           { kind: "trim", clipId: second!.id, edge: "end", deltaFrames: 1 },
         ],
-        baseRevision: null,
+        baseRevision: assembled.revision,
         sourceFingerprint: storyTimelineFingerprint(production),
       }),
       /cannot extend into/,
     );
-    await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" }, "a refused batch materialises nothing");
+    assert.equal(await readFile(timelinePath(store), "utf8"), before, "a refused batch writes nothing");
 
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "commands",
@@ -188,14 +189,15 @@ describe("semantic Picture commands (#679)", () => {
         { kind: "split", clipId: third!.id, atFrame: third!.startFrame + 10, newClipId: "cl_tail" },
         { kind: "ripple-delete", clipId: second!.id },
       ],
-      baseRevision: null,
+      baseRevision: assembled.revision,
       sourceFingerprint: storyTimelineFingerprint(production),
       label: "Tighten the opening",
     });
     const saved = ProductionTimelineSchema.parse(JSON.parse(await readFile(timelinePath(store), "utf8")));
-    assert.equal(saved.revision, 1);
-    assert.equal(saved.history.undo.length, 1);
-    assert.equal(saved.history.undo[0]!.kind === "change" ? saved.history.undo[0]!.label : "", "Tighten the opening");
+    assert.equal(saved.revision, assembled.revision + 1);
+    assert.equal(saved.history.undo.length, assembled.history.undo.length + 1);
+    const entry = saved.history.undo.at(-1)!;
+    assert.equal(entry.kind === "change" ? entry.label : "", "Tighten the opening");
     assert.deepEqual(
       orderedTrackClips(saved.tracks[0]!).slice(0, 3).map((clip) => [clip.id, clip.startFrame]),
       [
@@ -205,11 +207,11 @@ describe("semantic Picture commands (#679)", () => {
       ],
     );
 
-    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: 1 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: saved.revision });
     const undone = ProductionTimelineSchema.parse(JSON.parse(await readFile(timelinePath(store), "utf8")));
     assert.deepEqual(
       orderedTrackClips(undone.tracks[0]!).map((clip) => [clip.id, clip.startFrame, clip.durationFrames]),
-      orderedTrackClips(seeded.tracks[0]!).map((clip) => [clip.id, clip.startFrame, clip.durationFrames]),
+      orderedTrackClips(assembled.tracks[0]!).map((clip) => [clip.id, clip.startFrame, clip.durationFrames]),
     );
   });
 
@@ -239,8 +241,6 @@ describe("semantic Picture commands (#679)", () => {
 
     // Re-choosing the same take is a real review decision but no selection change, which is
     // exactly the "changes nothing" the pure layer refuses — so the batch carries a move too.
-    const seeded = seedStoryPictureTimeline(production);
-    const clips = orderedTrackClips(seeded.tracks[0]!);
     await store.commit({
       kind: "test-clear-selection",
       source: "test",
@@ -255,18 +255,20 @@ describe("semantic Picture commands (#679)", () => {
     });
     const cleared = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.equal(cleared.selections[shotId]?.acceptedTakeId ?? null, null);
+    const assembled = await assembleStory(store, PRODUCTION);
+    const clips = orderedTrackClips(assembled.tracks[0]!);
 
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "commands",
       commands: [{ kind: "switch-take", shotId, takeId: CLIP_TAKE }],
-      baseRevision: null,
+      baseRevision: assembled.revision,
       sourceFingerprint: storyTimelineFingerprint(cleared),
     });
     const reviewsAfter = await readFile(reviewsPath, "utf8");
     assert.equal(reviewsAfter.split("\n").length, reviewsBefore.split("\n").length + 1, "one review line appended");
     const switched = ProductionTimelineSchema.parse(JSON.parse(await readFile(timelinePath(store), "utf8")));
-    assert.equal(switched.revision, 1);
-    const entry = switched.history.undo[0]!;
+    assert.equal(switched.revision, assembled.revision + 1);
+    const entry = switched.history.undo.at(-1)!;
     assert.equal(entry.kind, "change");
     assert.equal(entry.kind === "change" ? entry.clips.length : -1, 0, "a take switch moves no clip");
     assert.equal(entry.kind === "change" ? entry.selections[0]?.shotId : "", shotId);
@@ -279,12 +281,12 @@ describe("semantic Picture commands (#679)", () => {
       CLIP_TAKE,
     );
 
-    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: 1 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: switched.revision });
     const afterUndo = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.equal(afterUndo.selections[shotId]?.acceptedTakeId ?? null, null, "Undo restores the previous selection");
     assert.equal(await readFile(reviewsPath, "utf8"), reviewsAfter, "Undo erases no review decision");
 
-    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: 2 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: switched.revision + 1 });
     const afterRedo = store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.equal(afterRedo.selections[shotId]?.acceptedTakeId, CLIP_TAKE);
     assert.equal(await readFile(reviewsPath, "utf8"), reviewsAfter, "Redo appends no duplicate review record");

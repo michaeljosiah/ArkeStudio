@@ -339,7 +339,7 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
     assert.deepEqual(beforeLane, [
       "fy-cutseg fy-cutseg--gap fy-cutseg--gap-warn:SHOT 13 · The lamps answer · 6.0s",
       "fy-cutseg fy-cutseg--black:4s",
-      "fy-cutseg fy-cutseg--pick fy-cutseg--selected:SC 4",
+      "fy-cutseg fy-cutseg--pick:SC 4",
       "fy-cutseg fy-cutseg--black:2s",
     ]);
     assert.match(beforeCut.textContent ?? "", /20s · 14s of 20s covered · cut to the track/);

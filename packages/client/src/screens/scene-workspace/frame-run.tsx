@@ -86,6 +86,7 @@ export function GenerateFramesDialog({
   shotId,
   returnFocus,
   onClose,
+  onStarted,
 }: {
   open: boolean;
   state: ClientState;
@@ -97,6 +98,8 @@ export function GenerateFramesDialog({
   shotId?: string;
   returnFocus: RefObject<HTMLElement | null>;
   onClose: () => void;
+  /** The run was accepted (SPEC-039 R-44): the workspace opens the editor and Arke assembles the scene. */
+  onStarted?: () => void;
 }) {
   if (!open) return null;
   return (
@@ -110,6 +113,7 @@ export function GenerateFramesDialog({
       {...(shotId === undefined ? {} : { shotId })}
       returnFocus={returnFocus}
       onClose={onClose}
+      {...(onStarted === undefined ? {} : { onStarted })}
     />
   );
 }
@@ -124,6 +128,7 @@ function GenerateFramesDialogOpen({
   shotId,
   returnFocus,
   onClose,
+  onStarted,
 }: Omit<Parameters<typeof GenerateFramesDialog>[0], "open">) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -274,6 +279,7 @@ function GenerateFramesDialogOpen({
       clearFrameRunStartResult(pending.requestId, pending.quoteId);
       if (event.disposition === "accepted") {
         onClose();
+        onStarted?.();
         return;
       }
       setQuote(null);

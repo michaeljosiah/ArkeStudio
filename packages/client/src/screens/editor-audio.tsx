@@ -14,6 +14,7 @@ import {
   type TimelineClipId,
   type TimelineTrack,
   type TimelineTrackId,
+  PICTURE_TRACK_ID,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import type { EditorTool } from "./editor-timeline.js";
@@ -28,7 +29,46 @@ import { frameAtPixel, framesFromDelta, previewTimeline, trackDragCommand, type 
  * same one the render plan reads.
  */
 
+import { Film, Mic, MusicMark, TextMark, Waveform, X } from "../components/icons.js";
+
 export const ARTIFACT_DRAG_TYPE = "application/x-arke-artifact";
+/**
+ * What a dragged Library row can land on, carried as drag types because the payload itself is
+ * unreadable during dragover (SPEC-039 R-10; the target refuses an incompatible lane while the
+ * drag is still moving, not after the drop).
+ */
+export const LANE_DRAG_PICTURE = "application/x-arke-lane-picture";
+export const LANE_DRAG_SOUND = "application/x-arke-lane-sound";
+/** A Library shot on the move: its payload is `shot:<id>` in the artifact slot, and this marks it. */
+export const SHOT_DRAG_TYPE = "application/x-arke-shot";
+
+export function dragAccepts(types: ArrayLike<string> | readonly string[], wantsSound: boolean): boolean {
+  const list = Array.from(types as ArrayLike<string>);
+  if (!list.includes(ARTIFACT_DRAG_TYPE)) return false;
+  // A drag from before the lane types existed (tests, other windows) says nothing about its kind and is let through.
+  if (!list.includes(LANE_DRAG_PICTURE) && !list.includes(LANE_DRAG_SOUND)) return true;
+  return list.includes(wantsSound ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE);
+}
+
+/** The lane marks the target draws beside each name. */
+export function laneIcon(kind: string): React.ReactNode {
+  switch (kind) {
+    case "picture":
+    case "overlay":
+      return <Film size={11} />;
+    case "dialogue":
+      return <Mic size={11} />;
+    case "ambience":
+      return <Waveform size={11} />;
+    case "music":
+      return <MusicMark size={11} />;
+    case "subtitle":
+    case "subtitles":
+      return <TextMark size={11} />;
+    default:
+      return null;
+  }
+}
 
 export interface TrackDrop {
   trackId: TimelineTrackId;
@@ -80,6 +120,7 @@ export function TypedTrackRows({
   tool?: EditorTool;
 }) {
   const [over, setOver] = useState<TimelineTrackId | null>(null);
+  const [refused, setRefused] = useState<TimelineTrackId | null>(null);
   const span = Math.max(totalFrames, 1);
   const anySolo = timeline.tracks.some((track) => track.solo === true);
   const tracks = typedTracksOf(timeline);
@@ -177,11 +218,25 @@ export function TypedTrackRows({
         const audio = AUDIO_TRACK_KINDS.has(track.kind);
         const silenced = track.muted || (anySolo && audio && track.solo !== true);
         const kindLabel = track.kind === "picture" ? "picture" : track.kind;
+        // An empty extra lane can go (the target's ×); the base Picture track and a lane holding anything stay.
+        const removable = track.clips.length === 0 && (track.cues ?? []).length === 0 && track.id !== PICTURE_TRACK_ID;
         return (
           <div className={cx("fy-track", silenced && "fy-track--silent")} data-track={track.kind === "picture" ? "overlay" : track.kind} data-track-id={track.id} key={track.id}>
             <span className="fy-track__label fy-track__label--typed">
+              <span className="fy-track__icon" aria-hidden="true">{laneIcon(track.kind)}</span>
               <span className="fy-track__name" title={`${track.name} · ${kindLabel}`}>{track.name}</span>
               <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
+                {removable && (
+                  <button
+                    type="button"
+                    className="fy-trackbtns__remove"
+                    aria-label={`Remove ${track.name}`}
+                    disabled={disabled}
+                    onClick={() => onCommands([{ kind: "remove-track", trackId: track.id }], `Remove ${track.name}`)}
+                  >
+                    <X size={9} />
+                  </button>
+                )}
                 <button
                   type="button"
                   aria-pressed={track.muted}
@@ -205,27 +260,45 @@ export function TypedTrackRows({
               </span>
             </span>
             <div
-              className={cx("fy-track__lane", "fy-typedlane", over === track.id && "fy-typedlane--over", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
+              className={cx(
+                "fy-track__lane",
+                "fy-typedlane",
+                over === track.id && "fy-typedlane--over",
+                refused === track.id && "fy-typedlane--refuse",
+                tool === "hand" && "fy-pictlane--hand",
+                tool === "blade" && "fy-pictlane--blade",
+              )}
               onPointerDown={onLanePointerDown}
               onDragOver={(event) => {
-                if (disabled || track.kind === "picture" && false) return;
+                if (disabled) return;
+                // The lane says no while the drag is still over it (R-10): sound on a picture lane, or the reverse.
+                if (!dragAccepts(event.dataTransfer.types, audio)) {
+                  event.dataTransfer.dropEffect = "none";
+                  setRefused(track.id);
+                  return;
+                }
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
                 setOver(track.id);
               }}
-              onDragLeave={() => setOver((current) => (current === track.id ? null : current))}
+              onDragLeave={() => {
+                setOver((current) => (current === track.id ? null : current));
+                setRefused((current) => (current === track.id ? null : current));
+              }}
               onDrop={(event) => {
                 event.preventDefault();
                 setOver(null);
+                setRefused(null);
                 const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
                 if (!artifactId || disabled) return;
                 const box = event.currentTarget.getBoundingClientRect();
                 onDrop({ trackId: track.id, artifactId, frame: frameAtPixel(event.clientX - box.left, box.width, span) });
               }}
             >
-              {track.clips.length === 0 && (
+              {track.clips.length === 0 && refused !== track.id && (
                 <span className="fy-track__empty">{audio ? "drop sound here" : "drop a picture here"}</span>
               )}
+              {refused === track.id && <span className="fy-track__refuse">{audio ? "sound lanes take sound" : "picture lanes take picture"}</span>}
               {orderedTrackClips(track).map((clip) => {
                 const selected = clip.id === selectedClipId;
                 const label = `${clipLabel(clip)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
@@ -267,6 +340,65 @@ export function TypedTrackRows({
 }
 
 /** A clip's gain, as the Inspector authors it: one command per press (SPEC-038 R-13). */
+/**
+ * The target's kind chips on a sound clip (SPEC-039 R-13): Dialogue, Ambience or Music, and the
+ * clip moves to the first lane of that kind — a new one when there is none — in one batch that
+ * undoes as one. The timeline has no move-between-tracks command, so the move is a delete and a
+ * place of the same clip under a fresh id.
+ */
+export function MoveToLane({
+  clip,
+  track,
+  timeline,
+  disabled,
+  onCommands,
+  mintClipId,
+}: {
+  clip: TimelineClip;
+  track: TimelineTrack;
+  timeline: ProductionTimeline;
+  disabled: boolean;
+  onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+  mintClipId: () => TimelineClipId;
+}) {
+  const kinds: Array<["dialogue" | "ambience" | "music", string]> = [
+    ["dialogue", "Dialogue"],
+    ["ambience", "Ambience"],
+    ["music", "Music"],
+  ];
+  // A split-audio half is tied to its picture twin by id; moving it under a new id would leave
+  // the twin pointing at nothing, so the move waits until the link is undone.
+  const linked = clip.linkedClipId !== undefined;
+  const move = (kind: "dialogue" | "ambience" | "music", name: string) => {
+    if (kind === track.kind) return;
+    const dest = [...timeline.tracks].sort((a, b) => a.order - b.order).find((candidate) => candidate.kind === kind) ?? null;
+    const taken = new Set(timeline.tracks.map((candidate) => candidate.id));
+    let fresh: TimelineTrackId = `tr_${kind}`;
+    for (let n = 2; taken.has(fresh); n += 1) fresh = `tr_${kind}-${n}`;
+    const commands: TimelineClipCommand[] = [{ kind: "delete", clipId: clip.id }];
+    if (dest === null) commands.push({ kind: "add-track", trackId: fresh, trackKind: kind, name });
+    let startFrame = clip.startFrame;
+    for (const other of orderedTrackClips(dest ?? { clips: [] })) {
+      if (other.startFrame < startFrame + clip.durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
+    }
+    commands.push({ kind: "place", trackId: dest?.id ?? fresh, clip: { ...clip, id: mintClipId(), startFrame } });
+    onCommands(commands, `Move ${clipLabel(clip)} to ${name}`);
+  };
+  return (
+    <div className="fy-cutinspect__row fy-movekind">
+      <span>Kind</span>
+      <strong className="fy-movekind__chips" role="group" aria-label="Move to lane">
+        {kinds.map(([kind, name]) => (
+          <button key={kind} type="button" className="fy-movekind__chip" aria-pressed={track.kind === kind} disabled={disabled || linked || track.kind === kind} onClick={() => move(kind, name)}>
+            {name}
+          </button>
+        ))}
+        {linked && <span className="fy-mono fy-movekind__note">linked to its picture</span>}
+      </strong>
+    </div>
+  );
+}
+
 export function ClipGain({
   clip,
   disabled,
