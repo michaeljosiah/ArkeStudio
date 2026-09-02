@@ -654,9 +654,12 @@ describe("the dock offers a name while the scene is Untitled (SPEC-036 R-38)", (
     scene.title = "Untitled";
     const untitled = await mountState(state);
     assert.ok(chips(untitled).includes("Name this scene"), `offered: ${chips(untitled).join(" | ")}`);
+    assert.match(untitled.container.textContent ?? "", /talking can name the scene/, "the dock says what talking now changes");
+    assert.doesNotMatch(untitled.container.textContent ?? "", /talking changes nothing/, "and no longer promises it changes nothing");
 
     const named = await mount();
     assert.ok(!chips(named).includes("Name this scene"), "a named scene is not nagged");
+    assert.match(named.container.textContent ?? "", /talking can name the scene/, "a named scene can still be renamed on request");
   });
 });
 

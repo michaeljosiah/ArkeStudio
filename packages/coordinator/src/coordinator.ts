@@ -11262,7 +11262,8 @@ export class Coordinator {
       },
       // A rename lands through the header's own fenced write, straight in (SPEC-036 R-38).
       sceneVersion: (context) => sceneVersionFor(store, context),
-      applySceneEdits: ({ entryContext, edits, baseVersion }) => applySceneEdits(store, { entryContext, edits, baseVersion }),
+      applySceneEdits: ({ entryContext, edits, baseVersion, dryRun }) =>
+        applySceneEdits(store, { entryContext, edits, baseVersion, ...(dryRun === true ? { dryRun: true } : {}) }),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

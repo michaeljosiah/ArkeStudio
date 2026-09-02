@@ -9,6 +9,7 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { SceneEditRefused } from "../../src/productions/scene-edits.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -578,7 +579,12 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     adapter: HarnessAdapter,
     deps: {
       sceneVersion?: () => number | null;
-      applySceneEdits?: (input: { edits: readonly { kind: "rename"; title: string }[]; baseVersion: number | null }) => Promise<void>;
+      applySceneEdits?: (input: {
+        edits: readonly { kind: "rename"; title: string }[];
+        baseVersion: number | null;
+        dryRun?: boolean;
+      }) => Promise<void>;
+      applyBibleEdits?: () => Promise<null>;
     },
   ) {
     const worldPath = await tempDir("arke-run-scene-");
@@ -619,18 +625,51 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     JSON.stringify({ reply: `Called it ${title}.`, candidateOperations: [], groupOperations: [], sceneEdits: [{ kind: "rename", title }] });
   const plain = JSON.stringify({ reply: "Left the name as it was.", candidateOperations: [], groupOperations: [] });
 
-  it("applies the rename against the version read when the prompt was built, and records the turn", async () => {
-    const applied: Array<{ baseVersion: number | null; titles: string[] }> = [];
+  it("checks the rename first and writes it last, both fenced by the version the prompt was built from", async () => {
+    const applied: Array<{ baseVersion: number | null; titles: string[]; dryRun: boolean }> = [];
     const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("The tide answers")]), {
       sceneVersion: () => 3,
-      applySceneEdits: async ({ edits, baseVersion }) => {
-        applied.push({ baseVersion, titles: edits.map((edit) => edit.title) });
+      applySceneEdits: async ({ edits, baseVersion, dryRun }) => {
+        applied.push({ baseVersion, titles: edits.map((edit) => edit.title), dryRun: dryRun === true });
       },
     });
     await runner.send(store, conversationId, "Call this one The tide answers");
-    assert.deepEqual(applied, [{ baseVersion: 3, titles: ["The tide answers"] }], "one write, fenced by what the model saw");
+    assert.deepEqual(
+      applied,
+      [
+        { baseVersion: 3, titles: ["The tide answers"], dryRun: true },
+        { baseVersion: 3, titles: ["The tide answers"], dryRun: false },
+      ],
+      "a check before anything durable, one write after everything else, both against what the model saw",
+    );
     const folded = await view();
     assert.match(folded.messages.at(-1)?.text ?? "", /Called it/, "and the reply that landed with it stands");
+  });
+
+  it("a rename never lands under a turn the bible then refuses (codex, PR 716)", async () => {
+    const prompts: string[] = [];
+    const writes: boolean[] = [];
+    const withBible = JSON.stringify({
+      reply: "Named it and noted it.",
+      candidateOperations: [],
+      groupOperations: [],
+      bibleEdits: [{ op: "append-to-section", heading: "Nowhere", text: "x" }],
+      sceneEdits: [{ kind: "rename", title: "From the model" }],
+    });
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([withBible, plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async ({ dryRun }) => {
+        writes.push(dryRun !== true);
+      },
+      applyBibleEdits: async () => {
+        throw new Error("no such heading");
+      },
+    });
+    await runner.send(store, conversationId, "Name it and note it");
+    assert.deepEqual(writes, [false], "the rename was checked, and never written: the bible refused first");
+    assert.ok(prompts.some((prompt) => /bible could not be edited/.test(prompt)), "the bible's refusal is what the retry answers");
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
   });
 
   it("a refused rename is the one corrective problem, and the retry that drops it completes", async () => {
@@ -640,7 +679,7 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
       sceneVersion: () => 2,
       applySceneEdits: async () => {
         attempts += 1;
-        throw new Error("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
+        throw new SceneEditRefused("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
       },
     });
     await runner.send(store, conversationId, "Name it");
@@ -648,6 +687,20 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     assert.ok(prompts.some((prompt) => /changed while you were answering/.test(prompt)), "the refusal reached the model in its own words");
     const folded = await view();
     assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
+  });
+
+  it("an error that is not a refusal reaches the model as the fixed line, never as a path (codex, PR 716)", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await sceneSetup(fakeAdapter([renaming("Anything"), plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async () => {
+        throw new Error("ENOENT: no such file, open '/Users/private/worlds/the-undersong/productions/saltlight/scenes/x.json'");
+      },
+    });
+    await runner.send(store, conversationId, "Name it");
+    const corrective = prompts.find((prompt) => /could not be renamed/.test(prompt));
+    assert.ok(corrective, "the model is told the rename failed");
+    assert.ok(!/ENOENT|private|the-undersong/.test(corrective!), "and nothing about where the world lives");
   });
 
   it("a rename with nowhere to land is refused rather than silently dropped", async () => {

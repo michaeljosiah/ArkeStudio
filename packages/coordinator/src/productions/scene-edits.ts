@@ -34,9 +34,17 @@ export function sceneVersionFor(store: WorldStore, context: WorldChatContext | u
   return production?.scenes.find((candidate) => candidate.id === about.sceneId)?.version ?? null;
 }
 
+const MOVED = "The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.";
+
 export async function applySceneEdits(
   store: WorldStore,
-  input: { entryContext: WorldChatContext | undefined; edits: readonly ModelSceneEdit[]; baseVersion: number | null },
+  input: {
+    entryContext: WorldChatContext | undefined;
+    edits: readonly ModelSceneEdit[];
+    baseVersion: number | null;
+    /** Check the thread, the scene and the fence, and write nothing: the pass before anything durable lands. */
+    dryRun?: boolean;
+  },
 ): Promise<void> {
   if (input.edits.length === 0) return;
   const about = sceneOfContext(input.entryContext);
@@ -45,6 +53,15 @@ export async function applySceneEdits(
   const sceneFile = production?.sceneFiles[about.sceneId];
   if (production === undefined || sceneFile === undefined || input.baseVersion === null) {
     throw new SceneEditRefused("The scene this thread is about could not be found, so it was left alone. Answer without renaming it.");
+  }
+  if (input.dryRun === true) {
+    // The same fence the write applies, read without writing (codex, PR 716): the runner asks
+    // this before the bible is touched, so a rename that could not land refuses a turn that
+    // has changed nothing yet. The write below reads the file itself; this reads the bundle,
+    // which is what the prompt's version came from.
+    const current = production.scenes.find((candidate) => candidate.id === about.sceneId)?.version ?? null;
+    if (current !== input.baseVersion) throw new SceneEditRefused(MOVED);
+    return;
   }
   for (const edit of input.edits) {
     try {
@@ -56,9 +73,7 @@ export async function applySceneEdits(
         command: { kind: "edit-scene", title: edit.title },
       });
     } catch (error) {
-      if (error instanceof SceneVersionMoved) {
-        throw new SceneEditRefused("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
-      }
+      if (error instanceof SceneVersionMoved) throw new SceneEditRefused(MOVED);
       if (error instanceof SceneCommandRefused) {
         throw new SceneEditRefused(`The rename was refused: ${error.reasons.join(" · ").slice(0, 200)}. Answer without renaming it this turn.`);
       }

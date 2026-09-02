@@ -623,6 +623,8 @@ export function SceneWorkspace({
                 ? [...(scene.title === "Untitled" ? ["Name this scene"] : []), "What is missing from this scene?", "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
+              // The one thing talking does change here (R-38), said where the default promised otherwise.
+              note: "talking can name the scene · everything else waits for your yes",
               ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
             }}
             openingNote="opening…"

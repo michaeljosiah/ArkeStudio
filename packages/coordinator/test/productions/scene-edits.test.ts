@@ -85,6 +85,19 @@ describe("a rename from the dock lands through edit-scene (SPEC-036 R-38)", () =
     );
   });
 
+  it("a dry run checks the fence and writes nothing, so the runner can ask before the bible is touched (codex, PR 716)", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const shown = sceneVersionFor(store, THREAD)!;
+    await applySceneEdits(store, { entryContext: THREAD, edits: [{ kind: "rename", title: "Checked only" }], baseVersion: shown, dryRun: true });
+    assert.deepEqual(await sceneOnDisk(store), before, "nothing on disk moved");
+    await assert.rejects(
+      applySceneEdits(store, { entryContext: THREAD, edits: [{ kind: "rename", title: "Checked only" }], baseVersion: shown + 1, dryRun: true }),
+      (err: unknown) => err instanceof SceneEditRefused && /changed while you were answering/.test(err.message),
+      "and a fence that does not match refuses in the same words the write would",
+    );
+  });
+
   it("does nothing at all for a turn that carries no edit", async () => {
     const { store } = await open();
     const before = await sceneOnDisk(store);

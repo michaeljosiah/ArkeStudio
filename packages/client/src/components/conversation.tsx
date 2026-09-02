@@ -437,6 +437,12 @@ export function ProductionConversation({
     subjectPrefix?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
+    /**
+     * The line under the composer. The default promises that talking changes nothing; a dock
+     * that offers a direct write — the scene's name (SPEC-036 R-38) — must say so instead, or
+     * the promise is false the moment the offer is taken.
+     */
+    note?: string;
   };
   onSelectShot?: (shotId: string) => void;
   /** What is selected on the timeline while they talk (SPEC-039 R-26), sent with each turn. */
@@ -761,7 +767,7 @@ export function ProductionConversation({
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
-          <div className="fy-mono">talking changes nothing · a change waits for your yes</div>
+          <div className="fy-mono">{dock.note ?? "talking changes nothing · a change waits for your yes"}</div>
         </div>
       </aside>
     );

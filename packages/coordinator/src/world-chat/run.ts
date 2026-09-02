@@ -20,6 +20,7 @@ import {
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
+import { SceneEditRefused } from "../productions/scene-edits.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
 import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
 import type { CurrentLook } from "./look.js";
@@ -175,6 +176,8 @@ export interface RunDeps {
     entryContext: WorldChatContext | undefined;
     edits: readonly ModelSceneEdit[];
     baseVersion: number | null;
+    /** Check the fence and write nothing: the pass that runs before the bible is written. */
+    dryRun?: boolean;
   }) => Promise<void>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
@@ -832,12 +835,15 @@ export class WorldChatRunner {
      * an edit that never happened is neither.
      */
     /*
-     * Scene edits land before the bible for the reason the bible lands before the turn is
-     * recorded: a rename that refuses — the scene moved, or the thread is not about one —
-     * leaves the bible untouched, and a rename that landed and then lost the turn is visible
-     * and versioned where a reply about one that never happened is neither.
+     * A rename is checked before anything durable lands and written after everything else has
+     * (codex, PR 716). The fence is read now, so a scene that moved — or a thread that is not
+     * about one — refuses while the bible is still untouched. The write itself waits until the
+     * bible and the editor requests are in: a rename landed ahead of a bible edit that then
+     * refused would leave the scene renamed under a failed turn, and the corrective retry,
+     * still fenced to the version the prompt showed, would refuse its own repeat as stale.
      */
-    if (outcome.turn.sceneEdits.length > 0) {
+    const sceneEdits = outcome.turn.sceneEdits;
+    if (sceneEdits.length > 0) {
       if (!this.deps.applySceneEdits) {
         return {
           ok: false,
@@ -852,19 +858,12 @@ export class WorldChatRunner {
       try {
         await this.deps.applySceneEdits({
           entryContext: folded.entryContext,
-          edits: outcome.turn.sceneEdits,
+          edits: sceneEdits,
           baseVersion: sceneBaseVersion,
+          dryRun: true,
         });
       } catch (err) {
-        return {
-          ok: false,
-          problems: [
-            {
-              code: "scene-edit",
-              safeMessage: (err instanceof Error ? err.message : "The scene could not be renamed. Answer without renaming it this turn.").slice(0, 300),
-            },
-          ],
-        };
+        return { ok: false, problems: [{ code: "scene-edit", safeMessage: sceneEditProblem(err) }] };
       }
     }
 
@@ -906,6 +905,15 @@ export class WorldChatRunner {
             },
           ],
         };
+      }
+    }
+
+    // The rename, last of the durable writes and before the record of the turn (see above).
+    if (sceneEdits.length > 0 && this.deps.applySceneEdits) {
+      try {
+        await this.deps.applySceneEdits({ entryContext: folded.entryContext, edits: sceneEdits, baseVersion: sceneBaseVersion });
+      } catch (err) {
+        return { ok: false, problems: [{ code: "scene-edit", safeMessage: sceneEditProblem(err) }] };
       }
     }
 
@@ -1041,6 +1049,16 @@ function safeDetail(err: unknown): string {
  * while the model was writing, and the only honest thing to do is answer without touching it.
  * Neither message carries world content, per TurnProblem's contract.
  */
+/**
+ * Why a rename failed, in words the corrective turn can use — and only those (codex, PR 716).
+ * A refusal is worded for the model already; anything else — a file that vanished, a parse
+ * error — carries a path or a stack, which is not the model's to see.
+ */
+function sceneEditProblem(err: unknown): string {
+  if (err instanceof SceneEditRefused) return err.reason.slice(0, 300);
+  return "The scene could not be renamed. Answer without renaming it this turn.";
+}
+
 function bibleProblem(err: unknown): string {
   if (err instanceof BibleEditError) {
     return `The bible has no section headed "${err.heading.slice(0, 120)}". Use set-section to add one, or name a heading that is there.`;
