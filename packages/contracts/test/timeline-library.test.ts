@@ -171,3 +171,12 @@ describe("Arke assembles a scene", () => {
     assert.ok("refused" in bare && /no shots/.test(bare.refused));
   });
 });
+
+describe("the Library is a set", () => {
+  it("keeps one of an item named twice in the same command", () => {
+    const empty = seedEmptyPictureTimeline(production());
+    const added = applyTimelineCommands(empty, [{ kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_1" }, { kind: "shot", shotId: "sh_1" }] }]);
+    assert.deepEqual(added.library, [{ kind: "shot", shotId: "sh_1" }]);
+    assert.doesNotThrow(() => ProductionTimelineSchema.parse(added), "the history replays with the Library in it");
+  });
+});

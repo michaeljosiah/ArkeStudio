@@ -358,3 +358,74 @@ describe("spoken lines in the Library (R-1, R-8)", () => {
     }
   });
 });
+
+describe("the picker and the keys sheet, round two", () => {
+  it("unchecking an item in the Library removes it, and Cancel forgets a draft", async () => {
+    const screen = await mount(savedState());
+    try {
+      await act(async () => button(screen, "Add").click());
+      const box = (): HTMLInputElement => {
+        const row = [...screen.container.querySelectorAll<HTMLLabelElement>(".fy-libpick__row")].find((candidate) => candidate.textContent?.includes("SH 12"));
+        const input = row?.querySelector<HTMLInputElement>("input");
+        assert.ok(input, "the SH 12 row is in the picker");
+        return input;
+      };
+      assert.equal(box().checked, true, "a shot already in the Library shows checked");
+      await act(async () => box().click());
+      await act(async () => button(screen, "Cancel").click());
+      await act(async () => button(screen, "Add").click());
+      assert.equal(box().checked, true, "Cancel forgot the unchecking");
+      await act(async () => box().click());
+      await act(async () => button(screen, "Update the library").click());
+      const [batch] = commandsSent(screen);
+      assert.deepEqual(batch, [{ kind: "remove-from-library", items: [{ kind: "shot", shotId: "sh_12" }] }]);
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("? closes the keys sheet it opened", async () => {
+    const screen = await mount(savedState());
+    try {
+      const press = (key: string) =>
+        act(async () => {
+          const event = new Event("keydown");
+          Object.defineProperty(event, "key", { value: key });
+          window.dispatchEvent(event);
+          await Promise.resolve();
+        });
+      await press("?");
+      assert.ok(screen.container.querySelector(".fy-editordialog"));
+      await press("?");
+      assert.equal(screen.container.querySelector(".fy-editordialog"), null);
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("a shot added from the Library lands after the clip under the playhead", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    const seeded = seedStoryPictureTimeline(production);
+    const first = seeded.tracks[0]!.clips[0]!;
+    production.timeline = {
+      status: "ready",
+      timeline: applyTimelineCommands(
+        { ...seeded, tracks: [{ ...seeded.tracks[0]!, clips: [first] }] },
+        [{ kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }] }],
+      ),
+    };
+    const screen = await mount(state);
+    try {
+      await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-library-item="shot:sh_13"] .fy-artrow__pick')!.click());
+      const add = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artrow__actions button")].find((candidate) => candidate.textContent?.includes("Add to timeline"));
+      assert.ok(add, "the unplaced shot can be added");
+      await act(async () => add.click());
+      const [batch] = commandsSent(screen);
+      assert.ok(batch && batch[0]!.kind === "place");
+      assert.equal(batch[0]!.kind === "place" && batch[0]!.clip.startFrame, first.startFrame + first.durationFrames, "it slides past the clip at the playhead");
+    } finally {
+      await close(screen);
+    }
+  });
+});

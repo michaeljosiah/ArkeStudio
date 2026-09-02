@@ -24,6 +24,10 @@ export function EditorDialog({
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
+  // The latest close callback, read at key time: callers pass inline closures, and re-running the
+  // focus set-up on every parent render would pull focus back to the first control mid-use.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return;
     opener.current = document.activeElement;
@@ -33,14 +37,18 @@ export function EditorDialog({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        close.current();
         return;
       }
       if (event.key !== "Tab" || panel.current === null) return;
       // The tab ring stays inside the sheet: from the last control forward lands on the first,
-      // from the first backward lands on the last.
+      // from the first backward lands on the last. A sheet with no controls keeps focus on itself.
       const focusable = [...panel.current.querySelectorAll<HTMLElement>("button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])")];
-      if (focusable.length === 0) return;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panel.current.focus();
+        return;
+      }
       const head = focusable[0]!;
       const tail = focusable[focusable.length - 1]!;
       if (event.shiftKey && document.activeElement === head) {
@@ -57,7 +65,7 @@ export function EditorDialog({
       const back = opener.current;
       if (back instanceof HTMLElement && back.isConnected) back.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   const heading = labelledBy ?? "editor-dialog-title";
   return (

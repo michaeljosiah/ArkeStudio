@@ -4729,9 +4729,14 @@ function ExportSheet({
 }
 
 /** The newest Undo entry that is one of Arke's assemblies (R-46): its label names the scene, its notes say what it did. */
-function assemblyEntry(timeline: ProductionTimeline): TimelineChangeHistoryEntry | null {
-  const entry = timeline.history.undo.at(-1);
-  return entry !== undefined && entry.kind === "change" && entry.label.startsWith("Arke assembled ") && entry.notes !== undefined ? entry : null;
+function assemblyEntry(timeline: ProductionTimeline): { entry: TimelineChangeHistoryEntry; index: number } | null {
+  // The newest assembly still on the undo stack, however many edits followed it: the banner
+  // stays until it is hidden or the assembly itself is undone.
+  for (let index = timeline.history.undo.length - 1; index >= 0; index -= 1) {
+    const entry = timeline.history.undo[index]!;
+    if (entry.kind === "change" && entry.label.startsWith("Arke assembled ") && entry.notes !== undefined) return { entry, index };
+  }
+  return null;
 }
 
 function AddToLibraryDialog({
@@ -4747,17 +4752,24 @@ function AddToLibraryDialog({
   artifacts: ArtifactSidecar[];
   library: readonly TimelineLibraryItem[];
   onClose: () => void;
-  onAdd: (items: TimelineLibraryItem[]) => void;
+  onAdd: (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => void;
 }) {
   const [sceneId, setSceneId] = useState<string | null>(null);
   const [chosen, setChosen] = useState<Set<string>>(() => new Set());
+  /** Items already in the Library that were unchecked: the picker removes as well as adds. */
+  const [dropped, setDropped] = useState<Set<string>>(() => new Set());
   const present = new Set(library.map(libraryItemKey));
+  const dismiss = () => {
+    setChosen(new Set());
+    setDropped(new Set());
+    onClose();
+  };
   const scenes = production?.scenes ?? [];
   const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
   const shots = scene ? orderedShots(scene) : [];
   const placeable = artifacts.filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
   const toggle = (key: string) =>
-    setChosen((current) => {
+    (present.has(key) ? setDropped : setChosen)((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -4775,26 +4787,29 @@ function AddToLibraryDialog({
       return next;
     });
   };
+  const asItem = (key: string): TimelineLibraryItem =>
+    key.startsWith("shot:") ? { kind: "shot", shotId: key.slice(5) } : { kind: "artifact", artifactId: key.slice(9) };
   const confirm = () => {
-    const items: TimelineLibraryItem[] = [...chosen].map((key) =>
-      key.startsWith("shot:") ? { kind: "shot", shotId: key.slice(5) } : { kind: "artifact", artifactId: key.slice(9) },
-    );
-    if (items.length === 0) return;
-    onAdd(items);
+    if (chosen.size === 0 && dropped.size === 0) return;
+    onAdd([...chosen].map(asItem), [...dropped].map(asItem));
     setChosen(new Set());
+    setDropped(new Set());
   };
   const row = (key: string, name: string, meta: string, tone: "muted" | "destructive" = "muted") => {
     const already = present.has(key);
+    const checked = already ? !dropped.has(key) : chosen.has(key);
     return (
       <label key={key} className={cx("fy-libpick__row", already && "fy-libpick__row--in")}>
-        <input type="checkbox" checked={already || chosen.has(key)} disabled={already} onChange={() => toggle(key)} />
+        <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
         <span className="fy-libpick__name">{name}</span>
-        <span className={cx("fy-mono fy-libpick__meta", tone === "destructive" && "fy-libpick__meta--destructive")}>{already ? "in the library" : meta}</span>
+        <span className={cx("fy-mono fy-libpick__meta", tone === "destructive" && "fy-libpick__meta--destructive")}>
+          {already ? (dropped.has(key) ? "leaves the library" : "in the library") : meta}
+        </span>
       </label>
     );
   };
   return (
-    <EditorDialog open={open} title="Add to the library" subtitle="Takes, uploads and lines to cut with" onClose={onClose} width={880} labelledBy="add-to-library-title">
+    <EditorDialog open={open} title="Add to the library" subtitle="Takes, uploads and lines to cut with" onClose={dismiss} width={880} labelledBy="add-to-library-title">
       <div className="fy-libpick">
         <div className="fy-libpick__col">
           <div className="fy-libpick__colhead">Scenes</div>
@@ -4845,13 +4860,15 @@ function AddToLibraryDialog({
         </div>
       </div>
       <div className="fy-libpick__foot">
-        <span className="fy-mono">{chosen.size} selected</span>
+        <span className="fy-mono">
+          {chosen.size} selected{dropped.size > 0 ? ` · ${dropped.size} leaving` : ""}
+        </span>
         <span className="fy-h1row__push" />
-        <button type="button" className="fy-libpick__cancel" onClick={onClose}>
+        <button type="button" className="fy-libpick__cancel" onClick={dismiss}>
           Cancel
         </button>
-        <button type="button" className="fy-libpick__confirm" data-primary="true" disabled={chosen.size === 0} onClick={confirm}>
-          Add to the library
+        <button type="button" className="fy-libpick__confirm" data-primary="true" disabled={chosen.size === 0 && dropped.size === 0} onClick={confirm}>
+          {chosen.size === 0 && dropped.size > 0 ? "Update the library" : "Add to the library"}
         </button>
       </div>
     </EditorDialog>
@@ -5248,7 +5265,14 @@ export function CutScreen() {
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
-  const addToLibrary = (items: TimelineLibraryItem[]) => sendCommands([{ kind: "add-to-library", items }], "Add to the library");
+  const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) =>
+    sendCommands(
+      [
+        ...(added.length > 0 ? [{ kind: "add-to-library" as const, items: added }] : []),
+        ...(removed.length > 0 ? [{ kind: "remove-from-library" as const, items: removed }] : []),
+      ],
+      added.length > 0 ? "Add to the library" : "Remove from the library",
+    );
   useEffect(() => {
     if (searchParams.get("export") === null) return;
     setSearchParams(
@@ -5261,7 +5285,7 @@ export function CutScreen() {
   }, [searchParams, setSearchParams]);
   useEffect(() => {
     if (assembleSceneId === null || !worldId || !prodId || !production || fence === null || timelineState.status === "invalid") return;
-    const key = `${prodId}:${assembleSceneId}`;
+    const key = `${worldId}:${prodId}:${assembleSceneId}`;
     if (assembled.current === key) return;
     assembled.current = key;
     setTimelineCommandError(null);
@@ -5448,6 +5472,13 @@ export function CutScreen() {
     const found = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => ({ scene, shot }))).find(({ shot }) => shot.id === shotId);
     if (found === undefined) return;
     const durationFrames = Math.max(1, secondsToFrames(found.shot.durationSec ?? CLIP_DEFAULT_SEC, frameRate));
+    // The playhead usually sits inside a clip; the shot slides to the first free span after it
+    // rather than being refused for the overlap (round eleven).
+    const base = editableTimeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
+    let startFrame = playheadFrame;
+    for (const clip of orderedTrackClips(base ?? { clips: [] })) {
+      if (clip.startFrame < startFrame + durationFrames && clip.startFrame + clip.durationFrames > startFrame) startFrame = clip.startFrame + clip.durationFrames;
+    }
     sendCommands(
       [
         {
@@ -5455,7 +5486,7 @@ export function CutScreen() {
           trackId: PICTURE_TRACK_ID,
           clip: {
             id: mintClipId(),
-            startFrame: playheadFrame,
+            startFrame,
             durationFrames,
             sourceInFrames: 0,
             source: { kind: "shot", shotId, sceneNumber: found.scene.number, shotNumber: found.shot.number, label: found.shot.title },
@@ -5507,8 +5538,9 @@ export function CutScreen() {
    * it is hidden; the empty start until something is placed; the song's anchors for a spine.
    * Nothing is said about a cut a person built — the timeline is its own account.
    */
-  const assembly = timelineState.status === "ready" ? assemblyEntry(timelineState.timeline) : null;
-  const noticeKey = assembly === null || timelineState.status !== "ready" ? null : `${timelineState.timeline.revision}:${assembly.label}`;
+  const found = timelineState.status === "ready" ? assemblyEntry(timelineState.timeline) : null;
+  const assembly = found?.entry ?? null;
+  const noticeKey = found === null ? null : `${found.index}:${found.entry.label}`;
   let notice: React.ReactNode = null;
   if (assembly !== null && noticeKey !== noticeHidden) {
     const shots = assembly.clips.filter((change) => change.before === null && change.after !== null && change.after.source.kind === "shot");
@@ -5558,8 +5590,8 @@ export function CutScreen() {
       </div>
     );
   }
-  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled });
-  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled };
+  const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen });
+  shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled, keysOpen };
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
   const deselect = (): boolean => {
     // Panes and dialogs own Escape first; the selection is only cleared when nothing else is open.
@@ -5575,13 +5607,19 @@ export function CutScreen() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (typingTarget(event.target)) return;
-      // A sheet owns the keyboard while it is up (R-5): Delete behind the keys list must not delete a clip.
-      if (document.querySelector(".fy-editordialog") !== null) return;
-      if (event.key === " " && interactiveTarget(event.target)) return;
       const meta = event.ctrlKey || event.metaKey;
       const key = event.key;
       const state = shortcuts.current;
       const actions = shortcutActions.current;
+      // The key that opened the keys sheet closes it; every other sheet owns the keyboard while
+      // it is up (R-5), so Delete behind the export sheet deletes nothing.
+      if (state.keysOpen && key === "?" && !meta) {
+        actions.keys();
+        event.preventDefault();
+        return;
+      }
+      if (document.querySelector(".fy-editordialog") !== null) return;
+      if (event.key === " " && interactiveTarget(event.target)) return;
       if (meta && (key === "z" || key === "Z")) {
         if (event.shiftKey ? state.canRedo : state.canUndo) actions.sendHistory(event.shiftKey ? "redo" : "undo");
       } else if (meta && (key === "y" || key === "Y")) {
@@ -5860,8 +5898,8 @@ export function CutScreen() {
         artifacts={artifacts}
         library={libraryItems}
         onClose={() => setPickerOpen(false)}
-        onAdd={(items) => {
-          addToLibrary(items);
+        onAdd={(added, removed) => {
+          changeLibrary(added, removed);
           setPickerOpen(false);
         }}
       />

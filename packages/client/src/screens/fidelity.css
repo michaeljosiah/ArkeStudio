@@ -7320,7 +7320,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-movekind__chip:disabled { cursor: default; }
 
 /* The export sheet (SPEC-039 R-24, T-5): the target's option rows as chips. */
-.fy-exsheet { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 4px; }
+.fy-exsheet { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 4px; max-height: calc(90vh - 120px); overflow: auto; }
 .fy-exsheet__row { display: flex; align-items: center; gap: 10px; }
 .fy-exsheet__name { flex: 0 0 76px; font: 600 9.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
 .fy-exsheet__opts { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }

@@ -1413,7 +1413,13 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     }
     case "add-to-library": {
       const present = new Set(working.library.map(libraryItemKey));
-      const fresh = command.items.filter((item) => !present.has(libraryItemKey(item)));
+      // The same item twice in one command is one item: the set is kept while accepting, not only before.
+      const fresh = command.items.filter((item) => {
+        const key = libraryItemKey(item);
+        if (present.has(key)) return false;
+        present.add(key);
+        return true;
+      });
       if (working.library.length + fresh.length > MAX_LIBRARY_ITEMS) throw new TimelineOperationRefused(`the library holds at most ${MAX_LIBRARY_ITEMS} items`);
       working.library = [...working.library, ...fresh];
       return;
@@ -1708,11 +1714,13 @@ function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEnt
 function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { index: number; message: string } | null {
   let tracks: readonly TimelineTrack[] = timeline.tracks;
   let mix = timeline.mix;
+  let library: readonly TimelineLibraryItem[] = timeline.library;
   for (let index = timeline.history[stack].length - 1; index >= 0; index -= 1) {
     try {
       const entry = timeline.history[stack][index]!;
       tracks = replayEntry(tracks, entry, stack);
       mix = replayMix(mix, entry, stack);
+      library = replayLibrary(library, entry, stack);
     } catch (error) {
       if (error instanceof TimelineOperationRefused) {
         return { index, message: `saved history is not replayable from its ${stack} position: ${error.reason}` };
