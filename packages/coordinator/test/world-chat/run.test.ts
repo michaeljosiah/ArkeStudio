@@ -9,6 +9,7 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { SceneEditRefused } from "../../src/productions/scene-edits.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -569,5 +570,143 @@ describe("what a turn was refused", () => {
       .map((e) => e.event)
       .find((e) => e.type === "turn.completed") as { refusedTools?: unknown };
     assert.equal(completed.refusedTools, undefined, "and nothing is written to the log either");
+  });
+});
+
+describe("a rename lands straight in, fenced by the version the prompt showed (SPEC-036 R-38)", () => {
+  /** A scene thread, with the two deps the rename needs handed in by the test. */
+  async function sceneSetup(
+    adapter: HarnessAdapter,
+    deps: {
+      sceneVersion?: () => number | null;
+      applySceneEdits?: (input: {
+        edits: readonly { kind: "rename"; title: string }[];
+        baseVersion: number | null;
+        dryRun?: boolean;
+      }) => Promise<void>;
+      applyBibleEdits?: () => Promise<null>;
+    },
+  ) {
+    const worldPath = await tempDir("arke-run-scene-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append(
+      {
+        type: "conversation.created",
+        title: "scene talk",
+        entryContext: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      },
+      { at: AT },
+    );
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const runner = new WorldChatRunner({
+      adapter,
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: () => [],
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({
+        messages,
+        bundle,
+        attachments: [],
+        attachmentText: new Map(),
+      }),
+      now: NOW,
+      ...deps,
+    });
+    const view = async () => {
+      const meta = await store.readMeta();
+      return foldConversation(meta!.id, meta!.createdAt, (await store.read()).events).view;
+    };
+    return { runner, store, conversationId, view };
+  }
+  const renaming = (title: string) =>
+    JSON.stringify({ reply: `Called it ${title}.`, candidateOperations: [], groupOperations: [], sceneEdits: [{ kind: "rename", title }] });
+  const plain = JSON.stringify({ reply: "Left the name as it was.", candidateOperations: [], groupOperations: [] });
+
+  it("checks the rename first and writes it last, both fenced by the version the prompt was built from", async () => {
+    const applied: Array<{ baseVersion: number | null; titles: string[]; dryRun: boolean }> = [];
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("The tide answers")]), {
+      sceneVersion: () => 3,
+      applySceneEdits: async ({ edits, baseVersion, dryRun }) => {
+        applied.push({ baseVersion, titles: edits.map((edit) => edit.title), dryRun: dryRun === true });
+      },
+    });
+    await runner.send(store, conversationId, "Call this one The tide answers");
+    assert.deepEqual(
+      applied,
+      [
+        { baseVersion: 3, titles: ["The tide answers"], dryRun: true },
+        { baseVersion: 3, titles: ["The tide answers"], dryRun: false },
+      ],
+      "a check before anything durable, one write after everything else, both against what the model saw",
+    );
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Called it/, "and the reply that landed with it stands");
+  });
+
+  it("a rename never lands under a turn the bible then refuses (codex, PR 716)", async () => {
+    const prompts: string[] = [];
+    const writes: boolean[] = [];
+    const withBible = JSON.stringify({
+      reply: "Named it and noted it.",
+      candidateOperations: [],
+      groupOperations: [],
+      bibleEdits: [{ op: "append-to-section", heading: "Nowhere", text: "x" }],
+      sceneEdits: [{ kind: "rename", title: "From the model" }],
+    });
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([withBible, plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async ({ dryRun }) => {
+        writes.push(dryRun !== true);
+      },
+      applyBibleEdits: async () => {
+        throw new Error("no such heading");
+      },
+    });
+    await runner.send(store, conversationId, "Name it and note it");
+    assert.deepEqual(writes, [false], "the rename was checked, and never written: the bible refused first");
+    assert.ok(prompts.some((prompt) => /bible could not be edited/.test(prompt)), "the bible's refusal is what the retry answers");
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
+  });
+
+  it("a refused rename is the one corrective problem, and the retry that drops it completes", async () => {
+    const prompts: string[] = [];
+    let attempts = 0;
+    const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("From the model"), plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async () => {
+        attempts += 1;
+        throw new SceneEditRefused("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
+      },
+    });
+    await runner.send(store, conversationId, "Name it");
+    assert.equal(attempts, 1, "asked once; the retry carried no rename");
+    assert.ok(prompts.some((prompt) => /changed while you were answering/.test(prompt)), "the refusal reached the model in its own words");
+    const folded = await view();
+    assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
+  });
+
+  it("an error that is not a refusal reaches the model as the fixed line, never as a path (codex, PR 716)", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await sceneSetup(fakeAdapter([renaming("Anything"), plain], { prompts }), {
+      sceneVersion: () => 2,
+      applySceneEdits: async () => {
+        throw new Error("ENOENT: no such file, open '/Users/private/worlds/the-undersong/productions/saltlight/scenes/x.json'");
+      },
+    });
+    await runner.send(store, conversationId, "Name it");
+    const corrective = prompts.find((prompt) => /could not be renamed/.test(prompt));
+    assert.ok(corrective, "the model is told the rename failed");
+    assert.ok(!/ENOENT|private|the-undersong/.test(corrective!), "and nothing about where the world lives");
+  });
+
+  it("a rename with nowhere to land is refused rather than silently dropped", async () => {
+    const prompts: string[] = [];
+    const { runner, store, conversationId } = await sceneSetup(fakeAdapter([renaming("Anything"), plain], { prompts }), {});
+    await runner.send(store, conversationId, "Name it");
+    assert.ok(prompts.some((prompt) => /cannot be renamed in this conversation/.test(prompt)), "told the model, not swallowed");
   });
 });

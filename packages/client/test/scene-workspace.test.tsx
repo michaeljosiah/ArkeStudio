@@ -644,6 +644,25 @@ describe("the title is typed where it reads (R-2, amended 2026-09-02)", () => {
   });
 });
 
+describe("the dock offers a name while the scene is Untitled (SPEC-036 R-38)", () => {
+  const chips = (mounted: Mounted): string[] => all(mounted, ".fy-arke__prompts button").map((chip) => chip.textContent ?? "");
+
+  it("offers Name this scene on an Untitled scene, and not on a named one", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.title = "Untitled";
+    const untitled = await mountState(state);
+    assert.ok(chips(untitled).includes("Name this scene"), `offered: ${chips(untitled).join(" | ")}`);
+    assert.match(untitled.container.textContent ?? "", /talking can name the scene/, "the dock says what talking now changes");
+    assert.doesNotMatch(untitled.container.textContent ?? "", /talking changes nothing/, "and no longer promises it changes nothing");
+
+    const named = await mount();
+    assert.ok(!chips(named).includes("Name this scene"), "a named scene is not nagged");
+    assert.match(named.container.textContent ?? "", /talking can name the scene/, "a named scene can still be renamed on request");
+  });
+});
+
 describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
   const newSceneButton = (mounted: Mounted): HTMLElement =>
     all(mounted, "button").find((candidate) => candidate.textContent === "New scene")!;

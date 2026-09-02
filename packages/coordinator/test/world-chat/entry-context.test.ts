@@ -267,3 +267,33 @@ describe("a production thread is briefed on its shape", () => {
     assert.match(text, /one continuous piece/);
   });
 });
+
+describe("a scene thread is told it may name the scene (SPEC-036 R-38)", () => {
+  async function sceneText(title: string): Promise<string> {
+    const scanned = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const production = scanned.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const patched: WorldBundle = {
+      ...scanned,
+      productions: scanned.productions.map((candidate) =>
+        candidate.meta.id !== "saltlight"
+          ? candidate
+          : { ...candidate, scenes: candidate.scenes.map((scene) => (scene.id === "sc_04" ? { ...scene, title } : scene)) },
+      ),
+    };
+    return describeEntryContext({ kind: "scene", productionId: production.meta.id, sceneId: "sc_04" }, patched);
+  }
+
+  it("an Untitled scene is offered a name, through the typed rename", async () => {
+    const text = await sceneText("Untitled");
+    assert.match(text, /called Untitled/);
+    assert.match(text, /sceneEdits rename/, "the field it must use, by name");
+    assert.match(text, /lands at once/, "and that no card stands between");
+  });
+
+  it("a named scene is renamed only when asked", async () => {
+    const text = await sceneText("The verse rises");
+    assert.match(text, /Its name is "The verse rises"/);
+    assert.match(text, /only when they ask/);
+    assert.ok(!/called Untitled/.test(text));
+  });
+});

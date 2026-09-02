@@ -206,7 +206,8 @@ describe("the dock head (design 2483-2489)", () => {
     const mounted = await mountNode(<App />);
     assert.match(q(mounted, ".fy-arke__who .fy-mono")?.textContent ?? "", /v\d+$/, "the scene and its version");
     assert.ok(q(mounted, ".fy-arke__thumb"), "the scene has no frame, and the slot is still drawn");
-    assert.match(q(mounted, ".fy-arke__foot > .fy-mono")?.textContent ?? "", /talking changes nothing/);
+    // The scene dock's line names the one thing talking does change here (SPEC-036 R-38).
+    assert.match(q(mounted, ".fy-arke__foot > .fy-mono")?.textContent ?? "", /talking can name the scene · everything else waits for your yes/);
   });
 });
 
