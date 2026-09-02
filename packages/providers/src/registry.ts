@@ -16,10 +16,12 @@ import { OpenAiClient } from "./clients/openai.js";
 import { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";
 import { captureProviderClient } from "./capture.js";
 import { missingHiggsfieldRunner } from "./higgsfield-cli.js";
-import type { CommandRunner, FetchLike, ProviderCallCapture, ProviderClient } from "./types.js";
+import type { CommandRunner, FetchLike, ProviderCallCapture, ProviderClient, ProviderTransport } from "./types.js";
 
 export interface ProviderClientDeps {
   fetch: FetchLike;
+  /** Desktop-owned cloud HTTP policy. Local engines retain their own scoped transports. */
+  transport?: ProviderTransport;
   /**
    * The Higgsfield CLI, already bound to a discovered command. Omitted when no CLI was found:
    * every call then fails with the remedy rather than an ENOENT, so an unset-up machine reads
@@ -75,10 +77,10 @@ export interface ProviderClientDeps {
  * downloaded and captured over HTTP. Both seams pass through captureProviderClient.
  */
 export function createProviderClients(deps: ProviderClientDeps): Partial<Record<ProviderId, ProviderClient>> {
-  const { fetch: fetchImpl, capture } = deps;
+  const { fetch: fetchImpl, capture, transport } = deps;
   const higgsfield = deps.higgsfield ?? missingHiggsfieldRunner();
   return {
-    fal: captureProviderClient("fal", (fetch) => new FalClient(fetch), fetchImpl, capture),
+    fal: captureProviderClient("fal", (fetch) => new FalClient(fetch), fetchImpl, capture, undefined, transport),
     // The only client taking both seams: the CLI carries submit, poll and status, and the
     // artifact bytes still arrive over HTTP. Both halves are instrumented.
     higgsfield: captureProviderClient(
@@ -87,10 +89,26 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
       fetchImpl,
       capture,
       higgsfield,
+      transport,
+      (operation) => operation === "fetch-artifacts",
     ),
-    openai: captureProviderClient("openai", (fetch) => new OpenAiClient(fetch), fetchImpl, capture),
-    anthropic: captureProviderClient("anthropic", (fetch) => new AnthropicClient(fetch), fetchImpl, capture),
-    elevenlabs: captureProviderClient("elevenlabs", (fetch) => new ElevenLabsClient(fetch), fetchImpl, capture),
+    openai: captureProviderClient("openai", (fetch) => new OpenAiClient(fetch), fetchImpl, capture, undefined, transport),
+    anthropic: captureProviderClient(
+      "anthropic",
+      (fetch) => new AnthropicClient(fetch),
+      fetchImpl,
+      capture,
+      undefined,
+      transport,
+    ),
+    elevenlabs: captureProviderClient(
+      "elevenlabs",
+      (fetch) => new ElevenLabsClient(fetch),
+      fetchImpl,
+      capture,
+      undefined,
+      transport,
+    ),
     ollama: captureProviderClient("ollama", (fetch) => new OllamaClient(fetch), fetchImpl, capture),
     ...(deps.voxa === undefined
       ? {}

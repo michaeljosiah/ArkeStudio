@@ -733,7 +733,13 @@ export class JobQueue {
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
-    const submitting: Job = { ...job, status: "submitting", attempt: job.attempt + 1, updatedAt: this.clock() };
+    const submitting: Job = {
+      ...job,
+      status: "submitting",
+      attempt: job.attempt + 1,
+      submissionRejected: undefined,
+      updatedAt: this.clock(),
+    };
     await this.transition(submitting);
     if (this.disposed) return;
     if (!this.stillSubmitting(submitting)) return;
@@ -815,15 +821,16 @@ export class JobQueue {
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
-    if (typeof err === "object" && err !== null && "submissionRejected" in err) {
-      // Witnessed rejection is terminal for this attempt. Credential/quota/billing rejection also
-      // poisons the lane: pause before terminalization returns to runJob's finally, or that finally
-      // can pump the queued sibling immediately through the same known-bad provider state.
-      if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
+    const submissionRejected =
+      typeof err === "object" && err !== null && (err as { submissionRejected?: unknown }).submissionRejected === true;
+    if (submissionRejected && klass === "terminal") {
+      // A witnessed request/content rejection is terminal. A witnessed 429/5xx still takes the
+      // transient branch below, and a credential fault returns to queued behind a paused lane —
+      // response-witnessed does not mean every class has the same remedy.
       await this.terminalize(job, "failed", message, undefined, klass);
       return;
     }
-    if (!local && !client.declarations.supportsIdempotencyKey) {
+    if (!submissionRejected && !local && !client.declarations.supportsIdempotencyKey) {
       await this.holdForUser(job, klass);
       if (klass === "provider-fault") this.pauseLane(job.provider, "fault", message);
       return;
@@ -831,7 +838,14 @@ export class JobQueue {
     switch (klass) {
       case "provider-fault": {
         // The job was never wrong — the credential was (R-8). Back to queued, lane paused.
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "fault", message);
         return;
@@ -841,7 +855,14 @@ export class JobQueue {
           await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         this.lane(job.provider).fifo.unshift(job.id);
         this.pauseLane(job.provider, "offline", "offline — jobs stay queued and resume with connectivity");
         return;
@@ -854,7 +875,14 @@ export class JobQueue {
           await this.terminalize(job, "failed", `gave up after ${job.attempt} attempts: ${message}`, undefined, klass);
           return;
         }
-        await this.transition({ ...job, status: "queued", failureClass: klass, error: message, updatedAt: this.clock() });
+        await this.transition({
+          ...job,
+          status: "queued",
+          failureClass: klass,
+          submissionRejected,
+          error: message,
+          updatedAt: this.clock(),
+        });
         const lane = this.lane(job.provider);
         lane.fifo.push(job.id);
         this.schedule(lane, backoffMs(job.attempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
@@ -1265,8 +1293,19 @@ export class JobQueue {
           .catch(() => {});
       }
     }
+    // A local abort ends our wait, not necessarily the provider's work. Preserve that distinction
+    // without turning a deliberate cancellation into a reconciliation hold.
+    const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
+    const outcomeMayBeRemote =
+      !local &&
+      (job.status === "submitting" ||
+        job.providerJobId != null ||
+        (job.attempt > 0 && job.submissionRejected !== true));
+    const reason = outcomeMayBeRemote
+      ? "Cancelled in Arke. The provider may still complete or charge for this request."
+      : null;
     // A cancelled job still writes a ledger entry (R-15, D10).
-    await this.terminalize(job, "cancelled", null);
+    await this.terminalize(job, "cancelled", reason);
     this.emitQueueStatus(job.provider);
   }
 
@@ -1406,7 +1445,12 @@ export class JobQueue {
         }
         const client = this.opts.clients[job.provider];
         const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
-        if (!local && !client?.declarations.supportsIdempotencyKey && prior?.status === "submitting") {
+        if (
+          !local &&
+          !client?.declarations.supportsIdempotencyKey &&
+          prior?.status === "submitting" &&
+          job.submissionRejected !== true
+        ) {
           const action = await this.holdForUser(job);
           report.push(action);
           continue;
@@ -1764,7 +1808,11 @@ export class JobQueue {
         return;
       }
       // Abandoned — but the ledger still records it (R-15): the charge is unknown, not zero.
-      await this.terminalize(job, "cancelled", "abandoned after an unwitnessed submission");
+      await this.terminalize(
+        job,
+        "cancelled",
+        "Abandoned in Arke. The provider may still complete or charge for the unwitnessed request.",
+      );
       this.emitQueueStatus(job.provider);
     } finally {
       this.resolvingHeld.delete(jobId);

@@ -1253,6 +1253,9 @@ export class Coordinator {
           this.refreshDiagnosticsLogTail(),
         )
       : null;
+    opts.providerCalls?.setTransportFailureSink((record) => {
+      void this.appLog?.append(record);
+    });
     this.credentials =
       opts.appRoot && opts.cipher
         ? new CredentialStore(
