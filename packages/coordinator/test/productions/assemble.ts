@@ -1,7 +1,7 @@
 import {
   assembleSceneCommands,
   orderedShots,
-  seedEmptyPictureTimeline,
+  seedFirstPictureTimeline,
   sortScenes,
   storyTimelineFingerprint,
   type ProductionBundle,
@@ -31,7 +31,7 @@ export function sceneAssembly(store: WorldStore, productionId: string, sceneId: 
   const production = productionOf(store, productionId);
   const assembly = assembleSceneCommands({
     production,
-    timeline: production.timeline?.status === "ready" ? production.timeline.timeline : seedEmptyPictureTimeline(production),
+    timeline: production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production),
     sceneId,
     artifacts: store.getBundle().artifacts,
   });
@@ -64,6 +64,26 @@ export async function assembleScene(
 }
 
 /** Every scene with shots, in story order, one revision each; the base Picture track then holds every story shot once. */
+/**
+ * The first write for a production that already holds legacy placements: those seed the story
+ * order, so an assembly would be refused; a Library add is the smallest batch that materialises.
+ */
+export async function libraryFirstWrite(store: WorldStore, productionId: string): Promise<{ timeline: ProductionTimeline; dropped: string[] }> {
+  const production = productionOf(store, productionId);
+  const shot = sortScenes(production.scenes).flatMap((scene) => orderedShots(scene))[0];
+  if (shot === undefined) throw new Error(`${productionId} has no shots`);
+  const { dropped } = await applyTimelineCommand(store, productionId, {
+    kind: "commands",
+    commands: [{ kind: "add-to-library", items: [{ kind: "shot", shotId: shot.id }] }],
+    baseRevision: null,
+    sourceFingerprint: storyTimelineFingerprint(production),
+    label: "Add to the library",
+  });
+  const state = productionOf(store, productionId).timeline;
+  if (state?.status !== "ready") throw new Error(`the first write left the timeline ${state?.status ?? "absent"}`);
+  return { timeline: state.timeline, dropped };
+}
+
 export async function assembleStory(store: WorldStore, productionId: string): Promise<ProductionTimeline> {
   let timeline: ProductionTimeline | null = null;
   for (const scene of sortScenes(productionOf(store, productionId).scenes)) {

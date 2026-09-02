@@ -806,6 +806,17 @@ export function seedEmptyPictureTimeline(production: Pick<ProductionBundle, "met
   };
 }
 
+/**
+ * The first record for a story production: empty, unless `cut.json` already holds placements —
+ * an existing film's shot-anchored sound has nothing to anchor to on an empty track, and the
+ * migration would drop it and call the record migrated. A production that was already cut keeps
+ * the story seed its placements were made against; a new one starts empty.
+ */
+export function seedFirstPictureTimeline(production: ProductionBundle): ProductionTimeline {
+  const placed = production.cut.overlays.length > 0 || production.cut.audio.some((lane) => lane.entries.length > 0);
+  return placed ? seedStoryPictureTimeline(production) : seedEmptyPictureTimeline(production);
+}
+
 /** How long a shot plays when the story names no length: the seed's own default, in frames. */
 export function storyShotFrames(durationSec: number | undefined, frameRate: FrameRate): number {
   return shotDurationFrames(durationSec, frameRate);
@@ -853,6 +864,9 @@ export function assembleSceneCommands(input: {
   const placed: string[] = [];
   const gaps: string[] = [];
   const cues: Array<{ id: SubtitleCueId; text: string; startFrame: number; endFrame: number; speaker?: string }> = [];
+  // Placed or a gap by the rule the preview and the export use: an accepted take that no longer
+  // resolves to media is a gap, whatever the selection says.
+  const playable = new Set(deriveCut(production).entries.filter((entry) => entry.media !== null).map((entry) => entry.shot.id));
   for (const shot of fresh) {
     const durationFrames = shotDurationFrames(shot.durationSec, frameRate);
     let id: TimelineClipId = `cl_${shot.id.replace("_", "-")}`;
@@ -869,8 +883,7 @@ export function assembleSceneCommands(input: {
         source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title },
       },
     });
-    const accepted = production.selections[shot.id]?.acceptedTakeId ?? null;
-    (accepted === null ? gaps : placed).push(shot.title);
+    (playable.has(shot.id) ? placed : gaps).push(shot.title);
     // Only a spoken line becomes a subtitle (R-45): an sfx note like "wind under the door" is
     // direction for the mix, not words anyone says.
     const spoken = shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue";
@@ -896,8 +909,11 @@ export function assembleSceneCommands(input: {
   }
   if (cues.length > 0) {
     const language = input.language ?? "en";
-    const subtitles = timeline.tracks.find((track) => track.kind === "subtitle");
-    const trackId: TimelineTrackId = subtitles?.id ?? `tr_subs-${language}`;
+    // The track of this language, never another's: an English cue on a Spanish track is a wrong deliverable.
+    const subtitles = timeline.tracks.find((track) => track.kind === "subtitle" && track.language === language);
+    const takenIds = new Set(timeline.tracks.map((track) => track.id));
+    let trackId: TimelineTrackId = subtitles?.id ?? `tr_subs-${language}`;
+    for (let n = 2; subtitles === undefined && takenIds.has(trackId); n += 1) trackId = `tr_subs-${language}-${n}`;
     if (subtitles === undefined) commands.push({ kind: "add-subtitle-track", trackId, name: "Subtitles", language });
     const taken = new Set((subtitles?.cues ?? []).map((cue) => cue.id));
     for (const cue of cues) {
@@ -909,9 +925,17 @@ export function assembleSceneCommands(input: {
     notes.push(`Conformed ${cues.length} subtitle${cues.length === 1 ? "" : "s"} from the shot lines.`);
   }
   if (beds.length > 0 && cursor > startFrame) {
-    const ambience = timeline.tracks.find((track) => track.kind === "ambience");
-    const trackId: TimelineTrackId = ambience?.id ?? "tr_ambience";
-    if (ambience === undefined) commands.push({ kind: "add-track", trackId, trackKind: "ambience", name: "Ambience" });
+    // The first Ambience lane with the span free; a new one when every lane already holds
+    // something across it, rather than an overlap that refuses the whole assembly.
+    const spanFree = (track: TimelineTrack) => !track.clips.some((clip) => clip.startFrame < cursor && clip.startFrame + clip.durationFrames > startFrame);
+    const ambienceLanes = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "ambience");
+    const ambience = ambienceLanes.find(spanFree);
+    let trackId: TimelineTrackId = ambience?.id ?? "tr_ambience";
+    if (ambience === undefined) {
+      const takenIds = new Set(timeline.tracks.map((track) => track.id));
+      for (let n = 2; takenIds.has(trackId); n += 1) trackId = `tr_ambience-${n}`;
+      commands.push({ kind: "add-track", trackId, trackKind: "ambience", name: ambienceLanes.length > 0 ? `Ambience ${ambienceLanes.length + 1}` : "Ambience" });
+    }
     // One bed per scene span on one track; a second file for the same scene waits in the Library.
     const bed = beds[0]!;
     let id: TimelineClipId = `cl_bed-${bed.id.slice(3, 11).toLowerCase()}`;

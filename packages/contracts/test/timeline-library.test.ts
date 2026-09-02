@@ -7,6 +7,7 @@ import {
   orderedTrackClips,
   redoTimelineHistory,
   seedEmptyPictureTimeline,
+  seedFirstPictureTimeline,
   undoTimelineHistory,
   type ProductionBundle,
   type Scene,
@@ -178,5 +179,24 @@ describe("the Library is a set", () => {
     const added = applyTimelineCommands(empty, [{ kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_1" }, { kind: "shot", shotId: "sh_1" }] }]);
     assert.deepEqual(added.library, [{ kind: "shot", shotId: "sh_1" }]);
     assert.doesNotThrow(() => ProductionTimelineSchema.parse(added), "the history replays with the Library in it");
+  });
+});
+
+describe("the first record, and what counts as placed", () => {
+  it("starts empty unless cut.json already holds placements, which keep the story seed to anchor to", () => {
+    const fresh = production();
+    assert.equal(seedFirstPictureTimeline(fresh).tracks[0]!.clips.length, 0, "a new production starts empty");
+    const cut = production();
+    cut.cut = { audio: [{ id: "au_1", kind: "ambience", label: "Wind", entries: [{ artifactId: BELLS, shotId: "sh_1", startSec: 0, endSec: 2 }] }], overlays: [] } as never;
+    assert.ok(seedFirstPictureTimeline(cut).tracks[0]!.clips.length > 0, "shot-anchored sound has shots to anchor to");
+  });
+
+  it("counts a shot whose accepted take has no media as a gap, as the cut resolver does", () => {
+    const bundle = production();
+    bundle.takes[0] = { ...bundle.takes[0]!, media: undefined } as never;
+    const first = assembleSceneCommands({ production: bundle, timeline: seedEmptyPictureTimeline(bundle), sceneId: "sc_one", artifacts: [] });
+    assert.ok(!("refused" in first));
+    assert.deepEqual(first.placed, []);
+    assert.deepEqual(first.gaps, ["sh_1", "sh_2"]);
   });
 });

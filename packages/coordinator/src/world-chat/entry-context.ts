@@ -4,7 +4,7 @@ import {
   orderedTrackClips,
   productionAspect,
   productionShape,
-  seedEmptyPictureTimeline,
+  seedFirstPictureTimeline,
   TURN_RESULT_BOUNDS,
   type ProductionTimeline,
   type TimelineClip,
@@ -206,7 +206,7 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
     return "This production is cut to a song and has not been opened on the timeline yet; an editor request needs the person to press Open on the timeline first.";
   } else {
     try {
-      base = seedEmptyPictureTimeline(production);
+      base = seedFirstPictureTimeline(production);
     } catch {
       return null;
     }
@@ -233,7 +233,9 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
       : "";
   return `The production timeline ${
     revision === null
-      ? "has not been saved yet; a first request materialises the story order below"
+      ? base.tracks.every((track) => track.clips.length === 0)
+        ? "has not been saved yet and starts empty: nothing is placed until a scene is assembled or a person places shots. A first request may add shots with place commands on tr_picture (source kind shot), in story order or any other; it does not find clips already there"
+        : "has not been saved yet; a first request materialises the story order below"
       : `is revision ${revision}`
   }, ${base.frameRate} fps, frames counted from zero. Tracks — ${tracks.join("; ")}. An editor request names these clip ids exactly; the person accepts or rejects it on its card.${waiting}`;
 }

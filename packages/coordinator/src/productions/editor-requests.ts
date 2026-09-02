@@ -3,7 +3,7 @@ import {
   editorRequestStaleness,
   previewEditorRequest,
   seedSpinePictureTimeline,
-  seedEmptyPictureTimeline,
+  seedFirstPictureTimeline,
   sourceLengthFramesFor,
   spineTimelineFingerprint,
   storyTimelineFingerprint,
@@ -102,7 +102,7 @@ function requestBase(
       sourceFingerprint: spineTimelineFingerprint(production, spine, measured),
     };
   }
-  return { timeline: seedEmptyPictureTimeline(production), baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production) };
+  return { timeline: seedFirstPictureTimeline(production), baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production) };
 }
 
 /**

@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ProductionTimelineSchema, sortScenes } from "@arke-studio/contracts";
+import { ProductionTimelineSchema } from "@arke-studio/contracts";
 import { placementsLiveOnTimeline } from "../../src/productions/timeline.js";
 import { placeOverlay } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
-import { assembleScene } from "./assemble.js";
+import { libraryFirstWrite } from "./assemble.js";
 
 /**
  * Legacy placements fold into typed tracks with the first write that reaches the record
@@ -38,7 +38,9 @@ describe("cut.json migration on the first timeline write", () => {
     assert.equal(productionOf(store).cut.overlays.length, 1);
     assert.equal(placementsLiveOnTimeline(productionOf(store)), false);
 
-    const { dropped } = await assembleScene(store, PRODUCTION, sortScenes(productionOf(store).scenes)[0]!.id);
+    // A production already cut in cut.json seeds the story order on its first write, so the lane
+    // entries have shots to anchor to; the smallest first write is a Library add.
+    const { dropped } = await libraryFirstWrite(store, PRODUCTION);
     assert.deepEqual(dropped, []);
 
     const saved = ProductionTimelineSchema.parse(
@@ -61,7 +63,6 @@ describe("cut.json migration on the first timeline write", () => {
 
   it("names a placement it cannot carry instead of dropping it silently", async () => {
     const store = await open();
-    const production = productionOf(store);
     const cutPath = join(store.dir, "productions", PRODUCTION, "cut.json");
     const { sha256 } = await import("../../src/world/text-files.js");
     const existing = await readFile(cutPath, "utf8").catch(() => null);
@@ -87,7 +88,7 @@ describe("cut.json migration on the first timeline write", () => {
         },
       ],
     });
-    const { dropped } = await assembleScene(store, PRODUCTION, sortScenes(production.scenes)[0]!.id);
+    const { dropped } = await libraryFirstWrite(store, PRODUCTION);
     assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B9 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have"]);
   });
 });

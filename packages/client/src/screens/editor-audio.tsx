@@ -39,6 +39,8 @@ export const ARTIFACT_DRAG_TYPE = "application/x-arke-artifact";
  */
 export const LANE_DRAG_PICTURE = "application/x-arke-lane-picture";
 export const LANE_DRAG_SOUND = "application/x-arke-lane-sound";
+/** A Library shot on the move: its payload is `shot:<id>` in the artifact slot, and this marks it. */
+export const SHOT_DRAG_TYPE = "application/x-arke-shot";
 
 export function dragAccepts(types: ArrayLike<string> | readonly string[], wantsSound: boolean): boolean {
   const list = Array.from(types as ArrayLike<string>);

@@ -297,6 +297,14 @@ describe("the export sheet (R-24, T-5)", () => {
       await act(async () => [...sheet.querySelectorAll<HTMLButtonElement>(".fy-exsheet__chip")].find((chip) => chip.textContent === "Stereo · flat")!.click());
       const [mix] = commandsSent(screen);
       assert.deepEqual(mix, [{ kind: "set-mix", mix: { speechFirst: false } }], "the audio chip is a timeline command");
+      // The mix command is in flight; the export waits for the snapshot that answers it (round three).
+      const ctaPending = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-libpick__confirm")].find((candidate) => /Export/.test(candidate.textContent ?? ""))!;
+      assert.equal(ctaPending.disabled, true, "no export while a command is pending");
+      const answered = savedState();
+      const saved = answered.world!.productions[0]!.timeline;
+      assert.ok(saved && saved.status === "ready");
+      answered.world!.productions[0]!.timeline = { status: "ready", timeline: { ...saved.timeline, revision: saved.timeline.revision + 1 } };
+      await act(async () => __setStateForTest(answered));
       const cta = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-libpick__confirm")].find((candidate) => /Export/.test(candidate.textContent ?? ""))!;
       await act(async () => cta.click());
       const exported = screen.sent.find((message) => message.kind === "export-cut");

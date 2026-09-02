@@ -7353,3 +7353,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-artrow__status { flex: none; font: 500 9px var(--font-mono); color: var(--success); letter-spacing: .04em; }
 .fy-artrow__status--missing { color: var(--destructive); }
 .fy-artrow__voice { margin: 0 8px 6px 46px; }
+
+/* The Arke pane says what the last assembly did (SPEC-039 R-46), above the conversation. */
+.fy-arkenotes { padding: 10px 12px 6px; border-bottom: 1px solid var(--border); }
+.fy-arkenotes__list { margin: 4px 0 0; padding-left: 14px; }

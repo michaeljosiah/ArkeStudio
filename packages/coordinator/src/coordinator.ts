@@ -39,7 +39,7 @@ import {
   assembleSceneCommands,
   audibleTracks,
   orderedTrackClips,
-  seedEmptyPictureTimeline,
+  seedFirstPictureTimeline,
   storyTimelineFingerprint,
   type TimelineCommand,
   productionFrameRate,
@@ -7174,7 +7174,7 @@ export class Coordinator {
           const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
           if (!production) return;
           if (production.spine !== null) throw new Error("this production is cut to a song; open it on the timeline and place its shots there");
-          const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedEmptyPictureTimeline(production);
+          const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
           const scene = production.scenes.find((candidate) => candidate.id === msg.sceneId);
           if (scene === undefined) throw new Error(`${msg.sceneId} is not a scene of this production`);
           const assembly = assembleSceneCommands({ production, timeline, sceneId: msg.sceneId, artifacts: store.getBundle().artifacts });

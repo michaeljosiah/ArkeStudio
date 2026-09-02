@@ -20,7 +20,8 @@ import {
   productionFrameRate,
   resolvePictureTimeline,
   libraryItemKey,
-  seedEmptyPictureTimeline,
+  pickableArtifacts,
+  seedFirstPictureTimeline,
   previewEditorRequest,
   editorRequestStaleness,
   timelineSourceFingerprint,
@@ -152,7 +153,7 @@ import {
   type EditorTool,
   type PictureClipView,
 } from "./editor-timeline.js";
-import { ARTIFACT_DRAG_TYPE, ClipGain, LANE_DRAG_PICTURE, LANE_DRAG_SOUND, MixPanel, MoveToLane, TypedTrackRows, dragAccepts, laneIcon, type TrackDrop } from "./editor-audio.js";
+import { ARTIFACT_DRAG_TYPE, ClipGain, LANE_DRAG_PICTURE, LANE_DRAG_SOUND, MixPanel, MoveToLane, SHOT_DRAG_TYPE, TypedTrackRows, dragAccepts, laneIcon, type TrackDrop } from "./editor-audio.js";
 import { CueInspector, SubtitleSources, SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
@@ -2967,7 +2968,7 @@ function ArtifactPanel({
       used,
       uses: usesOf((clip) => clip.source.kind === "shot" && clip.source.shotId === shot.id),
       add: onAddShot !== null && !used ? () => onAddShot(shot.id) : null,
-      drag: null,
+      drag: take !== null && path !== null ? `shot:${shot.id}` : null,
       search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line}`,
       kind: take === null ? "shot" : "take",
       scenes: [scene.id],
@@ -3139,6 +3140,7 @@ function ArtifactPanel({
                 onDragStart={(event) => {
                   if (item.drag === null) return;
                   event.dataTransfer.setData(ARTIFACT_DRAG_TYPE, item.drag);
+                  if (item.drag.startsWith("shot:")) event.dataTransfer.setData(SHOT_DRAG_TYPE, "1");
                   event.dataTransfer.setData(item.lane === "Music" ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE, "1");
                   event.dataTransfer.effectAllowed = "copy";
                 }}
@@ -4672,7 +4674,7 @@ function ExportSheet({
                   {refused !== null ? (
                     <span className="fy-mono fy-exsheet__refused">{refused}</span>
                   ) : (
-                    <button type="button" className="fy-exsheet__chip" onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, revision, episode.id, subtitleChoice)}>
+                    <button type="button" className="fy-exsheet__chip" disabled={commandsDisabled} onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, revision, episode.id, subtitleChoice)}>
                       Export episode
                     </button>
                   )}
@@ -4714,9 +4716,9 @@ function ExportSheet({
           type="button"
           className="fy-libpick__confirm"
           data-primary="true"
-          disabled={blockedBy !== null || !worldId || !prodId}
+          disabled={blockedBy !== null || !worldId || !prodId || commandsDisabled}
           onClick={() => {
-            if (blockedBy !== null || !worldId || !prodId) return;
+            if (blockedBy !== null || !worldId || !prodId || commandsDisabled) return;
             exportCut(worldId, prodId, preset, revision, undefined, subtitleChoice);
             onClose();
           }}
@@ -4767,7 +4769,7 @@ function AddToLibraryDialog({
   const scenes = production?.scenes ?? [];
   const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
   const shots = scene ? orderedShots(scene) : [];
-  const placeable = artifacts.filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
+  const placeable = pickableArtifacts(artifacts).filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
   const toggle = (key: string) =>
     (present.has(key) ? setDropped : setChosen)((current) => {
       const next = new Set(current);
@@ -4891,7 +4893,7 @@ export function CutScreen() {
         production.spine && timelineState.status !== "ready"
           ? deriveCut(production)
           : timelineState.status === "absent"
-            ? resolvePictureTimeline(production, { status: "ready", timeline: seedEmptyPictureTimeline(production) })
+            ? resolvePictureTimeline(production, { status: "ready", timeline: seedFirstPictureTimeline(production) })
             : resolvePictureTimeline(production, timelineState);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
@@ -5036,7 +5038,7 @@ export function CutScreen() {
    */
   const previewState: typeof timelineState =
     production && timelineState.status === "absent" && production.spine === null && !mediaOnly
-      ? { status: "ready", timeline: seedEmptyPictureTimeline(production) }
+      ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
       : timelineState;
   const renderPlan =
     production && (!production.spine || timelineState.status === "ready") && timelineError === null
@@ -5102,7 +5104,7 @@ export function CutScreen() {
   if (production && timelineState.status !== "invalid") {
     try {
       editableTimeline =
-        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedEmptyPictureTimeline(production);
+        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedFirstPictureTimeline(production);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
@@ -5265,14 +5267,12 @@ export function CutScreen() {
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
-  const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) =>
-    sendCommands(
-      [
-        ...(added.length > 0 ? [{ kind: "add-to-library" as const, items: added }] : []),
-        ...(removed.length > 0 ? [{ kind: "remove-from-library" as const, items: removed }] : []),
-      ],
-      added.length > 0 ? "Add to the library" : "Remove from the library",
-    );
+  const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => {
+    // One command holds at most 200 items (the schema's cap); a bigger choice is several in one batch.
+    const chunks = <Kind extends "add-to-library" | "remove-from-library">(kind: Kind, items: TimelineLibraryItem[]) =>
+      Array.from({ length: Math.ceil(items.length / 200) }, (_, index) => ({ kind, items: items.slice(index * 200, index * 200 + 200) }));
+    sendCommands([...chunks("add-to-library", added), ...chunks("remove-from-library", removed)], added.length > 0 ? "Add to the library" : "Remove from the library");
+  };
   useEffect(() => {
     if (searchParams.get("export") === null) return;
     setSearchParams(
@@ -5467,7 +5467,7 @@ export function CutScreen() {
     placeArtifact(artifact, null, Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1))), { kind: laneKindFor(artifact), newTrack: true });
   };
   /** The non-drag path for a shot the cut dropped (R-10): its clip lands on the base track at the playhead. */
-  const placeShot = (shotId: string) => {
+  const placeShot = (shotId: string, frameWanted: number = playheadFrame) => {
     if (!editableTimeline || !production) return;
     const found = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => ({ scene, shot }))).find(({ shot }) => shot.id === shotId);
     if (found === undefined) return;
@@ -5475,7 +5475,7 @@ export function CutScreen() {
     // The playhead usually sits inside a clip; the shot slides to the first free span after it
     // rather than being refused for the overlap (round eleven).
     const base = editableTimeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
-    let startFrame = playheadFrame;
+    let startFrame = frameWanted;
     for (const clip of orderedTrackClips(base ?? { clips: [] })) {
       if (clip.startFrame < startFrame + durationFrames && clip.startFrame + clip.durationFrames > startFrame) startFrame = clip.startFrame + clip.durationFrames;
     }
@@ -5986,6 +5986,11 @@ export function CutScreen() {
                         ? {}
                         : {
                             onDrop: (drop: { artifactId: string; frame: number }) => {
+                              // A Library shot carries `shot:<id>` in the same slot an artifact id would (R-10).
+                              if (drop.artifactId.startsWith("shot:")) {
+                                placeShot(drop.artifactId.slice(5), drop.frame);
+                                return;
+                              }
                               const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
                               if (artifact) placeArtifact(artifact, PICTURE_TRACK_ID, drop.frame);
                             },
@@ -6164,6 +6169,16 @@ export function CutScreen() {
             role="tabpanel"
             aria-labelledby="cut-arke-tab"
           >
+            {assembly !== null && (
+              <div className="fy-arkenotes" data-testid="arke-notes">
+                <div className="fy-cutinspect__eyebrow">{assembly.label.toUpperCase()}</div>
+                <ul className="fy-cutnotice__did fy-arkenotes__list">
+                  {(assembly.notes ?? []).map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <ProductionConversation
               worldId={worldId}
               productionId={prodId}
