@@ -34,10 +34,17 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+// An accepted start opens the editor (SPEC-039 R-44), whose playback engine pauses its <video>
+// on mount. linkedom's media element has no pause or play, so the navigation would throw.
+Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
+  pause() {},
+  play: () => Promise.resolve(),
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
   HTMLElement: dom.HTMLElement,
+  HTMLMediaElement: dom.HTMLMediaElement,
   Node: dom.Node,
   Event: dom.Event,
   KeyboardEvent: dom.KeyboardEvent,

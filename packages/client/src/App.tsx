@@ -55,10 +55,8 @@ import {
 } from "./screens/world.js";
 import { EpisodeChatScreen, EpisodeDetailScreen } from "./screens/development.js";
 import {
-  AudioScreen,
   ChapterTreeScreen,
   CutScreen,
-  ExportsScreen,
   GenerateScreen,
   NewSceneScreen,
   ProductionCastScreen,
@@ -280,8 +278,9 @@ export function App() {
           <Route path="generate/dispatch" element={<RetiredDispatchRoute />} />
           <Route path="generate/voice-line" element={<VoiceLineDialogScreen />} />
           <Route path="cut" element={<CutScreen />} />
-          <Route path="audio" element={<AudioScreen />} />
-          <Route path="exports" element={<ExportsScreen />} />
+          {/* The editor owns sound and delivery now (SPEC-039 R-1, T-5): the old addresses land in it. */}
+          <Route path="audio" element={<Navigate to="../cut?library=audio" replace />} />
+          <Route path="exports" element={<Navigate to="../cut?export=1" replace />} />
           {/* Stills is a lens on Generate now (design 55a); the old address keeps working. */}
           <Route path="stills" element={<Navigate to="../generate?view=stills" replace />} />
         </Route>

@@ -19,7 +19,8 @@ import {
   pendingSheets,
   productionFrameRate,
   resolvePictureTimeline,
-  seedStoryPictureTimeline,
+  libraryItemKey,
+  seedEmptyPictureTimeline,
   previewEditorRequest,
   editorRequestStaleness,
   timelineSourceFingerprint,
@@ -49,7 +50,11 @@ import {
   type ResolvedPictureEntry,
   type Scene,
   type TimelineClip,
+  type TimelineChangeHistoryEntry,
+  type Shot,
+  type Take,
   type TimelineClipId,
+  type TimelineLibraryItem,
   type TimelineCommand,
   type TimelineTrackId,
   PICTURE_TRACK_ID,
@@ -81,34 +86,35 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  Collapse,
+  Copy,
+  Duck,
   Film,
   Folder,
+  Hand,
   Home,
   ListOrdered,
+  Locate,
   Message,
+  Mic,
+  Minus,
   PanelLeft,
   PauseSolid,
   Play,
   Plus,
-  Scroll,
-  Search,
-  Sparkle,
-  Users,
-  VideoMark,
-  Waveform,
-  Collapse,
-  Copy,
-  Duck,
-  Hand,
-  Locate,
-  Minus,
   Pointer,
   RotateCcw,
   RotateCw,
   Scissors,
+  Scroll,
+  Search,
   Snap,
+  Sparkle,
   Trash,
   Upload,
+  Users,
+  VideoMark,
+  Waveform,
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
 import { AppChrome } from "../components/chrome.js";
@@ -146,7 +152,7 @@ import {
   type EditorTool,
   type PictureClipView,
 } from "./editor-timeline.js";
-import { ARTIFACT_DRAG_TYPE, ClipGain, MixPanel, TypedTrackRows, type TrackDrop } from "./editor-audio.js";
+import { ARTIFACT_DRAG_TYPE, ClipGain, LANE_DRAG_PICTURE, LANE_DRAG_SOUND, MixPanel, MoveToLane, TypedTrackRows, dragAccepts, laneIcon, type TrackDrop } from "./editor-audio.js";
 import { CueInspector, SubtitleSources, SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
@@ -168,6 +174,7 @@ import {
   moveOverlay,
   moveTimelineHistory,
   moveTimelinePictureClip,
+  sendTimelineAssemble,
   sendTimelineCommands,
   decideEditorRequest,
   sendTimelineTranscribe,
@@ -2859,6 +2866,9 @@ function ArtifactPanel({
   playheadFrame,
   usedArtifactIds,
   usedShotIds,
+  library,
+  onOpenPicker,
+  onAddLine,
   onAddArtifact,
   onAddShot,
   onLocate,
@@ -2877,6 +2887,11 @@ function ArtifactPanel({
   playheadFrame: number;
   usedArtifactIds: ReadonlySet<string>;
   usedShotIds: ReadonlySet<string>;
+  /** What the record's Library holds (R-8, amended 2026-09-02): the rows, not everything filed. */
+  library: readonly TimelineLibraryItem[];
+  onOpenPicker: (() => void) | null;
+  /** A read line lands on Dialogue (the Audio screen's rows, kept here since it redirects; R-1). */
+  onAddLine: ((take: Take, shot: Shot, sceneNumber: number) => void) | null;
   onAddArtifact: ((artifact: ArtifactSidecar) => void) | null;
   onAddShot: ((shotId: string) => void) | null;
   /** Select one use and bring the playhead to it (R-11, R-16). */
@@ -2887,6 +2902,7 @@ function ArtifactPanel({
   panelRef: RefObject<HTMLElement | null>;
   foot?: React.ReactNode;
 }) {
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>(initialFilter);
   const [picked, setPicked] = useState<string | null>(null);
@@ -2897,8 +2913,10 @@ function ArtifactPanel({
   const located = useRef(new Map<string, { id: TimelineClipId; frame: number }>());
   const normalQuery = query.trim().toLocaleLowerCase();
   const takesById = new Map((production?.takes ?? []).map((take) => [take.id, take] as const));
+  const inLibrary = new Set(library.map(libraryItemKey));
+  const [sceneFilter, setSceneFilter] = useState<string>("all");
   const shots = (production?.scenes ?? []).flatMap((scene) =>
-    orderedShots(scene).map((shot) => {
+    orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
       const take = takeId === null ? null : (takesById.get(takeId) ?? null);
       return { scene, shot, take, path: take && production ? takeMediaPath(production, take) : null };
@@ -2929,7 +2947,11 @@ function ArtifactPanel({
     add: (() => void) | null;
     drag: string | null;
     search: string;
-    kind: "take" | "shot" | "artifact";
+    kind: "take" | "shot" | "artifact" | "line";
+    /** The scenes this row belongs to: a shot's own, an artifact's links. */
+    scenes: string[];
+    /** A spoken line's shot, and what has been read of it. */
+    line?: { shotId: string; status: "read" | "reading…" | "not generated" };
   }
   const shotItems: LibraryItem[] = shots.map(({ scene, shot, take, path }) => {
     const used = usedShotIds.has(shot.id);
@@ -2948,9 +2970,10 @@ function ArtifactPanel({
       drag: null,
       search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${take?.id ?? ""} ${line}`,
       kind: take === null ? "shot" : "take",
+      scenes: [scene.id],
     };
   });
-  const artifactItems: LibraryItem[] = artifacts.map((artifact) => {
+  const artifactItems: LibraryItem[] = artifacts.filter((artifact) => inLibrary.has(`artifact:${artifact.id}`)).map((artifact) => {
     const lane = laneOf(artifact);
     const name = artifact.file.split("/").pop() ?? artifact.file;
     return {
@@ -2976,16 +2999,48 @@ function ArtifactPanel({
       drag: lane === null ? null : artifact.id,
       search: `${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`,
       kind: "artifact",
+      scenes: [...artifact.links],
     };
   });
+  // Every spoken line in the story (the Audio screen's dialogue rows): read or not, with the way
+  // to read it, and a place on Dialogue once it is. Under `All` only the lines of shots in the
+  // Library show; the audio filter shows them all, as the Audio address did.
+  const lineItems: LibraryItem[] = (production?.scenes ?? []).flatMap((scene) =>
+    orderedShots(scene)
+      .filter((shot) => (shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue") && (shot.audio.line?.trim() ?? "") !== "")
+      .map((shot) => {
+        const read = production ? ([...takesForShot(production, shot.id)].reverse().find((take) => take.kind === "voice") ?? null) : null;
+        const status: "read" | "reading…" | "not generated" = read === null ? "not generated" : read.completedAt ? "read" : "reading…";
+        const uses = read === null ? [] : usesOf((clip) => clip.source.kind === "take" && clip.source.takeId === read.id);
+        return {
+          key: `line:${shot.id}`,
+          name: `“${shot.audio!.line!.trim()}”`,
+          sub: `SH ${shot.number} · ${shot.audio?.speaker ?? shot.audio?.kind ?? "line"}`,
+          subTone: "muted" as const,
+          thumb: <Mic size={12} />,
+          lane: "Dialogue",
+          why: read === null ? "read the line first" : null,
+          used: uses.length > 0,
+          uses,
+          add: read !== null && read.completedAt !== undefined && onAddLine !== null ? () => onAddLine(read, shot, scene.number) : null,
+          drag: null,
+          search: `${scene.number} ${scene.title} ${shot.number} ${shot.title} ${shot.id} ${shot.audio?.speaker ?? ""} ${shot.audio?.line ?? ""} line`,
+          kind: "line" as const,
+          scenes: [scene.id],
+          line: { shotId: shot.id, status },
+        };
+      }),
+  );
   const passes = (item: LibraryItem): boolean => {
+    if (sceneFilter !== "all" && !item.scenes.includes(sceneFilter)) return false;
+    if (item.kind === "line" && filter !== "audio" && !inLibrary.has(`shot:${item.line!.shotId}`)) return false;
     if (filter === "needs-take" && item.kind !== "shot") return false;
-    if (filter === "audio" && !(item.kind === "artifact" && item.lane === "Music")) return false;
+    if (filter === "audio" && !((item.kind === "artifact" && item.lane === "Music") || item.kind === "line")) return false;
     if (filter === "unused" && (item.used || item.kind === "shot")) return false;
     if (filter === "all" && item.kind === "shot") return true;
     return normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery);
   };
-  const items = [...shotItems, ...artifactItems].filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
+  const items = [...shotItems, ...lineItems, ...artifactItems].filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
   const locate = (item: LibraryItem) => {
     if (item.uses.length === 0) return;
     const last = located.current.get(item.key);
@@ -3016,7 +3071,7 @@ function ArtifactPanel({
         >
           <Upload size={12} />
         </button>
-        <button type="button" className="fy-artpanel__add" disabled={worldId === undefined} onClick={() => worldId && uploadArtifacts(worldId)}>
+        <button type="button" className="fy-artpanel__add" disabled={onOpenPicker === null} onClick={() => onOpenPicker?.()}>
           <Plus size={11} />
           Add
         </button>
@@ -3048,6 +3103,16 @@ function ArtifactPanel({
               {label}
             </button>
           ))}
+          {(production?.scenes.length ?? 0) > 1 && (
+            <select className="fy-artpanel__scene" aria-label="Scene" value={sceneFilter} onChange={(event) => setSceneFilter(event.target.value)}>
+              <option value="all">All scenes</option>
+              {(production?.scenes ?? []).map((scene) => (
+                <option key={scene.id} value={scene.id}>
+                  SC {scene.number} · {scene.title}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
       <div className="fy-artpanel__list">
@@ -3057,9 +3122,9 @@ function ArtifactPanel({
               <Folder size={14} />
             </span>
             <span>
-              {normalQuery !== "" || filter !== "all"
+              {normalQuery !== "" || filter !== "all" || sceneFilter !== "all"
                 ? "Nothing here matches."
-                : "Nothing added yet. Upload video, stills, audio or subtitles to cut with."}
+                : "Nothing in the library yet. Add takes, uploads or lines to cut with."}
             </span>
           </div>
         ) : (
@@ -3074,6 +3139,7 @@ function ArtifactPanel({
                 onDragStart={(event) => {
                   if (item.drag === null) return;
                   event.dataTransfer.setData(ARTIFACT_DRAG_TYPE, item.drag);
+                  event.dataTransfer.setData(item.lane === "Music" ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE, "1");
                   event.dataTransfer.effectAllowed = "copy";
                 }}
               >
@@ -3090,8 +3156,20 @@ function ArtifactPanel({
                     <span className={cx("fy-artrow__meta", item.subTone === "destructive" && "fy-artrow__meta--destructive")}>{item.sub}</span>
                   </span>
                   {item.used && <span className="fy-artrow__dot" title="In the cut" aria-label="In the cut" />}
+                  {item.line !== undefined && (
+                    <span className={cx("fy-artrow__status", item.line.status === "not generated" && "fy-artrow__status--missing")}>{item.line.status}</span>
+                  )}
                   <span className="fy-artrow__lane">{item.lane ?? "—"}</span>
                 </button>
+                {item.line !== undefined && production && (
+                  <button
+                    type="button"
+                    className="fy-tlbtn fy-tlbtn--text fy-artrow__voice"
+                    onClick={() => navigate(`/w/${worldId}/p/${production.meta.id}/generate/voice-line?shot=${encodeURIComponent(item.line!.shotId)}`)}
+                  >
+                    {item.line.status === "not generated" ? "Generate" : "Again"}
+                  </button>
+                )}
                 {selected && (
                   <div className="fy-artrow__actions" role="group" aria-label={`${item.name} actions`}>
                     {item.add !== null && (
@@ -4010,12 +4088,94 @@ function SpineCutTrack({
 
 type CutSelection = { kind: "picture"; id: string } | { kind: "overlay"; id: string } | { kind: "cue"; id: string };
 
-function EmptyEditorTrack({ label, detail, kind }: { label: string; detail: string; kind: string }) {
+/**
+ * A lane that is not on the record yet (SPEC-039 R-13): the target keeps all five in view, and a
+ * drop on one adds the track and places in one batch. Sound lanes take sound, picture takes
+ * picture; the refusal shows while the drag is over the lane.
+ */
+function EmptyEditorTrack({
+  label,
+  detail,
+  kind,
+  onDrop,
+}: {
+  label: string;
+  detail: string;
+  kind: string;
+  onDrop?: (artifactId: string, frame: number, laneWidth: number, x: number) => void;
+}) {
+  const [over, setOver] = useState(false);
+  const [refused, setRefused] = useState(false);
+  const wantsSound = kind === "dialogue" || kind === "ambience" || kind === "music";
+  const droppable = onDrop !== undefined && kind !== "subtitles";
   return (
-    <div className="fy-track fy-track--empty" data-track={kind}>
-      <span className="fy-track__label">{label}</span>
-      <div className="fy-track__lane">
-        <span className="fy-track__empty">{detail}</span>
+    <div className={cx("fy-track fy-track--empty", over && "fy-track--over")} data-track={kind}>
+      <span className="fy-track__label">
+        <span className="fy-track__icon" aria-hidden="true">{laneIcon(kind)}</span>
+        <span className="fy-track__name">{label}</span>
+      </span>
+      <div
+        className={cx("fy-track__lane", refused && "fy-typedlane--refuse")}
+        onDragOver={(event) => {
+          if (!droppable) return;
+          if (!dragAccepts(event.dataTransfer.types, wantsSound)) {
+            event.dataTransfer.dropEffect = "none";
+            setRefused(true);
+            return;
+          }
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setOver(true);
+        }}
+        onDragLeave={() => {
+          setOver(false);
+          setRefused(false);
+        }}
+        onDrop={(event) => {
+          if (!droppable) return;
+          event.preventDefault();
+          setOver(false);
+          setRefused(false);
+          const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
+          if (!artifactId) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          onDrop(artifactId, 0, box.width, event.clientX - box.left);
+        }}
+      >
+        <span className="fy-track__empty">{refused ? (wantsSound ? "sound lanes take sound" : "picture lanes take picture") : detail}</span>
+      </div>
+    </div>
+  );
+}
+
+/** The target's strip under the last lane: a drop here makes a new lane of the item's own kind. */
+function NewLaneStrip({ onDrop }: { onDrop: ((artifactId: string, laneWidth: number, x: number) => void) | null }) {
+  const [over, setOver] = useState(false);
+  return (
+    <div className={cx("fy-track fy-track--new", over && "fy-track--over")} data-track="new">
+      <span className="fy-track__label">
+        <span className="fy-track__name">+ lane</span>
+      </span>
+      <div
+        className="fy-track__lane"
+        onDragOver={(event) => {
+          if (onDrop === null || !Array.from(event.dataTransfer.types).includes(ARTIFACT_DRAG_TYPE)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          if (onDrop === null) return;
+          event.preventDefault();
+          setOver(false);
+          const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
+          if (!artifactId) return;
+          const box = event.currentTarget.getBoundingClientRect();
+          onDrop(artifactId, box.width, event.clientX - box.left);
+        }}
+      >
+        <span className="fy-track__empty">{onDrop === null ? "" : "drop here for a new lane"}</span>
       </div>
     </div>
   );
@@ -4078,6 +4238,9 @@ function CutInspector({
   subtitleView,
   onViewSubtitles,
   onTranscribe,
+  onOpenExport,
+  onFill,
+  mintClipId,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
@@ -4099,6 +4262,11 @@ function CutInspector({
   subtitleView: TimelineTrackId | null;
   onViewSubtitles: (trackId: TimelineTrackId | null) => void;
   onTranscribe: ((trackId: TimelineTrackId, language: string) => void) | null;
+  /** The export sheet (R-24): the cut view's preset row opens it. */
+  onOpenExport: () => void;
+  /** A gap in the `Needs a decision` list selects its clip, where the takes are chosen (R-22). */
+  onFill: (clipId: TimelineClipId) => void;
+  mintClipId: () => TimelineClipId;
 }) {
   const selectedCue =
     selection?.kind === "cue" && timeline !== null
@@ -4179,6 +4347,9 @@ function CutInspector({
         </div>
         <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
+        {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
+          <MoveToLane clip={selectedClip} track={selectedTrack} timeline={timeline} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />
+        )}
         <p className="fy-cutinspect__note">
           {selectedTrack.kind === "dialogue"
             ? "Dialogue is foreground: Music and Ambience lower under it while speech-first mixing is on."
@@ -4267,14 +4438,45 @@ function CutInspector({
       <h2>{production?.meta.title ?? "Opening production…"}</h2>
       <div className="fy-cutinspect__rows">
         <InspectorRow label="Duration">{runtimeSeconds(filmSec)}</InspectorRow>
-        <InspectorRow label="Aspect">{production ? productionAspect(production.meta) : "not loaded"}</InspectorRow>
-        <InspectorRow label="Frame rate">{production ? `${productionFrameRate(production.meta)} fps` : "not loaded"}</InspectorRow>
-        <InspectorRow label="Picture">{cut ? `${cut.covered} of ${cut.entries.filter((entry) => (entry as ResolvedPictureEntry).hole !== true).length} shots` : "not loaded"}</InspectorRow>
-        <InspectorRow label="Overlays">{clipCount}</InspectorRow>
+        <InspectorRow label="Clips">{clipCount}</InspectorRow>
+        <InspectorRow label="Lanes">{timeline === null ? "—" : `${timeline.tracks.length}`}</InspectorRow>
+        <InspectorRow label="Aspect">{production ? `${productionAspect(production.meta)} · ${productionFrameRate(production.meta)} fps` : "not loaded"}</InspectorRow>
         <InspectorRow label="Source">
-          {spineCut ? "accepted takes · master track" : cut && isMediaOnly(cut) ? "placed clips" : "accepted takes"}
+          {spineCut ? "accepted takes · master track" : cut && isMediaOnly(cut) && (production?.scenes.length ?? 0) === 0 ? "placed clips" : "accepted takes"}
         </InspectorRow>
-        <InspectorRow label="Export preset">Review cut</InspectorRow>
+        <InspectorRow label="Coverage">{cut ? `${cut.covered} of ${cut.entries.filter((entry) => (entry as ResolvedPictureEntry).hole !== true).length} shots` : "not loaded"}</InspectorRow>
+      </div>
+      {cut !== null && spineCut === null && (() => {
+        // The target's `Needs a decision`: every shot on the timeline that still plays as a gap.
+        const open = (cut as ResolvedPictureCut).entries.filter((entry) => entry.hole !== true && entry.media === null);
+        if (open.length === 0) return null;
+        return (
+          <div className="fy-cutinspect__decisions" data-testid="needs-decision">
+            <div className="fy-cutinspect__eyebrow fy-cutinspect__eyebrow--warn">NEEDS A DECISION</div>
+            {open.map((entry) => (
+              <div key={entry.clipId ?? entry.shot.id} className="fy-cutinspect__decision">
+                <span className="fy-mono">SC {entry.sceneNumber} · SH {entry.shot.number}</span>
+                <span className="fy-cutinspect__decisiontitle">{entry.shot.title}</span>
+                {entry.clipId !== undefined && (
+                  <button type="button" className="fy-takepick__use" onClick={() => onFill(entry.clipId!)}>
+                    Fill
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+      <div className="fy-cutinspect__rows">
+        <div className="fy-cutinspect__row">
+          <span>Export preset</span>
+          <strong>
+            Review cut{" "}
+            <button type="button" className="fy-takepick__use" onClick={onOpenExport}>
+              Change
+            </button>
+          </strong>
+        </div>
       </div>
       {timeline !== null && <MixPanel mix={timeline.mix} disabled={commandsDisabled} onCommands={onCommands} />}
       {timeline !== null && (
@@ -4288,7 +4490,7 @@ function CutInspector({
           onTranscribe={onTranscribe}
         />
       )}
-      <p className="fy-cutinspect__note">Select a Picture or overlay clip to inspect its real source and supported timing controls.</p>
+      <p className="fy-cutinspect__note">Select a clip to inspect its source and timing.</p>
     </div>
   );
 }
@@ -4307,10 +4509,358 @@ function typingTarget(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/**
+ * `Add to the library` (SPEC-039 R-8, amended 2026-09-02): the target's picker — scenes on the
+ * left, that scene's shots in the middle, filed artifacts on the right, each a checkbox — and one
+ * `add-to-library` command on confirm. What is already in the Library shows checked and stays.
+ */
+/**
+ * The export sheet (SPEC-039 R-24, T-5): the target's 430px sheet over the editor — option rows
+ * as chips, the gap warning, one primary — with the old Exports screen's judgement behind it:
+ * the render plan decides what can be delivered, the same plan the preview draws. Sound options
+ * are the timeline's mix, so choosing one is a timeline command, not a private export setting.
+ */
+function ExportSheet({
+  open,
+  onClose,
+  worldId,
+  prodId,
+  world,
+  production,
+  timelineState,
+  onMix,
+  commandsDisabled,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  world: WorldBundle | null;
+  production: ProductionBundle | null;
+  timelineState: NonNullable<ProductionBundle["timeline"]>;
+  onMix: (speechFirst: boolean) => void;
+  commandsDisabled: boolean;
+}) {
+  const exportsState = useExports();
+  const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
+  const [subtitleTrack, setSubtitleTrack] = useState<string>("");
+  const [subtitleMode, setSubtitleMode] = useState<"none" | "burn-in" | "sidecar" | "burn-in+sidecar">("none");
+  const [sidecarFormat, setSidecarFormat] = useState<"srt" | "vtt">("srt");
+  if (!open) return null;
+  const ready = timelineState.status === "ready";
+  let cut: ReturnType<typeof resolvePictureTimeline> | null = null;
+  let blockedBy: string | null = null;
+  if (production === null) blockedBy = "No production here.";
+  else if (timelineState.status === "invalid") blockedBy = `Timeline unavailable · ${timelineState.message}`;
+  else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
+  else {
+    try {
+      cut = resolvePictureTimeline(production, timelineState);
+    } catch (error) {
+      blockedBy = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const plan =
+    production !== null && ready && blockedBy === null
+      ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset })
+      : null;
+  if (plan !== null && !plan.ok && blockedBy === null) blockedBy = plan.reason;
+  const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
+  const gaps = cut?.gaps ?? 0;
+  const covered = cut === null ? 0 : cut.covered;
+  const shotCount = cut === null ? 0 : cut.entries.length;
+  const subtitleTracks = ready ? subtitleTracksOf(timelineState.timeline) : [];
+  const chosenSubtitleTrack = subtitleTracks.find((track) => track.id === subtitleTrack) ?? subtitleTracks[0] ?? null;
+  const subtitleChoice =
+    chosenSubtitleTrack !== null && subtitleMode !== "none" ? { trackId: chosenSubtitleTrack.id, mode: subtitleMode, sidecar: sidecarFormat } : undefined;
+  const speechFirst = ready ? timelineState.timeline.mix.speechFirst : true;
+  const mine = Object.entries(exportsState).filter(([, entry]) => entry.productionId === prodId);
+  const revision = ready ? timelineState.timeline.revision : null;
+  const episodic = production !== null && productionShape(production.meta).isEpisodic;
+  const chip = (on: boolean, label: string, pick: () => void, disabled = false) => (
+    <button key={label} type="button" className="fy-exsheet__chip" aria-pressed={on} disabled={disabled} onClick={pick}>
+      {label}
+    </button>
+  );
+  const presetChips: Array<[keyof typeof PRESETS, string]> = [
+    ["review-cut", `${PRESETS["review-cut"].width} × ${PRESETS["review-cut"].height} · review`],
+    ["master", `${PRESETS.master.width} × ${PRESETS.master.height} · master`],
+    ["social-excerpt", `${PRESETS["social-excerpt"].width} × ${PRESETS["social-excerpt"].height} · vertical`],
+  ];
+  const meta =
+    cut === null
+      ? blockedBy ?? ""
+      : `${seconds(runtimeSec ?? cut.totalSec)} · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
+  return (
+    <EditorDialog open={open} title="Export film" subtitle={meta} onClose={onClose} width={430} labelledBy="export-sheet-title">
+      <div className="fy-exsheet" data-testid="export-sheet">
+        <div className="fy-exsheet__row">
+          <span className="fy-exsheet__name">Format</span>
+          <span className="fy-exsheet__opts">{chip(true, "H.264 · mp4", () => {})}</span>
+        </div>
+        <div className="fy-exsheet__row">
+          <span className="fy-exsheet__name">Resolution</span>
+          <span className="fy-exsheet__opts" role="group" aria-label="Resolution">
+            {presetChips.map(([key, label]) => chip(preset === key, label, () => setPreset(key)))}
+          </span>
+        </div>
+        <div className="fy-exsheet__row">
+          <span className="fy-exsheet__name">Subtitles</span>
+          <span className="fy-exsheet__opts" role="group" aria-label="Subtitle output">
+            {subtitleTracks.length === 0 ? (
+              <span className="fy-mono fy-exsheet__none">no subtitle track</span>
+            ) : (
+              (
+                [
+                  ["burn-in", "Burned in"],
+                  ["sidecar", "Sidecar"],
+                  ["burn-in+sidecar", "Both"],
+                  ["none", "None"],
+                ] as const
+              ).map(([value, label]) => chip(subtitleMode === value, label, () => setSubtitleMode(value)))
+            )}
+          </span>
+        </div>
+        {subtitleTracks.length > 1 && (
+          <div className="fy-exsheet__row">
+            <span className="fy-exsheet__name">Track</span>
+            <select className="fy-exsheet__select" aria-label="Subtitle track" value={chosenSubtitleTrack?.id ?? ""} onChange={(event) => setSubtitleTrack(event.target.value)}>
+              {subtitleTracks.map((track) => (
+                <option key={track.id} value={track.id}>
+                  {track.name} · {track.language}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {(subtitleMode === "sidecar" || subtitleMode === "burn-in+sidecar") && (
+          <div className="fy-exsheet__row">
+            <span className="fy-exsheet__name">Sidecar</span>
+            <span className="fy-exsheet__opts" role="group" aria-label="Sidecar format">
+              {chip(sidecarFormat === "srt", ".srt", () => setSidecarFormat("srt"))}
+              {chip(sidecarFormat === "vtt", ".vtt", () => setSidecarFormat("vtt"))}
+            </span>
+          </div>
+        )}
+        <div className="fy-exsheet__row">
+          <span className="fy-exsheet__name">Audio</span>
+          <span className="fy-exsheet__opts" role="group" aria-label="Audio">
+            {chip(speechFirst, "Stereo · ducked", () => onMix(true), !ready || commandsDisabled)}
+            {chip(!speechFirst, "Stereo · flat", () => onMix(false), !ready || commandsDisabled)}
+          </span>
+        </div>
+        {blockedBy !== null && (
+          <div className="fy-exsheet__warn" role="status">
+            {blockedBy}
+          </div>
+        )}
+        {blockedBy === null && gaps > 0 && (
+          <div className="fy-exsheet__warn" role="status">
+            {gaps} shot{gaps === 1 ? " has" : "s have"} no accepted take. Exporting now writes a black slate where {gaps === 1 ? "it sits" : "they sit"}.
+          </div>
+        )}
+        {episodic && production !== null && ready && (
+          <div className="fy-exsheet__episodes">
+            <span className="fy-exsheet__name">Episodes</span>
+            {production.episodes.map((episode) => {
+              const range = episodeTimelineRange(production, timelineState.timeline, episode.id);
+              const refused = range === null ? null : range.ok ? null : range.reason;
+              return (
+                <div key={episode.id} className="fy-exsheet__episode">
+                  <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
+                  <span className="fy-exsheet__eptitle">{episode.release?.title ?? episode.title}</span>
+                  {refused !== null ? (
+                    <span className="fy-mono fy-exsheet__refused">{refused}</span>
+                  ) : (
+                    <button type="button" className="fy-exsheet__chip" onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, revision, episode.id, subtitleChoice)}>
+                      Export episode
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {mine.length > 0 && (
+          <div className="fy-exsheet__delivered">
+            <span className="fy-exsheet__name">Delivered</span>
+            {mine.slice(-4).map(([id, entry]) => (
+              <div key={id} className="fy-exsheet__export">
+                <span className="fy-mono">render {id.slice(0, 8)}</span>
+                <span className="fy-mono fy-exsheet__status">
+                  {entry.status}
+                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
+                  {entry.output ? ` · ${entry.output}` : ""}
+                  {entry.sidecar ? ` · ${entry.sidecar}` : ""}
+                  {entry.error ? ` · ${entry.error}` : ""}
+                </span>
+                {entry.status === "running" && (
+                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="fy-exsheet__foot">
+        <span className="fy-mono">renders locally · no provider call</span>
+        <span className="fy-h1row__push" />
+        <button type="button" className="fy-libpick__cancel" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="fy-libpick__confirm"
+          data-primary="true"
+          disabled={blockedBy !== null || !worldId || !prodId}
+          onClick={() => {
+            if (blockedBy !== null || !worldId || !prodId) return;
+            exportCut(worldId, prodId, preset, revision, undefined, subtitleChoice);
+            onClose();
+          }}
+        >
+          {gaps > 0 ? "Export with gaps" : "Export film"}
+        </button>
+      </div>
+    </EditorDialog>
+  );
+}
+
+/** The newest Undo entry that is one of Arke's assemblies (R-46): its label names the scene, its notes say what it did. */
+function assemblyEntry(timeline: ProductionTimeline): TimelineChangeHistoryEntry | null {
+  const entry = timeline.history.undo.at(-1);
+  return entry !== undefined && entry.kind === "change" && entry.label.startsWith("Arke assembled ") && entry.notes !== undefined ? entry : null;
+}
+
+function AddToLibraryDialog({
+  open,
+  production,
+  artifacts,
+  library,
+  onClose,
+  onAdd,
+}: {
+  open: boolean;
+  production: ProductionBundle | null;
+  artifacts: ArtifactSidecar[];
+  library: readonly TimelineLibraryItem[];
+  onClose: () => void;
+  onAdd: (items: TimelineLibraryItem[]) => void;
+}) {
+  const [sceneId, setSceneId] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set());
+  const present = new Set(library.map(libraryItemKey));
+  const scenes = production?.scenes ?? [];
+  const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
+  const shots = scene ? orderedShots(scene) : [];
+  const placeable = artifacts.filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
+  const toggle = (key: string) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const toggleScene = (target: ProductionBundle["scenes"][number]) => {
+    const keys = orderedShots(target).map((shot) => `shot:${shot.id}`).filter((key) => !present.has(key));
+    setChosen((current) => {
+      const next = new Set(current);
+      const all = keys.every((key) => next.has(key));
+      for (const key of keys) {
+        if (all) next.delete(key);
+        else next.add(key);
+      }
+      return next;
+    });
+  };
+  const confirm = () => {
+    const items: TimelineLibraryItem[] = [...chosen].map((key) =>
+      key.startsWith("shot:") ? { kind: "shot", shotId: key.slice(5) } : { kind: "artifact", artifactId: key.slice(9) },
+    );
+    if (items.length === 0) return;
+    onAdd(items);
+    setChosen(new Set());
+  };
+  const row = (key: string, name: string, meta: string, tone: "muted" | "destructive" = "muted") => {
+    const already = present.has(key);
+    return (
+      <label key={key} className={cx("fy-libpick__row", already && "fy-libpick__row--in")}>
+        <input type="checkbox" checked={already || chosen.has(key)} disabled={already} onChange={() => toggle(key)} />
+        <span className="fy-libpick__name">{name}</span>
+        <span className={cx("fy-mono fy-libpick__meta", tone === "destructive" && "fy-libpick__meta--destructive")}>{already ? "in the library" : meta}</span>
+      </label>
+    );
+  };
+  return (
+    <EditorDialog open={open} title="Add to the library" subtitle="Takes, uploads and lines to cut with" onClose={onClose} width={880} labelledBy="add-to-library-title">
+      <div className="fy-libpick">
+        <div className="fy-libpick__col">
+          <div className="fy-libpick__colhead">Scenes</div>
+          <div className="fy-libpick__list" role="list">
+            {scenes.length === 0 ? (
+              <div className="fy-libpick__empty">No scenes yet.</div>
+            ) : (
+              scenes.map((candidate) => {
+                const keys = orderedShots(candidate).map((shot) => `shot:${shot.id}`);
+                const count = keys.filter((key) => chosen.has(key) || present.has(key)).length;
+                return (
+                  <div key={candidate.id} className={cx("fy-libpick__scene", candidate.id === scene?.id && "fy-libpick__scene--current")} role="listitem">
+                    <button type="button" className="fy-libpick__scenepick" aria-pressed={candidate.id === scene?.id} onClick={() => setSceneId(candidate.id)}>
+                      <span className="fy-libpick__name">SC {candidate.number} · {candidate.title}</span>
+                      <span className="fy-mono fy-libpick__meta">{count}/{keys.length}</span>
+                    </button>
+                    <button type="button" className="fy-libpick__all" onClick={() => toggleScene(candidate)} aria-label={`Every shot of scene ${candidate.number}`}>
+                      all
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+        <div className="fy-libpick__col">
+          <div className="fy-libpick__colhead">{scene ? `Shots · SC ${scene.number}` : "Shots"}</div>
+          <div className="fy-libpick__list">
+            {shots.length === 0 ? (
+              <div className="fy-libpick__empty">This scene has no shots.</div>
+            ) : (
+              shots.map((shot) => {
+                const takeId = production ? acceptedTakeId(production, shot.id) : null;
+                return row(`shot:${shot.id}`, `SH ${shot.number} · ${shot.title}`, takeId === null ? "no accepted take" : takeId, takeId === null ? "destructive" : "muted");
+              })
+            )}
+          </div>
+        </div>
+        <div className="fy-libpick__col">
+          <div className="fy-libpick__colhead">Artifacts</div>
+          <div className="fy-libpick__list">
+            {placeable.length === 0 ? (
+              <div className="fy-libpick__empty">Nothing filed that can be placed. Upload from the Library.</div>
+            ) : (
+              placeable.map((artifact) => row(`artifact:${artifact.id}`, artifact.file.split("/").pop() ?? artifact.file, artifact.kind))
+            )}
+          </div>
+        </div>
+      </div>
+      <div className="fy-libpick__foot">
+        <span className="fy-mono">{chosen.size} selected</span>
+        <span className="fy-h1row__push" />
+        <button type="button" className="fy-libpick__cancel" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="fy-libpick__confirm" data-primary="true" disabled={chosen.size === 0} onClick={confirm}>
+          Add to the library
+        </button>
+      </div>
+    </EditorDialog>
+  );
+}
+
 export function CutScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
   const timelineState = production?.timeline ?? { status: "absent" as const };
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
   let cut: ResolvedPictureCut | null = null;
@@ -4320,7 +4870,12 @@ export function CutScreen() {
       // The song clock derives its picture until its timeline is saved (SPEC-037 §2.3); from then
       // on it reads the saved order like every other production, with the master as a Music clip.
       if (timelineState.status === "invalid") throw new Error(timelineState.message);
-      cut = production.spine && timelineState.status !== "ready" ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
+      cut =
+        production.spine && timelineState.status !== "ready"
+          ? deriveCut(production)
+          : timelineState.status === "absent"
+            ? resolvePictureTimeline(production, { status: "ready", timeline: seedEmptyPictureTimeline(production) })
+            : resolvePictureTimeline(production, timelineState);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
@@ -4335,7 +4890,6 @@ export function CutScreen() {
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
-  const [selectionCleared, setSelectionCleared] = useState(false);
   const [rightTab, setRightTab] = useState<"inspector" | "arke">("inspector");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -4344,8 +4898,15 @@ export function CutScreen() {
   /** Timeline zoom (R-19c): a view scale on the canvas, 1× to 4× in halves; never written. */
   const [zoom, setZoom] = useState(1);
   const [keysOpen, setKeysOpen] = useState(false);
-  const [searchParams] = useSearchParams();
-  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  /** The scene the workspace's Generate handed off (R-44): assembled once as the editor opens. */
+  const assembleSceneId = searchParams.get("assemble");
+  const assembled = useRef<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  /** The Exports route lands here with the sheet up (R-1, T-5); the query is spent on arrival. */
+  const [exportOpen, setExportOpen] = useState(() => searchParams.get("export") !== null);
+  const [noticeHidden, setNoticeHidden] = useState<string | null>(null);
+  const [didOpen, setDidOpen] = useState(false);  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
   const libraryFilter: LibraryFilter = searchParams.get("library") === "audio" ? "audio" : "all";
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
@@ -4418,7 +4979,8 @@ export function CutScreen() {
    * song as authoritative — and a track that later measured would yank the canvas out from under
    * somebody mid-edit. A production with a spine is never this, however unresolved that spine is.
    */
-  const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
+  const mediaOnly =
+    cut !== null && view.kind === "scene-order" && isMediaOnly(cut) && (production?.scenes ?? []).every((scene) => orderedShots(scene).length === 0);
   /*
    * Resolved exactly as the coordinator resolves them, because the screen must not advertise a
    * film the export will not produce: `exportOverlays` drops a document or a missing artifact and
@@ -4450,12 +5012,21 @@ export function CutScreen() {
    * the plan what is visible; the coordinator hands the same plan to FFmpeg. A production the
    * plan refuses is a production the export refuses, so the refusal blocks the editor by name.
    */
+  /*
+   * The preview draws the record the editor edits (decided 2026-09-02): an unsaved story
+   * production previews its empty first state, not the film the story would derive. A production
+   * with no story and legacy placements keeps its legacy preview until the first write folds them.
+   */
+  const previewState: typeof timelineState =
+    production && timelineState.status === "absent" && production.spine === null && !mediaOnly
+      ? { status: "ready", timeline: seedEmptyPictureTimeline(production) }
+      : timelineState;
   const renderPlan =
     production && (!production.spine || timelineState.status === "ready") && timelineError === null
       ? buildRenderPlan({
           production,
           artifacts,
-          timeline: timelineState,
+          timeline: previewState,
           scope: { kind: "production" },
           preset: "review-cut",
           // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
@@ -4473,7 +5044,7 @@ export function CutScreen() {
    */
   const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
-  const timelineOwnsFilm = timelineState.status === "ready";
+  const timelineOwnsFilm = previewState.status === "ready";
   const canvasSec = spineCut
     ? spineCut.trackDurationSec
     : mediaOnly && !timelineOwnsFilm
@@ -4498,7 +5069,7 @@ export function CutScreen() {
    * run on the timeline. The sound half is the half that is not counted, because the picture is
    * the one they dropped.
    */
-  const clipCount = (production?.cut.overlays ?? []).filter((o) => (o.audio ?? "keep") !== "only").length;
+  const legacyClipCount = (production?.cut.overlays ?? []).filter((o) => (o.audio ?? "keep") !== "only").length;
   const snapPoints = snap
     ? snapPointsFor(
         spans.map((s) => s.startSec),
@@ -4514,7 +5085,7 @@ export function CutScreen() {
   if (production && timelineState.status !== "invalid") {
     try {
       editableTimeline =
-        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedStoryPictureTimeline(production);
+        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedEmptyPictureTimeline(production);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
@@ -4528,6 +5099,11 @@ export function CutScreen() {
    * the coordinator does not read it there (round six).
    */
   const fence = sourceFingerprint ?? (production && timelineState.status === "ready" ? storyTimelineFingerprint(production) : null);
+  /** What the timeline holds when it is the editor, the legacy placements until then (round ten). */
+  const clipCount = editableTimeline
+    ? editableTimeline.tracks.reduce((count, track) => count + track.clips.length, 0) + (timelineState.status === "ready" && timelineState.timeline.migratedCut === true ? 0 : legacyClipCount)
+    : legacyClipCount;
+  const libraryItems: readonly TimelineLibraryItem[] = editableTimeline?.library ?? [];
   /*
    * A ghost (SPEC-039 R-33): a pending request's commands applied to the live base in memory
    * and drawn in its place while the card is previewed. Never saved, and gone the moment the
@@ -4564,9 +5140,6 @@ export function CutScreen() {
     ? editableTimeline.tracks.flatMap((track) => track.clips.map((clip) => ({ clip, track })))
     : [];
   const drift = production && editableTimeline && timelineState.status === "ready" ? storyOrderDrift(production, editableTimeline) : null;
-  const firstPictureId = spineCut
-    ? (spineCut.segments.find((segment) => segment.kind === "clip" && segment.shotId)?.shotId ?? null)
-    : (orderedPictureClips[0]?.id ?? null);
   const allCues = editableTimeline ? editableTimeline.tracks.flatMap((track) => (track.cues ?? []).map((cue) => ({ cue, track }))) : [];
   const selectedExists =
     selected?.kind === "picture"
@@ -4578,15 +5151,9 @@ export function CutScreen() {
         : selected?.kind === "cue"
           ? allCues.some(({ cue }) => cue.id === selected.id)
           : false;
-  const activeSelection: CutSelection | null = selectedExists
-    ? selected
-    : selectionCleared
-      ? null
-      : firstPictureId
-        ? { kind: "picture", id: firstPictureId }
-        : overlays[0]
-          ? { kind: "overlay", id: overlays[0].id }
-          : null;
+  // Nothing is selected until someone selects (R-25a): the Inspector opens on the cut, and
+  // Escape has something to clear only after a click. A selection that no longer exists reads as none.
+  const activeSelection: CutSelection | null = selectedExists ? selected : null;
   const revealDetails = () => {
     setRightTab("inspector");
     setLibraryOpen(false);
@@ -4600,18 +5167,15 @@ export function CutScreen() {
   };
   const selectPicture = (id: string) => {
     setSelected({ kind: "picture", id });
-    setSelectionCleared(false);
     revealDetails();
   };
   const selectCue = (id: string) => {
     setSelected({ kind: "cue", id });
-    setSelectionCleared(false);
     revealDetails();
   };
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   const selectOverlay = (id: string) => {
     setSelected({ kind: "overlay", id });
-    setSelectionCleared(false);
     setRightTab("inspector");
     setLibraryOpen(false);
     setRightOpen(true);
@@ -4630,7 +5194,7 @@ export function CutScreen() {
     : mediaOnly
       ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
       : cut
-        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${views.length || cut.entries.length} shots covered · ${production?.spine ? "cut to the track" : "assembled from accepted takes only"}`
+        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${views.length || cut.entries.length} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
         : "";
   const selectedPictureClip =
     activeSelection?.kind === "picture"
@@ -4684,6 +5248,33 @@ export function CutScreen() {
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
   };
+  const addToLibrary = (items: TimelineLibraryItem[]) => sendCommands([{ kind: "add-to-library", items }], "Add to the library");
+  useEffect(() => {
+    if (searchParams.get("export") === null) return;
+    setSearchParams(
+      (params) => {
+        params.delete("export");
+        return params;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
+  useEffect(() => {
+    if (assembleSceneId === null || !worldId || !prodId || !production || fence === null || timelineState.status === "invalid") return;
+    const key = `${prodId}:${assembleSceneId}`;
+    if (assembled.current === key) return;
+    assembled.current = key;
+    setTimelineCommandError(null);
+    setInFlight({ revision: timelineRevision, since: Date.now() });
+    sendTimelineAssemble(worldId, prodId, assembleSceneId, timelineState.status === "ready" ? timelineState.timeline.revision : null, fence);
+    setSearchParams(
+      (params) => {
+        params.delete("assemble");
+        return params;
+      },
+      { replace: true },
+    );
+  }, [assembleSceneId, worldId, prodId, production, fence, timelineState, timelineRevision, setSearchParams]);
   /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
   const openOnTimeline = () => {
     if (!worldId || !prodId || spineCut === null || sourceFingerprint === null || commandPending || timelineState.status !== "absent") return;
@@ -4714,14 +5305,22 @@ export function CutScreen() {
     playheadFrame > selectedAny.clip.startFrame &&
     playheadFrame < selectedAny.clip.startFrame + selectedAny.clip.durationFrames;
   /** Placement from the Library (SPEC-039 R-9, R-10): one `place` command, never a host path. */
-  const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number) => {
+  const placeArtifact = (
+    artifact: ArtifactSidecar,
+    trackId: TimelineTrackId | null,
+    frameWanted: number,
+    options: { kind?: "picture" | "dialogue" | "ambience" | "music"; newTrack?: boolean } = {},
+  ) => {
     if (!editableTimeline) return;
+    let frame = frameWanted;
     const still = artifact.kind === "image" || artifact.kind === "board";
     // Refused here, in the words the coordinator would use, rather than written and then refused
     // by every render: a document has no picture and no sound, an image has no sound, and a
     // video is only sound when it is known to carry some (SPEC-037 R-22).
     const targetTrack = trackId === null ? null : (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null);
-    const audioTarget = targetTrack !== null ? AUDIO_TRACK_KINDS.has(targetTrack.kind) : artifact.kind === "audio";
+    const laneKind: "picture" | "dialogue" | "ambience" | "music" =
+      targetTrack !== null && targetTrack.kind !== "subtitle" ? targetTrack.kind : (options.kind ?? (artifact.kind === "audio" ? "music" : "picture"));
+    const audioTarget = targetTrack !== null ? AUDIO_TRACK_KINDS.has(targetTrack.kind) : AUDIO_TRACK_KINDS.has(laneKind);
     const carriesSound = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
     const carriesPicture = still || artifact.kind === "video";
     if (targetTrack !== null && targetTrack.kind === "subtitle") {
@@ -4739,21 +5338,23 @@ export function CutScreen() {
     const measured = artifact.mediaInfo?.durationSec;
     const durationFrames = Math.max(1, secondsToFrames(still ? CLIP_DEFAULT_SEC : (measured ?? CLIP_DEFAULT_SEC), frameRate));
     const label = artifact.file.split("/").pop() ?? artifact.file;
-    const wantsAudio = artifact.kind === "audio";
+    const wantsAudio = AUDIO_TRACK_KINDS.has(laneKind);
     /*
      * A non-drag placement lands on a same-kind track with room at the playhead, or on a new
      * one. The first matching track alone was refused for overlap while another sat empty
      * (round six). An explicit drop keeps its target, and the coordinator's overlap refusal.
      */
-    const sameKind = (candidate: TimelineTrack) => (wantsAudio ? candidate.kind === "music" : candidate.kind === "picture" && candidate.id !== PICTURE_TRACK_ID);
+    const sameKind = (candidate: TimelineTrack) => candidate.kind === laneKind && candidate.id !== PICTURE_TRACK_ID;
     const roomAt = (candidate: TimelineTrack) =>
       !candidate.clips.some((clip) => clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame);
-    const track =
-      trackId !== null
+    const track = options.newTrack
+      ? null
+      : trackId !== null
         ? (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null)
-        : (editableTimeline.tracks.find((candidate) => sameKind(candidate) && roomAt(candidate)) ?? null);
+        : (editableTimeline.tracks.find((candidate) => sameKind(candidate) && roomAt(candidate)) ?? editableTimeline.tracks.find(sameKind) ?? null);
     const commands: TimelineCommand[] = [];
-    const stem = wantsAudio ? "tr_music" : "tr_inserts";
+    const laneName = laneKind === "picture" ? "Inserts" : laneKind === "dialogue" ? "Dialogue" : laneKind === "ambience" ? "Ambience" : "Music";
+    const stem: TimelineTrackId = `tr_${laneName.toLowerCase()}`;
     const taken = new Set(editableTimeline.tracks.map((candidate) => candidate.id));
     let fresh: TimelineTrackId = stem;
     for (let n = 2; taken.has(fresh); n += 1) fresh = `${stem}-${n}`;
@@ -4763,15 +5364,26 @@ export function CutScreen() {
       commands.push({
         kind: "add-track",
         trackId: target,
-        trackKind: wantsAudio ? "music" : "picture",
-        name: `${wantsAudio ? "Music" : "Inserts"}${alike > 0 ? ` ${alike + 1}` : ""}`,
+        trackKind: laneKind,
+        name: `${laneName}${alike > 0 ? ` ${alike + 1}` : ""}`,
       });
+    } else {
+      // The target's drop: snap to a neighbouring edge when close, then slide to the first span
+      // that is actually free rather than refusing the overlap.
+      const edges = track.clips.flatMap((clip) => [clip.startFrame, clip.startFrame + clip.durationFrames]);
+      const snapWithin = Math.round(1.2 * frameRate);
+      const nearest = edges.reduce<number | null>((best, edge) => (Math.abs(edge - frame) < snapWithin && (best === null || Math.abs(edge - frame) < Math.abs(best - frame)) ? edge : best), null);
+      if (snap && nearest !== null) frame = nearest;
+      for (const clip of orderedTrackClips(track)) {
+        if (clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame) frame = clip.startFrame + clip.durationFrames;
+      }
     }
+    const placedId = mintClipId();
     commands.push({
       kind: "place",
       trackId: target,
       clip: {
-        id: mintClipId(),
+        id: placedId,
         startFrame: frame,
         durationFrames,
         sourceInFrames: 0,
@@ -4781,6 +5393,54 @@ export function CutScreen() {
       },
     });
     sendCommands(commands, `Place ${label}`);
+    // The placed clip is the selection and the Inspector's subject, as the target does on a drop.
+    selectPicture(placedId);
+  };
+  const placeVoiceTake = (take: Take, shot: Shot, sceneNumber: number) => {
+    if (!editableTimeline || !production) return;
+    const dialogue = [...editableTimeline.tracks].sort((a, b) => a.order - b.order).find((track) => track.kind === "dialogue") ?? null;
+    const commands: TimelineCommand[] = [];
+    const taken = new Set(editableTimeline.tracks.map((track) => track.id));
+    let fresh: TimelineTrackId = "tr_dialogue";
+    for (let n = 2; taken.has(fresh); n += 1) fresh = `tr_dialogue-${n}`;
+    if (dialogue === null) commands.push({ kind: "add-track", trackId: fresh, trackKind: "dialogue", name: "Dialogue" });
+    const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
+    const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
+    let startFrame = playheadFrame;
+    for (const other of orderedTrackClips(dialogue ?? { clips: [] })) {
+      if (other.startFrame < startFrame + durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
+    }
+    const id = mintClipId();
+    commands.push({
+      kind: "place",
+      trackId: dialogue?.id ?? fresh,
+      clip: {
+        id,
+        startFrame,
+        durationFrames,
+        sourceInFrames: 0,
+        source: {
+          kind: "take",
+          takeId: take.id,
+          label: `SC ${sceneNumber} · SH ${shot.number} · ${(shot.audio?.line ?? "").slice(0, 40)}`,
+          ...(shot.audio?.speaker !== undefined ? { sheetId: shot.audio.speaker } : {}),
+        },
+        gainDb: 0,
+      },
+    });
+    sendCommands(commands, `Place line SH ${shot.number}`);
+    selectPicture(id);
+  };
+  const laneKindFor = (artifact: ArtifactSidecar): "picture" | "music" => (artifact.kind === "audio" ? "music" : "picture");
+  const dropOnEmptyLane = (kind: "picture" | "dialogue" | "ambience" | "music") => (artifactId: string, _frame: number, laneWidth: number, x: number) => {
+    const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+    if (!artifact) return;
+    placeArtifact(artifact, null, Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1))), { kind, newTrack: true });
+  };
+  const dropOnNewLane = (artifactId: string, laneWidth: number, x: number) => {
+    const artifact = artifacts.find((candidate) => candidate.id === artifactId);
+    if (!artifact) return;
+    placeArtifact(artifact, null, Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1))), { kind: laneKindFor(artifact), newTrack: true });
   };
   /** The non-drag path for a shot the cut dropped (R-10): its clip lands on the base track at the playhead. */
   const placeShot = (shotId: string) => {
@@ -4809,6 +5469,8 @@ export function CutScreen() {
   const locateClip = (clipId: TimelineClipId, startFrame: number) => {
     selectPicture(clipId);
     transport.seek(startFrame / frameRate);
+    // Zoomed in, the use can sit past the canvas edge; a locate that leaves it there is a no-op to the eye.
+    queueMicrotask(() => document.querySelector<HTMLElement>(`[data-clip="${clipId}"]`)?.scrollIntoView?.({ block: "nearest", inline: "center" }));
   };
   const onTrackDrop = (drop: TrackDrop) => {
     const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
@@ -4840,6 +5502,62 @@ export function CutScreen() {
    * platform, and Delete removes the selection when focus is not already on a clip that handles
    * its own keys. Every one of them has a labelled control in the toolbar.
    */
+  /*
+   * The banner (R-46): the last assembly Arke made, with its notes behind `what it did`, until
+   * it is hidden; the empty start until something is placed; the song's anchors for a spine.
+   * Nothing is said about a cut a person built — the timeline is its own account.
+   */
+  const assembly = timelineState.status === "ready" ? assemblyEntry(timelineState.timeline) : null;
+  const noticeKey = assembly === null || timelineState.status !== "ready" ? null : `${timelineState.timeline.revision}:${assembly.label}`;
+  let notice: React.ReactNode = null;
+  if (assembly !== null && noticeKey !== noticeHidden) {
+    const shots = assembly.clips.filter((change) => change.before === null && change.after !== null && change.after.source.kind === "shot");
+    const gaps = production ? shots.filter((change) => change.after!.source.kind === "shot" && acceptedTakeId(production, change.after!.source.shotId) === null).length : 0;
+    const beds = assembly.clips.some((change) => change.before === null && change.after?.source.kind === "artifact");
+    const cues = assembly.cues.some((change) => change.before === null && change.after !== null);
+    const parts = [`${assembly.label}: ${shots.length - gaps} of ${shots.length} shot${shots.length === 1 ? "" : "s"}`];
+    if (beds) parts.push("laid the bed");
+    if (cues) parts.push("conformed the subtitles");
+    notice = (
+      <div className="fy-cutnotice" data-testid="assembly-notice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+        <strong>{parts.length === 1 ? `${parts[0]}.` : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}.`}</strong>
+        <span className="fy-h1row__push" />
+        <button type="button" aria-expanded={didOpen} aria-controls="assembly-did" onClick={() => setDidOpen((open) => !open)}>
+          what it did
+        </button>
+        <button type="button" className="fy-cutnotice__hide" aria-label="Hide" onClick={() => setNoticeHidden(noticeKey)}>
+          &times;
+        </button>
+        {didOpen && (
+          <ul className="fy-cutnotice__did" id="assembly-did">
+            {(assembly.notes ?? []).map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  } else if (spineCut) {
+    notice = (
+      <div className="fy-cutnotice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+        <strong>{`Arke assembled ${spineCut.segments.filter((segment) => segment.kind === "clip").length} picture anchors on the track.`}</strong>
+      </div>
+    );
+  } else if (editableTimeline !== null && allClips.length === 0 && !commandPending) {
+    notice = (
+      <div className="fy-cutnotice" data-testid="empty-notice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+        <strong>This cut starts empty.</strong>
+        <span className="fy-cutnotice__hint">Add to the Library and place, or ask Arke.</span>
+        <span className="fy-h1row__push" />
+        <button type="button" disabled={commandsDisabled} onClick={() => setPickerOpen(true)}>
+          Add to the library
+        </button>
+      </div>
+    );
+  }
   const shortcuts = useRef({ canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled });
   shortcuts.current = { canUndo, canRedo, selectedPictureClip: selectedAny?.clip ?? selectedPictureClip, selectedCueId, commandsDisabled };
   const zoomBy = (delta: number) => setZoom((current) => Math.min(4, Math.max(1, Math.round((current + delta) * 2) / 2)));
@@ -4848,16 +5566,17 @@ export function CutScreen() {
     if (keysOpen || document.querySelector(".fy-clipmenu, .fy-editordialog")) return false;
     if (libraryOpen && editorMediaMatches("(max-width: 1199px)")) return false;
     if (rightOpen && editorMediaMatches("(max-width: 899px)")) return false;
-    if (selected === null) return false;
+    if (activeSelection === null) return false;
     setSelected(null);
-    setSelectionCleared(true);
     return true;
   };
-  const shortcutActions = useRef({ sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect });
-  shortcutActions.current = { sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect };
+  const shortcutActions = useRef({ sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool });
+  shortcutActions.current = { sendHistory, selectedAction, toggle: () => transport.setPlaying((playing) => !playing), zoom: zoomBy, keys: () => setKeysOpen((open) => !open), deselect, setTool };
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (typingTarget(event.target)) return;
+      // A sheet owns the keyboard while it is up (R-5): Delete behind the keys list must not delete a clip.
+      if (document.querySelector(".fy-editordialog") !== null) return;
       if (event.key === " " && interactiveTarget(event.target)) return;
       const meta = event.ctrlKey || event.metaKey;
       const key = event.key;
@@ -4875,6 +5594,9 @@ export function CutScreen() {
         actions.zoom(-0.5);
       } else if (key === "?" && !meta) {
         actions.keys();
+      } else if ((key === "v" || key === "b" || key === "h" || key === "V" || key === "B" || key === "H") && !meta && !event.altKey) {
+        const lower = key.toLowerCase();
+        actions.setTool(lower === "v" ? "select" : lower === "b" ? "blade" : "hand");
       } else if (key === "Escape" && !meta) {
         if (!actions.deselect()) return;
       } else if ((key === "Delete" || key === "Backspace") && !meta) {
@@ -4908,6 +5630,9 @@ export function CutScreen() {
         playheadFrame={playheadFrame}
         usedArtifactIds={usedArtifactIds}
         usedShotIds={usedShotIds}
+        library={libraryItems}
+        onOpenPicker={editableTimeline !== null && !commandsDisabled ? () => setPickerOpen(true) : null}
+        onAddLine={editableTimeline !== null && !commandsDisabled ? placeVoiceTake : null}
         onAddArtifact={editableTimeline !== null && !commandsDisabled ? (artifact) => placeArtifact(artifact, null, playheadFrame) : null}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
         onLocate={locateClip}
@@ -4949,7 +5674,7 @@ export function CutScreen() {
             size="sm"
             variant="primary"
             disabled={timelineError !== null || renderError !== null}
-            onClick={() => navigate(`/w/${worldId}/p/${prodId}/exports`)}
+            onClick={() => setExportOpen(true)}
           >
             Export film
           </Button>
@@ -4969,32 +5694,7 @@ export function CutScreen() {
             {rightTab === "arke" ? "Arke" : "Inspector"}
           </button>
         </header>
-        <div className="fy-cutnotice">
-          <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
-          <strong>
-            {spineCut
-              ? `Arke assembled ${spineCut.segments.filter((segment) => segment.kind === "clip").length} picture anchors on the track.`
-              : mediaOnly
-                ? "This cut starts empty. Add media from the Library."
-                : cut
-                  ? `Arke assembled ${cut.covered} of ${views.length || cut.entries.length} shots.${cut.gaps > 0 ? ` ${cut.gaps} still ${cut.gaps === 1 ? "needs" : "need"} an accepted take.` : ""}`
-                  : "The cut will assemble when the story has shots."}
-          </strong>
-          <span className="fy-h1row__push" />
-          <button
-            type="button"
-            onClick={() => {
-              setRightTab("arke");
-              setLibraryOpen(false);
-              setRightOpen(true);
-              if (editorMediaMatches("(max-width: 899px)")) {
-                queueMicrotask(() => focusFirstControl(rightPanelRef.current));
-              }
-            }}
-          >
-            what it did
-          </button>
-        </div>
+        {notice}
         <div className="fy-cutpreview-wrap">
           {timelineError && <div className="fy-cuttimeline-error">Timeline unavailable · {timelineError}</div>}
           {timelineError === null && renderError !== null && (
@@ -5143,7 +5843,29 @@ export function CutScreen() {
               </button>
             </span>
           </div>
-          <EditorDialog open={keysOpen} title="Keyboard" subtitle="press ? to close" onClose={() => setKeysOpen(false)} width={372}>
+          <ExportSheet
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        worldId={worldId}
+        prodId={prodId}
+        world={world ?? null}
+        production={production ?? null}
+        timelineState={timelineState}
+        onMix={(speechFirst) => sendCommands([{ kind: "set-mix", mix: { speechFirst } }], speechFirst ? "Duck under speech" : "Flat mix")}
+        commandsDisabled={commandsDisabled}
+      />
+      <AddToLibraryDialog
+        open={pickerOpen}
+        production={production ?? null}
+        artifacts={artifacts}
+        library={libraryItems}
+        onClose={() => setPickerOpen(false)}
+        onAdd={(items) => {
+          addToLibrary(items);
+          setPickerOpen(false);
+        }}
+      />
+      <EditorDialog open={keysOpen} title="Keyboard" subtitle="press ? to close" onClose={() => setKeysOpen(false)} width={372}>
             <div className="fy-keys">
               {EDITOR_KEYS.map(([key, what]) => (
                 <span key={key} className="fy-keys__row">
@@ -5162,7 +5884,6 @@ export function CutScreen() {
               const target = event.target as HTMLElement;
               if (target.closest(".fy-cutseg, .fy-ovclip, .fy-typedclip, .fy-clipmenu, .fy-trackbtns")) return;
               setSelected(null);
-              setSelectionCleared(true);
             }}
           >
             <div className="fy-timeline__zoomwrap" style={{ width: `${zoom * 100}%` }}>
@@ -5223,6 +5944,14 @@ export function CutScreen() {
                       disabled={commandsDisabled}
                       mintClipId={mintClipId}
                       sourceLength={sourceLength}
+                      {...(commandsDisabled
+                        ? {}
+                        : {
+                            onDrop: (drop: { artifactId: string; frame: number }) => {
+                              const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
+                              if (artifact) placeArtifact(artifact, PICTURE_TRACK_ID, drop.frame);
+                            },
+                          })}
                     />
                     <TypedTrackRows
                       timeline={shownTimeline}
@@ -5252,10 +5981,12 @@ export function CutScreen() {
                   <EmptyEditorTrack
                     key={kind}
                     label={kind === "dialogue" ? "Dialogue" : kind === "ambience" ? "Ambience" : "Music"}
-                    detail={editableTimeline ? "Drop sound from the Library to add a track" : `Typed ${kind} track not available`}
+                    detail={editableTimeline ? "drop sound here" : `Typed ${kind} track not available`}
                     kind={kind}
+                    {...(editableTimeline && !commandsDisabled ? { onDrop: dropOnEmptyLane(kind) } : {})}
                   />
                 ))}
+              {editableTimeline && <NewLaneStrip onDrop={commandsDisabled ? null : dropOnNewLane} />}
               {worldId && prodId && timelineError === null && !placementsOnTimeline && overlays.length > 0 && (
                 <ClipLanes
                   worldId={worldId}
@@ -5278,7 +6009,7 @@ export function CutScreen() {
                 ? `saved timeline · revision ${timelineState.timeline.revision} · ${productionFrameRate(production.meta)} fps`
                 : mediaOnly
                   ? "the cut is what you placed — nothing recomputes it; the clips themselves are the record"
-                  : "the cut is a projection — it recomputes from shot selections; the first edit saves it as the timeline"}
+                  : "the cut starts empty — the first placement saves it as the timeline"}
             </span>
             <span className="fy-mono">
               {spineCut
@@ -5379,6 +6110,13 @@ export function CutScreen() {
               frameRate={frameRate}
               commandsDisabled={commandsDisabled}
               onCommands={sendCommands}
+              onOpenExport={() => setExportOpen(true)}
+              onFill={(clipId) => {
+                selectPicture(clipId);
+                const clip = allClips.find((candidate) => candidate.clip.id === clipId);
+                if (clip) transport.seek(clip.clip.startFrame / frameRate);
+              }}
+              mintClipId={mintClipId}
             />
           </div>
         ) : (

@@ -156,6 +156,8 @@ describe("editor command guards (#679 review)", () => {
     const state = savedState();
     const screen = await mountCut(state);
     try {
+      // Nothing opens selected (R-25a): the clip is chosen before anything can act on it.
+      await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_sh-12"]')!.click());
       await act(async () => button(screen, "Delete").click());
       assert.equal(commandsSent(screen).length, 1);
       assert.equal(button(screen, "Delete").disabled, true, "the same revision cannot be named twice");

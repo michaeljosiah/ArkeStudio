@@ -4,7 +4,7 @@ import {
   orderedTrackClips,
   productionAspect,
   productionShape,
-  seedStoryPictureTimeline,
+  seedEmptyPictureTimeline,
   TURN_RESULT_BOUNDS,
   type ProductionTimeline,
   type TimelineClip,
@@ -206,7 +206,7 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
     return "This production is cut to a song and has not been opened on the timeline yet; an editor request needs the person to press Open on the timeline first.";
   } else {
     try {
-      base = seedStoryPictureTimeline(production);
+      base = seedEmptyPictureTimeline(production);
     } catch {
       return null;
     }

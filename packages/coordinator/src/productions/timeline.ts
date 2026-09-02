@@ -11,7 +11,7 @@ import {
   migrateLegacyCut,
   redoTimelineHistory,
   seedSpinePictureTimeline,
-  seedStoryPictureTimeline,
+  seedEmptyPictureTimeline,
   sourceLengthFramesFor,
   spineTimelineFingerprint,
   storyTimelineFingerprint,
@@ -51,6 +51,8 @@ export type TimelineWrite =
       label?: string;
       /** The accepted Arke request this batch lands (SPEC-039 R-30); recorded on the entry. */
       requestId?: string;
+      /** What the batch did, in plain lines, for the entry that explains it (Arke's assembly). */
+      notes?: readonly string[];
       /** Files that land in the same commit as the timeline — the request's own status change. */
       attach?: readonly CommitFileInput[];
     }
@@ -211,7 +213,9 @@ export async function applyTimelineCommand(
         if (fingerprint !== command.sourceFingerprint) {
           throw new TimelineCommandRefused("the story order changed while this move was being made");
         }
-        current = seedStoryPictureTimeline(production);
+        // The first state is empty (decided 2026-09-02): Arke's assembly or a person's own
+        // placements fill it, so the story guides the order without writing the cut itself.
+        current = seedEmptyPictureTimeline(production);
       }
     } else {
       try {
@@ -288,6 +292,7 @@ export async function applyTimelineCommand(
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
+          ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
       } else {
         const entry = current.history[command.kind].at(-1);

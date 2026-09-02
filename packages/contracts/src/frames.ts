@@ -2249,6 +2249,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       trackId: TimelineTrackIdSchema,
     })
     .strict(),
+  /**
+   * Arke assembles one scene onto the timeline (SPEC-039, decided 2026-09-02): the scene
+   * workspace's Generate hands off here, and the editor sends it as it opens. One revision,
+   * one Undo entry, its notes on the entry; refused when the scene is already on the timeline.
+   */
+  z
+    .object({
+      kind: z.literal("timeline-assemble"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneId: z.string().min(1),
+      baseRevision: z.number().int().min(0).nullable(),
+      sourceFingerprint: z.string().min(1),
+    })
+    .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),

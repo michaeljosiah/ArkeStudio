@@ -256,5 +256,16 @@ export function migrateLegacyCut(
     });
   });
 
-  return { timeline: { ...timeline, tracks, migratedCut: true }, dropped };
+  // What the fold placed is in the Library too (SPEC-039 R-8): a person looking for the file
+  // that plays on a lane finds it where the target keeps it, not only on the lane.
+  const inLibrary = new Set(timeline.library.map((item) => (item.kind === "shot" ? `shot:${item.shotId}` : `artifact:${item.artifactId}`)));
+  const library = [...timeline.library];
+  for (const candidate of tracks) {
+    for (const clip of candidate.clips) {
+      if (clip.source.kind !== "artifact" || inLibrary.has(`artifact:${clip.source.artifactId}`)) continue;
+      inLibrary.add(`artifact:${clip.source.artifactId}`);
+      library.push({ kind: "artifact", artifactId: clip.source.artifactId });
+    }
+  }
+  return { timeline: { ...timeline, tracks, library, migratedCut: true }, dropped };
 }

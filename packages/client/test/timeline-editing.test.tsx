@@ -137,8 +137,12 @@ describe("semantic Picture editing (#679)", () => {
       const clips = [...screen.container.querySelectorAll<HTMLButtonElement>("[data-clip]")];
       assert.deepEqual(clips.map((clip) => clip.dataset["clip"]), ["cl_sh-13", "cl_sh-12"]);
       assert.match(screen.container.querySelector(".fy-driftchip")?.textContent ?? "", /order differs from the story/);
-      assert.equal(clips[0]!.getAttribute("aria-pressed"), "true", "the first clip opens selected");
       assert.match(clips[0]!.getAttribute("aria-label") ?? "", /00:00:00:00 to 00:00:06:00/);
+      // Nothing opens selected (R-25a), so Delete has nothing to act on until a clip is chosen.
+      assert.equal(clips[0]!.getAttribute("aria-pressed"), "false", "nothing opens selected");
+      assert.equal(button(screen, "Delete").disabled, true);
+      await act(async () => clips[0]!.click());
+      assert.equal(screen.container.querySelector("[data-clip='cl_sh-13']")?.getAttribute("aria-pressed"), "true");
 
       await act(async () => button(screen, "Delete").click());
       const [sent] = commandsSent(screen);
@@ -156,6 +160,9 @@ describe("semantic Picture editing (#679)", () => {
     const state = savedState();
     const screen = await mountCut(state);
     try {
+      const first = screen.container.querySelector<HTMLButtonElement>("[data-clip='cl_sh-13']");
+      assert.ok(first);
+      await act(async () => first.click());
       assert.equal(button(screen, "Split").disabled, true, "the playhead sits on the first frame");
       const scrubber = screen.container.querySelector<HTMLElement>("[role='slider'][aria-label='Seek']");
       assert.ok(scrubber);
@@ -253,17 +260,31 @@ describe("semantic Picture editing (#679)", () => {
     }
   });
 
-  it("keeps the first edit on the unsaved assembly fenced by the source fingerprint", async () => {
+  it("keeps the first write on the empty record fenced by the source fingerprint", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const screen = await mountCut(state);
     try {
-      assert.equal(screen.container.querySelector(".fy-driftchip"), null, "nothing drifts before the first save");
-      await act(async () => button(screen, "Delete").click());
+      /*
+       * The editor opens empty (SPEC-039 §1.9): nothing on the timeline, nothing drifting, and
+       * a Library with nothing in it. The first write is therefore adding to the Library, through
+       * the picker behind the Library's Add — and it is the write that materialises the record,
+       * so it names no revision and carries the story's fingerprint instead.
+       */
+      assert.equal(screen.container.querySelectorAll("[data-clip]").length, 0, "nothing is on the timeline yet");
+      assert.ok(screen.container.querySelector(".fy-driftchip") === null, "nothing drifts before the first save");
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(".fy-artpanel__add")!.click());
+      assert.ok(screen.container.querySelector(".fy-editordialog") !== null, "the picker opens as a sheet");
+      await act(async () => button(screen, "Every shot of scene 4").click());
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(".fy-libpick__confirm")!.click());
       const [sent] = commandsSent(screen);
       assert.ok(sent);
       assert.equal(sent.baseRevision, null);
       assert.equal(sent.sourceFingerprint, storyTimelineFingerprint(state.world!.productions[0]!));
-      assert.deepEqual(sent.commands, [{ kind: "delete", clipId: "cl_sh-12" }]);
+      assert.deepEqual(sent.commands, [
+        { kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }] },
+      ]);
+      assert.equal(sent.label, "Add to the library");
+      assert.ok(screen.container.querySelector(".fy-editordialog") === null, "the sheet closes on confirm");
     } finally {
       await close(screen);
     }

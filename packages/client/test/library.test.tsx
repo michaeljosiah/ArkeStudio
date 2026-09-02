@@ -110,7 +110,13 @@ function commandsSent(screen: Mounted): Extract<ClientMessage, { kind: "timeline
   return screen.sent.filter((message): message is Extract<ClientMessage, { kind: "timeline-command" }> => message.kind === "timeline-command");
 }
 
-/** The saved timeline with the bells placed twice on a Music track: two uses to locate between. */
+/**
+ * The saved timeline with the bells placed twice on a Music track: two uses to locate between.
+ * The Library lists only what the record's `library` holds (R-8, amended 2026-09-02), so the
+ * shots and every filed artifact are added to it the way a person or Arke would — the document
+ * included, because an unsupported file still belongs in the list (R-12) even though the picker
+ * would not offer it.
+ */
 function stateWithBells(): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
@@ -123,6 +129,16 @@ function stateWithBells(): ClientState {
   production.timeline = {
     status: "ready",
     timeline: applyTimelineCommands(seeded, [
+      {
+        kind: "add-to-library",
+        items: [
+          { kind: "shot", shotId: "sh_12" },
+          { kind: "shot", shotId: "sh_13" },
+          { kind: "artifact", artifactId: BELLS },
+          { kind: "artifact", artifactId: BOARD },
+          { kind: "artifact", artifactId: PAPER },
+        ],
+      },
       { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" },
       { kind: "place", trackId: "tr_music", clip: { id: "cl_bells-1", startFrame: 0, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "harbour-bells.wav" } } },
       { kind: "place", trackId: "tr_music", clip: { id: "cl_bells-2", startFrame: 120, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "harbour-bells.wav" } } },
@@ -158,7 +174,8 @@ describe("the Library (SPEC-039 T-3)", () => {
       await typeInto(search, "");
       const audio = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === "Audio")!;
       await act(async () => audio.click());
-      assert.deepEqual(rows(screen), [`artifact:${BELLS}`], "the Audio filter keeps only sound");
+      // The audio filter is the Audio address's view (R-1): every spoken line, read or not, beside the sound files.
+      assert.deepEqual(rows(screen), ["line:sh_12", `artifact:${BELLS}`], "the Audio filter keeps sound and lines");
     } finally {
       await close(screen);
     }
@@ -210,7 +227,7 @@ describe("the Library (SPEC-039 T-3)", () => {
     try {
       const audio = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === "Audio")!;
       assert.equal(audio.getAttribute("aria-pressed"), "true");
-      assert.deepEqual(rows(screen), [`artifact:${BELLS}`]);
+      assert.deepEqual(rows(screen), ["line:sh_12", `artifact:${BELLS}`]);
     } finally {
       await close(screen);
     }

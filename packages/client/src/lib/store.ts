@@ -3244,6 +3244,17 @@ export function sendTimelineTranscribe(
   send({ kind: "timeline-transcribe", worldId, productionId, baseRevision, trackId, language });
 }
 
+/** Arke assembles one scene onto the timeline (SPEC-039 R-44): one fenced batch, applied directly. */
+export function sendTimelineAssemble(
+  worldId: string,
+  productionId: string,
+  sceneId: string,
+  baseRevision: number | null,
+  sourceFingerprint: string,
+): void {
+  send({ kind: "timeline-assemble", worldId, productionId, sceneId, baseRevision, sourceFingerprint });
+}
+
 export function cancelExport(worldId: string, exportId: string): void {
   send({ kind: "cancel-export", worldId, exportId });
 }

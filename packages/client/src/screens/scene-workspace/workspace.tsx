@@ -664,6 +664,7 @@ export function SceneWorkspace({
           {...(generateTarget?.shotId === undefined ? {} : { shotId: generateTarget.shotId })}
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
+          onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
         />
         <ShotLightbox
           scene={scene}

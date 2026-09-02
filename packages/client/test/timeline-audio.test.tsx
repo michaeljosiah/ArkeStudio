@@ -100,7 +100,11 @@ async function advance(state: ClientState): Promise<void> {
   await act(async () => __setStateForTest(structuredClone(state) as ClientState));
 }
 
-/** The fixture with its bells placed on a lane, then migrated: one Ambience track, no lanes. */
+/**
+ * The fixture with its bells placed on a lane, then migrated: one Ambience track, no lanes. The
+ * migration folds the placement in but says nothing about the Library, which lists only what the
+ * record holds (R-8, amended 2026-09-02) — so the bells are added to it here, as a person would.
+ */
 function migratedState(): { state: ClientState; timeline: ProductionTimeline } {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
@@ -109,7 +113,10 @@ function migratedState(): { state: ClientState; timeline: ProductionTimeline } {
     overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: BELLS, startSec: 1, endSec: 3, lane: 0, audio: "keep" }],
   } as typeof production.cut;
   const migrated = migrateLegacyCut(seedStoryPictureTimeline(production), production, state.world!.artifacts).timeline;
-  const timeline = applyTimelineCommands(migrated, [{ kind: "move-adjacent", clipId: "cl_sh-13", direction: "earlier" }]);
+  const timeline = applyTimelineCommands(migrated, [
+    { kind: "add-to-library", items: [{ kind: "artifact", artifactId: BELLS }] },
+    { kind: "move-adjacent", clipId: "cl_sh-13", direction: "earlier" },
+  ]);
   production.timeline = { status: "ready", timeline };
   return { state, timeline };
 }

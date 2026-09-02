@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ProductionTimelineSchema, seedStoryPictureTimeline, storyTimelineFingerprint } from "@arke-studio/contracts";
-import { applyTimelineCommand, placementsLiveOnTimeline } from "../../src/productions/timeline.js";
+import { ProductionTimelineSchema, sortScenes } from "@arke-studio/contracts";
+import { placementsLiveOnTimeline } from "../../src/productions/timeline.js";
 import { placeOverlay } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { assembleScene } from "./assemble.js";
 
 /**
  * Legacy placements fold into typed tracks with the first write that reaches the record
@@ -37,14 +38,7 @@ describe("cut.json migration on the first timeline write", () => {
     assert.equal(productionOf(store).cut.overlays.length, 1);
     assert.equal(placementsLiveOnTimeline(productionOf(store)), false);
 
-    const production = productionOf(store);
-    const seeded = seedStoryPictureTimeline(production);
-    const { dropped } = await applyTimelineCommand(store, PRODUCTION, {
-      kind: "commands",
-      commands: [{ kind: "move-adjacent", clipId: seeded.tracks[0]!.clips[1]!.id, direction: "earlier" }],
-      baseRevision: null,
-      sourceFingerprint: storyTimelineFingerprint(production),
-    });
+    const { dropped } = await assembleScene(store, PRODUCTION, sortScenes(productionOf(store).scenes)[0]!.id);
     assert.deepEqual(dropped, []);
 
     const saved = ProductionTimelineSchema.parse(
@@ -93,13 +87,7 @@ describe("cut.json migration on the first timeline write", () => {
         },
       ],
     });
-    const seeded = seedStoryPictureTimeline(productionOf(store));
-    const { dropped } = await applyTimelineCommand(store, PRODUCTION, {
-      kind: "commands",
-      commands: [{ kind: "delete", clipId: seeded.tracks[0]!.clips[0]!.id }],
-      baseRevision: null,
-      sourceFingerprint: storyTimelineFingerprint(production),
-    });
+    const { dropped } = await assembleScene(store, PRODUCTION, sortScenes(production.scenes)[0]!.id);
     assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B9 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have"]);
   });
 });
