@@ -758,43 +758,6 @@ export class WorldChatRunner {
     }));
 
     /*
-     * Editor requests are staged before the bible is written and before the turn is recorded
-     * (SPEC-039 R-27): a request that cannot apply is the likelier refusal, and refusing it
-     * first leaves no bible edit on disk beside a rejected turn. A staged request beside a
-     * later failure is harmless — pending, visible, and one Reject away from gone.
-     */
-    if (outcome.turn.editorRequests.length > 0) {
-      if (!this.deps.stageEditorRequests) {
-        return {
-          ok: false,
-          problems: [
-            {
-              code: "editor-request-unavailable",
-              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
-            },
-          ],
-        };
-      }
-      try {
-        await this.deps.stageEditorRequests({
-          conversationId,
-          entryContext: folded.entryContext,
-          requests: outcome.turn.editorRequests,
-        });
-      } catch (err) {
-        return {
-          ok: false,
-          problems: [
-            {
-              code: "editor-request",
-              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
-            },
-          ],
-        };
-      }
-    }
-
-    /*
      * The bible is written before the turn is recorded, and a failure here rejects the turn
      * whole (master §4.5, §8.3's all-or-nothing rule).
      *
@@ -829,6 +792,44 @@ export class WorldChatRunner {
         // Named precisely, because the corrective turn can act on it: a heading that does not
         // resolve is fixable by the model, and a bible that moved underneath it is not.
         return { ok: false, problems: [{ code: "bible-edit", safeMessage: bibleProblem(err) }] };
+      }
+    }
+
+    /*
+     * Editor requests are staged last, after the shape, the checks and the bible edit have all
+     * passed (SPEC-039 R-27; round five): a turn that is refused for any of those leaves no
+     * pending card behind, and the corrective retry cannot stage the same request twice. What
+     * remains is the append below; a crash between the two leaves a pending request, which is
+     * visible and one Reject away from gone — the same trade the bible makes.
+     */
+    if (outcome.turn.editorRequests.length > 0) {
+      if (!this.deps.stageEditorRequests) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request-unavailable",
+              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
+            },
+          ],
+        };
+      }
+      try {
+        await this.deps.stageEditorRequests({
+          conversationId,
+          entryContext: folded.entryContext,
+          requests: outcome.turn.editorRequests,
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request",
+              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+            },
+          ],
+        };
       }
     }
 

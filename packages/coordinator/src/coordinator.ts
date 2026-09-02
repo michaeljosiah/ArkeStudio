@@ -36,6 +36,7 @@ import {
   CutFileSchema,
   buildRenderPlan,
   serializeTimedText,
+  audibleTracks,
   orderedTrackClips,
   storyTimelineFingerprint,
   type TimelineCommand,
@@ -7124,8 +7125,10 @@ export class Coordinator {
           if (production.timeline?.status !== "ready") throw new Error("speech-to-text needs a saved timeline with Dialogue clips");
           if (!this.voiceService) throw new Error("Voxa is not running — speech-to-text is off");
           const record = production.timeline.timeline;
-          const dialogue = record.tracks
-            .filter((track) => track.kind === "dialogue" && !track.muted)
+          // The same audible set the plan mixes (SPEC-038 R-6): a solo elsewhere silences these
+          // clips in preview and export, so it silences them here too (round five).
+          const dialogue = audibleTracks(record)
+            .filter((track) => track.kind === "dialogue")
             .flatMap((track) => orderedTrackClips(track));
           if (dialogue.length === 0) throw new Error("there are no Dialogue clips to transcribe");
           const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
@@ -7169,21 +7172,16 @@ export class Coordinator {
               clip.sourceInFrames === 0 && sourceLengthSec !== null && clipSec >= sourceLengthSec - 1 / record.frameRate;
             let audio: Buffer;
             let contentType: string;
-            if (wholeSource) {
-              const extension = path.toLowerCase().split(".").pop() ?? "";
-              contentType =
-                extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "audio/wav";
-              audio = await readFile(toExtendedLength(path));
-            } else {
-              if (ffmpeg === undefined) {
-                throw new Error(`${clip.id} may play only part of its source, and ffmpeg is needed to transcribe only what it plays`);
-              }
+            if (ffmpeg !== undefined) {
+              // Through ffmpeg whenever it is there: the window when the clip plays part of its
+              // source, a plain extraction otherwise, so a video container never reaches the
+              // model labelled as WAV (round five).
               const windowDir = join(store.dir, ".cache", "transcribe");
               const windowed = join(windowDir, `${ulid()}.wav`);
               await mkdir(toExtendedLength(windowDir), { recursive: true });
               try {
                 await ffmpeg.run(
-                  ["-y", "-ss", String(sourceInSec), "-t", String(clipSec), "-i", path, "-vn", "-ac", "1", "-ar", "16000", windowed],
+                  ["-y", ...(wholeSource ? [] : ["-ss", String(sourceInSec), "-t", String(clipSec)]), "-i", path, "-vn", "-ac", "1", "-ar", "16000", windowed],
                   () => {},
                   new AbortController().signal,
                 );
@@ -7192,6 +7190,25 @@ export class Coordinator {
                 await rm(toExtendedLength(windowed), { force: true }).catch(() => {});
               }
               contentType = "audio/wav";
+            } else {
+              if (!wholeSource) {
+                throw new Error(`${clip.id} may play only part of its source, and ffmpeg is needed to transcribe only what it plays`);
+              }
+              const extension = path.toLowerCase().split(".").pop() ?? "";
+              const known: Record<string, string> = {
+                wav: "audio/wav",
+                mp3: "audio/mpeg",
+                m4a: "audio/mp4",
+                aac: "audio/aac",
+                ogg: "audio/ogg",
+                oga: "audio/ogg",
+                opus: "audio/ogg",
+                flac: "audio/flac",
+              };
+              const type = known[extension];
+              if (type === undefined) throw new Error(`${clip.id} plays a .${extension} source, and ffmpeg is needed to extract its audio for speech-to-text`);
+              contentType = type;
+              audio = await readFile(toExtendedLength(path));
             }
             const text = (await this.voiceService.transcribe(Uint8Array.from(audio), contentType)).trim();
             if (text === "") continue;

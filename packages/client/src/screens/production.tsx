@@ -4174,6 +4174,12 @@ function CutInspector({
 }
 
 /** True when a key press belongs to a text field rather than the editor (SPEC-039 R-17). */
+/** A focused button or link owns Space (round five): its native activation, not the transport. */
+function interactiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.closest("button, a[href], [role='button'], summary") !== null;
+}
+
 function typingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
@@ -4655,6 +4661,7 @@ export function CutScreen() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (typingTarget(event.target)) return;
+      if (event.key === " " && interactiveTarget(event.target)) return;
       const meta = event.ctrlKey || event.metaKey;
       const key = event.key;
       const state = shortcuts.current;

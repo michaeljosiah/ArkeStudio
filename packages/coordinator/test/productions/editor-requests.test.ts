@@ -12,7 +12,7 @@ import {
   type TimelineClipId,
   type TimelineCommand,
 } from "@arke-studio/contracts";
-import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "../../src/productions/editor-requests.js";
+import { decideEditorRequest, EditorRequestRefused, retainEditorRequests, stageEditorRequests } from "../../src/productions/editor-requests.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -171,6 +171,45 @@ describe("Arke's editor requests (issue 684)", () => {
     assert.deepEqual(again.map((record) => record.id), [first[0]!.id, first[0]!.id]);
     const file = EditorRequestFileSchema.parse(JSON.parse(await readFile(requestsPath(store), "utf8")));
     assert.equal(file.requests.length, 1, "one record, one card");
+  });
+
+  it("dismisses a request the base moved under as stale, with the reason (round five)", async () => {
+    const store = await open();
+    const { commands, movingId } = moveSecondEarlier(store);
+    const [staged] = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [{ summary: "Swap the first two shots", commands }], now: NOW });
+    await applyTimelineCommand(store, PRODUCTION, {
+      kind: "move-picture",
+      clipId: movingId,
+      direction: "earlier",
+      baseRevision: null,
+      sourceFingerprint: storyTimelineFingerprint(productionOf(store)),
+    });
+    const dismissed = await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged!.id, decision: "reject", now: NOW });
+    assert.equal(dismissed.status, "stale");
+    assert.match(dismissed.reason ?? "", /gone|moved/);
+  });
+
+  it("never evicts a pending request to make room, and refuses when nothing decided can go", () => {
+    const record = (n: number, status: "pending" | "accepted" | "rejected" | "stale") => ({
+      id: `req_01J8G00000000000000000${String(n).padStart(4, "0")}`,
+      productionId: PRODUCTION,
+      conversationId: CONVERSATION,
+      baseRevision: null,
+      sourceFingerprint: `story-picture-v1:${"a".repeat(16)}`,
+      commands: [{ kind: "delete" as const, clipId: "cl_x" as const }],
+      summary: `request ${n}`,
+      createdAt: NOW,
+      status,
+    });
+    const mixed = [record(1, "pending"), ...Array.from({ length: 199 }, (_, i) => record(i + 2, "accepted")), record(201, "pending")];
+    const kept = retainEditorRequests(mixed);
+    assert.equal(kept.length, 200);
+    assert.ok(kept.some((request) => request.id === mixed[0]!.id), "the oldest pending request stays");
+    assert.ok(!kept.some((request) => request.id === mixed[1]!.id), "the oldest decided one goes");
+    assert.throws(
+      () => retainEditorRequests(Array.from({ length: 201 }, (_, i) => record(i + 1, "pending"))),
+      (error: unknown) => error instanceof EditorRequestRefused && /waiting for a decision/.test(error.reason),
+    );
   });
 
   it("refuses a forged decision that names no request (A-11)", async () => {

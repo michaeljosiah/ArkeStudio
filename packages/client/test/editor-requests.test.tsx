@@ -73,6 +73,7 @@ describe("editor request cards (issue 684)", () => {
     assert.match(html, /ask Arke again/);
     assert.doesNotMatch(html, />Accept</);
     assert.doesNotMatch(html, />Preview</);
+    assert.match(html, />Reject</, "a stale card can still be dismissed, and the record says stale");
   });
 
   it("keeps an accepted request's status and reports its revision undone (R-36)", () => {

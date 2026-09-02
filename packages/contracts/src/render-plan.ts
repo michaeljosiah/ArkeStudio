@@ -534,10 +534,19 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     const head = Math.max(0, startSec - clip.startSec);
     return [head === 0 ? cut : { ...cut, sourceInSec: clip.sourceInSec + head }];
   });
-  const speech = plan.speech.flatMap((region) => {
-    const cut = clipRange(region);
-    return cut === null ? [] : [cut];
-  });
+  /*
+   * A speech region outside the window still ducks inside it through its look-ahead and release
+   * (R-15), so every region whose envelope reaches the window travels with it — whole, shifted
+   * onto the scoped clock, never cut to it. The ducking expression reads the region's own edges,
+   * and a region cut at the window would start or end the scoped mix unducked (round five).
+   */
+  const lookAheadSec = (plan.mix?.lookAheadMs ?? 0) / 1000;
+  const releaseSec = (plan.mix?.releaseMs ?? 0) / 1000;
+  const speech = plan.speech.flatMap((region) =>
+    region.endSec + releaseSec <= startSec || region.startSec - lookAheadSec >= endSec
+      ? []
+      : [{ startSec: region.startSec - startSec, endSec: region.endSec - startSec }],
+  );
   const subtitles = plan.subtitles === null ? null : { ...plan.subtitles, cues: plan.subtitles.cues.flatMap((cue) => { const cut = clipRange(cue); return cut === null ? [] : [cut]; }) };
   const burnIn = plan.burnIn === undefined ? undefined : { ...plan.burnIn, cues: plan.burnIn.cues.flatMap((cue) => { const cut = clipRange(cue); return cut === null ? [] : [cut]; }) };
   return {

@@ -73,11 +73,13 @@ export function EditorRequestCards({
             {stale !== null && <p className="fy-reqcard__reason">{stale} · ask Arke again</p>}
             {request.status === "stale" && request.reason !== undefined && <p className="fy-reqcard__reason">{request.reason}</p>}
             {preview !== null && !preview.ok && <p className="fy-reqcard__reason">Cannot apply: {preview.reason}</p>}
-            {status === "pending" && (
+            {request.status === "pending" && (
               <div className="fy-reqcard__actions">
-                <Button variant="primary" disabled={disabled || preview === null || !preview.ok} onClick={() => onDecide(request.id, "accept")}>
-                  Accept
-                </Button>
+                {stale === null && (
+                  <Button variant="primary" disabled={disabled || preview === null || !preview.ok} onClick={() => onDecide(request.id, "accept")}>
+                    Accept
+                  </Button>
+                )}
                 <Button variant="ghost" disabled={disabled} onClick={() => onDecide(request.id, "reject")}>
                   Reject
                 </Button>

@@ -64,6 +64,23 @@ async function readRequests(store: WorldStore, productionId: string): Promise<{ 
 
 const serialise = (file: EditorRequestFile): string => `${JSON.stringify(file, null, 2)}\n`;
 
+/**
+ * The file keeps a bounded audit, but a pending request is not audit — it is waiting for a
+ * decision, and dropping it off the front would take that decision away (round five). The oldest
+ * decided records go first; when every record is still pending, staging refuses instead.
+ */
+export function retainEditorRequests(requests: readonly EditorRequest[]): EditorRequest[] {
+  const kept = [...requests];
+  while (kept.length > EDITOR_REQUEST_BOUNDS.kept) {
+    const index = kept.findIndex((request) => request.status !== "pending");
+    if (index === -1) {
+      throw new EditorRequestRefused(`${kept.length - 1} requests are waiting for a decision; accept or reject some before asking for more`);
+    }
+    kept.splice(index, 1);
+  }
+  return kept;
+}
+
 function fileFor(path: string, raw: string | null, content: string): CommitFileInput {
   return { path, action: raw === null ? "create" : "replace", content, baseHash: raw === null ? null : sha256(raw) };
 }
@@ -174,7 +191,7 @@ export async function stageEditorRequests(
     if (added.length === 0) return staged;
     const next: EditorRequestFile = {
       schemaVersion: 1,
-      requests: [...file.requests, ...added].slice(-EDITOR_REQUEST_BOUNDS.kept),
+      requests: retainEditorRequests([...file.requests, ...added]),
     };
     await store.commitUnserialised({
       kind: "editor-request",
@@ -219,9 +236,14 @@ export async function decideEditorRequest(
 ): Promise<EditorRequest> {
   const { productionId, requestId, now } = input;
   if (input.decision === "reject") {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+    if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
     return writeStatus(store, productionId, requestId, (request) => {
       if (request.status !== "pending") throw new EditorRequestRefused(`request ${requestId} is already ${request.status}`);
-      return { ...request, status: "rejected", decidedAt: now };
+      // A request the base has moved under is dismissed as stale, not rejected: the audit says
+      // what happened to it, and the person's Reject is how a card nobody can accept goes (R-32).
+      const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
+      return stale === null ? { ...request, status: "rejected", decidedAt: now } : { ...request, status: "stale", decidedAt: now, reason: stale };
     });
   }
 
