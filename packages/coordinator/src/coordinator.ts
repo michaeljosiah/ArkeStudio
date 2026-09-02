@@ -206,6 +206,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
+import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand } from "./productions/timeline.js";
 import {
   acceptStill,
@@ -6265,65 +6266,36 @@ export class Coordinator {
             sceneFile: msg.sceneFile,
             reason,
           });
-        const production = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
-        const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
-        const shot = scene === undefined ? undefined : orderedShots(scene).find((candidate) => candidate.id === msg.shotId);
-        // Refused before the bytes are copied: a playblast with no staging to pin onto would be
-        // an orphan on the shelf, and the version fence below would refuse the pin anyway.
-        if (scene === undefined || shot?.staging === undefined) {
-          refuse("stage the shot before filing a playblast for it");
-          return;
-        }
-        if (shot.staging.version !== msg.stagingVersion) {
-          refuse(`the staging moved to v${shot.staging.version} while the playblast rendered — export it again`);
-          return;
-        }
-        // The scene fence, checked BEFORE the bytes are copied: the pin below is a versioned scene
-        // write, and a refusal there would leave the artifact filed and nothing pointing at it.
-        if (scene.version !== msg.baseVersion) {
-          refuse(`the scene moved to v${scene.version} while the playblast rendered — export it again`);
-          return;
-        }
-        // Our own bytes, sized by the shot's length; the large-file consent is for imports.
-        const artifactId = await this.fileOne(msg.worldId, msg.sourcePath, {
-          links: [msg.shotId],
-          production: msg.productionId,
-          allowLarge: true,
-        });
-        if (artifactId === null) return;
-        // Filing took time, and a scene write may have landed under it. What the pin protects is
-        // the STAGING the recording shows, so it is re-fenced on that: still the same staging
-        // version, the pin lands against the scene as it now stands; moved, the pin is refused
-        // and says so — an artifact of a staging that no longer exists is not worth a wrong pin.
-        const landed = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId)
-          ?.scenes.find((candidate) => candidate.id === msg.sceneId);
-        const shotNow = landed === undefined ? undefined : orderedShots(landed).find((candidate) => candidate.id === msg.shotId);
-        if (landed === undefined || shotNow?.staging === undefined || shotNow.staging.version !== msg.stagingVersion) {
-          refuse("the staging moved while the playblast was filed — export it again");
-          return;
-        }
-        await applySceneCommand(store, {
+        // One gated write: the bytes land on the shelf and the pin lands on the staging in the
+        // same commit, or neither does — a refusal leaves nothing on the shelf.
+        const outcome = await filePlayblast(store, {
           productionId: msg.productionId,
           sceneFile: msg.sceneFile,
           sceneId: msg.sceneId,
-          baseVersion: landed.version,
-          command: {
-            kind: "edit-shot",
-            shotId: msg.shotId,
-            change: {
-              staging: {
-                ...shotNow.staging,
-                playblast: {
-                  artifactId,
-                  version: msg.stagingVersion,
-                  durationSec: msg.durationSec,
-                  aspect: msg.aspect,
-                  ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
-                },
-              },
-            },
-          },
-        }).catch((err: unknown) => refuse(err instanceof Error ? err.message : "the playblast could not be pinned"));
+          baseVersion: msg.baseVersion,
+          shotId: msg.shotId,
+          stagingVersion: msg.stagingVersion,
+          sourcePath: msg.sourcePath,
+          durationSec: msg.durationSec,
+          aspect: msg.aspect,
+          ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
+        }).catch((err: unknown) => ({
+          outcome: "refused" as const,
+          reason: err instanceof Error ? err.message : "the playblast could not be filed",
+        }));
+        if (outcome.outcome === "refused") {
+          refuse(outcome.reason);
+          return;
+        }
+        this.emit({
+          at: new Date().toISOString(),
+          type: "artifact.attached",
+          worldId: msg.worldId,
+          artifactId: outcome.artifact.id,
+          file: outcome.artifact.file,
+          kind: outcome.artifact.kind,
+          deduplicated: false,
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

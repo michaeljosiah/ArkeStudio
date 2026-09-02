@@ -5,6 +5,7 @@ import {
   orderedShots,
   resolveCast,
   stageShot,
+  stagingRetimed,
   stagingFov,
   stagingMoveWord,
   type ClientMessage,
@@ -65,19 +66,6 @@ function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>)
   const made: StagingKey = { ...base, ...patch, t: round(at) };
   const next = sortedKeys([...keys, made]);
   return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
-}
-
-/** The last key at the shot's length, interior keys kept in order before it. */
-function endAtDuration(staging: ShotStaging | null, durationSec: number): ShotStaging | null {
-  if (staging === null || staging.keys.length === 0) return staging;
-  const last = staging.keys.length - 1;
-  if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
-  const keys = staging.keys.map((key, index) =>
-    index === last
-      ? { ...key, t: round(durationSec) }
-      : key.t >= durationSec ? { ...key, t: round(Math.max(0, durationSec - 0.1 * (last - index))) } : key,
-  );
-  return { ...staging, keys };
 }
 
 /** Where a figure stands at `at` seconds: on its walk when it has one, else where it was put. */
@@ -159,7 +147,10 @@ export function SceneStage({
 
   // The end key is the end pose, so it always sits at the shot's length: a staging kept before
   // the shot was retimed plays to its end pose here and is repaired by the next Keep.
-  const working = useMemo(() => endAtDuration(draft ?? persisted, durationSec), [draft, persisted, durationSec]);
+  const working = useMemo(() => {
+    const base = draft ?? persisted;
+    return base === null ? null : stagingRetimed(base, durationSec);
+  }, [draft, persisted, durationSec]);
   const moved = draft !== null && moveOf(draft) !== moveOf(persisted);
   const keys = working?.keys ?? [];
   const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
@@ -314,8 +305,8 @@ export function SceneStage({
     if (write(fresh)) setStaging(true);
   };
   const keep = () => {
-    if (draft === null || persisted === null) return;
-    write({ ...draft, version: persisted.version + 1, ...(persisted.playblast === undefined ? {} : { playblast: persisted.playblast }) });
+    if (draft === null || working === null || persisted === null) return;
+    write({ ...working, version: persisted.version + 1, ...(persisted.playblast === undefined ? {} : { playblast: persisted.playblast }) });
   };
   const toggle = () => {
     if (playing) {
@@ -665,7 +656,14 @@ export function SceneStage({
                 >
                   {exporting === null ? "Export playblast" : `exporting… ${Math.round(exporting * 100)}%`}
                 </Button>
-                <Button variant="primary" size="sm" disabled={generatorPending || locked} onClick={() => onRenderShot(shot.id)}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  // The session is prepared from the KEPT staging; a move still in hand would render the old one.
+                  disabled={generatorPending || locked || moved}
+                  title={moved ? "Keep the move first" : undefined}
+                  onClick={() => onRenderShot(shot.id)}
+                >
                   {generatorPending ? "Opening…" : "Render with this"}
                 </Button>
               </div>

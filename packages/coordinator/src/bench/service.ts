@@ -591,16 +591,16 @@ function filingMatchesCurrentSubject(
   subject: NonNullable<BenchSession["subject"]>,
   coveredDurationSec?: number,
 ): boolean {
-  if (
-    filing === undefined ||
-    filing.kind !== subject.kind ||
-    filing.productionId !== subject.productionId ||
-    filing.sceneId !== subject.sceneId
-  ) {
+  if (filing === undefined || filing.productionId !== subject.productionId || filing.sceneId !== subject.sceneId) {
     return false;
   }
-  if (filing.kind === "shot" && subject.kind === "shot") return filing.shotId === subject.shotId;
-  if (filing.kind !== "board" || subject.kind !== "board" || filing.members.length !== subject.members.length) {
+  if (subject.kind === "shot") {
+    // A shot's clip files as a board of one (R-36), and that board is the shot's own filing —
+    // a rerun of it is a rerun of the shot, not a take of some older timing.
+    if (filing.kind === "shot") return filing.shotId === subject.shotId;
+    return filing.members.length === 1 && filing.members[0]!.shotId === subject.shotId;
+  }
+  if (filing.kind !== "board" || filing.members.length !== subject.members.length) {
     return false;
   }
   let cursor = 0;

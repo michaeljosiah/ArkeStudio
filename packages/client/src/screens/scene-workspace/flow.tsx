@@ -17,6 +17,7 @@ import { Button } from "../../components/ui.js";
 import { sheetPortraitPath } from "../../components/portrait.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
+import { shotFramePath } from "./lightbox.js";
 import type { WorkspaceBoardPack } from "./boards.js";
 import { subjectMatchesBoard, useWorkspaceSelection, type WorkspaceSubject } from "./selection.js";
 
@@ -644,7 +645,8 @@ export function SceneFlow({
     if ((node.kind === "board" || node.kind === "clip") && node.memberShotIds !== undefined) {
       const members = [...node.memberShotIds];
       return [
-        ...(onOpenStage === undefined ? [] : [{ label: "Stage this board", act: () => { closeMenu(false); onOpenStage(members[0]!); } }]),
+        // Staging is per shot (board scope is deferred), so only a board of one offers it — as the shot it is.
+        ...(onOpenStage === undefined || members.length !== 1 ? [] : [{ label: "Stage this shot", act: () => { closeMenu(false); onOpenStage(members[0]!); } }]),
         { label: "Render board", disabled: locked || generatorPending, act: () => { closeMenu(false); onRenderBoard(members); } },
         ...(onViewBoardSheet === undefined
           ? []
@@ -1308,11 +1310,11 @@ function buildGraph(input: {
   sequence.shots.forEach(({ nodeId, shot }, index) => {
     const point = at(nodeId, shotX, shotStartY + index * shotPitch);
     shotAt.set(shot.id, point);
-    const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
-    const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
-    const frame = !newShotIds.has(shot.id) && artifact !== undefined && slug !== undefined
-      ? mediaUrl(slug, `artifacts/${artifact.file}`)
-      : undefined;
+    // The picture the rows, Preview and the lightbox show: a filed frame, else the poster of
+    // the take standing in for one — a migrated production with only an accepted still is not
+    // a shot with nothing to show.
+    const framePath = newShotIds.has(shot.id) ? null : shotFramePath(production, artifacts, shot.id);
+    const frame = framePath !== null && slug !== undefined ? mediaUrl(slug, framePath) : undefined;
     if (frame !== undefined) shotFrame.set(shot.id, frame);
     const framing = effectiveFraming(scene, shot);
     nodes.push({
@@ -1506,11 +1508,17 @@ function buildGraph(input: {
           staged: stagedBoards || stagedShotIds.has(member.shotId),
         });
       }
-      const rendered = board.memberShotIds.some((shotId: string) => {
-        if (newShotIds.has(shotId)) return false;
+      // Rendered means the whole board is: every member holds an accepted clip, and they are
+      // segments of one pass (a lone shot render or a leftover from an older boundary covers a
+      // member, not the board).
+      const clips = board.memberShotIds.map((shotId: string) => {
+        if (newShotIds.has(shotId)) return null;
         const accepted = acceptedTakeId(production, shotId);
-        return accepted !== null && production.takes.find((take) => take.id === accepted)?.kind === "clip";
+        const take = accepted === null ? undefined : production.takes.find((candidate) => candidate.id === accepted);
+        return take?.kind === "clip" ? take : null;
       });
+      const rendered = clips.every((take) => take !== null)
+        && (clips.length === 1 || new Set(clips.map((take) => take!.segment?.passTakeId ?? take!.id)).size === 1);
       const clipPoint = at(clipId, compact ? 280 : 960, compact ? point.y + 102 : point.y + 6);
       // The first member frame stands for the clip, the way the prototype's reel opens on it.
       const frame = board.memberShotIds.map((shotId) => shotFrame.get(shotId)).find((url) => url !== undefined);

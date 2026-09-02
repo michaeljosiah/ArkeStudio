@@ -196,6 +196,14 @@ describe("scene detail owns the workspace", () => {
     assert.equal(all(mounted, ".fy-swstage__key[data-mid=\"true\"]").length, 1, "only interior keys retime");
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
 
+    // A move in hand cannot be rendered: the session is prepared from the KEPT staging.
+    await click(q(mounted, '[aria-label="Raise"]')!);
+    const held = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Render with this") as unknown as HTMLButtonElement;
+    assert.equal(held.disabled, true, "Render waits for Keep");
+    assert.equal(held.getAttribute("title"), "Keep the move first");
+    await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+
     // Render with this asks the bench for the clip, not a still.
     await click([...stage.querySelectorAll("button")].find((button) => button.textContent === "Render with this") as unknown as HTMLElement);
     const open = sent.at(-1) as Extract<ClientMessage, { kind: "bench-open-subject" }>;

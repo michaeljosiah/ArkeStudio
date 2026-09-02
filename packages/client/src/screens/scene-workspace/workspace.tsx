@@ -6,6 +6,7 @@ import {
   legacySceneView,
   type ClientMessage,
   type ArtifactSidecar,
+  type FrameRunState,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
@@ -190,6 +191,7 @@ export function SceneWorkspace({
   const frameRun = visibleSceneRuns.find((candidate) => candidate.status === "active" || candidate.status === "paused")
     ?? visibleSceneRuns.find((candidate) => candidate.status === "completed")
     ?? null;
+  const reviewShotId = frameRun === null ? null : firstProducedShot(frameRun, artifacts);
   const dismissedCancelled = useRef(new Set<string>());
   useEffect(() => {
     for (const candidate of visibleSceneRuns) {
@@ -457,22 +459,9 @@ export function SceneWorkspace({
                 productionId={production.meta.id}
                 // Review opens the first frame THIS run put down, in the lightbox, to arrow through
                 // (R-19): a frame is the run's when one of its own jobs produced the artifact, so a
-                // shot whose retry failed over an older frame is never shown as new output.
-                onReview={() => {
-                  const jobs = new Set(frameRun.run.steps.flatMap((step) => (step.jobId === null ? [] : [`frame-run:${step.jobId}`])));
-                  const produced = frameRun.run.steps
-                    .flatMap((step) => step.updateShotIds)
-                    .find((shotId) =>
-                      artifacts.some(
-                        (artifact) =>
-                          artifact.kind === "image" &&
-                          artifact.origin.by === "system" &&
-                          jobs.has(artifact.origin.producedBy) &&
-                          artifact.links.includes(shotId),
-                      ),
-                    );
-                  setLightboxShotId(produced ?? focus ?? shots[0]?.id ?? null);
-                }}
+                // shot whose retry failed over an older frame is never shown as new output, and a
+                // run that put down nothing has nothing to review.
+                {...(reviewShotId === null ? {} : { onReview: () => setLightboxShotId(reviewShotId) })}
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage">
@@ -628,6 +617,7 @@ export function SceneWorkspace({
                 ? ["What is missing from this scene?", "Which shots need a frame?"]
                 : [`Tighten shot ${focused.number}`, `What does shot ${focused.number} need?`],
               shotLabel,
+              ...(focused === undefined ? {} : { subjectPrefix: `About shot ${focused.number}:` }),
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
@@ -705,5 +695,20 @@ export function SceneWorkspace({
         />
       </div>
     </SelectionProvider>
+  );
+}
+
+/** The first shot, in run order, that one of the run's OWN jobs put a frame on — or null when it put down none. */
+function firstProducedShot(run: FrameRunState, artifacts: readonly ArtifactSidecar[]): string | null {
+  const jobs = new Set(run.run.steps.flatMap((step) => (step.jobId === null ? [] : [`frame-run:${step.jobId}`])));
+  return (
+    run.run.steps
+      .flatMap((step) => step.updateShotIds)
+      .find((shotId) =>
+        artifacts.some(
+          (artifact) =>
+            artifact.kind === "image" && artifact.origin.by === "system" && jobs.has(artifact.origin.producedBy) && artifact.links.includes(shotId),
+        ),
+      ) ?? null
   );
 }

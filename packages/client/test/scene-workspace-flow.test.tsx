@@ -315,16 +315,15 @@ describe("Flow context menus (§11.6)", () => {
     });
     const board = all(mounted, '.fy-swnode[data-kind="board"]')[0]!;
     await act(async () => board.dispatchEvent(contextMenu()));
-    assert.deepEqual(items(mounted), ["Stage this board", "Render board", "View board sheet", "Show boards"]);
+    // Staging is per shot and board scope is deferred, so a board of two offers none.
+    assert.deepEqual(items(mounted), ["Render board", "View board sheet", "Show boards"]);
     await click(item(mounted, "View board sheet"));
     assert.deepEqual(opened, [["sh_12", "sh_13"]], "the sheet opens for the board's members");
 
     const clip = all(mounted, '.fy-swnode[data-kind="clip"]')[0]!;
     await act(async () => clip.dispatchEvent(contextMenu()));
-    assert.deepEqual(items(mounted), ["Stage this board", "Render board", "View board sheet", "Show boards"], "a clip's menu is its board's");
-    await click(item(mounted, "Stage this board"));
-    assert.deepEqual(staged, ["sh_12"], "staging a board starts at its first member");
-    await act(async () => clip.dispatchEvent(contextMenu()));
+    assert.deepEqual(items(mounted), ["Render board", "View board sheet", "Show boards"], "a clip's menu is its board's");
+    assert.deepEqual(staged, [], "nothing on a board promises a staging it cannot give");
     await click(item(mounted, "Show boards"));
     assert.equal(shown, 1);
 

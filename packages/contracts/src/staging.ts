@@ -129,11 +129,9 @@ function sweep(keys: readonly StagingKey[]): number {
  * Where the camera stands relative to what it looks at, in the words a prompt uses. A figure
  * faces +Z until it walks (then it faces its path), and "left" is the subject's left.
  */
-function bearing(k: StagingKey, facing: readonly [number, number]): string {
-  const ox = k.p[0] - (k.anchor === undefined ? k.l[0] : 0);
-  const oz = k.p[2] - (k.anchor === undefined ? k.l[2] : 0);
+function bearing(ox: number, oz: number, rise: number, facing: readonly [number, number]): string {
   const flat = Math.hypot(ox, oz);
-  if (k.p[1] - k.l[1] > 2.4 && flat < 1.6) return "above";
+  if (rise > 2.4 && flat < 1.6) return "above";
   if (flat < 0.05) return "on top of";
   // Forward along the facing; the subject's left is up × forward.
   const forward = (ox * facing[0] + oz * facing[1]) / flat;
@@ -163,17 +161,50 @@ export function stagingBeats(
     const length = Math.hypot(dx, dz);
     facings.set(figure.sheetId, length < 0.05 ? [0, 1] : [dx / length, dz / length]);
   }
+  const lastT = staging.keys.at(-1)?.t ?? 0;
   return staging.keys.map((k) => {
     const subject = k.anchor ?? k.track ?? null;
-    const ox = k.p[0] - (k.anchor === undefined ? k.l[0] : 0);
-    const oz = k.p[2] - (k.anchor === undefined ? k.l[2] : 0);
+    // Measured from what the camera is actually on: an anchored key is already an offset from
+    // its figure; a key that only TRACKS one is in world space, so the figure is read where it
+    // stands at that key's time, not at the aim point the track has overridden.
+    const tracked = k.anchor === undefined && k.track !== undefined ? staging.cast.find((figure) => figure.sheetId === k.track) : undefined;
+    const standing = tracked === undefined ? null : figureAt(tracked, lastT <= 0 ? 0 : k.t / lastT);
+    const [tx, tz] = k.anchor !== undefined ? [0, 0] : standing ?? [k.l[0], k.l[2]];
+    const ox = k.p[0] - tx;
+    const oz = k.p[2] - tz;
     const flat = Math.hypot(ox, oz).toFixed(1);
     const height = k.p[1].toFixed(2);
-    const where = bearing(k, facings.get(subject ?? "") ?? [0, 1]);
+    const where = bearing(ox, oz, k.p[1] - k.l[1], facings.get(subject ?? "") ?? [0, 1]);
     const who = subject === null ? "the aim point" : nameOf(subject);
     const aim = k.track === undefined ? "" : `, aimed at ${nameOf(k.track)}`;
     return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}`;
   });
+}
+
+/** Where a figure stands a fraction `u` of the way through the shot: on its walk, or where it was put. */
+function figureAt(figure: ShotStaging["cast"][number], u: number): [number, number] {
+  if (figure.to === undefined) return [figure.x, figure.z];
+  const along = Math.max(0, Math.min(1, u));
+  return [figure.x + (figure.to[0] - figure.x) * along, figure.z + (figure.to[1] - figure.z) * along];
+}
+
+/**
+ * A staging held to the shot's length. The end key is the end pose, so it always sits at the
+ * shot's duration; a shot retimed after it was staged would otherwise play past (or stop short
+ * of) its own end pose, and the beats would name seconds the clip does not have. Interior keys
+ * that no longer fit are pulled in ahead of the end, in order. Returns the same object when
+ * nothing needs to move.
+ */
+export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotStaging {
+  if (staging.keys.length === 0) return staging;
+  const last = staging.keys.length - 1;
+  if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
+  const keys = staging.keys.map((key, index) =>
+    index === last
+      ? { ...key, t: round(durationSec) }
+      : key.t >= durationSec ? { ...key, t: round(Math.max(0, durationSec - 0.1 * (last - index))) } : key,
+  );
+  return { ...staging, keys };
 }
 
 /** The playblast's own line for a session brief: what it is, and the beats beneath it. */

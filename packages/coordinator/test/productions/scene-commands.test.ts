@@ -403,6 +403,43 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     assert.deepEqual(shotIds(after), shotIds(before), "an edit is not a move");
     assert.equal(nodeIdOf(after, target.id), nodeIdOf(before, target.id));
   });
+
+  it("retimes a staged shot's staging with its duration, as a new staging version", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const target = orderedShots(before)[1]!;
+    const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: before.version,
+      command: {
+        kind: "edit-shot",
+        shotId: target.id,
+        change: {
+          durationSec: 4,
+          staging: { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -2], l: [0, 1, 0] }] },
+        },
+      },
+    });
+    const staged = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: staged.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 6 } },
+    });
+    const after = orderedShots(await sceneOnDisk(store))[1]!;
+    assert.equal(after.durationSec, 6);
+    assert.deepEqual(after.staging?.keys.map((key) => key.t), [0, 6], "the end key follows the shot's length");
+    assert.equal(after.staging?.version, 2, "a retime is a staging change, so a playblast of the old length reads stale");
+    // A duration that already fits leaves the staging exactly as it was.
+    const again = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: again.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { title: "Retitled" } },
+    });
+    assert.equal(orderedShots(await sceneOnDisk(store))[1]!.staging?.version, 2, "an edit that is not a retime moves nothing");
+  });
 });
 
 describe("the fence names a scene, not a filename (codex round on #653)", () => {

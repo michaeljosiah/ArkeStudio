@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import {
+  type ArtifactSidecar,
   FrameRunSchema,
   FrameRunStateSchema,
   foldFrameRun,
@@ -270,7 +271,23 @@ describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
       second: { status: "succeeded", finalization: "complete", etaSec: null },
       filed: true,
     });
-    const item = await mount(stateWith({ runs: [complete] }));
+    // Review opens what THIS run put down: with none of its frames on the shelf there is nothing
+    // to open, so the button is not drawn rather than falling back to some older frame.
+    const bare = await mount(stateWith({ runs: [complete] }));
+    const bareBar = one(bare, '[data-testid="frame-run-bar"]')!;
+    assert.equal([...bareBar.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Review"), false, "nothing produced, nothing to review");
+    const state = stateWith({ runs: [complete] });
+    state.world!.artifacts.push({
+      id: "ar_01J8E000000000000000000RV1",
+      kind: "image",
+      file: "frame-sh_12-run.png",
+      hash: "sha256:6a1e02b9c44d7f32",
+      origin: { by: "system", producedBy: `frame-run:${JOB_1}` },
+      links: ["saltlight", "sc_04", "sh_12"],
+      production: "saltlight",
+      created: "2026-08-30T12:01:00Z",
+    } as unknown as ArtifactSidecar);
+    const item = await mount(state);
     const bar = one(item, '.fy-sw__toolbar [data-testid="frame-run-bar"]')!;
     assert.ok(bar.classList.contains("fy-swrun--complete"));
     assert.match(bar.querySelector(".fy-swrun__done")?.textContent ?? "", /^2 frames added$/);

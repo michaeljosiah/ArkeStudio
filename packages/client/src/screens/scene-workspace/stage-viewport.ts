@@ -367,7 +367,12 @@ export class StageViewport {
       if (event.button === 0) this.down(event);
     });
     renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
-    renderer.domElement.addEventListener("dblclick", (event) => this.track(event));
+    renderer.domElement.addEventListener("dblclick", (event) => {
+      // A recording reads the data the panel holds; a track picked mid-take would change the
+      // active key under it and file a take of two stagings under one version.
+      if (this.recordingAt !== null) return;
+      this.track(event);
+    });
     renderer.domElement.addEventListener("pointermove", (event) => {
       if (this.transform.dragging || this.data.mode === "camera") return;
       const hit = this.probe(event);

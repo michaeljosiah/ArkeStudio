@@ -17,6 +17,7 @@ import {
   setBoardOverride,
   setBoardPrompt,
   shotDeleteBlockers,
+  stagingRetimed,
   type GraphScene,
   type SceneRecord,
   type Shot,
@@ -273,8 +274,20 @@ async function candidateFor(
       const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
       return duplicateShot(record, { shotId: command.shotId, newShotId: nextShotIdIn(taken) });
     }
-    case "edit-shot":
-      return editShot(record, { shotId: command.shotId, change: command.change });
+    case "edit-shot": {
+      // A retimed shot carries its staging with it: the end key is the end pose and sits at the
+      // shot's length, so a duration edit that left the keys alone would leave a staging (and
+      // its beats) describing seconds the shot no longer has. The version moves with it, which
+      // is what marks a playblast recorded at the old length stale.
+      const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
+      const retimed = command.change.durationSec !== undefined && command.change.staging === undefined && current?.staging !== undefined
+        ? stagingRetimed(current.staging, command.change.durationSec)
+        : undefined;
+      const change = retimed === undefined || retimed === current?.staging
+        ? command.change
+        : { ...command.change, staging: { ...retimed, version: retimed.version + 1 } };
+      return editShot(record, { shotId: command.shotId, change });
+    }
     case "set-prompt-override": {
       const shot = orderedShots(record).find((candidate) => candidate.id === command.shotId);
       if (shot === undefined) throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
@@ -359,7 +372,7 @@ function productionOrThrow(store: WorldStore, productionId: string) {
   return production;
 }
 
-function stemOrThrow(sceneFile: string): string {
+export function stemOrThrow(sceneFile: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(sceneFile) || sceneFile === "." || sceneFile === "..") {
     throw new SceneCommandRefused([`"${sceneFile}" is not a scene file name`]);
   }

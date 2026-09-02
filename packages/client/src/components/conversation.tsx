@@ -192,6 +192,8 @@ export function ConversationTranscript({
 }
 
 const REPORT_FAILURE_STATUSES = new Set(["failed", "missing", "needs-reconciliation"]);
+/** What actually came back: a frame filed by the run, or one reconciled from a job it lost sight of. */
+const REPORT_RETURNED_STATUSES = new Set(["succeeded", "reconciled"]);
 
 function FrameRunReport({
   run,
@@ -234,9 +236,11 @@ function FrameRunReport({
     const pending = ["not-enqueued", "queued", "submitting", "running"].includes(state.status);
     // What came back, not what was asked for: a board with one dark member reads "2 frames"
     // beside that member's failure row rather than claiming all three.
-    const kept = state.shots.filter((shot) => !REPORT_FAILURE_STATUSES.has(shot.status)).length;
+    const kept = state.shots.filter((shot) => REPORT_RETURNED_STATUSES.has(shot.status)).length;
     const board = run.run.mode === "board" && step.dispatch.target.kind === "board-sheet";
-    const value = `${kept} frame${kept === 1 ? "" : "s"}${board && kept > 1 ? " · one pass" : ""}${step.grain === "initial" ? "" : " · retry"}`;
+    const value = pending
+      ? `running${step.grain === "initial" ? "" : " · retry"}`
+      : `${kept} frame${kept === 1 ? "" : "s"}${board && kept > 1 ? " · one pass" : ""}${step.grain === "initial" ? "" : " · retry"}`;
     stepRows.push(
       <div key={`step:${index}`} className="fy-chat__runreport-row" data-kind="step" data-state={failed ? "failed" : pending ? "pending" : "complete"}>
         <button type="button" onClick={() => selectShot(step.updateShotIds[0]!)}>
@@ -424,6 +428,11 @@ export function ProductionConversation({
     onToggleSubject?: () => void;
     /** Quick asks above the composer, each said as it stands. */
     prompts?: readonly string[];
+    /**
+     * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
+     * so the shot the dock names has to be in the words themselves or the studio never hears it.
+     */
+    subjectPrefix?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
   };
@@ -586,8 +595,11 @@ export function ProductionConversation({
   const submit = () => {
     const text = message.trim();
     if (!text || !worldId || !productionId) return;
+    // The field keeps its words while a thread is still opening; say() would drop them.
+    if (opening) return;
     setMessage("");
-    say(text);
+    const prefix = dock?.subjectPrefix;
+    say(prefix === undefined ? text : `${prefix} ${text}`);
   };
 
   const points = loaded?.points ?? [];
@@ -738,8 +750,8 @@ export function ProductionConversation({
             onSubmit={submit}
             placeholder={placeholder}
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
-            busy={running}
-            busyLabel="reading the world…"
+            busy={running || opening !== null}
+            busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />

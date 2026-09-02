@@ -485,7 +485,7 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
     .filter((value): value is string => value !== null);
 }
 
-export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview: () => void }) {
+export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {
   const total = new Set(run.run.steps.filter((step) => step.grain === "initial").flatMap((step) => step.updateShotIds)).size;
   const settled = Math.min(total, run.filedShots + run.failedShots + run.supersededShots);
   const current = run.steps.find((step) => !SETTLED.has(step.status));
@@ -498,7 +498,7 @@ export function FrameRunBar({ run, worldId, productionId, onReview }: { run: Fra
     return (
       <div className="fy-swrun fy-swrun--complete" data-testid="frame-run-bar" role="status">
         <span className="fy-swrun__done">{run.filedShots} frame{run.filedShots === 1 ? "" : "s"} added{run.failedShots > 0 ? ` · ${run.failedShots} failed` : ""}{run.supersededShots > 0 ? ` · ${run.supersededShots} overtaken` : ""}</span>
-        <button type="button" className="fy-swrun__review" data-primary="true" onClick={onReview}>Review</button>
+        {onReview === undefined ? null : <button type="button" className="fy-swrun__review" data-primary="true" onClick={onReview}>Review</button>}
         <button type="button" className="fy-swrun__dismiss" aria-label="Dismiss frame run" onClick={() => control("frame-run-dismiss")}><X size={11} /></button>
       </div>
     );
