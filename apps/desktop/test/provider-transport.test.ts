@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { ProviderTransportPolicy } from "@arke-studio/contracts";
 import {
   captureProviderClient,
@@ -270,5 +272,19 @@ describe("desktop cloud provider HTTP policy (issue 95)", () => {
     await transport.run(scope(), (fetch) => fetch("https://api.openai.com/test"));
     assert.ok(dispatcher instanceof Agent);
     await transport.close();
+  });
+
+  it("holds the process open until the whole-operation deadline fires", () => {
+    // The runner cannot witness this itself: node 22 cancels a file whose loop drains mid-test
+    // (subtests 3–7 above went down that way, intermittently, whenever no stdout write happened
+    // to be in flight) and node 24 parks on a keep-alive of its own. A bare child process can.
+    const fixture = fileURLToPath(new URL("./fixtures/deadline-holds-loop.ts", import.meta.url));
+    const child = spawnSync(process.execPath, ["--import", "tsx", fixture], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    assert.equal(child.status, 0, child.error ? String(child.error) : child.stderr);
+    assert.deepEqual(child.stdout.trim().split(/\r?\n/), ["rejected: configured-deadline", "beforeExit"]);
   });
 });
