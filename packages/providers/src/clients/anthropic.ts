@@ -1,6 +1,14 @@
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import {
+  ProviderRequestRejectedError,
+  type FetchedArtifact,
+  type FetchLike,
+  type PollResult,
+  type ProviderClient,
+  type SubmitRequest,
+  type SubmitResult,
+} from "../types.js";
 
 /**
  * Anthropic — direct llm provider. Synchronous messages API, cached like OpenAI's. Usage
@@ -49,7 +57,8 @@ export class AnthropicClient implements ProviderClient {
       body: JSON.stringify({ model: request.model, max_tokens: 4096, ...request.params }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
-    if (status >= 400) throw new Error(`anthropic: message failed (HTTP ${status})`);
+    if (status >= 500) throw new Error(`anthropic: message failed (HTTP ${status})`);
+    if (status >= 400) throw new ProviderRequestRejectedError(`anthropic: message failed (HTTP ${status})`);
     const blocks = (body as { content?: Array<{ type?: string; text?: string }> } | null)?.content ?? [];
     const text = blocks
       .filter((b) => b.type === "text" && typeof b.text === "string")

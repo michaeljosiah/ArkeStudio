@@ -1503,6 +1503,7 @@ describe("kill mid-submit — strategy C: neither, so the user is asked (D4)", (
     await g2.queue.start();
     await g2.queue.resolveHeld(job2.id, "discard");
     assert.equal(foldedJob(g2, job2.id)?.status, "cancelled");
+    assert.match(foldedJob(g2, job2.id)?.error ?? "", /may still complete or charge/);
     assert.equal(g2.ledger.entries.length, 1);
     assert.equal(g2.ledger.entries[0]!.outcome, "cancelled");
     assert.equal(g2.ledger.entries[0]!.actualMicroUsd, null, "the charge is unknown, not zero");
@@ -1574,7 +1575,7 @@ describe("kill during download and after terminal (§3.2)", () => {
 });
 
 describe("provider faults pause the queue (R-8, D6, D7)", () => {
-  it("a witnessed provider-fault submission rejection pauses before queued siblings can submit", async () => {
+  it("a witnessed provider-fault submission rejection pauses and queues the work for credential repair", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("HTTP 402 payment required: quota exhausted");
     fake.submissionRejected = true;
@@ -1582,12 +1583,14 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     const siblings = await Promise.all(Array.from({ length: 4 }, () => h.queue.enqueue(INPUT)));
-    await until(() => foldedJob(h, first.id)?.status === "failed", "the witnessed rejection to terminalize", FOLD_MS);
+    await until(() => h.queue.queueStatus("fake").paused, "the witnessed provider fault to pause the lane", FOLD_MS);
+    assert.equal(foldedJob(h, first.id)?.status, "queued");
     assert.equal(foldedJob(h, first.id)?.failureClass, "provider-fault");
     assert.equal(h.queue.queueStatus("fake").paused, true);
     assert.equal(h.faults.length, 1);
     assert.equal(fake.submitCount, 1, "the lane pauses before runJob's finally can pump a sibling");
     assert.ok(siblings.every((job) => foldedJob(h, job.id)?.status === "queued"));
+    assert.equal(h.ledger.entries.length, 0, "credential repair can resume the original work");
     h.queue.dispose();
   });
 
@@ -1642,6 +1645,7 @@ describe("provider faults pause the queue (R-8, D6, D7)", () => {
   it("a 401 with forty queued jobs: paused, told once, zero failed, others keep running", async () => {
     const bad = new FakeProvider({ supportsIdempotencyKey: true });
     bad.submitError = new Error("HTTP 401 the credential was rejected");
+    bad.submissionRejected = true;
     const good = new FakeProvider({});
     const h = await makeHarness({ bad, good }, { baseConcurrency: 1 });
     await h.queue.start();
@@ -1691,6 +1695,19 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.equal(fake.submitCount, 1);
     assert.equal(foldedJob(h, job.id)?.attempt, 1);
     assert.doesNotMatch(foldedJob(h, job.id)?.error ?? "", /outcome was not witnessed/);
+    h.queue.dispose();
+  });
+
+  it("a witnessed 5xx still reconciles when the paid outcome is ambiguous", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("HTTP 503 unavailable");
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "needs-reconciliation", "the ambiguous response to hold", FOLD_MS);
+    assert.equal(fake.submitCount, 1);
+    assert.equal(foldedJob(h, job.id)?.attempt, 1);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may have accepted and charged/);
     h.queue.dispose();
   });
 
@@ -1980,6 +1997,43 @@ describe("offline holds rather than fails (R-17, D13)", () => {
     h2.queue.dispose();
   });
 
+  it("requeues a witnessed rejection after restart instead of inventing uncertainty", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake });
+    const now = new Date().toISOString();
+    const submitting: Job = {
+      id: `jb_${"8".repeat(26)}`,
+      idempotencyKey: "01J8E100000000000000000J94",
+      worldId: WORLD,
+      target: { kind: "character-sheet", id: "maren-kest/witnessed" },
+      capability: "image",
+      provider: "fake",
+      model: "gpt-image-2",
+      params: {},
+      estimatedMicroUsd: 40000,
+      status: "submitting",
+      providerJobId: null,
+      attempt: 1,
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const rejected: Job = {
+      ...submitting,
+      status: "queued",
+      submissionRejected: true,
+      failureClass: "transient",
+      error: "HTTP 429 rate limit",
+    };
+    await appendFile(h.journalPath, `${JSON.stringify(submitting)}\n${JSON.stringify(rejected)}\n`, "utf8");
+    const h2 = h.revive();
+    const report = await h2.queue.start();
+    assert.equal(report.find((row) => row.jobId === submitting.id)?.action, "requeued");
+    await until(() => foldedJob(h2, submitting.id)?.status === "succeeded", "the rejected attempt to retry", FOLD_MS);
+    assert.equal(fake.submitCount, 1);
+    h2.queue.dispose();
+  });
+
   it("a guaranteed-idempotent offline submission retries with one key and a hard ceiling", async () => {
     const fake = new FakeProvider({ supportsIdempotencyKey: true });
     fake.submitError = new Error("fetch failed: ENOTFOUND queue.fal.run");
@@ -2083,6 +2137,36 @@ describe("artifact verification (R-12, R-13, D12)", () => {
 });
 
 describe("cancellation (R-14, R-15, D10)", () => {
+  it("does not warn about a charge when queued remote work never reached the provider", async () => {
+    const fake = new FakeProvider({});
+    fake.pollState = "running";
+    const h = await makeHarness({ fake }, { baseConcurrency: 1 });
+    await h.queue.start();
+    const blocker = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, blocker.id)?.status === "running", "the first job to hold the lane", FOLD_MS);
+    const job = await h.queue.enqueue(INPUT);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    assert.equal(fake.submitCount, 1, "only the lane-blocking job reached the provider");
+    h.queue.dispose();
+  });
+
+  it("does not warn after a witnessed rejection left the job queued", async () => {
+    const fake = new FakeProvider({});
+    fake.submitError = new Error("HTTP 402 payment required");
+    fake.submissionRejected = true;
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => h.queue.queueStatus("fake").paused, "the rejected attempt to pause the lane", FOLD_MS);
+    assert.equal(foldedJob(h, job.id)?.submissionRejected, true);
+    await h.queue.cancel(job.id);
+    assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null);
+    h.queue.dispose();
+  });
+
   it("cancelling a running job attempts the remote cancel and still writes a ledger entry", async () => {
     const fake = new FakeProvider({ reportsCost: true });
     fake.pollState = "running"; // the remote work never finishes on its own
@@ -2092,6 +2176,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => foldedJob(h, job.id)?.status === "running", "the job to fold to running", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
     assert.equal(fake.cancelCount, 1);
     assert.equal(h.ledger.entries.length, 1);
     assert.equal(h.ledger.entries[0]!.outcome, "cancelled");
@@ -2122,6 +2207,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await h.queue.cancel(job.id);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.equal(foldedJob(h, job.id)?.error, null, "local cancellation makes no remote-charge claim");
     assert.equal(h.ledger.entries.at(-1)?.outcome, "cancelled");
     h.queue.dispose();
   });
@@ -2154,6 +2240,8 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => h.ledger.entries.at(-1)?.outcome === "cancelled", "the cancellation to reach the ledger", FOLD_MS);
     assert.equal(submitSignal?.aborted, true);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
+    assert.equal(foldedJob(h, job.id)?.failureClass, null);
     assert.equal(submits, 1);
     h.queue.dispose();
   });
@@ -2182,6 +2270,7 @@ describe("cancellation (R-14, R-15, D10)", () => {
     await until(() => release !== undefined, "the provider to hold the in-flight submission", FOLD_MS);
     await h.queue.cancel(job.id);
     assert.equal(foldedJob(h, job.id)?.status, "cancelled");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /may still complete or charge/);
     assert.equal(fake.cancelCount, 0, "there is nothing to cancel remotely until the id comes back");
     release!();
     await until(() => fake.cancelCount === 1, "the cancellation to reach the provider", FOLD_MS);
