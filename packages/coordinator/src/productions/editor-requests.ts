@@ -135,11 +135,29 @@ export async function stageEditorRequests(
     if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
     const base = requestBase(store, production);
     const sourceLength = sourceLengthFramesFor(production, store.getBundle().artifacts);
+    const { raw, file } = await readRequests(store, productionId);
     const staged: EditorRequest[] = [];
+    const added: EditorRequest[] = [];
     for (const request of input.requests) {
       const preview = previewEditorRequest(base.timeline, request.commands, { sourceLength });
       if (!preview.ok) throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${preview.reason}`);
-      staged.push({
+      /*
+       * The same request twice is one record. A turn's corrective retry runs this again with
+       * whatever the model repeats, and a model that ignores "do not repeat a pending request"
+       * would otherwise stack identical cards; the person decides each request once.
+       */
+      const same = [...file.requests, ...added].find(
+        (candidate) =>
+          candidate.status === "pending" &&
+          candidate.conversationId === input.conversationId &&
+          candidate.summary === request.summary &&
+          JSON.stringify(candidate.commands) === JSON.stringify(request.commands),
+      );
+      if (same !== undefined) {
+        staged.push(same);
+        continue;
+      }
+      const record: EditorRequest = {
         id: `req_${ulid()}`,
         productionId,
         conversationId: input.conversationId,
@@ -149,12 +167,14 @@ export async function stageEditorRequests(
         summary: request.summary,
         createdAt: input.now,
         status: "pending",
-      });
+      };
+      staged.push(record);
+      added.push(record);
     }
-    const { raw, file } = await readRequests(store, productionId);
+    if (added.length === 0) return staged;
     const next: EditorRequestFile = {
       schemaVersion: 1,
-      requests: [...file.requests, ...staged].slice(-EDITOR_REQUEST_BOUNDS.kept),
+      requests: [...file.requests, ...added].slice(-EDITOR_REQUEST_BOUNDS.kept),
     };
     await store.commitUnserialised({
       kind: "editor-request",

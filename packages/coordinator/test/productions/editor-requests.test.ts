@@ -161,6 +161,18 @@ describe("Arke's editor requests (issue 684)", () => {
     assert.match(record.reason ?? "", /gone|moved/);
   });
 
+  it("stages the same request once, however many times a turn repeats it", async () => {
+    const store = await open();
+    const { commands } = moveSecondEarlier(store);
+    const request = { summary: "Swap the first two shots", commands };
+    const first = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [request], now: NOW });
+    // The corrective retry of the same turn, and a later turn that repeats itself, both land here.
+    const again = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [request, request], now: NOW });
+    assert.deepEqual(again.map((record) => record.id), [first[0]!.id, first[0]!.id]);
+    const file = EditorRequestFileSchema.parse(JSON.parse(await readFile(requestsPath(store), "utf8")));
+    assert.equal(file.requests.length, 1, "one record, one card");
+  });
+
   it("refuses a forged decision that names no request (A-11)", async () => {
     const store = await open();
     await assert.rejects(
