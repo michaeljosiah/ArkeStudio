@@ -28,7 +28,7 @@ import {
   useStore,
 } from "../../lib/store.js";
 import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
-import { SceneReview, SceneSynopsis, useBlockDigests } from "../storyboard.js";
+import { SceneReview, SceneSynopsis, SceneTitle, useBlockDigests } from "../storyboard.js";
 import { SceneFlow } from "./flow.js";
 import { StoryboardRows } from "./rows.js";
 import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceSubject } from "./selection.js";
@@ -394,7 +394,12 @@ export function SceneWorkspace({
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title">
-                Scene {scene.number} · {scene.title}
+                Scene {scene.number} ·{" "}
+                <SceneTitle
+                  title={scene.title}
+                  locked={staged !== undefined || sceneFile === undefined || commandPending}
+                  onCommit={(title) => write({ kind: "edit-scene", title })}
+                />
               </h1>
               <div className="fy-sw__actions">
                 <Button variant="outline" size="sm" onClick={() => setSceneReviewOpen((open) => !open)}>Review scene</Button>

@@ -198,6 +198,7 @@ export {
   composeDispatches,
   createChapter,
   createProduction,
+  createScene,
   draftSceneSkeleton,
   exportBoard,
   landBoard,

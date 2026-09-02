@@ -699,3 +699,39 @@ describe("the blockers are checked under the same lock that writes", () => {
     assert.equal(selections[target]?.["acceptedTakeId"], "tk_01J8F0000000000000000000B2");
   });
 });
+
+describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amended)", () => {
+  it("renames the scene and leaves the synopsis exactly as it was", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: { kind: "edit-scene", title: "The verse answers" },
+    });
+    const after = await sceneOnDisk(store);
+    assert.equal(after.title, "The verse answers");
+    assert.equal(after.synopsis, before.synopsis, "a rename says nothing about the synopsis");
+    assert.equal(after.version, before.version + 1);
+    assert.deepEqual(shotIds(after), shotIds(before));
+  });
+
+  it("refuses a command that names nothing, byte-identical", async () => {
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    const print = await worldPrint(dir);
+    await assert.rejects(
+      applySceneCommand(store, {
+        productionId: PRODUCTION,
+        sceneFile: SCENE,
+        sceneId: SCENE_ID,
+        baseVersion: before.version,
+        command: { kind: "edit-scene" },
+      }),
+      (err: unknown) => err instanceof SceneCommandRefused && /neither a title nor a synopsis/.test(err.message),
+    );
+    assert.equal(await worldPrint(dir), print);
+  });
+});

@@ -6,6 +6,7 @@ import {
   acknowledgeUpdate,
   subscribeJobReady,
   subscribeQueueResults,
+  subscribeSceneCreateResults,
   subscribeSceneRefusals,
   useStore,
   useUpdateStatus,
@@ -171,6 +172,27 @@ export function QueueToaster() {
           title: "That edit was not saved",
           meta: `scene ${event.sceneFile}`,
           reason: event.reason,
+        };
+        toast.custom(
+          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: duration(note) },
+        );
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      // A scene that could not be made is said the same way a refused edit is: the button that
+      // asked only comes back, and the reason is worded here, above whichever screen pressed it.
+      subscribeSceneCreateResults((result) => {
+        if (result.disposition !== "failed") return;
+        const note: QueueNote = {
+          id: `scene-create:${result.requestId}`,
+          tone: "refused",
+          title: "That scene was not created",
+          meta: `production ${result.productionId}`,
+          reason: result.reason ?? "the scene could not be created",
         };
         toast.custom(
           (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,

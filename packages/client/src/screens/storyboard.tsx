@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
@@ -329,6 +329,81 @@ export function SceneSynopsis({
       onCommit={(next) => {
         const scrubbed = next.trim();
         onCommit(scrubbed === "" ? null : scrubbed);
+      }}
+    />
+  );
+}
+
+/**
+ * The name in the header (SPEC-036 R-2, amended 2026-09-02): typed where it reads, like the
+ * synopsis under it.
+ *
+ * A scene is born `Untitled` (R-37) and named here or by Arke, and either way it is the same
+ * `edit-scene` write. Enter commits, Escape puts the old name back, and an empty box commits
+ * nothing: a scene cannot be nameless, so a blank is read as "leave it", not as a clear.
+ */
+export function SceneTitle({
+  title,
+  locked = false,
+  onCommit,
+}: {
+  title: string;
+  locked?: boolean;
+  onCommit: (title: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
+  // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
+  const settled = useRef(false);
+  if (!editing) {
+    return (
+      <span
+        role="textbox"
+        tabIndex={locked ? -1 : 0}
+        aria-readonly={locked ? true : undefined}
+        title={locked ? undefined : "Rename"}
+        className={cx("fy-sw__title-text", locked && "fy-sw__title-text--locked")}
+        onClick={() => {
+          if (locked) return;
+          settled.current = false;
+          setEditing(true);
+        }}
+        onKeyDown={(e) => {
+          if (locked || (e.key !== "Enter" && e.key !== " ")) return;
+          e.preventDefault();
+          settled.current = false;
+          setEditing(true);
+        }}
+      >
+        {title}
+      </span>
+    );
+  }
+  const commit = (input: HTMLInputElement) => {
+    if (settled.current) return;
+    settled.current = true;
+    setEditing(false);
+    const next = input.value.trim();
+    if (next !== "" && next !== title) onCommit(next);
+  };
+  return (
+    <input
+      autoFocus
+      className="fy-sw__title-input"
+      aria-label="Scene title"
+      defaultValue={title}
+      maxLength={200}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={(e) => commit(e.currentTarget)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit(e.currentTarget);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          settled.current = true;
+          setEditing(false);
+        }
       }}
     />
   );

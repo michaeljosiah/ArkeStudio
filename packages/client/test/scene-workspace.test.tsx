@@ -572,6 +572,113 @@ describe("selection survives a view switch (T-18)", () => {
   });
 });
 
+describe("the title is typed where it reads (R-2, amended 2026-09-02)", () => {
+  const press = async (element: HTMLElement, key: string): Promise<void> => {
+    const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "key", { value: key });
+    await act(async () => element.dispatchEvent(event));
+  };
+
+  it("renames through one edit-scene write, and a blank leaves the name alone", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    assert.match(q(mounted, ".fy-sw__title")?.textContent ?? "", /^Scene 4 · /);
+
+    await click(q(mounted, ".fy-sw__title-text")!);
+    const blank = q(mounted, ".fy-sw__title-input") as HTMLInputElement | null;
+    assert.ok(blank, "a click opens the name for typing");
+    blank!.value = "   ";
+    await press(blank!, "Enter");
+    assert.equal(q(mounted, ".fy-sw__title-input"), null, "Enter closes the box");
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "a blank is not a name");
+
+    await click(q(mounted, ".fy-sw__title-text")!);
+    const input = q(mounted, ".fy-sw__title-input") as HTMLInputElement;
+    input.value = "  The verse answers  ";
+    await press(input, "Enter");
+    const command = sent.findLast((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command");
+    assert.equal(command.sceneId, "sc_04");
+    assert.deepEqual(command.command, { kind: "edit-scene", title: "The verse answers" });
+  });
+
+  it("Escape puts the old name back without writing", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    const before = q(mounted, ".fy-sw__title")?.textContent;
+    await click(q(mounted, ".fy-sw__title-text")!);
+    const input = q(mounted, ".fy-sw__title-input") as HTMLInputElement;
+    input.value = "Something else";
+    await press(input, "Escape");
+    assert.equal(q(mounted, ".fy-sw__title-input"), null);
+    assert.equal(q(mounted, ".fy-sw__title")?.textContent, before);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false);
+  });
+});
+
+describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
+  const newSceneButton = (mounted: Mounted): HTMLElement =>
+    all(mounted, "button").find((candidate) => candidate.textContent === "New scene")!;
+
+  it("sends one correlated create and lands in the workspace the answer names", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes`);
+    const button = newSceneButton(mounted);
+    assert.ok(button, "the Scenes screen offers New scene");
+    await click(button);
+
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene", "one press, one create — no brief form in between");
+    assert.equal(create.productionId, "saltlight");
+    assert.equal(create.episodeId, undefined, "a film's scenes belong to no episode");
+    assert.equal(button.hasAttribute("disabled"), true, "pending until the answer arrives");
+
+    await apply({
+      at: "2026-09-02T10:00:00.000Z",
+      type: "scene.create-result",
+      requestId: create.requestId,
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      disposition: "created",
+      sceneId: "sc_04",
+    });
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'), "the answer opens the scene it names");
+    assert.match(q(mounted, ".fy-sw__title")?.textContent ?? "", /^Scene 4 · /);
+  });
+
+  it("comes back, still on the list, when the answer is a refusal", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes`);
+    const button = newSceneButton(mounted);
+    await click(button);
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene");
+    await apply({
+      at: "2026-09-02T10:00:00.000Z",
+      type: "scene.create-result",
+      requestId: create.requestId,
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      disposition: "failed",
+      reason: "episode ep_nowhere is not in saltlight",
+    });
+    assert.ok(q(mounted, '[data-screen="scenes"]'), "nothing to open, so nowhere to go");
+    assert.equal(newSceneButton(mounted).hasAttribute("disabled"), false, "and the press is offered again");
+  });
+
+  it("a bookmark to the retired brief form lands on the list, and writes nothing", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/new`);
+    assert.ok(q(mounted, '[data-screen="scenes"]'));
+    assert.equal(sent.some((message) => message.kind === "create-scene"), false);
+  });
+});
+
 describe("Preview plays the accepted scene on its authored clock (R-28)", () => {
   it("fits landscape and portrait stages inside both available dimensions", () => {
     assert.deepEqual(fitPreviewStage(900, 300, "9:16"), { width: 168.75, height: 300 });

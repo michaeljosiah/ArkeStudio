@@ -478,7 +478,9 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
     assert.match(html, /4 · The verse rises/);
-    assert.match(html, /bell-watch-season-1\/scenes\/new/);
+    // A press, not a link (SPEC-036 R-37): the episode's New scene makes the scene and opens it.
+    assert.match(html, /<button type="button" class="fy-prodrail__new-scene">/);
+    assert.doesNotMatch(html, /scenes\/new/, "the brief form is retired");
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
     assert.match(html, /aria-label="Switch production\. Current production: Bell Watch — Season 1"/);

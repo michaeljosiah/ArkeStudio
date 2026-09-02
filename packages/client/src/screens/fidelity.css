@@ -1245,6 +1245,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-prodrail__item:hover { background: var(--accent); color: var(--foreground); }
 .fy-prodrail__item--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+/* A rail item that presses rather than navigates (New scene): a button wearing the link's face,
+   so the rail reads as one column whichever kind of thing each row is. */
+.fy-prodrail__item--press { width: 100%; border: 0; background: none; text-align: left; }
+.fy-prodrail__item--press:disabled,
+.fy-prodrail__new-scene:disabled { cursor: default; color: var(--neutral-400); }
+.fy-prodrail__item--press:disabled:hover,
+.fy-prodrail__new-scene:disabled:hover { background: none; }
 .fy-prodrail__count { margin-left: auto; font: 400 11px var(--font-mono); }
 .fy-prodrail__sub {
   display: flex;
@@ -6489,6 +6496,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-sw__headline > .fy-sw__title { flex: 1; min-width: 0; }
 .fy-sw__actions { display: flex; gap: 8px; flex: none; padding-top: 2px; }
 .fy-sw__title { margin: 0; font: 650 24px/1.1 var(--font-sans); letter-spacing: -0.025em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name is typed where it reads (R-2, amended): idle, it keeps the h1's face and takes the
+   rail's hover tint; editing swaps in a bare input wearing the same face and the synopsis's
+   secondary tint, so renaming does not swap in a bordered control and jump the header. */
+.fy-sw__title-text { border-radius: 6px; padding: 0 4px; margin: 0 -4px; cursor: text; transition: var(--transition-control); }
+.fy-sw__title-text:hover { background: var(--accent); }
+.fy-sw__title-text--locked { cursor: default; }
+.fy-sw__title-text--locked:hover { background: transparent; }
+.fy-sw__title-input { width: min(100%, 28ch); padding: 0 4px; margin: 0 -4px; border: 0; border-radius: 6px; background: var(--secondary); color: var(--foreground); font: inherit; letter-spacing: inherit; outline: none; }
 .fy-sw__head .fy-sbsynopsis { max-width: 660px; margin: 7px 0 8px; padding: 2px 4px; transform: translateX(-4px); color: var(--muted-foreground); font-size: 12.5px; line-height: 1.6; }
 .fy-sw__head .fy-sbsynopsis:hover { background: transparent; }
 /* Editing keeps the synopsis's box: the textarea wears the idle shape with a secondary tint,

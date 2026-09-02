@@ -451,6 +451,14 @@ export function subscribeProductionCreateResults(
   return () => productionCreateListeners.delete(listener);
 }
 
+/** The correlated answer to one create-scene request (SPEC-036 R-37), by requestId. */
+export type SceneCreateResult = Extract<DomainEvent, { type: "scene.create-result" }>;
+const sceneCreateListeners = new Set<(result: SceneCreateResult) => void>();
+export function subscribeSceneCreateResults(listener: (result: SceneCreateResult) => void): () => void {
+  sceneCreateListeners.add(listener);
+  return () => sceneCreateListeners.delete(listener);
+}
+
 export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
 export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
 const planResultListeners = new Set<(result: PlanResult) => void>();
@@ -864,6 +872,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "scene.create-result") {
+      for (const listener of sceneCreateListeners) listener(event);
     }
     if (event.type === "scene.write-refused") {
       for (const listener of sceneRefusalListeners) listener(event);
@@ -2813,8 +2824,18 @@ export function reorderEpisodes(worldId: string, productionId: string, orderedId
   send({ kind: "reorder-episodes", worldId, productionId, orderedIds });
 }
 
-export function draftScene(worldId: string, productionId: string, brief: string): void {
-  send({ kind: "draft-scene", worldId, productionId, brief });
+/**
+ * Make an empty scene and learn which one it was (SPEC-036 R-37). Returns the requestId the
+ * `scene.create-result` will carry, or null when nothing was sent — a button that waited on an
+ * answer to a frame that never left would wait for good.
+ */
+export function createScene(
+  worldId: string,
+  productionId: string,
+  input: { episodeId?: string; title?: string } = {},
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "create-scene", worldId, productionId, requestId, ...input }) ? requestId : null;
 }
 
 type SceneCommandMessage = Extract<ClientMessage, { kind: "scene-command" }>;
