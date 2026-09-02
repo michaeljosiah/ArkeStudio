@@ -8,6 +8,7 @@ import {
   benchSubjectTitle,
   benchTokenFor,
   designatedVoiceSample,
+  effectiveFraming,
   hasOwnFrame,
   mappedReferenceKinds,
   modelForCapability,
@@ -228,12 +229,23 @@ async function voiceTokens(
  * is. `when-supported`, because no route today maps a video reference — the tile stays visible
  * and says it is not riding, while the beats in the brief carry the move regardless.
  */
-function playblastToken(staging: ShotStaging, world: WorldBundle): BenchReferenceToken | null {
+function playblastToken(
+  staging: ShotStaging,
+  world: WorldBundle,
+  shown: { durationSec: number; aspect: string; lens: string | undefined },
+): BenchReferenceToken | null {
   const pinned = staging.playblast;
   if (pinned === undefined) return null;
   const artifact = world.artifacts.find((candidate) => candidate.id === pinned.artifactId);
   if (artifact === undefined || artifact.kind !== "video") return null;
-  const stale = pinned.version !== staging.version ? ` · from v${pinned.version}` : "";
+  // The recording baked in a staging, a length, an aspect and a lens; any of them moving on
+  // makes it a file of a shot that no longer exists this way, and the tile says so.
+  const moved =
+    pinned.version !== staging.version ||
+    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
+    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
+    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+  const stale = moved ? " · stale" : "";
   return {
     token: benchTokenFor("video", 1),
     kind: "video",
@@ -388,7 +400,13 @@ export async function prepareBenchSubject(
     // The clip is where the move matters: the playblast rides where a route can carry video,
     // and the beats ride in the words everywhere. A still has no move to describe.
     const staging = mode === "video" ? shot.staging : undefined;
-    const playblast = staging === undefined ? null : playblastToken(staging, world);
+    const playblast = staging === undefined
+      ? null
+      : playblastToken(staging, world, {
+          durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
+          aspect,
+          lens: effectiveFraming(scene, shot).lens,
+        });
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;

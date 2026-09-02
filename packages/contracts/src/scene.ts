@@ -126,9 +126,19 @@ export const ShotStagingSchema = z
     cast: z.array(StagingFigureSchema),
     sets: z.array(StagingSetSchema),
     keys: z.array(StagingKeySchema),
-    /** The playblast filed from this staging, and the staging version it shows. */
+    /**
+     * The playblast filed from this staging, and what it was rendered from: the staging version,
+     * and the shot length, lens and aspect the recording baked in. A pin that disagrees with any
+     * of them is stale — the file still exists, it just no longer shows this shot.
+     */
     playblast: z
-      .object({ artifactId: ArtifactIdSchema, version: z.number().int().min(1) })
+      .object({
+        artifactId: ArtifactIdSchema,
+        version: z.number().int().min(1),
+        durationSec: z.number().positive().optional(),
+        aspect: z.string().min(1).optional(),
+        lens: z.string().optional(),
+      })
       .strict()
       .optional(),
   })

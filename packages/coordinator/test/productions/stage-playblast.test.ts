@@ -83,6 +83,8 @@ describe("filing a playblast from the Stage", () => {
         sceneId: SCENE,
         baseVersion: sceneVersion,
         shotId: SHOT,
+        durationSec: 4,
+        aspect: "16:9",
         stagingVersion: 1,
         sourcePath: await playblastFile(),
       });
@@ -118,6 +120,8 @@ describe("filing a playblast from the Stage", () => {
         sceneId: SCENE,
         baseVersion: shot().scene.version,
         shotId: SHOT,
+        durationSec: 4,
+        aspect: "16:9",
         stagingVersion: 1,
         sourcePath: await playblastFile(),
       });
@@ -133,6 +137,8 @@ describe("filing a playblast from the Stage", () => {
         sceneId: SCENE,
         baseVersion: shot().scene.version,
         shotId: SHOT,
+        durationSec: 4,
+        aspect: "16:9",
         stagingVersion: 7,
         sourcePath: await playblastFile(),
       });

@@ -79,6 +79,9 @@ export type AttachTarget =
       baseVersion: number;
       shotId: string;
       stagingVersion: number;
+      durationSec: number;
+      aspect: string;
+      lens?: string;
     };
 
 declare global {

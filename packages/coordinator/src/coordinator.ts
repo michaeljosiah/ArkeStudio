@@ -6270,12 +6270,18 @@ export class Coordinator {
         const shot = scene === undefined ? undefined : orderedShots(scene).find((candidate) => candidate.id === msg.shotId);
         // Refused before the bytes are copied: a playblast with no staging to pin onto would be
         // an orphan on the shelf, and the version fence below would refuse the pin anyway.
-        if (shot?.staging === undefined) {
+        if (scene === undefined || shot?.staging === undefined) {
           refuse("stage the shot before filing a playblast for it");
           return;
         }
         if (shot.staging.version !== msg.stagingVersion) {
           refuse(`the staging moved to v${shot.staging.version} while the playblast rendered — export it again`);
+          return;
+        }
+        // The scene fence, checked BEFORE the bytes are copied: the pin below is a versioned scene
+        // write, and a refusal there would leave the artifact filed and nothing pointing at it.
+        if (scene.version !== msg.baseVersion) {
+          refuse(`the scene moved to v${scene.version} while the playblast rendered — export it again`);
           return;
         }
         // Our own bytes, sized by the shot's length; the large-file consent is for imports.
@@ -6293,7 +6299,18 @@ export class Coordinator {
           command: {
             kind: "edit-shot",
             shotId: msg.shotId,
-            change: { staging: { ...shot.staging, playblast: { artifactId, version: msg.stagingVersion } } },
+            change: {
+              staging: {
+                ...shot.staging,
+                playblast: {
+                  artifactId,
+                  version: msg.stagingVersion,
+                  durationSec: msg.durationSec,
+                  aspect: msg.aspect,
+                  ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
+                },
+              },
+            },
           },
         }).catch((err: unknown) => refuse(err instanceof Error ? err.message : "the playblast could not be pinned"));
         await this.refreshWorldSnapshot(msg.worldId);
@@ -7106,6 +7123,9 @@ export class Coordinator {
               subject.kind === "shot"
                 ? { kind: "shot", shotId: subject.shotId }
                 : { kind: "board", memberShotIds: subject.members.map((member) => member.shotId) },
+            // A shot session the Stage opened for the clip rebuilds as the clip, playblast and beats
+            // included; without this a Rebuild would quietly hand it back an image composer.
+            ...(subject.kind === "shot" && bench.session.composer.mode === "video" ? { mode: "video" as const } : {}),
             settings,
             manifest: this.opts.manifest ?? null,
             sources: {

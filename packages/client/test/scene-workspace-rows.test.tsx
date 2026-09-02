@@ -225,7 +225,7 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
     return state;
   }
 
-  it("dresses the band with a grip, mono metadata, icon controls and a Stage link before Render board", async () => {
+  it("dresses the band with a grip, mono metadata and icon controls before Render board", async () => {
     const mounted = await mountState(split());
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const first = q(mounted, '[data-testid="workspace-board-A"]')!;
@@ -249,7 +249,6 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
       "Board A",
       "Consolidated prompt",
       "View board sheet",
-      "Stage the camera for this board",
       "Send this board to the generator",
       "Plan video",
     ]);

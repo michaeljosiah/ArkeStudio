@@ -2030,6 +2030,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       shotId: ShotIdSchema,
       /** The staging version the playblast was rendered from — what the pin records. */
       stagingVersion: z.number().int().min(1),
+      /** The shot length, aspect and lens the recording baked in, so a later edit reads as stale. */
+      durationSec: z.number().positive(),
+      aspect: z.string().min(1).max(20),
+      lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
     })
     .strict(),

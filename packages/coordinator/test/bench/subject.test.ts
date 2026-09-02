@@ -795,6 +795,83 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(image.prefill.references.some((reference) => reference.kind === "video"), false);
     assert.doesNotMatch(image.prefill.composer.brief, /Camera move/);
   });
+
+  it("dispatches a shot's clip as a board of one and files it onto the shot's clip slot", async () => {
+    const { dir, store } = await openWorld();
+    const world = store.getBundle();
+    const prepared = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(prepared.ok);
+    if (!prepared.ok) return;
+    const session = {
+      schemaVersion: 1,
+      id: newId("sess"),
+      ...prepared.prefill,
+      tokenRegistry: prepared.prefill.references,
+      subjectTokens: prepared.prefill.references.map((reference) => reference.token),
+      nextToken: { image: 2, video: 1, audio: 1 },
+      nextTake: 1,
+      takes: [],
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    } as BenchSession;
+    const plan = planBenchDispatch(session, store.getBundle(), MANIFEST, {
+      worldId: store.worldId,
+      requestId: "shot-clip-dispatch",
+      at: CLOCK(),
+    });
+    assert.ok(plan.ok, plan.ok ? "" : plan.reason);
+    if (!plan.ok) return;
+    const snapshot = plan.reserved[0]!.request;
+    assert.equal(snapshot.mode, "video");
+    assert.equal(snapshot.filing?.kind, "board", "a shot's clip files like a board of one");
+    if (snapshot.filing?.kind !== "board") return;
+    assert.deepEqual(
+      snapshot.filing.members.map((member) => [member.shotId, member.startSec, member.endSec]),
+      [["sh_12", 0, 4]],
+    );
+
+    // The same rules a board is held to: a longer clip than the shot is refused before spend.
+    const stretched = planBenchDispatch(
+      { ...session, composer: { ...session.composer, params: { kind: "video", aspect: "16:9", durationSec: 6, sound: true } } },
+      store.getBundle(),
+      MANIFEST,
+      { worldId: store.worldId, requestId: "shot-clip-long", at: CLOCK() },
+    );
+    assert.equal(stretched.ok, false);
+    if (!stretched.ok) assert.match(stretched.reason, /authored duration/);
+
+    const takeId = newId("tk") as BenchTake["id"];
+    const { session: filingSession, take } = sessionWithTake({
+      subject: session.subject,
+      takeId,
+      request: snapshot,
+      media: "take.mp4",
+      cost: { estimatedMicroUsd: 100_000, actualMicroUsd: null },
+    });
+    await mkdir(join(dir, sessionMediaDir(filingSession.id, take.id)), { recursive: true });
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), take.media!.file), "clip bytes");
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), "frame.png"), "poster bytes");
+    const filed = await fileBenchSubjectTake(store, filingSession, take);
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const parentId = snapshot.filing.productionTakeId;
+    const childId = snapshot.filing.members[0]!.takeId;
+    const parent = production.takes.find((candidate) => candidate.id === parentId)!;
+    const child = production.takes.find((candidate) => candidate.id === childId)!;
+    assert.equal(parent.kind, "clip");
+    assert.deepEqual([...parent.coversShots], ["sh_12"]);
+    assert.equal(child.kind, "clip");
+    assert.deepEqual(child.segment, { passTakeId: parent.id, inSec: 0, outSec: 4 });
+    assert.equal(production.selections["sh_12"]?.acceptedTakeId, child.id, "the shot selects its own segment, never the parent");
+    assert.deepEqual(filed.affectedShotIds, ["sh_12"]);
+  });
 });
 
 describe("subject Accept filing (SPEC-036 R-24)", () => {

@@ -10,7 +10,7 @@ import {
 import { ChevronLeft, ChevronRight, ImageMark, X } from "../../components/icons.js";
 import { mediaUrl } from "../../lib/media.js";
 import { mediaTakeFor, acceptedTakeId } from "../../lib/selectors.js";
-import { posterNameFor } from "../../lib/poster.js";
+import { posterNameFor, posterize } from "../../lib/poster.js";
 
 /**
  * The picture the preview shows for a shot: its own filed frame first, then the poster of the
@@ -38,9 +38,14 @@ export function shotFramePath(
     ? undefined
     : production.takes.find((take) => take.id === accepted && (take.kind === "frame" || take.kind === "still"));
   const legacyMedia = legacy === undefined ? null : mediaTakeFor(production, legacy);
-  return legacyMedia === null
-    ? null
-    : `productions/${production.meta.id}/takes/${legacyMedia.id}/${posterNameFor(legacyMedia.media)}`;
+  if (legacyMedia !== null) {
+    return `productions/${production.meta.id}/takes/${legacyMedia.id}/${posterNameFor(legacyMedia.media)}`;
+  }
+  // A rendered shot with no frame of its own still has a picture: its clip's poster, the same
+  // one Preview's filmstrip falls back to, so Larger never says "no frame yet" over a clip.
+  const clip = accepted === null ? undefined : production.takes.find((take) => take.id === accepted && take.kind === "clip");
+  const clipMedia = clip === undefined ? null : mediaTakeFor(production, clip);
+  return clipMedia === null ? null : posterize(`productions/${production.meta.id}/takes/${clipMedia.id}/${clipMedia.media}`);
 }
 
 /**

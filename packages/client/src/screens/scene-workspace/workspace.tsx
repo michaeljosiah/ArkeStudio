@@ -561,6 +561,7 @@ export function SceneWorkspace({
               sceneFile={sceneFile}
               locked={staged !== undefined || sceneFile === undefined || commandPending}
               generatorPending={generatorPending}
+              refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
             />

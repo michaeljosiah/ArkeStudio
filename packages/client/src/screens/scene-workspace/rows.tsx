@@ -253,7 +253,6 @@ export function StoryboardRows({
                   onViewBoardSheet={onViewBoardSheet}
                   onRender={() => onRenderBoard([...board.memberShotIds])}
                   onPlanVideo={onPlanVideo}
-                  onStage={() => onStageShot(board.memberShotIds[0]!)}
                 />
               ) : null}
               {/* The insert line sits between a band and its first card, the way the design draws it,
@@ -432,7 +431,6 @@ function BoardBand({
   onViewBoardSheet,
   onRender,
   onPlanVideo,
-  onStage,
 }: {
   board: PackedBoard;
   scene: SceneRecord;
@@ -453,7 +451,6 @@ function BoardBand({
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
   onRender: () => void;
   onPlanVideo: () => void;
-  onStage: () => void;
 }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const promptDirty = useRef(false);
@@ -590,18 +587,8 @@ function BoardBand({
           <Grid2x2 size={14} />
         </button>
         {staged ? <span className="fy-swboard__staged">staged</span> : null}
-        {/* Stopped here: the band's own click selects the board, and the Stage reads a shot
-            selection, so the bubble would undo the selection this link just made. */}
-        <button
-          type="button"
-          title="Stage the camera for this board"
-          onClick={(event) => {
-            event.stopPropagation();
-            onStage();
-          }}
-        >
-          Stage
-        </button>
+        {/* No Stage link on the band: staging is per shot until board scope exists (SPEC-036 §1.13),
+            and a link that staged only the first member would claim more than it did. */}
         <button type="button" title="Send this board to the generator" disabled={locked || staged || generatorPending} onClick={onRender}>
           {generatorPending ? "Opening…" : "Render board"}
         </button>

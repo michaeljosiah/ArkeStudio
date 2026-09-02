@@ -2327,7 +2327,7 @@ function BenchWorkspace({
             {subject !== undefined && selected?.disposition === "open" && selected.media !== undefined && (
               <span className="fy-bench__acceptoutcome">
                 {subject.kind === "shot"
-                  ? `accepting files the frame onto shot ${subject.shotNumber}`
+                  ? `accepting files the ${draft.mode === "video" ? "clip" : "frame"} onto shot ${subject.shotNumber}`
                   : `accepting files the clip onto ${subject.members.length} shots`}
               </span>
             )}

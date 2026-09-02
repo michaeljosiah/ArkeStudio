@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import {
+  DEFAULT_SHOT_SEC,
   admitReference,
   aspectSupport,
   benchSessionSummary,
@@ -484,6 +485,7 @@ function productionProvenanceFor(
 function productionFilingFor(
   session: BenchSession,
   bundle: WorldBundle,
+  mode: BenchSession["composer"]["mode"],
 ): { ok: true; make: (coveredDurationSec?: number) => NonNullable<BenchRequestSnapshot["filing"]> } | { ok: false; reason: string } {
   const subject = session.subject;
   if (subject === undefined) return { ok: false, reason: "this session has no production subject" };
@@ -494,18 +496,45 @@ function productionFilingFor(
   }
   const shots = orderedShots(scene);
   if (subject.kind === "shot") {
-    if (!shots.some((shot) => shot.id === subject.shotId)) {
+    const shot = shots.find((candidate) => candidate.id === subject.shotId);
+    if (shot === undefined) {
       return { ok: false, reason: "The subject shot is no longer in this scene." };
+    }
+    if (mode === "image") {
+      return {
+        ok: true,
+        make: () => ({
+          kind: "shot",
+          productionId: subject.productionId,
+          sceneId: subject.sceneId,
+          shotId: subject.shotId,
+          productionTakeId: newId("tk"),
+          frameArtifactId: newId("ar"),
+        }),
+      };
+    }
+    // The clip files as a board of one: a parent pass covering the shot and its one segment
+    // child selected on the shot, so the cut, the boundary chain and Variants see exactly what a
+    // board's members get (SPEC-036 R-24, R-36).
+    if ((shot.durationSec ?? DEFAULT_SHOT_SEC) !== subject.durationSec) {
+      return { ok: false, reason: "The shot timing changed in this scene. Rebuild the session." };
     }
     return {
       ok: true,
-      make: () => ({
-        kind: "shot",
+      make: (coveredDurationSec) => ({
+        kind: "board",
         productionId: subject.productionId,
         sceneId: subject.sceneId,
-        shotId: subject.shotId,
         productionTakeId: newId("tk"),
-        frameArtifactId: newId("ar"),
+        members: [
+          {
+            shotId: subject.shotId,
+            number: subject.shotNumber,
+            startSec: 0,
+            endSec: Math.max(subject.durationSec, coveredDurationSec ?? 0),
+            takeId: newId("tk"),
+          },
+        ],
       }),
     };
   }
@@ -632,8 +661,15 @@ export function planBenchDispatch(
   }
   if (params.kind !== composer.mode) return { ok: false, reason: "The controls do not match the mode." };
   if (session.subject?.kind === "shot") {
-    if (composer.mode !== "image" || params.kind !== "image") {
-      return { ok: false, reason: "A shot subject must generate an image." };
+    // A shot makes its frame, or — opened from the Stage — its clip, which files like a board of
+    // one: the same length, aspect and sound rules a board is held to (SPEC-036 R-36).
+    if (composer.mode === "video" && params.kind === "video") {
+      if (params.durationSec !== session.subject.durationSec) {
+        return { ok: false, reason: `This shot must keep its ${session.subject.durationSec}s authored duration.` };
+      }
+      if (params.sound !== true) return { ok: false, reason: "A shot clip must keep sound on." };
+    } else if (composer.mode !== "image" || params.kind !== "image") {
+      return { ok: false, reason: "A shot subject makes an image, or a clip of its own length." };
     }
     if (params.aspect !== session.subject.aspect) {
       return { ok: false, reason: `This shot must use the production aspect ${session.subject.aspect}.` };
@@ -703,7 +739,7 @@ export function planBenchDispatch(
   }
   const referencePaths = resolvedRefs.map(({ resolved }) => resolved.path);
 
-  const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle);
+  const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
 
   // The Keyframe lane (issue 305 §3): resolve the snapshot's own frames (re-run) or the live

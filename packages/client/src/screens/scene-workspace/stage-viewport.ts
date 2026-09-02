@@ -730,6 +730,8 @@ export class StageViewport {
   }
 
   private down(event: PointerEvent): void {
+    // While the playblast records, the scene is the one being filed: nothing may move it.
+    if (this.recordingAt !== null) return;
     // A press on a gizmo arrow is the gizmo's: it hovers the axis before the press lands, and a
     // pick or an orbit started underneath it would fight the drag for the same pointer.
     if (this.transform.dragging || this.transform.axis !== null) return;
@@ -1207,6 +1209,9 @@ export class StageViewport {
     });
     // Elapsed from a start timestamp, never accumulated per tick (SPEC-036 R-29).
     const started = Date.now();
+    // The gizmo comes off for the take, so a drag cannot reshape what is being written.
+    this.transform.detach();
+    this.transformHelper.visible = false;
     recorder.start(250);
     try {
       await new Promise<void>((resolve) => {
@@ -1230,6 +1235,7 @@ export class StageViewport {
       this.recordingAt = null;
       recorder.stop();
       for (const track of stream.getTracks()) track.stop();
+      this.attachGizmo();
     }
     const blob = await finished;
     renderer.dispose();

@@ -111,6 +111,23 @@ function baseTake(
   };
 }
 
+/**
+ * A filing belongs to its subject by kind — except a shot's clip, which files as a board of one
+ * (SPEC-036 R-36): the board shape covering exactly that shot is that shot's own filing.
+ */
+function filingFitsSubject(
+  filing: NonNullable<BenchTake["request"]["filing"]>,
+  subject: NonNullable<BenchSession["subject"]>,
+): boolean {
+  if (filing.kind === subject.kind) return true;
+  return (
+    subject.kind === "shot" &&
+    filing.kind === "board" &&
+    filing.members.length === 1 &&
+    filing.members[0]!.shotId === subject.shotId
+  );
+}
+
 /** A production commit that landed before the Bench log caught up, or null if it did not. */
 export function existingBenchSubjectFiling(
   store: WorldStore,
@@ -118,7 +135,7 @@ export function existingBenchSubjectFiling(
   take: BenchTake,
 ): SubjectFilingOutcome | null {
   const filing = take.request.filing;
-  if (session.subject === undefined || filing === undefined || filing.kind !== session.subject.kind) return null;
+  if (session.subject === undefined || filing === undefined || !filingFitsSubject(filing, session.subject)) return null;
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === filing.productionId);
   if (production === undefined) return null;
   const productionTakeIds =
@@ -264,7 +281,7 @@ async function fileBenchSubjectTakeUnserialised(
   if (session.subject === undefined) throw new Error("this Bench session has no production subject");
   if (take.media === undefined || take.status !== "succeeded") throw new Error("that Bench take has no completed media to accept");
   const filing = take.request.filing;
-  if (filing === undefined || filing.kind !== session.subject.kind) {
+  if (filing === undefined || !filingFitsSubject(filing, session.subject)) {
     throw new Error("that Bench take has no filing plan for this subject");
   }
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === filing.productionId);
@@ -278,6 +295,14 @@ async function fileBenchSubjectTakeUnserialised(
     throw new Error("the subject shots are no longer available");
   }
   const boardSubject = session.subject.kind === "board" ? session.subject : null;
+  // A shot's clip is held to its own length the way a board is held to its members'.
+  const shotSubject = session.subject.kind === "shot" ? session.subject : null;
+  if (filing.kind === "board" && shotSubject !== null) {
+    const shot = currentShots.find((candidate) => candidate.id === shotSubject.shotId);
+    if ((shot?.durationSec ?? 4) !== shotSubject.durationSec) {
+      throw new Error("the shot timing changed in this scene; rebuild and generate a current take");
+    }
+  }
   if (filing.kind === "board" && boardSubject !== null) {
     const first = currentShots.findIndex((shot) => shot.id === filing.members[0]?.shotId);
     const members = first < 0 ? [] : currentShots.slice(first, first + filing.members.length);

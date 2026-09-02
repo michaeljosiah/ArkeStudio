@@ -89,6 +89,7 @@ export function SceneStage({
   sceneFile,
   locked,
   generatorPending,
+  refusalVersion,
   onCommand,
   onRenderShot,
 }: {
@@ -99,6 +100,8 @@ export function SceneStage({
   sceneFile: string | undefined;
   locked: boolean;
   generatorPending: boolean;
+  /** Counts up on every refused scene write, so a wait can end on a refusal as well as a landing. */
+  refusalVersion: number;
   onCommand: (command: Command) => boolean;
   onRenderShot: (shotId: string) => void;
 }) {
@@ -150,6 +153,10 @@ export function SceneStage({
     setDraft((current) => (current !== null && moveOf(current) === moveOf(persisted) ? null : current));
     setStaging(false);
   }, [persisted]);
+  // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
+  useEffect(() => {
+    setStaging(false);
+  }, [refusalVersion]);
   useEffect(() => {
     setDraft(null);
     setAt(0);
@@ -328,7 +335,7 @@ export function SceneStage({
     setKeyIndex(Math.max(0, active - 1));
   };
   const retime = (which: number, event: ReactMouseEvent<HTMLSpanElement>) => {
-    if (event.button !== 0 || which === 0 || which === keys.length - 1) return;
+    if (event.button !== 0 || which === 0 || which === keys.length - 1 || frozen) return;
     event.stopPropagation();
     const track = event.currentTarget.closest<HTMLElement>("[data-key-track]");
     if (track === null) return;
@@ -399,6 +406,9 @@ export function SceneStage({
           baseVersion: scene.version,
           shotId: shot.id,
           stagingVersion: persisted.version,
+          durationSec,
+          aspect,
+          ...(framing.lens === undefined ? {} : { lens: framing.lens }),
         },
         new Uint8Array(await blob.arrayBuffer()),
       );
@@ -427,8 +437,19 @@ export function SceneStage({
           ? "aim target"
           : `${nameOf(selection.sheetId)} · ${selection.kind === "cast" ? "start" : "end"}`;
   const filed = persisted?.playblast;
+  // A playblast shows one staging at one length, lens and aspect; a pin that disagrees with any
+  // of those is a file of a shot that no longer exists this way. Absent fields were never recorded.
+  const stale =
+    filed !== undefined &&
+    (filed.version !== persisted?.version ||
+      (filed.durationSec !== undefined && filed.durationSec !== durationSec) ||
+      (filed.aspect !== undefined && filed.aspect !== aspect) ||
+      (filed.lens !== undefined && filed.lens !== (framing.lens ?? "")));
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
+  // While the playblast records, the staging it shows must hold still (R-35). Only then: a draft
+  // edit writes nothing, so a pending write has no claim on it.
+  const frozen = exporting !== null;
 
   return (
     <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage">
@@ -494,7 +515,7 @@ export function SceneStage({
                   <span className="fy-swstage__moved" data-testid="stage-moved">
                     <span>{keyName(active, keys.length)} moved</span>
                     <button type="button" aria-label="Discard" title="Discard" onClick={() => setDraft(null)}><X size={11} /></button>
-                    <button type="button" className="fy-swstage__keep" disabled={locked} onClick={keep}>Keep</button>
+                    <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>
                 ) : null}
                 <button
@@ -532,16 +553,16 @@ export function SceneStage({
                   <span title="Drag the green arrow on the camera to raise or lower it">height</span>
                   <span>{activeKey === null ? "—" : `${activeKey.p[1].toFixed(2)}m`}</span>
                   <span className="fy-swstage__nudge">
-                    <button type="button" aria-label="Lower" onClick={() => nudge(1, -0.1)}><Minus size={10} /></button>
-                    <button type="button" aria-label="Raise" onClick={() => nudge(1, 0.1)}><Plus size={10} /></button>
+                    <button type="button" aria-label="Lower" disabled={frozen} onClick={() => nudge(1, -0.1)}><Minus size={10} /></button>
+                    <button type="button" aria-label="Raise" disabled={frozen} onClick={() => nudge(1, 0.1)}><Plus size={10} /></button>
                   </span>
                 </div>
                 <div className="fy-swstage__row">
                   <span title="Drag the red or blue arrow to move the camera across the floor">back</span>
                   <span>{activeKey === null ? "—" : `${activeKey.p[2].toFixed(2)}m`}</span>
                   <span className="fy-swstage__nudge">
-                    <button type="button" aria-label="Closer" onClick={() => nudge(2, -0.25)}><Minus size={10} /></button>
-                    <button type="button" aria-label="Further" onClick={() => nudge(2, 0.25)}><Plus size={10} /></button>
+                    <button type="button" aria-label="Closer" disabled={frozen} onClick={() => nudge(2, -0.25)}><Minus size={10} /></button>
+                    <button type="button" aria-label="Further" disabled={frozen} onClick={() => nudge(2, 0.25)}><Plus size={10} /></button>
                   </span>
                 </div>
                 <div className="fy-swstage__row">
@@ -556,6 +577,7 @@ export function SceneStage({
                         key={candidate ?? "world"}
                         type="button"
                         data-on={(activeKey?.anchor ?? null) === candidate ? "true" : undefined}
+                        disabled={frozen}
                         onClick={() => anchorTo(candidate)}
                       >
                         {candidate === null ? "world" : nameOf(candidate)}
@@ -570,7 +592,7 @@ export function SceneStage({
                 <div className="fy-swstage__block">
                   <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
                   {working.cast.map((figure, position) => (
-                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" onClick={() => toggleWalk(figure.sheetId)}>
+                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen} onClick={() => toggleWalk(figure.sheetId)}>
                       <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
                       <span>{nameOf(figure.sheetId)}</span>
                       <span data-walks={figure.to === undefined ? undefined : "true"}>{figure.to === undefined ? "holds" : "walks"}</span>
@@ -595,8 +617,8 @@ export function SceneStage({
               <div className="fy-swstage__block fy-swstage__block--playblast">
                 <div className="fy-swstage__row">
                   <span>playblast</span>
-                  <span data-filed={filed === undefined ? undefined : "true"}>
-                    {filed === undefined ? "not filed" : filed.version === persisted?.version ? "filed" : `filed · v${filed.version}`}
+                  <span data-filed={filed === undefined || stale ? undefined : "true"}>
+                    {filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
                   </span>
                 </div>
                 {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}
@@ -653,9 +675,9 @@ export function SceneStage({
             })}
           </div>
           <span className="fy-swstage__keytools">
-            <button type="button" aria-label="Add a camera key at the playhead" title="Add a camera key at the playhead" onClick={addKey}><Plus size={12} /></button>
+            <button type="button" aria-label="Add a camera key at the playhead" title="Add a camera key at the playhead" disabled={frozen} onClick={addKey}><Plus size={12} /></button>
             {keys.length > 2 ? (
-              <button type="button" aria-label="Remove the selected key" title="Remove the selected key" disabled={active === 0 || active === keys.length - 1} onClick={dropKey}><Minus size={12} /></button>
+              <button type="button" aria-label="Remove the selected key" title="Remove the selected key" disabled={frozen || active === 0 || active === keys.length - 1} onClick={dropKey}><Minus size={12} /></button>
             ) : null}
           </span>
           <span className="fy-swstage__count">{keys.length} keys</span>
