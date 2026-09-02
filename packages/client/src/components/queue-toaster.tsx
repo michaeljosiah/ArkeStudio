@@ -5,7 +5,9 @@ import type { Job, ModelManifest } from "@arke-studio/contracts";
 import {
   acknowledgeUpdate,
   subscribeJobReady,
+  isOwnSceneCreate,
   subscribeQueueResults,
+  subscribeSceneCreateResults,
   subscribeSceneRefusals,
   useStore,
   useUpdateStatus,
@@ -171,6 +173,28 @@ export function QueueToaster() {
           title: "That edit was not saved",
           meta: `scene ${event.sceneFile}`,
           reason: event.reason,
+        };
+        toast.custom(
+          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: duration(note) },
+        );
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      // A scene that could not be made is said the same way a refused edit is: the button that
+      // asked only comes back, and the reason is worded here, above whichever screen pressed it.
+      // Only for a press this window made: the answer is broadcast to every window (codex, PR 708).
+      subscribeSceneCreateResults((result) => {
+        if (result.disposition !== "failed" || !isOwnSceneCreate(result.requestId)) return;
+        const note: QueueNote = {
+          id: `scene-create:${result.requestId}`,
+          tone: "refused",
+          title: "That scene was not created",
+          meta: `production ${result.productionId}`,
+          reason: result.reason ?? "the scene could not be created",
         };
         toast.custom(
           (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,

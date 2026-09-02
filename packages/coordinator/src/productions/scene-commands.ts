@@ -42,7 +42,7 @@ import type { WorldStore } from "./../world/store.js";
  */
 
 export type SceneCommand =
-  | { kind: "edit-scene"; synopsis: string | null }
+  | { kind: "edit-scene"; title?: string; synopsis?: string | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
@@ -255,8 +255,18 @@ async function candidateFor(
 ): Promise<GraphScene> {
   const command = input.command;
   switch (command.kind) {
-    case "edit-scene":
-      return editScene(record, { synopsis: command.synopsis ?? undefined });
+    case "edit-scene": {
+      // A command that names nothing is refused rather than committed as a version cut over
+      // an unchanged record — the schema cannot say "at least one", so this is where it is said.
+      if (command.title === undefined && command.synopsis === undefined) {
+        throw new SceneCommandRefused(["this edit names neither a title nor a synopsis"]);
+      }
+      return editScene(record, {
+        ...(command.title !== undefined ? { title: command.title } : {}),
+        // Null on the wire is the clear; the operation reads present-with-undefined as the clear.
+        ...(command.synopsis !== undefined ? { synopsis: command.synopsis ?? undefined } : {}),
+      });
+    }
     case "insert-shot": {
       const production = productionOrThrow(store, input.productionId);
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare

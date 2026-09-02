@@ -354,3 +354,19 @@ describe("a legacy group loses its deleted member rather than blocking forever",
     assert.deepEqual(deleteShot(before, { shotId: "sh_1" }).flow.storyboardGroups, []);
   });
 });
+
+describe("edit-scene carries the title (SPEC-036 R-2, amended)", () => {
+  it("sets the title and says nothing about the synopsis", () => {
+    const before: GraphScene = { ...graph(["sh_1"]), synopsis: "The light changes." };
+    const after = editScene(before, { title: "The verse answers" });
+    assert.equal(after.title, "The verse answers");
+    assert.equal(after.synopsis, "The light changes.", "an absent key means leave it, not clear it");
+    assert.deepEqual(after.flow, before.flow);
+  });
+
+  it("clears the synopsis only when the key is present as undefined", () => {
+    const before: GraphScene = { ...graph(["sh_1"]), synopsis: "The light changes." };
+    assert.equal(editScene(before, { synopsis: undefined }).synopsis, undefined);
+    assert.equal(editScene(before, {}).synopsis, "The light changes.");
+  });
+});

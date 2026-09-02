@@ -114,6 +114,7 @@ import {
   composeDispatches,
   createChapter,
   createProduction,
+  createScene,
   draftSceneSkeleton,
   exportBoard,
   landBoard,
@@ -5288,6 +5289,47 @@ export class Coordinator {
         } finally {
           if (requestId) this.creatingProductions.delete(requestId);
         }
+        return;
+      }
+      case "create-scene": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          result: { disposition: "created"; sceneId: string } | { disposition: "failed"; reason: string },
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.create-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...result,
+          });
+        // The world the request named, not whichever is open now (the scene-command lesson):
+        // two worlds can hold the same production id, and a scene made in the wrong one would
+        // be answered with an id the sender's world does not hold.
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        let sceneId: string;
+        try {
+          ({ sceneId } = await createScene(store, {
+            productionId: msg.productionId,
+            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
+            ...(msg.title !== undefined ? { title: msg.title } : {}),
+          }));
+        } catch (err) {
+          answer({
+            disposition: "failed",
+            reason: err instanceof Error ? err.message : "the scene could not be created",
+          });
+          return;
+        }
+        // The snapshot before the answer, so the sender opens a scene its state already holds
+        // rather than a route that waits on the next broadcast — and outside the try, because
+        // a scene that is on disk was created whatever the broadcast then does.
+        await this.refreshWorldSnapshot(msg.worldId);
+        answer({ disposition: "created", sceneId });
         return;
       }
       case "draft-scene": {

@@ -17,6 +17,7 @@ import {
   FrameRunIdSchema,
   JobIdSchema,
   ProposalIdSchema,
+  SceneIdSchema,
   ShotIdSchema,
   SlugSchema,
   SessionIdSchema,
@@ -148,6 +149,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       productionId: SlugSchema,
       sceneFile: z.string().min(1),
       reason: z.string().min(1),
+    })
+    .strict(),
+
+  /**
+   * The correlated answer to one create-scene request: the scene is durable and this is its id,
+   * or nothing was written and this is why.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("scene.create-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["created", "failed"]),
+      sceneId: SceneIdSchema.optional(),
+      reason: z.string().min(1).optional(),
     })
     .strict(),
 
