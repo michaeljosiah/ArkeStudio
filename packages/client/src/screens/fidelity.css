@@ -6810,6 +6810,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.fy-swrow__waiting { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.fy-swrow__waiting a { color: var(--warning); font: 500 10px var(--font-mono, ui-monospace, monospace); text-decoration: underline; text-underline-offset: 2px; }
+.fy-swrow__waiting a span { margin-left: 6px; color: var(--muted-foreground); font-weight: 400; text-decoration: none; }
 .fy-swrow__stale {
   display: flex; align-items: center; gap: 7px; padding: 4px 8px;
   border: 1px solid var(--warning); border-radius: 7px; background: var(--muted);

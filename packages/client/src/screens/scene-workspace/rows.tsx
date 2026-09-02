@@ -13,6 +13,7 @@ import {
   shotCardState,
   shotCoverage,
   type ArtifactSidecar,
+  type BenchSessionSummary,
   type ClientMessage,
   type FrameRunState,
   type PackedBoard,
@@ -45,6 +46,40 @@ const CHIP: Record<ShotCardState, string> = {
 };
 
 const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
+
+export function waitingTakeSessions(
+  sessions: readonly BenchSessionSummary[],
+  productionId: string,
+  sceneId: string,
+  shotId: string,
+): BenchSessionSummary[] {
+  return sessions.filter((summary) => {
+    const subject = summary.subject;
+    return summary.waitingCount > 0 &&
+      subject?.kind === "shot" &&
+      subject.productionId === productionId &&
+      subject.sceneId === sceneId &&
+      subject.shotId === shotId;
+  });
+}
+
+export function WaitingTakeLinks({ sessions, worldId }: { sessions: readonly BenchSessionSummary[]; worldId: string }) {
+  if (sessions.length === 0) return null;
+  return (
+    <div className="fy-swrow__waiting">
+      {sessions.map((summary) => (
+        <a
+          key={summary.id}
+          href={`#/w/${worldId}/artifacts/bench/${summary.id}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {summary.waitingCount} take{summary.waitingCount === 1 ? "" : "s"} waiting{" "}
+          <span>· {summary.mode}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
 
 function canPickFiles(): boolean {
   return typeof window !== "undefined" && window.arke !== undefined;
@@ -773,6 +808,8 @@ function Row({
     hasFrame,
     coverage,
   });
+  const waitingSessions = waitingTakeSessions(world.benchSessions, production.meta.id, scene.id, shot.id);
+  const waitingTakeCount = waitingSessions.reduce((total, summary) => total + summary.waitingCount, 0);
   const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
   const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
   const legacyStill = acceptedTake?.kind === "frame" || acceptedTake?.kind === "still" ? acceptedTake : undefined;
@@ -1030,7 +1067,7 @@ function Row({
       role="group"
       tabIndex={staged ? -1 : 0}
       aria-disabled={staged ? "true" : undefined}
-      aria-label={`Shot ${shot.number}, ${shot.title}, ${staged ? "staged, " : ""}${state}`}
+      aria-label={`Shot ${shot.number}, ${shot.title}, ${staged ? "staged, " : ""}${state}${waitingTakeCount === 0 ? "" : `, ${waitingTakeCount} take${waitingTakeCount === 1 ? "" : "s"} waiting`}`}
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onDragOver={(event) => !disabled && event.preventDefault()}
       onDrop={(event) => { event.preventDefault(); onDrop(); }}
@@ -1176,6 +1213,7 @@ function Row({
             <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
           )}
         </div>
+        <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
         {coverage === "changed" || runScriptChanged ? (
           <div className="fy-swrow__stale">
             <span className="fy-swrow__stalelabel">script changed</span>
