@@ -211,10 +211,11 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     const row = q(mounted, ".fy-swrow")!;
     assert.equal(row.querySelector(".fy-swrow__slot span")?.textContent, "prompt · auto");
     await click(byText(row, "Edit"));
-    assert.ok(row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]'), "Edit opens the row's own prompt");
+    const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
+    assert.equal(prompt?.getAttribute("role"), "combobox", "Edit opens the row's mention-aware prompt");
     assert.equal(row.querySelector(".fy-swrow__slot"), null, "the slot gives way to the disclosure");
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "and nobody left the storyboard");
-    assert.equal(row.querySelector(".fy-swrow__prompt > div span")?.textContent, "image prompt");
+    assert.equal(row.querySelector(".fy-swrow__prompthead > span")?.textContent, "image prompt");
   });
 
   it("always offers Prompt and Rebuild, enabled only once there is something behind them", async () => {

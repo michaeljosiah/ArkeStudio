@@ -1222,7 +1222,7 @@ function Row({
               commitPrompt(event.currentTarget.querySelector("textarea")?.value ?? promptValue);
             }}
           >
-            <div>
+            <div className="fy-swrow__prompthead">
               <span>image prompt</span>
               <button
                 type="button"
@@ -1243,14 +1243,17 @@ function Row({
                 Hide
               </button>
             </div>
-            <textarea
+            <BenchBrief
               value={promptValue}
-              disabled={disabled}
-              aria-label={`Image prompt for shot ${shot.number}`}
-              onChange={(event) => {
+              onChange={(value) => {
                 promptDirty.current = true;
-                setPromptDraft(event.target.value);
+                setPromptDraft(value);
               }}
+              options={mentionOptions}
+              worldSlug={slug}
+              underlay={promptValue}
+              label={`Image prompt for shot ${shot.number}`}
+              disabled={disabled}
             />
           </div>
         ) : null}

@@ -2221,7 +2221,7 @@ function TakesView({
         }}
         openingNote="opening…"
         emptyLine={`${takes.length} take${takes.length === 1 ? "" : "s"} back on shot ${shot.number}. Say what to change and it runs again.`}
-        placeholder="Say what to change · @ to reference"
+        placeholder="Say what to change"
         pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here."
       />
     </div>

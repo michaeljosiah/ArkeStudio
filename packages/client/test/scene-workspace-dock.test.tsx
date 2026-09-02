@@ -97,7 +97,7 @@ function dockConversation(dock: Dock) {
       entry={{ kind: "scene", productionId: "saltlight", sceneId: "sc_04" }}
       dock={dock}
       emptyLine="Nothing written with Arke for scene 4 yet."
-      placeholder="Ask about scene 4 · @ to reference"
+      placeholder="Ask about scene 4"
     />
   );
 }
