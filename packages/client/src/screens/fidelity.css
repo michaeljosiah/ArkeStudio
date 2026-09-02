@@ -2128,33 +2128,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-cutfoot { min-height: 30px; display: flex; align-items: center; gap: 12px; padding: 0 10px; border-top: 1px solid var(--border); }
 .fy-warnchip { display: inline-flex; align-items: center; gap: 6px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 
-/* audio rows (25a) */
-.fy-audiorow { display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--border); }
-.fy-audiorow__play {
-  width: 30px;
-  height: 30px;
-  border-radius: 99px;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  border: none;
-  cursor: pointer;
-}
-.fy-audiorow__id { width: 250px; flex: none; min-width: 0; }
-.fy-audiorow__title { font: 600 13.5px var(--font-sans); }
-.fy-audiorow__sub { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
-.fy-audiorow__wave { flex: 1; min-width: 0; overflow: hidden; color: var(--neutral-300); }
-.fy-audiorow__status { display: inline-flex; align-items: center; gap: 6px; width: 104px; flex: none; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
-
-/* exports (25b) */
-.fy-exportrow { display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--border); }
-.fy-exportrow__thumb { width: 74px; height: 42px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); flex: none; }
-.fy-exportrow__title { font: 600 13.5px var(--font-sans); }
-.fy-exportrow__sub { font: 400 10.5px var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
-.fy-radiorow { display: flex; gap: 12px; margin-top: 10px; }
+/* radio cards: Day One's two doors, and the world's video kind picker */
 .fy-radio {
   flex: 1;
   border: 1px solid var(--border);
@@ -6158,13 +6132,6 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* Over the black stage, so the neutral ramp rather than the theme: white words in either mode. */
 .fy-cutviewer__cue { position: absolute; left: 8%; right: 8%; bottom: 46px; text-align: center; color: var(--neutral-50); font: 500 15px/1.35 var(--font-sans); text-shadow: 0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950); white-space: pre-line; pointer-events: none; }
 .fy-cutviewer__cue--box { background: color-mix(in srgb, var(--neutral-950) 60%, transparent); border-radius: 4px; padding: 4px 8px; margin: 0 auto; display: table; text-shadow: none; }
-.fy-subtitle-delivery { margin: 12px 0 4px; }
-.fy-subtitle-delivery__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 6px; font: 400 11px var(--font-sans); }
-.fy-subtitle-delivery__row label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
-.fy-subtitle-delivery__row select { border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }
-.fy-subtitle-delivery__modes { display: inline-flex; gap: 2px; padding: 1px; border: 1px solid var(--border); border-radius: 6px; }
-.fy-subtitle-delivery__modes button { border: 0; background: transparent; color: var(--muted-foreground); padding: 3px 8px; border-radius: 5px; font: 500 10.5px var(--font-sans); cursor: pointer; }
-.fy-subtitle-delivery__modes button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
 .fy-clanes { position: relative; }
 .fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
 .fy-ovclip { cursor: grab; user-select: none; touch-action: none; }

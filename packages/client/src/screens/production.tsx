@@ -2,7 +2,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   deriveCut,
-  deriveEpisodeCut,
   deriveSpineCut,
   exportAudioClips,
   exportOverlays,
@@ -11,8 +10,6 @@ import {
   MEDIA_CANVAS_HEADROOM_SEC,
   placedExtentSec,
   placedFilmSec,
-  episodeExportRefusals,
-  spineExportRefusals,
   trimCeilingSec,
   guestsOf,
   pendingGuestsOf,
@@ -125,7 +122,7 @@ import { ProductionConversation, StagedDecision } from "../components/conversati
 import { productionModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { ClipPlayButton, clock } from "../components/player.js";
+import { clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
@@ -167,7 +164,6 @@ import {
   hostCanAttach,
   createScene,
   exportCut,
-  exportWorld,
   rejectTake,
   placeOverlay,
   proposeEpisode,
@@ -4608,9 +4604,10 @@ function ExportSheet({
   const ready = timelineState.status === "ready";
   let cut: ReturnType<typeof resolvePictureTimeline> | null = null;
   let blockedBy: string | null = null;
+  const nothingOnTimeline = "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
   if (production === null) blockedBy = "No production here.";
   else if (timelineState.status === "invalid") blockedBy = `Timeline unavailable · ${timelineState.message}`;
-  else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
+  else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : nothingOnTimeline;
   else {
     try {
       cut = resolvePictureTimeline(production, timelineState);
@@ -4623,6 +4620,14 @@ function ExportSheet({
       ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset })
       : null;
   if (plan !== null && !plan.ok && blockedBy === null) blockedBy = plan.reason;
+  /*
+   * Nothing to render, said before the encode (issue 453): an empty plan is `concat=n=0`, which is
+   * not a filter graph, and the coordinator would only fail it after reporting it running. The
+   * Exports screen used to block here; with the screen gone (SPEC-039 T-5) the sheet does. A saved
+   * record with nothing on it is, to the person, the same state as no record at all.
+   */
+  const nothingPlaced = plan?.ok === true && plan.plan.items.length === 0;
+  if (nothingPlaced && blockedBy === null) blockedBy = nothingOnTimeline;
   const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
   const gaps = cut?.gaps ?? 0;
   const covered = cut === null ? 0 : cut.covered;
@@ -4646,7 +4651,7 @@ function ExportSheet({
     ["social-excerpt", `${PRESETS["social-excerpt"].width} × ${PRESETS["social-excerpt"].height} · vertical`],
   ];
   const meta =
-    cut === null
+    cut === null || nothingPlaced
       ? blockedBy ?? ""
       : `${seconds(runtimeSec ?? cut.totalSec)} · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
   return (
@@ -6289,173 +6294,12 @@ export function CutScreen() {
   );
 }
 
-// ---- Audio (25a) -----------------------------------------------------------
-
-export function AudioScreen() {
-  const { worldId, prodId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
-  const navigate = useNavigate();
-  // Spoken lines live on shots and their Generate is the voice-line dispatch — a video affair.
-  // A story production keeps this pane for its audio artifacts alone (design 54a: nothing on a
-  // story screen mentions shots or dispatch); narration comes later, as its own design.
-  const isStory = production ? productionShape(production.meta).hasChapters : false;
-  const linked = artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio");
-  const voLines = isStory
-    ? []
-    : (production?.scenes
-        .flatMap((s) => orderedShots(s))
-        .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue") ?? []);
-  const speakerOf = (id: string | undefined) => world?.sheets.find((c) => c.id === id);
-  return (
-    <div className="fy-prodmain" data-screen="audio" style={{ minHeight: "100%" }}>
-      <div className="fy-h1row">
-        <h1 className="fy-h1">Audio</h1>
-        <span className="fy-h1row__meta">
-          {isStory
-            ? `${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · filed with the world, linkable to chapters`
-            : `${voLines.length} spoken line${voLines.length === 1 ? "" : "s"} · ${linked.length} audio artifact${linked.length === 1 ? "" : "s"} · voices come from the sheets`}
-        </span>
-        <span className="fy-h1row__push" />
-        {!isStory && (
-          <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/generate/voice-line`)}>
-            Generate voice line…
-          </Button>
-        )}
-      </div>
-      {!isStory && (
-        <div>
-          <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-            DIALOGUE
-          </div>
-          {voLines.length === 0 && (
-            <div className="fy-mono" style={{ padding: "10px 0" }}>
-              no spoken lines in the shots yet
-            </div>
-          )}
-          {voLines.map((s) => {
-            const speaker = speakerOf(s.audio?.speaker);
-            // The most recent spoken take covering this shot, if one has been made.
-            const read = production
-              ? [...takesForShot(production, s.id)].reverse().find((t) => t.kind === "voice")
-              : undefined;
-            return (
-              <div key={s.id} className="fy-audiorow">
-                {/* Nothing is generated for these lines yet, so there is no circle to press —
-                  the status dot carries that, rather than a button that cannot sound. */}
-                <div className="fy-audiorow__id">
-                  <div className="fy-audiorow__title">
-                    {speaker?.name ?? s.audio?.kind}, “{s.audio?.line}”
-                  </div>
-                  <div className="fy-audiorow__sub">
-                    {s.id.replace("sh_", "shot ")}
-                    {speaker ? ` · voice: ${speaker.name} sheet v${speaker.version}` : ""}
-                    {speaker?.voice ? ` · ${speaker.voice.provider}` : ""}
-                  </div>
-                </div>
-                <div className="fy-audiorow__wave">
-                  <Wave seed={s.id + (s.audio?.line ?? "")} />
-                </div>
-                {/* What is actually here. "not generated" was hardcoded, so a line that had been
-                  read landed in the production and the row went on claiming nothing existed —
-                  with no way to hear it. */}
-                {read === undefined ? (
-                  <span className="fy-audiorow__status">
-                    <span className="fy-dot fy-dot--warn" />
-                    not generated
-                  </span>
-                ) : (
-                  <span className="fy-audiorow__status">
-                    <span className="fy-dot fy-dot--ok" />
-                    {read.completedAt ? "read" : "reading…"}
-                  </span>
-                )}
-                {read?.media && world ? (
-                  <ClipPlayButton
-                    small
-                    clip={{
-                      id: `take:${read.id}`,
-                      url: mediaUrl(world.meta.slug, `productions/${prodId}/takes/${read.id}/${read.media}`),
-                      title: `${speaker?.name ?? "line"} · ${s.id.replace("sh_", "shot ")}`,
-                      sub: `voice line · ${speaker?.voice?.label ?? speaker?.voice?.provider ?? "voice"}`,
-                    }}
-                  />
-                ) : null}
-                <Button
-                  onClick={() =>
-                    navigate(`/w/${worldId}/p/${prodId}/generate/voice-line?shot=${encodeURIComponent(s.id)}`)
-                  }
-                >
-                  {read === undefined ? "Generate" : "Again"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div>
-        <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-          {isStory ? "AUDIO ARTIFACTS" : "BEDS AND STEMS"}
-        </div>
-        {linked.length === 0 && (
-          <div className="fy-mono" style={{ padding: "10px 0" }}>
-            no audio artifacts yet — imports land here
-          </div>
-        )}
-        {linked.map((a) => (
-          <div key={a.id} className="fy-audiorow">
-            <ClipPlayButton
-              clip={
-                world
-                  ? {
-                      id: `artifact:${a.id}`,
-                      url: mediaUrl(world.meta.slug, `artifacts/${a.file}`),
-                      title: a.file.split("/").pop() ?? a.file,
-                      sub: `artifact · ${a.file}`,
-                    }
-                  : null
-              }
-            />
-            <div className="fy-audiorow__id">
-              <div className="fy-audiorow__title">{a.file.split("/").pop()}</div>
-              <div className="fy-audiorow__sub">artifact · {a.file}</div>
-            </div>
-            <div className="fy-audiorow__wave">
-              <Wave seed={a.file} />
-            </div>
-            <span className="fy-audiorow__status">
-              <span className="fy-dot fy-dot--ok" />
-              in artifacts
-            </span>
-            <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/artifacts`)}>
-              Open artifact
-            </Button>
-          </div>
-        ))}
-      </div>
-      {/* Every row already names its sheet and voice — the legend that re-taught it is gone (design 54). */}
-      <div className="fy-scenefoot">
-        <span className="fy-h1row__push" />
-        <span
-          style={{
-            font: "400 11px var(--font-sans)",
-            color: "var(--muted-foreground)",
-            cursor: "pointer",
-            textDecoration: "underline",
-            textUnderlineOffset: 3,
-          }}
-          onClick={() => navigate(`/w/${worldId}/cast`)}
-        >
-          Voice picker
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ---- Exports (25b) ---------------------------------------------------------
+// ---- The song clock's export view -------------------------------------------
 
 /**
- * Everything the Exports pane needs to say, decided in one place (issue 283, design 60c).
+ * Everything the Exports pane needed to say, decided in one place (issue 283, design 60c). The
+ * pane is gone — delivery is the editor's export sheet (SPEC-039 T-5) — but the Cut still reads
+ * this view to know which clock a production is on and whether its master is measured.
  *
  * Three review rounds found the same class of defect: a state the screen had not enumerated,
  * falling through a ternary to a number or a sentence belonging to a different state -- the
@@ -6491,444 +6335,6 @@ function exportViewFor(
   // Measured is not usable. A track with no audio stream refuses every preset in the coordinator.
   if (!track.mediaInfo.hasAudio) return { kind: "silent", durationSec: track.mediaInfo.durationSec };
   return { kind: "spine", cut: deriveSpineCut(production, spine, track.mediaInfo.durationSec) };
-}
-
-/** What the review will actually contain, in the exporter's terms rather than the screen's. */
-function reviewNotes(cut: ReturnType<typeof deriveSpineCut>): string[] {
-  const notes: string[] = [];
-  if (cut.slateSec > 0)
-    notes.push(`${seconds(cut.slateSec)} is a labelled slate naming the shot that is missing`);
-  // Plain black carries no label: the exporter draws text on slates only.
-  if (cut.blackSec > 0) notes.push(`${seconds(cut.blackSec)} is plain black, anchored to no shot at all`);
-  if (cut.unanchoredShotIds.length > 0) {
-    const n = cut.unanchoredShotIds.length;
-    notes.push(
-      `${n} shot${n === 1 ? "" : "s"} anchored nowhere in the song, so ${n === 1 ? "it is" : "they are"} not in the film at all`,
-    );
-  }
-  if (cut.problems.length > 0) {
-    notes.push(`unresolved: ${[...new Set(cut.problems.map((p) => p.kind))].sort().join(", ")}`);
-  }
-  return notes;
-}
-
-export function ExportsScreen() {
-  const { worldId, prodId } = useParams();
-  const { world, production } = useProduction(worldId, prodId);
-  const exportsState = useExports();
-  // A story has no cut to render, and a manuscript exporter does not exist yet — so this pane
-  // offers neither rather than a zero-length video (design 54a). It stays on the story rail
-  // because the world folder export lives here, and the chapters travel whole inside it.
-  const isStory = production ? productionShape(production.meta).hasChapters : false;
-  const timelineState = production?.timeline ?? { status: "absent" as const };
-  let cut: ReturnType<typeof deriveCut> | null = null;
-  let timelineBlock: string | null = null;
-  if (production) {
-    try {
-      if (timelineState.status === "invalid") throw new Error(timelineState.message);
-      cut = production.spine && timelineState.status !== "ready" ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
-    } catch (error) {
-      timelineBlock = error instanceof Error ? error.message : String(error);
-    }
-  }
-  const legacyView = exportViewFor(world, production);
-  /*
-   * A saved timeline delivers every scope through one plan (SPEC-038 R-3, R-33; issue 682), so
-   * the song clock's readiness rules stop applying once its timeline exists: the master is a
-   * Music clip and the plan says what the film is. Until then the spine's own view stands.
-   */
-  const timelineOwnsDelivery = timelineState.status === "ready" && timelineBlock === null;
-  const view: ExportView = timelineOwnsDelivery ? { kind: "scene-order" } : legacyView;
-  const deliveryPlan =
-    production && timelineOwnsDelivery
-      ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset: "review-cut" })
-      : null;
-  if (deliveryPlan !== null && !deliveryPlan.ok && timelineBlock === null) timelineBlock = deliveryPlan.reason;
-  /*
-   * No story to derive a picture from, so what was placed is the film (issue 453). Resolved
-   * exactly as the coordinator resolves it, or this screen advertises a runtime the encode does
-   * not produce — a document stretched to 60s beside a 5s image is a 5s film, and a lane holding
-   * nothing but a document is not a film at all.
-   */
-  const overlays = production?.cut.overlays ?? [];
-  const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
-  const placedArtifacts = world?.artifacts ?? [];
-  // Once the timeline delivers, what is placed is what the plan renders (round three): the
-  // legacy lanes may be empty while the typed tracks hold the whole film.
-  const placedSec = deliveryPlan?.ok === true ? deliveryPlan.plan.totalSec : mediaOnly ? placedFilmSec(overlays, placedArtifacts) : 0;
-  const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
-  const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
-  /*
-   * Subtitle delivery (SPEC-038 R-27): one language track, and none, burned in, a sidecar, or
-   * both. Only a saved timeline holds subtitle tracks, so a legacy production offers nothing here.
-   */
-  const subtitleTracks = timelineState.status === "ready" ? subtitleTracksOf(timelineState.timeline) : [];
-  const [subtitleTrack, setSubtitleTrack] = useState<string>("");
-  const [subtitleMode, setSubtitleMode] = useState<"none" | "burn-in" | "sidecar" | "burn-in+sidecar">("none");
-  const [sidecarFormat, setSidecarFormat] = useState<"srt" | "vtt">("srt");
-  const chosenSubtitleTrack = subtitleTracks.find((track) => track.id === subtitleTrack) ?? subtitleTracks[0] ?? null;
-  const subtitleChoice =
-    chosenSubtitleTrack !== null && subtitleMode !== "none"
-      ? { trackId: chosenSubtitleTrack.id, mode: subtitleMode, sidecar: sidecarFormat }
-      : undefined;
-  /*
-   * Runtime, block and refusal all read from the one view, so none can describe a state the screen
-   * is not in. The song's length is the runtime wherever there is a song (design 60, binding).
-   */
-  const refusal = view.kind === "spine" ? spineExportRefusals(view.cut, preset) : null;
-  const runtimeSec =
-    deliveryPlan?.ok === true
-      ? deliveryPlan.plan.totalSec
-      : view.kind === "spine"
-        ? view.cut.trackDurationSec
-        : view.kind === "silent"
-          ? view.durationSec
-          : view.kind === "scene-order"
-            ? // A production with no story runs as long as what was placed on it (issue 453), which
-              // is the only length it has — `cut.totalSec` is zero there and would report 0s for a
-              // film that plainly is not.
-              mediaOnly
-              ? placedSec
-              : cut?.totalSec
-            : undefined;
-  /*
-   * An unmeasured track does not block: exporting is what measures it, and the coordinator probes
-   * an artifact with no stored measurement, then renders or refuses in words. A missing artifact
-   * and a silent one do block, because no probe rescues either.
-   */
-  /*
-   * Nothing the export can USE, which is not the same as nothing on the lanes: a production
-   * holding only a document has a clip on screen and still has no film. Blocked either way,
-   * because an empty plan becomes `concat=n=0`, which is not a filter graph — but the two are
-   * told apart below, so somebody looking at a clip is not told there is nothing there.
-   */
-  const nothingPlaced = mediaOnly && placedSec === 0;
-  const unusablePlacements =
-    nothingPlaced &&
-    (overlays.length > 0 || (timelineState.status === "ready" && timelineState.timeline.tracks.some((track) => track.clips.length > 0)));
-  const blocked =
-    timelineBlock !== null || refusal !== null || view.kind === "no-track" || view.kind === "silent" || nothingPlaced;
-  const episodeTimelineBlock = timelineState.status === "absent" ? null : timelineBlock;
-  /** One episode's refusal or range on the saved timeline (SPEC-037 R-33); null before one exists. */
-  const episodeRange = (episodeId: string) =>
-    production && timelineState.status === "ready" ? episodeTimelineRange(production, timelineState.timeline, episodeId) : null;
-  /*
-   * Labels state only what the encode does (SPEC-038 R-31): no timecode, no captions, no
-   * excerpt. The vertical preset renders the whole cut in a 9:16 frame and says so.
-   */
-  const presetCopy: Record<string, { label: string; sub: string }> = {
-    "review-cut": {
-      label: "Review cut",
-      sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · fastest`,
-    },
-    master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
-    "social-excerpt": {
-      label: "Vertical",
-      sub: `${PRESETS["social-excerpt"].width}×${PRESETS["social-excerpt"].height} · 9:16 · the whole cut`,
-    },
-  };
-  const boardPath = production?.scenes.find((s) => s.board)?.board?.image;
-  return (
-    <div className="fy-prodmain" data-screen="exports" style={{ minHeight: "100%" }}>
-      <div className="fy-h1row">
-        <h1 className="fy-h1">Exports</h1>
-        <span className="fy-h1row__meta">
-          {isStory
-            ? "the chapters travel in the world folder · a manuscript export is designed, not yet built"
-            : "renders of the cut · the cut itself stays the source"}
-        </span>
-      </div>
-      {!isStory && production && productionShape(production.meta).isEpisodic && (
-        <div>
-          <div className="fy-listhead">
-            Episodes · each its own deliverable
-            <Button
-              variant="secondary"
-              disabled={episodeTimelineBlock !== null}
-              onClick={() => {
-                // The season batch is one send per episode (issue 396): each encode is its own
-                // export with its own progress and retry, so one failure never re-encodes the
-                // rest. Refused episodes are skipped here and say why on their row.
-                if (!worldId || !prodId || episodeTimelineBlock !== null) return;
-                for (const episode of production.episodes) {
-                  const range = episodeRange(episode.id);
-                  // The legacy refusals belong to the legacy cut; a saved timeline judges an
-                  // episode by its own range (round seven).
-                  if (range !== null ? range.ok : episodeExportRefusals(production, episode.id) === null) {
-                    exportCut(worldId, prodId, preset, timelineState.status === "ready" ? timelineState.timeline.revision : null, episode.id, subtitleChoice);
-                  }
-                }
-              }}
-            >
-              Export the season · {preset}
-            </Button>
-          </div>
-          {production.episodes.map((episode) => {
-            const episodeCut = deriveEpisodeCut(production, episode.id);
-            const range = episodeRange(episode.id);
-            const episodeRefusal = episodeTimelineBlock
-              ? { detail: episodeTimelineBlock }
-              : range !== null
-                ? range.ok
-                  ? null
-                  : { detail: range.reason }
-                : episodeExportRefusals(production, episode.id);
-            const frameRate = productionFrameRate(production.meta);
-            const rangeSec = range !== null && range.ok ? (range.endFrame - range.startFrame) / frameRate : null;
-            return (
-              <div key={episode.id} className="fy-listrow">
-                <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
-                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
-                  {episode.release?.title ?? episode.title}
-                </span>
-                <span className="fy-mono">
-                  {rangeSec !== null
-                    ? `${seconds(rangeSec)} on the timeline · every visible track`
-                    : `${seconds(episodeCut.totalSec)} · ${episodeCut.covered} of ${episodeCut.entries.length} covered${
-                        episodeCut.gaps > 0 ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates` : ""
-                      }`}
-                </span>
-                {episodeRefusal ? (
-                  <span className="fy-mono" style={{ color: "var(--destructive)" }}>
-                    {episodeRefusal.detail}
-                  </span>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      worldId &&
-                      prodId &&
-                      exportCut(worldId, prodId, preset, timelineState.status === "ready" ? timelineState.timeline.revision : null, episode.id, subtitleChoice)
-                    }
-                  >
-                    Export episode
-                  </Button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {!isStory && (
-        <>
-          <div>
-            <div className="fy-eyebrow-sm" style={{ margin: "0 0 2px" }}>
-              DELIVERED
-            </div>
-            {mine.length === 0 && (
-              <div className="fy-mono" style={{ padding: "10px 0" }}>
-                nothing delivered yet
-              </div>
-            )}
-            {mine.map(([id, e]) => (
-              <div key={id} className="fy-exportrow">
-                <div className="fy-exportrow__thumb">
-                  <Portrait
-                    worldSlug={world?.meta.slug}
-                    path={boardPath && production ? `productions/${production.meta.id}/${boardPath}` : ""}
-                    label="cut"
-                    radius={0}
-                  />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="fy-exportrow__title">
-                    {production?.meta.title}
-                    {e.episodeId !== undefined
-                      ? ` · ${production?.episodes.find((ep) => ep.id === e.episodeId)?.title ?? e.episodeId}`
-                      : ""}{" "}
-                    · render {id.slice(0, 8)}
-                  </div>
-                  <div className="fy-exportrow__sub">
-                    {e.status}
-                    {e.status === "running" ? ` · ${Math.round(e.percent)}%` : ""}
-                    {e.output ? ` · ${e.output}` : ""}
-                    {e.sidecar ? ` · ${e.sidecar}` : ""}
-                    {e.error ? ` · ${e.error}` : ""}
-                  </div>
-                </div>
-                {e.status === "running" && (
-                  <Button variant="ghost" onClick={() => worldId && cancelExport(worldId, id)}>
-                    Cancel
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-          <div>
-            <div className="fy-eyebrow-sm">NEW EXPORT</div>
-            <div className="fy-radiorow">
-              {(Object.keys(presetCopy) as Array<keyof typeof PRESETS>).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  className={cx("fy-radio", preset === p && "fy-radio--on")}
-                  onClick={() => setPreset(p)}
-                >
-                  <div className="fy-radio__head">
-                    <span className="fy-radio__dot" />
-                    {presetCopy[p]!.label}
-                  </div>
-                  <div className="fy-radio__sub">{presetCopy[p]!.sub}</div>
-                </button>
-              ))}
-            </div>
-            {subtitleTracks.length > 0 && (
-              <div className="fy-subtitle-delivery" aria-label="Subtitles">
-                <div className="fy-eyebrow-sm">SUBTITLES</div>
-                <div className="fy-subtitle-delivery__row">
-                  <label>
-                    Track
-                    <select aria-label="Subtitle track" value={chosenSubtitleTrack?.id ?? ""} onChange={(event) => setSubtitleTrack(event.target.value)}>
-                      {subtitleTracks.map((track) => (
-                        <option key={track.id} value={track.id}>
-                          {track.name} · {track.language}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span className="fy-subtitle-delivery__modes" role="group" aria-label="Subtitle output">
-                    {(
-                      [
-                        ["none", "None"],
-                        ["burn-in", "Burned in"],
-                        ["sidecar", "Sidecar"],
-                        ["burn-in+sidecar", "Both"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <button key={value} type="button" aria-pressed={subtitleMode === value} onClick={() => setSubtitleMode(value)}>
-                        {label}
-                      </button>
-                    ))}
-                  </span>
-                  {(subtitleMode === "sidecar" || subtitleMode === "burn-in+sidecar") && (
-                    <label>
-                      Format
-                      <select aria-label="Sidecar format" value={sidecarFormat} onChange={(event) => setSidecarFormat(event.target.value as "srt" | "vtt")}>
-                        <option value="srt">SRT</option>
-                        <option value="vtt">WebVTT</option>
-                      </select>
-                    </label>
-                  )}
-                </div>
-              </div>
-            )}
-            {timelineBlock && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                Timeline unavailable · {timelineBlock}
-              </div>
-            )}
-            {view.kind === "no-track" && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                The spine names a track this world does not have, so there is nothing to measure or cut
-                against. Assign a track again — the anchors are unaffected.
-              </div>
-            )}
-            {view.kind === "silent" && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                The master track has no audio stream, so there is no song to cut against. Assign a track that
-                carries audio — nothing else about the production changes.
-              </div>
-            )}
-            {nothingPlaced && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                {unusablePlacements
-                  ? // Saying "nothing on its lanes" to somebody looking at a clip is simply untrue,
-                    // and leaves them with no idea why the button will not move.
-                    "The lanes hold nothing this export can use — a document has no picture, and a video is only mixed in when it is known to carry sound. Place a video, an image or an audio file and it becomes the film."
-                  : "This production has no story and nothing on its lanes, so there is no film to render yet. Drop something on the Cut and it becomes the film."}
-              </div>
-            )}
-            {view.kind === "unmeasured" && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                The master track has not been measured yet, so its length is not known here. Exporting
-                measures it first and renders against it — or says why it cannot be read. Nothing about the
-                production changes either way.
-              </div>
-            )}
-            {view.kind === "spine" &&
-              (() => {
-                /*
-                 * One sentence about what the review will contain, built from the cut rather than
-                 * written per case. Three rounds were spent on copy that described a state the screen
-                 * was not in -- gaps promised as labelled when only slates carry labels, shots
-                 * anchored nowhere omitted from both the film and the warning, a refusal naming the
-                 * master while another preset was selected.
-                 */
-                const notes = reviewNotes(view.cut);
-                if (refusal === null && notes.length === 0) return null;
-                return (
-                  <div className="fy-notecard">
-                    <span className="fy-dot fy-dot--warn" />
-                    {refusal !== null && (
-                      <>
-                        {presetCopy[preset]?.label ?? "This export"} cannot be made yet — {refusal.detail}
-                        .{" "}
-                      </>
-                    )}
-                    {notes.length > 0 ? (
-                      <>A review cut renders anyway: {notes.join("; ")}. An unfinished film still reviews.</>
-                    ) : (
-                      <>A review cut renders the whole song as it stands.</>
-                    )}
-                  </div>
-                );
-              })()}
-            {view.kind === "scene-order" && cut && cut.gaps > 0 && (
-              <div className="fy-notecard">
-                <span className="fy-dot fy-dot--warn" />
-                The cut has {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} ({seconds(cut.uncoveredSec)}). They
-                export as black slates carrying their labels and durations — an unfinished film still reviews.
-              </div>
-            )}
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14 }}>
-              <span className="fy-mono">renders locally · no provider call</span>
-              <span className="fy-h1row__push" />
-              <Button
-                variant="primary"
-                disabled={blocked}
-                onClick={() =>
-                  !blocked &&
-                  worldId &&
-                  prodId &&
-                  exportCut(
-                    worldId,
-                    prodId,
-                    preset,
-                    timelineState.status === "ready" ? timelineState.timeline.revision : null,
-                    undefined,
-                    subtitleChoice,
-                  )
-                }
-              >
-                {runtimeSec === undefined ? "Export" : <>Export · {mediaOnly ? runtimeSeconds(runtimeSec) : seconds(runtimeSec)}</>}
-              </Button>
-            </div>
-          </div>
-        </>
-      )}
-      {isStory && (
-        <EmptyState
-          title="No manuscript export yet"
-          hint="Chapters live in the world folder as ordinary Markdown; the export below carries them whole."
-        />
-      )}
-      <div className="fy-scenefoot">
-        <span className="fy-mono">
-          world export: a folder that reopens identically elsewhere — history kept, caches and locks stay
-          behind · lands under ArkeStudio\exports
-        </span>
-        <span className="fy-h1row__push" />
-        <Button variant="ghost" onClick={() => worldId && exportWorld(worldId)}>
-          Export world folder
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 // ---- Stills contact sheet --------------------------------------------------
