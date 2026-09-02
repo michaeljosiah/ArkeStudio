@@ -636,7 +636,7 @@ export class StageViewport {
         this.rigGroup.add(mesh);
         this.marks.push({ index, mesh });
       });
-      this.drawPath(at);
+      this.drawPath();
     }
 
     this.buildLabels();
@@ -1037,11 +1037,14 @@ export class StageViewport {
   }
 
   /** The true animated path: anchored keys curve around their subject rather than joining dots. */
-  private drawPath(at: number): void {
+  private drawPath(): void {
     if (this.path === null || this.data.keys.length < 2) return;
     const position = this.path.geometry.attributes["position"] as BufferAttribute;
     for (let index = 0; index < PATH_POINTS; index += 1) {
-      const point = this.sampleCam((index / (PATH_POINTS - 1)) * this.data.durationSec, at);
+      // Each sample resolves its anchor at ITS OWN time: a camera riding a walker crosses the
+      // set with them, and a path clocked to the playhead would draw that ride as one point.
+      const t = (index / (PATH_POINTS - 1)) * this.data.durationSec;
+      const point = this.sampleCam(t, t);
       position.setXYZ(index, point.x, point.y, point.z);
     }
     position.needsUpdate = true;
@@ -1084,7 +1087,7 @@ export class StageViewport {
       const key = this.data.keys[mark.index];
       if (key !== undefined) mark.mesh.position.copy(this.keyWorld(key, at));
     }
-    this.drawPath(at);
+    this.drawPath();
   }
 
   private loop(): void {
@@ -1207,7 +1210,9 @@ export class StageViewport {
     recorder.addEventListener("dataavailable", (event) => {
       if (event.data.size > 0) chunks.push(event.data);
     });
-    const duration = Math.max(0.5, this.data.durationSec);
+    // Exactly the shot's length — the pin says the take is the shot, so the take must not
+    // run past it; one frame is the floor a recorder can make anything of.
+    const duration = Math.max(1 / 30, this.data.durationSec);
     const finished = new Promise<Blob>((resolve, reject) => {
       recorder.addEventListener("stop", () => resolve(new Blob(chunks, { type: type ?? "video/webm" })));
       recorder.addEventListener("error", () => reject(new Error("the recording failed")));

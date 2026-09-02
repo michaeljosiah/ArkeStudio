@@ -282,6 +282,8 @@ export function StoryboardRows({
               ) : null}
               <Row
                 shot={shot}
+                prevShotId={shots[shots.indexOf(shot) - 1]?.id ?? null}
+                nextShotId={shots[shots.indexOf(shot) + 1]?.id ?? null}
                 scene={scene}
                 world={world}
                 production={production}
@@ -339,7 +341,8 @@ export function StoryboardRows({
             onClick={() =>
               onCommand({
                 kind: "insert-shot",
-                at: { after: shots.at(-1)!.id },
+                // An empty scene is a valid one; its first shot has nothing to follow.
+                at: shots.length === 0 ? { atStart: true } : { after: shots.at(-1)!.id },
                 shot: { title: "Untitled shot", description: "" },
               })
             }
@@ -698,6 +701,8 @@ function Row({
   onOpenInGenerator,
   onStage,
   onPreview,
+  prevShotId,
+  nextShotId,
 }: {
   shot: Shot;
   scene: SceneRecord;
@@ -731,6 +736,9 @@ function Row({
   onOpenInGenerator: () => void;
   onStage: () => void;
   onPreview: () => void;
+  /** The rows either side, for moving without a pointer. */
+  prevShotId: string | null;
+  nextShotId: string | null;
 }) {
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -1022,6 +1030,7 @@ function Row({
       tabIndex={staged ? -1 : 0}
       aria-disabled={staged ? "true" : undefined}
       aria-label={`Shot ${shot.number}, ${shot.title}, ${staged ? "staged, " : ""}${state}`}
+      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onDragOver={(event) => !disabled && event.preventDefault()}
       onDrop={(event) => { event.preventDefault(); onDrop(); }}
       onClick={() => !staged && onSelect()}
@@ -1035,6 +1044,12 @@ function Row({
         } else if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onSelect();
+        } else if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown") && !disabled) {
+          // The grip is the pointer's way to reorder; this is the keyboard's (the menu lost its
+          // Move entries to the design). The row keeps focus, so a second press keeps moving.
+          event.preventDefault();
+          const to = event.key === "ArrowUp" ? (prevShotId === null ? null : { before: prevShotId }) : nextShotId === null ? null : { after: nextShotId };
+          if (to !== null) onCommand({ kind: "move-shot", shotId: shot.id, to });
         }
       }}
     >

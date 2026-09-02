@@ -120,6 +120,31 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     );
   });
 
+  it("moves a shot from the keyboard with Alt and an arrow, since the menu has no Move entries", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    const shots = orderedShots(sceneOf(FIXTURE_STATE) as never);
+    // The band is the focusable row (role group); the list item around it is layout.
+    const rows = all(mounted, ".fy-swrow__band");
+    const press = async (row: HTMLElement, key: string, altKey: boolean) => {
+      const event = new dom.window.Event("keydown", { bubbles: true });
+      Object.defineProperty(event, "key", { value: key });
+      Object.defineProperty(event, "altKey", { value: altKey });
+      await act(async () => row.dispatchEvent(event));
+    };
+    assert.equal(rows[0]!.getAttribute("aria-keyshortcuts"), "Alt+ArrowUp Alt+ArrowDown");
+    // A command locks the rows until the coordinator answers, so the no-ops come first.
+    const before = sent.length;
+    await press(rows[0]!, "ArrowUp", true);
+    assert.equal(sent.length, before, "the first row has nowhere up to go");
+    await press(rows[1]!, "ArrowDown", false);
+    assert.equal(sent.length, before, "a bare arrow is the list's to handle, not a move");
+    await press(rows[1]!, "ArrowUp", true);
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.deepEqual(command.command, { kind: "move-shot", shotId: shots[1]!.id, to: { before: shots[0]!.id } });
+  });
+
   it("appends a shot from the trailing card", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
