@@ -1575,8 +1575,12 @@ export function sourceLengthFramesFor(
     const takeId = production.selections[clip.source.shotId]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : takesById.get(takeId);
     if (take === undefined) return undefined;
-    if (take.segment !== undefined) return Math.max(1, secondsToFrames(take.segment.outSec - take.segment.inSec, frameRate));
-    return measured(take.id);
+    // The selection's own in-point has already consumed the head (round nine): rendering starts
+    // there, so the tail can only grow into what the source has left after it.
+    const trim = production.selections[clip.source.shotId]?.trimInSec ?? 0;
+    if (take.segment !== undefined) return Math.max(1, secondsToFrames(take.segment.outSec - take.segment.inSec - trim, frameRate));
+    const whole = measured(take.id);
+    return whole === undefined ? undefined : Math.max(1, whole - secondsToFrames(trim, frameRate));
   };
 }
 

@@ -211,8 +211,23 @@ function mergeRegions(regions: SpeechRegion[]): SpeechRegion[] {
  * a named refusal rather than a silent omission (R-5): the clip is on the timeline, so something
  * was meant to be seen there.
  */
+/** A take's playable file and the in-point a segment adds, or null when nothing can play. */
+function resolveTakeMedia(production: ProductionBundle, takeId: string): { path: string; inSec: number; outSec?: number; measuredId: string } | null {
+  const take = production.takes.find((candidate) => candidate.id === takeId);
+  const segment = take?.segment;
+  const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
+  if (take === undefined || pass?.media === undefined) return null;
+  return {
+    path: `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`,
+    inSec: segment?.inSec ?? 0,
+    ...(segment !== undefined ? { outSec: segment.outSec } : {}),
+    measuredId: pass.id,
+  };
+}
+
 function overlaysFromTimeline(
   timeline: ProductionTimeline,
+  production: ProductionBundle,
   artifacts: readonly RenderArtifact[],
   frameRate: FrameRate,
 ): { ok: true; overlays: ExportOverlay[]; sound: RenderAudioItem[] } | { ok: false; reason: string } {
@@ -226,8 +241,22 @@ function overlaysFromTimeline(
     .sort((a, b) => a.order - b.order);
   for (const track of upper) {
     for (const clip of orderedTrackClips(track)) {
+      const startSec = framesToSeconds(clip.startFrame, frameRate);
+      const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
+      if (clip.source.kind === "take") {
+        // A take on an upper track is a video insert from its pass (round nine).
+        const takeId = clip.source.takeId;
+        const resolved = resolveTakeMedia(production, takeId);
+        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        const sourceInSec = resolved.inSec + framesToSeconds(clip.sourceInFrames, frameRate);
+        overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
+        if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
+          sound.push({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id });
+        }
+        continue;
+      }
       if (clip.source.kind !== "artifact") {
-        return { ok: false, reason: `${clip.id} on ${track.name} is not a placed artifact, which is all an upper Picture track can hold` };
+        return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
       const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -236,8 +265,6 @@ function overlaysFromTimeline(
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
       }
-      const startSec = framesToSeconds(clip.startFrame, frameRate);
-      const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
       const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
@@ -266,12 +293,12 @@ function audioFromTimeline(
 ): { ok: true; audio: RenderAudioItem[]; speech: SpeechRegion[] } | { ok: false; reason: string } {
   const audio: RenderAudioItem[] = [];
   const speech: SpeechRegion[] = [];
-  const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
   for (const track of audibleTracks(timeline).filter((track) => AUDIO_TRACK_KINDS.has(track.kind)).sort((a, b) => a.order - b.order)) {
     for (const clip of orderedTrackClips(track)) {
       const startSec = framesToSeconds(clip.startFrame, frameRate);
       const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
       let path: string;
+      let segmentInSec = 0;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
         const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -280,10 +307,13 @@ function audioFromTimeline(
         if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
       } else if (clip.source.kind === "take") {
+        // A pass segment plays its pass's file from the segment's in-point (round nine), the
+        // same resolution the placement check and the base track apply.
         const takeId = clip.source.takeId;
-        const take = takesById.get(takeId);
-        if (take?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
-        path = `productions/${production.meta.id}/takes/${take.id}/${take.media}`;
+        const resolved = resolveTakeMedia(production, takeId);
+        if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+        path = resolved.path;
+        segmentInSec = resolved.inSec;
       } else {
         return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
       }
@@ -293,7 +323,7 @@ function audioFromTimeline(
         endSec,
         gainDb: clip.gainDb ?? 0,
         role: track.kind as RenderAudioRole,
-        sourceInSec: framesToSeconds(clip.sourceInFrames, frameRate),
+        sourceInSec: segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate),
         clipId: clip.id,
       });
       if (track.kind === "dialogue") speech.push({ startSec, endSec });
@@ -358,7 +388,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     throw error;
   }
   const record = timeline.timeline;
-  const upper = overlaysFromTimeline(record, artifacts, frameRate);
+  const upper = overlaysFromTimeline(record, production, artifacts, frameRate);
   if (!upper.ok) return upper;
   const typed = audioFromTimeline(record, production, artifacts, frameRate);
   if (!typed.ok) return typed;
@@ -603,9 +633,9 @@ export interface VisiblePicture {
   /** 0 is the base sequence; overlays count upward in composition order. */
   layer: number;
   /**
-   * The base clip a still overlay sits on, so a logo or title composites over the picture
-   * rather than replacing it with black (round eight). Absent when the base is not a clip, or
-   * when the visible overlay is itself video, which the preview plays alone.
+   * The base clip an overlay sits on, so a logo, a title or an insert composites over the
+   * picture rather than replacing it with black (rounds eight and nine). Absent when the base
+   * is not a clip.
    */
   under?: { path: string; sourceSec: number; label: string };
 }
@@ -629,7 +659,9 @@ export function pictureAtSec(plan: ExportPlan, sec: number): VisiblePicture | nu
   for (let index = plan.overlays.length - 1; index >= 0; index -= 1) {
     const overlay = plan.overlays[index]!;
     if (sec >= overlay.startSec && sec < overlay.endSec) {
-      const base = overlay.still ? baseAtSec(plan, sec) : null;
+      // Video overlays too (round nine): a transparent title or a letterboxed insert composites
+      // over the base in the export, so the preview keeps the base playing under it.
+      const base = baseAtSec(plan, sec);
       return {
         path: overlay.path,
         still: overlay.still,

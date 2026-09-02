@@ -38,7 +38,10 @@ describe("the preview reads the render plan (#680)", () => {
         [1, 2, "artifacts/plate.png", 0, true],
         [2, 4, "p/a.mp4", 2, false],
         [4, 5, null, 0, false],
-        [5, 8, "artifacts/insert.mp4", 0, false],
+        // The insert keeps playing across 7s, but the base under it changes there, so the base
+        // video the preview runs beneath it has to switch: two spans, one overlay (round nine).
+        [5, 7, "artifacts/insert.mp4", 0, false],
+        [7, 8, "artifacts/insert.mp4", 2, false],
         [8, 10, "p/c.mp4", 4, false],
       ],
     );

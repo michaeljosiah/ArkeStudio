@@ -114,7 +114,7 @@ import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
-import { videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { mediaTimeFor, videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
 import { planSpans } from "../lib/plan-playback.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
@@ -3571,10 +3571,24 @@ function CutPreview({
    * the whole placement. So the two are separated at the source: the video never receives a
    * still, and the still is drawn over it by an `<img>` wearing the same class.
    */
-  // A still with a base under it keeps the base video playing beneath the image (round eight).
+  // An overlay with a base under it keeps the base video playing beneath it (rounds eight and
+  // nine): the base element plays the base, a still is drawn by the image, and a video overlay
+  // plays in its own element on top — the composition the export makes.
   const videoSrcFor = (span: PlaybackSpan | null) =>
-    span?.still ? (span.under !== undefined && slug ? mediaUrl(slug, span.under.path) : null) : srcFor(span);
+    span?.under !== undefined && slug ? mediaUrl(slug, span.under.path) : span?.still ? null : srcFor(span);
   const stillSrcFor = (span: PlaybackSpan | null) => (span?.still ? srcFor(span) : null);
+  const overlayVideoSrcFor = (span: PlaybackSpan | null) => (span !== null && !span.still && span.under !== undefined ? srcFor(span) : null);
+  const overlayVideo = useRef<HTMLVideoElement>(null);
+  const syncOverlayVideo = useCallback(
+    (span: PlaybackSpan | null, at: number, playingNow: boolean, nowMs: number) => {
+      const el = overlayVideo.current;
+      if (el === null) return;
+      const src = overlayVideoSrcFor(span);
+      syncMediaElement(el, { src, targetSec: span ? mediaTimeFor(span, at) : 0, playing: playingNow, nowMs });
+      el.style.opacity = src === null ? "0" : "1";
+    },
+    [slug],
+  );
 
   /*
    * The still is painted off the frame clock too, for the reason the video already is.
@@ -3620,12 +3634,13 @@ function CutPreview({
         nowMs: ts,
       });
       paintStill(span);
+      syncOverlayVideo(span, at, true, ts);
       syncCue(at);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, spans, slug, paintStill, syncCue]);
+  }, [playing, spans, slug, paintStill, syncCue, syncOverlayVideo]);
 
   // Paused: one sync, so a seek lands on the right frame without a loop running. A source that
   // was not ready when it was asked calls back through onMediaReady, since nothing else will.
@@ -3642,11 +3657,13 @@ function CutPreview({
         nowMs: 0,
       });
       paintStill(span);
+      syncOverlayVideo(span, at, false, 0);
       syncCue(at);
     };
     onMediaReady(el, push);
+    if (overlayVideo.current !== null) onMediaReady(overlayVideo.current, push);
     push();
-  }, [playing, time, spans, slug, timeRef, paintStill, syncCue]);
+  }, [playing, time, spans, slug, timeRef, paintStill, syncCue, syncOverlayVideo]);
 
   const current = spanAt(spans, time);
   /*
@@ -3667,6 +3684,14 @@ function CutPreview({
         playsInline
         muted
         style={{ opacity: showingVideo === null ? 0 : 1 }}
+      />
+      {/* A video overlay over the base: its own element, synced on the same frame clock (round nine). */}
+      <video
+        ref={overlayVideo}
+        className="fy-cutviewer__video"
+        playsInline
+        muted
+        style={{ opacity: overlayVideoSrcFor(current) === null ? 0 : 1 }}
       />
       {/*
         * Always mounted, never conditional: `paintStill` reaches it through the ref on the frame
@@ -4335,7 +4360,11 @@ export function CutScreen() {
           timeline: timelineState,
           scope: { kind: "production" },
           preset: "review-cut",
-          ...(subtitleView !== null ? { subtitles: { trackId: subtitleView, mode: "none" } } : {}),
+          // A hidden (muted) track is not asked for: the plan would refuse it and take the whole
+          // preview with it (round nine). Hiding captions leaves the film.
+          ...(subtitleView !== null && subtitleTracks.some((track) => track.id === subtitleView && !track.muted)
+            ? { subtitles: { trackId: subtitleView, mode: "none" } }
+            : {}),
         })
       : null;
   /*

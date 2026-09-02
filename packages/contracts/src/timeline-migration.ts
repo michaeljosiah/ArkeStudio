@@ -232,6 +232,12 @@ export function migrateLegacyCut(
           dropped.push(`${legacy.label} entry ${entryIndex + 1} cites artifact ${entry.artifactId}, which this world does not have`);
           return;
         }
+        // The legacy schema let a bed cite anything; a typed audio track refuses a source with
+        // no sound, so the entry is named here rather than saved and refused by every render.
+        if (!(artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true))) {
+          dropped.push(`${legacy.label} entry ${entryIndex + 1} cites ${artifact.file}, which is not known to carry sound`);
+          return;
+        }
         clips.push({
           id,
           startFrame,

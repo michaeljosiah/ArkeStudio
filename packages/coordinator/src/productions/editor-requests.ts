@@ -263,8 +263,16 @@ export async function decideEditorRequest(
   if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
 
   const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
+  // Two Accepts can race past the status check above; the second must not mark the first's
+  // landed request stale. The mark is written under the gate and only onto a record that is
+  // still pending (round nine).
+  const markStale = (reason: string) =>
+    writeStatus(store, productionId, requestId, (current) => {
+      if (current.status !== "pending") throw new EditorRequestRefused(`request ${requestId} is already ${current.status}`);
+      return { ...current, status: "stale", decidedAt: now, reason: reason.slice(0, 300) };
+    });
   if (stale !== null) {
-    await writeStatus(store, productionId, requestId, (current) => ({ ...current, status: "stale", decidedAt: now, reason: stale }));
+    await markStale(stale);
     throw new EditorRequestRefused(`the request is stale: ${stale}; ask Arke for a new one against the current timeline`);
   }
 
@@ -286,7 +294,7 @@ export async function decideEditorRequest(
     });
   } catch (error) {
     if (error instanceof TimelineCommandRefused && /moved from revision|changed while/.test(error.reason)) {
-      await writeStatus(store, productionId, requestId, (current) => ({ ...current, status: "stale", decidedAt: now, reason: error.reason.slice(0, 300) }));
+      await markStale(error.reason);
       throw new EditorRequestRefused(`the request is stale: ${error.reason}; ask Arke for a new one against the current timeline`);
     }
     throw error;
