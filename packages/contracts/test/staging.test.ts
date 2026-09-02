@@ -104,6 +104,16 @@ describe("the Stage's arithmetic", () => {
     assert.match(mid[0]!, /^2.0s — 4.0m /, "halfway through a four-second shot she is 4m down an 8m walk");
   });
 
+  it("reads a camera riding a walking figure as tracking, not static", () => {
+    const keys = [
+      { t: 0, p: [0, 1.5, 2] as [number, number, number], l: [0, 1.2, 0] as [number, number, number], anchor: "maren-kest", track: "maren-kest" },
+      { t: 4, p: [0, 1.5, 2] as [number, number, number], l: [0, 1.2, 0] as [number, number, number], anchor: "maren-kest", track: "maren-kest" },
+    ];
+    assert.equal(stagingMoveWord(keys, [{ sheetId: "maren-kest", x: 0, z: 0, to: [0, -6] }]), "tracking");
+    assert.equal(stagingMoveWord(keys, [{ sheetId: "maren-kest", x: 0, z: 0 }]), "static", "the same offset from a figure who holds is a static camera");
+    assert.equal(stagingMoveWord(keys), "static", "without the cast the word is what the keys alone say");
+  });
+
   it("holds a staging to the shot's length: the end key moves to the duration and interior keys keep ahead of it", () => {
     const staging: ShotStaging = {
       version: 1,
@@ -112,7 +122,10 @@ describe("the Stage's arithmetic", () => {
       keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 2, p: [0, 1.5, 2], l: [0, 1, 0] }, { t: 8, p: [0, 1.5, -2], l: [0, 1, 0] }],
     };
     assert.deepEqual(stagingRetimed(staging, 4).keys.map((key) => key.t), [0, 2, 4], "the end key is the end pose");
-    assert.deepEqual(stagingRetimed(staging, 1).keys.map((key) => key.t), [0, 0.9, 1], "keys that no longer fit are pulled in ahead of the end");
+    assert.deepEqual(stagingRetimed(staging, 1).keys.map((key) => key.t), [0, 0.25, 1], "a move that no longer fits is scaled, so no two keys share a moment");
+    const eight: ShotStaging = { ...staging, keys: Array.from({ length: 8 }, (_, index) => ({ t: index, p: [0, 1.5, 4 - index] as [number, number, number], l: [0, 1, 0] as [number, number, number] })) };
+    const times = stagingRetimed(eight, 0.5).keys.map((key) => key.t);
+    assert.ok(times.every((t, index) => index === 0 || t > times[index - 1]!), `eight keys into half a second stay strictly ordered: ${times.join(",")}`);
     assert.equal(stagingRetimed(staging, 8), staging, "nothing to move returns the same staging");
     assert.equal(stagingRetimed({ ...staging, keys: [] }, 4).keys.length, 0);
   });

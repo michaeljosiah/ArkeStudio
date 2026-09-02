@@ -251,7 +251,7 @@ function playblastToken(
     kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys)}${stale}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, staging.cast)}${stale}`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",

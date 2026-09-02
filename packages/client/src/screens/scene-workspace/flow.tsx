@@ -1351,7 +1351,7 @@ function buildGraph(input: {
       x: point.x,
       y: point.y,
       name: `Staging · shot ${shot.number}`,
-      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys)} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
+      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys, shot.staging.cast)} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
       shotId: shot.id,
       staged: stagedShotIds.has(shot.id),
     });

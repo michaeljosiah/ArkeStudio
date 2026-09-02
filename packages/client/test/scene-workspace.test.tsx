@@ -271,6 +271,24 @@ describe("scene detail owns the workspace", () => {
     assert.ok(stage);
   });
 
+  it("seeds start and end poses when a key is added to a staging with none", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    // The schema reads a staging with no keys; the Stage must not throw on it.
+    (shot as { staging?: unknown }).staging = { version: 1, cast: [], sets: [], keys: [] };
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    assert.equal(all(mounted, ".fy-swstage__key").length, 0);
+    await click(q(mounted, '[aria-label="Add a camera key at the playhead"]')!);
+    const keys = all(mounted, ".fy-swstage__key").map((key) => key.getAttribute("title") ?? "");
+    assert.equal(keys.length, 2, "a first key brings its end pose with it");
+    assert.match(keys[0]!, /start · 0.0s/);
+    assert.match(keys[1]!, /end · 4.0s/);
+    assert.ok(q(mounted, '[data-testid="stage-moved"]'), "and it is a move to keep");
+  });
+
   it("reaches the Stage from a row's menu and draws a staged shot's blocking on the canvas", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!

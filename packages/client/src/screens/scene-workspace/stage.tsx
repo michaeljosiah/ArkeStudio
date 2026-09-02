@@ -55,6 +55,24 @@ function sortedKeys(keys: readonly StagingKey[]): StagingKey[] {
   return [...keys].sort((left, right) => left.t - right.t);
 }
 
+const DEFAULT_POSE = { p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] };
+
+/**
+ * The pose the camera holds at `at`: interpolated between the keys either side, the way the
+ * viewport plays it, so a key inserted there starts from what was on screen. Keys on different
+ * anchors are offsets in different spaces and do not blend; the nearer one stands for the pose.
+ */
+function sampledKey(keys: readonly StagingKey[], at: number): StagingKey {
+  if (keys.length === 0) return { t: at, ...DEFAULT_POSE };
+  let before = 0;
+  while (before < keys.length - 1 && keys[before + 1]!.t <= at) before += 1;
+  const a = keys[before]!;
+  const b = keys[Math.min(keys.length - 1, before + 1)]!;
+  if (a.anchor !== b.anchor || a.track !== b.track || b.t === a.t) return keys[nearestKey(keys, at)]!;
+  const f = Math.max(0, Math.min(1, (at - a.t) / (b.t - a.t)));
+  return { ...a, t: at, p: mix(a.p, b.p, f), l: mix(a.l, b.l, f) };
+}
+
 /** Insert-or-update at the playhead: the Blender workflow, move the playhead then the camera. */
 function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>): { staging: ShotStaging; index: number } {
   const keys = staging.keys;
@@ -62,8 +80,8 @@ function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>)
   if (near >= 0) {
     return { staging: { ...staging, keys: keys.map((key, index) => (index === near ? { ...key, ...patch } : key)) }, index: near };
   }
-  const base = keys[nearestKey(keys, at)] ?? { t: at, p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] };
-  const made: StagingKey = { ...base, ...patch, t: round(at) };
+  // Only the edited channel changes; the rest of the pose is what was playing at the playhead.
+  const made: StagingKey = { ...sampledKey(keys, at), ...patch, t: round(at) };
   const next = sortedKeys([...keys, made]);
   return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
 }
@@ -325,19 +343,14 @@ export function SceneStage({
   };
   const addKey = () => {
     if (working === null) return;
+    // A staging with no keys (the schema reads them) gets its start and end poses first.
+    if (keys.length === 0) {
+      patch((current) => ({ ...current, keys: [{ t: 0, ...DEFAULT_POSE }, { t: round(durationSec), ...DEFAULT_POSE }] }));
+      return;
+    }
     const when = Math.max(0.05, Math.min(durationSec - 0.05, at));
     if (keys.some((key) => Math.abs(key.t - when) < 0.12)) return;
-    let before = 0;
-    while (before < keys.length - 1 && keys[before + 1]!.t < when) before += 1;
-    const a = keys[before]!;
-    const b = keys[Math.min(keys.length - 1, before + 1)]!;
-    const f = b.t === a.t ? 0 : (when - a.t) / (b.t - a.t);
-    const made: StagingKey = {
-      ...a,
-      t: round(when),
-      p: mix(a.p, b.p, f),
-      l: mix(a.l, b.l, f),
-    };
+    const made: StagingKey = { ...sampledKey(keys, when), t: round(when) };
     const next = sortedKeys([...keys, made]);
     patch((current) => ({ ...current, keys: next }));
     setKeyIndex(next.indexOf(made));
@@ -501,7 +514,7 @@ export function SceneStage({
         <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
         {working === null ? null : (
           <span className="fy-swstage__version">
-            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMoveWord(keys)}
+            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMoveWord(keys, working.cast)}
           </span>
         )}
       </div>

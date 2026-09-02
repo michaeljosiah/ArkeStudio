@@ -889,10 +889,13 @@ export function planBenchDispatch(
       : params.kind === "video"
         ? { kind: "provider-default" as const }
          : null;
-  if (session.subject?.kind === "board" && videoDuration?.kind === "provider-default") {
+  // A board and a shot's clip are both filed as covering an authored length, so neither can
+  // ride a provider that picks its own.
+  const timed = session.subject?.kind === "board" || (session.subject?.kind === "shot" && params.kind === "video");
+  if (timed && videoDuration?.kind === "provider-default") {
     return {
       ok: false,
-      reason: `${model.displayName} does not offer a fixed duration for this board.`,
+      reason: `${model.displayName} does not offer a fixed duration for this ${session.subject?.kind === "board" ? "board" : "shot"}.`,
     };
   }
   if (videoDuration?.kind === "over-cap") {

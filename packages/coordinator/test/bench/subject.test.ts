@@ -615,6 +615,34 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
       }),
       { ok: false, reason: "Default Duration Video does not offer a fixed duration for this board." },
     );
+
+    // A shot's clip is filed as covering the shot's length, so it is held to the same rule.
+    const shotPrepared = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: { ...MANIFEST, models: [IMAGE_MODEL, model] },
+      sources: sourceReader,
+    });
+    assert.ok(shotPrepared.ok);
+    if (!shotPrepared.ok) return;
+    const shotSession = {
+      ...session,
+      id: newId("sess"),
+      ...shotPrepared.prefill,
+      tokenRegistry: shotPrepared.prefill.references,
+      subjectTokens: shotPrepared.prefill.references.map((reference) => reference.token),
+    } as BenchSession;
+    assert.deepEqual(
+      planBenchDispatch(shotSession, world, { ...MANIFEST, models: [IMAGE_MODEL, model] }, {
+        worldId: store.worldId,
+        requestId: "default-duration-shot",
+        at: CLOCK(),
+      }),
+      { ok: false, reason: "Default Duration Video does not offer a fixed duration for this shot." },
+    );
   });
 
   it("recomputes subject riding lanes for the newly chosen model", async () => {

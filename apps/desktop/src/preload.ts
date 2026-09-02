@@ -229,6 +229,11 @@ const bridge = {
           ? Uint8Array.from(raw as number[])
           : null;
     if (!view) return { ok: false, reason: "the app could not read what was pasted" };
+    // send() drops a frame on a closed socket without a word; a playblast that took the shot's
+    // length to record must not be reported filed when nothing carried it.
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, reason: "not connected to the app — try again in a moment" };
+    }
     const result = (await ipcRenderer
       .invoke("arke:spool", { name, bytes: view })
       .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };

@@ -302,6 +302,12 @@ async function fileBenchSubjectTakeUnserialised(
     if ((shot?.durationSec ?? 4) !== shotSubject.durationSec) {
       throw new Error("the shot timing changed in this scene; rebuild and generate a current take");
     }
+    // The member was frozen with the take; a subject rebuilt to a longer shot since then would
+    // pass the check above and file a clip that stops short of the shot it is filed for.
+    const member = filing.members[0]!;
+    if (member.startSec !== 0 || member.endSec < shotSubject.durationSec) {
+      throw new Error("the shot timing changed since this take; rebuild and generate a current take");
+    }
   }
   if (filing.kind === "board" && boardSubject !== null) {
     const first = currentShots.findIndex((shot) => shot.id === filing.members[0]?.shotId);

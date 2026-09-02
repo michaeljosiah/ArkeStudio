@@ -100,14 +100,20 @@ export function stageShot(
 }
 
 /** The move in one word, read off what the keys actually do. */
-export function stagingMoveWord(keys: readonly StagingKey[]): string {
+export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly ShotStaging["cast"][number][] = []): string {
   if (keys.length < 2) return "static";
   const first = keys[0]!;
   const last = keys[keys.length - 1]!;
   const dx = Math.abs(last.p[0] - first.p[0]);
   const dy = Math.abs(last.p[1] - first.p[1]);
   const dz = Math.abs(last.p[2] - first.p[2]);
-  if (dx < 0.15 && dy < 0.15 && dz < 0.15) return keys.length > 2 && sweep(keys) > 50 ? "orbit" : "static";
+  if (dx < 0.15 && dy < 0.15 && dz < 0.15) {
+    if (keys.length > 2 && sweep(keys) > 50) return "orbit";
+    // The same offset from a figure who walks is a camera that walks with them: it holds its
+    // frame and crosses the set, which is a tracking shot and not a static one.
+    const rides = keys.every((key) => key.anchor !== undefined && cast.find((figure) => figure.sheetId === key.anchor)?.to !== undefined);
+    return rides ? "tracking" : "static";
+  }
   if (sweep(keys) > 50) return "orbit";
   if (dy >= dx && dy >= dz) return "crane";
   if (dx > dz) return "truck";
@@ -199,10 +205,12 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotS
   if (staging.keys.length === 0) return staging;
   const last = staging.keys.length - 1;
   if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
+  // Interior keys that still fit stay where they are; if any no longer does, the whole move is
+  // scaled to the new length instead of clamped, so no two keys land on one moment.
+  const fits = staging.keys.every((key, index) => index === last || key.t < durationSec);
+  const scale = staging.keys[last]!.t > 0 ? durationSec / staging.keys[last]!.t : 0;
   const keys = staging.keys.map((key, index) =>
-    index === last
-      ? { ...key, t: round(durationSec) }
-      : key.t >= durationSec ? { ...key, t: round(Math.max(0, durationSec - 0.1 * (last - index))) } : key,
+    index === last ? { ...key, t: round(durationSec) } : fits ? key : { ...key, t: round(key.t * scale) },
   );
   return { ...staging, keys };
 }
@@ -212,7 +220,7 @@ export function stagingPromptClause(staging: ShotStaging, nameOf: (sheetId: stri
   const walkers = staging.cast.filter((figure) => figure.to !== undefined).map((figure) => nameOf(figure.sheetId));
   const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
   return [
-    `Camera move, ${stagingMoveWord(staging.keys)}, blocked out on the stage (${staging.keys.length} keys).${walk}`,
+    `Camera move, ${stagingMoveWord(staging.keys, staging.cast)}, blocked out on the stage (${staging.keys.length} keys).${walk}`,
     ...stagingBeats(staging, nameOf),
   ].join("\n");
 }
