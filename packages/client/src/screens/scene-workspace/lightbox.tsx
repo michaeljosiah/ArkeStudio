@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
+  effectiveFraming,
   DEFAULT_SHOT_SEC,
   hasOwnFrame,
   orderedShots,
@@ -102,6 +103,8 @@ export function ShotLightbox({
   const path = shotFramePath(production, artifacts, shot.id);
   const src = path === null || worldSlug === undefined ? null : mediaUrl(worldSlug, path);
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
+  // The lens the shot actually has, inherited from the scene when it sets none of its own.
+  const lens = effectiveFraming(scene, shot).lens;
   return (
     <dialog
       ref={dialog}
@@ -115,7 +118,7 @@ export function ShotLightbox({
           <span className="fy-swlightbox__label">shot {shot.number}</span>
           <span className="fy-swlightbox__title">{shot.title}</span>
           <span className="fy-swlightbox__chip">
-            {aspect} · {durationSec.toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
+            {aspect} · {durationSec.toFixed(1)}s{lens === undefined ? "" : ` · ${lens}`}
           </span>
           <button type="button" className="fy-swlightbox__close" aria-label="Close" onClick={onClose}><X size={13} /></button>
         </div>

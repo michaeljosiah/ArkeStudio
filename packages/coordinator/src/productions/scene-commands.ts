@@ -280,7 +280,9 @@ async function candidateFor(
       // its beats) describing seconds the shot no longer has. The version moves with it, which
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
-      const retimed = command.change.durationSec !== undefined && command.change.staging === undefined && current?.staging !== undefined
+      // Present-with-undefined is a clear (sceneCommandFrom), and a clear is honoured: only a
+      // change that says nothing about the staging has it retimed.
+      const retimed = command.change.durationSec !== undefined && !("staging" in command.change) && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec)
         : undefined;
       const change = retimed === undefined || retimed === current?.staging

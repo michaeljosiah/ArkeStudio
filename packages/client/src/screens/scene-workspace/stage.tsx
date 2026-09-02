@@ -400,15 +400,21 @@ export function SceneStage({
       return figure === undefined ? undefined : figureAt(figure, activeKey.t, durationSec);
     };
     const base = standingOf(activeKey.anchor);
+    // The anchor is the camera's ride; what it looks at is its own channel and does not change
+    // here. A free aim lives in the same space as the camera, so it is carried across with it;
+    // a tracked aim is a figure and needs no carrying.
+    const freeAim = activeKey.track === undefined;
     const world: [number, number, number] = base === undefined ? [...activeKey.p] : [round(activeKey.p[0] + base.x), activeKey.p[1], round(activeKey.p[2] + base.z)];
+    const aim: [number, number, number] = base === undefined || !freeAim ? [...activeKey.l] : [round(activeKey.l[0] + base.x), activeKey.l[1], round(activeKey.l[2] + base.z)];
     if (sheetId === null) {
-      const { anchor: _anchor, ...free } = activeKey;
-      patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...free, p: world } : key)) }));
+      const { anchor: _anchor, ...rest } = activeKey;
+      patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...rest, p: world, l: aim } : key)) }));
       return;
     }
     const subject = standingOf(sheetId);
     const offset: [number, number, number] = subject === undefined ? world : [round(world[0] - subject.x), world[1], round(world[2] - subject.z)];
-    patchKey(active, { anchor: sheetId, track: sheetId, p: offset });
+    const look: [number, number, number] = subject === undefined || !freeAim ? aim : [round(aim[0] - subject.x), aim[1], round(aim[2] - subject.z)];
+    patchKey(active, { anchor: sheetId, p: offset, l: look });
   };
   const toggleWalk = (sheetId: string) =>
     patch((current) => ({
@@ -434,6 +440,10 @@ export function SceneStage({
       // take is never filed as the whole shot.
       if (viewport.current !== view) {
         setNote("export stopped — the shot changed");
+        return;
+      }
+      if (blob.size === 0) {
+        setNote("the recording came back empty — export it again");
         return;
       }
       const outcome = await stagePlayblast(

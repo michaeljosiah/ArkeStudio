@@ -15,11 +15,11 @@ const SCENE = "sc_04";
 const SHOT = "sh_12";
 
 /** Any bytes will do: filing hashes and copies, it does not decode. The extension names the kind. */
-async function playblastFile(): Promise<string> {
+async function playblastFile(bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5, 6, 7, 8])): Promise<string> {
   const dir = await tempDir("stage-playblast-");
   await mkdir(dir, { recursive: true });
   const path = join(dir, "playblast.webm");
-  await writeFile(path, new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5, 6, 7, 8]));
+  await writeFile(path, bytes);
   return path;
 }
 
@@ -143,6 +143,25 @@ describe("filing a playblast from the Stage", () => {
         sourcePath: await playblastFile(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /moved to v1 .* export it again/);
+      assert.equal(bundle().artifacts.length, shelfBefore);
+      assert.equal(shot().shot.staging?.playblast, undefined);
+
+      // A recorder that stopped without a chunk: nothing to pin, and nothing pinned.
+      const empty = await playblastFile(new Uint8Array());
+      await send({
+        kind: "stage-playblast",
+        worldId: WORLD_ID,
+        productionId: PRODUCTION,
+        sceneFile: SCENE_FILE,
+        sceneId: SCENE,
+        baseVersion: shot().scene.version,
+        shotId: SHOT,
+        durationSec: 4,
+        aspect: "16:9",
+        stagingVersion: 1,
+        sourcePath: empty,
+      });
+      assert.match(refusals().at(-1)?.reason ?? "", /came back empty/);
       assert.equal(bundle().artifacts.length, shelfBefore);
       assert.equal(shot().shot.staging?.playblast, undefined);
     } finally {

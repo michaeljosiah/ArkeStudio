@@ -58,6 +58,9 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
     }
     const bytes = await readFile(input.sourcePath).catch(() => null);
     if (bytes === null) return refused(`${input.sourcePath} is not readable`);
+    // A recorder that stopped without a chunk hands over an empty file; pinned, it would read
+    // as the current playblast and ride into a session with nothing in it.
+    if (bytes.byteLength === 0) return refused("the recording came back empty — export it again");
 
     const id = `ar_${ulid()}`;
     const file = `playblast-${input.shotId}-${id.slice(-8).toLowerCase()}.webm`;

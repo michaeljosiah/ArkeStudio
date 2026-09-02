@@ -1085,7 +1085,8 @@ export class StageViewport {
     }
     for (const mark of this.marks) {
       const key = this.data.keys[mark.index];
-      if (key !== undefined) mark.mesh.position.copy(this.keyWorld(key, at));
+      // A marker stands where its key is, at its key's time — never where the anchor is now.
+      if (key !== undefined) mark.mesh.position.copy(this.keyWorld(key, key.t));
     }
     this.drawPath();
   }

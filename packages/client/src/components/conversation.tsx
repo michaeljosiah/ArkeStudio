@@ -578,8 +578,9 @@ export function ProductionConversation({
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
   const say = (text: string) => {
     if (!text || !worldId || !productionId) return;
-    // A second line said while the first is still opening its thread would open a second one.
-    if (opening) return;
+    // A second line said while the first is still opening its thread would open a second one,
+    // and one said over a running turn starts a second turn the first can no longer stop.
+    if (opening || running) return;
     /*
      * No thread yet: the first thing said opens one and is then said into it. Creating does not
      * take a turn — it only names the conversation — so without the send that follows, the
@@ -738,7 +739,7 @@ export function ProductionConversation({
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
               {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null} onClick={() => say(prompt)}>
+                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running} onClick={() => say(prompt)}>
                   {prompt}
                 </button>
               ))}

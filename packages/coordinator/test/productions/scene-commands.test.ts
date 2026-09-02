@@ -466,6 +466,16 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
       command: { kind: "edit-shot", shotId: target.id, change: { title: "Retitled" } },
     });
     assert.equal(orderedShots(await sceneOnDisk(store))[1]!.staging?.version, 2, "an edit that is not a retime moves nothing");
+    // A clear said in the same edit as the retime is a clear: present-with-undefined is honoured.
+    const cleared = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: cleared.version,
+      command: sceneCommandFrom({ kind: "edit-shot", shotId: target.id, change: { durationSec: 3 }, clear: ["staging"] }),
+    });
+    const bare = orderedShots(await sceneOnDisk(store))[1]!;
+    assert.equal(bare.durationSec, 3);
+    assert.equal(bare.staging, undefined, "the retime does not resurrect a staging the edit cleared");
   });
 });
 
