@@ -164,11 +164,6 @@
   outline-offset: 2px;
 }
 
-/* A row that is the sounding clip. Tint only — the geometry must not move. */
-.fy-audiorow--live {
-  background: var(--muted);
-}
-
 /* ---- Actions under a block of text ---------------------------
    Out of the way until the text is under the pointer. Hidden with
    opacity, never display, so revealing them shifts nothing. */

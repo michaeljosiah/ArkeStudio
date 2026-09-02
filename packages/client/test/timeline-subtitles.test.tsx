@@ -12,13 +12,14 @@ import {
   type ProductionTimeline,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen, ExportsScreen } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
- * Subtitles on the editor and the export sheet (SPEC-038 R-21..R-27; SPEC-039 R-19b, R-21;
+ * Subtitles on the editor and the export sheet (SPEC-038 R-21..R-27; SPEC-039 R-19b, R-21, T-5;
  * issue 683): cues sit on the Subtitles lane, the viewed cue shows over the preview, a cue's
- * words and timing are authored as commands, and delivery is a choice the export names.
+ * words and timing are authored as commands, and delivery is a choice the export sheet names —
+ * the sheet the Exports address now opens, since the Exports screen is gone.
  */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -52,12 +53,13 @@ function bridge(sent: ClientMessage[]) {
   } as unknown as NonNullable<Window["arke"]>;
 }
 
-async function mount(state: ClientState, screen: "cut" | "exports"): Promise<Mounted> {
+/** The editor; `?export=1` lands with the sheet up, exactly as the Exports address does (SPEC-039 R-1). */
+async function mount(state: ClientState, search = ""): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(bridge(sent));
   __setStateForTest(state);
   const production = state.world!.productions[0]!;
-  const path = `/w/${state.world!.meta.worldId}/p/${production.meta.id}/${screen}`;
+  const path = `/w/${state.world!.meta.worldId}/p/${production.meta.id}/cut${search}`;
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -66,7 +68,6 @@ async function mount(state: ClientState, screen: "cut" | "exports"): Promise<Mou
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} />
-          <Route path="/w/:worldId/p/:prodId/exports" element={<ExportsScreen />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -91,6 +92,34 @@ function commandsSent(mounted: Mounted): Extract<ClientMessage, { kind: "timelin
   return mounted.sent.filter((message): message is Extract<ClientMessage, { kind: "timeline-command" }> => message.kind === "timeline-command");
 }
 
+function sheet(mounted: Mounted): HTMLElement {
+  const found = mounted.container.querySelector<HTMLElement>('[data-testid="export-sheet"]');
+  assert.ok(found, "the export sheet is up");
+  return found;
+}
+
+/** One chip group on the sheet, as label and pressed state. */
+function chips(mounted: Mounted, group: string): Array<[string, string | null]> {
+  return [...sheet(mounted).querySelectorAll<HTMLButtonElement>(`[aria-label="${group}"] .fy-exsheet__chip`)].map((chip) => [
+    chip.textContent ?? "",
+    chip.getAttribute("aria-pressed"),
+  ]);
+}
+
+function exportPrimary(mounted: Mounted): HTMLButtonElement {
+  const found = [...mounted.container.querySelectorAll<HTMLButtonElement>(".fy-libpick__confirm")].find((candidate) =>
+    (candidate.textContent ?? "").startsWith("Export"),
+  );
+  assert.ok(found, "the sheet's primary is rendered");
+  return found;
+}
+
+function exportRequest(mounted: Mounted): Extract<ClientMessage, { kind: "export-cut" }> {
+  const request = mounted.sent.find((message) => message.kind === "export-cut");
+  assert.ok(request && request.kind === "export-cut", "the export was sent");
+  return request;
+}
+
 function subtitledState(): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
@@ -111,7 +140,7 @@ afterEach(() => {
 describe("subtitles on the editor (issue 683)", () => {
   it("draws cues on the Subtitles lane, shows the current cue over the preview, and edits by command", async () => {
     const state = subtitledState();
-    const mounted = await mount(state, "cut");
+    const mounted = await mount(state);
     try {
       const row = mounted.container.querySelector<HTMLElement>("[data-track='subtitles'][data-track-id='tr_subs-en']");
       assert.ok(row, "the language track is a row");
@@ -135,7 +164,7 @@ describe("subtitles on the editor (issue 683)", () => {
 
   it("adds a cue at the playhead from the row and offers the sources from the Inspector", async () => {
     const state = subtitledState();
-    const mounted = await mount(state, "cut");
+    const mounted = await mount(state);
     try {
       // The playhead sits at frame 0, inside cu_one, so the row cannot add there.
       assert.equal(byLabel(mounted, "Add subtitle at 00:00:00:00").disabled, true);
@@ -162,18 +191,26 @@ describe("subtitles on the editor (issue 683)", () => {
     }
   });
 
-  it("names the subtitle delivery on the export and passes it with the request", async () => {
+  it("names the subtitle delivery on the export sheet and passes it with the request", async () => {
     const state = subtitledState();
-    const mounted = await mount(state, "exports");
+    const mounted = await mount(state, "?export=1");
     try {
-      const block = mounted.container.querySelector(".fy-subtitle-delivery");
-      assert.ok(block, "a saved timeline with subtitles offers delivery choices");
+      // Delivery is a choice (SPEC-038 R-27): none until it is made, and one language needs no track choice.
+      assert.deepEqual(chips(mounted, "Subtitle output"), [
+        ["Burned in", "false"],
+        ["Sidecar", "false"],
+        ["Both", "false"],
+        ["None", "true"],
+      ]);
+      assert.equal(sheet(mounted).querySelector('[aria-label="Subtitle track"]'), null, "one track is not a choice");
+      assert.deepEqual(chips(mounted, "Sidecar format"), [], "no sidecar format until a sidecar is asked for");
       await act(async () => byLabel(mounted, "Both").click());
-      const exportButton = [...mounted.container.querySelectorAll<HTMLButtonElement>("button.ui-btn--primary")].find((node) => node.textContent?.startsWith("Export"));
-      assert.ok(exportButton);
-      await act(async () => exportButton.click());
-      const request = mounted.sent.find((message) => message.kind === "export-cut");
-      assert.ok(request && request.kind === "export-cut");
+      assert.deepEqual(chips(mounted, "Sidecar format"), [
+        [".srt", "true"],
+        [".vtt", "false"],
+      ]);
+      await act(async () => exportPrimary(mounted).click());
+      const request = exportRequest(mounted);
       assert.deepEqual(request.subtitles, { trackId: "tr_subs-en", mode: "burn-in+sidecar", sidecar: "srt" });
       assert.equal(request.timelineRevision, 1);
     } finally {
@@ -181,10 +218,42 @@ describe("subtitles on the editor (issue 683)", () => {
     }
   });
 
-  it("offers no subtitle delivery before a timeline exists", async () => {
-    const mounted = await mount(structuredClone(FIXTURE_STATE) as ClientState, "exports");
+  it("offers the track once there are two languages, and the sidecar's format", async () => {
+    const state = subtitledState();
+    const production = state.world!.productions[0]!;
+    const saved = production.timeline;
+    assert.ok(saved && saved.status === "ready");
+    production.timeline = {
+      status: "ready",
+      timeline: applyTimelineCommands(saved.timeline, [{ kind: "add-subtitle-track", trackId: "tr_subs-fr", name: "Français", language: "fr" }]),
+    };
+    const mounted = await mount(state, "?export=1");
     try {
-      assert.equal(mounted.container.querySelector(".fy-subtitle-delivery"), null);
+      const track = sheet(mounted).querySelector<HTMLSelectElement>('select[aria-label="Subtitle track"]');
+      assert.ok(track, "two languages make the track a choice");
+      const options = [...track.querySelectorAll<HTMLOptionElement>("option")];
+      assert.deepEqual(options.map((option) => option.textContent), ["English · en", "Français · fr"]);
+      // linkedom's select has no value setter; choosing the option is what a person does anyway.
+      await act(async () => {
+        options.find((option) => option.value === "tr_subs-fr")!.selected = true;
+        track.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      });
+      await act(async () => byLabel(mounted, "Sidecar").click());
+      await act(async () => byLabel(mounted, ".vtt").click());
+      await act(async () => exportPrimary(mounted).click());
+      const request = exportRequest(mounted);
+      assert.deepEqual(request.subtitles, { trackId: "tr_subs-fr", mode: "sidecar", sidecar: "vtt" });
+      assert.equal(request.timelineRevision, 2);
+    } finally {
+      await close(mounted);
+    }
+  });
+
+  it("offers no subtitle delivery before a timeline exists", async () => {
+    const mounted = await mount(structuredClone(FIXTURE_STATE) as ClientState, "?export=1");
+    try {
+      assert.equal(sheet(mounted).querySelector(".fy-exsheet__none")?.textContent, "no subtitle track");
+      assert.deepEqual(chips(mounted, "Subtitle output"), [], "no mode to choose without a track");
     } finally {
       await close(mounted);
     }
