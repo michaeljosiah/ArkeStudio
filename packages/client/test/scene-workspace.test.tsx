@@ -899,6 +899,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       const mentions = dom.document.querySelector('[data-testid="bench-mentions"]') as unknown as HTMLElement | null;
       assert.ok(mentions, "the in-place script opens its attached-reference picker");
       assert.equal(mentions.parentElement, dom.document.body, "the picker uses viewport coordinates outside the query container");
+      assert.ok(mentions.querySelector(".fy-bench__mentionthumb img"), "mention rows show their sheet portraits (#720)");
       await click(mentions.querySelector('[role="option"]') as unknown as HTMLElement);
       assert.equal(dom.document.querySelector('[data-testid="bench-mentions"]'), null, "choosing a mention closes the portal");
       assert.equal(script.value, "@maren-kest grips the rail of @the-vigil.", "a portaled suggestion still completes the in-place script");

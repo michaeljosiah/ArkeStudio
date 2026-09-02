@@ -816,6 +816,7 @@ function Row({
     kind: "image" as const,
     name: sheet.name,
     meta: `${sheet.type} · v${sheet.version}`,
+    imagePath: sheet.type === "location" ? locationPortraitPath(world, sheet.id) : characterPortraitPath(world, sheet.id),
   }));
   const disabled = locked || staged;
   const menuOpen = menu || confirmDelete;
