@@ -902,9 +902,9 @@ export class JobQueue {
     const submissionRejected =
       typeof err === "object" && err !== null && (err as { submissionRejected?: unknown }).submissionRejected === true;
     if (submissionRejected && klass === "terminal") {
-      // A witnessed request/content rejection is terminal. A witnessed 429/5xx still takes the
-      // transient branch below, and a credential fault returns to queued behind a paused lane —
-      // response-witnessed does not mean every class has the same remedy.
+      // A witnessed request/content rejection is terminal. A witnessed 429 still takes the
+      // transient branch below, and a credential fault returns to queued behind a paused lane.
+      // A 5xx never reaches this branch: a response alone does not prove paid work was rejected.
       await this.terminalize(job, "failed", message, undefined, klass);
       return;
     }
