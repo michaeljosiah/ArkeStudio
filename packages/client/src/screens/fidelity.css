@@ -1948,6 +1948,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   height: 326px;
   flex: none;
   min-height: 0;
+  /* The cue sizes itself against the picture (cqh); the box has fixed dimensions, so nothing collapses. */
+  container-type: size;
   border: 1px solid var(--border);
   border-radius: 11px;
   overflow: hidden;

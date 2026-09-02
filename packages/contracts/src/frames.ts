@@ -2073,7 +2073,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("timeline-command"),
       worldId: UlidSchema,
       productionId: SlugSchema,
-      commands: z.array(TimelineCommandSchema).min(1).max(50),
+      /**
+       * Empty only with a null `baseRevision`: it materialises the first assembly as it stands
+       * (SPEC-037 R-13), which is how a music-timed production opens on the timeline before any
+       * edit. Against a saved record an empty batch changes nothing and is refused.
+       */
+      commands: z.array(TimelineCommandSchema).max(50),
       baseRevision: z.number().int().min(0).nullable(),
       sourceFingerprint: TimelineSourceFingerprintSchema,
       /** What the history entry calls this action; derived from the commands when absent. */

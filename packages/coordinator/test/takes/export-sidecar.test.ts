@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runExport, type FfmpegRunner } from "../../src/takes/export.js";
 import { tempDir } from "../tmp.js";
@@ -66,5 +66,24 @@ describe("subtitle sidecars beside an export", () => {
     const failed = await runExport(worldDir, args, "failed.mp4", failing, () => {}, sidecar).done;
     assert.equal(failed.status, "failed");
     await assert.rejects(() => stat(join(worldDir, "exports", "film.en.srt")));
+  });
+});
+
+describe("a sidecar that cannot be published takes the video with it", () => {
+  it("removes the already-published video when the sidecar rename fails", async () => {
+    const worldDir = await tempDir("arke-sidecar-");
+    // A directory where the sidecar must land: rename refuses it on every platform.
+    await mkdir(join(worldDir, "exports", sidecar.name), { recursive: true });
+    const runner: FfmpegRunner = {
+      slateFont: font,
+      run: async (argv) => {
+        await writeFile(argv[argv.length - 1]!, "rendered");
+      },
+    };
+    const result = await runExport(worldDir, args, "film.mp4", runner, () => {}, sidecar).done;
+    assert.equal(result.status, "failed", "both or neither (SPEC-038 A-10)");
+    await assert.rejects(() => stat(join(worldDir, "exports", "film.mp4")), "the video does not stay behind without its subtitles");
+    const staged = await readdir(join(worldDir, ".cache", "exports")).catch(() => [] as string[]);
+    assert.deepEqual(staged, [], "the stage is clean");
   });
 });

@@ -6744,18 +6744,78 @@ export class Coordinator {
             );
             return;
           }
-          if (
-            timeline !== undefined &&
-            timeline.status !== "absent" &&
-            (spine !== null || msg.episodeId !== undefined)
-          ) {
-            const reason =
-              timeline.status === "invalid"
-                ? `timeline is invalid: ${timeline.message}`
-                : msg.episodeId !== undefined
-                  ? "episode ranges do not consume the saved Picture timeline in this release"
-                  : "music-timed delivery does not consume the saved Picture timeline in this release";
-            emitProgress(attemptId, "failed", 0, null, `timeline is not ready for this export: ${reason}`);
+          if (timeline !== undefined && timeline.status === "invalid") {
+            emitProgress(attemptId, "failed", 0, null, `timeline is not ready for this export: timeline is invalid: ${timeline.message}`);
+            return;
+          }
+          /*
+           * Every delivery scope reads one plan once the timeline is saved (SPEC-038 R-3, R-33;
+           * issue 682): production is the full used range, an episode is that plan windowed to
+           * its validated contiguous range, and a music-timed production mixes its master with the
+           * edited picture rather than replacing it. A refusal is the plan's own words.
+           */
+          if (timeline?.status === "ready") {
+            const projected = buildRenderPlan({
+              production,
+              artifacts: store.getBundle().artifacts,
+              timeline,
+              scope: msg.episodeId !== undefined ? { kind: "episode", episodeId: msg.episodeId } : { kind: "production" },
+              preset: msg.preset,
+              ...(msg.subtitles !== undefined ? { subtitles: msg.subtitles } : {}),
+            });
+            if (!projected.ok) {
+              emitProgress(attemptId, "failed", 0, null, `timeline is not ready to export: ${projected.reason}`);
+              return;
+            }
+            const plan = projected.plan;
+            if (plan.items.length === 0) {
+              emitProgress(attemptId, "failed", 0, null, "nothing to export: the timeline holds no picture in this range");
+              return;
+            }
+            const delivered = plan.subtitles;
+            const sidecar =
+              delivered !== null && (delivered.mode === "sidecar" || delivered.mode === "burn-in+sidecar")
+                ? (stem: string) => ({ name: `${stem}.${delivered.language}.${delivered.sidecar}`, text: serializeTimedText(delivered.cues, delivered.sidecar) })
+                : null;
+            const stamp = new Date()
+              .toISOString()
+              .replace(/[-:TZ.]/g, "")
+              .slice(0, 14);
+            const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
+            const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${stamp}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${stamp}`;
+            const handle = runExport(
+              store.dir,
+              (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
+              `${stem}.mp4`,
+              runner,
+              (percent) => emitProgress(handle.id, "running", percent, null, null),
+              sidecar === null ? undefined : sidecar(stem),
+            );
+            this.exports.set(handle.id, handle);
+            emitProgress(handle.id, "running", 0, null, null);
+            started = true;
+            this.trackBackground(
+              handle.done.then((result) => {
+                this.exports.delete(handle.id);
+                this.exportsInFlight.delete(exportKey);
+                if (result.status === "done") {
+                  this.emit({
+                    at: new Date().toISOString(),
+                    type: "export.progress",
+                    worldId: msg.worldId,
+                    productionId: msg.productionId,
+                    ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
+                    exportId: handle.id,
+                    status: "done",
+                    percent: 100,
+                    output: result.output,
+                    ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                    error: null,
+                  });
+                } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
+                else emitProgress(handle.id, "failed", 0, null, result.error);
+              }),
+            );
             return;
           }
           const trackArtifact = spine
@@ -7039,21 +7099,60 @@ export class Coordinator {
             commands.push({ kind: "add-subtitle-track", trackId: msg.trackId, name: `Subtitles (${msg.language})`, language: msg.language });
           }
           const at = new Date().toISOString();
+          const ffmpeg = this.opts.ffmpeg;
           for (const clip of dialogue) {
             let path: string | null = null;
+            let sourceLengthSec: number | null = null;
             if (clip.source.kind === "take") {
               const take = takesById.get(clip.source.takeId);
-              if (take?.media !== undefined) path = join(store.dir, "productions", production.meta.id, "takes", take.id, take.media);
+              if (take?.media !== undefined) {
+                path = join(store.dir, "productions", production.meta.id, "takes", take.id, take.media);
+                sourceLengthSec = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec ?? null;
+              }
             } else if (clip.source.kind === "artifact") {
               const artifactId = clip.source.artifactId;
               const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
-              if (artifact !== undefined) path = join(store.dir, "artifacts", fromPortable(artifact.file));
+              if (artifact !== undefined) {
+                path = join(store.dir, "artifacts", fromPortable(artifact.file));
+                sourceLengthSec = artifact.mediaInfo?.durationSec ?? null;
+              }
             }
             if (path === null) continue;
-            const extension = path.toLowerCase().split(".").pop() ?? "";
-            const contentType =
-              extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "audio/wav";
-            const audio = await readFile(toExtendedLength(path));
+            /*
+             * The words the model hears must be the words the clip plays (round three). A clip
+             * that starts into its source, or stops short of its end, is windowed through ffmpeg
+             * before it is heard; only a clip that plays its whole source is read as the file.
+             * With no ffmpeg there is no window, and the clip is refused by name rather than
+             * transcribed with speech it never plays.
+             */
+            const sourceInSec = clip.sourceInFrames / record.frameRate;
+            const clipSec = clip.durationFrames / record.frameRate;
+            const wholeSource =
+              clip.sourceInFrames === 0 && (sourceLengthSec === null || clipSec >= sourceLengthSec - 1 / record.frameRate);
+            let audio: Buffer;
+            let contentType: string;
+            if (wholeSource) {
+              const extension = path.toLowerCase().split(".").pop() ?? "";
+              contentType =
+                extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "audio/wav";
+              audio = await readFile(toExtendedLength(path));
+            } else {
+              if (ffmpeg === undefined) throw new Error(`${clip.id} plays part of its source, and ffmpeg is needed to transcribe only that part`);
+              const windowDir = join(store.dir, ".cache", "transcribe");
+              const windowed = join(windowDir, `${ulid()}.wav`);
+              await mkdir(toExtendedLength(windowDir), { recursive: true });
+              try {
+                await ffmpeg.run(
+                  ["-y", "-ss", String(sourceInSec), "-t", String(clipSec), "-i", path, "-vn", "-ac", "1", "-ar", "16000", windowed],
+                  () => {},
+                  new AbortController().signal,
+                );
+                audio = await readFile(toExtendedLength(windowed));
+              } finally {
+                await rm(toExtendedLength(windowed), { force: true }).catch(() => {});
+              }
+              contentType = "audio/wav";
+            }
             const text = (await this.voiceService.transcribe(Uint8Array.from(audio), contentType)).trim();
             if (text === "") continue;
             commands.push({

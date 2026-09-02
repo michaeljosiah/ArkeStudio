@@ -208,8 +208,8 @@ describe("subtitle tracks and cues (#683)", () => {
     if (!burned.ok) return;
     const graph = buildFfmpegArgs(burned.plan, "/w", "/out.mp4", "/f.ttf");
     const filters = graph[graph.indexOf("-filter_complex") + 1]!;
-    assert.match(filters, /\[out\]drawtext=expansion=none:fontfile=\/f\.ttf:text='Hello  harbour\.':fontcolor=0xffffff:fontsize=49:x=\(w-tw\)\/2:y=h-th-65:borderw=2:bordercolor=black:enable='between\(t,0\.4,2\)'\[st0\]/);
-    assert.match(filters, /\[st0\]drawtext=[^;]*text='The bells  far under\.'[^;]*enable='between\(t,2\.4,4\.8\)'\[st1\]/, "a line break becomes a space on the way to the pixels");
+    assert.match(filters, /\[out\]drawtext=expansion=none:fontfile=\/f\.ttf:text='Hello, harbour\.':fontcolor=0xffffff:fontsize=49:x=\(w-tw\)\/2:y=h-th-65:borderw=2:bordercolor=black:enable='between\(t,0\.4,2\)'\[st0\]/);
+    assert.match(filters, /\[st0\]drawtext=[^;]*text='The bells, far under\.'[^;]*enable='between\(t,2\.4,4\.8\)'\[st1\]/, "a line break becomes a space on the way to the pixels");
     assert.equal(graph[graph.indexOf("-map") + 1], "[st1]", "the burned picture is what is encoded");
     assert.equal(JSON.stringify(timeline), before, "burn-in changed no saved cue");
 

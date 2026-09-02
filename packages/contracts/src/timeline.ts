@@ -4,6 +4,7 @@ import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { orderedShots } from "./scene-flow.js";
 import { ShotSelectionSchema, sortScenes } from "./scene.js";
+import { orderedAnchors, type ProductionSpine } from "./spine.js";
 import { FrameRateSchema, productionFrameRate, type FrameRate } from "./world.js";
 import {
   DEFAULT_SUBTITLE_STYLE,
@@ -24,7 +25,7 @@ export type TimelineTrackKind = z.infer<typeof TimelineTrackKindSchema>;
 
 export type TimelineTrackId = `tr_${string}`;
 export type TimelineClipId = `cl_${string}`;
-export const TimelineSourceFingerprintSchema = z.string().regex(/^story-picture-v1:[0-9a-f]{16}$/);
+export const TimelineSourceFingerprintSchema = z.string().regex(/^(story|spine)-picture-v1:[0-9a-f]{16}$/);
 
 export const TimelineTrackIdSchema = z
   .string()
@@ -581,13 +582,13 @@ function shotDurationFrames(durationSec: number | undefined, frameRate: FrameRat
   return Math.max(1, secondsToFrames(durationSec ?? DEFAULT_SHOT_SEC, frameRate));
 }
 
-function sourceFingerprint(value: string): string {
+function sourceFingerprint(value: string, clock: "story" | "spine" = "story"): string {
   let hash = 0xcbf29ce484222325n;
   for (let index = 0; index < value.length; index += 1) {
     hash ^= BigInt(value.charCodeAt(index));
     hash = BigInt.asUintN(64, hash * 0x100000001b3n);
   }
-  return `story-picture-v1:${hash.toString(16).padStart(16, "0")}`;
+  return `${clock}-picture-v1:${hash.toString(16).padStart(16, "0")}`;
 }
 
 /** Exactly the source fields that determine the first Picture assembly, in their effective order. */
@@ -599,6 +600,145 @@ export function storyTimelineFingerprint(production: ProductionBundle): string {
       orderedStoryShots(production).map(({ shot }) => [shot.id, shotDurationFrames(shot.durationSec, frameRate)]),
     ]),
   );
+}
+
+/**
+ * Exactly the source fields that determine the first music-timed assembly (SPEC-037 R-13, R-32):
+ * the clock, the master and its measured length, and every anchor in play order with its sound
+ * policy. Measured, not authored: a spine whose track is unmeasured has no first assembly yet.
+ */
+export function spineTimelineFingerprint(production: ProductionBundle, spine: ProductionSpine, trackDurationSec: number): string {
+  const frameRate = productionFrameRate(production.meta);
+  return sourceFingerprint(
+    JSON.stringify([
+      frameRate,
+      spine.trackArtifactId,
+      trackDurationSec,
+      orderedAnchors(spine).map(({ shotId, anchor }) => [
+        shotId,
+        anchor.startSec,
+        anchor.endSec,
+        anchor.clipAudio.mode,
+        anchor.clipAudio.mode === "keep-diegetic" ? anchor.clipAudio.gainDb : null,
+      ]),
+    ]),
+    "spine",
+  );
+}
+
+/**
+ * The fence for the first materialising command, on whichever clock the production runs. A
+ * music-timed production needs its master measured before it has a first assembly at all.
+ */
+export function timelineSourceFingerprint(production: ProductionBundle, trackDurationSec: number | null): string | null {
+  if (production.spine === null) return storyTimelineFingerprint(production);
+  if (trackDurationSec === null) return null;
+  return spineTimelineFingerprint(production, production.spine, trackDurationSec);
+}
+
+/**
+ * The first music-timed assembly (R-13): the spine's anchors as Picture clips, on the frame grid,
+ * and the master as a Music clip across the whole song. Overlapping anchors resolve exactly as
+ * the spine cut resolves them — the earlier one keeps the seconds, the later one starts where it
+ * ends — and an anchor for a shot that no longer exists is not a clip, because there is nothing
+ * for it to play. The track remembers the song's end, so a song that outruns its picture stays
+ * the length of the song.
+ */
+export function seedSpinePictureTimeline(production: ProductionBundle, spine: ProductionSpine, trackDurationSec: number): ProductionTimeline {
+  const frameRate = productionFrameRate(production.meta);
+  const shots = new Map<string, { sceneNumber: number; shot: { id: string; number: number; title: string } }>();
+  for (const scene of sortScenes(production.scenes)) {
+    for (const shot of orderedShots(scene)) shots.set(shot.id, { sceneNumber: scene.number, shot });
+  }
+  const songFrames = Math.max(1, secondsToFrames(trackDurationSec, frameRate));
+  const clips: TimelineClip[] = [];
+  let cursor = 0;
+  for (const { shotId, anchor } of orderedAnchors(spine)) {
+    const known = shots.get(shotId);
+    if (known === undefined) continue;
+    const startFrame = Math.max(cursor, secondsToFrames(anchor.startSec, frameRate));
+    const endFrame = Math.min(songFrames, secondsToFrames(anchor.endSec, frameRate));
+    if (endFrame <= startFrame) continue;
+    clips.push({
+      id: `cl_${shotId.replace("_", "-")}`,
+      startFrame,
+      durationFrames: endFrame - startFrame,
+      sourceInFrames: 0,
+      source: { kind: "shot", shotId, sceneNumber: known.sceneNumber, shotNumber: known.shot.number, label: known.shot.title },
+      audio: anchor.clipAudio.mode === "keep-diegetic" ? "keep" : "mute",
+      ...(anchor.clipAudio.mode === "keep-diegetic" ? { gainDb: anchor.clipAudio.gainDb } : {}),
+    });
+    cursor = endFrame;
+  }
+  return {
+    schemaVersion: 1,
+    revision: 0,
+    frameRate,
+    tracks: [
+      { id: PICTURE_TRACK_ID, kind: "picture", name: "Picture", order: 0, muted: false, endFrame: songFrames, clips },
+      {
+        id: "tr_master",
+        kind: "music",
+        name: "Master track",
+        order: 1,
+        muted: false,
+        solo: false,
+        clips: [
+          {
+            id: "cl_master",
+            startFrame: 0,
+            durationFrames: songFrames,
+            sourceInFrames: 0,
+            source: { kind: "artifact", artifactId: spine.trackArtifactId, label: "Master track" },
+            gainDb: 0,
+          },
+        ],
+      },
+    ],
+    history: { undo: [], redo: [] },
+    mix: DEFAULT_MIX,
+  };
+}
+
+export type EpisodeRange = { ok: true; startFrame: number; endFrame: number } | { ok: false; reason: string };
+
+/**
+ * One episode's delivery range on the timeline (SPEC-037 R-33): from the first through the last
+ * base Picture clip sourced by one of its scenes. A clip from another episode inside that range
+ * is a refusal that names the conflict, never a silent inclusion or omission.
+ */
+export function episodeTimelineRange(production: ProductionBundle, timeline: ProductionTimeline, episodeId: string): EpisodeRange {
+  const episode = production.episodes.find((candidate) => candidate.id === episodeId);
+  if (episode === undefined) return { ok: false, reason: `${episodeId} is not an episode of this production` };
+  const owner = new Map<string, string>();
+  for (const candidate of production.episodes) {
+    for (const sceneId of candidate.scenes) {
+      const scene = production.scenes.find((item) => item.id === sceneId);
+      for (const shot of scene === undefined ? [] : orderedShots(scene)) owner.set(shot.id, candidate.id);
+    }
+  }
+  const base = basePictureTrack(timeline);
+  const clips = base === null ? [] : orderedTrackClips(base);
+  const mine = clips.filter((clip) => clip.source.kind === "shot" && owner.get(clip.source.shotId) === episode.id);
+  if (mine.length === 0) return { ok: false, reason: `${episode.title} has no Picture clips on the timeline` };
+  const startFrame = mine[0]!.startFrame;
+  const endFrame = clipEnd(mine[mine.length - 1]!);
+  const intruders = clips.filter((clip) => {
+    if (clip.source.kind !== "shot") return false;
+    const owned = owner.get(clip.source.shotId);
+    return owned !== undefined && owned !== episode.id && clip.startFrame < endFrame && clipEnd(clip) > startFrame;
+  });
+  if (intruders.length > 0) {
+    const named = intruders
+      .map((clip) => {
+        const shotId = clip.source.kind === "shot" ? clip.source.shotId : null;
+        const owned = shotId === null ? undefined : production.episodes.find((candidate) => candidate.id === owner.get(shotId));
+        return `${clip.source.label} (${owned?.title ?? "another episode"})`;
+      })
+      .join(", ");
+    return { ok: false, reason: `${episode.title} is interleaved with ${named}; an episode delivers one contiguous range` };
+  }
+  return { ok: true, startFrame, endFrame };
 }
 
 /** Materialize every story shot once. A shot without valid media remains the same timed clip and resolves as a gap. */
@@ -777,7 +917,14 @@ function assertNewCueId(working: Working, cueId: SubtitleCueId): void {
 }
 
 function touchTrack(working: Working, track: Pick<TimelineTrack, "id" | "kind">, before: TimelineTrackProps | null): void {
-  if (!working.touchedTracks.has(track.id)) working.touchedTracks.set(track.id, { kind: track.kind, before });
+  const touched = working.touchedTracks.get(track.id);
+  // A history entry records one kind per track id. A batch that removed a Music track and added
+  // a Picture track under the same id would replay its undo onto the wrong kind, so the id is
+  // refused rather than recorded half-right (round three).
+  if (touched !== undefined && touched.kind !== track.kind) {
+    throw new TimelineOperationRefused(`track ${track.id} was a ${touched.kind} track earlier in this batch and cannot return as ${track.kind}`);
+  }
+  if (touched === undefined) working.touchedTracks.set(track.id, { kind: track.kind, before });
 }
 
 function findClip(working: Working, clipId: TimelineClipId): { track: TimelineTrack; clip: TimelineClip; ordered: TimelineClip[]; index: number } {
@@ -1048,6 +1195,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
       }
       TimelineTrackIdSchema.parse(command.trackId);
+      touchTrack(working, { id: command.trackId, kind: "subtitle" }, null);
       const order = working.tracks.reduce((high, candidate) => Math.max(high, candidate.order + 1), 0);
       const track: TimelineTrack = {
         id: command.trackId,

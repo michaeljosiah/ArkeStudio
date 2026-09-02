@@ -2,7 +2,7 @@ import { z } from "zod";
 import { orderedShots } from "./scene-flow.js";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
 import type { ProductionBundle } from "./client-state.js";
-import { assertSlateLabelSupported, ffmpegFilterPath } from "./ffmpeg-filter.js";
+import { assertSlateLabelSupported, ffmpegDrawtextText, ffmpegFilterPath } from "./ffmpeg-filter.js";
 import { sortScenes } from "./scene.js";
 import type { Shot } from "./scene.js";
 import type { Take } from "./take.js";
@@ -704,10 +704,11 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
           : "";
     burnIn.cues.forEach((cue, i) => {
       // One line per burned cue: drawtext takes its text through the filter graph, where a
-      // newline is a separator, so line breaks become spaces on the way to the pixels.
+      // newline is a separator, so line breaks become spaces on the way to the pixels. The
+      // punctuation stays — escaped through both parsers, never replaced (round three).
       const flat = cue.text.replace(/\s*\n\s*/g, " ");
       assertSlateLabelSupported(flat);
-      const text = flat.replace(/[':\\]/g, " ").replace(/[;,[\]]/g, " ");
+      const text = ffmpegDrawtextText(flat);
       const next = `st${i}`;
       filters.push(
         `[${last}]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=${colour}:fontsize=${fontsize}:x=(w-tw)/2:y=h-th-${margin}${decoration}:enable='between(t,${cue.startSec},${cue.endSec})'[${next}]`,

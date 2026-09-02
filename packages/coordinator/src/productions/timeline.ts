@@ -8,8 +8,10 @@ import {
   historySelectionChanges,
   migrateLegacyCut,
   redoTimelineHistory,
+  seedSpinePictureTimeline,
   seedStoryPictureTimeline,
   sourceLengthFramesFor,
+  spineTimelineFingerprint,
   storyTimelineFingerprint,
   undoTimelineHistory,
   type ProductionBundle,
@@ -177,9 +179,6 @@ export async function applyTimelineCommand(
   return store.gateOp(async () => {
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new TimelineCommandRefused(`production ${productionId} is not in this world`);
-    if (production.spine) {
-      throw new TimelineCommandRefused("music-timed timeline editing is not in this first Picture slice");
-    }
 
     const raw = await readOptional(store, timelinePath);
     let dropped: string[] = [];
@@ -189,11 +188,26 @@ export async function applyTimelineCommand(
       if (command.kind !== "commands" || command.baseRevision !== null) {
         throw new TimelineCommandRefused("the timeline has not been materialised yet");
       }
-      const fingerprint = storyTimelineFingerprint(production);
-      if (fingerprint !== command.sourceFingerprint) {
-        throw new TimelineCommandRefused("the story order changed while this move was being made");
+      const spine = production.spine;
+      if (spine !== null) {
+        /*
+         * The first music-timed assembly (SPEC-037 R-13, R-32): the anchors as they stand,
+         * against the master as measured. The measurement recorded when the track was assigned
+         * is the one answer to how long the song is; without it there is no first assembly.
+         */
+        const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
+        if (measured === null) throw new TimelineCommandRefused("measure the master track before editing a music-timed timeline");
+        if (spineTimelineFingerprint(production, spine, measured) !== command.sourceFingerprint) {
+          throw new TimelineCommandRefused("the spine changed while this edit was being made");
+        }
+        current = seedSpinePictureTimeline(production, spine, measured);
+      } else {
+        const fingerprint = storyTimelineFingerprint(production);
+        if (fingerprint !== command.sourceFingerprint) {
+          throw new TimelineCommandRefused("the story order changed while this move was being made");
+        }
+        current = seedStoryPictureTimeline(production);
       }
-      current = seedStoryPictureTimeline(production);
     } else {
       try {
         current = ProductionTimelineSchema.parse(JSON.parse(raw));
@@ -224,7 +238,15 @@ export async function applyTimelineCommand(
     const files: CommitFileInput[] = [];
     let next: ProductionTimeline;
     try {
-      if (command.kind === "commands") {
+      if (command.kind === "commands" && command.commands.length === 0) {
+        /*
+         * Materialise as it stands (SPEC-037 R-13): the first music-timed assembly opens on the
+         * timeline before anyone edits it, so the spine stops ordering the picture from here
+         * on. Against a saved record the same batch would change nothing, and says so.
+         */
+        if (raw !== null) throw new TimelineCommandRefused("an empty batch changes nothing");
+        next = current;
+      } else if (command.kind === "commands") {
         const switches = command.commands.filter(
           (candidate): candidate is Extract<TimelineCommand, { kind: "switch-take" }> => candidate.kind === "switch-take",
         );

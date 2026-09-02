@@ -20,7 +20,8 @@ import {
   productionFrameRate,
   resolvePictureTimeline,
   seedStoryPictureTimeline,
-  storyTimelineFingerprint,
+  timelineSourceFingerprint,
+  episodeTimelineRange,
   frameDispatchFor,
   modelCapabilityCopy,
   pickableSheets,
@@ -58,7 +59,6 @@ import {
   ulid,
   AUDIO_TRACK_KINDS,
   cueAtSec,
-  type RenderCue,
   type SubtitleStyle,
   type TimelineTrack,
   type Sheet,
@@ -3515,8 +3515,8 @@ function CutPreview({
   soundSec = 0,
   restartToken,
   transport,
-  cue = null,
   cueStyle = null,
+  cueAt = null,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
@@ -3525,12 +3525,29 @@ function CutPreview({
   soundSec?: number;
   restartToken: number;
   transport: Transport;
-  /** The subtitle showing now, from the same plan the export burns (SPEC-038 R-26). */
-  cue?: RenderCue | null;
+  /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
   cueStyle?: SubtitleStyle | null;
+  /** The cue at a film second, read on the frame clock like the picture (round three). */
+  cueAt?: ((sec: number) => ReturnType<typeof cueAtSec>) | null;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const { playing, time, timeRef, setPlaying, seek } = transport;
+  /*
+   * Subtitles change on the same frame loop as the picture: `time` reaches React four times a
+   * second, which would open and close every cue up to a quarter second late against the sound
+   * it captions. The lookup travels through a ref so the loops never restart for it, and the
+   * state only moves when the cue does.
+   */
+  const cueAtRef = useRef(cueAt);
+  cueAtRef.current = cueAt;
+  const [liveCue, setLiveCue] = useState<ReturnType<typeof cueAtSec>>(() => cueAt?.(timeRef.current) ?? null);
+  const syncCue = useCallback((at: number) => {
+    const next = cueAtRef.current?.(at) ?? null;
+    setLiveCue((previous) => (previous?.id === next?.id && previous?.text === next?.text ? previous : next));
+  }, []);
+  useEffect(() => {
+    syncCue(timeRef.current);
+  }, [cueAt, syncCue, timeRef]);
 
   // "Watch from top" (24a): rewind and run, without remounting the element and refetching media.
   useEffect(() => {
@@ -3596,11 +3613,12 @@ function CutPreview({
         nowMs: ts,
       });
       paintStill(span);
+      syncCue(at);
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(frame);
-  }, [playing, spans, slug, paintStill]);
+  }, [playing, spans, slug, paintStill, syncCue]);
 
   // Paused: one sync, so a seek lands on the right frame without a loop running. A source that
   // was not ready when it was asked calls back through onMediaReady, since nothing else will.
@@ -3617,10 +3635,11 @@ function CutPreview({
         nowMs: 0,
       });
       paintStill(span);
+      syncCue(at);
     };
     onMediaReady(el, push);
     push();
-  }, [playing, time, spans, slug, timeRef, paintStill]);
+  }, [playing, time, spans, slug, timeRef, paintStill, syncCue]);
 
   const current = spanAt(spans, time);
   /*
@@ -3659,9 +3678,25 @@ function CutPreview({
           {current ? current.label : soundOnly ? "sound only" : "nothing here yet"}
         </span>
       )}
-      {cue !== null && (
-        <span className={cx("fy-cutviewer__cue", cueStyle?.background === "box" && "fy-cutviewer__cue--box")} data-cue={cue.id} aria-live="off">
-          {cue.text}
+      {liveCue !== null && (
+        <span
+          className={cx("fy-cutviewer__cue", cueStyle?.background === "box" && "fy-cutviewer__cue--box")}
+          data-cue={liveCue.id}
+          aria-live="off"
+          // The saved style, every field of it, so the preview and the burn-in agree (round
+          // three): colour, a size and margin relative to the picture, and the decoration.
+          style={
+            cueStyle === null
+              ? undefined
+              : {
+                  color: cueStyle.color,
+                  fontSize: `${(cueStyle.relativeSize * 100).toFixed(2)}cqh`,
+                  bottom: `${(cueStyle.bottomMargin * 100).toFixed(2)}%`,
+                  textShadow: cueStyle.background === "outline" ? "0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950)" : "none",
+                }
+          }
+        >
+          {liveCue.text}
         </span>
       )}
       <button
@@ -4152,25 +4187,21 @@ export function CutScreen() {
   let timelineError: string | null = null;
   if (production) {
     try {
-      // Music-timed editing remains on its existing clock in this first slice. Every other story
-      // production reads the saved Picture order as soon as one exists.
-      if (production.spine && timelineState.status !== "absent") {
-        throw new Error(
-          timelineState.status === "invalid"
-            ? timelineState.message
-            : "music-timed editing does not consume a saved Picture timeline in this release",
-        );
-      }
-      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
+      // The song clock derives its picture until its timeline is saved (SPEC-037 §2.3); from then
+      // on it reads the saved order like every other production, with the master as a Music clip.
+      if (timelineState.status === "invalid") throw new Error(timelineState.message);
+      cut = production.spine && timelineState.status !== "ready" ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
   }
   // One Cut, two clocks (80a): the story orders the picture until a spine exists, and then the
-  // song does. Exports already chose this way; a Cut tab that did not would state a different
-  // film from the screen next to it.
+  // song does — until the saved timeline owns both. Exports already chose this way; a Cut tab
+  // that did not would state a different film from the screen next to it.
   const view = exportViewFor(world, production);
-  const spineCut = timelineError === null && view.kind === "spine" ? view.cut : null;
+  const spineCut = timelineError === null && view.kind === "spine" && timelineState.status !== "ready" ? view.cut : null;
+  /** The measured master, which is what a music-timed first assembly is cut against. */
+  const masterDurationSec = view.kind === "spine" ? view.cut.trackDurationSec : view.kind === "silent" ? view.durationSec : null;
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
@@ -4181,11 +4212,19 @@ export function CutScreen() {
   const [tool, setTool] = useState<EditorTool>("select");
   const [snap, setSnap] = useState(true);
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
-  /** Which language is viewed (SPEC-038 R-26): local view state; the first track until chosen. */
-  const [subtitleChoice, setSubtitleChoice] = useState<TimelineTrackId | null>(null);
+  /**
+   * Which language is viewed (SPEC-038 R-26): local view state. Unchosen shows the first track;
+   * null is a choice too — none — and stays none rather than falling back to the first track
+   * (round three).
+   */
+  const [subtitleChoice, setSubtitleChoice] = useState<TimelineTrackId | null | undefined>(undefined);
   const subtitleTracks = timelineState.status === "ready" ? subtitleTracksOf(timelineState.timeline) : [];
   const subtitleView: TimelineTrackId | null =
-    subtitleChoice !== null && subtitleTracks.some((track) => track.id === subtitleChoice) ? subtitleChoice : (subtitleTracks[0]?.id ?? null);
+    subtitleChoice === null
+      ? null
+      : subtitleChoice !== undefined && subtitleTracks.some((track) => track.id === subtitleChoice)
+        ? subtitleChoice
+        : (subtitleTracks[0]?.id ?? null);
   const libraryToggleRef = useRef<HTMLButtonElement>(null);
   const libraryPanelRef = useRef<HTMLElement>(null);
   const rightToggleRef = useRef<HTMLButtonElement>(null);
@@ -4274,7 +4313,7 @@ export function CutScreen() {
    * plan refuses is a production the export refuses, so the refusal blocks the editor by name.
    */
   const renderPlan =
-    production && !production.spine && timelineError === null
+    production && (!production.spine || timelineState.status === "ready") && timelineError === null
       ? buildRenderPlan({
           production,
           artifacts,
@@ -4324,14 +4363,22 @@ export function CutScreen() {
         totalSec,
       )
     : [];
+  /*
+   * The song clock keeps its own screen until it is opened on the timeline (SPEC-037 A-12):
+   * a seeded assembly under controls that draw a different track would edit clips nobody can
+   * see. Opening it is one explicit action below; from then on the saved record is the editor.
+   */
   let editableTimeline: ProductionTimeline | null = null;
-  if (production && !production.spine && timelineState.status !== "invalid") {
+  if (production && timelineState.status !== "invalid") {
     try {
-      editableTimeline = timelineState.status === "ready" ? timelineState.timeline : seedStoryPictureTimeline(production);
+      editableTimeline =
+        timelineState.status === "ready" ? timelineState.timeline : production.spine !== null ? null : seedStoryPictureTimeline(production);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
   }
+  /** The fence for the first materialising command; null while the song is unmeasured. */
+  const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   const shownTimeline = draft ?? editableTimeline;
   const views = shownTimeline ? pictureClipViews(shownTimeline, cut) : [];
   const usedShotIds = new Set(
@@ -4417,7 +4464,7 @@ export function CutScreen() {
     : mediaOnly
       ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
       : cut
-        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${views.length || cut.entries.length} shots covered · assembled from accepted takes only`
+        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${views.length || cut.entries.length} shots covered · ${production?.spine ? "cut to the track" : "assembled from accepted takes only"}`
         : "";
   const selectedPictureClip =
     activeSelection?.kind === "picture"
@@ -4441,30 +4488,30 @@ export function CutScreen() {
     return () => window.clearTimeout(timer);
   }, [inFlight, timelineRevision]);
   const commandsDisabled =
-    timelineError !== null || !worldId || !prodId || !production || editableTimeline === null || commandPending;
+    timelineError !== null || !worldId || !prodId || !production || editableTimeline === null || commandPending || sourceFingerprint === null;
   const sourceLength = useMemo(
     () => (production ? sourceLengthFramesFor(production, artifacts) : () => undefined),
     [production, artifacts],
   );
   const sendPictureMove = (direction: "earlier" | "later") => {
-    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending) return;
+    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || sourceFingerprint === null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
-    moveTimelinePictureClip(
-      worldId,
-      prodId,
-      selectedPictureClip.id,
-      direction,
-      timelineRevision,
-      storyTimelineFingerprint(production),
-    );
+    moveTimelinePictureClip(worldId, prodId, selectedPictureClip.id, direction, timelineRevision, sourceFingerprint);
   };
   /** Every editor action reaches the coordinator through here: one batch, one revision, one Undo step. */
   const sendCommands = (commands: TimelineCommand[], label?: string) => {
-    if (commandsDisabled || !worldId || !prodId || !production) return;
+    if (commandsDisabled || !worldId || !prodId || !production || sourceFingerprint === null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
-    sendTimelineCommands(worldId, prodId, commands, timelineRevision, storyTimelineFingerprint(production), label);
+    sendTimelineCommands(worldId, prodId, commands, timelineRevision, sourceFingerprint, label);
+  };
+  /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
+  const openOnTimeline = () => {
+    if (!worldId || !prodId || spineCut === null || sourceFingerprint === null || commandPending || timelineState.status !== "absent") return;
+    setTimelineCommandError(null);
+    setInFlight({ revision: timelineRevision, since: Date.now() });
+    sendTimelineCommands(worldId, prodId, [], null, sourceFingerprint, "Open the song on the timeline");
   };
   const sendHistory = (action: "undo" | "redo") => {
     if (commandPending) return;
@@ -4482,6 +4529,8 @@ export function CutScreen() {
   // The monitor mix reads the same plan the export does (SPEC-038 R-13, R-17).
   const urlFor = useCallback((path: string) => (slug ? mediaUrl(slug, path) : null), [slug]);
   usePlanAudio({ plan: renderPlan?.ok ? renderPlan.plan : null, playing: transport.playing, timeRef: transport.timeRef, urlFor });
+  const cuePlan = renderPlan?.ok ? renderPlan.plan : null;
+  const cueAt = useMemo(() => (cuePlan === null ? null : (sec: number) => cueAtSec(cuePlan, sec)), [cuePlan]);
   const playheadInsideSelected =
     selectedAny !== null &&
     playheadFrame > selectedAny.clip.startFrame &&
@@ -4709,7 +4758,7 @@ export function CutScreen() {
             soundSec={mediaOnly ? placedExtentSec(placedSound) : 0}
             restartToken={watchToken}
             transport={transport}
-            cue={renderPlan?.ok ? cueAtSec(renderPlan.plan, transport.time) : null}
+            cueAt={cueAt}
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
           />
         </div>
@@ -4760,6 +4809,16 @@ export function CutScreen() {
             </button>
             {/* The song clock has no editable record yet (SPEC-037 §2.3): its controls stay
                 the ones it can honour rather than buttons that refuse on every press. */}
+            {spineCut !== null && timelineState.status === "absent" && (
+              <button
+                type="button"
+                disabled={commandPending || sourceFingerprint === null || !worldId || !prodId}
+                onClick={openOnTimeline}
+                title={sourceFingerprint === null ? "Measure the master track first" : "Edit the song's picture on the timeline"}
+              >
+                Open on the timeline
+              </button>
+            )}
             {editableTimeline !== null && (
               <>
                 <button type="button" disabled={commandsDisabled || !playheadInsideSelected} onClick={() => selectedAction("split")} title="S">
@@ -5264,19 +5323,25 @@ export function ExportsScreen() {
   let timelineBlock: string | null = null;
   if (production) {
     try {
-      if (production.spine && timelineState.status !== "absent") {
-        throw new Error(
-          timelineState.status === "invalid"
-            ? timelineState.message
-            : "music-timed delivery does not consume the saved Picture timeline in this release",
-        );
-      }
-      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
+      if (timelineState.status === "invalid") throw new Error(timelineState.message);
+      cut = production.spine && timelineState.status !== "ready" ? deriveCut(production) : resolvePictureTimeline(production, timelineState);
     } catch (error) {
       timelineBlock = error instanceof Error ? error.message : String(error);
     }
   }
-  const view = exportViewFor(world, production);
+  const legacyView = exportViewFor(world, production);
+  /*
+   * A saved timeline delivers every scope through one plan (SPEC-038 R-3, R-33; issue 682), so
+   * the song clock's readiness rules stop applying once its timeline exists: the master is a
+   * Music clip and the plan says what the film is. Until then the spine's own view stands.
+   */
+  const timelineOwnsDelivery = timelineState.status === "ready" && timelineBlock === null;
+  const view: ExportView = timelineOwnsDelivery ? { kind: "scene-order" } : legacyView;
+  const deliveryPlan =
+    production && timelineOwnsDelivery
+      ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset: "review-cut" })
+      : null;
+  if (deliveryPlan !== null && !deliveryPlan.ok && timelineBlock === null) timelineBlock = deliveryPlan.reason;
   /*
    * No story to derive a picture from, so what was placed is the film (issue 453). Resolved
    * exactly as the coordinator resolves it, or this screen advertises a runtime the encode does
@@ -5286,7 +5351,9 @@ export function ExportsScreen() {
   const overlays = production?.cut.overlays ?? [];
   const mediaOnly = cut !== null && view.kind === "scene-order" && isMediaOnly(cut);
   const placedArtifacts = world?.artifacts ?? [];
-  const placedSec = mediaOnly ? placedFilmSec(overlays, placedArtifacts) : 0;
+  // Once the timeline delivers, what is placed is what the plan renders (round three): the
+  // legacy lanes may be empty while the typed tracks hold the whole film.
+  const placedSec = deliveryPlan?.ok === true ? deliveryPlan.plan.totalSec : mediaOnly ? placedFilmSec(overlays, placedArtifacts) : 0;
   const mine = Object.entries(exportsState).filter(([, e]) => e.productionId === prodId);
   const [preset, setPreset] = useState<keyof typeof PRESETS>("review-cut");
   /*
@@ -5308,18 +5375,20 @@ export function ExportsScreen() {
    */
   const refusal = view.kind === "spine" ? spineExportRefusals(view.cut, preset) : null;
   const runtimeSec =
-    view.kind === "spine"
-      ? view.cut.trackDurationSec
-      : view.kind === "silent"
-        ? view.durationSec
-        : view.kind === "scene-order"
-          ? // A production with no story runs as long as what was placed on it (issue 453), which
-            // is the only length it has — `cut.totalSec` is zero there and would report 0s for a
-            // film that plainly is not.
-            mediaOnly
-            ? placedSec
-            : cut?.totalSec
-          : undefined;
+    deliveryPlan?.ok === true
+      ? deliveryPlan.plan.totalSec
+      : view.kind === "spine"
+        ? view.cut.trackDurationSec
+        : view.kind === "silent"
+          ? view.durationSec
+          : view.kind === "scene-order"
+            ? // A production with no story runs as long as what was placed on it (issue 453), which
+              // is the only length it has — `cut.totalSec` is zero there and would report 0s for a
+              // film that plainly is not.
+              mediaOnly
+              ? placedSec
+              : cut?.totalSec
+            : undefined;
   /*
    * An unmeasured track does not block: exporting is what measures it, and the coordinator probes
    * an artifact with no stored measurement, then renders or refuses in words. A missing artifact
@@ -5332,22 +5401,28 @@ export function ExportsScreen() {
    * told apart below, so somebody looking at a clip is not told there is nothing there.
    */
   const nothingPlaced = mediaOnly && placedSec === 0;
-  const unusablePlacements = nothingPlaced && overlays.length > 0;
+  const unusablePlacements =
+    nothingPlaced &&
+    (overlays.length > 0 || (timelineState.status === "ready" && timelineState.timeline.tracks.some((track) => track.clips.length > 0)));
   const blocked =
     timelineBlock !== null || refusal !== null || view.kind === "no-track" || view.kind === "silent" || nothingPlaced;
-  const episodeTimelineBlock =
-    timelineState.status === "absent"
-      ? null
-      : timelineBlock ?? "episode ranges do not consume the saved Picture timeline in this release";
+  const episodeTimelineBlock = timelineState.status === "absent" ? null : timelineBlock;
+  /** One episode's refusal or range on the saved timeline (SPEC-037 R-33); null before one exists. */
+  const episodeRange = (episodeId: string) =>
+    production && timelineState.status === "ready" ? episodeTimelineRange(production, timelineState.timeline, episodeId) : null;
+  /*
+   * Labels state only what the encode does (SPEC-038 R-31): no timecode, no captions, no
+   * excerpt. The vertical preset renders the whole cut in a 9:16 frame and says so.
+   */
   const presetCopy: Record<string, { label: string; sub: string }> = {
     "review-cut": {
       label: "Review cut",
-      sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · timecode · fastest`,
+      sub: `mp4 ${PRESETS["review-cut"].width}×${PRESETS["review-cut"].height} · fastest`,
     },
     master: { label: "Master", sub: `${PRESETS.master.width}×${PRESETS.master.height} · clean` },
     "social-excerpt": {
-      label: "Social excerpt",
-      sub: `${PRESETS["social-excerpt"].width}×${PRESETS["social-excerpt"].height} · 9:16 · captions`,
+      label: "Vertical",
+      sub: `${PRESETS["social-excerpt"].width}×${PRESETS["social-excerpt"].height} · 9:16 · the whole cut`,
     },
   };
   const boardPath = production?.scenes.find((s) => s.board)?.board?.image;
@@ -5374,8 +5449,9 @@ export function ExportsScreen() {
                 // rest. Refused episodes are skipped here and say why on their row.
                 if (!worldId || !prodId || episodeTimelineBlock !== null) return;
                 for (const episode of production.episodes) {
-                  if (episodeExportRefusals(production, episode.id) === null) {
-                    exportCut(worldId, prodId, preset, null, episode.id);
+                  const range = episodeRange(episode.id);
+                  if (episodeExportRefusals(production, episode.id) === null && (range === null || range.ok)) {
+                    exportCut(worldId, prodId, preset, timelineState.status === "ready" ? timelineState.timeline.revision : null, episode.id, subtitleChoice);
                   }
                 }
               }}
@@ -5385,9 +5461,12 @@ export function ExportsScreen() {
           </div>
           {production.episodes.map((episode) => {
             const episodeCut = deriveEpisodeCut(production, episode.id);
+            const range = episodeRange(episode.id);
             const episodeRefusal = episodeTimelineBlock
               ? { detail: episodeTimelineBlock }
-              : episodeExportRefusals(production, episode.id);
+              : (episodeExportRefusals(production, episode.id) ?? (range !== null && !range.ok ? { detail: range.reason } : null));
+            const frameRate = productionFrameRate(production.meta);
+            const rangeSec = range !== null && range.ok ? (range.endFrame - range.startFrame) / frameRate : null;
             return (
               <div key={episode.id} className="fy-listrow">
                 <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
@@ -5395,10 +5474,11 @@ export function ExportsScreen() {
                   {episode.release?.title ?? episode.title}
                 </span>
                 <span className="fy-mono">
-                  {seconds(episodeCut.totalSec)} · {episodeCut.covered} of {episodeCut.entries.length} covered
-                  {episodeCut.gaps > 0
-                    ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates`
-                    : ""}
+                  {rangeSec !== null
+                    ? `${seconds(rangeSec)} on the timeline · every visible track`
+                    : `${seconds(episodeCut.totalSec)} · ${episodeCut.covered} of ${episodeCut.entries.length} covered${
+                        episodeCut.gaps > 0 ? ` · ${episodeCut.gaps} gap${episodeCut.gaps === 1 ? "" : "s"} as slates` : ""
+                      }`}
                 </span>
                 {episodeRefusal ? (
                   <span className="fy-mono" style={{ color: "var(--destructive)" }}>
@@ -5407,7 +5487,11 @@ export function ExportsScreen() {
                 ) : (
                   <Button
                     variant="ghost"
-                    onClick={() => worldId && prodId && exportCut(worldId, prodId, preset, null, episode.id)}
+                    onClick={() =>
+                      worldId &&
+                      prodId &&
+                      exportCut(worldId, prodId, preset, timelineState.status === "ready" ? timelineState.timeline.revision : null, episode.id, subtitleChoice)
+                    }
                   >
                     Export episode
                   </Button>

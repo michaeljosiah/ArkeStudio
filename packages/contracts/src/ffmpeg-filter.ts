@@ -32,6 +32,18 @@ export function ffmpegFilterPath(path: string): string {
     .replace(/([,;[\]])/g, "\\$1");
 }
 
+/**
+ * Escape a drawtext `text` value that is wrapped in single quotes in the filter graph.
+ *
+ * The graph parser copies a quoted run verbatim and strips the quotes; the option parser then
+ * reads the bare value, where `\`, `'` and `:` are special. So a backslash and a colon are
+ * escaped once for that second pass, and a quote closes the run, is escaped for the second pass
+ * outside it, and reopens it. Nothing is dropped: a cue's punctuation is the cue.
+ */
+export function ffmpegDrawtextText(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "'\\\\\\''");
+}
+
 /** Refuse a slate that the exact redistributed face would replace with missing-glyph boxes. */
 export function assertSlateLabelSupported(label: string): void {
   for (const character of label) {

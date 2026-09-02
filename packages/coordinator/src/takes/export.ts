@@ -71,7 +71,14 @@ export function runExport(
       if (controller.signal.aborted) throw new Error("cancelled");
       await rename(toExtendedLength(stage), toExtendedLength(output));
       if (sidecar !== undefined && sidecarStage !== null && sidecarOutput !== null) {
-        await rename(toExtendedLength(sidecarStage), toExtendedLength(sidecarOutput));
+        try {
+          await rename(toExtendedLength(sidecarStage), toExtendedLength(sidecarOutput));
+        } catch (error) {
+          // The video is already in exports/. Both or neither: a film without the subtitles it
+          // promised is not the export that was asked for, so the video goes too (round three).
+          await rm(toExtendedLength(output), { force: true }).catch(() => {});
+          throw error;
+        }
         return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
       }
       return { status: "done" as const, output: `exports/${outName}` };

@@ -17,6 +17,7 @@ import {
   DEFAULT_MIX,
   TimelineOperationRefused,
   basePictureTrack,
+  episodeTimelineRange,
   framesToSeconds,
   orderedTrackClips,
   resolvePictureTimeline,
@@ -312,16 +313,28 @@ function audioFromTimeline(
 export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
-  if (production.spine !== null) {
+  if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
+  // A music-timed production renders through the spine plan until its timeline is materialised
+  // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
+  if (production.spine !== null && (timeline === undefined || timeline.status === "absent")) {
     return { ok: false, reason: "music-timed delivery renders through the spine plan until its timeline is materialised" };
   }
-  if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
 
   if (scope.kind === "episode") {
     const refusal = episodeExportRefusals(production, scope.episodeId);
     if (refusal) return { ok: false, reason: `episode export refused: ${refusal.detail}` };
-    if (timeline !== undefined && timeline.status !== "absent") {
-      return { ok: false, reason: "episode ranges do not consume the saved Picture timeline in this release" };
+    if (timeline !== undefined && timeline.status === "ready") {
+      /*
+       * One episode is the production's plan windowed to its validated range (SPEC-037 R-33,
+       * SPEC-038 R-3, R-33): the same tracks, the same resolution, the same mix, cut at the frame
+       * the episode starts and the frame it ends. Building the whole and windowing it is what
+       * keeps the three delivery scopes from ever disagreeing about what a clip is.
+       */
+      const range = episodeTimelineRange(production, timeline.timeline, scope.episodeId);
+      if (!range.ok) return { ok: false, reason: `episode export refused: ${range.reason}` };
+      const whole = buildRenderPlan({ ...input, scope: { kind: "production" } });
+      if (!whole.ok) return whole;
+      return { ok: true, plan: windowPlan(whole.plan, framesToSeconds(range.startFrame, frameRate), framesToSeconds(range.endFrame, frameRate), scope) };
     }
     const plan = buildExportPlan(deriveEpisodeCut(production, scope.episodeId), preset, [], [], frameRate);
     return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
@@ -415,6 +428,20 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         durationSec: entry.durationSec,
         label: entry.label,
       });
+      // A shot that keeps its own sound — the spine's kept diegetic audio — rides under the mix
+      // at its stated gain, and only when the take is measured to carry a stream (SPEC-013 R-5a).
+      const takeId = entry.takeId;
+      if (clip !== undefined && clip.audio === "keep" && baseAudible && takeId !== null && production.takeMediaInfo[takeId]?.mediaInfo.hasAudio === true) {
+        baseSound.push({
+          path: entry.media.path,
+          startSec,
+          endSec: startSec + entry.durationSec,
+          gainDb: clip.gainDb ?? 0,
+          role: "picture",
+          sourceInSec: entry.media.inSec ?? 0,
+          clipId: clip.id,
+        });
+      }
       continue;
     }
     items.push({ type: "slate", label: `${entry.label} · ${entry.durationSec.toFixed(1)}s`, durationSec: entry.durationSec });
@@ -460,6 +487,71 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       : {}),
   };
   return { ok: true, plan };
+}
+
+/**
+ * The plan windowed to `[startSec, endSec)` on the production clock (SPEC-038 R-3, R-33): every
+ * item, overlay, sound, speech region and cue that intersects the window, cut at its edges and
+ * moved so the window starts at zero. Sources advance by whatever was cut from their heads, so
+ * the same frame plays at the same moment in the whole and in the part.
+ */
+export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, scope: RenderScope): RenderPlan {
+  const items: ExportItem[] = [];
+  let at = 0;
+  for (const item of plan.items) {
+    const itemStart = at;
+    const itemEnd = at + item.durationSec;
+    at = itemEnd;
+    const from = Math.max(itemStart, startSec);
+    const to = Math.min(itemEnd, endSec);
+    if (to <= from) continue;
+    const head = from - itemStart;
+    // An item the window does not cut keeps its exact duration rather than a re-derived one, so
+    // a full-range window is the plan it came from and no float residue creeps in.
+    const durationSec = from === itemStart && to === itemEnd ? item.durationSec : to - from;
+    if (item.type === "clip") {
+      items.push({ ...item, durationSec, ...(head > 0 ? { inSec: (item.inSec ?? 0) + head } : {}) });
+    } else if (item.type === "slate") {
+      items.push({ type: "slate", label: item.label, durationSec });
+    } else {
+      items.push({ type: "black", durationSec });
+    }
+  }
+  const clipRange = <T extends { startSec: number; endSec: number }>(entry: T): T | null => {
+    const from = Math.max(entry.startSec, startSec);
+    const to = Math.min(entry.endSec, endSec);
+    return to <= from ? null : { ...entry, startSec: from - startSec, endSec: to - startSec };
+  };
+  const overlays = plan.overlays.flatMap((overlay) => {
+    const cut = clipRange(overlay);
+    if (cut === null) return [];
+    const head = Math.max(0, startSec - overlay.startSec);
+    return [overlay.still || head === 0 ? cut : { ...cut, sourceInSec: (overlay.sourceInSec ?? 0) + head }];
+  });
+  const audio = plan.audio.flatMap((clip) => {
+    const cut = clipRange(clip);
+    if (cut === null) return [];
+    const head = Math.max(0, startSec - clip.startSec);
+    return [head === 0 ? cut : { ...cut, sourceInSec: clip.sourceInSec + head }];
+  });
+  const speech = plan.speech.flatMap((region) => {
+    const cut = clipRange(region);
+    return cut === null ? [] : [cut];
+  });
+  const subtitles = plan.subtitles === null ? null : { ...plan.subtitles, cues: plan.subtitles.cues.flatMap((cue) => { const cut = clipRange(cue); return cut === null ? [] : [cut]; }) };
+  const burnIn = plan.burnIn === undefined ? undefined : { ...plan.burnIn, cues: plan.burnIn.cues.flatMap((cue) => { const cut = clipRange(cue); return cut === null ? [] : [cut]; }) };
+  return {
+    ...plan,
+    items,
+    overlays,
+    audio,
+    speech,
+    subtitles,
+    ...(burnIn !== undefined ? { burnIn } : {}),
+    totalSec: endSec - startSec,
+    range: { startSec, endSec },
+    scope,
+  };
 }
 
 /** What the viewer sees at one moment (R-8): the last overlay covering it, else the base item. */
