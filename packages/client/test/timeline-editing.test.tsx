@@ -273,7 +273,9 @@ describe("semantic Picture editing (#679)", () => {
       assert.equal(screen.container.querySelectorAll("[data-clip]").length, 0, "nothing is on the timeline yet");
       assert.ok(screen.container.querySelector(".fy-driftchip") === null, "nothing drifts before the first save");
       await act(async () => screen.container.querySelector<HTMLButtonElement>(".fy-artpanel__add")!.click());
-      assert.ok(screen.container.querySelector(".fy-editordialog") !== null, "the picker opens as a sheet");
+      const dialog = screen.container.querySelector<HTMLElement>(".fy-editordialog");
+      assert.ok(dialog !== null, "the picker opens as a sheet");
+      assert.equal(dialog.closest(".fy-timeline"), null, "the fixed sheet is outside the animated, clipping timeline");
       await act(async () => button(screen, "Every shot of scene 4").click());
       await act(async () => screen.container.querySelector<HTMLButtonElement>(".fy-libpick__confirm")!.click());
       const [sent] = commandsSent(screen);

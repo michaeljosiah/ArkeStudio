@@ -6004,7 +6004,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-cutside__tabs > [role="tab"][aria-selected="true"] { border-bottom-color: var(--foreground); color: var(--foreground); }
 .fy-cutside__close { margin: auto 0 auto auto; }
 .fy-cutside__panel { flex: 1; min-height: 0; overflow-y: auto; }
-.fy-cutside__panel--arke { display: flex; overflow: hidden; }
+.fy-cutside__panel--arke { display: flex; flex-direction: column; overflow: hidden; }
 .fy-cutinspect { padding: 16px 15px; }
 .fy-cutinspect__eyebrow { font: 500 8.5px var(--font-mono); letter-spacing: .1em; color: var(--neutral-400); }
 .fy-cutinspect h2 { margin: 5px 0 14px; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.015em; }

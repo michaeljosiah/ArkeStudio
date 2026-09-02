@@ -851,10 +851,15 @@ export function assembleSceneCommands(input: {
   const frameRate = timeline.frameRate;
   const shots = orderedShots(scene);
   if (shots.length === 0) return { refused: `${scene.title} has no shots yet` };
+  const shotKey = (shotId: string, sceneNumber: number, shotNumber: number) => `${sceneNumber}:${shotNumber}:${shotId}`;
   const onTimeline = new Set(
-    timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "shot" ? [clip.source.shotId] : []))),
+    timeline.tracks.flatMap((track) =>
+      track.clips.flatMap((clip) =>
+        clip.source.kind === "shot" ? [shotKey(clip.source.shotId, clip.source.sceneNumber, clip.source.shotNumber)] : [],
+      ),
+    ),
   );
-  const fresh = shots.filter((shot) => !onTimeline.has(shot.id));
+  const fresh = shots.filter((shot) => !onTimeline.has(shotKey(shot.id, scene.number, shot.number)));
   if (fresh.length === 0) return { refused: `${scene.title} is already on the timeline` };
   const base = timeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
   const existingIds = new Set(timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
@@ -868,7 +873,11 @@ export function assembleSceneCommands(input: {
   const cues: Array<{ id: SubtitleCueId; text: string; startFrame: number; endFrame: number; speaker?: string }> = [];
   // Placed or a gap by the rule the preview and the export use: an accepted take that no longer
   // resolves to media is a gap, whatever the selection says.
-  const playable = new Set(deriveCut(production).entries.filter((entry) => entry.media !== null).map((entry) => entry.shot.id));
+  const playable = new Set(
+    deriveCut(production).entries
+      .filter((entry) => entry.media !== null)
+      .map((entry) => shotKey(entry.shot.id, entry.sceneNumber, entry.shot.number)),
+  );
   for (const shot of fresh) {
     const durationFrames = shotDurationFrames(shot.durationSec, frameRate);
     let id: TimelineClipId = `cl_${shot.id.replace("_", "-")}`;
@@ -885,7 +894,7 @@ export function assembleSceneCommands(input: {
         source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title },
       },
     });
-    (playable.has(shot.id) ? placed : gaps).push(shot.title);
+    (playable.has(shotKey(shot.id, scene.number, shot.number)) ? placed : gaps).push(shot.title);
     // Only a spoken line becomes a subtitle (R-45): an sfx note like "wind under the door" is
     // direction for the mix, not words anyone says.
     const spoken = shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue";
@@ -1908,12 +1917,11 @@ export function resolvePictureTimeline(
   const clips = base === null ? [] : orderedTrackClips(base);
 
   const derived = deriveCut(production);
-  const byShotId = new Map<string, CutEntry>();
+  const byShotId = new Map<string, CutEntry[]>();
   for (const entry of derived.entries) {
-    if (byShotId.has(entry.shot.id)) {
-      throw new TimelineOperationRefused(`derived story order contains duplicate shot ${entry.shot.id}`);
-    }
-    byShotId.set(entry.shot.id, entry);
+    const candidates = byShotId.get(entry.shot.id) ?? [];
+    candidates.push(entry);
+    byShotId.set(entry.shot.id, candidates);
   }
   const entries: ResolvedPictureEntry[] = [];
   let cursor = 0;
@@ -1949,15 +1957,24 @@ export function resolvePictureTimeline(
       });
       continue;
     }
-    const entry = byShotId.get(clip.source.shotId);
+    const source = clip.source;
+    const candidates = byShotId.get(source.shotId) ?? [];
+    const exact = candidates.filter(
+      (candidate) =>
+        candidate.sceneNumber === source.sceneNumber && candidate.shot.number === source.shotNumber,
+    );
+    // Scene and shot numbers disambiguate legacy duplicate ids. A unique id remains resolvable
+    // after story renumbering; more than one plausible source is a gap rather than a refusal.
+    const entry = exact.length === 1 ? exact[0] : candidates.length === 1 ? candidates[0] : undefined;
     if (entry === undefined) {
+      const reason = candidates.length === 0 ? "MISSING" : "AMBIGUOUS";
       entries.push({
         clipId: clip.id,
-        sceneNumber: clip.source.sceneNumber,
+        sceneNumber: source.sceneNumber,
         shot: {
-          id: clip.source.shotId,
-          number: clip.source.shotNumber,
-          title: clip.source.label,
+          id: source.shotId,
+          number: source.shotNumber,
+          title: source.label,
           description: "",
           durationSec,
         },
@@ -1965,7 +1982,7 @@ export function resolvePictureTimeline(
         take: null,
         media: null,
         durationSec,
-        label: `MISSING SHOT ${clip.source.shotNumber} · ${clip.source.label}`,
+        label: `${reason} SHOT ${source.shotNumber} · ${source.label}`,
       });
       continue;
     }

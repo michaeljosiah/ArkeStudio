@@ -86,6 +86,7 @@ import {
   ChevronsUpDown,
   Collapse,
   Copy,
+  Download,
   Duck,
   Film,
   Folder,
@@ -5790,13 +5791,17 @@ export function CutScreen() {
             </span>
           </div>
           <span className="fy-h1row__push" />
-          <Button size="sm" onClick={() => setWatchToken((n) => n + 1)}>Watch from top</Button>
+          <Button size="sm" onClick={() => setWatchToken((n) => n + 1)}>
+            <Play size={12} />
+            Watch from top
+          </Button>
           <Button
             size="sm"
             variant="primary"
             disabled={timelineError !== null || renderError !== null}
             onClick={() => setExportOpen(true)}
           >
+            <Download size={12} />
             Export film
           </Button>
           <button
@@ -5964,38 +5969,6 @@ export function CutScreen() {
               </button>
             </span>
           </div>
-          <ExportSheet
-        open={exportOpen}
-        onClose={() => setExportOpen(false)}
-        worldId={worldId}
-        prodId={prodId}
-        world={world ?? null}
-        production={production ?? null}
-        timelineState={timelineState}
-        onMix={(speechFirst) => sendCommands([{ kind: "set-mix", mix: { speechFirst } }], speechFirst ? "Duck under speech" : "Flat mix")}
-        commandsDisabled={commandsDisabled}
-      />
-      <AddToLibraryDialog
-        open={pickerOpen}
-        production={production ?? null}
-        artifacts={artifacts}
-        library={libraryItems}
-        onClose={() => setPickerOpen(false)}
-        onAdd={(added, removed) => {
-          changeLibrary(added, removed);
-          setPickerOpen(false);
-        }}
-      />
-      <EditorDialog open={keysOpen} title="Keyboard" subtitle="press ? to close" onClose={() => setKeysOpen(false)} width={372}>
-            <div className="fy-keys">
-              {EDITOR_KEYS.map(([key, what]) => (
-                <span key={key} className="fy-keys__row">
-                  <span className="fy-keys__key">{key}</span>
-                  <span className="fy-keys__what">{what}</span>
-                </span>
-              ))}
-            </div>
-          </EditorDialog>
           {timelineCommandError && (
             <div className="fy-timeline__refusal" role="alert">Edit refused · {timelineCommandError}</div>
           )}
@@ -6174,6 +6147,40 @@ export function CutScreen() {
                 )}
           </div>
         </section>
+        {/* The timeline animates with transform and clips overflow; fixed sheets must be its
+            siblings or the browser confines them to the timeline instead of the viewport. */}
+        <ExportSheet
+          open={exportOpen}
+          onClose={() => setExportOpen(false)}
+          worldId={worldId}
+          prodId={prodId}
+          world={world ?? null}
+          production={production ?? null}
+          timelineState={timelineState}
+          onMix={(speechFirst) => sendCommands([{ kind: "set-mix", mix: { speechFirst } }], speechFirst ? "Duck under speech" : "Flat mix")}
+          commandsDisabled={commandsDisabled}
+        />
+        <AddToLibraryDialog
+          open={pickerOpen}
+          production={production ?? null}
+          artifacts={artifacts}
+          library={libraryItems}
+          onClose={() => setPickerOpen(false)}
+          onAdd={(added, removed) => {
+            changeLibrary(added, removed);
+            setPickerOpen(false);
+          }}
+        />
+        <EditorDialog open={keysOpen} title="Keyboard" subtitle="press ? to close" onClose={() => setKeysOpen(false)} width={372}>
+          <div className="fy-keys">
+            {EDITOR_KEYS.map(([key, what]) => (
+              <span key={key} className="fy-keys__row">
+                <span className="fy-keys__key">{key}</span>
+                <span className="fy-keys__what">{what}</span>
+              </span>
+            ))}
+          </div>
+        </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
         <div className="fy-cutside__tabs" role="tablist" aria-label="Editor details">

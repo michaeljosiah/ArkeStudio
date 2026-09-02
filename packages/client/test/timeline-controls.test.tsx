@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -20,6 +21,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const focusedElements = new WeakSet<HTMLElement>();
+const CSS = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
 let viewportWidth = 800;
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({
@@ -120,6 +122,17 @@ afterEach(() => {
 });
 
 describe("durable Picture controls (#678)", () => {
+  it("draws the Watch and Export actions with their icons", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const screen = await mountCut(state);
+    try {
+      assert.ok(button(screen, "Watch from top").querySelector("svg"), "Watch carries a play icon");
+      assert.ok(button(screen, "Export film").querySelector("svg"), "Export carries a download icon");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("clears selection from empty timeline space", async () => {
     const state = seededState();
     const screen = await mountCut(state);
@@ -266,6 +279,11 @@ describe("durable Picture controls (#678)", () => {
       await act(async () => arke.click());
       assert.equal(arke.getAttribute("aria-selected"), "true");
       assert.ok(screen.container.querySelector("[role='tabpanel'][aria-labelledby='cut-arke-tab']"));
+      assert.match(
+        CSS,
+        /\.fy-cutside__panel--arke\s*\{[^}]*flex-direction:\s*column/,
+        "assembly notes stack above the conversation instead of clipping it (#719)",
+      );
       await act(async () => button(screen, "Hide").click());
       assert.ok(notice() === null, "hidden is hidden");
     } finally {
