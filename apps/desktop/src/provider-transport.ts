@@ -152,7 +152,12 @@ export class CloudProviderTransport implements ProviderTransport {
         deadline.abort(failure);
         rejectDeadline(failure);
       }, policy.operationMs);
-      timer.unref?.();
+      // Refed on purpose, and cleared in `finally`: this timer is what guarantees `run` settles.
+      // Unref'd, it never fires once the operation awaits nothing but the clock, because the loop
+      // drains first — node 22's test runner then cancels the whole file at beforeExit, which
+      // node 24 hides behind a keep-alive of its own (the issue 95 flake). It holds the process
+      // open only while an operation is genuinely in flight, which is exactly when it should.
+      // ArtifactModel keeps its deadline refed for the same reason.
     };
     const failure = (error: unknown, callerSignal: AbortSignal | undefined, responseStatus?: number) => {
       if (callerSignal?.aborted) {
