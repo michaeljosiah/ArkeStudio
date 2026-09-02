@@ -59,6 +59,10 @@ export class FakeProvider implements DispatchClient {
   /** Scripting hooks. */
   submitError: Error | null = null;
   submitErrorTimes = Infinity;
+  /** How long a submit takes to answer — a real call outlasts the lane's dispatch interval. */
+  submitDelayMs = 0;
+  /** When each submit began, so a test can measure the gap a retry actually waited. */
+  submitStartedAt: number[] = [];
   /** The kill-mid-③ window: the request left, nothing ever came back. */
   submitHangs = false;
   onSubmitAccepted: ((remoteId: string) => void) | null = null;
@@ -97,6 +101,7 @@ export class FakeProvider implements DispatchClient {
     },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }> {
     this.submitCount += 1;
+    this.submitStartedAt.push(Date.now());
     this.submittedKeys.push(request.idempotencyKey);
     this.submittedReferenceBytes = (request.imageReferences ?? []).map((reference) => reference.data);
     this.submittedVoiceReference = request.voiceReference ?? null;
@@ -104,6 +109,7 @@ export class FakeProvider implements DispatchClient {
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {
       await Promise.resolve(); // yield so dispose-during-submit is a real window
+      if (this.submitDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.submitDelayMs));
       if (this.submitHangs) await new Promise<never>(() => {});
       if (this.submitError && this.submitErrorTimes > 0) {
         this.submitErrorTimes -= 1;
