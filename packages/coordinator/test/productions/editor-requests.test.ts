@@ -7,8 +7,9 @@ import {
   ProductionTimelineSchema,
   editorRequestUndone,
   orderedTrackClips,
-  seedStoryPictureTimeline,
+  sortScenes,
   storyTimelineFingerprint,
+  type ProductionTimeline,
   type TimelineClipId,
   type TimelineCommand,
 } from "@arke-studio/contracts";
@@ -18,6 +19,7 @@ import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { assembleStory, sceneAssembly } from "./assemble.js";
 
 /**
  * Arke's editor requests at the coordinator boundary (SPEC-039 R-27..R-36; issue 684): staged
@@ -42,16 +44,17 @@ const productionOf = (store: WorldStore) => store.getBundle().productions.find((
 const timelinePath = (store: WorldStore): string => join(store.dir, "productions", PRODUCTION, "timeline.json");
 const requestsPath = (store: WorldStore): string => join(store.dir, "productions", PRODUCTION, "editor-requests.json");
 
-function moveSecondEarlier(store: WorldStore): { commands: TimelineCommand[]; movingId: TimelineClipId; firstId: TimelineClipId } {
-  const seeded = seedStoryPictureTimeline(productionOf(store));
-  const clips = orderedTrackClips(seeded.tracks[0]!);
-  return { commands: [{ kind: "move-adjacent", clipId: clips[1]!.id, direction: "earlier" }], movingId: clips[1]!.id, firstId: clips[0]!.id };
+/** The story on the timeline, and a request that needs its clips there: swap the first two shots. */
+async function moveSecondEarlier(store: WorldStore): Promise<{ timeline: ProductionTimeline; commands: TimelineCommand[]; movingId: TimelineClipId }> {
+  const timeline = await assembleStory(store, PRODUCTION);
+  const clips = orderedTrackClips(timeline.tracks[0]!);
+  return { timeline, commands: [{ kind: "move-adjacent", clipId: clips[1]!.id, direction: "earlier" }], movingId: clips[1]!.id };
 }
 
 describe("Arke's editor requests (issue 684)", () => {
   it("stages only for the thread's production, and only what applies", async () => {
     const store = await open();
-    const { commands } = moveSecondEarlier(store);
+    const { commands, timeline } = await moveSecondEarlier(store);
     await assert.rejects(
       stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: { kind: "world" }, requests: [{ summary: "Swap", commands }], now: NOW }),
       (error: unknown) => error instanceof EditorRequestRefused && /production, episode or scene thread/.test(error.reason),
@@ -75,7 +78,7 @@ describe("Arke's editor requests (issue 684)", () => {
     });
     assert.equal(staged.length, 1);
     assert.equal(staged[0]!.status, "pending");
-    assert.equal(staged[0]!.baseRevision, null, "prepared against the first assembly");
+    assert.equal(staged[0]!.baseRevision, timeline.revision, "prepared against the saved record");
     assert.equal(staged[0]!.sourceFingerprint, storyTimelineFingerprint(productionOf(store)));
     const file = EditorRequestFileSchema.parse(JSON.parse(await readFile(requestsPath(store), "utf8")));
     assert.deepEqual(file.requests.map((request) => request.id), [staged[0]!.id]);
@@ -85,7 +88,7 @@ describe("Arke's editor requests (issue 684)", () => {
 
   it("accepts as one revision and one Undo entry, in the same commit as the record (R-30, A-8)", async () => {
     const store = await open();
-    const { commands, movingId } = moveSecondEarlier(store);
+    const { commands, movingId, timeline } = await moveSecondEarlier(store);
     const [staged] = await stageEditorRequests(store, {
       conversationId: CONVERSATION,
       entryContext: THREAD,
@@ -94,12 +97,12 @@ describe("Arke's editor requests (issue 684)", () => {
     });
     const accepted = await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged!.id, decision: "accept", now: NOW });
     assert.equal(accepted.status, "accepted");
-    assert.equal(accepted.resultRevision, 1);
+    assert.equal(accepted.resultRevision, timeline.revision + 1);
 
     const saved = ProductionTimelineSchema.parse(JSON.parse(await readFile(timelinePath(store), "utf8")));
-    assert.equal(saved.revision, 1);
-    assert.equal(saved.history.undo.length, 1);
-    const entry = saved.history.undo[0]!;
+    assert.equal(saved.revision, timeline.revision + 1);
+    assert.equal(saved.history.undo.length, timeline.history.undo.length + 1);
+    const entry = saved.history.undo.at(-1)!;
     assert.equal(entry.kind === "change" ? entry.requestId : null, staged!.id, "the Undo entry carries the request");
     assert.equal(orderedTrackClips(saved.tracks[0]!)[0]!.id, movingId);
     const file = EditorRequestFileSchema.parse(JSON.parse(await readFile(requestsPath(store), "utf8")));
@@ -112,25 +115,27 @@ describe("Arke's editor requests (issue 684)", () => {
     );
 
     // Undo keeps the status and marks the record undone in the same commit (R-36); Redo clears it.
-    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: 1 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: saved.revision });
     const production = productionOf(store);
     assert.equal(production.editorRequests[0]!.status, "accepted");
     assert.equal(typeof production.editorRequests[0]!.undoneAt, "string");
     assert.equal(editorRequestUndone(production.editorRequests[0]!, production.timeline), true);
-    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: 2 });
+    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: saved.revision + 1 });
     assert.equal(productionOf(store).editorRequests[0]!.undoneAt, undefined);
     assert.equal(editorRequestUndone(productionOf(store).editorRequests[0]!, productionOf(store).timeline), false);
   });
 
   it("rejects without touching the timeline (R-31, A-9)", async () => {
     const store = await open();
-    const { commands } = moveSecondEarlier(store);
+    // Nobody has opened the timeline, so the request is prepared against the empty first state.
+    const { commands } = sceneAssembly(store, PRODUCTION, sortScenes(productionOf(store).scenes)[0]!.id);
     const [staged] = await stageEditorRequests(store, {
       conversationId: CONVERSATION,
       entryContext: THREAD,
-      requests: [{ summary: "Swap the first two shots", commands }],
+      requests: [{ summary: "Assemble the first scene", commands }],
       now: NOW,
     });
+    assert.equal(staged!.baseRevision, null, "prepared against the empty first state");
     const rejected = await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged!.id, decision: "reject", now: NOW });
     assert.equal(rejected.status, "rejected");
     await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
@@ -139,19 +144,19 @@ describe("Arke's editor requests (issue 684)", () => {
 
   it("refuses a stale request by name and marks it, without rebasing (R-32, A-9)", async () => {
     const store = await open();
-    const { commands, movingId } = moveSecondEarlier(store);
+    const { commands, movingId, timeline } = await moveSecondEarlier(store);
     const [staged] = await stageEditorRequests(store, {
       conversationId: CONVERSATION,
       entryContext: THREAD,
       requests: [{ summary: "Swap the first two shots", commands }],
       now: NOW,
     });
-    // The person makes the same move themselves, materialising revision 1 underneath the request.
+    // The person makes the same move themselves, moving the revision underneath the request.
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "move-picture",
       clipId: movingId,
       direction: "earlier",
-      baseRevision: null,
+      baseRevision: timeline.revision,
       sourceFingerprint: storyTimelineFingerprint(productionOf(store)),
     });
     const before = await readFile(timelinePath(store), "utf8");
@@ -167,7 +172,7 @@ describe("Arke's editor requests (issue 684)", () => {
 
   it("stages the same request once, however many times a turn repeats it", async () => {
     const store = await open();
-    const { commands } = moveSecondEarlier(store);
+    const { commands } = await moveSecondEarlier(store);
     const request = { summary: "Swap the first two shots", commands };
     const first = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [request], now: NOW });
     // The corrective retry of the same turn, and a later turn that repeats itself, both land here.
@@ -179,13 +184,13 @@ describe("Arke's editor requests (issue 684)", () => {
 
   it("dismisses a request the base moved under as stale, with the reason (round five)", async () => {
     const store = await open();
-    const { commands, movingId } = moveSecondEarlier(store);
+    const { commands, movingId, timeline } = await moveSecondEarlier(store);
     const [staged] = await stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [{ summary: "Swap the first two shots", commands }], now: NOW });
     await applyTimelineCommand(store, PRODUCTION, {
       kind: "move-picture",
       clipId: movingId,
       direction: "earlier",
-      baseRevision: null,
+      baseRevision: timeline.revision,
       sourceFingerprint: storyTimelineFingerprint(productionOf(store)),
     });
     const dismissed = await decideEditorRequest(store, { productionId: PRODUCTION, requestId: staged!.id, decision: "reject", now: NOW });

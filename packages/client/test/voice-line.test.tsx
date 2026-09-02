@@ -533,7 +533,7 @@ describe("reading a sheet aloud", () => {
   });
 });
 
-describe("the Audio row reports what exists", () => {
+describe("the Library's audio rows report what exists", () => {
   /**
    * "not generated" was hardcoded, so a line that had been read landed in the production and
    * the row went on claiming nothing existed — with no way to hear it. The same
@@ -569,11 +569,11 @@ describe("the Audio row reports what exists", () => {
 
   it("says a line is read, and offers it back, once one exists", () => {
     const { state, prodId } = withVoiceTake();
-    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/audio`, state);
+    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/cut?library=audio`, state);
     assert.match(html, />read</);
     assert.match(html, />Again</, "and the action becomes a retake rather than a first read");
     // Before it exists, the row says so and offers the first read.
-    const empty = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/audio`);
+    const empty = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/cut?library=audio`);
     assert.match(empty, /not generated/);
     assert.match(empty, />Generate</);
   });

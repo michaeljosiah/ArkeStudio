@@ -11,7 +11,7 @@ import {
   migrateLegacyCut,
   redoTimelineHistory,
   seedSpinePictureTimeline,
-  seedStoryPictureTimeline,
+  seedFirstPictureTimeline,
   sourceLengthFramesFor,
   spineTimelineFingerprint,
   storyTimelineFingerprint,
@@ -51,6 +51,8 @@ export type TimelineWrite =
       label?: string;
       /** The accepted Arke request this batch lands (SPEC-039 R-30); recorded on the entry. */
       requestId?: string;
+      /** What the batch did, in plain lines, for the entry that explains it (Arke's assembly). */
+      notes?: readonly string[];
       /** Files that land in the same commit as the timeline — the request's own status change. */
       attach?: readonly CommitFileInput[];
     }
@@ -211,7 +213,10 @@ export async function applyTimelineCommand(
         if (fingerprint !== command.sourceFingerprint) {
           throw new TimelineCommandRefused("the story order changed while this move was being made");
         }
-        current = seedStoryPictureTimeline(production);
+        // The first state is empty (decided 2026-09-02): Arke's assembly or a person's own
+        // placements fill it, so the story guides the order without writing the cut itself. A
+        // production already cut in `cut.json` keeps the story seed its placements anchor to.
+        current = seedFirstPictureTimeline(production);
       }
     } else {
       try {
@@ -283,11 +288,13 @@ export async function applyTimelineCommand(
           command.label ??
           (command.commands.length === 1 ? describeTimelineCommand(command.commands[0]!) : `${command.commands.length} edits`);
         refuseUnrenderablePlacements(clipCommands, current, boundedBy, store.getBundle().artifacts);
+        refuseUnknownLibraryItems(clipCommands, boundedBy, store.getBundle().artifacts);
         next = applyTimelineCommands(current, clipCommands, {
           label,
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
+          ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
       } else {
         const entry = current.history[command.kind].at(-1);
@@ -356,6 +363,30 @@ export async function applyTimelineCommand(
  * the shape; this is the check against the bundle, run before anything is written, so a
  * timeline never commits a clip every render would then refuse whole.
  */
+/**
+ * A Library item names something this world has (SPEC-039 R-8): a well-formed id for a shot or
+ * artifact that does not exist would persist, count against the limit and sit in Undo with no
+ * row to show for it.
+ */
+export function refuseUnknownLibraryItems(
+  commands: readonly TimelineCommand[],
+  production: ProductionBundle,
+  artifacts: ReadonlyArray<{ id: string; production?: string | null }>,
+): void {
+  const shots = new Set(production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)));
+  // What this production may see (SPEC-020 R-13): the world's own files and the ones it owns.
+  const known = new Set(
+    artifacts.filter((artifact) => artifact.production === undefined || artifact.production === null || artifact.production === production.meta.id).map((artifact) => artifact.id),
+  );
+  for (const command of commands) {
+    if (command.kind !== "add-to-library") continue;
+    for (const item of command.items) {
+      if (item.kind === "shot" && !shots.has(item.shotId)) throw new TimelineCommandRefused(`the library cannot hold ${item.shotId}: this production has no such shot`);
+      if (item.kind === "artifact" && !known.has(item.artifactId)) throw new TimelineCommandRefused(`the library cannot hold ${item.artifactId}: this world has no such artifact`);
+    }
+  }
+}
+
 export function refuseUnrenderablePlacements(
   commands: readonly TimelineCommand[],
   timeline: Pick<ProductionTimeline, "tracks">,

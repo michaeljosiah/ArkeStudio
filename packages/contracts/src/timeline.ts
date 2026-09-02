@@ -243,6 +243,20 @@ export type TimelineCueChange = z.infer<typeof TimelineCueChangeSchema>;
  * clip it touched is what lets Undo apply the exact inverse (R-25) without a second implementation
  * of every command, and what lets an accepted Arke request of several commands be one entry.
  */
+/**
+ * What the Library holds (SPEC-039 R-8): the shots and artifacts a person or Arke added to cut
+ * with. A curated set, not everything filed — the editor opens empty and fills as scenes are
+ * assembled or items are added, the way the target works.
+ */
+export const TimelineLibraryItemSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("shot"), shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema }).strict(),
+]);
+export type TimelineLibraryItem = z.infer<typeof TimelineLibraryItemSchema>;
+export const MAX_LIBRARY_ITEMS = 4000;
+
+export const libraryItemKey = (item: TimelineLibraryItem): string => (item.kind === "shot" ? `shot:${item.shotId}` : `artifact:${item.artifactId}`);
+
 export const TimelineChangeHistoryEntrySchema = z
   .object({
     kind: z.literal("change"),
@@ -252,13 +266,25 @@ export const TimelineChangeHistoryEntrySchema = z
     tracks: z.array(TimelineTrackChangeSchema).max(200).default([]),
     cues: z.array(TimelineCueChangeSchema).max(MAX_TRACK_CLIPS * 8).default([]),
     mix: z.object({ before: MixSettingsSchema, after: MixSettingsSchema }).strict().optional(),
+    /** The Library before and after, when the action changed it. */
+    library: z
+      .object({ before: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS), after: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS) })
+      .strict()
+      .optional(),
     /** Present when the entry landed an Arke editor request (SPEC-039 R-30, R-36). */
     requestId: z.string().min(1).max(80).optional(),
+    /** What the action did, in plain lines — Arke's assembly says what it placed, left and laid. */
+    notes: z.array(z.string().min(1).max(200)).max(8).optional(),
   })
   .strict()
   .refine(
     (entry) =>
-      entry.clips.length > 0 || entry.selections.length > 0 || entry.tracks.length > 0 || entry.cues.length > 0 || entry.mix !== undefined,
+      entry.clips.length > 0 ||
+      entry.selections.length > 0 ||
+      entry.tracks.length > 0 ||
+      entry.cues.length > 0 ||
+      entry.mix !== undefined ||
+      entry.library !== undefined,
     "a history entry must change something",
   );
 export type TimelineChangeHistoryEntry = z.infer<typeof TimelineChangeHistoryEntrySchema>;
@@ -286,6 +312,8 @@ export const ProductionTimelineSchema = z
     history: TimelineHistorySchema,
     /** Defaulted so a record written before the mix existed reads with the documented policy. */
     mix: MixSettingsSchema.default(DEFAULT_MIX),
+    /** The Library (SPEC-039 R-8). Defaulted, so a record from before it existed opens empty. */
+    library: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS).default([]),
     /**
      * Set once `cut.json`'s placements and audio tracks have been folded into typed tracks (R-30).
      * Until then the render plan still reads `cut.json`; after it there is one writable copy.
@@ -433,6 +461,8 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** Only an empty track goes; its clips are removed by their own commands first. */
   z.object({ kind: z.literal("remove-track"), trackId: TimelineTrackIdSchema }).strict(),
+  z.object({ kind: z.literal("add-to-library"), items: z.array(TimelineLibraryItemSchema).min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("remove-from-library"), items: z.array(TimelineLibraryItemSchema).min(1).max(200) }).strict(),
   z.object({ kind: z.literal("set-mix"), mix: MixSettingsSchema.partial().strict() }).strict(),
   /** Subtitles (SPEC-038 R-21..R-26): a language track, and the cues on it. */
   z
@@ -516,6 +546,10 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Add ${command.trackKind} track ${command.name}`;
     case "remove-track":
       return `Remove track ${command.trackId}`;
+    case "add-to-library":
+      return `Add ${command.items.length} item${command.items.length === 1 ? "" : "s"} to the library`;
+    case "remove-from-library":
+      return `Remove ${command.items.length} item${command.items.length === 1 ? "" : "s"} from the library`;
     case "set-mix":
       return "Change the mix";
     case "add-subtitle-track":
@@ -697,6 +731,7 @@ export function seedSpinePictureTimeline(production: ProductionBundle, spine: Pr
     ],
     history: { undo: [], redo: [] },
     mix: DEFAULT_MIX,
+    library: [],
   };
 }
 
@@ -753,6 +788,190 @@ export function episodeTimelineRange(production: ProductionBundle, timeline: Pro
   return { ok: true, startFrame, endFrame };
 }
 
+/**
+ * The editor's first state (SPEC-039 §1.1, decided 2026-09-02): nothing on the timeline and
+ * nothing in the Library. A scene reaches the timeline when Arke assembles it from the scene
+ * workspace, or when a person adds to the Library and places by hand — the story guides the
+ * order without filling the cut by itself.
+ */
+export function seedEmptyPictureTimeline(production: Pick<ProductionBundle, "meta">): ProductionTimeline {
+  return {
+    schemaVersion: 1,
+    revision: 0,
+    frameRate: productionFrameRate(production.meta),
+    tracks: [{ id: PICTURE_TRACK_ID, kind: "picture", name: "Picture", order: 0, muted: false, clips: [] }],
+    history: { undo: [], redo: [] },
+    mix: DEFAULT_MIX,
+    library: [],
+  };
+}
+
+/**
+ * The first record for a story production: empty, unless `cut.json` already holds placements —
+ * an existing film's shot-anchored sound has nothing to anchor to on an empty track, and the
+ * migration would drop it and call the record migrated. A production that was already cut keeps
+ * the story seed its placements were made against; a new one starts empty.
+ */
+export function seedFirstPictureTimeline(production: ProductionBundle): ProductionTimeline {
+  const placed = production.cut.overlays.length > 0 || production.cut.audio.some((lane) => lane.entries.length > 0);
+  return placed ? seedStoryPictureTimeline(production) : seedEmptyPictureTimeline(production);
+}
+
+/** How long a shot plays when the story names no length: the seed's own default, in frames. */
+export function storyShotFrames(durationSec: number | undefined, frameRate: FrameRate): number {
+  return shotDurationFrames(durationSec, frameRate);
+}
+
+export interface SceneAssembly {
+  commands: TimelineClipCommand[];
+  /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
+  notes: string[];
+  placed: string[];
+  gaps: string[];
+}
+
+/**
+ * Arke's assembly of one scene (decided 2026-09-02): the scene's shots go into the Library and
+ * onto the base Picture track after whatever is already there, in script order; a shot with no
+ * accepted take is placed as the same timed clip and resolves as a gap; a subtitle cue is
+ * conformed from each shot's spoken line; audio filed against the scene is laid under it as a
+ * bed. Pure — the coordinator applies the commands as one revision and one Undo entry, with
+ * the notes on the entry. A scene whose shots are all on the timeline already is refused.
+ */
+export function assembleSceneCommands(input: {
+  production: ProductionBundle;
+  timeline: ProductionTimeline;
+  sceneId: string;
+  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; links: readonly string[]; production?: string | null; mediaInfo?: { hasAudio: boolean; durationSec?: number } }>;
+  language?: string;
+}): SceneAssembly | { refused: string } {
+  const { production, timeline, sceneId, artifacts } = input;
+  const scene = production.scenes.find((candidate) => candidate.id === sceneId);
+  if (scene === undefined) return { refused: `${sceneId} is not a scene of this production` };
+  const frameRate = timeline.frameRate;
+  const shots = orderedShots(scene);
+  if (shots.length === 0) return { refused: `${scene.title} has no shots yet` };
+  const onTimeline = new Set(
+    timeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "shot" ? [clip.source.shotId] : []))),
+  );
+  const fresh = shots.filter((shot) => !onTimeline.has(shot.id));
+  if (fresh.length === 0) return { refused: `${scene.title} is already on the timeline` };
+  const base = timeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
+  const existingIds = new Set(timeline.tracks.flatMap((track) => track.clips.map((clip) => clip.id)));
+  // After the track's whole extent, not only its last clip: a hole a Delete deliberately left at
+  // the tail is kept as the track's `endFrame`, and the next scene goes after it.
+  let cursor = base === undefined ? 0 : Math.max(base.endFrame ?? 0, base.clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0));
+  const startFrame = cursor;
+  const commands: TimelineClipCommand[] = [];
+  const placed: string[] = [];
+  const gaps: string[] = [];
+  const cues: Array<{ id: SubtitleCueId; text: string; startFrame: number; endFrame: number; speaker?: string }> = [];
+  // Placed or a gap by the rule the preview and the export use: an accepted take that no longer
+  // resolves to media is a gap, whatever the selection says.
+  const playable = new Set(deriveCut(production).entries.filter((entry) => entry.media !== null).map((entry) => entry.shot.id));
+  for (const shot of fresh) {
+    const durationFrames = shotDurationFrames(shot.durationSec, frameRate);
+    let id: TimelineClipId = `cl_${shot.id.replace("_", "-")}`;
+    for (let n = 2; existingIds.has(id); n += 1) id = `cl_${shot.id.replace("_", "-")}-${n}`;
+    existingIds.add(id);
+    commands.push({
+      kind: "place",
+      trackId: PICTURE_TRACK_ID,
+      clip: {
+        id,
+        startFrame: cursor,
+        durationFrames,
+        sourceInFrames: 0,
+        source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title },
+      },
+    });
+    (playable.has(shot.id) ? placed : gaps).push(shot.title);
+    // Only a spoken line becomes a subtitle (R-45): an sfx note like "wind under the door" is
+    // direction for the mix, not words anyone says.
+    const spoken = shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue";
+    const line = spoken ? (shot.audio?.line?.trim() ?? "") : "";
+    if (line !== "") {
+      cues.push({
+        id: `cu_${id.slice(3)}`,
+        text: line.slice(0, 500),
+        startFrame: cursor,
+        endFrame: cursor + durationFrames,
+        ...(shot.audio?.speaker !== undefined ? { speaker: shot.audio.speaker } : {}),
+      });
+    }
+    cursor += durationFrames;
+  }
+  const library: TimelineLibraryItem[] = shots.map((shot) => ({ kind: "shot", shotId: shot.id }));
+  // A bed is the scene's own and the production's own (SPEC-020 R-13): scene ids repeat across
+  // productions, and another production's scoped file must not be laid under this one.
+  const visible = (artifact: { production?: string | null }) =>
+    artifact.production === undefined || artifact.production === null || artifact.production === production.meta.id;
+  const beds = artifacts.filter(
+    (artifact) => visible(artifact) && artifact.links.includes(scene.id) && (artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true)),
+  );
+  for (const bed of beds) library.push({ kind: "artifact", artifactId: bed.id });
+  commands.unshift({ kind: "add-to-library", items: library });
+  const notes: string[] = [`Placed ${fresh.length} shot${fresh.length === 1 ? "" : "s"} from ${scene.title} in script order.`];
+  if (gaps.length > 0) {
+    notes.push(`Left ${gaps.length === 1 ? "a gap" : `${gaps.length} gaps`} — ${gaps.slice(0, 4).join(", ")}${gaps.length > 4 ? ", …" : ""} — no accepted take yet, so it needs your call.`);
+  }
+  if (cues.length > 0) {
+    const language = input.language ?? "en";
+    // The track of this language, never another's: an English cue on a Spanish track is a wrong
+    // deliverable. Of those, the first with the scene's span free of cues; a trailing cue someone
+    // wrote past the picture would otherwise refuse the whole assembly.
+    const sameLanguage = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "subtitle" && track.language === language);
+    const subtitles = sameLanguage.find((track) => !(track.cues ?? []).some((cue) => cue.startFrame < cursor && cue.endFrame > startFrame));
+    const takenIds = new Set(timeline.tracks.map((track) => track.id));
+    let trackId: TimelineTrackId = subtitles?.id ?? `tr_subs-${language}`;
+    for (let n = 2; subtitles === undefined && takenIds.has(trackId); n += 1) trackId = `tr_subs-${language}-${n}`;
+    if (subtitles === undefined) {
+      commands.push({ kind: "add-subtitle-track", trackId, name: sameLanguage.length > 0 ? `Subtitles ${sameLanguage.length + 1}` : "Subtitles", language });
+    }
+    const taken = new Set((subtitles?.cues ?? []).map((cue) => cue.id));
+    for (const cue of cues) {
+      let cueId: SubtitleCueId = cue.id;
+      for (let n = 2; taken.has(cueId); n += 1) cueId = `${cue.id}-${n}`;
+      taken.add(cueId);
+      commands.push({ kind: "add-cue", trackId, cue: { ...cue, id: cueId } });
+    }
+    notes.push(`Conformed ${cues.length} subtitle${cues.length === 1 ? "" : "s"} from the shot lines.`);
+  }
+  if (beds.length > 0 && cursor > startFrame) {
+    // The first Ambience lane with the span free; a new one when every lane already holds
+    // something across it, rather than an overlap that refuses the whole assembly.
+    const spanFree = (track: TimelineTrack) => !track.clips.some((clip) => clip.startFrame < cursor && clip.startFrame + clip.durationFrames > startFrame);
+    const ambienceLanes = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "ambience");
+    const ambience = ambienceLanes.find(spanFree);
+    let trackId: TimelineTrackId = ambience?.id ?? "tr_ambience";
+    if (ambience === undefined) {
+      const takenIds = new Set(timeline.tracks.map((track) => track.id));
+      for (let n = 2; takenIds.has(trackId); n += 1) trackId = `tr_ambience-${n}`;
+      commands.push({ kind: "add-track", trackId, trackKind: "ambience", name: ambienceLanes.length > 0 ? `Ambience ${ambienceLanes.length + 1}` : "Ambience" });
+    }
+    // One bed per scene span on one track; a second file for the same scene waits in the Library.
+    const bed = beds[0]!;
+    let id: TimelineClipId = `cl_bed-${bed.id.slice(3, 11).toLowerCase()}`;
+    for (let n = 2; existingIds.has(id); n += 1) id = `cl_bed-${bed.id.slice(3, 11).toLowerCase()}-${n}`;
+    existingIds.add(id);
+    commands.push({
+      kind: "place",
+      trackId,
+      clip: {
+        id,
+        startFrame,
+        durationFrames: cursor - startFrame,
+        sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: bed.id, label: bed.file.split("/").pop() ?? bed.file },
+        gainDb: -12,
+      },
+    });
+    notes.push(`Laid ${bed.file.split("/").pop()} under ${scene.title} at −12 dB.`);
+  }
+  notes.push(`Added ${library.length} item${library.length === 1 ? "" : "s"} to the Library.`);
+  return { commands, notes, placed, gaps };
+}
+
 /** Materialize every story shot once. A shot without valid media remains the same timed clip and resolves as a gap. */
 export function seedStoryPictureTimeline(production: ProductionBundle): ProductionTimeline {
   const frameRate = productionFrameRate(production.meta);
@@ -786,6 +1005,7 @@ export function seedStoryPictureTimeline(production: ProductionBundle): Producti
     tracks: [{ id: PICTURE_TRACK_ID, kind: "picture", name: "Picture", order: 0, muted: false, clips }],
     history: { undo: [], redo: [] },
     mix: DEFAULT_MIX,
+    library: [],
   };
 }
 
@@ -879,6 +1099,7 @@ export type SourceLengthFrames = (clip: TimelineClip) => number | undefined;
 interface Working {
   tracks: TimelineTrack[];
   mix: MixSettings;
+  library: TimelineLibraryItem[];
   sourceLength: SourceLengthFrames;
   /** Every clip touched so far, keyed by id, with the state it had before the first touch. */
   touched: Map<TimelineClipId, { trackId: TimelineTrackId; before: TimelineClip | null }>;
@@ -1227,6 +1448,24 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       working.mix = MixSettingsSchema.parse({ ...working.mix, ...command.mix });
       return;
     }
+    case "add-to-library": {
+      const present = new Set(working.library.map(libraryItemKey));
+      // The same item twice in one command is one item: the set is kept while accepting, not only before.
+      const fresh = command.items.filter((item) => {
+        const key = libraryItemKey(item);
+        if (present.has(key)) return false;
+        present.add(key);
+        return true;
+      });
+      if (working.library.length + fresh.length > MAX_LIBRARY_ITEMS) throw new TimelineOperationRefused(`the library holds at most ${MAX_LIBRARY_ITEMS} items`);
+      working.library = [...working.library, ...fresh];
+      return;
+    }
+    case "remove-from-library": {
+      const gone = new Set(command.items.map(libraryItemKey));
+      working.library = working.library.filter((item) => !gone.has(libraryItemKey(item)));
+      return;
+    }
     case "add-subtitle-track": {
       if (working.tracks.some((candidate) => candidate.id === command.trackId)) {
         throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
@@ -1314,11 +1553,14 @@ export function applyTimelineCommands(
     selections?: readonly TimelineSelectionChange[];
     /** Measured source lengths, so a tail trim cannot reach past what a source can supply. */
     sourceLength?: SourceLengthFrames;
+    /** What this action did, for the record that explains it (Arke's assembly). */
+    notes?: readonly string[];
   } = {},
 ): ProductionTimeline {
   const working: Working = {
     tracks: timeline.tracks,
     mix: timeline.mix,
+    library: timeline.library,
     sourceLength: options.sourceLength ?? (() => undefined),
     touched: new Map(),
     touchedTracks: new Map(),
@@ -1346,8 +1588,9 @@ export function applyTimelineCommands(
     cues.push({ trackId, before, after });
   }
   const mix = canonical(working.mix) === canonical(timeline.mix) ? undefined : { before: timeline.mix, after: working.mix };
+  const library = canonical(working.library) === canonical(timeline.library) ? undefined : { before: timeline.library, after: working.library };
   const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && cues.length === 0 && mix === undefined) {
+  if (clips.length === 0 && selections.length === 0 && tracks.length === 0 && cues.length === 0 && mix === undefined && library === undefined) {
     throw new TimelineOperationRefused("the command changes nothing");
   }
 
@@ -1360,13 +1603,16 @@ export function applyTimelineCommands(
     tracks,
     cues,
     ...(mix !== undefined ? { mix } : {}),
+    ...(library !== undefined ? { library } : {}),
     ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    ...(options.notes !== undefined && options.notes.length > 0 ? { notes: options.notes.map((note) => note.slice(0, 200)).slice(0, 8) } : {}),
   };
   return {
     ...timeline,
     revision: nextRevision(timeline),
     tracks: working.tracks,
     mix: working.mix,
+    library: working.library,
     history: { undo: bounded([...timeline.history.undo, entry]), redo: [] },
   };
 }
@@ -1490,6 +1736,13 @@ function replayMix(mix: MixSettings, entry: TimelineHistoryEntry, phase: "undo" 
   return phase === "undo" ? entry.mix.before : entry.mix.after;
 }
 
+function replayLibrary(library: readonly TimelineLibraryItem[], entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelineLibraryItem[] {
+  if (entry.kind !== "change" || entry.library === undefined) return [...library];
+  const expected = phase === "undo" ? entry.library.after : entry.library.before;
+  if (canonical(library) !== canonical(expected)) throw new TimelineOperationRefused(`saved history is not in its ${phase} position for the library`);
+  return phase === "undo" ? [...entry.library.before] : [...entry.library.after];
+}
+
 function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelineTrack[] {
   return entry.kind === "move" ? replayMove(tracks, entry, phase) : replayChange(tracks, entry, phase);
 }
@@ -1498,11 +1751,13 @@ function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEnt
 function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { index: number; message: string } | null {
   let tracks: readonly TimelineTrack[] = timeline.tracks;
   let mix = timeline.mix;
+  let library: readonly TimelineLibraryItem[] = timeline.library;
   for (let index = timeline.history[stack].length - 1; index >= 0; index -= 1) {
     try {
       const entry = timeline.history[stack][index]!;
       tracks = replayEntry(tracks, entry, stack);
       mix = replayMix(mix, entry, stack);
+      library = replayLibrary(library, entry, stack);
     } catch (error) {
       if (error instanceof TimelineOperationRefused) {
         return { index, message: `saved history is not replayable from its ${stack} position: ${error.reason}` };
@@ -1532,6 +1787,7 @@ export function undoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "undo"),
     mix: replayMix(timeline.mix, entry, "undo"),
+    library: replayLibrary(timeline.library, entry, "undo"),
     history: { undo: timeline.history.undo.slice(0, -1), redo: bounded([...timeline.history.redo, entry]) },
   };
 }
@@ -1544,6 +1800,7 @@ export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "redo"),
     mix: replayMix(timeline.mix, entry, "redo"),
+    library: replayLibrary(timeline.library, entry, "redo"),
     history: { undo: bounded([...timeline.history.undo, entry]), redo: timeline.history.redo.slice(0, -1) },
   };
 }
