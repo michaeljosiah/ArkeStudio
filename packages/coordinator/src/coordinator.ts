@@ -5311,22 +5311,25 @@ export class Coordinator {
           answer({ disposition: "failed", reason: "that world is not open" });
           return;
         }
+        let sceneId: string;
         try {
-          const { sceneId } = await createScene(store, {
+          ({ sceneId } = await createScene(store, {
             productionId: msg.productionId,
             ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
             ...(msg.title !== undefined ? { title: msg.title } : {}),
-          });
-          // The snapshot before the answer, so the sender opens a scene its state already
-          // holds rather than a route that waits on the next broadcast.
-          await this.refreshWorldSnapshot(msg.worldId);
-          answer({ disposition: "created", sceneId });
+          }));
         } catch (err) {
           answer({
             disposition: "failed",
             reason: err instanceof Error ? err.message : "the scene could not be created",
           });
+          return;
         }
+        // The snapshot before the answer, so the sender opens a scene its state already holds
+        // rather than a route that waits on the next broadcast — and outside the try, because
+        // a scene that is on disk was created whatever the broadcast then does.
+        await this.refreshWorldSnapshot(msg.worldId);
+        answer({ disposition: "created", sceneId });
         return;
       }
       case "draft-scene": {
