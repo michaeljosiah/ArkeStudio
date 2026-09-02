@@ -606,6 +606,7 @@ export async function quoteFrameRun(store: WorldStore, input: QuoteFrameRunInput
           label: step.label,
           requestShotIds: step.requestShotIds,
           updateShotIds: step.updateShotIds,
+          references: step.request.references,
           estimatedMicroUsd: step.dispatch.estimatedMicroUsd,
         })),
         estimatedMicroUsd: run.steps.reduce((sum, step) => sum + step.dispatch.estimatedMicroUsd, 0),

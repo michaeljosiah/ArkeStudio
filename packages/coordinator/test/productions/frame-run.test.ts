@@ -256,6 +256,17 @@ describe("frame-run coordinator service", () => {
     assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
   });
 
+  it("quotes the exact references frozen into each step", async () => {
+    const f = await fixture();
+    let quotedReferences: unknown = null;
+    const run = await start(f, "per-shot", "all", f.production, f.world, IMAGE, undefined, (quote) => {
+      quotedReferences = quote.steps.map((step) => step.references);
+    });
+    const frozenReferences = run.steps.map((step) => step.request.references);
+    assert.ok(frozenReferences.some((references) => references.length > 0));
+    assert.deepEqual(quotedReferences, frozenReferences);
+  });
+
   it("refuses a quote for shot A when start asks for shot B", async () => {
     const f = await fixture();
     const [shotA, shotB] = orderedShots(f.scene);
