@@ -17,6 +17,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
+import type { ModelEditorRequest, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
@@ -145,6 +146,18 @@ export interface RunDeps {
     edits: readonly BibleEdit[];
     baseVersion: number;
   }) => Promise<BibleEditRecord | null>;
+  /**
+   * Stage this turn's editor requests as pending records (SPEC-039 R-27..R-29), or throw.
+   *
+   * The coordinator validates every command against the live base before a record exists and
+   * only for the production the thread is about; a refusal here rejects the turn as a corrective
+   * problem, the same way a bible edit that does not resolve does.
+   */
+  stageEditorRequests?: (input: {
+    conversationId: ConversationId;
+    entryContext: WorldChatContext | undefined;
+    requests: readonly ModelEditorRequest[];
+  }) => Promise<void>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -306,8 +319,9 @@ export class WorldChatRunner {
     conversationId: ConversationId,
     text: string,
     attachmentIds: readonly string[] = [],
+    subject?: WorldChatSubject,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject);
   }
 
   /**
@@ -340,6 +354,7 @@ export class WorldChatRunner {
     text: string,
     attachmentIds: readonly string[] = [],
     existingTurnId?: TurnId,
+    subject?: WorldChatSubject,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (!adapter || !adapter.readiness().ready) {
@@ -426,7 +441,7 @@ export class WorldChatRunner {
       budgetChars: budgetFor(adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -743,6 +758,43 @@ export class WorldChatRunner {
     }));
 
     /*
+     * Editor requests are staged before the bible is written and before the turn is recorded
+     * (SPEC-039 R-27): a request that cannot apply is the likelier refusal, and refusing it
+     * first leaves no bible edit on disk beside a rejected turn. A staged request beside a
+     * later failure is harmless — pending, visible, and one Reject away from gone.
+     */
+    if (outcome.turn.editorRequests.length > 0) {
+      if (!this.deps.stageEditorRequests) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request-unavailable",
+              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
+            },
+          ],
+        };
+      }
+      try {
+        await this.deps.stageEditorRequests({
+          conversationId,
+          entryContext: folded.entryContext,
+          requests: outcome.turn.editorRequests,
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request",
+              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+            },
+          ],
+        };
+      }
+    }
+
+    /*
      * The bible is written before the turn is recorded, and a failure here rejects the turn
      * whole (master §4.5, §8.3's all-or-nothing rule).
      *
@@ -948,4 +1000,11 @@ ${assembled.entryContext}`);
   // The id on its own line, so the text below it is unambiguously what offsets index into.
   sections.push(`## They just said\n[${assembled.currentUserMessageId}]\n${assembled.currentUserMessage}`);
   return sections.join("\n\n");
+}
+
+/** What the person has selected while they talk (SPEC-039 R-26), worded for the model. */
+function subjectNarration(subject: WorldChatSubject | undefined): string {
+  if (subject === undefined) return "";
+  const named = subject.kind === "timeline-clip" ? `clip ${subject.clipId}` : `track ${subject.trackId}`;
+  return ` They have ${named} selected on the timeline; that is what "this" and "the selected clip" mean.`;
 }

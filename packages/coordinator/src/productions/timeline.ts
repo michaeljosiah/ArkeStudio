@@ -48,6 +48,8 @@ export type TimelineWrite =
       label?: string;
       /** The accepted Arke request this batch lands (SPEC-039 R-30); recorded on the entry. */
       requestId?: string;
+      /** Files that land in the same commit as the timeline — the request's own status change. */
+      attach?: readonly CommitFileInput[];
     }
   | {
       kind: "move-picture";
@@ -320,7 +322,7 @@ export async function applyTimelineCommand(
       // A build that does not understand timeline authority must refuse this world rather than
       // export the old derived order. The boundary lands atomically with first materialisation.
       raiseSchemaVersion: 5,
-      files: [fileFor(timelinePath, raw, `${JSON.stringify(next, null, 2)}\n`), ...files],
+      files: [fileFor(timelinePath, raw, `${JSON.stringify(next, null, 2)}\n`), ...files, ...(command.kind === "commands" ? (command.attach ?? []) : [])],
     });
     return { dropped };
   });

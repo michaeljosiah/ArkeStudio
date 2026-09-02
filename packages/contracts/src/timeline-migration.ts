@@ -53,17 +53,21 @@ function clipIdFor(overlayId: string): TimelineClipId {
 }
 
 /**
- * Lay clips onto as few tracks as keep them from overlapping, in play order. Legacy lanes let
- * two placements share seconds; a typed track refuses that, so the second one steps down a track
- * rather than being dropped.
+ * Lay clips onto tracks that never overlap, in play order, keeping the legacy stacking. A lane
+ * let two placements share seconds and drew the later-starting one on top; a typed track refuses
+ * the overlap, so a clip steps to the track above everything it overlaps. First-fit packing
+ * would use fewer tracks and could put an earlier placement above a later one it never covered
+ * before — a migration that quietly changed the picture (round four).
  */
 function packWithoutOverlap(clips: readonly TimelineClip[]): TimelineClip[][] {
   const lanes: TimelineClip[][] = [];
+  const placed: Array<{ clip: TimelineClip; lane: number }> = [];
   for (const clip of orderedTrackClips({ clips: [...clips] })) {
     const end = clip.startFrame + clip.durationFrames;
-    const lane = lanes.find((candidate) => candidate.every((placed) => placed.startFrame >= end || placed.startFrame + placed.durationFrames <= clip.startFrame));
-    if (lane) lane.push(clip);
-    else lanes.push([clip]);
+    const under = placed.filter((item) => item.clip.startFrame < end && item.clip.startFrame + item.clip.durationFrames > clip.startFrame);
+    const lane = under.length === 0 ? 0 : Math.max(...under.map((item) => item.lane)) + 1;
+    (lanes[lane] ??= []).push(clip);
+    placed.push({ clip, lane });
   }
   return lanes;
 }

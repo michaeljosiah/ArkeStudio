@@ -47,6 +47,7 @@ export * from "./voice.js";
 export * from "./planning.js";
 export * from "./cut.js";
 export * from "./timeline.js";
+export * from "./editor-request.js";
 export * from "./render-plan.js";
 export * from "./timeline-migration.js";
 export * from "./subtitles.js";

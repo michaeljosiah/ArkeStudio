@@ -208,7 +208,8 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
-import { applyTimelineCommand, placementsLiveOnTimeline } from "./productions/timeline.js";
+import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "./productions/editor-requests.js";
 import {
   acceptStill,
   fileDrawnFrame,
@@ -3698,7 +3699,7 @@ export class Coordinator {
         const runner = this.worldChatRunner(store, msg.conversationId);
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
-        const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds);
+        const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds, msg.subject);
         // Started after the turn it names, so the person's own turn has first claim on the
         // harness, and awaited last, so naming a row never delays the reply.
         const naming =
@@ -7065,6 +7066,40 @@ export class Coordinator {
         return;
       }
       /*
+       * The one Accept/Reject boundary for an editor request (SPEC-039 R-29..R-32, issue 684).
+       * Everything is checked here, not on the card: the request must exist, be pending and still
+       * apply to the timeline as it stands. A stale Accept refuses by name and returns the
+       * current state through the snapshot; nothing is rebased.
+       */
+      case "editor-request-decide": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        try {
+          await decideEditorRequest(store, {
+            productionId: msg.productionId,
+            requestId: msg.requestId,
+            decision: msg.decision,
+            now: store.now(),
+          });
+        } catch (error) {
+          const reason =
+            error instanceof EditorRequestRefused || error instanceof TimelineCommandRefused
+              ? error.reason
+              : error instanceof Error
+                ? error.message
+                : String(error);
+          this.emit({
+            at: new Date().toISOString(),
+            type: "timeline.command-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            reason: reason.slice(0, 500),
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      /*
        * A subtitle draft from speech (SPEC-038 R-25, issue 683). One cue per Dialogue clip,
        * spanning that clip's window, with the words the local model heard; the model is
        * recorded as provenance and the cues are ordinary editable text from the moment they
@@ -7100,6 +7135,7 @@ export class Coordinator {
           }
           const at = new Date().toISOString();
           const ffmpeg = this.opts.ffmpeg;
+          const heard: Array<{ startFrame: number; endFrame: number; text: string; clip: (typeof dialogue)[number] }> = [];
           for (const clip of dialogue) {
             let path: string | null = null;
             let sourceLengthSec: number | null = null;
@@ -7127,8 +7163,10 @@ export class Coordinator {
              */
             const sourceInSec = clip.sourceInFrames / record.frameRate;
             const clipSec = clip.durationFrames / record.frameRate;
+            // Whole-source equivalence has to be established, not assumed: an unmeasured source
+            // under a tail-trimmed clip is windowed like any other (round four).
             const wholeSource =
-              clip.sourceInFrames === 0 && (sourceLengthSec === null || clipSec >= sourceLengthSec - 1 / record.frameRate);
+              clip.sourceInFrames === 0 && sourceLengthSec !== null && clipSec >= sourceLengthSec - 1 / record.frameRate;
             let audio: Buffer;
             let contentType: string;
             if (wholeSource) {
@@ -7137,7 +7175,9 @@ export class Coordinator {
                 extension === "mp3" ? "audio/mpeg" : extension === "m4a" ? "audio/mp4" : extension === "ogg" ? "audio/ogg" : "audio/wav";
               audio = await readFile(toExtendedLength(path));
             } else {
-              if (ffmpeg === undefined) throw new Error(`${clip.id} plays part of its source, and ffmpeg is needed to transcribe only that part`);
+              if (ffmpeg === undefined) {
+                throw new Error(`${clip.id} may play only part of its source, and ffmpeg is needed to transcribe only what it plays`);
+              }
               const windowDir = join(store.dir, ".cache", "transcribe");
               const windowed = join(windowDir, `${ulid()}.wav`);
               await mkdir(toExtendedLength(windowDir), { recursive: true });
@@ -7155,14 +7195,33 @@ export class Coordinator {
             }
             const text = (await this.voiceService.transcribe(Uint8Array.from(audio), contentType)).trim();
             if (text === "") continue;
+            heard.push({ startFrame: clip.startFrame, endFrame: clip.startFrame + clip.durationFrames, text, clip });
+          }
+          /*
+           * Two Dialogue tracks may overlap in time; a subtitle track may not. Overlapping windows
+           * become one cue carrying both lines, cited to the first, rather than a second add-cue
+           * the batch refuses — which would have thrown away every transcription with it (round
+           * four).
+           */
+          heard.sort((a, b) => a.startFrame - b.startFrame);
+          const merged: typeof heard = [];
+          for (const item of heard) {
+            const last = merged[merged.length - 1];
+            if (last !== undefined && item.startFrame < last.endFrame) {
+              last.endFrame = Math.max(last.endFrame, item.endFrame);
+              last.text = `${last.text} ${item.text}`;
+            } else merged.push({ ...item });
+          }
+          for (const item of merged) {
+            const clip = item.clip;
             commands.push({
               kind: "add-cue",
               trackId: msg.trackId,
               cue: {
                 id: `cu_${ulid()}`,
-                text: text.slice(0, 500),
-                startFrame: clip.startFrame,
-                endFrame: clip.startFrame + clip.durationFrames,
+                text: item.text.slice(0, 500),
+                startFrame: item.startFrame,
+                endFrame: item.endFrame,
                 ...(clip.source.kind === "take" && clip.source.sheetId !== undefined ? { speaker: clip.source.sheetId } : {}),
                 citation: { kind: "clip", clipId: clip.id },
                 provenance: { kind: "speech-to-text", model: "voxa", clipId: clip.id, at },
@@ -11038,6 +11097,10 @@ export class Coordinator {
       },
       applyBibleEdits: ({ edits, baseVersion }) =>
         applyTurnBibleEdits(store, edits, { source: "world-chat", baseVersion }),
+      // Validated and written by the coordinator, never by the model (SPEC-039 R-27..R-29).
+      stageEditorRequests: async ({ conversationId, entryContext, requests }) => {
+        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now() });
+      },
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

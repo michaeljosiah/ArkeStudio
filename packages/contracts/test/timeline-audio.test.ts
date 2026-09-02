@@ -129,6 +129,7 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
     selections: { sh_1: { acceptedTakeId: TAKE, trimInSec: 0 } },
     spine: null,
     cut: { audio: [], overlays: [] },
+    editorRequests: [],
     takeMediaInfo: {
       [TAKE]: { sourceHash: `sha256:${"a".repeat(64)}`, mediaInfo: { durationSec: 3, hasAudio: true }, probedAt: AT },
       [VOICE]: { sourceHash: `sha256:${"b".repeat(64)}`, mediaInfo: { durationSec: 2, hasAudio: true }, probedAt: AT },

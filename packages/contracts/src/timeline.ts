@@ -723,17 +723,18 @@ export function episodeTimelineRange(production: ProductionBundle, timeline: Pro
   if (mine.length === 0) return { ok: false, reason: `${episode.title} has no Picture clips on the timeline` };
   const startFrame = mine[0]!.startFrame;
   const endFrame = clipEnd(mine[mine.length - 1]!);
+  // Episode membership is the authority (SPEC-023 R-12): a shot from a scene no episode claims
+  // is as much an intruder as one from another episode, since the episode cut never carried it.
   const intruders = clips.filter((clip) => {
     if (clip.source.kind !== "shot") return false;
-    const owned = owner.get(clip.source.shotId);
-    return owned !== undefined && owned !== episode.id && clip.startFrame < endFrame && clipEnd(clip) > startFrame;
+    return owner.get(clip.source.shotId) !== episode.id && clip.startFrame < endFrame && clipEnd(clip) > startFrame;
   });
   if (intruders.length > 0) {
     const named = intruders
       .map((clip) => {
         const shotId = clip.source.kind === "shot" ? clip.source.shotId : null;
         const owned = shotId === null ? undefined : production.episodes.find((candidate) => candidate.id === owner.get(shotId));
-        return `${clip.source.label} (${owned?.title ?? "another episode"})`;
+        return `${clip.source.label} (${owned?.title ?? "no episode"})`;
       })
       .join(", ");
     return { ok: false, reason: `${episode.title} is interleaved with ${named}; an episode delivers one contiguous range` };

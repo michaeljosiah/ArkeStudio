@@ -81,6 +81,7 @@ function production(): ProductionBundle {
     selections: { sh_1: { acceptedTakeId: TAKE, trimInSec: 0 } },
     spine: null,
     cut: { audio: [], overlays: [] },
+    editorRequests: [],
     takeMediaInfo: {},
   };
 }

@@ -10,6 +10,7 @@ import {
   TimelineSourceFingerprintSchema,
   TimelineTrackIdSchema,
 } from "./timeline.js";
+import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
@@ -382,6 +383,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       text: z.string().min(1).max(16_000),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
+      /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
+      subject: WorldChatSubjectSchema.optional(),
     })
     .strict(),
   /**
@@ -2083,6 +2086,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourceFingerprint: TimelineSourceFingerprintSchema,
       /** What the history entry calls this action; derived from the commands when absent. */
       label: z.string().min(1).max(160).optional(),
+    })
+    .strict(),
+  /**
+   * SPEC-039 R-29: the only Accept/Reject boundary for one of Arke's editor requests. The
+   * coordinator checks the request exists, is pending and still applies before anything lands;
+   * a forged message with a made-up id, or one against a moved timeline, is refused by name.
+   */
+  z
+    .object({
+      kind: z.literal("editor-request-decide"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: EditorRequestIdSchema,
+      decision: z.enum(["accept", "reject"]),
     })
     .strict(),
   /** SPEC-037: move one durable Picture history entry between Undo and Redo. */

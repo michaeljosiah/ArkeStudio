@@ -20,6 +20,8 @@ import {
   productionFrameRate,
   resolvePictureTimeline,
   seedStoryPictureTimeline,
+  previewEditorRequest,
+  editorRequestStaleness,
   timelineSourceFingerprint,
   episodeTimelineRange,
   frameDispatchFor,
@@ -131,6 +133,7 @@ import {
 } from "./editor-timeline.js";
 import { ARTIFACT_DRAG_TYPE, ClipGain, MixPanel, TypedTrackRows, type TrackDrop } from "./editor-audio.js";
 import { CueInspector, SubtitleSources, SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
+import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
 import {
   acceptTake,
@@ -151,6 +154,7 @@ import {
   moveTimelineHistory,
   moveTimelinePictureClip,
   sendTimelineCommands,
+  decideEditorRequest,
   sendTimelineTranscribe,
   rejoinOverlayAudio,
   splitOverlayAudio,
@@ -4212,6 +4216,8 @@ export function CutScreen() {
   const [tool, setTool] = useState<EditorTool>("select");
   const [snap, setSnap] = useState(true);
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
+  /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
+  const [ghostRequestId, setGhostRequestId] = useState<string | null>(null);
   /**
    * Which language is viewed (SPEC-038 R-26): local view state. Unchosen shows the first track;
    * null is a choice too — none — and stays none rather than falling back to the first track
@@ -4379,7 +4385,28 @@ export function CutScreen() {
   }
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
-  const shownTimeline = draft ?? editableTimeline;
+  /*
+   * A ghost (SPEC-039 R-33): a pending request's commands applied to the live base in memory
+   * and drawn in its place while the card is previewed. Never saved, and gone the moment the
+   * request is decided or the base moves under it.
+   */
+  const ghostRequest =
+    ghostRequestId === null
+      ? null
+      : (production?.editorRequests.find((request) => request.id === ghostRequestId && request.status === "pending") ?? null);
+  let ghostTimeline: ProductionTimeline | null = null;
+  if (ghostRequest !== null && editableTimeline !== null && editorRequestStaleness(ghostRequest, timelineState, sourceFingerprint) === null) {
+    const ghost = previewEditorRequest(editableTimeline, ghostRequest.commands);
+    ghostTimeline = ghost.ok ? ghost.timeline : null;
+  }
+  const decideRequest = (requestId: string, decision: "accept" | "reject") => {
+    if (!worldId || !prodId) return;
+    setGhostRequestId(null);
+    setTimelineCommandError(null);
+    if (decision === "accept") setInFlight({ revision: timelineRevision, since: Date.now() });
+    decideEditorRequest(worldId, prodId, requestId, decision);
+  };
+  const shownTimeline = draft ?? ghostTimeline ?? editableTimeline;
   const views = shownTimeline ? pictureClipViews(shownTimeline, cut) : [];
   const usedShotIds = new Set(
     editableTimeline
@@ -4458,7 +4485,12 @@ export function CutScreen() {
       queueMicrotask(() => focusFirstControl(rightPanelRef.current));
     }
   };
-  const usedArtifactIds = new Set(overlays.map((clip) => clip.artifactId));
+  // What the cut uses is what the timeline holds once it owns placements (round four): a clip
+  // placed on a typed track is in the cut, whatever the legacy lanes say.
+  const usedArtifactIds = new Set([
+    ...overlays.map((clip) => clip.artifactId),
+    ...(editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? []),
+  ]);
   const cutMeta = spineCut
     ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
     : mediaOnly
@@ -4762,7 +4794,7 @@ export function CutScreen() {
             cueStyle={renderPlan?.ok ? (renderPlan.plan.subtitles?.style ?? null) : null}
           />
         </div>
-        <section className="fy-timeline" aria-label="Timeline">
+        <section className="fy-timeline" aria-label="Timeline" data-ghost={ghostTimeline !== null ? "true" : undefined}>
           <div className="fy-timeline__toolbar">
             <strong>TIMELINE</strong>
             <span>{views.length} picture · {clipCount} clip{clipCount === 1 ? "" : "s"} · {Math.max(2, overlays.reduce((high, clip) => Math.max(high, (clip.lane ?? 0) + 1), 0))} overlay lanes</span>
@@ -5076,9 +5108,25 @@ export function CutScreen() {
               productionId={prodId}
               dock={{ title: "Arke", subject: `${production?.meta.title ?? "production"} · production conversation` }}
               openingNote="opening production conversation…"
-              emptyLine="No production conversation yet. This tab uses the same real thread as Develop."
+              emptyLine="No production conversation yet. This tab uses the same real thread as Develop. Ask for a change to the cut and Arke stages it as a request you accept or reject."
               placeholder="Ask Arke about this production…"
-              pointsEmpty="Nothing understood yet. Timeline edit requests are not available in this shell."
+              pointsEmpty="Nothing understood yet."
+              subject={selectedAny ? { kind: "timeline-clip", clipId: selectedAny.clip.id } : undefined}
+              side={
+                production && production.editorRequests.length > 0 ? (
+                  <EditorRequestCards
+                    requests={production.editorRequests}
+                    base={editableTimeline}
+                    timelineState={timelineState}
+                    currentFingerprint={sourceFingerprint}
+                    frameRate={frameRate}
+                    ghostId={ghostRequestId}
+                    onGhost={setGhostRequestId}
+                    onDecide={decideRequest}
+                    disabled={timelineError !== null || commandPending || !worldId || !prodId}
+                  />
+                ) : undefined
+              }
             />
           </div>
         )}

@@ -96,6 +96,7 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
     selections: { sh_1: { acceptedTakeId: TAKE, trimInSec: 0 } },
     spine: null,
     cut: { audio: [], overlays: [] },
+    editorRequests: [],
     takeMediaInfo: {},
     ...over,
   };

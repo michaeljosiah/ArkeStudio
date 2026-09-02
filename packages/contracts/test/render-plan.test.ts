@@ -114,6 +114,7 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
         { id: "ov_01J8G0000000000000000000B3", artifactId: NOTES, startSec: 0, endSec: 9, lane: 2, audio: "keep" },
       ],
     },
+    editorRequests: [],
     takeMediaInfo: {},
     ...over,
   };

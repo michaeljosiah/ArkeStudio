@@ -6857,3 +6857,17 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 @media (prefers-reduced-motion: reduce) {
   .fy-swrow, .fy-swnode, .fy-sw__tab { transition: none; }
 }
+
+/* Arke's editor requests (SPEC-039 R-33, R-34): cards in the Arke strip, a ghost on the timeline. */
+.fy-reqcards { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; }
+.fy-reqcard { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--background); display: flex; flex-direction: column; gap: 4px; }
+.fy-reqcard--pending { border-color: var(--primary); }
+.fy-reqcard--accepted, .fy-reqcard--rejected, .fy-reqcard--stale { opacity: 0.75; }
+.fy-reqcard__summary { margin: 0; font: 500 12px/1.4 var(--font-sans); color: var(--foreground); }
+.fy-reqcard__status { font-size: 10px; color: var(--muted-foreground); text-transform: uppercase; }
+.fy-reqcard__lines { margin: 0; padding: 0 0 0 14px; font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-reqcard__reason { margin: 0; font: 400 11px/1.4 var(--font-sans); color: var(--destructive); }
+.fy-reqcard__actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.fy-reqcard__preview { border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted-foreground); padding: 3px 8px; font: 500 10.5px var(--font-sans); cursor: pointer; }
+.fy-reqcard__preview[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+.fy-timeline[data-ghost="true"] .fy-pictclip, .fy-timeline[data-ghost="true"] .fy-typedclip { outline: 1px dashed var(--primary); outline-offset: -1px; opacity: 0.85; }

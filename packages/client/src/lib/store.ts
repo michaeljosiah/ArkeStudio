@@ -28,6 +28,7 @@ import {
   type BenchMode,
   ulid,
   type TimelineCommand,
+  type WorldChatSubject,
 } from "@arke-studio/contracts";
 import type { ArkeBridge, AttachTarget } from "../arke-bridge.js";
 
@@ -3531,6 +3532,7 @@ export function sendWorldChat(
   conversationId: string,
   text: string,
   attachmentIds: string[] = [],
+  subject?: WorldChatSubject,
 ): void {
   send({
     kind: "world-chat-send",
@@ -3539,7 +3541,13 @@ export function sendWorldChat(
     conversationId,
     text,
     attachmentIds,
+    ...(subject !== undefined ? { subject } : {}),
   });
+}
+
+/** Accept or reject one of Arke's editor requests (SPEC-039 R-29): the only boundary that lands or discards it. */
+export function decideEditorRequest(worldId: string, productionId: string, requestId: string, decision: "accept" | "reject"): void {
+  send({ kind: "editor-request-decide", worldId, productionId, requestId, decision });
 }
 
 /** Stop the turn in flight. */
