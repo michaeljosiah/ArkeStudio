@@ -20,6 +20,7 @@ import {
   type ProductionMedium,
   type ProposalSkill,
   EpisodeSchema,
+  SceneRecordSchema,
   SeasonSchema,
   StoryOverviewSchema,
   type Episode,
@@ -505,6 +506,138 @@ export async function reorderScenes(store: WorldStore, productionId: string, ord
 // creates shots and dispatches nothing
 // ---------------------------------------------------------------------------
 
+/**
+ * A new scene's identity, minted against everything that already claims one (issue #387).
+ *
+ * Identity is stable at creation and independent of position: the id comes from the slug, the
+ * file stem IS the slug — no ordering prefix, ever — and both are deduplicated against what
+ * exists rather than derived from a count. `number` stays as the scene's stable birth name;
+ * explicit `order` places it. One function for the drafted skeleton and the empty scene, so the
+ * two cannot mint differently.
+ */
+async function sceneIdentityFor(
+  store: WorldStore,
+  productionId: string,
+  name: string,
+): Promise<{ id: string; file: string; number: number; slug: string; path: string }> {
+  const bundle = store.getBundle();
+  const production = bundle.productions.find((p) => p.meta.id === productionId);
+  const takenIds = new Set(production?.scenes.map((s) => s.id) ?? []);
+  const onDisk = new Set(Object.values(production?.sceneFiles ?? {}));
+  const takenStems = new Set(onDisk);
+  // A staged-but-unaccepted draft occupies its stem too: two identical briefs in a row must
+  // not race to one file, with the second accept silently colliding into the first.
+  const stagedStems = new Set<string>();
+  for (const staged of bundle.proposals) {
+    for (const target of staged.proposal.targets) {
+      const m = new RegExp(`^productions/${productionId}/scenes/(.+)\\.json$`).exec(target.path);
+      if (m && !onDisk.has(m[1]!)) stagedStems.add(m[1]!);
+    }
+  }
+  for (const stem of stagedStems) takenStems.add(stem);
+  /*
+   * A staged draft has claimed its number as well as its stem (round 3, 2026-08-22). Counting
+   * only what is on disk gave every draft staged before the first accept the same number and
+   * the same order — three scenes all calling themselves Scene 1, in an order nothing decided.
+   * Driven out by drafting two scenes back to back, which is how anybody would build an episode.
+   *
+   * Claimed by the number the draft actually carries, not by counting drafts (codex, PR 708):
+   * the live maximum can drop — delete the highest scene with two drafts waiting — and a count
+   * added to it lands exactly on the first draft's number. The scan parses candidates only for
+   * scene-edit proposals, so a draft's number is read from its staged file here; one that
+   * cannot be read still counts as one claim above everything that can.
+   */
+  const highest = production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0;
+  let claimed = highest;
+  let unreadable = 0;
+  for (const staged of bundle.proposals) {
+    for (const target of staged.proposal.targets) {
+      const m = new RegExp(`^productions/${productionId}/scenes/(.+)\\.json$`).exec(target.path);
+      if (!m || onDisk.has(m[1]!)) continue;
+      const stagedNumber = staged.scenes?.[target.path]?.number ?? (await stagedSceneNumber(store, staged.proposal.id, target.path));
+      if (stagedNumber === undefined) unreadable += 1;
+      else claimed = Math.max(claimed, stagedNumber);
+    }
+  }
+  const number = claimed + unreadable + 1;
+  const slug = slugify(name).slice(0, 40) || `scene-${number}`;
+  let id = `sc_${slug}`;
+  let file = slug;
+  for (let n = 2; takenIds.has(id) || takenStems.has(file); n++) {
+    id = `sc_${slug}-${n}`;
+    file = `${slug}-${n}`;
+  }
+  return { id, file, number, slug, path: `productions/${productionId}/scenes/${file}.json` };
+}
+
+/** The birth number a staged scene file carries, or undefined when the file cannot say. */
+async function stagedSceneNumber(store: WorldStore, proposalId: string, path: string): Promise<number | undefined> {
+  try {
+    const raw = await readFile(toExtendedLength(join(store.dir, ".proposals", proposalId, fromPortable(path))), "utf8");
+    const number = (JSON.parse(raw) as { number?: unknown }).number;
+    return typeof number === "number" && Number.isInteger(number) && number >= 1 ? number : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Make a scene with nothing in it, live (SPEC-036 R-37).
+ *
+ * The drafted skeleton below goes through the gate because an agent fills it; this one has no
+ * author but the person who pressed the button, and a proposal they would accept a second later
+ * is a step with no decision in it. It is written directly, `Untitled` unless named, and the
+ * workspace is where it gets built — with Arke or by hand.
+ *
+ * Joining an episode is bookkeeping about the scene, so it lands in the same commit as the
+ * scene — the mirror of what `deleteScene` removes. An episode this production does not have is
+ * a refusal, not a scene that quietly belongs nowhere.
+ */
+export async function createScene(
+  store: WorldStore,
+  input: { productionId: string; episodeId?: string; title?: string },
+): Promise<{ sceneId: string; path: string }> {
+  const title = input.title?.trim() || "Untitled";
+  /*
+   * Mint, read and commit inside ONE serialised region (codex, PR 708). Two presses at once —
+   * two windows, a double click — read the same snapshot outside it, both choose `sc_untitled`,
+   * and the second reports a collision for a scene the person expected to exist. The gate is
+   * what makes the second press see the first, the same way `applySceneCommand` mints shot ids.
+   */
+  return store.gateOp(async () => {
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((p) => p.meta.id === input.productionId);
+    if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+    const episode = input.episodeId === undefined ? undefined : production.episodes.find((e) => e.id === input.episodeId);
+    const episodeStem = episode === undefined ? undefined : production.episodeFiles[episode.id];
+    if (input.episodeId !== undefined && (episode === undefined || episodeStem === undefined)) {
+      throw new Error(`episode ${input.episodeId} is not in ${input.productionId}`);
+    }
+    const { id, number, slug, path } = await sceneIdentityFor(store, input.productionId, title);
+    // Validated as the gate validates a draft: nothing lands that the scanner would then drop.
+    const record = SceneRecordSchema.parse(
+      migrateLegacyScene({ id, number, order: number, slug, title, status: "draft", version: 1, shots: [] }),
+    );
+    const files: CommitFileInput[] = [
+      { path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null },
+    ];
+    if (episode !== undefined && episodeStem !== undefined) {
+      const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
+      const doc = JsonFile.parse(live);
+      // Appended to the file as it is, not to the snapshot's copy of it: the hash check proves
+      // the bytes, and a membership added since the snapshot would otherwise pass that check
+      // and be written away.
+      const current = doc.value["scenes"];
+      const scenes = Array.isArray(current) ? (current as unknown[]).filter((s): s is string => typeof s === "string") : episode.scenes;
+      doc.set({ scenes: [...scenes.filter((s) => s !== id), id] });
+      files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
+    }
+    await store.commitUnserialised({ kind: "scene-create", source: "editor", files });
+    return { sceneId: id, path };
+  });
+}
+
 export interface SceneDraft {
   proposalId: string;
   path: string;
@@ -543,39 +676,11 @@ export async function draftSceneSkeleton(
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
-  // Identity is stable at creation and independent of position (issue #387): the id comes from
-  // the slug, the file stem IS the slug — no ordering prefix, ever — and both are deduplicated
-  // against what exists rather than derived from a count. `number` stays as the scene's stable
-  // birth name; explicit `order` places it.
-  const takenIds = new Set(production?.scenes.map((s) => s.id) ?? []);
-  const onDisk = new Set(Object.values(production?.sceneFiles ?? {}));
-  const takenStems = new Set(onDisk);
-  // A staged-but-unaccepted draft occupies its stem too: two identical briefs in a row must
-  // not race to one file, with the second accept silently colliding into the first.
-  const stagedStems = new Set<string>();
-  for (const staged of bundle.proposals) {
-    for (const target of staged.proposal.targets) {
-      const m = new RegExp(`^productions/${input.productionId}/scenes/(.+)\\.json$`).exec(target.path);
-      if (m && !onDisk.has(m[1]!)) stagedStems.add(m[1]!);
-    }
-  }
-  for (const stem of stagedStems) takenStems.add(stem);
-  /*
-   * A staged draft has claimed its number as well as its stem (round 3, 2026-08-22). Counting
-   * only what is on disk gave every draft staged before the first accept the same number and
-   * the same order — three scenes all calling themselves Scene 1, in an order nothing decided.
-   * Driven out by drafting two scenes back to back, which is how anybody would build an episode.
-   */
-  const highest = production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0;
-  const number = highest + stagedStems.size + 1;
-  const slug = slugify(input.brief.split(/[.!?\n]/)[0] ?? "scene").slice(0, 40) || `scene-${number}`;
-  let id = `sc_${slug}`;
-  let file = slug;
-  for (let n = 2; takenIds.has(id) || takenStems.has(file); n++) {
-    id = `sc_${slug}-${n}`;
-    file = `${slug}-${n}`;
-  }
-  const path = `productions/${input.productionId}/scenes/${file}.json`;
+  const { id, number, slug, path } = await sceneIdentityFor(
+    store,
+    input.productionId,
+    input.brief.split(/[.!?\n]/)[0] ?? "scene",
+  );
   const skill = input.skill ?? null;
   const skeleton = migrateLegacyScene({
     id,

@@ -58,7 +58,6 @@ import {
   ChapterTreeScreen,
   CutScreen,
   GenerateScreen,
-  NewSceneScreen,
   ProductionCastScreen,
   ProductionHomeScreen,
   ProductionLayout,
@@ -268,7 +267,9 @@ export function App() {
               (turn 99): a season is its episodes. */}
           <Route path="story-structure" element={<StoryStructureScreen />} />
           <Route path="scenes" element={<ScenesScreen />} />
-          <Route path="scenes/new" element={<NewSceneScreen />} />
+          {/* The brief form retired (SPEC-036 R-37): `New scene` makes the scene and opens it, and
+              a bookmark to the form lands on the list rather than on a route that writes on load. */}
+          <Route path="scenes/new" element={<Navigate to="../scenes" replace />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />
           {/* The full shot behind the card (turn 97, 14d). */}
           <Route path="scenes/:sceneId/shots/:shotId" element={<ShotSheetScreen />} />

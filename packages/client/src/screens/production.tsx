@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   deriveCut,
@@ -165,7 +165,7 @@ import {
   attachHostFiles,
   attachHostText,
   hostCanAttach,
-  draftScene,
+  createScene,
   exportCut,
   exportWorld,
   rejectTake,
@@ -186,11 +186,11 @@ import {
   setShotTrim,
   useExports,
   useStore,
-  useWorld,
   requestVoiceLine,
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   subscribeQueueResults,
+  subscribeSceneCreateResults,
   subscribeTimelineRefusals,
   subscribeVoiceUploadConfirmations,
 } from "../lib/store.js";
@@ -269,6 +269,75 @@ export function sceneFileOf(
   return production?.sceneFiles[scene.id] ?? null;
 }
 
+/**
+ * Where a scene pressed outside any episode goes: the episode in view, else the last one, else
+ * nowhere — a film has no episodes and its scenes belong to none.
+ */
+export function defaultEpisodeFor(
+  production: { episodes: readonly { id: string; order: number }[] } | null | undefined,
+  currentEpisodeId?: string,
+): string | undefined {
+  if (!production) return undefined;
+  if (currentEpisodeId !== undefined && production.episodes.some((episode) => episode.id === currentEpisodeId)) {
+    return currentEpisodeId;
+  }
+  return [...production.episodes].sort((a, b) => a.order - b.order).at(-1)?.id;
+}
+
+/**
+ * The one way a scene begins (SPEC-036 R-37): pressed anywhere, it makes an empty scene and
+ * opens it. Pending until the correlated result arrives, the way a production create is
+ * (issue 384): success opens the scene it made, never the list; failure is the toaster's to
+ * say, so the button here only has to come back.
+ */
+export function useNewScene(worldId: string | undefined, prodId: string | undefined) {
+  const navigate = useNavigate();
+  const connection = useStore().connection;
+  const [pendingRequest, setPendingRequest] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingRequest === null) return;
+    return subscribeSceneCreateResults((result) => {
+      if (result.requestId !== pendingRequest) return;
+      setPendingRequest(null);
+      // The destination is the result's own world and production, not this route's (codex,
+      // PR 708): the layout stays mounted across a production switch, and a scene made in the
+      // one you left must not be opened under the one you arrived at.
+      if (result.disposition === "created" && result.sceneId !== undefined) {
+        navigate(
+          `/w/${encodeURIComponent(result.worldId)}/p/${encodeURIComponent(result.productionId)}/scenes/${encodeURIComponent(result.sceneId)}`,
+        );
+      }
+    });
+  }, [pendingRequest, navigate]);
+  // A result lost to a dropped connection never arrives — reconnect brings a snapshot, not the
+  // answer — and a press that waited on it would stay disabled for the session (codex, PR 708).
+  // The scene may well exist by then; the rail shows it, and the press is offered again.
+  useEffect(() => {
+    if (connection !== "open") setPendingRequest(null);
+  }, [connection]);
+  return {
+    pending: pendingRequest !== null,
+    create: (episodeId?: string) => {
+      if (!worldId || !prodId || pendingRequest !== null) return;
+      setPendingRequest(createScene(worldId, prodId, episodeId === undefined ? {} : { episodeId }));
+    },
+  };
+}
+
+/**
+ * The layout's one pending press, shared with the screens under it (codex, PR 708): a press on
+ * the Scenes screen followed by a rail link unmounts that screen with its listener, and the
+ * scene it made would never be opened. The layout outlives the screens, so it holds the request,
+ * and every New scene control in a production reads the same pending state.
+ */
+const NewSceneContext = createContext<ReturnType<typeof useNewScene> | null>(null);
+
+/** The layout's press where there is one, else this screen's own (screens rendered alone). */
+function useSharedNewScene(worldId: string | undefined, prodId: string | undefined) {
+  const own = useNewScene(worldId, prodId);
+  return useContext(NewSceneContext) ?? own;
+}
+
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
   if (decision === "accepted") return "ok";
   if (decision === "rejected") return "sketch";
@@ -334,6 +403,7 @@ export function ProductionLayout() {
   */
   const [railChoice, setRailChoice] = useRailCollapsed();
   const [episodeExpansion, setEpisodeExpansion] = useState<Record<string, boolean>>({});
+  const newScene = useNewScene(worldId, prodId);
   const sceneDetailDefault = /\/scenes\/[^/]+\/?$/.test(location.pathname);
   const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
   /*
@@ -352,7 +422,6 @@ export function ProductionLayout() {
     "story/chapters": Book,
     "story-structure": Folder,
     scenes: Film,
-    "scenes/new": Plus,
     "branch-map": ListOrdered,
     takes: VideoMark,
     generate: Sparkle,
@@ -547,13 +616,15 @@ export function ProductionLayout() {
                               </NavLink>
                             );
                           })}
-                          <NavLink
-                            to={`${base}/scenes/new`}
+                          <button
+                            type="button"
                             className="fy-prodrail__new-scene"
+                            disabled={newScene.pending}
+                            onClick={() => newScene.create(episode.id)}
                           >
                             <Plus size={11} />
                             New scene
-                          </NavLink>
+                          </button>
                         </div>
                       )}
                     </div>
@@ -635,7 +706,19 @@ export function ProductionLayout() {
                   {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
                   {shape?.isBranching &&
                     item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
-                  {item("scenes/new", "New scene", undefined, true, false, true)}
+                  {/* A press, not a destination (SPEC-036 R-37): it makes the scene and opens it. */}
+                  <button
+                    type="button"
+                    className="fy-prodrail__item fy-prodrail__item--under fy-prodrail__item--press"
+                    title={folded ? "New scene" : undefined}
+                    disabled={newScene.pending}
+                    onClick={() => newScene.create(defaultEpisodeFor(production, currentEpisodeId))}
+                  >
+                    <span className="fy-prodrail__mark" aria-hidden={!folded}>
+                      <Plus size={15} />
+                    </span>
+                    <span className="fy-prodrail__label">New scene</span>
+                  </button>
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
@@ -661,7 +744,13 @@ export function ProductionLayout() {
           {/* The production tree is a sibling of the world tree, not a child of it (App.tsx), so
               the world-open refusal has to be stated here too — otherwise a reload or deep link
               onto a production leaves every screen under it on its loader forever (issue 571). */}
-          {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
+          {refusal ? (
+            <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
+          ) : (
+            <NewSceneContext.Provider value={newScene}>
+              <Outlet />
+            </NewSceneContext.Provider>
+          )}
         </div>
       </div>
     </div>
@@ -1114,6 +1203,7 @@ export function ProductionDashboardScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const newScene = useSharedNewScene(worldId, prodId);
   if (!world || !production) {
     return (
       <Screen id="production-dashboard">
@@ -1238,6 +1328,7 @@ export function ProductionDashboardScreen() {
             onOpen={(path, opening) =>
               navigate(`/w/${worldId}/p/${prodId}${path}`, opening ? { state: { opening } } : {})
             }
+            newScene={newScene}
           />
           {/* Below the frame's content, not above it: 53b opens on the production's own name and
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
@@ -1430,10 +1521,12 @@ function DayOne({
   worldId,
   prodId,
   onOpen,
+  newScene,
 }: {
   worldId: string;
   prodId: string;
   onOpen: (path: string, opening?: string) => void;
+  newScene: ReturnType<typeof useNewScene>;
 }) {
   const [message, setMessage] = useState("");
   // Nothing is being said to yet, so what is dropped here is filed as the production's own
@@ -1479,7 +1572,7 @@ function DayOne({
         </div>
       </div>
       <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
-        <button type="button" className="fy-radio" style={{ flex: 1 }} onClick={() => onOpen("/scenes/new")}>
+        <button type="button" className="fy-radio" style={{ flex: 1 }} disabled={newScene.pending} onClick={() => newScene.create()}>
           <div style={{ font: "600 13px var(--font-sans)" }}>Write the first scene</div>
           <div
             style={{
@@ -1774,6 +1867,7 @@ export function ScenesScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const newScene = useSharedNewScene(worldId, prodId);
   const totalSec =
     production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
     0;
@@ -1785,7 +1879,11 @@ export function ScenesScreen() {
           {production?.scenes.length ?? 0} scenes · {seconds(totalSec)}
         </span>
         <span className="fy-h1row__push" />
-        <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/scenes/new`)}>
+        <Button
+          variant="primary"
+          disabled={newScene.pending}
+          onClick={() => newScene.create(defaultEpisodeFor(production))}
+        >
           New scene
         </Button>
       </div>
@@ -1857,53 +1955,6 @@ export function SceneDetailScreen() {
     <Screen id="scene-detail">
       <EmptyState title="Opening scene…" />
     </Screen>
-  );
-}
-
-export function NewSceneScreen() {
-  const { worldId, prodId } = useParams();
-  const navigate = useNavigate();
-  const world = useWorld();
-  const [brief, setBrief] = useState("");
-  // The example brief names one of this world's own cast, not the sample world's.
-  const exampleName = world?.sheets[0]?.name ?? "Someone";
-  return (
-    <div className="fy-prodmain" data-screen="new-scene">
-      <div className="fy-h1row">
-        <h1 className="fy-h1">New scene</h1>
-        <span className="fy-h1row__meta">
-          a draft arrives as a proposal · accepting creates the shots, dispatches nothing
-        </span>
-      </div>
-      <DegradedBanner component="harness" />
-      <div className="scr-form" style={{ maxWidth: 620 }}>
-        <div className="scr-field">
-          <label className="scr-field__label">What happens</label>
-          <Textarea
-            placeholder={`${exampleName} keeps the night watch alone; what they feared arrives a season early…`}
-            value={brief}
-            onChange={(e) => setBrief(e.target.value)}
-          />
-          <span className="scr-field__hint">
-            Mention cast with @name — shots compute their cast from live references, never guesses.
-          </span>
-        </div>
-        <div>
-          <Button
-            variant="primary"
-            disabled={brief.trim().length === 0}
-            onClick={() => {
-              if (worldId && prodId) {
-                draftScene(worldId, prodId, brief.trim());
-                navigate(`/w/${worldId}/p/${prodId}`);
-              }
-            }}
-          >
-            Draft scene
-          </Button>
-        </div>
-      </div>
-    </div>
   );
 }
 

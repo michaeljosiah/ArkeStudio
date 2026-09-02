@@ -1533,6 +1533,24 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       brief: z.string().min(1).max(2000),
     })
     .strict(),
+  /**
+   * Make a scene, empty, and open it (SPEC-036 R-37). No brief and no proposal: the record is
+   * written live under a placeholder title, and the workspace is where it gets built. The answer
+   * is `scene.create-result`, correlated by requestId, so the sender can open the scene it made
+   * rather than guessing which one arrived in the next snapshot.
+   */
+  z
+    .object({
+      kind: z.literal("create-scene"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** The episode it joins; absent, the scene belongs to no episode yet. */
+      episodeId: EpisodeIdSchema.optional(),
+      /** The name it is born with; absent, `Untitled`. Whitespace is not a name. */
+      title: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict(),
   /** Turn 97: undo. v<n> comes back as a new version; nothing between it and now is lost. */
   z
     .object({
@@ -1586,8 +1604,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         z
           .object({
             kind: z.literal("edit-scene"),
-            /** Null explicitly clears the optional synopsis; omission is not a command. */
-            synopsis: z.string().min(1).nullable(),
+            /** The name in the header. Whitespace is not a name, so it is trimmed before the check. */
+            title: z.string().trim().min(1).max(200).optional(),
+            /** Null explicitly clears the optional synopsis; omission leaves it as it is. */
+            synopsis: z.string().min(1).nullable().optional(),
           })
           .strict(),
         z

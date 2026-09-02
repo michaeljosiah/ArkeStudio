@@ -291,9 +291,20 @@ export function editShot(record: SceneRecord, input: { shotId: string; change: P
   return complete(record, next);
 }
 
-/** Edit scene prose without sending a legacy-shaped shots array back through the writer. */
-export function editScene(record: SceneRecord, input: { synopsis: string | undefined }): GraphScene {
-  const next = complete(record, shotsOf(record));
+/**
+ * Edit scene prose without sending a legacy-shaped shots array back through the writer.
+ *
+ * `title` sets when present. `synopsis` follows the patch vocabulary `editShot` uses: a key that
+ * is absent is left alone, and one present as `undefined` is cleared — the only way a patch can
+ * say "remove this" once JSON has dropped the distinction.
+ */
+export function editScene(
+  record: SceneRecord,
+  input: { title?: string; synopsis?: string | undefined },
+): GraphScene {
+  const completed = complete(record, shotsOf(record));
+  const next = input.title === undefined ? completed : { ...completed, title: input.title };
+  if (!("synopsis" in input)) return next;
   if (input.synopsis !== undefined) return { ...next, synopsis: input.synopsis };
   const { synopsis: _synopsis, ...withoutSynopsis } = next;
   return withoutSynopsis;
