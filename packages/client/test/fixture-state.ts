@@ -449,6 +449,7 @@ const state: ClientState = {
         spine: null,
         cut: { audio: [], overlays: [] },
         takeMediaInfo: {},
+        editorRequests: [],
       },
     ],
     series: [],

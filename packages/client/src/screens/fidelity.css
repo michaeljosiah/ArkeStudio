@@ -1948,6 +1948,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   height: 326px;
   flex: none;
   min-height: 0;
+  /* The cue sizes itself against the picture (cqh); the box has fixed dimensions, so nothing collapses. */
+  container-type: size;
   border: 1px solid var(--border);
   border-radius: 11px;
   overflow: hidden;
@@ -6051,6 +6053,84 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-ovclip__x:hover { color: var(--destructive); }
 
 /* Lanes: a stack of rows that hold clips, plus the gestures on a clip and its menu. */
+/* ---- The Picture track as an editable sequence (SPEC-037 R-19..R-23, issue 679) ------------
+   Clips are laid by frame, so a hole is empty lane rather than a missing cell, and a drag is a
+   preview of the algebra's answer rather than a hand-drawn approximation of it. */
+.fy-scenes--framed { position: relative; height: 18px; display: block; }
+.fy-scenes--framed > .fy-scenes__band { position: absolute; top: 0; bottom: 0; box-sizing: border-box; }
+.fy-pictlane { position: relative; height: 60px; box-sizing: border-box; display: block; padding: 0; }
+.fy-pictlane--hand { cursor: grab; }
+.fy-pictlane--blade .fy-pictclip { cursor: col-resize; }
+.fy-pictclip { position: absolute; top: 1px; height: 58px; box-sizing: border-box; margin: 0; padding: 0; font: inherit; color: inherit; cursor: grab; user-select: none; touch-action: none; }
+.fy-pictclip:active { cursor: grabbing; }
+.fy-pictclip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; z-index: 3; }
+.fy-pictclip.fy-cutseg--gap { display: flex; align-items: center; justify-content: center; }
+.fy-pictclip__gap { font: 400 9px var(--font-mono); padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-pictclip__grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; touch-action: none; z-index: 2; }
+.fy-pictclip__grip--start { left: 0; }
+.fy-pictclip__grip--end { right: 0; }
+.fy-pictclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
+.fy-pictclip > .fy-portrait, .fy-pictclip > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-timeline__tools { display: inline-flex; gap: 2px; padding: 1px; border: 1px solid var(--border); border-radius: 6px; }
+.fy-timeline__tools button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+.fy-timeline__toolbar button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+.fy-driftchip { display: inline-flex; align-items: center; gap: 6px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-framestep > strong { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.fy-takepick { margin-top: 14px; }
+.fy-takepick__row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); font-size: 10.5px; }
+.fy-takepick__row--current { color: var(--foreground); }
+.fy-takepick__id { font: 500 9.5px var(--font-mono); letter-spacing: .04em; }
+.fy-takepick__use { border: 1px solid var(--border); background: transparent; color: var(--foreground); border-radius: 5px; padding: 3px 8px; font: 500 10px var(--font-sans); cursor: pointer; transition: var(--transition-control); }
+.fy-takepick__use:hover:not(:disabled) { background: var(--accent); }
+.fy-takepick__use:disabled { color: var(--neutral-400); cursor: default; }
+.fy-takepick__use[aria-pressed="true"] { border-color: var(--foreground); }
+/* ---- Typed tracks: overlay picture, Dialogue, Ambience, Music (SPEC-038, issue 681) ---------- */
+.fy-track__label--typed { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
+.fy-track__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-trackbtns { display: inline-flex; gap: 2px; flex: none; }
+.fy-trackbtns button { width: 16px; height: 16px; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--muted-foreground); font: 600 8px var(--font-mono); cursor: pointer; }
+.fy-trackbtns button[aria-pressed="true"] { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.fy-trackbtns button:disabled { opacity: .4; cursor: default; }
+.fy-track--silent .fy-typedclip { opacity: .45; }
+.fy-typedlane { position: relative; display: block; padding: 0; height: 42px; box-sizing: border-box; border: 1px dashed transparent; border-radius: 5px; }
+.fy-track[data-track="overlay"] .fy-track__lane { height: 44px; }
+.fy-track[data-track="ambience"] .fy-typedlane, .fy-track[data-track="music"] .fy-typedlane { height: 38px; }
+.fy-typedlane--over { border-color: var(--foreground); background: color-mix(in srgb, var(--accent) 60%, transparent); }
+.fy-typedclip { position: absolute; top: 2px; bottom: 2px; box-sizing: border-box; margin: 0; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font: 400 8.5px var(--font-mono); display: flex; align-items: center; gap: 6px; overflow: hidden; cursor: grab; user-select: none; touch-action: none; }
+.fy-typedclip--audio { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
+.fy-typedclip--selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
+.fy-typedclip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; z-index: 3; }
+.fy-typedclip:active { cursor: grabbing; }
+.fy-typedclip__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.fy-typedclip__gain { flex: none; font: 500 7.5px var(--font-mono); letter-spacing: .06em; color: var(--neutral-400); border: 1px solid var(--border); border-radius: 3px; padding: 1px 3px; }
+.fy-mixpanel { margin-top: 14px; }
+.fy-mixpanel > .fy-takepick__use { margin-top: 8px; }
+.fy-artrow__add { flex: none; border: 1px solid var(--border); background: transparent; color: var(--foreground); border-radius: 5px; padding: 3px 7px; font: 500 9.5px var(--font-sans); cursor: pointer; }
+.fy-artrow__add:hover:not(:disabled) { background: var(--accent); }
+.fy-artrow__add:disabled { color: var(--neutral-400); cursor: default; }
+/* ---- Subtitles: cues on the lane, words in the Inspector (SPEC-038 R-21..R-26, issue 683) ---- */
+.fy-track[data-track="subtitles"] .fy-cuelane { height: 26px; }
+.fy-cue { background: var(--secondary); font: 400 8px var(--font-mono); }
+.fy-cue--stale { border-style: dashed; }
+.fy-track__tail { flex: none; display: flex; align-items: center; padding: 0 4px; }
+.fy-trackbtns__add { width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--muted-foreground); font: 600 11px var(--font-sans); cursor: pointer; }
+.fy-trackbtns__add:disabled { opacity: .4; cursor: default; }
+.fy-cue__field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.fy-cue__field textarea, .fy-cue__field input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); padding: 6px 8px; font: 400 11px/1.4 var(--font-sans); }
+.fy-cue__stale { color: var(--warning); }
+.fy-subsources { margin-top: 14px; }
+.fy-subsources select, .fy-subsources input { max-width: 150px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }
+.fy-subsources__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* Over the black stage, so the neutral ramp rather than the theme: white words in either mode. */
+.fy-cutviewer__cue { position: absolute; left: 8%; right: 8%; bottom: 46px; text-align: center; color: var(--neutral-50); font: 500 15px/1.35 var(--font-sans); text-shadow: 0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950); white-space: pre-line; pointer-events: none; }
+.fy-cutviewer__cue--box { background: color-mix(in srgb, var(--neutral-950) 60%, transparent); border-radius: 4px; padding: 4px 8px; margin: 0 auto; display: table; text-shadow: none; }
+.fy-subtitle-delivery { margin: 12px 0 4px; }
+.fy-subtitle-delivery__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 6px; font: 400 11px var(--font-sans); }
+.fy-subtitle-delivery__row label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); }
+.fy-subtitle-delivery__row select { border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }
+.fy-subtitle-delivery__modes { display: inline-flex; gap: 2px; padding: 1px; border: 1px solid var(--border); border-radius: 6px; }
+.fy-subtitle-delivery__modes button { border: 0; background: transparent; color: var(--muted-foreground); padding: 3px 8px; border-radius: 5px; font: 500 10.5px var(--font-sans); cursor: pointer; }
+.fy-subtitle-delivery__modes button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
 .fy-clanes { position: relative; }
 .fy-clanes__foot { display: flex; align-items: center; gap: 10px; padding: 8px 0 0 28px; }
 .fy-ovclip { cursor: grab; user-select: none; touch-action: none; }
@@ -7143,3 +7223,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 @media (prefers-reduced-motion: reduce) {
   .fy-swrow, .fy-swnode, .fy-sw__tab { transition: none; }
 }
+
+/* Arke's editor requests (SPEC-039 R-33, R-34): cards in the Arke strip, a ghost on the timeline. */
+.fy-reqcards { display: flex; flex-direction: column; gap: 8px; margin: 0 0 8px; }
+.fy-reqcard { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--background); display: flex; flex-direction: column; gap: 4px; }
+.fy-reqcard--pending { border-color: var(--primary); }
+.fy-reqcard--accepted, .fy-reqcard--rejected, .fy-reqcard--stale { opacity: 0.75; }
+.fy-reqcard__summary { margin: 0; font: 500 12px/1.4 var(--font-sans); color: var(--foreground); }
+.fy-reqcard__status { font-size: 10px; color: var(--muted-foreground); text-transform: uppercase; }
+.fy-reqcard__lines { margin: 0; padding: 0 0 0 14px; font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-reqcard__reason { margin: 0; font: 400 11px/1.4 var(--font-sans); color: var(--destructive); }
+.fy-reqcard__actions { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.fy-reqcard__preview { border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted-foreground); padding: 3px 8px; font: 500 10.5px var(--font-sans); cursor: pointer; }
+.fy-reqcard__preview[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); }
+.fy-timeline[data-ghost="true"] .fy-pictclip, .fy-timeline[data-ghost="true"] .fy-typedclip { outline: 1px dashed var(--primary); outline-offset: -1px; opacity: 0.85; }

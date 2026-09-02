@@ -9,7 +9,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { __setStateForTest } from "../src/lib/store.js";
 import { CutScreen, ExportsScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
-import { legacySceneView, orderedShots, seedStoryPictureTimeline } from "@arke-studio/contracts";
+import { legacySceneView, orderedShots, seedSpinePictureTimeline } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(globalThis, {
@@ -176,7 +176,7 @@ function spineLane(container: HTMLElement): string[] {
 describe("the Exports screen's exhaustive cut views (issue 405)", () => {
   it("keeps an ordinary production on scene-order runtime, gap copy, and enabled presets", async () => {
     const renderer = await renderExports(structuredClone(FIXTURE_STATE) as ClientState);
-    for (const label of ["Master", "Social excerpt", "Review cut"]) {
+    for (const label of ["Master", "Vertical", "Review cut"]) {
       await choosePreset(renderer, label);
       assertSelectedPreset(renderer, label);
       assert.deepEqual(exportAction(renderer), { text: "Export · 10s", disabled: false });
@@ -189,6 +189,10 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
     );
     assert.ok(!text.includes("song to cut against"), "scene-order copy says nothing about a spine");
     assert.ok(!text.includes("cannot be made yet"), "ordinary presets retain their existing readiness");
+    // Labels state only what the encode does (SPEC-038 R-31, issue 682).
+    assert.ok(!text.includes("timecode"), "no timecode is burned");
+    assert.ok(!text.includes("captions"), "no captions are burned unless asked for");
+    assert.ok(text.includes("Vertical"), "the 9:16 preset renders the whole cut and says so");
     await unmount(renderer);
   });
 
@@ -200,18 +204,22 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
     assert.match(allText(invalidRenderer), /Timeline unavailable · timeline\.json is malformed/);
     await unmount(invalidRenderer);
 
+    // A saved timeline delivers the song clock through the same plan as every other production
+    // (issue 682): the master is a Music clip, so the readiness rules of the spine plan no
+    // longer apply and the export is offered at the plan's length.
     const timed = spineState("audio");
     const production = timed.world!.productions[0]!;
-    production.timeline = { status: "ready", timeline: seedStoryPictureTimeline(production) };
+    production.timeline = { status: "ready", timeline: seedSpinePictureTimeline(production, production.spine!, 20) };
     const timedRenderer = await renderExports(ClientStateSchema.parse(timed));
-    assert.equal(exportAction(timedRenderer).disabled, true);
-    assert.match(allText(timedRenderer), /music-timed delivery does not consume the saved Picture timeline/);
+    assert.equal(exportAction(timedRenderer).disabled, false);
+    assert.doesNotMatch(allText(timedRenderer), /does not consume the saved Picture timeline/);
+    assert.deepEqual(exportAction(timedRenderer), { text: "Export · 20s", disabled: false });
     await unmount(timedRenderer);
   });
 
   it("blocks every preset when the named track artifact is missing, without borrowing scene runtime", async () => {
     const renderer = await renderExports(spineState("missing"));
-    for (const label of ["Master", "Social excerpt", "Review cut"]) {
+    for (const label of ["Master", "Vertical", "Review cut"]) {
       await choosePreset(renderer, label);
       assertSelectedPreset(renderer, label);
       assert.deepEqual(exportAction(renderer), { text: "Export", disabled: true });
@@ -231,7 +239,7 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
 
   it("lets every preset measure an unmeasured track and claims no runtime it has not measured", async () => {
     const renderer = await renderExports(spineState("unmeasured"));
-    for (const label of ["Master", "Social excerpt", "Review cut"]) {
+    for (const label of ["Master", "Vertical", "Review cut"]) {
       await choosePreset(renderer, label);
       assertSelectedPreset(renderer, label);
       assert.deepEqual(exportAction(renderer), { text: "Export", disabled: false });
@@ -248,7 +256,7 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
 
   it("uses a silent track's measured runtime and blocks every preset with the silent-track reason", async () => {
     const renderer = await renderExports(spineState("silent"));
-    for (const label of ["Master", "Social excerpt", "Review cut"]) {
+    for (const label of ["Master", "Vertical", "Review cut"]) {
       await choosePreset(renderer, label);
       assertSelectedPreset(renderer, label);
       assert.deepEqual(exportAction(renderer), { text: "Export · 20s", disabled: true });
@@ -283,7 +291,7 @@ describe("the Exports screen's exhaustive cut views (issue 405)", () => {
 
   it("recomputes preset-specific refusals as the user changes the selected deliverable", async () => {
     const renderer = await renderExports(spineState("audio", true));
-    for (const label of ["Master", "Social excerpt"] as const) {
+    for (const label of ["Master", "Vertical"] as const) {
       await choosePreset(renderer, label);
       assertSelectedPreset(renderer, label);
       assert.deepEqual(exportAction(renderer), { text: "Export · 20s", disabled: true });

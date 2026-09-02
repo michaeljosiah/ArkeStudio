@@ -3,7 +3,15 @@ import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
 import { ClientStateSchema } from "./client-state.js";
 import { MAX_CLIP_LANE } from "./cut.js";
-import { TimelineClipIdSchema, TimelineMoveDirectionSchema, TimelineSourceFingerprintSchema } from "./timeline.js";
+import {
+  TimelineClipIdSchema,
+  TimelineCommandSchema,
+  TimelineMoveDirectionSchema,
+  TimelineSourceFingerprintSchema,
+  TimelineTrackIdSchema,
+} from "./timeline.js";
+import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
+import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { ShotSchema } from "./scene.js";
@@ -376,6 +384,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       text: z.string().min(1).max(16_000),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
+      /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
+      subject: WorldChatSubjectSchema.optional(),
     })
     .strict(),
   /**
@@ -2079,6 +2089,44 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourceFingerprint: TimelineSourceFingerprintSchema,
     })
     .strict(),
+  /**
+   * SPEC-037 R-18, R-24 (issue #679): one completed action as one batch of semantic commands.
+   *
+   * The batch lands as one revision and one Undo entry or not at all. `baseRevision` null with the
+   * source fingerprint materialises the first assembly under the same command, exactly as the
+   * one-position move does.
+   */
+  z
+    .object({
+      kind: z.literal("timeline-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /**
+       * Empty only with a null `baseRevision`: it materialises the first assembly as it stands
+       * (SPEC-037 R-13), which is how a music-timed production opens on the timeline before any
+       * edit. Against a saved record an empty batch changes nothing and is refused.
+       */
+      commands: z.array(TimelineCommandSchema).max(50),
+      baseRevision: z.number().int().min(0).nullable(),
+      sourceFingerprint: TimelineSourceFingerprintSchema,
+      /** What the history entry calls this action; derived from the commands when absent. */
+      label: z.string().min(1).max(160).optional(),
+    })
+    .strict(),
+  /**
+   * SPEC-039 R-29: the only Accept/Reject boundary for one of Arke's editor requests. The
+   * coordinator checks the request exists, is pending and still applies before anything lands;
+   * a forged message with a made-up id, or one against a moved timeline, is refused by name.
+   */
+  z
+    .object({
+      kind: z.literal("editor-request-decide"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: EditorRequestIdSchema,
+      decision: z.enum(["accept", "reject"]),
+    })
+    .strict(),
   /** SPEC-037: move one durable Picture history entry between Undo and Redo. */
   z
     .object({
@@ -2175,6 +2223,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** The saved timeline revision shown when this export was requested; null means legacy derivation. */
       timelineRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable(),
       preset: z.enum(["review-cut", "master", "social-excerpt"]),
+      /** Which subtitle track to deliver and how (SPEC-038 R-27); absent delivers none. */
+      subtitles: z
+        .object({
+          trackId: TimelineTrackIdSchema,
+          mode: SubtitleOutputModeSchema,
+          sidecar: SidecarFormatSchema.optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  /**
+   * SPEC-038 R-25 (issue 683): draft a subtitle track from the Dialogue clips' speech. Explicit,
+   * never automatic, and ordinary editable text once it exists; the draft records the model that
+   * heard it without making that model the subtitle authority.
+   */
+  z
+    .object({
+      kind: z.literal("timeline-transcribe"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      baseRevision: z.number().int().min(0),
+      language: LanguageTagSchema,
+      trackId: TimelineTrackIdSchema,
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),

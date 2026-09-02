@@ -57,6 +57,7 @@ function production(over: Partial<ProductionBundle>): ProductionBundle {
     selections: {},
     spine: null,
     cut: { audio: [], overlays: [] },
+    editorRequests: [],
     takeMediaInfo: {},
     ...over,
   };

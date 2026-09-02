@@ -17,6 +17,7 @@ import {
   type WorldChatLoaded,
   type WorldChatRun,
 } from "@arke-studio/contracts";
+import type { ModelEditorRequest, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
@@ -145,6 +146,20 @@ export interface RunDeps {
     edits: readonly BibleEdit[];
     baseVersion: number;
   }) => Promise<BibleEditRecord | null>;
+  /**
+   * Stage this turn's editor requests as pending records (SPEC-039 R-27..R-29), or throw.
+   *
+   * The coordinator validates every command against the live base before a record exists and
+   * only for the production the thread is about; a refusal here rejects the turn as a corrective
+   * problem, the same way a bible edit that does not resolve does.
+   */
+  stageEditorRequests?: (input: {
+    conversationId: ConversationId;
+    entryContext: WorldChatContext | undefined;
+    requests: readonly ModelEditorRequest[];
+    /** Validate everything and write nothing: the pass that runs before the bible is written. */
+    dryRun?: boolean;
+  }) => Promise<void>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -306,8 +321,9 @@ export class WorldChatRunner {
     conversationId: ConversationId,
     text: string,
     attachmentIds: readonly string[] = [],
+    subject?: WorldChatSubject,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject);
   }
 
   /**
@@ -340,6 +356,7 @@ export class WorldChatRunner {
     text: string,
     attachmentIds: readonly string[] = [],
     existingTurnId?: TurnId,
+    subject?: WorldChatSubject,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (!adapter || !adapter.readiness().ready) {
@@ -426,7 +443,7 @@ export class WorldChatRunner {
       budgetChars: budgetFor(adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -743,6 +760,41 @@ export class WorldChatRunner {
     }));
 
     /*
+     * Editor requests are validated before anything durable happens and written after
+     * everything else has (SPEC-039 R-27; round eight): the dry run refuses a request that
+     * could not land while the bible is still untouched, so a rejected turn leaves neither a
+     * card nor an orphaned bible edit, and the corrective retry starts from the base it was
+     * shown. The write below follows the bible's; what remains after it is the append.
+     */
+    const requests = outcome.turn.editorRequests;
+    if (requests.length > 0) {
+      if (!this.deps.stageEditorRequests) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request-unavailable",
+              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
+            },
+          ],
+        };
+      }
+      try {
+        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests, dryRun: true });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request",
+              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+            },
+          ],
+        };
+      }
+    }
+
+    /*
      * The bible is written before the turn is recorded, and a failure here rejects the turn
      * whole (master §4.5, §8.3's all-or-nothing rule).
      *
@@ -777,6 +829,22 @@ export class WorldChatRunner {
         // Named precisely, because the corrective turn can act on it: a heading that does not
         // resolve is fixable by the model, and a bible that moved underneath it is not.
         return { ok: false, problems: [{ code: "bible-edit", safeMessage: bibleProblem(err) }] };
+      }
+    }
+
+    if (requests.length > 0 && this.deps.stageEditorRequests) {
+      try {
+        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request",
+              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+            },
+          ],
+        };
       }
     }
 
@@ -948,4 +1016,11 @@ ${assembled.entryContext}`);
   // The id on its own line, so the text below it is unambiguously what offsets index into.
   sections.push(`## They just said\n[${assembled.currentUserMessageId}]\n${assembled.currentUserMessage}`);
   return sections.join("\n\n");
+}
+
+/** What the person has selected while they talk (SPEC-039 R-26), worded for the model. */
+function subjectNarration(subject: WorldChatSubject | undefined): string {
+  if (subject === undefined) return "";
+  const named = subject.kind === "timeline-clip" ? `clip ${subject.clipId}` : `track ${subject.trackId}`;
+  return ` They have ${named} selected on the timeline; that is what "this" and "the selected clip" mean.`;
 }

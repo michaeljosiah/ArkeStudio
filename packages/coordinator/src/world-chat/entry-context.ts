@@ -1,5 +1,14 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { orderedShots, productionAspect, productionShape, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import {
+  orderedShots,
+  orderedTrackClips,
+  productionAspect,
+  productionShape,
+  seedStoryPictureTimeline,
+  TURN_RESULT_BOUNDS,
+  type ProductionTimeline,
+  type TimelineClip,
+} from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "./wrapup.js";
 
 /**
@@ -77,6 +86,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
             .join("; ")}.`,
         );
       }
+      const timeline = describeTimeline(production);
+      if (timeline) lines.push(timeline);
       return lines.join(" ");
     }
     case "episode": {
@@ -105,6 +116,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
           episode.scenes.length > 0 ? `Its scenes, in order: ${episode.scenes.join(", ")}.` : "It has no scenes yet.",
         );
       }
+      const timeline = describeTimeline(production);
+      if (timeline) lines.push(timeline);
       return lines.join(" ");
     }
     case "scene": {
@@ -161,9 +174,68 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
           "A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
         );
       }
+      const timeline = describeTimeline(production);
+      if (timeline) lines.push(timeline);
       return lines.join(" ");
     }
   }
+}
+
+function clipLabel(clip: TimelineClip): string {
+  const source = clip.source;
+  return source.kind === "shot" ? source.shotId : source.kind === "take" ? source.takeId : `"${source.label}"`;
+}
+
+/**
+ * The timeline as the model may address it (SPEC-039 R-27, issue 684): every clip id, track and
+ * frame it could name in an editor request, and the requests already waiting so it does not
+ * stage them twice. A story production with no saved record is described from the first
+ * assembly its first command would materialise; the song clock is not, because opening it on
+ * the timeline is the person's own choice.
+ */
+function describeTimeline(production: ProductionBundle | undefined): string | null {
+  if (!production) return null;
+  const state = production.timeline;
+  if (state?.status === "invalid") return "The timeline record is invalid, so no editor request can be made until it is repaired.";
+  let base: ProductionTimeline;
+  let revision: number | null;
+  if (state?.status === "ready") {
+    base = state.timeline;
+    revision = base.revision;
+  } else if (production.spine !== null) {
+    return "This production is cut to a song and has not been opened on the timeline yet; an editor request needs the person to press Open on the timeline first.";
+  } else {
+    try {
+      base = seedStoryPictureTimeline(production);
+    } catch {
+      return null;
+    }
+    revision = null;
+  }
+  const tracks = [...base.tracks]
+    .sort((a, b) => a.order - b.order)
+    .slice(0, 12)
+    .map((track) => {
+      const clips = orderedTrackClips(track);
+      const items = clips
+        .slice(0, 40)
+        .map((clip) => `${clip.id} ${clipLabel(clip)} ${clip.startFrame}–${clip.startFrame + clip.durationFrames}f`)
+        .join(", ");
+      return `${track.id} (${track.kind}${track.muted ? ", muted" : ""}): ${items || "empty"}${clips.length > 40 ? ", …" : ""}`;
+    });
+  const pending = production.editorRequests.filter((request) => request.status === "pending");
+  const waiting =
+    pending.length > 0
+      ? ` Requests already waiting for their decision: ${pending
+          .slice(0, 6)
+          .map((request) => `${request.id} "${request.summary.slice(0, 80)}"`)
+          .join("; ")}.`
+      : "";
+  return `The production timeline ${
+    revision === null
+      ? "has not been saved yet; a first request materialises the story order below"
+      : `is revision ${revision}`
+  }, ${base.frameRate} fps, frames counted from zero. Tracks — ${tracks.join("; ")}. An editor request names these clip ids exactly; the person accepts or rejects it on its card.${waiting}`;
 }
 
 /**
