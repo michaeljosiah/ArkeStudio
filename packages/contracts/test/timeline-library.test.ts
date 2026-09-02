@@ -200,3 +200,16 @@ describe("the first record, and what counts as placed", () => {
     assert.deepEqual(first.gaps, ["sh_1", "sh_2"]);
   });
 });
+
+describe("what the assembly may lay", () => {
+  it("leaves another production's scoped bed alone, even when it links the same scene id", () => {
+    const bundle = production();
+    const foreign = { ...bells, id: "ar_01J8G0000000000000000000R9", production: "other-production" };
+    const first = assembleSceneCommands({ production: bundle, timeline: seedEmptyPictureTimeline(bundle), sceneId: "sc_one", artifacts: [foreign, { ...bells, production: bundle.meta.id }] });
+    assert.ok(!("refused" in first));
+    const applied = applyTimelineCommands(seedEmptyPictureTimeline(bundle), first.commands);
+    const laid = applied.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : [])));
+    assert.deepEqual(laid, [BELLS], "only the production's own bed is laid");
+    assert.ok(!applied.library.some((item) => item.kind === "artifact" && item.artifactId === foreign.id), "and only it joins the Library");
+  });
+});

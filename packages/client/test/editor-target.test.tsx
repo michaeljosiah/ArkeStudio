@@ -437,3 +437,28 @@ describe("the picker and the keys sheet, round two", () => {
     }
   });
 });
+
+describe("the picker sees what the production sees", () => {
+  it("leaves another production's scoped file out of the rows", async () => {
+    const state = savedState();
+    state.world!.artifacts.push({
+      id: "ar_01J8G0000000000000000000R8",
+      kind: "audio",
+      file: "other-scratch.wav",
+      hash: "sha256:d1d24c90a13e58f8",
+      origin: { by: "user" },
+      links: [],
+      production: "someone-else",
+      created: "2026-07-29T11:02:00Z",
+    } as never);
+    const screen = await mount(state);
+    try {
+      await act(async () => button(screen, "Add").click());
+      const rows = [...screen.container.querySelectorAll<HTMLElement>(".fy-libpick__row")].map((row) => row.textContent ?? "");
+      assert.ok(rows.some((row) => row.includes("harbour-bells.wav")), "the world's own file is offered");
+      assert.ok(!rows.some((row) => row.includes("other-scratch.wav")), "another production's scratch is not");
+    } finally {
+      await close(screen);
+    }
+  });
+});

@@ -7179,7 +7179,7 @@ export class Coordinator {
           if (scene === undefined) throw new Error(`${msg.sceneId} is not a scene of this production`);
           const assembly = assembleSceneCommands({ production, timeline, sceneId: msg.sceneId, artifacts: store.getBundle().artifacts });
           if ("refused" in assembly) throw new Error(assembly.refused);
-          await applyTimelineCommand(store, msg.productionId, {
+          const { dropped } = await applyTimelineCommand(store, msg.productionId, {
             kind: "commands",
             commands: assembly.commands,
             baseRevision: msg.baseRevision,
@@ -7187,6 +7187,14 @@ export class Coordinator {
             label: `Arke assembled ${scene.title}`,
             notes: assembly.notes,
           });
+          // The first write may fold cut.json; what it could not carry is named, as the command handler names it.
+          for (const placement of dropped) {
+            void this.appLog?.append({
+              kind: "timeline.migration-dropped",
+              reason: placement,
+              detail: { productionId: msg.productionId },
+            });
+          }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
           refuse(error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error));

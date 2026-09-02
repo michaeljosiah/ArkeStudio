@@ -371,10 +371,13 @@ export async function applyTimelineCommand(
 export function refuseUnknownLibraryItems(
   commands: readonly TimelineCommand[],
   production: ProductionBundle,
-  artifacts: ReadonlyArray<{ id: string }>,
+  artifacts: ReadonlyArray<{ id: string; production?: string | null }>,
 ): void {
   const shots = new Set(production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)));
-  const known = new Set(artifacts.map((artifact) => artifact.id));
+  // What this production may see (SPEC-020 R-13): the world's own files and the ones it owns.
+  const known = new Set(
+    artifacts.filter((artifact) => artifact.production === undefined || artifact.production === null || artifact.production === production.meta.id).map((artifact) => artifact.id),
+  );
   for (const command of commands) {
     if (command.kind !== "add-to-library") continue;
     for (const item of command.items) {

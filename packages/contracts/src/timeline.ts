@@ -842,7 +842,7 @@ export function assembleSceneCommands(input: {
   production: ProductionBundle;
   timeline: ProductionTimeline;
   sceneId: string;
-  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; links: readonly string[]; mediaInfo?: { hasAudio: boolean; durationSec?: number } }>;
+  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; links: readonly string[]; production?: string | null; mediaInfo?: { hasAudio: boolean; durationSec?: number } }>;
   language?: string;
 }): SceneAssembly | { refused: string } {
   const { production, timeline, sceneId, artifacts } = input;
@@ -900,7 +900,13 @@ export function assembleSceneCommands(input: {
     cursor += durationFrames;
   }
   const library: TimelineLibraryItem[] = shots.map((shot) => ({ kind: "shot", shotId: shot.id }));
-  const beds = artifacts.filter((artifact) => artifact.links.includes(scene.id) && (artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true)));
+  // A bed is the scene's own and the production's own (SPEC-020 R-13): scene ids repeat across
+  // productions, and another production's scoped file must not be laid under this one.
+  const visible = (artifact: { production?: string | null }) =>
+    artifact.production === undefined || artifact.production === null || artifact.production === production.meta.id;
+  const beds = artifacts.filter(
+    (artifact) => visible(artifact) && artifact.links.includes(scene.id) && (artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true)),
+  );
   for (const bed of beds) library.push({ kind: "artifact", artifactId: bed.id });
   commands.unshift({ kind: "add-to-library", items: library });
   const notes: string[] = [`Placed ${fresh.length} shot${fresh.length === 1 ? "" : "s"} from ${scene.title} in script order.`];
@@ -909,12 +915,17 @@ export function assembleSceneCommands(input: {
   }
   if (cues.length > 0) {
     const language = input.language ?? "en";
-    // The track of this language, never another's: an English cue on a Spanish track is a wrong deliverable.
-    const subtitles = timeline.tracks.find((track) => track.kind === "subtitle" && track.language === language);
+    // The track of this language, never another's: an English cue on a Spanish track is a wrong
+    // deliverable. Of those, the first with the scene's span free of cues; a trailing cue someone
+    // wrote past the picture would otherwise refuse the whole assembly.
+    const sameLanguage = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "subtitle" && track.language === language);
+    const subtitles = sameLanguage.find((track) => !(track.cues ?? []).some((cue) => cue.startFrame < cursor && cue.endFrame > startFrame));
     const takenIds = new Set(timeline.tracks.map((track) => track.id));
     let trackId: TimelineTrackId = subtitles?.id ?? `tr_subs-${language}`;
     for (let n = 2; subtitles === undefined && takenIds.has(trackId); n += 1) trackId = `tr_subs-${language}-${n}`;
-    if (subtitles === undefined) commands.push({ kind: "add-subtitle-track", trackId, name: "Subtitles", language });
+    if (subtitles === undefined) {
+      commands.push({ kind: "add-subtitle-track", trackId, name: sameLanguage.length > 0 ? `Subtitles ${sameLanguage.length + 1}` : "Subtitles", language });
+    }
     const taken = new Set((subtitles?.cues ?? []).map((cue) => cue.id));
     for (const cue of cues) {
       let cueId: SubtitleCueId = cue.id;

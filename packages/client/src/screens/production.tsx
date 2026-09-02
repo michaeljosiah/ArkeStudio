@@ -2916,6 +2916,8 @@ function ArtifactPanel({
   const takesById = new Map((production?.takes ?? []).map((take) => [take.id, take] as const));
   const inLibrary = new Set(library.map(libraryItemKey));
   const [sceneFilter, setSceneFilter] = useState<string>("all");
+  // The panel can outlive a production change (the router keeps the screen); a scene of the last production is no filter here.
+  const sceneScope = (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
   const shots = (production?.scenes ?? []).flatMap((scene) =>
     orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
@@ -3033,7 +3035,7 @@ function ArtifactPanel({
       }),
   );
   const passes = (item: LibraryItem): boolean => {
-    if (sceneFilter !== "all" && !item.scenes.includes(sceneFilter)) return false;
+    if (sceneScope !== "all" && !item.scenes.includes(sceneScope)) return false;
     if (item.kind === "line" && filter !== "audio" && !inLibrary.has(`shot:${item.line!.shotId}`)) return false;
     if (filter === "needs-take" && item.kind !== "shot") return false;
     if (filter === "audio" && !((item.kind === "artifact" && item.lane === "Music") || item.kind === "line")) return false;
@@ -3105,7 +3107,7 @@ function ArtifactPanel({
             </button>
           ))}
           {(production?.scenes.length ?? 0) > 1 && (
-            <select className="fy-artpanel__scene" aria-label="Scene" value={sceneFilter} onChange={(event) => setSceneFilter(event.target.value)}>
+            <select className="fy-artpanel__scene" aria-label="Scene" value={sceneScope} onChange={(event) => setSceneFilter(event.target.value)}>
               <option value="all">All scenes</option>
               {(production?.scenes ?? []).map((scene) => (
                 <option key={scene.id} value={scene.id}>
@@ -3123,7 +3125,7 @@ function ArtifactPanel({
               <Folder size={14} />
             </span>
             <span>
-              {normalQuery !== "" || filter !== "all" || sceneFilter !== "all"
+              {normalQuery !== "" || filter !== "all" || sceneScope !== "all"
                 ? "Nothing here matches."
                 : "Nothing in the library yet. Add takes, uploads or lines to cut with."}
             </span>
@@ -4921,12 +4923,20 @@ export function CutScreen() {
   /** The scene the workspace's Generate handed off (R-44): assembled once as the editor opens. */
   const assembleSceneId = searchParams.get("assemble");
   const assembled = useRef<string | null>(null);
+  /** A clip just placed: selected once the snapshot carries it, forgotten if the write is refused. */
+  const pendingSelect = useRef<TimelineClipId | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   /** The Exports route lands here with the sheet up (R-1, T-5); the query is spent on arrival. */
   const [exportOpen, setExportOpen] = useState(() => searchParams.get("export") !== null);
   const [noticeHidden, setNoticeHidden] = useState<string | null>(null);
   const [didOpen, setDidOpen] = useState(false);  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
   const libraryFilter: LibraryFilter = searchParams.get("library") === "audio" ? "audio" : "all";
+  // The Audio address lands with the Library up (R-1): below 1200px it is a drawer that would otherwise stay shut.
+  useEffect(() => {
+    if (libraryFilter === "audio") setLibraryOpen(true);
+    // Once, on arrival: the drawer is the person's to close afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
   const [ghostRequestId, setGhostRequestId] = useState<string | null>(null);
@@ -5006,7 +5016,8 @@ export function CutScreen() {
    * `exportAudioClips` drops a video not known to carry sound, so measuring raw lane records
    * would let a document stretched to 60s claim a film that encodes as five seconds.
    */
-  const artifacts = world?.artifacts ?? [];
+  // The production's own view of the world's files (SPEC-020 R-13): another production's scoped media stays out of this Library and picker.
+  const artifacts = artifactsFor(world?.artifacts ?? [], prodId);
   const placedPicture = mediaOnly ? exportOverlays(overlays, artifacts) : [];
   const placedSound = mediaOnly ? exportAudioClips(overlays, artifacts) : [];
   /*
@@ -5205,7 +5216,7 @@ export function CutScreen() {
   // What the cut uses is what the timeline holds once it owns placements (round four): a clip
   // placed on a typed track is in the cut, whatever the legacy lanes say.
   const usedArtifactIds = new Set([
-    ...overlays.map((clip) => clip.artifactId),
+    ...(placementsOnTimeline ? [] : overlays.map((clip) => clip.artifactId)),
     ...(editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? []),
   ]);
   const cutMeta = spineCut
@@ -5299,6 +5310,17 @@ export function CutScreen() {
       { replace: true },
     );
   }, [assembleSceneId, worldId, prodId, production, fence, timelineState, timelineRevision, setSearchParams]);
+  useEffect(() => {
+    const id = pendingSelect.current;
+    if (id === null) return;
+    if (allClips.some(({ clip }) => clip.id === id)) {
+      pendingSelect.current = null;
+      selectPicture(id);
+    } else if (!commandPending) {
+      // The write was refused or answered without the clip: the old selection stands.
+      pendingSelect.current = null;
+    }
+  });
   /** Materialise the song's anchors as the first assembly (SPEC-037 R-13): an empty batch, fenced by the spine. */
   const openOnTimeline = () => {
     if (!worldId || !prodId || spineCut === null || sourceFingerprint === null || commandPending || timelineState.status !== "absent") return;
@@ -5417,8 +5439,8 @@ export function CutScreen() {
       },
     });
     sendCommands(commands, `Place ${label}`);
-    // The placed clip is the selection and the Inspector's subject, as the target does on a drop.
-    selectPicture(placedId);
+    // The placed clip becomes the selection and the Inspector's subject once it exists (round four).
+    pendingSelect.current = placedId;
   };
   const placeVoiceTake = (take: Take, shot: Shot, sceneNumber: number) => {
     if (!editableTimeline || !production) return;
@@ -5453,7 +5475,7 @@ export function CutScreen() {
       },
     });
     sendCommands(commands, `Place line SH ${shot.number}`);
-    selectPicture(id);
+    pendingSelect.current = id;
   };
   const laneKindFor = (artifact: ArtifactSidecar): "picture" | "music" => (artifact.kind === "audio" ? "music" : "picture");
   const dropOnEmptyLane = (kind: "picture" | "dialogue" | "ambience" | "music") => (artifactId: string, _frame: number, laneWidth: number, x: number) => {
