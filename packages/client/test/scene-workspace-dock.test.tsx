@@ -226,6 +226,11 @@ describe("the dock foot (design 2536-2543)", () => {
     const last = sent.at(-1) as { kind: string; title?: string } | undefined;
     assert.equal(last?.kind, "world-chat-create", "no thread yet, so the ask opens one");
     assert.equal(last?.title, "Tighten the coverage");
+    // While that thread opens a second ask would open a second one: the chips wait it out.
+    assert.ok(chips.every((chip) => (chip as HTMLButtonElement).disabled), "chips wait for the thread");
+    const before = sent.length;
+    await click(chips[0]!);
+    assert.equal(sent.length, before, "a second ask opens nothing");
   });
 
   it("draws no chip row without prompts", async () => {

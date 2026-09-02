@@ -228,6 +228,41 @@ describe("scene detail owns the workspace", () => {
     assert.match(stage.textContent ?? "", /1\.55m/);
   });
 
+  it("plays a staging kept before the shot was retimed to its end pose, and repairs it on Keep", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    // Kept when the shot ran eight seconds; the shot is four now.
+    (shot as { staging?: unknown }).staging = {
+      version: 1,
+      cast: [],
+      sets: [],
+      keys: [
+        { t: 0, p: [0, 1.5, 4], l: [0, 1, 0] },
+        { t: 2, p: [-2, 1.5, 2], l: [0, 1, 0] },
+        { t: 8, p: [0, 1.5, -2], l: [0, 1, 0] },
+      ],
+    };
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
+    const keys = all(mounted, ".fy-swstage__key").map((key) => key.getAttribute("title") ?? "");
+    assert.match(keys[2]!, /4.0s/, "the end key sits at the shot's length");
+    assert.match(keys[1]!, /2.0s/, "an interior key that still fits is left where it was");
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null, "reading is not a move");
+
+    await click(q(mounted, '[aria-label="Raise"]')!);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.equal(command.command.kind, "edit-shot");
+    if (command.command.kind !== "edit-shot") return;
+    assert.deepEqual(command.command.change.staging?.keys.map((key) => key.t), [0, 2, 4]);
+    assert.ok(stage);
+  });
+
   it("reaches the Stage from a row's menu and draws a staged shot's blocking on the canvas", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!

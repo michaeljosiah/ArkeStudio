@@ -455,15 +455,24 @@ export function SceneWorkspace({
                 run={frameRun}
                 worldId={world.meta.worldId}
                 productionId={production.meta.id}
-                // Review opens the first frame the run put down, in the lightbox, to arrow through (R-19).
-                onReview={() =>
-                  setLightboxShotId(
-                    frameRun.run.steps.flatMap((step) => step.updateShotIds).find((shotId) => shotHasFrame(production, artifacts, shotId))
-                      ?? focus
-                      ?? shots[0]?.id
-                      ?? null,
-                  )
-                }
+                // Review opens the first frame THIS run put down, in the lightbox, to arrow through
+                // (R-19): a frame is the run's when one of its own jobs produced the artifact, so a
+                // shot whose retry failed over an older frame is never shown as new output.
+                onReview={() => {
+                  const jobs = new Set(frameRun.run.steps.flatMap((step) => (step.jobId === null ? [] : [`frame-run:${step.jobId}`])));
+                  const produced = frameRun.run.steps
+                    .flatMap((step) => step.updateShotIds)
+                    .find((shotId) =>
+                      artifacts.some(
+                        (artifact) =>
+                          artifact.kind === "image" &&
+                          artifact.origin.by === "system" &&
+                          jobs.has(artifact.origin.producedBy) &&
+                          artifact.links.includes(shotId),
+                      ),
+                    );
+                  setLightboxShotId(produced ?? focus ?? shots[0]?.id ?? null);
+                }}
               />
             ) : shots.length === 0 ? null : (
               <span className="fy-sw__coverage">

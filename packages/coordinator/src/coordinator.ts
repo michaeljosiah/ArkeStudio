@@ -6291,17 +6291,28 @@ export class Coordinator {
           allowLarge: true,
         });
         if (artifactId === null) return;
+        // Filing took time, and a scene write may have landed under it. What the pin protects is
+        // the STAGING the recording shows, so it is re-fenced on that: still the same staging
+        // version, the pin lands against the scene as it now stands; moved, the pin is refused
+        // and says so — an artifact of a staging that no longer exists is not worth a wrong pin.
+        const landed = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId)
+          ?.scenes.find((candidate) => candidate.id === msg.sceneId);
+        const shotNow = landed === undefined ? undefined : orderedShots(landed).find((candidate) => candidate.id === msg.shotId);
+        if (landed === undefined || shotNow?.staging === undefined || shotNow.staging.version !== msg.stagingVersion) {
+          refuse("the staging moved while the playblast was filed — export it again");
+          return;
+        }
         await applySceneCommand(store, {
           productionId: msg.productionId,
           sceneFile: msg.sceneFile,
           sceneId: msg.sceneId,
-          baseVersion: msg.baseVersion,
+          baseVersion: landed.version,
           command: {
             kind: "edit-shot",
             shotId: msg.shotId,
             change: {
               staging: {
-                ...shot.staging,
+                ...shotNow.staging,
                 playblast: {
                   artifactId,
                   version: msg.stagingVersion,

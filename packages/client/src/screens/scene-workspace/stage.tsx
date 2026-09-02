@@ -67,6 +67,26 @@ function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>)
   return { staging: { ...staging, keys: next }, index: next.indexOf(made) };
 }
 
+/** The last key at the shot's length, interior keys kept in order before it. */
+function endAtDuration(staging: ShotStaging | null, durationSec: number): ShotStaging | null {
+  if (staging === null || staging.keys.length === 0) return staging;
+  const last = staging.keys.length - 1;
+  if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
+  const keys = staging.keys.map((key, index) =>
+    index === last
+      ? { ...key, t: round(durationSec) }
+      : key.t >= durationSec ? { ...key, t: round(Math.max(0, durationSec - 0.1 * (last - index))) } : key,
+  );
+  return { ...staging, keys };
+}
+
+/** Where a figure stands at `at` seconds: on its walk when it has one, else where it was put. */
+function figureAt(figure: ShotStaging["cast"][number], at: number, durationSec: number): { x: number; z: number } {
+  if (figure.to === undefined) return { x: figure.x, z: figure.z };
+  const u = durationSec <= 0 ? 0 : Math.max(0, Math.min(1, at / durationSec));
+  return { x: figure.x + (figure.to[0] - figure.x) * u, z: figure.z + (figure.to[1] - figure.z) * u };
+}
+
 function keyName(index: number, count: number): string {
   return index === 0 ? "start" : index === count - 1 ? "end" : `key ${index}`;
 }
@@ -137,7 +157,9 @@ export function SceneStage({
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
 
-  const working = draft ?? persisted;
+  // The end key is the end pose, so it always sits at the shot's length: a staging kept before
+  // the shot was retimed plays to its end pose here and is repaired by the next Keep.
+  const working = useMemo(() => endAtDuration(draft ?? persisted, durationSec), [draft, persisted, durationSec]);
   const moved = draft !== null && moveOf(draft) !== moveOf(persisted);
   const keys = working?.keys ?? [];
   const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
@@ -364,15 +386,20 @@ export function SceneStage({
   };
   const anchorTo = (sheetId: string | null) => {
     if (activeKey === null || working === null) return;
-    const figureOf = (id: string | undefined) => (id === undefined ? undefined : working.cast.find((figure) => figure.sheetId === id));
-    const base = figureOf(activeKey.anchor);
+    // Subjects are read where they stand AT THIS KEY'S TIME: a walking figure is well down its
+    // path by the end key, and an offset taken from its start would jump the camera that far.
+    const standingOf = (id: string | undefined) => {
+      const figure = id === undefined ? undefined : working.cast.find((candidate) => candidate.sheetId === id);
+      return figure === undefined ? undefined : figureAt(figure, activeKey.t, durationSec);
+    };
+    const base = standingOf(activeKey.anchor);
     const world: [number, number, number] = base === undefined ? [...activeKey.p] : [round(activeKey.p[0] + base.x), activeKey.p[1], round(activeKey.p[2] + base.z)];
     if (sheetId === null) {
       const { anchor: _anchor, ...free } = activeKey;
       patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...free, p: world } : key)) }));
       return;
     }
-    const subject = figureOf(sheetId);
+    const subject = standingOf(sheetId);
     const offset: [number, number, number] = subject === undefined ? world : [round(world[0] - subject.x), world[1], round(world[2] - subject.z)];
     patchKey(active, { anchor: sheetId, track: sheetId, p: offset });
   };
@@ -396,6 +423,12 @@ export function SceneStage({
     setExporting(0);
     try {
       const blob = await view.record(setExporting);
+      // The viewport is disposed when the shot changes, and its recording ends early: a partial
+      // take is never filed as the whole shot.
+      if (viewport.current !== view) {
+        setNote("export stopped — the shot changed");
+        return;
+      }
       const outcome = await stagePlayblast(
         {
           kind: "stage-playblast",
@@ -408,7 +441,8 @@ export function SceneStage({
           stagingVersion: persisted.version,
           durationSec,
           aspect,
-          ...(framing.lens === undefined ? {} : { lens: framing.lens }),
+          // An unset lens is recorded as the empty string, so setting one later reads as a change.
+          lens: framing.lens ?? "",
         },
         new Uint8Array(await blob.arrayBuffer()),
       );
@@ -458,7 +492,7 @@ export function SceneStage({
           type="button"
           className="fy-swstage__step"
           aria-label="Previous shot"
-          disabled={index === 0}
+          disabled={index === 0 || exporting !== null}
           onClick={() => shots[index - 1] && select({ kind: "shot", shotId: shots[index - 1]!.id })}
         >
           <ChevronLeft size={12} />
@@ -468,7 +502,7 @@ export function SceneStage({
           type="button"
           className="fy-swstage__step"
           aria-label="Next shot"
-          disabled={index >= shots.length - 1}
+          disabled={index >= shots.length - 1 || exporting !== null}
           onClick={() => shots[index + 1] && select({ kind: "shot", shotId: shots[index + 1]!.id })}
         >
           <ChevronRight size={12} />

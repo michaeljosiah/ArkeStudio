@@ -306,7 +306,13 @@ function BenchWorkspace({
    */
   const switchSubjectMode = (mode: "image" | "video") => {
     if (subject?.kind !== "shot" || mode === draft.mode) return;
-    if (pushTimer.current) clearTimeout(pushTimer.current);
+    // Words typed in the last third of a second are still waiting on the debounce; they go now,
+    // or the tab drops them on the floor.
+    if (pushTimer.current) {
+      clearTimeout(pushTimer.current);
+      pushTimer.current = null;
+      sendBenchCompose(worldId, session.id, draft);
+    }
     subjectOpen.open({
       worldId,
       productionId: subject.productionId,
