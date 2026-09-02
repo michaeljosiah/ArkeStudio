@@ -4,10 +4,12 @@ import { access, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, SceneRecordSchema, ulid, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
-import { createScene } from "../../src/productions/ops.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
+import { createScene, draftSceneSkeleton } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempRoot, makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -110,6 +112,69 @@ describe("an empty scene, made live (SPEC-036 R-37)", () => {
     const before = (await readdir(scenesDir(dir))).sort();
     await assert.rejects(createScene(store, { productionId: PRODUCTION, episodeId: "ep_nowhere" }), /ep_nowhere/);
     assert.deepEqual((await readdir(scenesDir(dir))).sort(), before, "no scene file appeared");
+  });
+
+  it("two presses at once make two scenes, each with its own identity (codex round 1)", async () => {
+    /*
+     * Identity minted outside the serialised write is minted twice from one snapshot: both
+     * presses choose `sc_untitled`, the first commit lands, and the second reports a collision
+     * for a scene the person expected to exist. Minting inside the gate is what makes the
+     * second press see the first.
+     */
+    const { dir, store } = await open();
+    const [first, second] = await Promise.all([
+      createScene(store, { productionId: PRODUCTION }),
+      createScene(store, { productionId: PRODUCTION }),
+    ]);
+    assert.deepEqual([first.sceneId, second.sceneId].sort(), ["sc_untitled", "sc_untitled-2"]);
+    const numbers = (await Promise.all([first, second].map((made) => sceneOnDisk(dir, made.path)))).map(
+      (record) => record.number,
+    );
+    assert.notEqual(numbers[0], numbers[1], "and two birth numbers, not one shared");
+  });
+
+  it("two presses under one episode both join it — the live file is appended to, not the snapshot", async () => {
+    const { dir, store } = await open();
+    const episodePath = await putEpisode(store, "ep_one", "one");
+    const made = await Promise.all([
+      createScene(store, { productionId: PRODUCTION, episodeId: "ep_one" }),
+      createScene(store, { productionId: PRODUCTION, episodeId: "ep_one" }),
+    ]);
+    const episode = JSON.parse(await readFile(join(dir, ...episodePath.split("/")), "utf8")) as { scenes: string[] };
+    assert.deepEqual([...episode.scenes].sort(), made.map((scene) => scene.sceneId).sort(), "neither membership was lost");
+  });
+
+  it("numbers past what a staged draft already claims, even after a live scene above it is deleted", async () => {
+    /*
+     * Counting staged stems assumed the live maximum never drops. Delete the highest live scene
+     * with two drafts waiting and the count lands exactly on the first draft's number, so an
+     * accept later leaves two scenes with one stable birth number and one ordering key.
+     */
+    const { dir, store } = await open();
+    const gate = new ProposalManager(store);
+    const readNumber = async (draft: { proposalId: string; path: string }) =>
+      (JSON.parse(await readFile(join(dir, ".proposals", draft.proposalId, ...draft.path.split("/")), "utf8")) as {
+        number: number;
+      }).number;
+    const staged = [
+      await readNumber(await draftSceneSkeleton(store, gate, { productionId: PRODUCTION, brief: "The first draft." })),
+      await readNumber(await draftSceneSkeleton(store, gate, { productionId: PRODUCTION, brief: "The second draft." })),
+    ];
+    const highestLive = Math.max(...productionOf(store).scenes.map((scene) => scene.number));
+    const top = productionOf(store).scenes.find((scene) => scene.number === highestLive)!;
+    const topPath = `productions/${PRODUCTION}/scenes/${productionOf(store).sceneFiles[top.id]}.json`;
+    const raw = await readFile(join(dir, ...topPath.split("/")), "utf8");
+    await store.commit({
+      kind: "scene-delete",
+      source: "test",
+      files: [{ path: topPath, action: "delete", baseHash: sha256(raw) }],
+    });
+
+    const made = await createScene(store, { productionId: PRODUCTION });
+
+    const record = await sceneOnDisk(dir, made.path);
+    assert.ok(!staged.includes(record.number), `number ${record.number} is not one a draft already holds (${staged.join(", ")})`);
+    assert.equal(record.number, Math.max(...staged) + 1, "the next number past everything claimed, live or staged");
   });
 });
 

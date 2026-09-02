@@ -515,11 +515,12 @@ export async function reorderScenes(store: WorldStore, productionId: string, ord
  * explicit `order` places it. One function for the drafted skeleton and the empty scene, so the
  * two cannot mint differently.
  */
-function sceneIdentityFor(
-  bundle: WorldBundle,
+async function sceneIdentityFor(
+  store: WorldStore,
   productionId: string,
   name: string,
-): { id: string; file: string; number: number; slug: string; path: string } {
+): Promise<{ id: string; file: string; number: number; slug: string; path: string }> {
+  const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === productionId);
   const takenIds = new Set(production?.scenes.map((s) => s.id) ?? []);
   const onDisk = new Set(Object.values(production?.sceneFiles ?? {}));
@@ -539,9 +540,26 @@ function sceneIdentityFor(
    * only what is on disk gave every draft staged before the first accept the same number and
    * the same order — three scenes all calling themselves Scene 1, in an order nothing decided.
    * Driven out by drafting two scenes back to back, which is how anybody would build an episode.
+   *
+   * Claimed by the number the draft actually carries, not by counting drafts (codex, PR 708):
+   * the live maximum can drop — delete the highest scene with two drafts waiting — and a count
+   * added to it lands exactly on the first draft's number. The scan parses candidates only for
+   * scene-edit proposals, so a draft's number is read from its staged file here; one that
+   * cannot be read still counts as one claim above everything that can.
    */
   const highest = production?.scenes.reduce((a, s) => Math.max(a, s.number), 0) ?? 0;
-  const number = highest + stagedStems.size + 1;
+  let claimed = highest;
+  let unreadable = 0;
+  for (const staged of bundle.proposals) {
+    for (const target of staged.proposal.targets) {
+      const m = new RegExp(`^productions/${productionId}/scenes/(.+)\\.json$`).exec(target.path);
+      if (!m || onDisk.has(m[1]!)) continue;
+      const stagedNumber = staged.scenes?.[target.path]?.number ?? (await stagedSceneNumber(store, staged.proposal.id, target.path));
+      if (stagedNumber === undefined) unreadable += 1;
+      else claimed = Math.max(claimed, stagedNumber);
+    }
+  }
+  const number = claimed + unreadable + 1;
   const slug = slugify(name).slice(0, 40) || `scene-${number}`;
   let id = `sc_${slug}`;
   let file = slug;
@@ -550,6 +568,17 @@ function sceneIdentityFor(
     file = `${slug}-${n}`;
   }
   return { id, file, number, slug, path: `productions/${productionId}/scenes/${file}.json` };
+}
+
+/** The birth number a staged scene file carries, or undefined when the file cannot say. */
+async function stagedSceneNumber(store: WorldStore, proposalId: string, path: string): Promise<number | undefined> {
+  try {
+    const raw = await readFile(toExtendedLength(join(store.dir, ".proposals", proposalId, fromPortable(path))), "utf8");
+    const number = (JSON.parse(raw) as { number?: unknown }).number;
+    return typeof number === "number" && Number.isInteger(number) && number >= 1 ? number : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -568,32 +597,45 @@ export async function createScene(
   store: WorldStore,
   input: { productionId: string; episodeId?: string; title?: string },
 ): Promise<{ sceneId: string; path: string }> {
-  const bundle = store.getBundle();
-  const production = bundle.productions.find((p) => p.meta.id === input.productionId);
-  if (!production) throw new Error(`production ${input.productionId} is not in this world`);
-  const episode = input.episodeId === undefined ? undefined : production.episodes.find((e) => e.id === input.episodeId);
-  const episodeStem = episode === undefined ? undefined : production.episodeFiles[episode.id];
-  if (input.episodeId !== undefined && (episode === undefined || episodeStem === undefined)) {
-    throw new Error(`episode ${input.episodeId} is not in ${input.productionId}`);
-  }
   const title = input.title?.trim() || "Untitled";
-  const { id, number, slug, path } = sceneIdentityFor(bundle, input.productionId, title);
-  // Validated as the gate validates a draft: nothing lands that the scanner would then drop.
-  const record = SceneRecordSchema.parse(
-    migrateLegacyScene({ id, number, order: number, slug, title, status: "draft", version: 1, shots: [] }),
-  );
-  const files: CommitFileInput[] = [
-    { path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null },
-  ];
-  if (episode !== undefined && episodeStem !== undefined) {
-    const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
-    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
-    const doc = JsonFile.parse(live);
-    doc.set({ scenes: [...episode.scenes, id] });
-    files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
-  }
-  await store.commit({ kind: "scene-create", source: "editor", files });
-  return { sceneId: id, path };
+  /*
+   * Mint, read and commit inside ONE serialised region (codex, PR 708). Two presses at once —
+   * two windows, a double click — read the same snapshot outside it, both choose `sc_untitled`,
+   * and the second reports a collision for a scene the person expected to exist. The gate is
+   * what makes the second press see the first, the same way `applySceneCommand` mints shot ids.
+   */
+  return store.gateOp(async () => {
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((p) => p.meta.id === input.productionId);
+    if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+    const episode = input.episodeId === undefined ? undefined : production.episodes.find((e) => e.id === input.episodeId);
+    const episodeStem = episode === undefined ? undefined : production.episodeFiles[episode.id];
+    if (input.episodeId !== undefined && (episode === undefined || episodeStem === undefined)) {
+      throw new Error(`episode ${input.episodeId} is not in ${input.productionId}`);
+    }
+    const { id, number, slug, path } = await sceneIdentityFor(store, input.productionId, title);
+    // Validated as the gate validates a draft: nothing lands that the scanner would then drop.
+    const record = SceneRecordSchema.parse(
+      migrateLegacyScene({ id, number, order: number, slug, title, status: "draft", version: 1, shots: [] }),
+    );
+    const files: CommitFileInput[] = [
+      { path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null },
+    ];
+    if (episode !== undefined && episodeStem !== undefined) {
+      const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
+      const doc = JsonFile.parse(live);
+      // Appended to the file as it is, not to the snapshot's copy of it: the hash check proves
+      // the bytes, and a membership added since the snapshot would otherwise pass that check
+      // and be written away.
+      const current = doc.value["scenes"];
+      const scenes = Array.isArray(current) ? (current as unknown[]).filter((s): s is string => typeof s === "string") : episode.scenes;
+      doc.set({ scenes: [...scenes.filter((s) => s !== id), id] });
+      files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
+    }
+    await store.commitUnserialised({ kind: "scene-create", source: "editor", files });
+    return { sceneId: id, path };
+  });
 }
 
 export interface SceneDraft {
@@ -634,8 +676,8 @@ export async function draftSceneSkeleton(
 ): Promise<SceneDraft> {
   const bundle = store.getBundle();
   const production = bundle.productions.find((p) => p.meta.id === input.productionId);
-  const { id, number, slug, path } = sceneIdentityFor(
-    bundle,
+  const { id, number, slug, path } = await sceneIdentityFor(
+    store,
     input.productionId,
     input.brief.split(/[.!?\n]/)[0] ?? "scene",
   );
