@@ -1009,6 +1009,7 @@ describe("no graph survives capture", () => {
         started.push({ provider: input.provider, endpoint: input.endpoint, body: input.body });
         return "pc_1";
       },
+      respond: async () => {},
       finish: async () => {},
       fail: async () => {},
     };
@@ -1036,6 +1037,7 @@ describe("no graph survives capture", () => {
         started.push(input.body);
         return "pc_1";
       },
+      respond: async () => {},
       finish: async () => {},
       fail: async () => {},
     };

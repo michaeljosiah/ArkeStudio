@@ -3,6 +3,7 @@ import type {
   CapabilityProbe,
   ClientDeclarations,
   ProviderId,
+  ProviderTransportDiagnostic,
   RecipeIdentity,
 } from "@arke-studio/contracts";
 
@@ -122,6 +123,8 @@ export interface FetchedArtifact {
 
 /** A credential failure is a provider fault, never a work failure (R-4). */
 export class ProviderAuthError extends Error {
+  readonly submissionRejected = true;
+
   constructor(
     readonly provider: ProviderId,
     message: string,
@@ -187,7 +190,31 @@ export interface ProviderCallContext {
   model?: string;
 }
 
+export type ProviderOperation =
+  | "provider"
+  | "validate"
+  | "submit"
+  | "poll"
+  | "fetch-artifacts"
+  | "cancel"
+  | "lookup-by-key"
+  | "list-recent"
+  | "list-voices";
+
+export interface ProviderTransportScope extends ProviderCallContext {
+  provider: ProviderId;
+  operation: ProviderOperation;
+  capability?: Capability;
+}
+
+/** Host-owned operation policy. Provider clients continue to receive an ordinary FetchLike. */
+export interface ProviderTransport {
+  run<T>(scope: ProviderTransportScope, operation: (fetch: FetchLike) => Promise<T>): Promise<T>;
+}
+
 export interface ProviderCallCapture {
+  /** Keep detached response-body capture alive through the host's final drain. */
+  track(task: Promise<void>): void;
   start(input: {
     provider: ProviderId;
     operation: string;
@@ -198,12 +225,14 @@ export interface ProviderCallCapture {
     headers: Record<string, string>;
     body: unknown;
   }): Promise<string>;
+  /** Response headers arrived. Persist this before a body timeout can erase that fact. */
+  respond(id: string, input: { status: number; headers: Record<string, string> }): Promise<void>;
   /** `status` for HTTP, `exitCode` for a subprocess — whichever the call actually produced. */
   finish(
     id: string,
     input: { status?: number; exitCode?: number | null; headers: Record<string, string>; body: unknown },
   ): Promise<void>;
-  fail(id: string, error: unknown): Promise<void>;
+  fail(id: string, error: unknown, diagnostic?: ProviderTransportDiagnostic): Promise<void>;
 }
 
 export interface VoiceCatalogueClient extends ProviderClient {

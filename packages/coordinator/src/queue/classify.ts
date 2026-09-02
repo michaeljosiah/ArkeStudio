@@ -104,6 +104,7 @@ export function classifyError(err: unknown): FailureClass {
 
 /** A 429 additionally tells the rate limiter to adapt downward (R-10, D9). */
 export function isRateLimit(err: unknown): boolean {
+  if (typeof err === "object" && err !== null && (err as { responseStatus?: unknown }).responseStatus === 429) return true;
   const message = err instanceof Error ? err.message : String(err);
   return /(HTTP 429|rate.?limit)/i.test(message);
 }

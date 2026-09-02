@@ -55,6 +55,7 @@ export * from "./spine.js";
 export * from "./spine-cut.js";
 export * from "./spine-export.js";
 export * from "./provider-call.js";
+export * from "./provider-transport.js";
 export * from "./diagnostics.js";
 export * from "./update.js";
 export * from "./storyboard.js";

@@ -7,6 +7,7 @@ export const ProviderCallStatusSchema = z.enum([
   "accepted",
   "succeeded",
   "rejected",
+  "server-error",
   "transport-failed",
 ]);
 export type ProviderCallStatus = z.infer<typeof ProviderCallStatusSchema>;

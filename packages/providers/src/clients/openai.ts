@@ -143,6 +143,7 @@ export class OpenAiClient implements ProviderClient {
         status = response.status;
         body = response.body;
       }
+      if (status >= 500) throw new Error(`openai: image generation failed (HTTP ${status})`);
       if (status >= 400) throw new ProviderRequestRejectedError(`openai: image generation failed (HTTP ${status})`);
       const response = body as { data?: Array<{ b64_json?: string }>; output_format?: string } | null;
       const images = response?.data ?? [];
@@ -164,7 +165,8 @@ export class OpenAiClient implements ProviderClient {
       body: JSON.stringify({ model: request.model, ...request.params }),
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
-    if (status >= 400) throw new Error(`openai: completion failed (HTTP ${status})`);
+    if (status >= 500) throw new Error(`openai: completion failed (HTTP ${status})`);
+    if (status >= 400) throw new ProviderRequestRejectedError(`openai: completion failed (HTTP ${status})`);
     const text = (body as { choices?: Array<{ message?: { content?: string } }> } | null)?.choices?.[0]?.message?.content ?? "";
     this.completed.set(remoteId, {
       artifacts: [{ name: "completion.txt", contentType: "text/plain", data: new TextEncoder().encode(text) }],

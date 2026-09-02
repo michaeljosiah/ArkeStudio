@@ -7,7 +7,10 @@ import {
 } from "@arke-studio/contracts";
 import { IDLE_UPDATE_STATE } from "@arke-studio/contracts";
 import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
+import { AppLog } from "../../src/app-log.js";
 import { SecretRegistry, diagnosticsBoundary } from "../../src/redact.js";
+import { tempDir } from "../tmp.js";
+import { join } from "node:path";
 
 /**
  * SPEC-032 R-38, R-39 (#558): the findings ride the existing SPEC-008 R-6 bundle — one export,
@@ -136,6 +139,29 @@ describe("the findings ride the one bundle (R-38, row 52)", () => {
   it("a build with no derivation exports findings: null, never a fabricated empty result", async () => {
     const bundle = await buildDiagnosticsBundle(stateFor(sources()), null, new SecretRegistry(), null);
     assert.equal(bundle["findings"], null);
+  });
+
+  it("includes a redacted provider transport record after the app log is reopened", async () => {
+    const dir = await tempDir("arke-transport-bundle-");
+    const path = join(dir, "app.jsonl");
+    const registry = new SecretRegistry();
+    const log = new AppLog(path, registry);
+    await log.append({
+      kind: "provider.transport-failed",
+      provider: "openai",
+      operation: "submit",
+      method: "POST",
+      category: "connection-reset",
+      code: "ECONNRESET",
+      elapsedMs: 60_310,
+      outcomeWitnessed: false,
+    });
+    await log.drain();
+    const bundle = await buildDiagnosticsBundle(stateFor(sources()), new AppLog(path, registry), registry);
+    const recent = (bundle["recentLog"] as string[]).join("\n");
+    assert.match(recent, /provider\.transport-failed/);
+    assert.match(recent, /ECONNRESET/);
+    assert.match(recent, /"outcomeWitnessed":false/);
   });
 });
 

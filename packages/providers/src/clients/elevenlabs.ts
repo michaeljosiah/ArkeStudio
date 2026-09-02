@@ -1,6 +1,15 @@
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
-import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
+import {
+  ProviderAuthError,
+  ProviderRequestRejectedError,
+  type FetchedArtifact,
+  type FetchLike,
+  type PollResult,
+  type ProviderClient,
+  type SubmitRequest,
+  type SubmitResult,
+} from "../types.js";
 
 /**
  * ElevenLabs — direct voice provider. The subscription read is the probe: free, and it names
@@ -75,9 +84,10 @@ export class ElevenLabsClient implements ProviderClient {
       ...(request.signal !== undefined ? { signal: request.signal } : {}),
     });
     if (res.status === 401 || res.status === 403) {
-      throw new Error(`elevenlabs: the credential was rejected (HTTP ${res.status})`);
+      throw new ProviderAuthError("elevenlabs", `elevenlabs: the credential was rejected (HTTP ${res.status})`);
     }
-    if (res.status >= 400) throw new Error(`elevenlabs: synthesis failed (HTTP ${res.status})`);
+    if (res.status >= 500) throw new Error(`elevenlabs: synthesis failed (HTTP ${res.status})`);
+    if (res.status >= 400) throw new ProviderRequestRejectedError(`elevenlabs: synthesis failed (HTTP ${res.status})`);
     const data = new Uint8Array(await res.arrayBuffer());
     return {
       remoteId,
