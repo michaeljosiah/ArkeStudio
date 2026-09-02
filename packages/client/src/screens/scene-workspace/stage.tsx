@@ -370,6 +370,9 @@ export function SceneStage({
     const high = keys[which + 1]!.t - 0.1;
     stop();
     setKeyIndex(which);
+    // Selecting a key is arriving at it: the playhead, the viewport and the gizmo move to its
+    // time at once, so a nudge or a drag that follows edits the key the panel names.
+    setAt(keys[which]!.t);
     const move = (next: MouseEvent) => {
       const when = round(Math.max(low, Math.min(high, ((next.clientX - bounds.left) / Math.max(1, bounds.width)) * durationSec)));
       patchKey(which, { t: when });

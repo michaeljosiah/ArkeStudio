@@ -209,10 +209,20 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotS
   // scaled to the new length instead of clamped, so no two keys land on one moment.
   const fits = staging.keys.every((key, index) => index === last || key.t < durationSec);
   const scale = staging.keys[last]!.t > 0 ? durationSec / staging.keys[last]!.t : 0;
-  const keys = staging.keys.map((key, index) =>
+  const scaled = staging.keys.map((key, index) =>
     index === last ? { ...key, t: round(durationSec) } : fits ? key : { ...key, t: round(key.t * scale) },
   );
-  return { ...staging, keys };
+  if (fits) return { ...staging, keys: scaled };
+  // Rounding to hundredths can still land two scaled keys on one moment; each is kept a step
+  // after the last, and any pushed onto the end pose is folded into it.
+  const end = round(durationSec);
+  const interior: StagingKey[] = [];
+  for (const key of scaled.slice(0, -1)) {
+    const prev = interior.at(-1);
+    const t = prev === undefined ? key.t : Math.max(key.t, round(prev.t + 0.01));
+    if (t < end) interior.push({ ...key, t });
+  }
+  return { ...staging, keys: [...interior, { ...scaled[last]!, t: end }] };
 }
 
 /** The playblast's own line for a session brief: what it is, and the beats beneath it. */

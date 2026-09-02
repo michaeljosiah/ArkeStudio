@@ -345,7 +345,9 @@ function BenchWorkspace({
     if (!aspectSupport(candidate, subject.aspect).ok) {
       return `does not make ${subject.aspect}`;
     }
-    if (subject.kind === "board") {
+    // A board, and a shot in video mode, are filed as covering an authored length: a model that
+    // cannot make that length is a fault here, not a refusal after the button.
+    if (subject.kind === "board" || (subject.kind === "shot" && draft.mode === "video")) {
       const duration = dispatchDuration(candidate, subject.durationSec, {
         withReferences:
           session.composer.activeTokens.length > 0 || session.composer.keyframeTokens.length > 0,

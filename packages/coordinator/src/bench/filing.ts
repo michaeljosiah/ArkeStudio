@@ -302,10 +302,10 @@ async function fileBenchSubjectTakeUnserialised(
     if ((shot?.durationSec ?? 4) !== shotSubject.durationSec) {
       throw new Error("the shot timing changed in this scene; rebuild and generate a current take");
     }
-    // The member was frozen with the take; a subject rebuilt to a longer shot since then would
-    // pass the check above and file a clip that stops short of the shot it is filed for.
-    const member = filing.members[0]!;
-    if (member.startSec !== 0 || member.endSec < shotSubject.durationSec) {
+    // The take was asked for at one length; a subject rebuilt to another since then passes the
+    // check above, and would file a clip made for a different shot than the one it lands on.
+    const asked = take.request.params;
+    if (filing.members[0]!.startSec !== 0 || asked.kind !== "video" || asked.durationSec !== shotSubject.durationSec) {
       throw new Error("the shot timing changed since this take; rebuild and generate a current take");
     }
   }

@@ -766,6 +766,9 @@ export const BenchSessionSchema = z
     if (session.subject?.kind === "board" && session.composer.mode !== "video") {
       ctx.addIssue({ code: "custom", message: "a board subject uses video mode" });
     }
+    if (session.subject?.kind === "shot" && session.composer.mode !== "image" && session.composer.mode !== "video") {
+      ctx.addIssue({ code: "custom", message: "a shot subject uses image or video mode" });
+    }
   });
 export type BenchSession = z.infer<typeof BenchSessionSchema>;
 

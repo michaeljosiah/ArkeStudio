@@ -126,6 +126,9 @@ describe("the Stage's arithmetic", () => {
     const eight: ShotStaging = { ...staging, keys: Array.from({ length: 8 }, (_, index) => ({ t: index, p: [0, 1.5, 4 - index] as [number, number, number], l: [0, 1, 0] as [number, number, number] })) };
     const times = stagingRetimed(eight, 0.5).keys.map((key) => key.t);
     assert.ok(times.every((t, index) => index === 0 || t > times[index - 1]!), `eight keys into half a second stay strictly ordered: ${times.join(",")}`);
+    const dense: ShotStaging = { ...staging, keys: [0, 1, 2, 100].map((t) => ({ t, p: [0, 1.5, 4 - t / 25] as [number, number, number], l: [0, 1, 0] as [number, number, number] })) };
+    assert.deepEqual(stagingRetimed(dense, 0.5).keys.map((key) => key.t), [0, 0.01, 0.02, 0.5], "rounding never lands two keys on one moment");
+    assert.deepEqual(stagingRetimed(dense, 0.02).keys.map((key) => key.t), [0, 0.01, 0.02], "a key with no moment left before the end folds into it");
     assert.equal(stagingRetimed(staging, 8), staging, "nothing to move returns the same staging");
     assert.equal(stagingRetimed({ ...staging, keys: [] }, 4).keys.length, 0);
   });

@@ -1517,8 +1517,13 @@ function buildGraph(input: {
         const take = accepted === null ? undefined : production.takes.find((candidate) => candidate.id === accepted);
         return take?.kind === "clip" ? take : null;
       });
+      const passIds = new Set(clips.map((take) => take?.segment?.passTakeId ?? null));
+      const pass = passIds.size === 1 && clips.length > 1 ? production.takes.find((take) => take.id === [...passIds][0]) : undefined;
       const rendered = clips.every((take) => take !== null)
-        && (clips.length === 1 || new Set(clips.map((take) => take!.segment?.passTakeId ?? take!.id)).size === 1);
+        && (clips.length === 1
+          || (pass !== undefined
+            && pass.coversShots.length === board.memberShotIds.length
+            && pass.coversShots.every((shotId, index) => shotId === board.memberShotIds[index])));
       const clipPoint = at(clipId, compact ? 280 : 960, compact ? point.y + 102 : point.y + 6);
       // The first member frame stands for the clip, the way the prototype's reel opens on it.
       const frame = board.memberShotIds.map((shotId) => shotFrame.get(shotId)).find((url) => url !== undefined);
