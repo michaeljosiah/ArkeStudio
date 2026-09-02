@@ -355,6 +355,22 @@ export function SceneTitle({
   // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
   // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
   const settled = useRef(false);
+  // The name the box opened on. A rename landing from elsewhere while it is open — another
+  // window, Arke — re-renders `title` under an input still holding the old words, and a blur
+  // would then write the old name over the new one against the new version (codex, PR 708).
+  // The box closes on the newer name instead, and nothing it held is written.
+  const openedOn = useRef(title);
+  useEffect(() => {
+    if (editing && title !== openedOn.current) {
+      settled.current = true;
+      setEditing(false);
+    }
+  }, [editing, title]);
+  const open = () => {
+    settled.current = false;
+    openedOn.current = title;
+    setEditing(true);
+  };
   if (!editing) {
     return (
       <span
@@ -364,15 +380,12 @@ export function SceneTitle({
         title={locked ? undefined : "Rename"}
         className={cx("fy-sw__title-text", locked && "fy-sw__title-text--locked")}
         onClick={() => {
-          if (locked) return;
-          settled.current = false;
-          setEditing(true);
+          if (!locked) open();
         }}
         onKeyDown={(e) => {
           if (locked || (e.key !== "Enter" && e.key !== " ")) return;
           e.preventDefault();
-          settled.current = false;
-          setEditing(true);
+          open();
         }}
       >
         {title}
@@ -384,7 +397,7 @@ export function SceneTitle({
     settled.current = true;
     setEditing(false);
     const next = input.value.trim();
-    if (next !== "" && next !== title) onCommit(next);
+    if (next !== "" && next !== openedOn.current && title === openedOn.current) onCommit(next);
   };
   return (
     <input

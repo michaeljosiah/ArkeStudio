@@ -875,6 +875,8 @@ function handleFrame(json: string): void {
     }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
+      // Forgotten after the listeners have asked, so a late duplicate reads as someone else's.
+      issuedSceneCreates.delete(event.requestId);
     }
     if (event.type === "scene.write-refused") {
       for (const listener of sceneRefusalListeners) listener(event);
@@ -2835,7 +2837,18 @@ export function createScene(
   input: { episodeId?: string; title?: string } = {},
 ): string | null {
   const requestId = ulid();
-  return send({ kind: "create-scene", worldId, productionId, requestId, ...input }) ? requestId : null;
+  if (!send({ kind: "create-scene", worldId, productionId, requestId, ...input })) return null;
+  issuedSceneCreates.add(requestId);
+  return requestId;
+}
+
+/**
+ * The creates this window sent and has not yet heard back on. Every window hears every answer
+ * (the coordinator broadcasts), so a refusal is only this window's to word when the request was.
+ */
+const issuedSceneCreates = new Set<string>();
+export function isOwnSceneCreate(requestId: string): boolean {
+  return issuedSceneCreates.has(requestId);
 }
 
 type SceneCommandMessage = Extract<ClientMessage, { kind: "scene-command" }>;

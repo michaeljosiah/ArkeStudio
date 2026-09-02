@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   deriveCut,
@@ -300,6 +300,20 @@ export function useNewScene(worldId: string | undefined, prodId: string | undefi
       setPendingRequest(createScene(worldId, prodId, episodeId === undefined ? {} : { episodeId }));
     },
   };
+}
+
+/**
+ * The layout's one pending press, shared with the screens under it (codex, PR 708): a press on
+ * the Scenes screen followed by a rail link unmounts that screen with its listener, and the
+ * scene it made would never be opened. The layout outlives the screens, so it holds the request,
+ * and every New scene control in a production reads the same pending state.
+ */
+const NewSceneContext = createContext<ReturnType<typeof useNewScene> | null>(null);
+
+/** The layout's press where there is one, else this screen's own (screens rendered alone). */
+function useSharedNewScene(worldId: string | undefined, prodId: string | undefined) {
+  const own = useNewScene(worldId, prodId);
+  return useContext(NewSceneContext) ?? own;
 }
 
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
@@ -708,7 +722,13 @@ export function ProductionLayout() {
           {/* The production tree is a sibling of the world tree, not a child of it (App.tsx), so
               the world-open refusal has to be stated here too — otherwise a reload or deep link
               onto a production leaves every screen under it on its loader forever (issue 571). */}
-          {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
+          {refusal ? (
+            <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
+          ) : (
+            <NewSceneContext.Provider value={newScene}>
+              <Outlet />
+            </NewSceneContext.Provider>
+          )}
         </div>
       </div>
     </div>
@@ -1161,7 +1181,7 @@ export function ProductionDashboardScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const newScene = useNewScene(worldId, prodId);
+  const newScene = useSharedNewScene(worldId, prodId);
   if (!world || !production) {
     return (
       <Screen id="production-dashboard">
@@ -1825,7 +1845,7 @@ export function ScenesScreen() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const newScene = useNewScene(worldId, prodId);
+  const newScene = useSharedNewScene(worldId, prodId);
   const totalSec =
     production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
     0;

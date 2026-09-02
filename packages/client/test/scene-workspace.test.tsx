@@ -11,6 +11,7 @@ import {
   __connectionStatusForTest,
   __setBridgeForTest,
   __setStateForTest,
+  isOwnSceneCreate,
 } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -603,6 +604,31 @@ describe("the title is typed where it reads (R-2, amended 2026-09-02)", () => {
     assert.deepEqual(command.command, { kind: "edit-scene", title: "The verse answers" });
   });
 
+  it("a rename that lands while the box is open wins, and the box writes nothing (codex round 3)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    await click(q(mounted, ".fy-sw__title-text")!);
+    const input = q(mounted, ".fy-sw__title-input") as HTMLInputElement;
+    input.value = "What this window typed";
+
+    // Another window — or Arke — renames the scene and its version moves.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.title = "Renamed elsewhere";
+    scene.version += 1;
+    await act(async () => __setStateForTest(state));
+
+    assert.equal(q(mounted, ".fy-sw__title-input"), null, "the box closes on the newer name");
+    assert.match(q(mounted, ".fy-sw__title")?.textContent ?? "", /Renamed elsewhere/);
+    await press(q(mounted, ".fy-sw__title-text")!, "Enter");
+    const reopened = q(mounted, ".fy-sw__title-input") as HTMLInputElement;
+    assert.equal(reopened.value, "Renamed elsewhere", "reopening starts from the name that won");
+    await press(reopened, "Escape");
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "nothing the stale box held was written");
+  });
+
   it("Escape puts the old name back without writing", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
@@ -700,6 +726,38 @@ describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
     assert.equal(newSceneButton(mounted).hasAttribute("disabled"), false, "the answer is not coming; the press comes back");
     await act(async () => __connectionStatusForTest("open"));
     assert.ok(q(mounted, '[data-screen="scenes"]'), "and nothing was opened on its behalf");
+  });
+
+  it("the promised open survives leaving the screen that pressed it (codex round 3)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount(`/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes`);
+    // The screen's own button, not the rail's: the press whose screen is about to unmount.
+    const screenButton = all(mounted, '[data-screen="scenes"] button').find((candidate) => candidate.textContent === "New scene")!;
+    await click(screenButton);
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene");
+    assert.ok(isOwnSceneCreate(create.requestId), "this window remembers the press as its own");
+    assert.equal(
+      all(mounted, "button").filter((candidate) => candidate.textContent === "New scene" && candidate.hasAttribute("disabled")).length,
+      2,
+      "the rail's press and the screen's are one pending state",
+    );
+
+    await click(q(mounted, `.fy-prodrail__item[href="/w/${FIXTURE_WORLD_ID}/p/saltlight/generate"]`)!);
+    assert.equal(q(mounted, '[data-screen="scenes"]'), null, "the pressing screen is gone");
+
+    await apply({
+      at: "2026-09-02T10:00:00.000Z",
+      type: "scene.create-result",
+      requestId: create.requestId,
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      disposition: "created",
+      sceneId: "sc_04",
+    });
+    assert.ok(q(mounted, '[data-testid="scene-workspace"]'), "the layout kept the promise");
+    assert.equal(isOwnSceneCreate(create.requestId), false, "and the answered press is forgotten");
   });
 
   it("a bookmark to the retired brief form lands on the list, and writes nothing", async () => {
