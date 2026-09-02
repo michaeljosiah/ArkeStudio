@@ -386,6 +386,27 @@ describe("Picture timeline resolution", () => {
     assert.equal(resolved.gaps, 2);
   });
 
+  it("resolves a cited shot through duplicate story ids and turns a genuine ambiguity into a gap (#718)", () => {
+    const value = production();
+    const timeline = seedStoryPictureTimeline(value);
+    value.scenes.push(scene("sc_two", 2, [{ id: "sh_1" }]));
+
+    const resolved = resolvePictureTimeline(value, { status: "ready", timeline });
+    assert.equal(resolved.entries[0]!.sceneNumber, 1, "the clip's scene and shot citation chooses its source");
+    assert.equal(resolved.entries[0]!.takeId, TAKE);
+
+    const ambiguous = structuredClone(timeline);
+    const source = ambiguous.tracks[0]!.clips[0]!.source;
+    assert.equal(source.kind, "shot");
+    if (source.kind === "shot") {
+      source.sceneNumber = 9;
+      source.shotNumber = 9;
+    }
+    const withGap = resolvePictureTimeline(value, { status: "ready", timeline: ambiguous });
+    assert.equal(withGap.entries[0]!.takeId, null);
+    assert.equal(withGap.entries[0]!.label, "AMBIGUOUS SHOT 9 · sh_1");
+  });
+
   it("blocks malformed state, freezes the clock, and preserves a deleted source as a gap", () => {
     const value = production();
     assert.throws(

@@ -171,6 +171,24 @@ describe("Arke assembles a scene", () => {
     const bare = assembleSceneCommands({ production: bundle, timeline: applied, sceneId: "sc_bare", artifacts: [] });
     assert.ok("refused" in bare && /no shots/.test(bare.refused));
   });
+
+  it("assembles a shot whose id is already used by another scene (#718)", () => {
+    const bundle = production();
+    bundle.scenes[1] = scene("sc_two", 2, [{ id: "sh_1" }]);
+    const empty = seedEmptyPictureTimeline(bundle);
+    const first = assembleSceneCommands({ production: bundle, timeline: empty, sceneId: "sc_one", artifacts: [] });
+    assert.ok(!("refused" in first));
+    const afterFirst = applyTimelineCommands(empty, first.commands);
+
+    const second = assembleSceneCommands({ production: bundle, timeline: afterFirst, sceneId: "sc_two", artifacts: [] });
+    assert.ok(!("refused" in second), "the second scene's shot is distinct by its scene citation");
+    const assembled = applyTimelineCommands(afterFirst, second.commands);
+    const duplicates = orderedTrackClips(assembled.tracks.find((track) => track.id === "tr_picture")!)
+      .filter((clip) => clip.source.kind === "shot" && clip.source.shotId === "sh_1")
+      .map((clip) => clip.source.kind === "shot" ? [clip.id, clip.source.sceneNumber, clip.source.shotNumber] : []);
+    assert.deepEqual(duplicates, [["cl_sh-1", 1, 1], ["cl_sh-1-2", 2, 1]]);
+    assert.match(second.notes[0]!, /Placed 1 shot from Scene 2/);
+  });
 });
 
 describe("the Library is a set", () => {
