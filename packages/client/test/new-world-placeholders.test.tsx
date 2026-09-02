@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -77,5 +78,14 @@ describe("the new-world form asks for words rather than showing someone else's (
     const seeds = placeholders(render()).filter((p) => p.includes("one line"));
     assert.equal(seeds.length, 2, "a character and a place");
     for (const seed of seeds) assert.ok(seed.includes("·"), `${seed} shows the separator`);
+  });
+
+  it("keeps every field named after its placeholder disappears", () => {
+    const document = parseHTML(render()).document;
+    const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input[placeholder], textarea[placeholder]")];
+    assert.equal(fields.length, 6);
+    for (const field of fields) {
+      assert.equal(field.getAttribute("aria-label"), field.getAttribute("placeholder"));
+    }
   });
 });

@@ -1227,6 +1227,7 @@ export function NewWorldScreen() {
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Name</div>
               <Input
                 placeholder="What this world is called"
+                aria-label="What this world is called"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -1235,6 +1236,7 @@ export function NewWorldScreen() {
               <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Logline</div>
               <Textarea
                 placeholder="One sentence about this world"
+                aria-label="One sentence about this world"
                 value={logline}
                 onChange={(e) => setLogline(e.target.value)}
                 style={{ minHeight: 52 }}
@@ -1258,6 +1260,7 @@ export function NewWorldScreen() {
                 </div>
                 <Input
                   placeholder="or your own words"
+                  aria-label="or your own words"
                   value={GENESIS_TONES.includes(tone as (typeof GENESIS_TONES)[number]) ? "" : tone}
                   onChange={(e) => setTone(e.target.value)}
                   style={{ marginTop: 6 }}
@@ -1265,7 +1268,7 @@ export function NewWorldScreen() {
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ font: "600 12.5px var(--font-sans)", marginBottom: 6 }}>Genre</div>
-                <Input placeholder="A genre" value={genre} onChange={(e) => setGenre(e.target.value)} />
+                <Input aria-label="A genre" placeholder="A genre" value={genre} onChange={(e) => setGenre(e.target.value)} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 14 }}>
@@ -1277,6 +1280,7 @@ export function NewWorldScreen() {
                     teach it where the example used to demonstrate it. */}
                 <Input
                   placeholder="Their name · one line about them"
+                  aria-label="Their name · one line about them"
                   value={firstCharacter}
                   onChange={(e) => setFirstCharacter(e.target.value)}
                 />
@@ -1292,6 +1296,7 @@ export function NewWorldScreen() {
                 </div>
                 <Input
                   placeholder="Its name · one line about it"
+                  aria-label="Its name · one line about it"
                   value={firstLocation}
                   onChange={(e) => setFirstLocation(e.target.value)}
                 />
