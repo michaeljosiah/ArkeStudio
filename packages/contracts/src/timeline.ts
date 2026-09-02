@@ -888,7 +888,12 @@ interface Working {
 }
 
 function touchCue(working: Working, trackId: TimelineTrackId, cueId: SubtitleCueId, before: SubtitleCue | null): void {
-  if (!working.touchedCues.has(cueId)) working.touchedCues.set(cueId, { trackId, before });
+  const touched = working.touchedCues.get(cueId);
+  // One track per cue id per entry, for the reason clips have it (round eight).
+  if (touched !== undefined && touched.trackId !== trackId) {
+    throw new TimelineOperationRefused(`subtitle ${cueId} was on ${touched.trackId} earlier in this batch and cannot reappear on ${trackId}`);
+  }
+  if (touched === undefined) working.touchedCues.set(cueId, { trackId, before });
 }
 
 function findCue(working: Working, cueId: SubtitleCueId): { track: TimelineTrack; cue: SubtitleCue } {

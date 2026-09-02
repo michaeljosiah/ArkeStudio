@@ -157,6 +157,8 @@ export interface RunDeps {
     conversationId: ConversationId;
     entryContext: WorldChatContext | undefined;
     requests: readonly ModelEditorRequest[];
+    /** Validate everything and write nothing: the pass that runs before the bible is written. */
+    dryRun?: boolean;
   }) => Promise<void>;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
@@ -758,6 +760,41 @@ export class WorldChatRunner {
     }));
 
     /*
+     * Editor requests are validated before anything durable happens and written after
+     * everything else has (SPEC-039 R-27; round eight): the dry run refuses a request that
+     * could not land while the bible is still untouched, so a rejected turn leaves neither a
+     * card nor an orphaned bible edit, and the corrective retry starts from the base it was
+     * shown. The write below follows the bible's; what remains after it is the append.
+     */
+    const requests = outcome.turn.editorRequests;
+    if (requests.length > 0) {
+      if (!this.deps.stageEditorRequests) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request-unavailable",
+              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
+            },
+          ],
+        };
+      }
+      try {
+        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests, dryRun: true });
+      } catch (err) {
+        return {
+          ok: false,
+          problems: [
+            {
+              code: "editor-request",
+              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+            },
+          ],
+        };
+      }
+    }
+
+    /*
      * The bible is written before the turn is recorded, and a failure here rejects the turn
      * whole (master §4.5, §8.3's all-or-nothing rule).
      *
@@ -795,31 +832,9 @@ export class WorldChatRunner {
       }
     }
 
-    /*
-     * Editor requests are staged last, after the shape, the checks and the bible edit have all
-     * passed (SPEC-039 R-27; round five): a turn that is refused for any of those leaves no
-     * pending card behind, and the corrective retry cannot stage the same request twice. What
-     * remains is the append below; a crash between the two leaves a pending request, which is
-     * visible and one Reject away from gone — the same trade the bible makes.
-     */
-    if (outcome.turn.editorRequests.length > 0) {
-      if (!this.deps.stageEditorRequests) {
-        return {
-          ok: false,
-          problems: [
-            {
-              code: "editor-request-unavailable",
-              safeMessage: "Editor requests cannot be made in this conversation. Answer without one.",
-            },
-          ],
-        };
-      }
+    if (requests.length > 0 && this.deps.stageEditorRequests) {
       try {
-        await this.deps.stageEditorRequests({
-          conversationId,
-          entryContext: folded.entryContext,
-          requests: outcome.turn.editorRequests,
-        });
+        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests });
       } catch (err) {
         return {
           ok: false,

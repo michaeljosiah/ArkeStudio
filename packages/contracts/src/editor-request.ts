@@ -73,6 +73,8 @@ export const EditorRequestSchema = z
     resultRevision: z.number().int().min(1).optional(),
     /** Why the request went stale, in the coordinator's words (R-32). */
     reason: z.string().max(300).optional(),
+    /** When the accepted revision was undone (R-36); cleared again by Redo. The status stays accepted. */
+    undoneAt: z.string().min(1).optional(),
   })
   .strict();
 export type EditorRequest = z.infer<typeof EditorRequestSchema>;
@@ -242,8 +244,11 @@ export function editorRequestStaleness(
   return request.sourceFingerprint === currentFingerprint ? null : "the story changed since this request was made";
 }
 
-/** Whether Accept's revision has since been undone (R-36): the status stays; the history says what happened after. */
-export function editorRequestUndone(request: Pick<EditorRequest, "id" | "status">, timeline: TimelineState | undefined): boolean {
-  if (request.status !== "accepted" || timeline?.status !== "ready") return false;
-  return timeline.timeline.history.redo.some((entry) => entry.kind === "change" && entry.requestId === request.id);
+/**
+ * Whether Accept's revision has since been undone (R-36): the status stays; the record says what
+ * happened after. Durable on the record rather than read off the redo stack, which the next
+ * edit clears while the request's action stays absent (round eight).
+ */
+export function editorRequestUndone(request: Pick<EditorRequest, "status" | "undoneAt">, _timeline?: TimelineState | undefined): boolean {
+  return request.status === "accepted" && request.undoneAt !== undefined;
 }

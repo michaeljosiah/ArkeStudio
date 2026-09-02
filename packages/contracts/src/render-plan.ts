@@ -455,8 +455,12 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       });
       // A shot that keeps its own sound — the spine's kept diegetic audio — rides under the mix
       // at its stated gain, and only when the take is measured to carry a stream (SPEC-013 R-5a).
+      // A segment has no measurement of its own; its pass carries the stream the media path
+      // already resolves to (round eight).
       const takeId = entry.takeId;
-      if (clip !== undefined && clip.audio === "keep" && baseAudible && takeId !== null && production.takeMediaInfo[takeId]?.mediaInfo.hasAudio === true) {
+      const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
+      const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
+      if (clip !== undefined && clip.audio === "keep" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
         baseSound.push({
           path: entry.media.path,
           startSec,
@@ -598,22 +602,15 @@ export interface VisiblePicture {
   label: string;
   /** 0 is the base sequence; overlays count upward in composition order. */
   layer: number;
+  /**
+   * The base clip a still overlay sits on, so a logo or title composites over the picture
+   * rather than replacing it with black (round eight). Absent when the base is not a clip, or
+   * when the visible overlay is itself video, which the preview plays alone.
+   */
+  under?: { path: string; sourceSec: number; label: string };
 }
 
-export function pictureAtSec(plan: ExportPlan, sec: number): VisiblePicture | null {
-  if (sec < 0 || sec >= plan.totalSec) return null;
-  for (let index = plan.overlays.length - 1; index >= 0; index -= 1) {
-    const overlay = plan.overlays[index]!;
-    if (sec >= overlay.startSec && sec < overlay.endSec) {
-      return {
-        path: overlay.path,
-        still: overlay.still,
-        sourceSec: overlay.still ? 0 : (overlay.sourceInSec ?? 0) + (sec - overlay.startSec),
-        label: overlay.path.split("/").pop() ?? overlay.path,
-        layer: index + 1,
-      };
-    }
-  }
+function baseAtSec(plan: ExportPlan, sec: number): VisiblePicture | null {
   let at = 0;
   for (const item of plan.items) {
     if (sec < at + item.durationSec) {
@@ -625,6 +622,25 @@ export function pictureAtSec(plan: ExportPlan, sec: number): VisiblePicture | nu
     at += item.durationSec;
   }
   return null;
+}
+
+export function pictureAtSec(plan: ExportPlan, sec: number): VisiblePicture | null {
+  if (sec < 0 || sec >= plan.totalSec) return null;
+  for (let index = plan.overlays.length - 1; index >= 0; index -= 1) {
+    const overlay = plan.overlays[index]!;
+    if (sec >= overlay.startSec && sec < overlay.endSec) {
+      const base = overlay.still ? baseAtSec(plan, sec) : null;
+      return {
+        path: overlay.path,
+        still: overlay.still,
+        sourceSec: overlay.still ? 0 : (overlay.sourceInSec ?? 0) + (sec - overlay.startSec),
+        label: overlay.path.split("/").pop() ?? overlay.path,
+        layer: index + 1,
+        ...(base !== null && base.path !== null ? { under: { path: base.path, sourceSec: base.sourceSec, label: base.label } } : {}),
+      };
+    }
+  }
+  return baseAtSec(plan, sec);
 }
 
 /** Every moment the visible picture can change: item boundaries and overlay edges. */

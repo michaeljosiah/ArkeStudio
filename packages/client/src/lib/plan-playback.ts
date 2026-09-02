@@ -21,13 +21,16 @@ export function planSpans(plan: ExportPlan): PlaybackSpan[] {
     const last = spans[spans.length - 1];
     // Adjacent windows of one continuous source merge, so a clip under a short overlay does not
     // reload when the overlay ends and its own source resumes at the right offset.
+    const under = visible.under === undefined ? undefined : { path: visible.under.path, mediaInSec: visible.under.sourceSec };
     if (
       last !== undefined &&
       last.path === visible.path &&
       last.label === visible.label &&
       (last.still ?? false) === visible.still &&
       last.endSec === startSec &&
-      (visible.path === null || last.mediaInSec + (startSec - last.startSec) === visible.sourceSec)
+      (visible.path === null || last.mediaInSec + (startSec - last.startSec) === visible.sourceSec) &&
+      (last.under?.path ?? null) === (under?.path ?? null) &&
+      (under === undefined || last.under === undefined || last.under.mediaInSec + (startSec - last.startSec) === under.mediaInSec)
     ) {
       last.endSec = endSec;
       continue;
@@ -39,6 +42,7 @@ export function planSpans(plan: ExportPlan): PlaybackSpan[] {
       mediaInSec: visible.sourceSec,
       label: visible.label,
       ...(visible.still ? { still: true } : {}),
+      ...(under !== undefined ? { under } : {}),
     });
   }
   return spans;

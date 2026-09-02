@@ -11115,8 +11115,8 @@ export class Coordinator {
       applyBibleEdits: ({ edits, baseVersion }) =>
         applyTurnBibleEdits(store, edits, { source: "world-chat", baseVersion }),
       // Validated and written by the coordinator, never by the model (SPEC-039 R-27..R-29).
-      stageEditorRequests: async ({ conversationId, entryContext, requests }) => {
-        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now() });
+      stageEditorRequests: async ({ conversationId, entryContext, requests, dryRun }) => {
+        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), ...(dryRun === true ? { dryRun: true } : {}) });
       },
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({

@@ -133,7 +133,11 @@ describe("editor requests (issue 684)", () => {
     });
     assert.equal(editorRequestUndone(record, { status: "ready", timeline: accepted }), false);
     const undone = undoTimelineHistory(accepted);
-    assert.equal(editorRequestUndone(record, { status: "ready", timeline: undone }), true);
+    // The mark is on the record, written by the coordinator with the undo; the redo stack is
+    // transient and says nothing durable.
+    assert.equal(editorRequestUndone(record, { status: "ready", timeline: undone }), false);
+    assert.equal(editorRequestUndone({ ...record, undoneAt: "2026-09-02T10:02:00Z" }, { status: "ready", timeline: undone }), true);
+    assert.equal(editorRequestUndone({ ...record, status: "rejected", undoneAt: "2026-09-02T10:02:00Z" }), false);
     assert.equal(record.status, "accepted", "the status is not rewritten");
   });
 });

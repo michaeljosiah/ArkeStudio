@@ -16,6 +16,7 @@ import {
   type TimelineTrackId,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
+import type { EditorTool } from "./editor-timeline.js";
 import { frameAtPixel, framesFromDelta, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
 
 /**
@@ -61,6 +62,7 @@ export function TypedTrackRows({
   onDrop,
   playheadFrame,
   mintClipId,
+  tool = "select",
 }: {
   timeline: ProductionTimeline;
   totalFrames: number;
@@ -74,6 +76,8 @@ export function TypedTrackRows({
   onDrop: (drop: TrackDrop) => void;
   playheadFrame: number;
   mintClipId: () => TimelineClipId;
+  /** The toolbar's tool applies to every track (round eight): Blade splits here, Hand pans here. */
+  tool?: EditorTool;
 }) {
   const [over, setOver] = useState<TimelineTrackId | null>(null);
   const span = Math.max(totalFrames, 1);
@@ -82,7 +86,7 @@ export function TypedTrackRows({
   if (tracks.length === 0) return null;
 
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
-    if (event.button !== 0 || disabled) return;
+    if (event.button !== 0 || disabled || tool !== "select") return;
     onSelect(clipId);
     event.preventDefault();
     event.stopPropagation();
@@ -116,6 +120,40 @@ export function TypedTrackRows({
     element.addEventListener("pointermove", move);
     element.addEventListener("pointerup", up);
     element.addEventListener("pointercancel", cancel);
+  };
+
+  const blade = (track: TimelineTrack, clip: TimelineClip) => (event: React.MouseEvent) => {
+    const lane = (event.currentTarget as HTMLElement).closest<HTMLElement>(".fy-track__lane");
+    if (lane === null) return;
+    const box = lane.getBoundingClientRect();
+    const frame = frameAtPixel(event.clientX - box.left, box.width, span);
+    if (frame <= clip.startFrame || frame >= clip.startFrame + clip.durationFrames) return;
+    onSelect(clip.id);
+    onCommands([{ kind: "split", clipId: clip.id, atFrame: frame, newClipId: mintClipId() }], "Split clip");
+    void track;
+  };
+
+  const onLanePointerDown = (event: React.PointerEvent) => {
+    if (tool !== "hand" || event.button !== 0) return;
+    const canvas = (event.currentTarget as HTMLElement).closest<HTMLElement>(".fy-timeline__canvas");
+    if (canvas === null) return;
+    event.preventDefault();
+    const element = event.currentTarget as HTMLElement;
+    element.setPointerCapture(event.pointerId);
+    let lastX = event.clientX;
+    const move = (pointer: PointerEvent) => {
+      canvas.scrollLeft -= pointer.clientX - lastX;
+      lastX = pointer.clientX;
+    };
+    const up = (pointer: PointerEvent) => {
+      element.releasePointerCapture(pointer.pointerId);
+      element.removeEventListener("pointermove", move);
+      element.removeEventListener("pointerup", up);
+      element.removeEventListener("pointercancel", up);
+    };
+    element.addEventListener("pointermove", move);
+    element.addEventListener("pointerup", up);
+    element.addEventListener("pointercancel", up);
   };
 
   const onClipKeyDown = (clipId: TimelineClipId, clip: TimelineClip) => (event: React.KeyboardEvent) => {
@@ -167,7 +205,8 @@ export function TypedTrackRows({
               </span>
             </span>
             <div
-              className={cx("fy-track__lane", "fy-typedlane", over === track.id && "fy-typedlane--over")}
+              className={cx("fy-track__lane", "fy-typedlane", over === track.id && "fy-typedlane--over", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
+              onPointerDown={onLanePointerDown}
               onDragOver={(event) => {
                 if (disabled || track.kind === "picture" && false) return;
                 event.preventDefault();
@@ -201,7 +240,13 @@ export function TypedTrackRows({
                     aria-label={label}
                     title={label}
                     disabled={disabled}
-                    onClick={() => onSelect(clip.id)}
+                    onClick={(event) => {
+                      if (tool === "blade") {
+                        blade(track, clip)(event);
+                        return;
+                      }
+                      onSelect(clip.id);
+                    }}
                     onPointerDown={begin(track, clip.id, "move")}
                     onKeyDown={onClipKeyDown(clip.id, clip)}
                   >

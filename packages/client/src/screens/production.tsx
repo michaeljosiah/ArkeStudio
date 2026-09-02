@@ -114,7 +114,7 @@ import { DevelopmentWorkspace } from "./development.js";
 import { posterize, posterNameFor } from "../lib/poster.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
-import { mediaTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
+import { mediaTimeFor, videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
 import { planSpans } from "../lib/plan-playback.js";
 import { SceneWorkspace } from "./scene-workspace/workspace.js";
 import {
@@ -3571,7 +3571,9 @@ function CutPreview({
    * the whole placement. So the two are separated at the source: the video never receives a
    * still, and the still is drawn over it by an `<img>` wearing the same class.
    */
-  const videoSrcFor = (span: PlaybackSpan | null) => (span?.still ? null : srcFor(span));
+  // A still with a base under it keeps the base video playing beneath the image (round eight).
+  const videoSrcFor = (span: PlaybackSpan | null) =>
+    span?.still ? (span.under !== undefined && slug ? mediaUrl(slug, span.under.path) : null) : srcFor(span);
   const stillSrcFor = (span: PlaybackSpan | null) => (span?.still ? srcFor(span) : null);
 
   /*
@@ -3613,7 +3615,7 @@ function CutPreview({
       const span = spanAt(spans, at);
       syncMediaElement(el, {
         src: videoSrcFor(span),
-        targetSec: span ? mediaTimeFor(span, at) : 0,
+        targetSec: span ? videoTimeFor(span, at) : 0,
         playing: true,
         nowMs: ts,
       });
@@ -3635,7 +3637,7 @@ function CutPreview({
       const span = spanAt(spans, at);
       syncMediaElement(el, {
         src: videoSrcFor(span),
-        targetSec: span ? mediaTimeFor(span, at) : 0,
+        targetSec: span ? videoTimeFor(span, at) : 0,
         playing: false,
         nowMs: 0,
       });
@@ -4250,7 +4252,7 @@ export function CutScreen() {
    * lifts when the snapshot's revision moves, when a refusal arrives, or after a bounded wait in
    * case neither ever does.
    */
-  const [inFlight, setInFlight] = useState<{ revision: number | null; since: number } | null>(null);
+  const [inFlight, setInFlight] = useState<{ revision: number | null; since: number; patient?: boolean } | null>(null);
   useEffect(
     () => {
       setTimelineCommandError(null);
@@ -4530,17 +4532,29 @@ export function CutScreen() {
       setInFlight(null);
       return;
     }
-    const timer = window.setTimeout(() => setInFlight((pending) => (pending === inFlight ? null : pending)), 8000);
+    // A command answers in well under eight seconds or something is wrong. Speech drafting
+    // transcribes every Dialogue clip in turn and is not wrong at a minute; releasing its gate
+    // early let a second edit land under it and discard the whole draft (round eight).
+    const timer = window.setTimeout(() => setInFlight((pending) => (pending === inFlight ? null : pending)), inFlight.patient ? 600_000 : 8000);
     return () => window.clearTimeout(timer);
   }, [inFlight, timelineRevision]);
   const commandsDisabled =
-    timelineError !== null || !worldId || !prodId || !production || editableTimeline === null || commandPending || fence === null;
+    timelineError !== null ||
+    !worldId ||
+    !prodId ||
+    !production ||
+    editableTimeline === null ||
+    commandPending ||
+    fence === null ||
+    // A ghost is the request's timeline, not the live one; a gesture drawn against it would
+    // land against the record and mean something else (round eight). Decide the card first.
+    ghostTimeline !== null;
   const sourceLength = useMemo(
     () => (production ? sourceLengthFramesFor(production, artifacts) : () => undefined),
     [production, artifacts],
   );
   const sendPictureMove = (direction: "earlier" | "later") => {
-    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || fence === null) return;
+    if (!worldId || !prodId || !production || !selectedPictureClip || commandPending || fence === null || ghostTimeline !== null) return;
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     moveTimelinePictureClip(worldId, prodId, selectedPictureClip.id, direction, timelineRevision, fence);
@@ -4658,7 +4672,7 @@ export function CutScreen() {
   const transcribe = (trackId: TimelineTrackId, language: string) => {
     if (!worldId || !prodId || timelineRevision === null || commandPending) return;
     setTimelineCommandError(null);
-    setInFlight({ revision: timelineRevision, since: Date.now() });
+    setInFlight({ revision: timelineRevision, since: Date.now(), patient: true });
     sendTimelineTranscribe(worldId, prodId, timelineRevision, trackId, language);
   };
   const selectedAction = (action: "split" | "duplicate" | "delete" | "ripple") => {
@@ -4987,6 +5001,7 @@ export function CutScreen() {
                       onDrop={onTrackDrop}
                       playheadFrame={playheadFrame}
                       mintClipId={mintClipId}
+                      tool={tool}
                     />
                   </>
                 ) : (

@@ -1,8 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   EDITOR_REQUEST_BOUNDS,
-  EditorRequestFileSchema,
   editorRequestStaleness,
   previewEditorRequest,
   seedSpinePictureTimeline,
@@ -21,9 +18,7 @@ import {
 import { applyTimelineCommand, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
-import type { CommitFileInput } from "../world/commit.js";
-import { fromPortable, toExtendedLength } from "../world/paths.js";
-import { sha256 } from "../world/text-files.js";
+import { EditorRequestFileInvalid, readRequestFile, requestFileInput } from "./editor-request-file.js";
 
 /**
  * Arke's editor requests on disk (SPEC-039 §1.7, §2.2; issue 684).
@@ -42,28 +37,14 @@ export class EditorRequestRefused extends Error {
   }
 }
 
-const requestsPath = (productionId: string): string => `productions/${productionId}/editor-requests.json`;
-
-const missing = (error: unknown): boolean =>
-  error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
-
 async function readRequests(store: WorldStore, productionId: string): Promise<{ raw: string | null; file: EditorRequestFile }> {
-  let raw: string | null;
   try {
-    raw = await readFile(toExtendedLength(join(store.dir, fromPortable(requestsPath(productionId)))), "utf8");
+    return await readRequestFile(store, productionId);
   } catch (error) {
-    if (!missing(error)) throw error;
-    raw = null;
-  }
-  if (raw === null) return { raw, file: { schemaVersion: 1, requests: [] } };
-  try {
-    return { raw, file: EditorRequestFileSchema.parse(JSON.parse(raw)) };
-  } catch (error) {
-    throw new EditorRequestRefused(`editor-requests.json is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    if (error instanceof EditorRequestFileInvalid) throw new EditorRequestRefused(error.reason);
+    throw error;
   }
 }
-
-const serialise = (file: EditorRequestFile): string => `${JSON.stringify(file, null, 2)}\n`;
 
 /**
  * The file keeps a bounded audit, but a pending request is not audit — it is waiting for a
@@ -80,10 +61,6 @@ export function retainEditorRequests(requests: readonly EditorRequest[]): Editor
     kept.splice(index, 1);
   }
   return kept;
-}
-
-function fileFor(path: string, raw: string | null, content: string): CommitFileInput {
-  return { path, action: raw === null ? "create" : "replace", content, baseHash: raw === null ? null : sha256(raw) };
 }
 
 /** The production a thread is about (R-26), or null for a thread that is not about one. */
@@ -143,12 +120,15 @@ export async function stageEditorRequests(
     entryContext: WorldChatContext | undefined;
     requests: readonly ModelEditorRequest[];
     now: string;
+    /** Validate every request against the base and write nothing (round eight). */
+    dryRun?: boolean;
   },
 ): Promise<EditorRequest[]> {
   const productionId = productionOfContext(input.entryContext);
   if (productionId === null) throw new EditorRequestRefused("editor requests need a production, episode or scene thread");
   if (input.requests.length === 0) return [];
   return store.gateOp(async () => {
+    const dryRun = input.dryRun === true;
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
     const base = requestBase(store, production);
@@ -216,7 +196,7 @@ export async function stageEditorRequests(
       staged.push(record);
       added.push(record);
     }
-    if (added.length === 0) return staged;
+    if (added.length === 0 || dryRun) return dryRun ? [] : staged;
     const next: EditorRequestFile = {
       schemaVersion: 1,
       requests: retainEditorRequests([...file.requests, ...added]),
@@ -224,7 +204,7 @@ export async function stageEditorRequests(
     await store.commitUnserialised({
       kind: "editor-request",
       source: "stage",
-      files: [fileFor(requestsPath(productionId), raw, serialise(next))],
+      files: [requestFileInput(productionId, raw, next)],
     });
     return staged;
   });
@@ -244,7 +224,7 @@ async function writeStatus(
     await store.commitUnserialised({
       kind: "editor-request",
       source: updated.status,
-      files: [fileFor(requestsPath(productionId), raw, serialise({ ...file, requests: file.requests.map((candidate) => (candidate.id === requestId ? updated : candidate)) }))],
+      files: [requestFileInput(productionId, raw, { ...file, requests: file.requests.map((candidate) => (candidate.id === requestId ? updated : candidate)) })],
     });
     return updated;
   });
@@ -290,11 +270,10 @@ export async function decideEditorRequest(
 
   const resultRevision = (production.timeline?.status === "ready" ? production.timeline.timeline.revision : 0) + 1;
   const accepted: EditorRequest = { ...request, status: "accepted", decidedAt: now, resultRevision };
-  const attach = fileFor(
-    requestsPath(productionId),
-    raw,
-    serialise({ ...file, requests: file.requests.map((candidate) => (candidate.id === requestId ? accepted : candidate)) }),
-  );
+  const attach = requestFileInput(productionId, raw, {
+    ...file,
+    requests: file.requests.map((candidate) => (candidate.id === requestId ? accepted : candidate)),
+  });
   try {
     await applyTimelineCommand(store, productionId, {
       kind: "commands",

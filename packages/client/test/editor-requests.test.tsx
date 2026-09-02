@@ -84,7 +84,7 @@ describe("editor request cards (issue 684)", () => {
     assert.match(landed, /r1/);
     assert.doesNotMatch(landed, /undone/);
     assert.doesNotMatch(landed, />Accept</);
-    const undone = render([record], { status: "ready", timeline: undoTimelineHistory(accepted) }, undoTimelineHistory(accepted));
+    const undone = render([{ ...record, undoneAt: "2026-09-02T10:02:00Z" }], { status: "ready", timeline: undoTimelineHistory(accepted) }, undoTimelineHistory(accepted));
     assert.match(undone, /accepted · r1 · undone/);
   });
 });

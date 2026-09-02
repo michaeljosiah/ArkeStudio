@@ -111,11 +111,15 @@ describe("Arke's editor requests (issue 684)", () => {
       (error: unknown) => error instanceof EditorRequestRefused && /already accepted/.test(error.reason),
     );
 
-    // Undo keeps the status and says the action was undone (R-36).
+    // Undo keeps the status and marks the record undone in the same commit (R-36); Redo clears it.
     await applyTimelineCommand(store, PRODUCTION, { kind: "undo", baseRevision: 1 });
     const production = productionOf(store);
     assert.equal(production.editorRequests[0]!.status, "accepted");
+    assert.equal(typeof production.editorRequests[0]!.undoneAt, "string");
     assert.equal(editorRequestUndone(production.editorRequests[0]!, production.timeline), true);
+    await applyTimelineCommand(store, PRODUCTION, { kind: "redo", baseRevision: 2 });
+    assert.equal(productionOf(store).editorRequests[0]!.undoneAt, undefined);
+    assert.equal(editorRequestUndone(productionOf(store).editorRequests[0]!, productionOf(store).timeline), false);
   });
 
   it("rejects without touching the timeline (R-31, A-9)", async () => {

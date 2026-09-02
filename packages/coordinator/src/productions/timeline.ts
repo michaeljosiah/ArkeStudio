@@ -28,6 +28,7 @@ import {
   type TimelineSelectionChange,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
+import { readRequestFile, requestFileInput } from "./editor-request-file.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -292,6 +293,24 @@ export async function applyTimelineCommand(
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);
         next = command.kind === "undo" ? undoTimelineHistory(current) : redoTimelineHistory(current);
+        /*
+         * An accepted request whose revision is undone stays accepted and says so (SPEC-039
+         * R-36), durably: the redo stack is transient — the next edit clears it — so the mark
+         * lives on the record, in the same commit as the history move (round eight).
+         */
+        if (entry.kind === "change" && entry.requestId !== undefined) {
+          const requestId = entry.requestId;
+          const { raw: requestsRaw, file } = await readRequestFile(store, productionId);
+          if (file.requests.some((request) => request.id === requestId)) {
+            const marked = file.requests.map((request) => {
+              if (request.id !== requestId) return request;
+              if (command.kind === "undo") return { ...request, undoneAt: store.now() };
+              const { undoneAt: _redone, ...rest } = request;
+              return rest;
+            });
+            files.push(requestFileInput(productionId, requestsRaw, { ...file, requests: marked }));
+          }
+        }
         // The selection half of a take switch travels with the entry; the review line it appended
         // stays exactly where it is (R-17), which is why nothing here reads reviews.jsonl.
         const changes = historySelectionChanges(entry, command.kind);

@@ -26,6 +26,8 @@ export interface PlaybackSpan {
    * still for its whole placement.
    */
   still?: boolean;
+  /** The base clip playing under a still overlay (round eight): the video keeps running while the still sits on top. */
+  under?: { path: string; mediaInSec: number };
 }
 
 export function spineSpans(cut: DerivedSpineCut): PlaybackSpan[] {
@@ -119,4 +121,10 @@ export function mediaSpans(
     at = end;
   }
   return spans;
+}
+
+/** Where the video element should be: the base under a still, else the span's own media. */
+export function videoTimeFor(span: PlaybackSpan, seconds: number): number {
+  if (span.still && span.under !== undefined) return span.under.mediaInSec + Math.max(0, seconds - span.startSec);
+  return mediaTimeFor(span, seconds);
 }

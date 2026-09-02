@@ -703,12 +703,13 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
           ? ":borderw=2:bordercolor=black"
           : "";
     burnIn.cues.forEach((cue, i) => {
-      // One line per burned cue: drawtext takes its text through the filter graph, where a
-      // newline is a separator, so line breaks become spaces on the way to the pixels. The
-      // punctuation stays — escaped through both parsers, never replaced (round three).
-      const flat = cue.text.replace(/\s*\n\s*/g, " ");
-      assertSlateLabelSupported(flat);
-      const text = ffmpegDrawtextText(flat);
+      // The cue's own lines: a quoted run in the filter graph carries a newline verbatim, and
+      // drawtext breaks on it, so a two-line cue is two lines in the pixels as it is in the
+      // preview and the sidecar (round eight). Each line is checked against the face; the
+      // punctuation stays, escaped through both parsers, never replaced (round three).
+      const lines = cue.text.split(/\s*\n\s*/).map((line) => line.trim()).filter((line) => line.length > 0);
+      for (const line of lines) assertSlateLabelSupported(line);
+      const text = ffmpegDrawtextText(lines.join("\n"));
       const next = `st${i}`;
       filters.push(
         `[${last}]drawtext=expansion=none:fontfile=${ffmpegFilterPath(slateFont)}:text='${text}':fontcolor=${colour}:fontsize=${fontsize}:x=(w-tw)/2:y=h-th-${margin}${decoration}:enable='between(t,${cue.startSec},${cue.endSec})'[${next}]`,
