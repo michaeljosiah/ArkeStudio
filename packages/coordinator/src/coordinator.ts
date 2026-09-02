@@ -277,7 +277,7 @@ import {
 import { atomicWriteFile } from "./world/atomic.js";
 import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { CommitPlanError } from "./world/commit.js";
+import { classify, CommitPlanError } from "./world/commit.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
@@ -1879,6 +1879,8 @@ export class Coordinator {
       parsed.type !== "voice.runtime-test" &&
       // This is after-the-fact UI news derived from the accept result, not a second domain record.
       parsed.type !== "world-chat.ripples" &&
+      // A correlated form receipt: proposal and commit events remain the durable account.
+      parsed.type !== "sheet.edit-result" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
       parsed.type !== "vendor-auth.status" &&
@@ -3450,8 +3452,86 @@ export class Coordinator {
       }
       case "stage-sheet-edit": {
         const gate = this.opts.provider.gate?.();
-        if (!gate) return;
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          disposition: "accepted" | "merged" | "refused",
+          details: {
+            proposalId?: string;
+            reason?: string;
+            ripples?: RippleItem[];
+            undoVersion?: number;
+          } = {},
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "sheet.edit-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            path: msg.path,
+            action: "edit",
+            disposition,
+            ...details,
+          });
+        if (!gate || !store) {
+          answer("refused", { reason: "The accept gate is unavailable." });
+          return;
+        }
         try {
+          const existing = (await gate.listOpen())
+            .filter((proposal) => proposal.targets.some((target) => target.path === msg.path))
+            .sort((a, b) => a.created.localeCompare(b.created))[0];
+          if (existing) {
+            if (this.refuseWhileDrafting(msg.worldId, existing.id)) {
+              answer("refused", {
+                proposalId: existing.id,
+                reason: "the studio is still writing into this proposal — cancel the run first",
+              });
+              return;
+            }
+            const byHeading = new Map(msg.sections.map((section) => [section.heading, section]));
+            const dirtySections = msg.dirtyHeadings.map((heading) => {
+              const section = byHeading.get(heading);
+              if (!section) throw new Error(`${heading} is not a field on this form`);
+              return section;
+            });
+            const merged = await gate.mergeSheetFormEdit({
+              proposalId: existing.id,
+              requestId: msg.requestId,
+              path: msg.path,
+              sections: dirtySections,
+              ...(msg.role !== undefined ? { role: msg.role } : {}),
+              expectedDraftRevision: existing.draftRevision,
+            });
+            if (merged.status === "updated") {
+              answer("merged", { proposalId: existing.id });
+            } else {
+              const reason =
+                merged.status === "stale"
+                  ? "This proposal changed while the form was being saved. Review its latest version and try again."
+                  : merged.status === "rejected"
+                    ? merged.message
+                    : merged.status === "unknown-target"
+                      ? "This proposal no longer contains the sheet being edited."
+                      : "An earlier edit to this proposal did not finish, so it cannot safely be changed.";
+              this.emit({
+                at: new Date().toISOString(),
+                type: "proposal.blocked",
+                worldId: msg.worldId,
+                proposalId: existing.id,
+                reason:
+                  merged.status === "stale"
+                    ? "stale"
+                    : merged.status === "draft-unresolved"
+                      ? "draft-unresolved"
+                      : "invalid",
+                detail: reason,
+              });
+              answer("refused", { proposalId: existing.id, reason });
+            }
+            await this.refreshWorldSnapshot(msg.worldId).catch(() => this.transport.broadcastSnapshot());
+            return;
+          }
+
           const proposal = await gate.stageSheetEdit(msg.path, msg.summary, msg.sections, "form", msg.role);
           this.emit({
             at: new Date().toISOString(),
@@ -3459,8 +3539,86 @@ export class Coordinator {
             worldId: msg.worldId,
             proposalId: proposal.id,
           });
-        } catch {
-          /* the snapshot below carries whatever state resulted */
+          const outcome = await acceptDecided(gate, proposal.id);
+          if (landed(outcome)) {
+            this.emit({
+              at: new Date().toISOString(),
+              type: "proposal.resolved",
+              worldId: msg.worldId,
+              proposalId: proposal.id,
+              outcome: "accepted",
+            });
+            const baseVersion = proposal.targets[0]?.baseVersion;
+            answer("accepted", {
+              proposalId: proposal.id,
+              ...(outcome.status === "accepted" && outcome.ripples.length > 0 ? { ripples: outcome.ripples } : {}),
+              ...(outcome.status === "accepted" && baseVersion !== null && baseVersion !== undefined
+                ? { undoVersion: baseVersion }
+                : {}),
+            });
+          } else {
+            const reason = explainAcceptRefusal(outcome);
+            this.emit({
+              at: new Date().toISOString(),
+              type: "proposal.blocked",
+              worldId: msg.worldId,
+              proposalId: proposal.id,
+              reason:
+                outcome.status === "needs-reconfirm"
+                  ? "needs-reconfirm"
+                  : outcome.status === "stale"
+                    ? "stale"
+                    : outcome.status === "pending-review"
+                      ? "pending-review"
+                      : outcome.status === "unresolved-conflicts"
+                        ? "unresolved-conflicts"
+                        : outcome.status === "open-choices"
+                          ? "open-choices"
+                          : outcome.status === "invalid"
+                            ? "invalid"
+                            : outcome.status === "draft-unresolved"
+                              ? "draft-unresolved"
+                              : "target-retired",
+              detail: reason,
+              ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
+            });
+            answer("refused", { proposalId: proposal.id, reason });
+            // A failed single act returns to its form. Keeping this temporary proposal would make
+            // the next press join an unattended draft and turn a retry into a trip to Approvals.
+            await gate.discard(proposal.id);
+          }
+        } catch (err) {
+          answer("refused", { reason: err instanceof Error ? err.message : "This sheet edit could not be saved." });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-sheet-version": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store) throw new Error("The world is not open.");
+          if (classify(msg.path).track !== "sheet") throw new Error("Only a sheet version can be restored here.");
+          await store.restoreVersion(msg.path, msg.version, "form:undo");
+          this.emit({
+            at: new Date().toISOString(),
+            type: "sheet.edit-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            path: msg.path,
+            action: "undo",
+            disposition: "restored",
+          });
+        } catch (err) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "sheet.edit-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            path: msg.path,
+            action: "undo",
+            disposition: "refused",
+            reason: err instanceof Error ? err.message : "That version could not be restored.",
+          });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -4294,12 +4452,21 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store || !this.authoring) return;
         try {
+          const target = classify(msg.path).track;
+          const proposalKind =
+            target === "sheet"
+              ? "sheet-edit"
+              : target === "canon"
+                ? "canon-edit"
+                : (() => {
+                    throw new Error(`Studio drafting does not support ${msg.path}`);
+                  })();
           // A proposalId continues that proposal's conversation — same session, same agent
           // context; without one, a fresh proposal is staged and the conversation begins.
           let proposalId = msg.proposalId ?? null;
           if (proposalId === null) {
             const proposal = await gate.stage({
-              kind: "sheet-edit",
+              kind: proposalKind,
               summary: msg.summary,
               source: "chat:studio",
               targets: [{ path: msg.path }],

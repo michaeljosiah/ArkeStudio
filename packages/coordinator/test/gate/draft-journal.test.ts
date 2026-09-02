@@ -115,6 +115,48 @@ describe("an in-place edit lands, once", () => {
   });
 });
 
+describe("a sheet form joins the proposal already on its target (SPEC-040 R-9a)", () => {
+  it("journals only the submitted fields and preserves unread draft content", async () => {
+    const { dir, store, gate } = await openGate();
+    const live = await readFile(join(dir, MAREN), "utf8");
+    const drafted = MarkdownFile.parse(live);
+    drafted.setBody(
+      drafted
+        .sections()
+        .map((section) =>
+          `## ${section.heading}\n${section.heading === "Appearance" ? "The Studio's unread silver eyes." : section.body}`,
+        )
+        .join("\n\n"),
+    );
+    const proposal = await gate.stage({
+      kind: "sheet-edit",
+      summary: "Studio draft",
+      source: "chat:studio",
+      targets: [{ path: MAREN, content: drafted.serialize() }],
+    });
+
+    const outcome = await gate.mergeSheetFormEdit({
+      proposalId: proposal.id,
+      requestId: "form-1",
+      path: MAREN,
+      sections: [{ heading: "Essence", body: "The form's deliberate essence." }],
+      expectedDraftRevision: 1,
+    });
+
+    assert.equal(outcome.status, "updated");
+    const merged = MarkdownFile.parse(await draftFile(dir, proposal.id));
+    assert.equal(merged.sections().find((section) => section.heading === "Essence")?.body, "The form's deliberate essence.");
+    assert.equal(
+      merged.sections().find((section) => section.heading === "Appearance")?.body,
+      "The Studio's unread silver eyes.",
+      "an unchanged form field does not overwrite the draft",
+    );
+    assert.equal((await gate.readManifest(proposal.id)).draftRevision, 2, "the whole form press is one revision");
+    assert.deepEqual(await journalEntries(dir, proposal.id), [], "the revision and file settled together");
+    await store.close();
+  });
+});
+
 describe("an edit against a revision somebody else moved on", () => {
   it("is refused rather than merged, and says what the revision now is", async () => {
     const { dir, store, gate } = await openGate();

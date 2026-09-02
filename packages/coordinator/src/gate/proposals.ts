@@ -115,6 +115,16 @@ export interface UpdateFieldInput {
   expectedDraftRevision: number;
 }
 
+export interface MergeSheetFormInput {
+  proposalId: string;
+  requestId: string;
+  path: string;
+  sections: Array<{ heading: string; body: string }>;
+  /** Characters only: the new role, including an empty string to clear it. */
+  role?: string;
+  expectedDraftRevision: number;
+}
+
 export interface ResolveOpenChoiceInput {
   proposalId: string;
   requestId: string;
@@ -479,6 +489,66 @@ export class ProposalManager {
       summary,
       source,
       targets: [{ path, content: doc.serialize() }],
+    });
+  }
+
+  /**
+   * Merge only the fields submitted by a sheet form into the proposal already on that target.
+   *
+   * Presence dominates acceptance (SPEC-040 R-9a): the proposal may contain unread Studio work,
+   * so the form press must not accept the whole file. Applying its dirty fields to the proposal's
+   * current bytes keeps that work for the proposal's own decision without treating it as consent.
+   */
+  async mergeSheetFormEdit(input: MergeSheetFormInput): Promise<UpdateFieldOutcome> {
+    return this.store.gateOp(async () => {
+      const dir = this.proposalDir(input.proposalId);
+      const recovery = await this.recoverDrafts(input.proposalId);
+      if (recovery.status === "blocked") return { status: "draft-unresolved", records: recovery.unreadable };
+
+      const proposal = await this.readManifest(input.proposalId);
+      if (proposal.lastDraftRequestId === input.requestId) return { status: "updated", proposal };
+      if (proposal.draftRevision !== input.expectedDraftRevision) {
+        return { status: "stale", currentDraftRevision: proposal.draftRevision };
+      }
+      if (classify(input.path).track !== "sheet" || !proposal.targets.some((target) => target.path === input.path)) {
+        return { status: "unknown-target" };
+      }
+
+      let content = await this.readProposalFile(input.proposalId, input.path);
+      if (content === null) return { status: "unknown-target" };
+      const edits = [
+        ...input.sections.map((section) => ({ field: section.heading, value: section.body })),
+        ...(input.role === undefined ? [] : [{ field: "Role", value: input.role }]),
+      ];
+      if (edits.length === 0) return { status: "rejected", message: "No changed sheet fields were submitted." };
+      for (const edit of edits) {
+        const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
+        if (!changed.ok) return { status: "rejected", message: safeFieldEditMessage(changed.problem) };
+        content = changed.content;
+      }
+
+      const nextManifest: Proposal = {
+        ...proposal,
+        draftRevision: proposal.draftRevision + 1,
+        lastDraftRequestId: input.requestId,
+      };
+      const op: DraftOperation = {
+        operationId: newId("dop"),
+        requestId: input.requestId,
+        proposalId: input.proposalId,
+        expectedDraftRevision: input.expectedDraftRevision,
+        currentDraftRevision: proposal.draftRevision,
+        nextDraftRevision: nextManifest.draftRevision,
+        state: "prepared",
+        files: [{ path: input.path, content }],
+        nextManifest: ProposalSchema.parse(nextManifest) as Record<string, unknown>,
+        at: this.store.now(),
+      };
+      await writeDraftRecord(dir, op);
+      await atomicWriteFile(draftStagingPath(dir, op.operationId, input.path), content);
+      await writeDraftRecord(dir, { ...op, state: "committing" });
+      await this.commitDraft(dir, { ...op, state: "committing" });
+      return { status: "updated", proposal: nextManifest };
     });
   }
 

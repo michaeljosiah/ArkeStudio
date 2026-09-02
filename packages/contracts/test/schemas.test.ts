@@ -249,9 +249,11 @@ describe("sheets", () => {
     const edit = {
       kind: "stage-sheet-edit" as const,
       worldId: WORLD_ID,
+      requestId: "01J8E10000000000000000ED11",
       path: "characters/maren-kest.md",
       summary: "Edit Maren Kest",
       sections: [{ heading: "Essence", body: "She hears the verse." }],
+      dirtyHeadings: ["Essence"],
     };
 
     /** Parse and narrow off the discriminated union, so `.role` is reachable. */
@@ -282,6 +284,33 @@ describe("sheets", () => {
 
     it("accepts an edit that omits role entirely — the field is left untouched", () => {
       assert.equal(stageEdit().role, undefined);
+    });
+
+    it("correlates the form result with ripple disclosure and undo", () => {
+      const requestId = ulid();
+      const result = DomainEventSchema.parse({
+        at: "2026-09-03T12:00:00Z",
+        type: "sheet.edit-result",
+        requestId,
+        worldId: WORLD_ID,
+        path: "characters/maren-kest.md",
+        action: "edit",
+        disposition: "accepted",
+        undoVersion: 4,
+        ripples: [{ kind: "owning-canon-rules", summary: "Two citations changed", targets: ["CANON-002"] }],
+      });
+      assert.equal(result.type, "sheet.edit-result");
+      assert.equal(result.requestId, requestId);
+      assert.equal(
+        ClientMessageSchema.parse({
+          kind: "restore-sheet-version",
+          worldId: WORLD_ID,
+          requestId: ulid(),
+          path: "characters/maren-kest.md",
+          version: 4,
+        }).kind,
+        "restore-sheet-version",
+      );
     });
   });
 });

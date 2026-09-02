@@ -464,6 +464,13 @@ export function subscribeSceneCreateResults(listener: (result: SceneCreateResult
   return () => sceneCreateListeners.delete(listener);
 }
 
+export type SheetEditResult = Extract<DomainEvent, { type: "sheet.edit-result" }>;
+const sheetEditResultListeners = new Set<(result: SheetEditResult) => void>();
+export function subscribeSheetEditResults(listener: (result: SheetEditResult) => void): () => void {
+  sheetEditResultListeners.add(listener);
+  return () => sheetEditResultListeners.delete(listener);
+}
+
 export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
 export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
 const planResultListeners = new Set<(result: PlanResult) => void>();
@@ -885,6 +892,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "scene.write-refused") {
       for (const listener of sceneRefusalListeners) listener(event);
+    }
+    if (event.type === "sheet.edit-result") {
+      for (const listener of sheetEditResultListeners) listener(event);
     }
     if (event.type === "timeline.command-refused") {
       for (const listener of timelineRefusalListeners) listener(event);
@@ -1693,17 +1703,29 @@ export function stageSheetEdit(
   path: string,
   summary: string,
   sections: Array<{ heading: string; body: string }>,
+  dirtyHeadings: string[],
   /** Characters only: the new `role`, or "" to clear it. Omit to leave it untouched. */
   role?: string,
-): void {
-  send({
+): string | null {
+  const requestId = ulid();
+  return send({
     kind: "stage-sheet-edit",
     worldId,
+    requestId,
     path,
     summary,
     sections,
+    dirtyHeadings,
     ...(role !== undefined ? { role } : {}),
-  });
+  })
+    ? requestId
+    : null;
+}
+
+/** Restore the outgoing version carried by a successful sheet edit result (SPEC-040 R-24). */
+export function restoreSheetVersion(worldId: string, path: string, version: number): string | null {
+  const requestId = ulid();
+  return send({ kind: "restore-sheet-version", worldId, requestId, path, version }) ? requestId : null;
 }
 
 export function stageArtDirectionChange(

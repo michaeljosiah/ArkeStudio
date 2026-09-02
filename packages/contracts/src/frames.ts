@@ -266,21 +266,34 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("reconcile-external-edit"), worldId: UlidSchema, path: z.string().min(1) })
     .strict(),
-  /** SPEC-004: stage a sheet edit as a proposal — the form editor's whole flow in one message. */
+  /** SPEC-040: merge into a present draft, or stage and accept, as one correlated form action. */
   z
     .object({
       kind: z.literal("stage-sheet-edit"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       /** World-relative sheet path, e.g. "characters/maren-kest.md". */
       path: z.string().min(1),
       summary: z.string().min(1).max(300),
       sections: z.array(z.object({ heading: z.string().min(1), body: z.string() }).strict()).min(1),
+      /** Only these form fields may overwrite a proposal already present on this target (R-9a). */
+      dirtyHeadings: z.array(z.string().min(1)),
       /**
        * Characters only. The one frontmatter field the form edits, bounded here because this is
        * the write path: an over-long role is refused before it reaches disk, where the read
        * schema would have to tolerate it (SPEC-007 R-6). Empty string clears the field.
        */
       role: z.string().trim().max(CHARACTER_ROLE_MAX).optional(),
+    })
+    .strict(),
+  /** SPEC-040 R-24: undo one accepted sheet form edit by restoring its outgoing version. */
+  z
+    .object({
+      kind: z.literal("restore-sheet-version"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      path: z.string().min(1),
+      version: z.number().int().min(1),
     })
     .strict(),
   /** SPEC-017: changing the shared world look is staged, never written as a field edit. */
