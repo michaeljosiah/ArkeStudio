@@ -131,6 +131,7 @@ describe("scene detail owns the workspace", () => {
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "Storyboard is the default (R-21)");
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
     assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
+    assert.equal(q(mounted, ".fy-cx__placeholder")?.textContent, "Ask about scene 4", "the plain-text dock does not promise mentions");
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Stage"));
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
   });
@@ -911,7 +912,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     }
 
     await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
-    assert.ok(row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]'));
+    const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
+    assert.equal(prompt?.getAttribute("role"), "combobox", "the image prompt uses the shared @ picker too");
   });
 
   it("opens its action menu out of layout without losing the row's interaction scope", async () => {

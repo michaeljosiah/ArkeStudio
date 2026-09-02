@@ -629,7 +629,7 @@ export function SceneWorkspace({
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
-            placeholder={`Ask about ${focused === undefined ? `scene ${scene.number}` : `shot ${focused.number}`} · @ to reference`}
+            placeholder={`Ask about ${focused === undefined ? `scene ${scene.number}` : `shot ${focused.number}`}`}
             onSelectShot={(shotId) => setSubject({ kind: "shot", shotId })}
             {...(staged === undefined
               ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }

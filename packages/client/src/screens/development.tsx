@@ -140,7 +140,7 @@ function SeasonDock() {
       dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}` }}
       openingNote="opening…"
       emptyLine="Let’s shape the season. What is it about?"
-      placeholder="Ask about the season · @ to reference"
+      placeholder="Ask about the season"
       {...(staged
         ? {
             side: (
@@ -178,7 +178,7 @@ function EpisodeDock({ episode }: { episode: Episode }) {
       dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}` }}
       openingNote="opening…"
       emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
-      placeholder="Ask about the episode · @ to reference"
+      placeholder="Ask about the episode"
       {...(staged
         ? {
             side: (

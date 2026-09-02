@@ -6820,11 +6820,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swrow__scripteditor .fy-bench__briefmirror,
 .fy-swrow__scripteditor .fy-bench__brieftext { padding: 0; font: 400 13px/1.7 var(--font-sans); scrollbar-gutter: auto; }
 .fy-swrow__prompt { display: flex; flex-direction: column; gap: 5px; }
-.fy-swrow__prompt > div { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
-.fy-swrow__prompt > div span { flex: 1; letter-spacing: .06em; color: var(--neutral-400); }
+.fy-swrow__prompthead { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
+.fy-swrow__prompthead > span { flex: 1; letter-spacing: .06em; color: var(--neutral-400); }
 .fy-swrow__prompt button { border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 10px; text-decoration: underline; }
 .fy-swrow__prompt button:disabled { cursor: default; opacity: .45; text-decoration: none; }
-.fy-swrow__prompt textarea { min-height: 44px; max-height: 72px; resize: vertical; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); color: var(--foreground); padding: 7px 9px 8px; font: 400 10.5px/1.65 var(--font-mono); }
+.fy-swrow__prompt > .fy-bench__briefstack { display: block; flex: none; min-height: 44px; max-height: 72px; height: 44px; resize: vertical; overflow: hidden; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); }
+.fy-swrow__prompt .fy-bench__briefunder,
+.fy-swrow__prompt .fy-bench__briefmirror,
+.fy-swrow__prompt .fy-bench__brieftext { padding: 7px 9px 8px; font: 400 10.5px/1.65 var(--font-mono); }
 .fy-swrow__meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fy-swrow__refs { display: flex; flex-wrap: wrap; gap: 4px; }
 .fy-swrow__ref {
