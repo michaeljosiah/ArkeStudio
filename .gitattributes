@@ -1,6 +1,10 @@
 # Normalize text files to LF in the repository, regardless of platform
 * text=auto eol=lf
 
+# Source is always reviewable as text, including a correction whose previous blob contained NULs.
+*.ts diff
+*.tsx diff
+
 # Binary assets — never touch line endings, never diff as text
 *.png binary
 *.jpg binary
