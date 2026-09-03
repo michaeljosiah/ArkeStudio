@@ -9,6 +9,7 @@ import {
   benchTokenFor,
   designatedVoiceSample,
   effectiveFraming,
+  resolvedShotStaging,
   hasOwnFrame,
   mappedReferenceKinds,
   modelForCapability,
@@ -20,6 +21,7 @@ import {
   promptFor,
   resolveCast,
   stagingMoveWord,
+  stagePlayblastIsStale,
   stagingPromptClause,
   supportsMode,
   type AppSettings,
@@ -232,6 +234,7 @@ async function voiceTokens(
  */
 function playblastToken(
   staging: ShotStaging,
+  scene: SceneRecord,
   world: WorldBundle,
   shown: { durationSec: number; aspect: string; lens: string | undefined },
 ): BenchReferenceToken | null {
@@ -239,20 +242,17 @@ function playblastToken(
   if (pinned === undefined) return null;
   const artifact = world.artifacts.find((candidate) => candidate.id === pinned.artifactId);
   if (artifact === undefined || artifact.kind !== "video") return null;
+  const resolved = resolvedShotStaging(scene, staging);
   // The recording baked in a staging, a length, an aspect and a lens; any of them moving on
   // makes it a file of a shot that no longer exists this way, and the tile says so.
-  const moved =
-    pinned.version !== staging.version ||
-    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
-    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
-    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+  const moved = stagePlayblastIsStale(scene, staging, shown);
   const stale = moved ? " · stale" : "";
   return {
     token: benchTokenFor("video", 1),
     kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, staging.cast)}${stale}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast)}${stale}`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
@@ -261,17 +261,14 @@ function playblastToken(
 
 function stageOpeningFrameToken(
   staging: ShotStaging,
+  scene: SceneRecord,
   world: WorldBundle,
   shown: { durationSec: number; aspect: string; lens: string | undefined },
   index: number,
 ): BenchReferenceToken | null {
   const pinned = staging.playblast;
   if (pinned?.openingFrameArtifactId === undefined) return null;
-  const moved =
-    pinned.version !== staging.version ||
-    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
-    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
-    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+  const moved = stagePlayblastIsStale(scene, staging, shown);
   if (moved) return null;
   const artifact = world.artifacts.find((candidate) => candidate.id === pinned.openingFrameArtifactId);
   if (artifact === undefined || artifact.kind !== "image") return null;
@@ -280,7 +277,7 @@ function stageOpeningFrameToken(
     kind: "image",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · opening frame v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, staging.cast)}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolvedShotStaging(scene, staging).cast)}`,
     ride: "when-supported",
     subjectRole: "board-frame",
   };
@@ -441,7 +438,7 @@ export async function prepareBenchSubject(
     };
     const openingFrame = staging === undefined
       ? null
-      : stageOpeningFrameToken(staging, world, shown, references.length + 1);
+      : stageOpeningFrameToken(staging, scene, world, shown, references.length + 1);
     const selection = production.selections[shot.id];
     const frameArtifactId = selection?.startFrameArtifactId;
     const frameArtifact = frameArtifactId === undefined || frameArtifactId === null
@@ -464,11 +461,11 @@ export async function prepareBenchSubject(
     // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
     const playblast = staging === undefined
       ? null
-      : playblastToken(staging, world, shown);
+      : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;
-    const brief = staging === undefined ? prompt : `${prompt}\n\n${stagingPromptClause(staging, nameOf)}`;
+    const brief = staging === undefined ? prompt : `${prompt}\n\n${stagingPromptClause(resolvedShotStaging(scene, staging), nameOf)}`;
     const promptSheetVersions = shot.promptOverride === undefined
       ? assembledPromptSheetVersions([shot], scene, world)
       : { ...shot.promptOverride.sheetVersions };

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema } from "./ids.js";
-import type { Shot } from "./scene.js";
+import type { SceneBlocking, Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -300,14 +300,21 @@ export function editShot(record: SceneRecord, input: { shotId: string; change: P
  */
 export function editScene(
   record: SceneRecord,
-  input: { title?: string; synopsis?: string | undefined },
+  input: { title?: string; synopsis?: string | undefined; blocking?: SceneBlocking | undefined },
 ): GraphScene {
   const completed = complete(record, shotsOf(record));
-  const next = input.title === undefined ? completed : { ...completed, title: input.title };
-  if (!("synopsis" in input)) return next;
-  if (input.synopsis !== undefined) return { ...next, synopsis: input.synopsis };
-  const { synopsis: _synopsis, ...withoutSynopsis } = next;
-  return withoutSynopsis;
+  let next = input.title === undefined ? completed : { ...completed, title: input.title };
+  if ("synopsis" in input) {
+    if (input.synopsis !== undefined) next = { ...next, synopsis: input.synopsis };
+    else {
+      const { synopsis: _synopsis, ...withoutSynopsis } = next;
+      next = withoutSynopsis;
+    }
+  }
+  if (!("blocking" in input)) return next;
+  if (input.blocking !== undefined) return { ...next, blocking: input.blocking };
+  const { blocking: _blocking, ...withoutBlocking } = next;
+  return withoutBlocking;
 }
 
 /**

@@ -1,4 +1,5 @@
-import type { Shot, ShotStaging, StagingKey } from "./scene.js";
+import type { Shot, ShotStaging, StagingFigure, StagingKey, StagingSet } from "./scene.js";
+import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
 /**
@@ -14,6 +15,54 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+
+export type EffectiveStageBlocking = {
+  cast: StagingFigure[];
+  sets: StagingSet[];
+  identity: { owner: "scene"; version: number | null } | { owner: "shot" };
+};
+
+export type ResolvedShotStaging = Omit<ShotStaging, "cast" | "sets"> & {
+  cast: StagingFigure[];
+  sets: StagingSet[];
+};
+
+/** A legacy inline block is a complete shot override; otherwise the scene owns the action. */
+export function effectiveStageBlocking(
+  scene: Pick<SceneRecord, "blocking">,
+  staging: ShotStaging | undefined,
+): EffectiveStageBlocking {
+  if (staging?.cast !== undefined && staging.sets !== undefined) {
+    return { cast: staging.cast, sets: staging.sets, identity: { owner: "shot" } };
+  }
+  const blocking = scene.blocking;
+  return blocking === undefined
+    ? { cast: [], sets: [], identity: { owner: "scene", version: null } }
+    : { cast: blocking.cast, sets: blocking.sets, identity: { owner: "scene", version: blocking.version } };
+}
+
+export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, staging: ShotStaging): ResolvedShotStaging {
+  const blocking = effectiveStageBlocking(scene, staging);
+  return { ...staging, cast: blocking.cast, sets: blocking.sets };
+}
+
+/** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
+export function stagePlayblastIsStale(
+  scene: Pick<SceneRecord, "blocking">,
+  staging: ShotStaging,
+  shown: { durationSec: number; aspect: string; lens: string | undefined },
+): boolean {
+  const pinned = staging.playblast;
+  if (pinned === undefined) return false;
+  const current = effectiveStageBlocking(scene, staging).identity;
+  const blockingMoved = current.owner === "shot"
+    ? pinned.blocking !== undefined && pinned.blocking.owner !== "shot"
+    : pinned.blocking === undefined || pinned.blocking.owner !== "scene" || pinned.blocking.version !== current.version;
+  return pinned.version !== staging.version || blockingMoved ||
+    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
+    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
+    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+}
 
 /** Fixed-rate export is half-open: frame i samples i/fps, never an extra frame at the end. */
 export function stageFrameCount(durationSec: number): number {
@@ -69,7 +118,7 @@ function key(t: number, p: readonly [number, number, number], l: readonly [numbe
 export function stageShot(
   shot: Shot,
   input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"] },
-): ShotStaging {
+): ResolvedShotStaging {
   const framing = input.framing ?? shot.framing;
   const cast = input.cast.slice(0, 5).map((sheetId, index) => ({
     sheetId,
@@ -112,7 +161,7 @@ export function stageShot(
 }
 
 /** The move in one word, read off what the keys actually do. */
-export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly ShotStaging["cast"][number][] = []): string {
+export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly StagingFigure[] = []): string {
   if (keys.length < 2) return "static";
   const first = keys[0]!;
   const last = keys[keys.length - 1]!;
@@ -165,7 +214,7 @@ function bearing(ox: number, oz: number, rise: number, facing: readonly [number,
  * playblast the route cannot carry still leaves the numbers behind.
  */
 export function stagingBeats(
-  staging: ShotStaging,
+  staging: ResolvedShotStaging,
   nameOf: (sheetId: string) => string,
 ): string[] {
   const facings = new Map<string, readonly [number, number]>();
@@ -200,7 +249,7 @@ export function stagingBeats(
 }
 
 /** Where a figure stands a fraction `u` of the way through the shot: on its walk, or where it was put. */
-function figureAt(figure: ShotStaging["cast"][number], u: number): [number, number] {
+function figureAt(figure: StagingFigure, u: number): [number, number] {
   if (figure.to === undefined) return [figure.x, figure.z];
   const along = Math.max(0, Math.min(1, u));
   return [figure.x + (figure.to[0] - figure.x) * along, figure.z + (figure.to[1] - figure.z) * along];
@@ -238,7 +287,7 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotS
 }
 
 /** The playblast's own line for a session brief: what it is, and the beats beneath it. */
-export function stagingPromptClause(staging: ShotStaging, nameOf: (sheetId: string) => string): string {
+export function stagingPromptClause(staging: ResolvedShotStaging, nameOf: (sheetId: string) => string): string {
   const walkers = staging.cast.filter((figure) => figure.to !== undefined).map((figure) => nameOf(figure.sheetId));
   const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
   return [

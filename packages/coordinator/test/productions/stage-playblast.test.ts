@@ -56,9 +56,10 @@ async function harness() {
     const scene = production.scenes.find((candidate) => candidate.id === SCENE)!;
     return { scene, shot: orderedShots(scene).find((candidate) => candidate.id === SHOT)! };
   };
-  /** Stage the shot the way the client does: one versioned edit carrying a fresh v1. */
+  /** Keep a legacy private block so filing its new pin proves the schema fence follows the bytes. */
   const stage = async () => {
     const { scene, shot: current } = shot();
+    const fresh = stageShot(current, { cast: ["maren-kest"], sets: ["The Vigil"], durationSec: 4 });
     await send({
       kind: "scene-command",
       worldId: WORLD_ID,
@@ -67,9 +68,9 @@ async function harness() {
       sceneId: SCENE,
       baseVersion: scene.version,
       command: {
-        kind: "edit-shot",
+        kind: "edit-stage",
         shotId: SHOT,
-        change: { staging: stageShot(current, { cast: ["maren-kest"], sets: ["The Vigil"], durationSec: 4 }) },
+        staging: { cast: fresh.cast, sets: fresh.sets, keys: fresh.keys },
       },
     });
   };
@@ -109,6 +110,8 @@ describe("filing a playblast from the Stage", () => {
       const pinned = after.shot.staging?.playblast;
       assert.ok(pinned, "the staging names its playblast");
       assert.equal(pinned.version, 1);
+      assert.deepEqual(pinned.blocking, { owner: "shot" });
+      assert.equal(bundle().meta.schemaVersion, 6, "the new strict pin is fenced even on private blocking");
       assert.equal(after.scene.version, sceneVersion + 1, "the pin is a versioned scene write");
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
       assert.ok(artifact, "the pinned id resolves on the shelf");
@@ -123,6 +126,19 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(openingFrame.production, PRODUCTION);
       assert.ok(openingFrame.links.includes(SHOT));
       assert.ok((await readFile(join(worldDir, "artifacts", openingFrame.file))).byteLength > 0);
+
+      await send({
+        kind: "scene-command",
+        worldId: WORLD_ID,
+        productionId: PRODUCTION,
+        sceneFile: SCENE_FILE,
+        sceneId: SCENE,
+        baseVersion: after.scene.version,
+        command: { kind: "edit-stage", shotId: SHOT, staging: { cast: [], sets: [], keys: [{ t: 0, p: [0, 2, 4], l: [0, 1, 0] }] } },
+      });
+      const revised = shot().shot.staging!;
+      assert.equal(revised.version, 2, "the coordinator advances camera identity");
+      assert.equal(revised.playblast?.version, 1, "the prior pin survives only as stale output");
     } finally {
       await provider.close();
     }

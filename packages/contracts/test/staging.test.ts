@@ -2,17 +2,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   ClientMessageSchema,
+  effectiveStageBlocking,
   ShotSchema,
   ShotStagingSchema,
   STAGE_FRAME_RATE,
   stageShot,
   stageFrameCount,
+  stagePlayblastIsStale,
   stagingBeats,
   stagingFov,
   stagingMoveWord,
   stagingPromptClause,
   stagingRetimed,
   type Shot,
+  type ResolvedShotStaging,
   type ShotStaging,
 } from "../src/index.js";
 
@@ -98,7 +101,7 @@ describe("the Stage's arithmetic", () => {
   it("measures a tracked key from where the figure stands, not from the aim point the track overrides", () => {
     // Camera at z=3 looking at the origin, but tracking Maren who stands 5m off to the side and
     // walks nowhere: the distance is to her, and she is to the camera's side, not in front.
-    const staging: ShotStaging = {
+    const staging: ResolvedShotStaging = {
       version: 1,
       cast: [{ sheetId: "maren-kest", x: 5, z: 0 }],
       sets: [],
@@ -112,7 +115,7 @@ describe("the Stage's arithmetic", () => {
     assert.match(tracked!, /Maren, 1.50m high, aimed at Maren$/);
     assert.match(free!, /^4.0s — 3.0m in front of the aim point/, "an untracked key still measures to its aim point");
     // A walker is read where the key's time puts them along the path.
-    const walking: ShotStaging = { ...staging, cast: [{ sheetId: "maren-kest", x: 0, z: 0, to: [0, -8] }] };
+    const walking: ResolvedShotStaging = { ...staging, cast: [{ sheetId: "maren-kest", x: 0, z: 0, to: [0, -8] }] };
     const mid = stagingBeats({ ...walking, keys: [{ t: 2, p: [0, 1.5, 0], l: [0, 1.2, 0], track: "maren-kest" }, { t: 4, p: [0, 1.5, 0], l: [0, 1.2, 0] }] }, () => "Maren");
     assert.match(mid[0]!, /^2.0s — 4.0m /, "halfway through a four-second shot she is 4m down an 8m walk");
   });
@@ -148,9 +151,56 @@ describe("the Stage's arithmetic", () => {
 
   it("keeps the schema a read path: a staging with one key or no keys still parses", () => {
     assert.ok(ShotStagingSchema.safeParse({ version: 1, cast: [], sets: [], keys: [] }).success);
+    assert.ok(ShotStagingSchema.safeParse({ version: 1, keys: [] }).success, "a camera may inherit scene blocking");
+    assert.equal(ShotStagingSchema.safeParse({ version: 1, cast: [], keys: [] }).success, false, "an override is whole");
     assert.ok(ShotStagingSchema.safeParse({ version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1, 2], l: [0, 1, 0] }], playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 2 } }).success);
     assert.ok(ShotStagingSchema.safeParse({ version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1, 2], l: [0, 1, 0] }], playblast: { artifactId: "ar_01J8G0000000000000000000A1", openingFrameArtifactId: "ar_01J8G0000000000000000000A2", version: 3 } }).success);
     assert.equal(ShotStagingSchema.safeParse({ version: 0, cast: [], sets: [], keys: [] }).success, false);
+  });
+
+  it("resolves shared blocking without changing legacy shot overrides", () => {
+    const scene = { blocking: { version: 3, cast: [{ sheetId: "shared", x: 1, z: 2 }], sets: [] } };
+    const inherited = { version: 1, keys: [] };
+    const local = { version: 2, cast: [] as [], sets: [] as [], keys: [] };
+    assert.deepEqual(effectiveStageBlocking(scene, inherited).identity, { owner: "scene", version: 3 });
+    assert.deepEqual(effectiveStageBlocking(scene, inherited).cast.map((figure) => figure.sheetId), ["shared"]);
+    assert.deepEqual(effectiveStageBlocking(scene, local), { cast: [], sets: [], identity: { owner: "shot" } });
+  });
+
+  it("makes inherited playblasts stale when shared blocking moves", () => {
+    const pin = {
+      artifactId: "ar_01J8G0000000000000000000A1",
+      version: 1,
+      blocking: { owner: "scene" as const, version: 2 },
+    };
+    const staging = { version: 1, keys: [], playblast: pin };
+    const shown = { durationSec: 4, aspect: "16:9", lens: undefined };
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, staging, shown), false);
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 3, cast: [], sets: [] } }, staging, shown), true);
+    const legacyLocal = { ...staging, cast: [], sets: [], playblast: { artifactId: pin.artifactId, version: 1 } };
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), false);
+  });
+
+  it("keeps Stage authorship on the edit-stage wire command", () => {
+    const message = {
+      kind: "scene-command",
+      worldId: "01J8G0000000000000000000W1",
+      productionId: "saltlight",
+      sceneFile: "04-the-verse-rises",
+      sceneId: "sc_04",
+      baseVersion: 2,
+      command: { kind: "edit-stage", shotId: "sh_12", staging: { keys: [] } },
+    };
+    assert.ok(ClientMessageSchema.safeParse(message).success);
+    assert.ok(ClientMessageSchema.safeParse({ ...message, command: { kind: "edit-stage", shotId: "sh_12", staging: null } }).success);
+    assert.equal(ClientMessageSchema.safeParse({
+      ...message,
+      command: { kind: "edit-stage", shotId: "sh_12", staging: { version: 1, keys: [] } },
+    }).success, false, "the coordinator, not the caller, owns camera versions");
+    assert.equal(ClientMessageSchema.safeParse({
+      ...message,
+      command: { kind: "edit-shot", shotId: "sh_12", change: { staging: { version: 1, keys: [] } } },
+    }).success, false);
   });
 
   it("requires both files in a Stage export", () => {

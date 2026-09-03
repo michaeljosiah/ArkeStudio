@@ -150,23 +150,186 @@ describe("scene detail owns the workspace", () => {
     assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
     await click(q(mounted, '[aria-label="Previous shot"]')!);
 
-    // Staging writes at once, as one versioned shot edit: cast from the script's references,
-    // a massing box for the scene's location, and a camera move read off the framing words.
+    // Staging writes the scene block and this shot's camera atomically.
     const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Stage the shot") as unknown as HTMLElement;
     await click(stageButton);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.kind, "scene-command");
-    assert.equal(command.command.kind, "edit-shot");
-    if (command.command.kind !== "edit-shot") return;
+    assert.equal(command.command.kind, "edit-stage");
+    if (command.command.kind !== "edit-stage") return;
     assert.equal(command.command.shotId, "sh_12");
-    const staging = command.command.change.staging!;
-    assert.equal(staging.version, 1);
-    assert.deepEqual(staging.cast.map((figure) => figure.sheetId), ["maren-kest"]);
-    assert.ok(staging.sets.length >= 1, "the scene's location becomes set massing");
+    const staging = command.command.staging!;
+    assert.equal("version" in staging, false, "the coordinator assigns the first camera version");
+    assert.equal(staging.cast, undefined, "an ordinary camera inherits rather than copying blocking");
+    assert.deepEqual(command.command.blocking?.cast.map((figure) => figure.sheetId), ["maren-kest"]);
+    assert.ok((command.command.blocking?.sets.length ?? 0) >= 1, "the scene's location becomes set massing");
     assert.equal(staging.keys.length, 2);
     assert.equal(staging.keys[0]!.anchor, "maren-kest", "a shot with a subject rides its keys on them");
     assert.ok(staging.keys[1]!.p[2] < staging.keys[0]!.p[2], "a push-in ends closer than it starts");
     assert.equal(staging.keys[1]!.t, 4, "the last key sits at the shot's length");
+  });
+
+  it("never anchors a new camera to a character outside the capped scene block", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const world = state.world!;
+    const template = world.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    for (let number = 1; number <= 6; number += 1) {
+      world.sheets.push({ ...template, id: `player-${number}`, name: `Player ${number}`, links: [] });
+    }
+    const scene = world.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const [first, second] = orderedShots(scene);
+    first!.description = [1, 2, 3, 4, 5].map((number) => `@player-${number}`).join(" ");
+    second!.description = "@player-6 enters alone.";
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(q(mounted, '[aria-label="Next shot"]')!);
+    await click(all(mounted, '[data-testid="workspace-stage"] button').find((button) => button.textContent === "Stage the shot")!);
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.equal(command.command.kind, "edit-stage");
+    if (command.command.kind !== "edit-stage") return;
+    assert.equal(command.command.staging?.keys[0]?.anchor, undefined, "the camera cannot target a figure the block omitted");
+    assert.deepEqual(
+      command.command.blocking?.cast.map((figure) => figure.sheetId),
+      ["player-1", "player-2", "player-3", "player-4", "player-5"],
+    );
+  });
+
+  it("edits scene blocking by default and forks it only for This shot", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+    shot.staging = { version: 1, keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }] };
+
+    const shared: ClientMessage[] = [];
+    __setBridgeForTest(capture(shared));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const sharedCommand = (shared.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(sharedCommand.kind, "edit-stage");
+    if (sharedCommand.kind !== "edit-stage") return;
+    assert.equal(sharedCommand.staging, undefined, "moving shared cast does not rewrite the camera");
+    assert.deepEqual(sharedCommand.blocking?.cast[0]?.to, [0.4, -3.4]);
+
+    const local: ClientMessage[] = [];
+    __setBridgeForTest(capture(local));
+    const remounted = await mountState(structuredClone(state));
+    await click(all(remounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(remounted, ".fy-swstage__chips button").find((button) => button.textContent === "This shot")!);
+    await click([...q(remounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const localCommand = (local.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(localCommand.kind, "edit-stage");
+    if (localCommand.kind !== "edit-stage") return;
+    assert.equal(localCommand.blocking, undefined);
+    assert.deepEqual(localCommand.staging?.cast, scene.blocking.cast);
+  });
+
+  it("rebases the untouched half of a Stage draft when a newer scene snapshot arrives", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+    shot.staging = { version: 1, keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }] };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+
+    await click(q(mounted, '[aria-label="Raise"]')!);
+    const blockingMoved = structuredClone(state);
+    const newerScene = blockingMoved.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    newerScene.version += 1;
+    newerScene.blocking = { version: 3, cast: [{ sheetId: "maren-kest", x: 5, z: 1 }], sets: [] };
+    const newerShot = orderedShots(newerScene).find((candidate) => candidate.id === "sh_12")!;
+    newerShot.staging = { ...newerShot.staging!, cast: [{ sheetId: "maren-kest", x: 7, z: 2 }], sets: [] };
+    await act(async () => __setStateForTest(blockingMoved));
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const cameraCommand = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(cameraCommand.kind, "edit-stage");
+    if (cameraCommand.kind !== "edit-stage") return;
+    assert.ok(cameraCommand.staging, "the camera move remains a draft");
+    assert.equal(cameraCommand.staging.cast?.[0]?.x, 7, "the newer private scope survives the camera draft");
+    assert.equal(cameraCommand.blocking, undefined, "the newer shared block is not written back");
+
+    const secondState = structuredClone(state);
+    const secondSent: ClientMessage[] = [];
+    __setBridgeForTest(capture(secondSent));
+    const second = await mountState(secondState);
+    await click(all(second, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(second, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    const cameraMoved = structuredClone(secondState);
+    const cameraScene = cameraMoved.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    cameraScene.version += 1;
+    const cameraShot = orderedShots(cameraScene).find((candidate) => candidate.id === "sh_12")!;
+    cameraShot.staging = { version: 2, keys: [{ t: 0, p: [0, 2, 8], l: [0, 1.2, 0] }] };
+    await act(async () => __setStateForTest(cameraMoved));
+    await click([...q(second, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const blockingCommand = (secondSent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(blockingCommand.kind, "edit-stage");
+    if (blockingCommand.kind !== "edit-stage") return;
+    assert.ok(blockingCommand.blocking, "the blocking move remains a draft");
+    assert.equal(blockingCommand.staging, undefined, "the newer camera is not written back");
+  });
+
+  it("rebases shared blocking while a private shot is returning to Scene scope", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    scene.blocking = { version: 2, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+    shot.staging = {
+      version: 1,
+      cast: [{ sheetId: "maren-kest", x: 2, z: 2 }],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
+
+    const moved = structuredClone(state);
+    const movedScene = moved.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    movedScene.version += 1;
+    movedScene.blocking = { version: 3, cast: [{ sheetId: "maren-kest", x: 9, z: 1 }], sets: [] };
+    await act(async () => __setStateForTest(moved));
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.blocking, undefined, "returning to inherited scope does not rewrite shared blocking");
+    assert.equal(command.staging?.cast, undefined, "the private override is removed");
+  });
+
+  it("retires a camera draft when a newer snapshot removes that camera", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    orderedShots(scene)[0]!.staging = { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(q(mounted, '[aria-label="Raise"]')!);
+
+    const cleared = structuredClone(state);
+    const clearedScene = cleared.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    clearedScene.version += 1;
+    delete orderedShots(clearedScene)[0]!.staging;
+    await act(async () => __setStateForTest(cleared));
+
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.match(q(mounted, '[data-testid="workspace-stage"]')?.textContent ?? "", /Nothing staged yet/);
   });
 
   it("reads a staged shot back: readouts, keys on the track, Keep after a nudge, and the playblast state", async () => {
@@ -222,10 +385,11 @@ describe("scene detail owns the workspace", () => {
     await click([...moved.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     assert.equal(sent.length, before + 1);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
-    assert.equal(command.command.kind, "edit-shot");
-    if (command.command.kind !== "edit-shot") return;
-    assert.equal(command.command.change.staging?.version, 3);
-    assert.equal(command.command.change.staging?.keys[0]?.p[1], 1.65);
+    assert.equal(command.command.kind, "edit-stage");
+    if (command.command.kind !== "edit-stage") return;
+    assert.ok(command.command.staging);
+    assert.equal("version" in command.command.staging, false);
+    assert.equal(command.command.staging?.keys[0]?.p[1], 1.65);
 
     // Lowering back to the kept height is not a move at all — the chip goes without a click.
     await click(q(mounted, '[aria-label="Lower"]')!);
@@ -267,9 +431,9 @@ describe("scene detail owns the workspace", () => {
     await click(q(mounted, '[aria-label="Raise"]')!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
-    assert.equal(command.command.kind, "edit-shot");
-    if (command.command.kind !== "edit-shot") return;
-    assert.deepEqual(command.command.change.staging?.keys.map((key) => key.t), [0, 2, 4]);
+    assert.equal(command.command.kind, "edit-stage");
+    if (command.command.kind !== "edit-stage") return;
+    assert.deepEqual(command.command.staging?.keys.map((key) => key.t), [0, 2, 4]);
     assert.ok(stage);
   });
 

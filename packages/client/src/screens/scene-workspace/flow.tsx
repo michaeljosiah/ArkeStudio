@@ -5,6 +5,7 @@ import {
   linearizeSceneFlow,
   resolveCast,
   stagingMoveWord,
+  effectiveStageBlocking,
   type ArtifactSidecar,
   type ClientMessage,
   type ProductionBundle,
@@ -1338,6 +1339,7 @@ function buildGraph(input: {
   let contextSlot = cited.length;
   sequence.shots.forEach(({ nodeId, shot }) => {
     if (shot.staging === undefined) return;
+    const blocking = effectiveStageBlocking(scene, shot.staging);
     const slot = contextSlot;
     contextSlot += 1;
     const point = at(
@@ -1351,7 +1353,7 @@ function buildGraph(input: {
       x: point.x,
       y: point.y,
       name: `Staging · shot ${shot.number}`,
-      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys, shot.staging.cast)} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
+      meta: `${shot.staging.keys.length} keys · ${stagingMoveWord(shot.staging.keys, blocking.cast)} · ${blocking.identity.owner === "scene" ? "scene block" : "shot override"} · ${shot.staging.playblast === undefined ? "not exported" : "playblast filed"}`,
       shotId: shot.id,
       staged: stagedShotIds.has(shot.id),
     });
