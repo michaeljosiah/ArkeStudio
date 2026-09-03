@@ -233,6 +233,10 @@ export const TaskModeSpecSchema = z
     locked: z.array(LockedParameterSchema).default([]),
     /** What to send in a locked parameter's place, where the route requires something. */
     sentinels: z.record(LockedParameterSchema, z.string().min(1)).optional(),
+    /** This route's duration ceiling, when it differs from the model's default route. */
+    maxDurationSec: z.number().int().min(1).optional(),
+    /** Seconds to this route's own duration vocabulary, with model-level fallback when absent. */
+    durations: z.record(z.string().regex(/^[0-9]+$/), z.string().min(1)).optional(),
     /**
      * How far the output duration may exceed the input's, in seconds. Priced at the top (R-38):
      * a figure that can come in under is honest where one that can come in over is not.
@@ -898,11 +902,38 @@ export function modelCapabilityCopy(model: ManifestModel): string {
  * than substituting is deliberate: a reference route that ever offers a length the text route
  * does not would be under-promised here, which costs a choice, where over-promising costs money.
  */
-export function durationOptions(model: ManifestModel, opts?: { withReferences?: boolean }): number[] {
-  const ceiling = opts?.withReferences === true ? model.limits.maxReferenceDurationSec : undefined;
-  return Object.keys(model.limits.durations ?? {})
+export interface DurationRouteOptions {
+  taskMode?: TaskMode;
+  withReferences?: boolean;
+}
+
+/** The effective duration contract for one task-mode route, with the default route as fallback. */
+export function durationLimitsFor(
+  model: ManifestModel,
+  taskMode: TaskMode = "generate",
+): {
+  maxDurationSec: number | undefined;
+  durations: Record<string, string> | undefined;
+  durationWire: "string" | "number";
+} {
+  const mode = modeSpec(model, taskMode);
+  return {
+    maxDurationSec: mode?.maxDurationSec ?? model.limits.maxDurationSec,
+    durations: mode?.durations ?? model.limits.durations,
+    durationWire: model.limits.durationWire ?? "string",
+  };
+}
+
+export function durationOptions(model: ManifestModel, opts?: DurationRouteOptions): number[] {
+  const limits = durationLimitsFor(model, opts?.taskMode);
+  const referenceCeiling = opts?.withReferences === true ? model.limits.maxReferenceDurationSec : undefined;
+  const ceiling = Math.min(
+    limits.maxDurationSec ?? Number.POSITIVE_INFINITY,
+    referenceCeiling ?? Number.POSITIVE_INFINITY,
+  );
+  return Object.keys(limits.durations ?? {})
     .map((seconds) => Number.parseInt(seconds, 10))
-    .filter((seconds) => ceiling === undefined || seconds <= ceiling)
+    .filter((seconds) => seconds <= ceiling)
     .sort((a, b) => a - b);
 }
 
@@ -924,8 +955,9 @@ export type DurationChoice =
 export function dispatchDuration(
   model: ManifestModel,
   requestedSec: number,
-  opts?: { withReferences?: boolean },
+  opts?: DurationRouteOptions,
 ): DurationChoice {
+  const limits = durationLimitsFor(model, opts?.taskMode);
   const options = durationOptions(model, opts);
   if (options.length === 0) return { kind: "provider-default" };
   const longest = options[options.length - 1]!;
@@ -933,20 +965,20 @@ export function dispatchDuration(
     // Whether the references are what shortened it, so the refusal can say so: "runs at most
     // 10s" reads as a fact about the model, where "at most 10s with references" tells the user
     // there is a shot to be had by removing one.
-    const unrestricted = durationOptions(model);
+    const unrestricted = durationOptions(model, { taskMode: opts?.taskMode });
     const becauseReferences = longest < (unrestricted[unrestricted.length - 1] ?? longest);
     return { kind: "over-cap", longest, becauseReferences };
   }
   const chosen = options.find((seconds) => seconds >= requestedSec)!;
-  const wire = model.limits.durations![String(chosen)]!;
+  const wire = limits.durations![String(chosen)]!;
   // In the route's own type. The lengths are stored as strings because they are keys, but a
   // route declaring `duration` as a number enum rejects the quoted form — and it rejects it
   // AFTER accepting the submission, so the job is queued, billed and then 422s on its result.
-  return { kind: "asked", seconds: chosen, wire: model.limits.durationWire === "number" ? Number(wire) : wire };
+  return { kind: "asked", seconds: chosen, wire: limits.durationWire === "number" ? Number(wire) : wire };
 }
 
 /** The seconds a dispatch will run for, for pricing — the request itself when we cannot ask. */
-export function pricedDuration(model: ManifestModel, requestedSec: number, opts?: { withReferences?: boolean }): number {
+export function pricedDuration(model: ManifestModel, requestedSec: number, opts?: DurationRouteOptions): number {
   const choice = dispatchDuration(model, requestedSec, opts);
   return choice.kind === "asked" ? choice.seconds : requestedSec;
 }
@@ -985,8 +1017,12 @@ export function modelPriceCopy(model: ManifestModel): string {
 /**
  * Whole-scene pass packing (§2.5): how many dispatches a duration needs under the model's cap.
  */
-export function passesForDuration(model: ManifestModel, durationSec: number): number {
-  const cap = model.limits.maxDurationSec;
+export function passesForDuration(
+  model: ManifestModel,
+  durationSec: number,
+  opts?: Pick<DurationRouteOptions, "taskMode">,
+): number {
+  const cap = durationLimitsFor(model, opts?.taskMode).maxDurationSec;
   if (cap === undefined || durationSec <= 0) return durationSec > 0 ? 1 : 0;
   return Math.ceil(durationSec / cap);
 }

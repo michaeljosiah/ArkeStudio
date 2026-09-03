@@ -1,4 +1,10 @@
-import { PROVIDERS, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import {
+  PROVIDERS,
+  durationLimitsFor,
+  type CapabilityProbe,
+  type ClientDeclarations,
+  type TaskMode,
+} from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
@@ -51,12 +57,7 @@ const MAX_INLINE_VIDEO_BYTES = 48 * 1024 * 1024;
  * dispatch ran at the provider's default length while the estimate was computed from the seconds
  * the scene had planned.
  */
-const DURATIONS = new Map(
-  FAL_MODELS.filter((model) => model.limits.durations !== undefined).map((model) => [
-    model.id,
-    model.limits.durations!,
-  ]),
-);
+const MODELS = new Map(FAL_MODELS.map((model) => [model.id, model]));
 
 /** Model id → what its reference route calls the image array. Absent means `image_urls`. */
 const REFERENCES_FIELD = new Map(
@@ -66,16 +67,17 @@ const REFERENCES_FIELD = new Map(
   ]),
 );
 
-/** Model id → whether this route's `duration` is a number. Absent means the string it always was. */
-const DURATION_IS_NUMBER = new Set(
-  FAL_MODELS.filter((model) => model.limits.durationWire === "number").map((model) => model.id),
-);
-
 /** The duration field as this route wants it, or nothing when the row declares no lengths. */
-function durationParam(model: string, params: Record<string, unknown>): Record<string, string | number> {
+function durationParam(
+  model: string,
+  taskMode: TaskMode,
+  params: Record<string, unknown>,
+): Record<string, string | number> {
   const seconds = params["durationSec"];
   if (typeof seconds !== "number") return {};
-  const declared = DURATIONS.get(model);
+  const row = MODELS.get(model);
+  const limits = row === undefined ? undefined : durationLimitsFor(row, taskMode);
+  const declared = limits?.durations;
   // A model with no declared lengths never asks for one — the provider's default is the honest
   // answer there, and the estimate was computed the same way.
   if (declared === undefined) return {};
@@ -91,7 +93,7 @@ function durationParam(model: string, params: Record<string, unknown>): Record<s
   }
   // The route's own type: a number enum rejects the quoted form, and coercion is not a
   // promise any of these schemas makes.
-  return { duration: DURATION_IS_NUMBER.has(model) ? Number(wire) : wire };
+  return { duration: limits?.durationWire === "number" ? Number(wire) : wire };
 }
 
 /** fal takes file inputs as URLs; a data URI is a URL that needs nobody's storage. */
@@ -188,7 +190,8 @@ export class FalClient implements ProviderClient {
     // have gone.
     const routeOverride = typeof request.params["route"] === "string" ? (request.params["route"] as string) : null;
     const endpoint = routeOverride ?? this.endpointFor(request.model, withReferences);
-    const taskMode = typeof request.params["taskMode"] === "string" ? (request.params["taskMode"] as string) : null;
+    const taskMode =
+      typeof request.params["taskMode"] === "string" ? (request.params["taskMode"] as TaskMode) : "generate";
     // The durable list is what the job promised; the prepared list is what actually resolved to
     // bytes. A mismatch means a reference went missing between planning and dispatch, and
     // submitting the remainder would quietly generate against a smaller set than was priced.
@@ -292,7 +295,7 @@ export class FalClient implements ProviderClient {
       body: JSON.stringify({
         ...params,
         ...(typeof request.params["sound"] === "boolean" ? { generate_audio: request.params["sound"] } : {}),
-        ...durationParam(request.model, request.params),
+        ...durationParam(request.model, taskMode, request.params),
         // The shape, in the video routes' own vocabulary (issue 389). Image requests carry
         // theirs inside `output` above; a mode that locks the ratio never sends one here,
         // because the planner already dropped it.

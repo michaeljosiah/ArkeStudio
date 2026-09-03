@@ -19,6 +19,7 @@ import {
   frameDispatchFor,
   sceneImageOutput,
   type ManifestModel,
+  type TaskMode,
 } from "./manifest.js";
 import type { SceneRecord } from "./scene-flow.js";
 import type { Sheet } from "./world.js";
@@ -167,7 +168,12 @@ function passEstimate(
  * as a 15s clip is paid-for footage that cannot cover what was asked for.
  */
 function askedSeconds(model: ManifestModel, requestedSec: number, what: string, route: CompiledRoute): number {
-  const choice = dispatchDuration(model, requestedSec, { withReferences: route.kind === "reference" });
+  const taskMode: TaskMode =
+    route.kind === "continuation" ? "continue" : route.kind === "frame" ? route.mode : "generate";
+  const choice = dispatchDuration(model, requestedSec, {
+    taskMode,
+    withReferences: route.kind === "reference",
+  });
   if (choice.kind === "over-cap") {
     throw new Error(
       `${what} runs ${requestedSec}s — longer than the ${choice.longest}s ${model.displayName} can make${

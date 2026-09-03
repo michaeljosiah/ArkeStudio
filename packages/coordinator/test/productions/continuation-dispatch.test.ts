@@ -38,7 +38,13 @@ const VEO_LIKE: ManifestModel = {
   pricing: { kind: "perSecond", microUsdPerSecond: 200000 },
   modes: {
     generate: { locked: [] },
-    continue: { route: "acme/veo-like/extend-video", locked: ["aspect"], sentinels: { aspect: "auto" } },
+    continue: {
+      route: "acme/veo-like/extend-video",
+      locked: ["aspect"],
+      sentinels: { aspect: "auto" },
+      maxDurationSec: 7,
+      durations: { "7": "7s" },
+    },
   },
 };
 
@@ -136,7 +142,7 @@ async function planFor(
   };
 }
 
-describe("continuation dispatch (SPEC-019 T-31, issue 461)", () => {
+describe("continuation dispatch (SPEC-019 T-31, issues 461 and 629)", () => {
   it("puts continuedFrom on the job, which is the whole point — nothing wrote it before", async () => {
     const { plan, compile } = await planFor();
 
@@ -153,6 +159,9 @@ describe("continuation dispatch (SPEC-019 T-31, issue 461)", () => {
     assert.equal(pass.params["continuedFrom"], TK_1, "the param arrival reads is actually written");
     assert.equal(pass.params["taskMode"], "continue");
     assert.equal(pass.params["route"], "acme/veo-like/extend-video");
+    assert.equal(pass.params["durationSec"], 7, "the continue route's exact duration is dispatched");
+    assert.equal(pass.askedSec, 7);
+    assert.equal(pass.estimatedMicroUsd, 1_400_000, "the estimate prices the same seven seconds");
     // The footage decides the shape, so a chosen ratio must not ride beside it (R-33).
     assert.equal(pass.params["aspect"], undefined, "the locked aspect is dropped, not sent");
     assert.deepEqual(pass.params["references"], [], "the extend route declares no image field");
@@ -161,6 +170,8 @@ describe("continuation dispatch (SPEC-019 T-31, issue 461)", () => {
     const ordinary = compile()[0]!;
     assert.equal(ordinary.params["continuedFrom"], undefined);
     assert.equal(ordinary.route.kind, "text");
+    assert.equal(ordinary.params["durationSec"], 6, "generation keeps its separate duration vocabulary");
+    assert.equal(ordinary.estimatedMicroUsd, 1_200_000);
   });
 
   it("names every refusal rather than quietly generating from scratch (R-51, R-52, R-34)", async () => {

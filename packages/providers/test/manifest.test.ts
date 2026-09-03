@@ -30,6 +30,7 @@ import {
   reconcileStrategy,
   sceneImageOutput,
   sumMicroUsd,
+  type TaskMode,
   tiersFor,
   type ClientDeclarations,
 } from "@arke-studio/contracts";
@@ -182,6 +183,11 @@ describe("the shipped manifest (R-9, §3.2)", () => {
         options[options.length - 1],
         `${video.id}'s cap is its longest declared length`,
       );
+      for (const [taskMode, spec] of Object.entries(video.modes ?? {})) {
+        if (spec.durations === undefined) continue;
+        const modeOptions = durationOptions(video, { taskMode: taskMode as TaskMode });
+        assert.equal(spec.maxDurationSec, modeOptions.at(-1), `${video.id}'s ${taskMode} cap matches its lengths`);
+      }
     }
   });
 
@@ -204,6 +210,25 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     // A model with no declared lengths says so, rather than inventing one.
     const bare = { ...veo, limits: { ...veo.limits, durations: undefined } };
     assert.deepEqual(dispatchDuration(bare, 5), { kind: "provider-default" });
+  });
+
+  it("uses a task mode's own duration contract without changing generation", () => {
+    for (const id of ["veo-3.1", "veo-3.1-fast"]) {
+      const veo = model(id);
+      assert.deepEqual(durationOptions(veo), [4, 6, 8], `${id} generation keeps its own choices`);
+      assert.deepEqual(durationOptions(veo, { taskMode: "continue" }), [7]);
+      assert.deepEqual(dispatchDuration(veo, 6, { taskMode: "continue" }), {
+        kind: "asked",
+        seconds: 7,
+        wire: "7s",
+      });
+      assert.deepEqual(dispatchDuration(veo, 8, { taskMode: "continue" }), {
+        kind: "over-cap",
+        longest: 7,
+        becauseReferences: false,
+      });
+      assert.equal(passesForDuration(veo, 14, { taskMode: "continue" }), 2);
+    }
   });
 
   it("pass packing computes from the duration cap (§2.5)", () => {

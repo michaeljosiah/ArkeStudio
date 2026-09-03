@@ -1,4 +1,4 @@
-import { durationOptions, type ManifestModel } from "@arke-studio/contracts";
+import { durationOptions, type ManifestModel, type TaskMode } from "@arke-studio/contracts";
 
 /**
  * Everything the length track needs to draw itself, worked out once.
@@ -39,7 +39,7 @@ export interface DurationTrack {
 export function durationTrack(
   model: ManifestModel,
   chosen: number | undefined,
-  opts: { withReferences: boolean },
+  opts: { taskMode?: TaskMode; withReferences: boolean },
 ): DurationTrack {
   const stops = durationOptions(model, opts);
   const unset = chosen === undefined;
@@ -49,7 +49,7 @@ export function durationTrack(
   const index = Math.max(0, stops.indexOf(chosen ?? stops[0] ?? 0));
   const value = unset ? min : overCeiling ? max : index;
   const fill = unset || max <= min ? 0 : ((value - min) / (max - min)) * 100;
-  const unrestricted = opts.withReferences ? durationOptions(model) : stops;
+  const unrestricted = opts.withReferences ? durationOptions(model, { taskMode: opts.taskMode }) : stops;
   const lostToReferences =
     opts.withReferences && unrestricted.length > stops.length
       ? (unrestricted[unrestricted.length - 1] ?? null)

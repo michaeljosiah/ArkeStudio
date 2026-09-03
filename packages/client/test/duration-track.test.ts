@@ -20,6 +20,13 @@ const BASE: ManifestModel = {
 };
 /** The same row whose reference route runs shorter, as wan's does. */
 const SHORTER: ManifestModel = { ...BASE, limits: { ...BASE.limits, maxReferenceDurationSec: 6 } };
+const MODAL: ManifestModel = {
+  ...BASE,
+  modes: {
+    generate: { locked: [] },
+    "first-frame": { locked: [], maxDurationSec: 7, durations: { "7": "7" } },
+  },
+};
 
 const free = (chosen?: number) => durationTrack(BASE, chosen, { withReferences: false });
 
@@ -72,6 +79,12 @@ describe("the length track's geometry", () => {
     const track = durationTrack(bare, undefined, { withReferences: false });
     assert.deepEqual(track.stops, []);
     assert.equal(track.fill, 0);
+  });
+
+  it("draws the duration choices for the task-mode route", () => {
+    const track = durationTrack(MODAL, 7, { taskMode: "first-frame", withReferences: false });
+    assert.deepEqual(track.stops, [7]);
+    assert.equal(track.overCeiling, false);
   });
 });
 

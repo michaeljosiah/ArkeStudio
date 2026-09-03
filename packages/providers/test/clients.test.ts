@@ -622,8 +622,8 @@ describe("higgsfield drives the CLI (issue #137)", () => {
   });
 });
 
-describe("fal continuation dispatch (SPEC-019 R-50, issue 461)", () => {
-  const submit = async (over: Partial<Parameters<FalClient["submit"]>[1]> = {}) => {
+describe("fal continuation dispatch (SPEC-019 R-50, issues 461 and 629)", () => {
+  const submit = async (over: Partial<Parameters<FalClient["submit"]>[1]> = {}, durationSec = 7) => {
     let sent: Record<string, unknown> = {};
     let endpoint = "";
     const fetchImpl: FetchLike = async (url, init) => {
@@ -640,7 +640,7 @@ describe("fal continuation dispatch (SPEC-019 R-50, issue 461)", () => {
         taskMode: "continue",
         route: "fal-ai/veo3.1/extend-video",
         continuedFrom: "tk_01J8F0000000000000000000B2",
-        durationSec: 6,
+        durationSec,
       },
       videoSource: { contentType: "video/mp4", data: new Uint8Array([0, 1, 2, 3]) },
       ...over,
@@ -652,8 +652,8 @@ describe("fal continuation dispatch (SPEC-019 R-50, issue 461)", () => {
     const { sent, endpoint } = await submit();
     assert.match(endpoint, /fal-ai\/veo3\.1\/extend-video$/, "the mode is a route, not a field (T-1)");
     assert.equal(sent["video_url"], "data:video/mp4;base64,AAECAw==");
-    // Veo spells six seconds "6s"; the estimate was computed from the same table.
-    assert.equal(sent["duration"], "6s");
+    // The sibling route accepts exactly seven seconds, independently of generation's 4s/6s/8s.
+    assert.equal(sent["duration"], "7s");
     // Ours, not fal's: the edge is recorded on the take, and the footage already travelled above.
     assert.ok(!("continuedFrom" in sent), "the predecessor id is never sent to a provider");
     assert.ok(!("taskMode" in sent));
@@ -665,6 +665,10 @@ describe("fal continuation dispatch (SPEC-019 R-50, issue 461)", () => {
     // Silently dropping it would submit a paid text-to-video request under a continuation's name,
     // which is the failure the whole capability is built to avoid.
     await assert.rejects(() => submit({ videoSource: undefined }), /needs the footage being extended/);
+  });
+
+  it("refuses a generation-only duration before enqueueing the continuation", async () => {
+    await assert.rejects(() => submit({}, 6), /cannot be asked for 6s.*offers 7s/);
   });
 
   it("refuses a clip over the inline ceiling, early and by name", async () => {
