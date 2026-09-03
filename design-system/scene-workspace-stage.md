@@ -113,7 +113,7 @@ One canvas, one renderer, two cameras:
 - **`view`** — the orbit camera. What you see in Look mode.
 - **`shot`** — the shot camera. A **child of the rig group** at local origin with identity rotation, so rig and lens cannot diverge in position or orientation. This is the standard camera-rig pattern: add the camera to a rig, and move the rig rather than the camera.
 
-Both modes render through a **16:9 letterbox** computed with `setViewport` + `setScissor` + `setScissorTest`, rather than stretching the shot camera to the pane's aspect. This keeps the drawn frustum an honest guide — it and the render are the same shape.
+Both modes render through the **production aspect** computed with `setViewport` + `setScissor` + `setScissorTest`, rather than stretching the shot camera to the pane's aspect. The vertical field of view comes from a Super 35 active gate cropped to that aspect, without lens clamps. This keeps the drawn frustum an honest guide — it and the render are the same shape.
 
 In Look mode a second pass renders the shot camera into a small rect in the top-right corner: a live lens preview, always on screen. The rig, gizmo and staging aids are hidden for that pass. Both passes restore renderer state in `finally` blocks.
 

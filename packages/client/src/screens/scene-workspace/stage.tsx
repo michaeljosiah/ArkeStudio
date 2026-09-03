@@ -253,7 +253,7 @@ export function SceneStage({
       active,
       mode,
       at,
-      fov: stagingFov(framing.lens),
+      fov: stagingFov(framing.lens, aspect),
       aspect: aspectNumber(aspect),
       lensLabel: framing.lens ?? "lens unset",
     };
