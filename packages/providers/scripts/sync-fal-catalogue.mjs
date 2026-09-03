@@ -248,9 +248,8 @@ const CURATED = {
    * route like every other mode. Its schema was read on 2026-08-27, and it disagrees with the
    * text route it sits beside in three ways that would each have been wrong to carry across:
    *
-   *   - `duration` is an open string defaulting to "7s", where the text route enumerates
-   *     4s/6s/8s. We keep asking in the model's own vocabulary from `durations` below rather
-   *     than inventing a seventh second nobody can price.
+   *   - `duration` accepts exactly "7s", where the text route enumerates 4s/6s/8s. The mode's
+   *     duration contract below keeps planning, pricing and the paid request on that value.
    *   - `aspect_ratio` gains an "auto" member and defaults to it, because the footage being
    *     extended already has a shape. Hence `locked: ["aspect"]` with "auto" as the sentinel —
    *     the one route shipped here that genuinely wants a value in a locked parameter's place.
@@ -268,6 +267,8 @@ const CURATED = {
         route: "fal-ai/veo3.1/extend-video",
         locked: ["aspect"],
         sentinels: { aspect: "auto" },
+        maxDurationSec: 7,
+        durations: { "7": "7s" },
       },
     },
     // Veo counts in "4s"/"6s"/"8s" and takes nothing between them.
@@ -290,6 +291,8 @@ const CURATED = {
         route: "fal-ai/veo3.1/fast/extend-video",
         locked: ["aspect"],
         sentinels: { aspect: "auto" },
+        maxDurationSec: 7,
+        durations: { "7": "7s" },
       },
     },
     limits: {
@@ -593,6 +596,16 @@ function limitsFor(curated) {
   return { ...curated.limits, maxDurationSec: Math.max(...declared) };
 }
 
+function modesFor(curated) {
+  if (!curated.modes) return undefined;
+  return Object.fromEntries(
+    Object.entries(curated.modes).map(([mode, spec]) => {
+      const declared = Object.keys(spec.durations ?? {}).map(Number);
+      return [mode, declared.length === 0 ? spec : { ...spec, maxDurationSec: Math.max(...declared) }];
+    }),
+  );
+}
+
 const skipped = [];
 const transcribed = [];
 for (const [route, curated] of Object.entries(CURATED)) {
@@ -637,7 +650,7 @@ for (const [route, curated] of Object.entries(CURATED)) {
     // because the vendor API and this aggregator spell the same idea differently ("-1"/"adaptive"
     // vs "auto"). A row with no modes supports generate only, which is what every row meant
     // before this existed.
-    ...(curated.modes ? { modes: curated.modes } : {}),
+    ...(curated.modes ? { modes: modesFor(curated) } : {}),
     ...(curated.aspectRange ? { aspectRange: curated.aspectRange } : {}),
   });
   endpoints[curated.id] = route;

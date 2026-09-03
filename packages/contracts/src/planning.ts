@@ -17,6 +17,7 @@ import {
   aspectSupport,
   continueDispatchFor,
   dispatchDuration,
+  durationLimitsFor,
   durationOptions,
   estimateMicroUsd,
   frameDispatchFor,
@@ -26,6 +27,7 @@ import {
   type DurationChoice,
   type ManifestModel,
   type SizeTier,
+  type TaskMode,
 } from "./manifest.js";
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
@@ -1716,7 +1718,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const productionStyleOverride = input.production?.styleOverride?.trim() || undefined;
   const effectiveStyle = styleFor(world, productionStyleFor(input.production, input.artDirection?.description));
   const { resolved, perShot } = sceneCast(scene, sheets);
-  const capSec = model.limits.maxDurationSec ?? Number.POSITIVE_INFINITY;
+  const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
   const ordered = orderedShots(scene);
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
@@ -1726,6 +1728,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // keeps the motion and the audio the extracted still throws away, so the frame steps aside
   // rather than the capability it stands in for.
   const continuations = resolveContinuations(scene, selections, model, input.takes, mode);
+  const taskModeForShot = (shotId: string): TaskMode => {
+    if (continuations.get(shotId)?.continuation !== undefined) return "continue";
+    if (boundaryFrames.get(shotId)?.frame !== undefined) return frameDispatchFor(model, 1)?.mode ?? "generate";
+    return "generate";
+  };
 
   // Merged once for the whole plan (#244). Both dispatch shapes are the same clip's constraints,
   // and computing it twice is how the per-shot and whole-scene paths come to disagree about what
@@ -1756,6 +1763,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // and the figure billed are for two different requests. A shot longer than anything the
     // route offers keeps its own seconds here and is refused by name in the warnings.
     const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+      taskMode: taskModeForShot(shot.id),
       withReferences: bound.length > 0,
     });
     const estimate =
@@ -1826,7 +1834,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // dispatch on the reference route is packed against that route's ceiling, so a plan cannot
   // price 15 seconds and fail when the provider takes the 10-second route.
   const boundByShot = new Map(shots.map((s) => [s.shot.id, s.bound.length > 0]));
-  const referenceCapCandidates = durationOptions(model, { withReferences: true });
+  const referenceCapCandidates = durationOptions(model, { taskMode: "generate", withReferences: true });
   const referenceCapSec =
     model.limits.maxReferenceDurationSec ??
     (referenceCapCandidates.length > 0 ? referenceCapCandidates[referenceCapCandidates.length - 1]! : capSec);
@@ -1931,6 +1939,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             a +
             estimateMicroUsd(model, {
               durationSec: pricedDuration(model, p.durationSec, {
+                taskMode: "generate",
                 withReferences: passCarriesReferences.get(p.index) ?? false,
               }),
               ...(input.resolution !== undefined ? { resolution: input.resolution } : {}),
@@ -1956,6 +1965,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     .map((shot) => ({
       shot,
       choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+        taskMode: taskModeForShot(shot.id),
         // The route the shot will actually take (issue #390): a 12-second shot with references
         // is over-cap on a 15s-text/10s-reference model, and saying so here is the difference
         // between a refusal before commit and a provider failure after it.
@@ -1980,7 +1990,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const overlongPasses = pack.ok
     ? pack.passes.flatMap((pass) => {
         const withReferences = passCarriesReferences.get(pass.index) ?? false;
-        const choice = dispatchDuration(model, pass.durationSec, { withReferences });
+        const choice = dispatchDuration(model, pass.durationSec, { taskMode: "generate", withReferences });
         return choice.kind === "over-cap"
           ? [
               {

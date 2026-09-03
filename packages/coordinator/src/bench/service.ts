@@ -10,6 +10,7 @@ import {
   bindingPreamble,
   briefForProvider,
   dispatchDuration,
+  durationLimitsFor,
   estimateMicroUsd,
   imageOutputFor,
   keyframeAddable,
@@ -776,6 +777,7 @@ export function planBenchDispatch(
       paths,
     };
   }
+  const taskMode = frame?.mode ?? "generate";
 
   // Mentions (issue 476): a brief may cite an attached reference by name — "@Image 1". What it
   // cites has to still be riding. A stale mention is refused with the name in it rather than
@@ -884,7 +886,8 @@ export function planBenchDispatch(
   const videoDuration =
     params.kind === "video" && (params.durationSec ?? 0) > 0
       ? dispatchDuration(model, params.durationSec!, {
-          withReferences: referencePaths.length > 0 || frame !== null,
+          taskMode,
+          withReferences: referencePaths.length > 0,
         })
       : params.kind === "video"
         ? { kind: "provider-default" as const }
@@ -970,9 +973,9 @@ export function planBenchDispatch(
       });
     } else if (params.kind === "video") {
       const requestedSec = params.durationSec ?? 0;
-      // The route this job lands on is the one whose ceiling applies: references send it to a
-      // different endpoint, and wan's makes 10s where its text route makes 15.
-      const withReferences = referencePaths.length > 0 || frame !== null;
+      // The route this job lands on is the one whose ceiling applies: task modes select their
+      // sibling route directly, while ordinary references select the reference endpoint.
+      const withReferences = referencePaths.length > 0;
       const choice = videoDuration!;
       inputs.push({
         worldId: options.worldId,
@@ -1020,7 +1023,9 @@ export function planBenchDispatch(
           // Priced at the length that will actually be asked for, on the route it will be asked
           // of — the estimate and the dispatch read the same function for that reason.
           durationSec:
-            requestedSec > 0 ? pricedDuration(model, requestedSec, { withReferences }) : (model.limits.maxDurationSec ?? 5),
+            requestedSec > 0
+              ? pricedDuration(model, requestedSec, { taskMode, withReferences })
+              : (durationLimitsFor(model, taskMode).maxDurationSec ?? 5),
           ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
         }),
         landing: { dir: sessionMediaDir(session.id, takeId) },

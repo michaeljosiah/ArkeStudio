@@ -7,6 +7,7 @@ import {
   aspectSupport,
   deriveCapabilityAvailability,
   dispatchDuration,
+  durationLimitsFor,
   estimateMicroUsd,
   formatMicroUsd,
   frameTaskModes,
@@ -30,6 +31,7 @@ import {
   type BenchTake,
   type ManifestModel,
   type SizeTier,
+  type TaskMode,
 } from "@arke-studio/contracts";
 import {
   sendBenchAddReference,
@@ -349,8 +351,8 @@ function BenchWorkspace({
     // cannot make that length is a fault here, not a refusal after the button.
     if (subject.kind === "board" || (subject.kind === "shot" && draft.mode === "video")) {
       const duration = dispatchDuration(candidate, subject.durationSec, {
-        withReferences:
-          session.composer.activeTokens.length > 0 || session.composer.keyframeTokens.length > 0,
+        taskMode: taskModeForKeyframes(candidate, session.composer.keyframeTokens.length),
+        withReferences: session.composer.activeTokens.length > 0,
       });
       if (duration.kind === "over-cap") return `runs at most ${duration.longest}s`;
       if (duration.kind === "provider-default") return "does not offer a fixed duration";
@@ -820,9 +822,13 @@ function BenchWorkspace({
       // bound and stops when the song is done, so this is what the take can cost at most.
       return estimateMicroUsd(candidate, { durationSec: MUSIC_DURATION_SEC }) * draft.params.count;
     }
-    const seconds = draft.params.durationSec ?? candidate.limits.maxDurationSec ?? 5;
+    const taskMode = taskModeForKeyframes(candidate, session.composer.keyframeTokens.length);
+    const seconds = draft.params.durationSec ?? durationLimitsFor(candidate, taskMode).maxDurationSec ?? 5;
     return estimateMicroUsd(candidate, {
-      durationSec: pricedDuration(candidate, seconds),
+      durationSec: pricedDuration(candidate, seconds, {
+        taskMode,
+        withReferences: session.composer.activeTokens.length > 0,
+      }),
       ...(draft.params.resolution !== undefined ? { resolution: draft.params.resolution } : {}),
     });
   };
@@ -893,11 +899,12 @@ function BenchWorkspace({
    * shortest stop would say the shot is 4 seconds when nobody has said that yet.
    */
   const withReferences = session.composer.activeTokens.length > 0;
+  const taskMode = model === null ? "generate" : taskModeForKeyframes(model, session.composer.keyframeTokens.length);
   // The track's geometry and its states, worked out in one place so the fill, the ends, the
   // handle and the pill cannot drift apart. See lib/duration.ts for why it has two extra stops.
   const track =
     videoParams !== null && model !== null
-      ? durationTrack(model, videoParams.durationSec, { withReferences })
+      ? durationTrack(model, videoParams.durationSec, { taskMode, withReferences })
       : null;
   const durationStops = track?.stops ?? [];
   const durationUnset = track?.unset ?? true;
@@ -1001,9 +1008,10 @@ function BenchWorkspace({
                 {`${durationLostToReferences}s`}
               </s>
             ) : (
-              longestOffered(models) > durationStops[durationStops.length - 1]! && (
+              longestOffered(models, session.composer.keyframeTokens.length, withReferences) >
+                durationStops[durationStops.length - 1]! && (
                 <s className="fy-bench__durationover" title="Longer than this model runs">
-                  {`${longestOffered(models)}s`}
+                  {`${longestOffered(models, session.composer.keyframeTokens.length, withReferences)}s`}
                 </s>
               )
             )}
@@ -2743,9 +2751,18 @@ function takeMeta(take: BenchTake): string {
  * when the chosen model stops short, so the ceiling is visible rather than merely missing —
  * the same reason the bench shows a refusal instead of hiding a control.
  */
-function longestOffered(models: readonly ManifestModel[]): number {
+function taskModeForKeyframes(model: ManifestModel, count: number): TaskMode {
+  if (count === 0) return "generate";
+  const plan = keyframePlan(model, count);
+  return plan.ok ? plan.mode : "generate";
+}
+
+function longestOffered(models: readonly ManifestModel[], keyframes: number, withReferences: boolean): number {
   return models.reduce((longest, model) => {
-    const options = durationOptions(model);
+    const options = durationOptions(model, {
+      taskMode: taskModeForKeyframes(model, keyframes),
+      withReferences,
+    });
     const last = options[options.length - 1] ?? 0;
     return last > longest ? last : longest;
   }, 0);

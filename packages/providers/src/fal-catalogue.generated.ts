@@ -410,6 +410,10 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         ],
         "sentinels": {
           "aspect": "auto"
+        },
+        "maxDurationSec": 7,
+        "durations": {
+          "7": "7s"
         }
       }
     }
@@ -456,6 +460,10 @@ export const FAL_MODELS: readonly ManifestModel[] = [
         ],
         "sentinels": {
           "aspect": "auto"
+        },
+        "maxDurationSec": 7,
+        "durations": {
+          "7": "7s"
         }
       }
     }
