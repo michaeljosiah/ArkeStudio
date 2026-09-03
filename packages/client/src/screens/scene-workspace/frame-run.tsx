@@ -425,7 +425,7 @@ function GenerateFramesDialogOpen({
               {references.map((reference) => (
                 <article key={reference.sheet.id} data-riding={reference.ridingSteps > 0 ? "true" : "false"}>
                   <span className="fy-swgen__reference-image">
-                    <Portrait worldSlug={world.meta.slug} path={reference.path} label={reference.sheet.type} radius={5} />
+                    <Portrait worldSlug={world.meta.slug} path={reference.path} label="" radius={5} />
                   </span>
                   <span className="fy-swgen__reference-copy">
                     <strong>{reference.sheet.name}</strong>
