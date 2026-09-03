@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, orderedShots, type ClientMessage, type ClientState, type SceneRecord } from "@arke-studio/contracts";
+import { insertShot, orderedShots, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   __applyEventForTest,
@@ -667,6 +667,61 @@ describe("the dock offers a name while the scene is Untitled (SPEC-036 R-38)", (
 describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
   const newSceneButton = (mounted: Mounted): HTMLElement =>
     all(mounted, "button").find((candidate) => candidate.textContent === "New scene")!;
+  const episodicState = (episodes: Episode[]): ClientState => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, kind: "microdrama" };
+    production.episodes = episodes;
+    production.episodeFiles = Object.fromEntries(episodes.map((episode) => [episode.id, episode.id]));
+    return state;
+  };
+
+  it("the episodic rail creates an unassigned scene when no episode exists (#727)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(episodicState([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+
+    const button = q(mounted, ".fy-prodrail__item--press")!;
+    assert.equal(button.getAttribute("aria-label"), "New unassigned scene");
+    await click(button);
+
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene");
+    assert.equal(create.productionId, "saltlight");
+    assert.equal(create.episodeId, undefined, "there is no episode to infer or invent");
+    assert.equal(q(mounted, ".fy-prodrail__item--press")!.hasAttribute("disabled"), true);
+  });
+
+  it("the episodic production-level press uses the episode in view", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const episode: Episode = {
+      id: "ep_the-vigil",
+      version: 1,
+      order: 1,
+      title: "The vigil",
+      scenes: ["sc_04"],
+    };
+    const later: Episode = {
+      id: "ep_the-bell",
+      version: 1,
+      order: 2,
+      title: "The bell",
+      scenes: [],
+    };
+    const mounted = await mountState(
+      episodicState([episode, later]),
+      `/w/${FIXTURE_WORLD_ID}/p/saltlight/episodes/ep_the-vigil`,
+    );
+
+    const button = q(mounted, ".fy-prodrail__item--press")!;
+    assert.equal(button.getAttribute("aria-label"), "New scene in Episode 1: The vigil");
+    await click(button);
+
+    const create = sent.findLast((message) => message.kind === "create-scene");
+    assert.ok(create && create.kind === "create-scene");
+    assert.equal(create.episodeId, "ep_the-vigil");
+  });
 
   it("sends one correlated create and lands in the workspace the answer names", async () => {
     const sent: ClientMessage[] = [];

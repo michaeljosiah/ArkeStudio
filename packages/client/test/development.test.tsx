@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
+import { legacySceneView, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { ProductionChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
@@ -68,6 +68,19 @@ function withMicrodrama(episodes: Episode[]): ClientState {
       ],
     },
   };
+}
+
+function withMicrodramaScenes(
+  episodes: Episode[],
+  scenes: ReadonlyArray<ProductionBundle["scenes"][number]>,
+): ClientState {
+  const state = withMicrodrama(episodes);
+  const production = state.world!.productions.find(
+    (candidate) => candidate.meta.id === "bell-watch-season-1",
+  )!;
+  production.scenes = [...structuredClone(scenes)];
+  production.sceneFiles = Object.fromEntries(scenes.map((scene) => [scene.id, scene.slug]));
+  return state;
 }
 
 function render(state: ClientState, path: string, element: React.ReactElement, routePath: string): string {
@@ -475,8 +488,8 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const html = home(PROD);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
     assert.deepEqual(
-      labels.slice(0, 8),
-      ["Overview", "Episodes", "Takes", "Artifacts", "Audio", "Generate", "Cut", "Exports"],
+      labels.slice(0, 9),
+      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Audio", "Generate", "Cut", "Exports"],
     );
     assert.ok(!labels.includes("Dashboard"), "a series has an overview and episodes instead");
     assert.ok(!labels.includes("Cast"), "the scene workspace keeps the production hierarchy quiet");
@@ -484,15 +497,13 @@ describe("an episodic production's front page is its season (design turn 93)", (
   });
 
   it("opens the current episode in the rail and shows its scene in place", () => {
-    const state = withMicrodrama([
-      episode("ep_the-vigil", 2, { title: "The vigil", scenes: ["sc_04"] }),
-    ]);
     const source = FIXTURE_STATE.world!.productions.find((production) => production.meta.id === "saltlight")!;
-    const production = state.world!.productions.find(
-      (candidate) => candidate.meta.id === "bell-watch-season-1",
-    )!;
-    production.scenes = structuredClone(source.scenes);
-    production.sceneFiles = { ...source.sceneFiles };
+    const baseScene = legacySceneView(source.scenes[0]!)!;
+    const earlier = { ...structuredClone(baseScene), id: "sc_02", number: 2, title: "Before the watch", shots: [] };
+    const state = withMicrodramaScenes(
+      [episode("ep_the-vigil", 2, { title: "The vigil", scenes: ["sc_04", "sc_02"] })],
+      [baseScene, earlier],
+    );
 
     const html = renderApp(
       state,
@@ -501,12 +512,51 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.match(html, /aria-label="Collapse Episode 2: The vigil"/);
     assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
     assert.match(html, /4 · The verse rises/);
+    assert.ok(html.indexOf("4 · The verse rises") < html.indexOf("2 · Before the watch"), "episode order wins");
     // A press, not a link (SPEC-036 R-37): the episode's New scene makes the scene and opens it.
-    assert.match(html, /<button type="button" class="fy-prodrail__new-scene">/);
+    assert.match(html, /class="fy-prodrail__new-scene" aria-label="New scene in Episode 2: The vigil"/);
     assert.doesNotMatch(html, /scenes\/new/, "the brief form is retired");
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
     assert.match(html, /aria-label="Switch production\. Current production: Bell Watch — Season 1"/);
+  });
+
+  it("keeps loose scenes reachable under Unassigned after episodes exist", () => {
+    const source = FIXTURE_STATE.world!.productions.find((production) => production.meta.id === "saltlight")!;
+    const baseScene = legacySceneView(source.scenes[0]!)!;
+    const loose = { ...structuredClone(baseScene), id: "sc_05", number: 5, title: "The bell answers", shots: [] };
+    const state = withMicrodramaScenes(
+      [episode("ep_the-vigil", 2, { title: "The vigil", scenes: ["sc_04"] })],
+      [baseScene, loose],
+    );
+
+    const html = renderApp(
+      state,
+      `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1/scenes/sc_05`,
+    );
+
+    assert.match(html, /aria-label="Expand Episode 2: The vigil"/);
+    assert.match(html, /aria-label="Collapse Unassigned scenes"/);
+    assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_05"/);
+    assert.match(html, /fy-prodrail__scene fy-prodrail__scene--active/);
+    assert.match(html, /5 · The bell answers/);
+  });
+
+  it("shows ordered loose scenes and New scene before an episodic production has episodes", () => {
+    const source = FIXTURE_STATE.world!.productions.find((production) => production.meta.id === "saltlight")!;
+    const baseScene = legacySceneView(source.scenes[0]!)!;
+    const earlier = { ...structuredClone(baseScene), id: "sc_02", number: 2, title: "Before the watch", shots: [] };
+    const state = withMicrodramaScenes([], [baseScene, earlier]);
+
+    const html = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`);
+
+    assert.match(html, /aria-label="Collapse Unassigned scenes"/);
+    assert.ok(html.indexOf("2 · Before the watch") < html.indexOf("4 · The verse rises"));
+    assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_02"/);
+    assert.match(html, /href="\/w\/[^/]+\/p\/bell-watch-season-1\/scenes\/sc_04"/);
+    assert.match(html, /class="fy-prodrail__item fy-prodrail__item--under fy-prodrail__item--press"/);
+    assert.doesNotMatch(html, /class="fy-prodrail__new-scene"/, "there is no episode to own a nested press");
+    assert.match(html, /New episode/);
   });
 
   it("distinguishes reviewing Takes from opening Generate", () => {
@@ -523,10 +573,19 @@ describe("an episodic production's front page is its season (design turn 93)", (
   });
 
   it("every other medium keeps its dashboard, having no season to be", () => {
-    const html = renderApp(withMicrodrama([]), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const baseScene = legacySceneView(production.scenes[0]!)!;
+    const earlier = { ...structuredClone(baseScene), id: "sc_02", number: 2, title: "Before the watch", shots: [] };
+    production.scenes = [baseScene, earlier];
+    const html = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
     assert.equal(labels[0], "Dashboard");
     assert.ok(labels.includes("Overview"), "and its overview beside it");
+    assert.match(html, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/sc_04"`));
+    assert.match(html, /fy-prodrail__scenes fy-prodrail__scenes--production/);
+    assert.match(html, /4 · The verse rises/);
+    assert.ok(html.indexOf("2 · Before the watch") < html.indexOf("4 · The verse rises"), "film scenes use canonical order");
   });
 
   it("an empty season opens the conversation beside it (turn 99)", () => {
