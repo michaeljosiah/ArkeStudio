@@ -1502,12 +1502,13 @@ export class Coordinator {
             },
             onProviderFault: (provider, message) => this.reportProviderFault(provider as ProviderId, message),
             onTerminal: (job) => this.onJobTerminal(job),
-            onFinalizationFailure: (job) => {
+            onFinalizationFailure: (job, cause) => {
               void this.appLog?.append({
                 kind: "job.finalization-failed",
                 jobId: job.id,
                 worldId: job.worldId,
                 targetKind: job.target.kind,
+                cause,
               });
               void this.emitFrameRunForJob(job).catch(() => {});
             },

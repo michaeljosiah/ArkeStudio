@@ -908,6 +908,7 @@ describe("reference finalization after provider success", () => {
     fake.artifacts = [{ name: "sheet.png", contentType: "image/png", data: pngBytes() }];
     let finalizations = 0;
     let fail = true;
+    const failures: Array<{ job: Job; cause: string }> = [];
     const h = await makeHarness(
       { fake },
       {
@@ -915,6 +916,7 @@ describe("reference finalization after provider success", () => {
           finalizations += 1;
           if (fail) throw new Error("disk busy");
         },
+        onFinalizationFailure: (failedJob, cause) => failures.push({ job: failedJob, cause }),
       },
     );
     await h.queue.start();
@@ -935,6 +937,9 @@ describe("reference finalization after provider success", () => {
       foldedJob(h, job.id)?.finalization?.error ?? "",
       /will not contact the provider or charge again/,
     );
+    assert.equal(foldedJob(h, job.id)?.finalization?.cause, "disk busy");
+    assert.equal(failures[0]?.cause, "disk busy");
+    assert.equal(failures[0]?.job.finalization?.cause, "disk busy");
 
     fail = false;
     await Promise.all([h.queue.retryFinalization(job.id), h.queue.retryFinalization(job.id)]);

@@ -167,7 +167,7 @@ export interface JobQueueOptions {
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
   onTerminal?: (job: Job) => void | Promise<void>;
   /** Safe operational notice for a persisted domain-finalization failure. */
-  onFinalizationFailure?: (job: Job) => void;
+  onFinalizationFailure?: (job: Job, cause: string) => void;
   /**
    * Coordinator enqueue admission (SPEC-021 §2.12, R-16): consulted before anything is
    * journalled, so a stale picker can never commit work the coordinator knows cannot run.
@@ -1269,15 +1269,15 @@ export class JobQueue {
       !ledgered &&
       !(await this.opts.ledger.has(terminal.id).catch(() => false))
     ) {
-      await this.failFinalization(terminal);
+      await this.failFinalization(terminal, "the job's ledger entry could not be confirmed");
       return;
     }
     try {
       await this.opts.onTerminal?.(terminal);
       if (terminal.finalization?.status === "pending") await this.completeFinalization(terminal);
       else if (terminal.status === "succeeded") this.emitReady(terminal);
-    } catch {
-      if (terminal.finalization?.status === "pending") await this.failFinalization(terminal);
+    } catch (error) {
+      if (terminal.finalization?.status === "pending") await this.failFinalization(terminal, error);
     }
   }
 
@@ -1487,7 +1487,7 @@ export class JobQueue {
         ) {
           // Follow-ons outside the replayable set are not crash-safe. Surface the interrupted
           // preparation honestly instead of duplicating takes or mutating domain state.
-          await this.failFinalization(job);
+          await this.failFinalization(job, "finalization was interrupted before completion");
         }
         await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
         continue;
@@ -1756,17 +1756,18 @@ export class JobQueue {
     this.opts.emit({ at: this.clock(), type: "job.ready", job });
   }
 
-  private async failFinalization(job: Job): Promise<void> {
+  private async failFinalization(job: Job, cause: unknown): Promise<void> {
+    const detail = (cause instanceof Error ? cause.message : String(cause)) || "unknown finalization failure";
     const error = this.needsReplayableFinalization(job)
       ? "Generation completed, but its result could not be prepared. Retry finalization; this will not contact the provider or charge again."
       : "Generation completed, but its result could not be prepared. Open Activity for details; no additional provider charge was made.";
     const failed: Job = {
       ...job,
-      finalization: { status: "failed", error, updatedAt: this.clock() },
+      finalization: { status: "failed", error, cause: detail, updatedAt: this.clock() },
       updatedAt: this.clock(),
     };
     await this.transition(failed);
-    this.opts.onFinalizationFailure?.(failed);
+    this.opts.onFinalizationFailure?.(failed, detail);
   }
 
   async retryFinalization(jobId: string): Promise<void> {
@@ -1784,8 +1785,8 @@ export class JobQueue {
       try {
         await this.opts.onTerminal?.(pending);
         await this.completeFinalization(pending);
-      } catch {
-        await this.failFinalization(pending);
+      } catch (error) {
+        await this.failFinalization(pending, error);
       }
     } finally {
       this.finalizing.delete(jobId);

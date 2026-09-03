@@ -95,6 +95,8 @@ export const JobFinalizationSchema = z
   .object({
     status: z.enum(["pending", "complete", "failed"]),
     error: z.string().nullable(),
+    /** Operational cause retained separately from the stable user-facing recovery copy. */
+    cause: z.string().min(1).optional(),
     updatedAt: IsoDateTimeSchema,
   })
   .strict();
