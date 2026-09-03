@@ -10238,7 +10238,6 @@ export class Coordinator {
           return;
         }
         const failures: Array<{ index: number; reason: string }> = [];
-        let filed = 0;
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           const outcome = await fileArtifact(store, {
@@ -10254,12 +10253,13 @@ export class Coordinator {
             outcome: "refused" as const,
             reason: err instanceof Error ? err.message : String(err),
           }));
-          if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") filed += 1;
-          else if (outcome.outcome === "needs-consent") {
-            failures.push({ index, reason: `${sourcePath}: ${outcome.reason}` });
-          } else failures.push({ index, reason: `${sourcePath}: ${outcome.reason}` });
+          if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") {
+            failures.push({ index, reason: `${basename(sourcePath)}: ${outcome.reason}` });
+          }
         }
-        this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, filed === 0);
+        // Filing completes locally. The counts tell the client whether to report success, a mixed
+        // result, or refusal; none of those outcomes creates an Activity job.
+        this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

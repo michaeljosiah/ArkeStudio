@@ -211,6 +211,63 @@ describe("queue notification", () => {
     assert.equal(note?.action, undefined);
   });
 
+  it("confirms files added to the Library without inventing a queue job", () => {
+    const note = enqueueNote(
+      result({
+        command: "upload-artifacts",
+        disposition: "not-queued",
+        requestedCount: 2,
+        acceptedJobIds: [],
+      }),
+      [],
+      manifest,
+    );
+    assert.equal(note?.tone, "back");
+    assert.equal(note?.title, "2 files added to the Library");
+    assert.equal(note?.meta, "ready to use");
+    assert.equal(note?.action, undefined);
+  });
+
+  it("names failed files when only part of a Library upload lands", () => {
+    const note = enqueueNote(
+      result({
+        command: "upload-artifacts",
+        disposition: "not-queued",
+        requestedCount: 2,
+        acceptedJobIds: [],
+        failures: [{ index: 1, reason: "broken.m4a: Unsupported audio container." }],
+      }),
+      [],
+      manifest,
+    );
+    assert.equal(note?.tone, "warning");
+    assert.equal(note?.title, "1 of 2 files added to the Library");
+    assert.equal(note?.meta, "1 file not added");
+    assert.equal(note?.reason, "broken.m4a: Unsupported audio container.");
+  });
+
+  it("reports an all-failed Library upload as a file refusal", () => {
+    const note = enqueueNote(
+      result({
+        command: "upload-artifacts",
+        disposition: "not-queued",
+        requestedCount: 2,
+        acceptedJobIds: [],
+        failures: [
+          { index: 0, reason: "broken.mp4: Unsupported video container." },
+          { index: 1, reason: "broken.m4a: Unsupported audio container." },
+        ],
+      }),
+      [],
+      manifest,
+    );
+    assert.equal(note?.tone, "refused");
+    assert.equal(note?.title, "No files added to the Library");
+    assert.equal(note?.meta, "nothing spent");
+    assert.match(note?.reason ?? "", /broken\.mp4.*broken\.m4a/);
+    assert.doesNotMatch(note?.title ?? "", /image/i);
+  });
+
   it("says nothing at all about work that never reached the queue", () => {
     assert.equal(enqueueNote(result({ disposition: "not-queued", requestedCount: 0, acceptedJobIds: [] }), [], manifest), null);
   });
