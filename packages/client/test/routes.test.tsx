@@ -321,6 +321,17 @@ describe("screen inventory", () => {
   });
 
   /*
+   * The door into the editor states its own act (issue 747). What is behind it accepts on the
+   * press — `Set the look · v2` writes the record and queues nothing — so a door labelled
+   * "Propose a change" promised a review step the screen then had nowhere to send anyone.
+   */
+  it("opens the look editor with a label that matches what committing there does", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/art-direction`);
+    assert.ok(html.includes("Change the look"), "the door says what pressing it does");
+    assert.ok(!html.includes("Propose a change"), "and no longer promises a review that never comes");
+  });
+
+  /*
    * The page was three inventories and a look. Two of the inventories counted work that this page
    * changes nothing about, and the third was a whole second image with its own controls; between
    * them they pushed the look — the reason to be here — into a third of the column.
