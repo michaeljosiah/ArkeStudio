@@ -110,6 +110,13 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     assert.deepEqual(__stateForTest().state?.app.comfyui, comfyui);
   });
 
+  it("makes no installation or recipe claims before the first ComfyUI status", () => {
+    const html = plain(render("/settings/providers?provider=comfyui", stateWith({ comfyui: null })));
+    assert.match(html, /ENGINE\s+Not yet known/);
+    assert.match(html, /RECIPES\s+NOT YET KNOWN/);
+    assert.doesNotMatch(html, /Not installed|NONE IN THIS BUILD/);
+  });
+
   it("mounts at its own route and rails the three engines", () => {
     const html = render("/settings/providers");
     assert.match(html, /data-screen="settings-providers"/);
