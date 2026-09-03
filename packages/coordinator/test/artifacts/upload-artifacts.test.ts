@@ -72,6 +72,7 @@ describe("filing artifacts from the panel (82a)", () => {
       assert.equal(result?.["requestedCount"], 2);
       assert.deepEqual(result?.["failures"], []);
       assert.equal(result?.["command"], "upload-artifacts");
+      assert.equal(result?.["disposition"], "not-queued", "filing locally does not create a queue job");
     } finally {
       await provider.close();
     }
@@ -101,6 +102,43 @@ describe("filing artifacts from the panel (82a)", () => {
       // Only what this test filed: the fixture world already ships a board png of its own.
       const filed = (await readdir(join(worldDir, "artifacts"))).filter((f) => f.startsWith("plate"));
       assert.deepEqual(filed.sort(), ["plate.png", "plate.png.json"], "one set of bytes, one artifact");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("reports a mixed filing result without pretending that a job was queued", async () => {
+    const good = await sourceFile("good-plate.png", distinctPng(8));
+    const missing = join(await tempDir("upload-src"), "missing-clip.mp4");
+    const { provider, events, send } = await harness(() => [good, missing]);
+    try {
+      await send(upload);
+
+      const [result] = results(events);
+      assert.equal(result?.["disposition"], "not-queued");
+      assert.equal(result?.["requestedCount"], 2);
+      const failures = result?.["failures"] as Array<{ index: number; reason: string }>;
+      assert.equal(failures.length, 1);
+      assert.equal(failures[0]?.index, 1);
+      assert.match(failures[0]?.reason ?? "", /^missing-clip\.mp4:/);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("reports every failed file while remaining a local, non-queue action", async () => {
+    const dir = await tempDir("upload-src");
+    const { provider, events, send } = await harness(() => [join(dir, "missing-a.png"), join(dir, "missing-b.m4a")]);
+    try {
+      await send(upload);
+
+      const [result] = results(events);
+      assert.equal(result?.["disposition"], "not-queued");
+      assert.equal(result?.["requestedCount"], 2);
+      const failures = result?.["failures"] as Array<{ index: number; reason: string }>;
+      assert.deepEqual(failures.map((failure) => failure.index), [0, 1]);
+      assert.match(failures[0]?.reason ?? "", /^missing-a\.png:/);
+      assert.match(failures[1]?.reason ?? "", /^missing-b\.m4a:/);
     } finally {
       await provider.close();
     }

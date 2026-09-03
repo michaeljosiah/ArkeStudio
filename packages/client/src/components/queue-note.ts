@@ -234,6 +234,28 @@ export function enqueueNote(
   jobs: readonly Job[],
   manifest: ModelManifest | null,
 ): QueueNote | null {
+  if (result.command === "upload-artifacts" && result.requestedCount > 0) {
+    const failed = result.failures.length;
+    const added = Math.max(0, result.requestedCount - failed);
+    const reason = reasonOf(result);
+    if (added > 0) {
+      const file = (failed > 0 ? result.requestedCount : added) === 1 ? "file" : "files";
+      return {
+        id: queueNoteId(result.requestId),
+        tone: failed > 0 ? "warning" : "back",
+        title: `${failed > 0 ? `${added} of ${result.requestedCount}` : added} ${file} added to the Library`,
+        meta: failed > 0 ? `${failed} file${failed === 1 ? "" : "s"} not added` : "ready to use",
+        ...(reason ? { reason } : {}),
+      };
+    }
+    return {
+      id: queueNoteId(result.requestId),
+      tone: "refused",
+      title: "No files added to the Library",
+      meta: "nothing spent",
+      ...(reason ? { reason } : {}),
+    };
+  }
   if (result.disposition === "not-queued") return null;
 
   const accepted = result.acceptedJobIds
