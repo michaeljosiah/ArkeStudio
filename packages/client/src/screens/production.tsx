@@ -72,6 +72,7 @@ import {
   MAX_CLIP_LANE,
   type CutOverlay,
   orderedShots,
+  sortScenes,
   legacySceneView,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
@@ -532,11 +533,50 @@ export function ProductionLayout() {
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
   const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
-  const scenesById = new Map((production?.scenes ?? []).map((scene) => [scene.id, scene]));
+  const orderedScenes = sortScenes(production?.scenes ?? []);
+  const scenesById = new Map(orderedScenes.map((scene) => [scene.id, scene]));
+  const assignedSceneIds = new Set(episodes.flatMap((episode) => episode.scenes));
+  const unassignedScenes = orderedScenes.filter((scene) => !assignedSceneIds.has(scene.id));
+  const currentSceneIsUnassigned = sceneId !== undefined && unassignedScenes.some((scene) => scene.id === sceneId);
+  const unassignedExpansionKey = `${prodId ?? ""}:__rail_unassigned__`;
+  const unassignedOpen =
+    episodeExpansion[unassignedExpansionKey] ?? (currentSceneIsUnassigned || episodes.length === 0);
   const generateView = new URLSearchParams(location.search).get("view");
   const inGenerate = location.pathname.endsWith("/generate");
   const takesActive = inGenerate && generateView !== "bench";
   const generateActive = inGenerate && generateView === "bench";
+  const defaultSceneEpisodeId = defaultEpisodeFor(production, currentEpisodeId);
+  const defaultSceneEpisode = episodes.find((episode) => episode.id === defaultSceneEpisodeId);
+  const newSceneLabel = defaultSceneEpisode
+    ? `New scene in Episode ${defaultSceneEpisode.order}: ${defaultSceneEpisode.title}`
+    : "New unassigned scene";
+  const sceneItem = (scene: ProductionBundle["scenes"][number]) => (
+    <NavLink
+      key={scene.id}
+      to={`${base}/scenes/${scene.id}`}
+      className={({ isActive }) => cx("fy-prodrail__scene", isActive && "fy-prodrail__scene--active")}
+    >
+      <span className="fy-prodrail__scene-name">
+        {scene.number} · {scene.title}
+      </span>
+      <span className="fy-prodrail__scene-dot" aria-hidden />
+    </NavLink>
+  );
+  const newSceneItem = (
+    <button
+      type="button"
+      className="fy-prodrail__item fy-prodrail__item--under fy-prodrail__item--press"
+      title={folded ? "New scene" : undefined}
+      aria-label={newSceneLabel}
+      disabled={newScene.pending}
+      onClick={() => newScene.create(defaultSceneEpisodeId)}
+    >
+      <span className="fy-prodrail__mark" aria-hidden={!folded}>
+        <Plus size={15} />
+      </span>
+      <span className="fy-prodrail__label">New scene</span>
+    </button>
+  );
   return (
     <div className="fy-app">
       <AppChrome
@@ -597,7 +637,8 @@ export function ProductionLayout() {
               )}
               <div className="fy-prodrail__episodes">
                 {episodes.map((episode) => {
-                  const open = episodeExpansion[episode.id] ?? episode.id === currentEpisodeId;
+                  const expansionKey = `${prodId ?? ""}:${episode.id}`;
+                  const open = episodeExpansion[expansionKey] ?? episode.id === currentEpisodeId;
                   return (
                     <div key={episode.id} className="fy-prodrail__episode">
                       <button
@@ -606,7 +647,7 @@ export function ProductionLayout() {
                         aria-expanded={open}
                         aria-label={`${open ? "Collapse" : "Expand"} Episode ${episode.order}: ${episode.title}`}
                         onClick={() =>
-                          setEpisodeExpansion((current) => ({ ...current, [episode.id]: !open }))
+                          setEpisodeExpansion((current) => ({ ...current, [expansionKey]: !open }))
                         }
                       >
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
@@ -624,23 +665,13 @@ export function ProductionLayout() {
                                 {index + 1} · Missing scene
                               </span>
                             ) : (
-                              <NavLink
-                                key={scene.id}
-                                to={`${base}/scenes/${scene.id}`}
-                                className={({ isActive }) =>
-                                  cx("fy-prodrail__scene", isActive && "fy-prodrail__scene--active")
-                                }
-                              >
-                                <span className="fy-prodrail__scene-name">
-                                  {scene.number} · {scene.title}
-                                </span>
-                                <span className="fy-prodrail__scene-dot" aria-hidden />
-                              </NavLink>
+                              sceneItem(scene)
                             );
                           })}
                           <button
                             type="button"
                             className="fy-prodrail__new-scene"
+                            aria-label={`New scene in Episode ${episode.order}: ${episode.title}`}
                             disabled={newScene.pending}
                             onClick={() => newScene.create(episode.id)}
                           >
@@ -652,6 +683,27 @@ export function ProductionLayout() {
                     </div>
                   );
                 })}
+                {unassignedScenes.length > 0 && (
+                  <div className="fy-prodrail__episode">
+                    <button
+                      type="button"
+                      className="fy-prodrail__episode-toggle"
+                      aria-expanded={unassignedOpen}
+                      aria-label={`${unassignedOpen ? "Collapse" : "Expand"} Unassigned scenes`}
+                      onClick={() =>
+                        setEpisodeExpansion((current) => ({
+                          ...current,
+                          [unassignedExpansionKey]: !unassignedOpen,
+                        }))
+                      }
+                    >
+                      {unassignedOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                      <span className="fy-prodrail__episode-name">Unassigned</span>
+                      <span className="fy-prodrail__episode-count">{unassignedScenes.length}</span>
+                    </button>
+                    {unassignedOpen && <div className="fy-prodrail__scenes">{unassignedScenes.map(sceneItem)}</div>}
+                  </div>
+                )}
                 {production && (
                   <button
                     type="button"
@@ -670,6 +722,7 @@ export function ProductionLayout() {
                   </button>
                 )}
               </div>
+              {newSceneItem}
               <span className="fy-prodrail__section-divider" aria-hidden="true" />
               {item(
                 "takes",
@@ -724,22 +777,16 @@ export function ProductionLayout() {
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
                   {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
+                  {orderedScenes.length > 0 && (
+                    <div className="fy-prodrail__scenes fy-prodrail__scenes--production">
+                      {orderedScenes.map(sceneItem)}
+                    </div>
+                  )}
                   {/* Interactive video's structural authority (epic 401): only this Video kind routes here. */}
                   {shape?.isBranching &&
                     item("branch-map", "Branch map", String(production?.routing?.choices.length ?? 0))}
                   {/* A press, not a destination (SPEC-036 R-37): it makes the scene and opens it. */}
-                  <button
-                    type="button"
-                    className="fy-prodrail__item fy-prodrail__item--under fy-prodrail__item--press"
-                    title={folded ? "New scene" : undefined}
-                    disabled={newScene.pending}
-                    onClick={() => newScene.create(defaultEpisodeFor(production, currentEpisodeId))}
-                  >
-                    <span className="fy-prodrail__mark" aria-hidden={!folded}>
-                      <Plus size={15} />
-                    </span>
-                    <span className="fy-prodrail__label">New scene</span>
-                  </button>
+                  {newSceneItem}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}

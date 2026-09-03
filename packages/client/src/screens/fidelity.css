@@ -1365,6 +1365,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   gap: 1px;
   padding: 1px 0 0 17px;
 }
+.fy-prodrail__scenes--production { padding: 1px 0 2px 24px; }
+.fy-prodrail--folded .fy-prodrail__scenes--production { display: none; }
 .fy-prodrail__scene {
   min-width: 0;
   display: flex;
