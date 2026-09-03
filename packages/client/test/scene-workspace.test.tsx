@@ -230,6 +230,112 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(localCommand.staging?.cast, scene.blocking.cast);
   });
 
+  it("promotes private blocking when returning to a Scene with no shared block", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    delete scene.blocking;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    const privateBlocking = {
+      cast: [{ sheetId: "maren-kest", x: 2, z: 2 }],
+      sets: [{ name: "salt flats", x: 0, z: 0, w: 8, h: 0.2, d: 8 }],
+    };
+    const keys = [
+      { t: 0, p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] },
+      { t: 4, p: [0, 1.5, 2] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] },
+    ];
+    shot.staging = {
+      version: 1,
+      ...privateBlocking,
+      keys,
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
+    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /Maren Kest/, "the promoted cast remains visible");
+
+    const updated = structuredClone(state);
+    const updatedScene = updated.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    updatedScene.version += 1;
+    const updatedShot = orderedShots(updatedScene).find((candidate) => candidate.id === "sh_12")!;
+    const updatedBlocking = { ...privateBlocking, cast: [{ sheetId: "maren-kest", x: 7, z: 1 }] };
+    updatedShot.staging = { ...updatedShot.staging!, version: 2, ...updatedBlocking };
+    await act(async () => __setStateForTest(updated));
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.deepEqual(command.blocking, updatedBlocking, "promotion follows the latest authoritative private block");
+    assert.deepEqual(command.staging?.keys, keys);
+    assert.equal(command.staging?.cast, undefined, "the camera inherits the promoted scene block");
+    assert.equal(command.staging?.sets, undefined, "the private override is removed");
+  });
+
+  it("adopts shared blocking created while a private block is awaiting promotion", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    delete scene.blocking;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.staging = {
+      version: 1,
+      cast: [{ sheetId: "maren-kest", x: 2, z: 2 }],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
+
+    const updated = structuredClone(state);
+    const updatedScene = updated.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    updatedScene.version += 1;
+    updatedScene.blocking = { version: 1, cast: [{ sheetId: "maren-kest", x: 9, z: 1 }], sets: [] };
+    await act(async () => __setStateForTest(updated));
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.blocking, undefined, "the newer shared block is not overwritten by the pending promotion");
+    assert.equal(command.staging?.cast, undefined, "the private override is still removed");
+  });
+
+  it("creates a shared block when the private block being promoted is empty", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    delete scene.blocking;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.staging = {
+      version: 1,
+      cast: [],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.deepEqual(command.blocking, { cast: [], sets: [] });
+    assert.equal(command.staging?.cast, undefined);
+    assert.equal(command.staging?.sets, undefined);
+  });
+
   it("rebases the untouched half of a Stage draft when a newer scene snapshot arrives", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!

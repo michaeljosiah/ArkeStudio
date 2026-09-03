@@ -178,6 +178,7 @@ export function SceneStage({
   const cameraDirty = useRef(false);
   const blockingDirty = useRef(false);
   const scopeDirty = useRef(false);
+  const promotingBlocking = useRef(false);
   const [at, setAt] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [keyIndex, setKeyIndex] = useState(0);
@@ -205,7 +206,8 @@ export function SceneStage({
     (scope === "shot" && JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: currentBlocking.cast, sets: currentBlocking.sets }))
   );
   const sharedChanged = draft !== null && scope === "scene" &&
-    JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] });
+    ((scene.blocking === undefined && promotingBlocking.current) ||
+      JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] }));
   const moved = draft !== null && (cameraChanged || overrideChanged || sharedChanged);
   const keys = working?.keys ?? [];
   const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
@@ -219,6 +221,10 @@ export function SceneStage({
   // from elsewhere — rebases any half the person did not touch and leaves their own half standing.
   useEffect(() => {
     const rebasedScope = scopeDirty.current ? scope : persistedScope;
+    if (promotingBlocking.current && scene.blocking !== undefined) {
+      promotingBlocking.current = false;
+      blockingDirty.current = false;
+    }
     if (!scopeDirty.current && scope !== persistedScope) setScope(persistedScope);
     setDraft((current) => {
       if (current === null) return null;
@@ -226,10 +232,12 @@ export function SceneStage({
         cameraDirty.current = false;
         blockingDirty.current = false;
         scopeDirty.current = false;
+        promotingBlocking.current = false;
         return null;
       }
-      const rebasedBlocking = rebasedScope === "scene"
-        ? { cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] }
+      // An absent shared block makes Scene a promotion of the private block, not an empty block.
+      const rebasedBlocking = rebasedScope === "scene" && scene.blocking !== undefined
+        ? { cast: scene.blocking.cast, sets: scene.blocking.sets }
         : { cast: resolvedPersisted.cast, sets: resolvedPersisted.sets };
       const rebased = {
         ...current,
@@ -240,6 +248,7 @@ export function SceneStage({
       cameraDirty.current = false;
       blockingDirty.current = false;
       scopeDirty.current = false;
+      promotingBlocking.current = false;
       return null;
     });
     setStaging(false);
@@ -255,6 +264,7 @@ export function SceneStage({
     cameraDirty.current = false;
     blockingDirty.current = false;
     scopeDirty.current = false;
+    promotingBlocking.current = false;
     setDraft(null);
     setAt(0);
     setPlaying(false);
@@ -426,12 +436,14 @@ export function SceneStage({
     cameraDirty.current = false;
     blockingDirty.current = false;
     scopeDirty.current = false;
+    promotingBlocking.current = false;
     setDraft(null);
   };
   const chooseScope = (next: "scene" | "shot") => {
     if (working === null || next === scope) return;
     scopeDirty.current = true;
-    if (next === "scene") blockingDirty.current = false;
+    promotingBlocking.current = next === "scene" && scene.blocking === undefined;
+    if (next === "scene" && !promotingBlocking.current) blockingDirty.current = false;
     setDraft({
       ...working,
       ...(next === "scene" && scene.blocking !== undefined
