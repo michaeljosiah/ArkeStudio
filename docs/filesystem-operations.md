@@ -35,6 +35,7 @@ A new world does **not** start with empty `canon`, `characters`, `productions`, 
 | Finish a metered job | Appends one terminal charge record to `R\ledger.jsonl`, including applicable failures and cancellations. |
 | Record a provider call | Appends one redacted request and response record to `R\provider-calls\calls.jsonl`, then restricts it to the current user — `icacls` on Windows, mode `600` elsewhere. Past 2,000 records or 50 MiB the file is compacted by temporary-file rename, dropping the oldest. A filesystem without ACL support is tolerated. |
 | Run the application | Appends logs under `R\logs\` and replaces `R\run\children.json` as supervised children start and stop. |
+| Verify a ComfyUI checkpoint | Creates or replaces a digest receipt under `R\.index\comfyui-digests\`. An unchanged file is identified by its exact size, timestamps, device and inode, so later launches do not read the checkpoint again. These receipts are derived caches and may be deleted. |
 | Stage an application update | Creates or replaces the update receipt `R\update\pending.json` by temporary-file rename, recording the target version and whether it lands on restart or on close. The next start reads the receipt and removes it before reporting the outcome; the paths that abandon an install remove it too. |
 | Download local runtime | Streams to `R\models\<component>\<file>.partial`, validates it, then renames it to the real filename. Ollama's installer is staged at `R\models\.staging\OllamaSetup.exe` and removed after successful installation. |
 | Paste a file | Writes `R\.spool\<id>\<name>`. Filing copies it into a world; the next application start removes the spool. |
@@ -70,7 +71,7 @@ also creates the lock and derived index files described below.
 |---|---|
 | Open read-write | Recovers `W\.commit\`, creates `W\world.lock`, creates or replaces `W\.index\scan-state.json`, and opens `W\.index\world.db`. The lock timestamp is refreshed while open. |
 | Close | Replaces `W\.index\scan-state.json`, closes SQLite, and removes `W\world.lock`. |
-| Delete index manually | Deleting `W\.index\` or `R\.index\app.db` removes caches only. The next open rebuilds them from durable files and logs. |
+| Delete index manually | Deleting `W\.index\` or anything under `R\.index\` removes caches only. The next open or checkpoint verification rebuilds them from durable files. |
 | Reconcile external edit | Recommits, versions, snapshots, and logs changed versioned files. Logs unversioned changes. A file deleted outside the app remains deleted and gains a `deleted: true` change line. |
 | Archive world | Closes the world and moves the whole directory from `R\worlds\<slug>` to `R\archive\<slug>`. A collision adds a timestamp. |
 
