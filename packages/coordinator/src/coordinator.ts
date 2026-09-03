@@ -6029,7 +6029,7 @@ export class Coordinator {
       case "comfyui-verify-recipe": {
         const service = this.opts.comfyui?.service;
         if (!service) return;
-        await service.reverify([msg.recipeId]).catch(() => {});
+        await service.reverify([msg.recipeId], true).catch(() => {});
         await this.refreshComfyUi();
         return;
       }

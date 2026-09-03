@@ -980,6 +980,28 @@ describe("pre-flight names the file and both digests (§2.5, R-9)", () => {
     assert.equal(world.spawned.length, 1, "re-verification did not restart the active engine");
   });
 
+  it("lets a manual Re-verify bypass a persistent digest receipt", async () => {
+    const world = fakeWorld();
+    const file = "C:/AI/ComfyUI/ComfyUI/models/checkpoints/sd_xl_base_1.0.safetensors";
+    world.files.add("C:/AI/ComfyUI/python_embeded/python.exe");
+    world.files.add("C:/AI/ComfyUI/ComfyUI/main.py");
+    world.files.add(file);
+    world.hashes.set(file, "a".repeat(64));
+    const deps = engineDeps(world, "C:/app");
+    const hashFile = deps.hashFile;
+    const forced: Array<boolean | undefined> = [];
+    deps.hashFile = async (path, signal, force) => {
+      forced.push(force);
+      return hashFile(path, signal, force);
+    };
+    const service = new ComfyUiEngineService(deps);
+    await service.applySettings({ enginePath: "C:/AI/ComfyUI", engineUrl: null, modelsDir: null });
+
+    await service.reverify(["comfyui-draft-image"], true);
+
+    assert.deepEqual(forced, [true]);
+  });
+
   it("an unreadable custom-node identity fails closed, and an exact clean identity passes", async () => {
     const nodeRecipe: ComfyUiRecipeFacts = {
       ...FACTS[0]!,

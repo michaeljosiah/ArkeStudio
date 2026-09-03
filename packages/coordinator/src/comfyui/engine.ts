@@ -55,7 +55,7 @@ export interface EngineServiceDeps {
   /** Immediate subdirectory names, or empty when the path is not a readable directory. */
   listDirectories: (path: string) => Promise<string[]>;
   /** sha256 hex of the file's bytes, or null when unreadable. The expensive pre-flight read. */
-  hashFile: (path: string, signal?: AbortSignal) => Promise<string | null>;
+  hashFile: (path: string, signal?: AbortSignal, force?: boolean) => Promise<string | null>;
   /** For the extra-model-paths mapping a spawned engine needs when `modelsDir` is overridden. */
   writeTextFile: (path: string, text: string) => Promise<void>;
   /** The immutable source/content identity marker of a custom-node archive, or null when unknowable. */
@@ -872,6 +872,7 @@ export class ComfyUiEngineService {
    */
   async preflight(
     recipeId: string,
+    forceHash = false,
   ): Promise<{ ok: true } | { ok: false; reason: string; reasonKind?: RecipeReasonKind }> {
     const recipe = this.deps.recipes.find((r) => r.id === recipeId);
     if (!recipe) return { ok: false, reason: `"${recipeId}" is not a shipped recipe`, reasonKind: "catalogue" };
@@ -929,7 +930,7 @@ export class ComfyUiEngineService {
           reasonKind: "verification",
         };
       }
-      const found = await this.deps.hashFile(path, hashSignal);
+      const found = await this.deps.hashFile(path, hashSignal, forceHash);
       if (hashSignal.aborted) {
         return {
           ok: false,
@@ -1024,7 +1025,7 @@ export class ComfyUiEngineService {
    * Invalidate and re-check dependency identity after setup. If the child is still starting, the
    * pending set is consumed by its healthy transition instead of falsely publishing readiness.
    */
-  async reverify(recipeIds?: readonly string[]): Promise<void> {
+  async reverify(recipeIds?: readonly string[], forceHash = false): Promise<void> {
     if (this.disposed) return;
     this.cancelHashing();
     this.nodeClasses = null;
@@ -1038,7 +1039,7 @@ export class ComfyUiEngineService {
     this.verifyingPasses += 1;
     await this.publish();
     try {
-      await this.runVerificationWork(() => this.verifyPending(true));
+      await this.runVerificationWork(() => this.verifyPending(true, forceHash));
     } finally {
       this.verifyingPasses -= 1;
     }
@@ -1051,7 +1052,7 @@ export class ComfyUiEngineService {
     return next;
   }
 
-  private async verifyPending(hashDependencies = false): Promise<void> {
+  private async verifyPending(hashDependencies = false, forceHash = false): Promise<void> {
     if (this.disposed || this.baseUrl() === null || this.pendingVerification.size === 0) return;
     const base = this.baseUrl()!;
     const generation = this.verificationGeneration;
@@ -1059,7 +1060,7 @@ export class ComfyUiEngineService {
     if (generation !== this.verificationGeneration || base !== this.baseUrl()) return;
     this.nodeClasses = nodeClasses;
     if (hashDependencies) {
-      for (const recipeId of this.pendingVerification) await this.preflight(recipeId);
+      for (const recipeId of this.pendingVerification) await this.preflight(recipeId, forceHash);
     }
   }
 

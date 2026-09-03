@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
+import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
 import { CloudProviderTransport } from "./provider-transport.js";
-import { appendFileSync, createReadStream, existsSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
@@ -604,6 +605,7 @@ async function initialize(): Promise<{ port: number }> {
     });
 
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
+  const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
   const comfyUiEngine = new ComfyUiEngineService({
     freeVramMb,
@@ -642,32 +644,7 @@ async function initialize(): Promise<{ port: number }> {
         return [];
       }
     },
-    // The expensive pre-flight read (SPEC-021 §2.5): streamed, so a 10 GB checkpoint never
-    // lands in memory whole; null on any read failure, which refuses with the reason.
-    hashFile: (path, signal) =>
-      new Promise<string | null>((resolveHash) => {
-        const hash = createHash("sha256");
-        const stream = createReadStream(path);
-        let settled = false;
-        const finish = (value: string | null) => {
-          if (settled) return;
-          settled = true;
-          signal?.removeEventListener("abort", abort);
-          resolveHash(value);
-        };
-        const abort = () => {
-          stream.destroy();
-          finish(null);
-        };
-        if (signal?.aborted) {
-          abort();
-          return;
-        }
-        signal?.addEventListener("abort", abort, { once: true });
-        stream.on("data", (chunk) => hash.update(chunk));
-        stream.on("end", () => finish(hash.digest("hex")));
-        stream.on("error", () => finish(null));
-      }),
+    hashFile: (path, signal, force) => comfyUiDigests.hashFile(path, signal, force),
     writeTextFile: (path, text) => writeFile(path, text, "utf8"),
     readNodeRef: (dir) => readCustomNodeRef(dir),
     createSupervisor: (spec) => {
