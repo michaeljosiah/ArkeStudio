@@ -53,6 +53,7 @@ import { ClipPlayButton, TextActions } from "../components/player.js";
 import { foundingNote } from "../components/queue-note.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
+import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { useTalkItThrough } from "../lib/talk-it-through.js";
 import {
@@ -60,6 +61,7 @@ import {
   assignVoice,
   subscribeVoiceAssignmentResults,
   subscribeSheetEditResults,
+  subscribeCanonContradictions,
   subscribeVoiceUploadConfirmations,
   createProduction,
   subscribeProductionCreateResults,
@@ -78,6 +80,7 @@ import {
   promoteGuest,
   renameSheet,
   requestCanonRefs,
+  requestCanonContradictions,
   requestSheetRefs,
   retireEntity,
   searchCanonList,
@@ -1593,6 +1596,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
+  const lifecycle = useSingleAct();
 
   useEffect(() => {
     if (worldId && sheetId) requestSheetRefs(worldId, sheetId);
@@ -1787,7 +1791,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         <Button
           onClick={() => {
             if (!worldId) return;
-            setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked");
+            lifecycle.track(setSheetStatus(worldId, sheetPath, sheet.status === "locked" ? "sketch" : "locked"));
           }}
           title={
             sheet.status === "locked"
@@ -1822,7 +1826,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {sheet.production !== undefined && (
           <Button
             variant="ghost"
-            onClick={() => worldId && promoteGuest(worldId, sheetPath)}
+            onClick={() => worldId && lifecycle.track(promoteGuest(worldId, sheetPath))}
             title={`Moves ${sheet.name} out of ${sheet.production} and into the world's cast — the id, every citation and the reference kit stay`}
           >
             Promote to the world
@@ -1848,11 +1852,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               variant="primary"
               disabled={renaming.trim().length === 0 || renaming.trim() === sheet.name}
               onClick={() => {
-                if (worldId) renameSheet(worldId, sheetPath, renaming.trim());
-                setRenaming(null);
+                if (worldId) lifecycle.track(renameSheet(worldId, sheetPath, renaming.trim()));
               }}
             >
-              Stage rename
+              Rename
             </Button>
             <Button variant="ghost" onClick={() => setRenaming(null)}>
               Cancel
@@ -1873,11 +1876,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
               variant="primary"
               disabled={duplicating.trim().length === 0}
               onClick={() => {
-                if (worldId) duplicateSheet(worldId, sheetPath, duplicating.trim());
-                setDuplicating(null);
+                if (worldId) lifecycle.track(duplicateSheet(worldId, sheetPath, duplicating.trim()));
               }}
             >
-              Stage duplicate
+              Duplicate
             </Button>
             <Button variant="ghost" onClick={() => setDuplicating(null)}>
               Cancel
@@ -1885,6 +1887,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           </div>
         </Card>
       )}
+      <SingleActFeedback
+        result={lifecycle.result}
+        undoLabel={
+          lifecycle.result?.operation === "sheet-duplicate" || lifecycle.result?.operation === "guest-promotion"
+            ? "Retire it"
+            : "Undo"
+        }
+        onUndo={lifecycle.undo}
+      />
       {staged.map((p) => (
         <ConnectedProposalPanel key={p.proposal.id} staged={p} />
       ))}
@@ -3027,6 +3038,7 @@ function NewSheetScreen({
   const [tab, setTab] = useState<"sentence" | "image" | "duplicate">("sentence");
   const [copyName, setCopyName] = useState("");
   const [copySource, setCopySource] = useState<string | null>(null);
+  const duplicate = useSingleAct();
   const harnessReady = state?.app.health.harness.status === "healthy";
   const characters = world?.sheets.filter((s) => s.type === "character" && !s.retired) ?? [];
   const listPath = sheetType === "character" ? "cast" : `${sheetType}s`;
@@ -3180,8 +3192,7 @@ function NewSheetScreen({
                     disabled={!worldId || copySource === null || copyName.trim().length === 0}
                     onClick={() => {
                       if (!worldId || !copySource) return;
-                      duplicateSheet(worldId, `characters/${copySource}.md`, copyName.trim());
-                      navigate(`/w/${worldId}/${listPath}`);
+                      duplicate.track(duplicateSheet(worldId, `characters/${copySource}.md`, copyName.trim()));
                     }}
                   >
                     Duplicate as sketch
@@ -3190,6 +3201,7 @@ function NewSheetScreen({
                   draftCta
                 )}
               </div>
+              <SingleActFeedback result={duplicate.result} undoLabel="Retire copy" onUndo={duplicate.undo} />
             </div>
           </div>
         </div>
@@ -3284,6 +3296,65 @@ export const NewLocationScreen = () => (
 );
 
 // ---- Canon -----------------------------------------------------------------
+
+function useCanonCandidateCheck(
+  worldId: string | undefined,
+  title: string,
+  statement: string,
+  excludeEntryId?: string,
+  enabled = true,
+) {
+  const key = `${title.trim()}\u0000${statement.trim()}\u0000${excludeEntryId ?? ""}`;
+  const pending = useRef<{ requestId: string; key: string } | null>(null);
+  const [answer, setAnswer] = useState<{ key: string; candidates: Array<{ entryId: string; title: string; statement: string }> } | null>(null);
+  useEffect(
+    () =>
+      subscribeCanonContradictions((result) => {
+        if (result.requestId !== pending.current?.requestId) return;
+        setAnswer({ key: pending.current.key, candidates: result.candidates });
+        pending.current = null;
+      }),
+    [],
+  );
+  useEffect(() => {
+    pending.current = null;
+    setAnswer(null);
+    if (!enabled || !worldId || title.trim() === "" || statement.trim() === "") return;
+    const timer = setTimeout(() => {
+      const requestId = requestCanonContradictions(worldId, title.trim(), statement.trim(), excludeEntryId);
+      pending.current = requestId === null ? null : { requestId, key };
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [enabled, worldId, key]);
+  return {
+    checked: answer?.key === key,
+    candidates: answer?.key === key ? answer.candidates : [],
+  };
+}
+
+function CanonCandidates({
+  checked,
+  candidates,
+}: {
+  checked: boolean;
+  candidates: Array<{ entryId: string; title: string; statement: string }>;
+}) {
+  return (
+    <div className="fy-draftcard">
+      <div style={{ font: "600 13px var(--font-sans)" }}>Contradiction candidates · advisory</div>
+      {!checked ? (
+        <div className="fy-mono">Candidates appear here as you write. This check never blocks acceptance.</div>
+      ) : candidates.length === 0 ? (
+        <div className="fy-mono">No overlapping canon found. This check never blocks acceptance.</div>
+      ) : candidates.map((candidate) => (
+        <div key={candidate.entryId} className="fy-listrow">
+          <span className="fy-mono">{candidate.entryId}</span>
+          <span className="fy-listrow__text">{candidate.title} · {candidate.statement}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** A grounded answer or a refusal with receipts (SPEC-006 §2.6–§2.7). */
 function AskOutcome({
@@ -3596,6 +3667,8 @@ export function CanonEntryScreen() {
   const refs = useCanonRefs();
   const [amending, setAmending] = useState(false);
   const [statement, setStatement] = useState("");
+  const amendment = useSingleAct();
+  const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, amending);
   const { talk: talkAbout, starting: talkStarting } = useTalkItThrough(worldId);
   /**
    * "Propose a change" is the direct route and stays the primary one. This is for the case the
@@ -3761,21 +3834,22 @@ export function CanonEntryScreen() {
           <div className="fy-draftcard">
             <div className="fy-fieldlabel">Amended statement</div>
             <Textarea value={statement} onChange={(e) => setStatement(e.target.value)} />
+            <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <Button
                 variant="primary"
                 disabled={statement.trim().length === 0 || statement.trim() === entry.body.trim()}
                 onClick={() => {
-                  stageAmendmentMsg(worldId, entry.id, statement.trim());
-                  setAmending(false);
+                  amendment.track(stageAmendmentMsg(worldId, entry.id, statement.trim()));
                 }}
               >
-                Stage amendment
+                Accept amendment
               </Button>
               <Button variant="ghost" onClick={() => setAmending(false)}>
                 Cancel
               </Button>
             </div>
+            <SingleActFeedback result={amendment.result} undoLabel="Restore previous version" onUndo={amendment.undo} />
           </div>
         )}
         <div style={{ flex: 1, minHeight: 16 }} />
@@ -3825,6 +3899,7 @@ export function CanonThreadScreen() {
   const { state } = useStore();
   const [resolvedType, setResolvedType] = useState<(typeof SETTLE_TYPES)[number]>("lore");
   const [statement, setStatement] = useState("");
+  const settlement = useSingleAct();
   const [message, setMessage] = useState("");
   const harnessReady = state?.app.health.harness.status === "healthy";
   // What has been attached here this session. Dismissing a chip stops the conversation
@@ -4023,11 +4098,10 @@ export function CanonThreadScreen() {
             disabled={!entry || !worldId || statement.trim().length === 0}
             onClick={() => {
               if (!entry || !worldId) return;
-              settleThread(worldId, entry.id, resolvedType, statement.trim());
-              navigate(`/w/${worldId}/canon/${entry.id}`);
+              settlement.track(settleThread(worldId, entry.id, resolvedType, statement.trim()));
             }}
           >
-            Stage settlement · close the thread
+            Settle thread
           </Button>
           <div
             style={{
@@ -4036,8 +4110,9 @@ export function CanonThreadScreen() {
               textAlign: "center",
             }}
           >
-            Nothing changes until you accept the staged proposal. Then the canon revision moves once.
+            This press accepts the settlement. The canon revision moves once.
           </div>
+          <SingleActFeedback result={settlement.result} undoLabel="Reopen thread" onUndo={settlement.undo} />
         </div>
       </div>
     </div>
@@ -4053,6 +4128,8 @@ export function NewCanonScreen() {
   const [entryType, setEntryType] = useState<(typeof SETTLE_TYPES)[number]>("rule");
   const [title, setTitle] = useState("");
   const [statement, setStatement] = useState(seed ?? "");
+  const creation = useSingleAct();
+  const candidates = useCanonCandidateCheck(worldId, title, statement);
   const nextId = world ? `CANON-${String(world.meta.nextCanonId).padStart(3, "0")}` : "CANON-…";
   return (
     <div className="fy-gate" data-screen="new-canon">
@@ -4123,15 +4200,7 @@ export function NewCanonScreen() {
             {statement.trim() || "The statement appears here as you write it."}
           </div>
         </div>
-        <div className="fy-draftcard">
-          <div style={{ font: "600 13px var(--font-sans)" }}>Ripples</div>
-          <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
-            <span className="fy-ripplerow">
-              <span className="fy-dot fy-dot--sketch" />
-              contradiction candidates appear on the proposal as an aid · nothing blocks
-            </span>
-          </div>
-        </div>
+        <CanonCandidates checked={candidates.checked} candidates={candidates.candidates} />
         <div style={{ flex: 1, minHeight: 16 }} />
         <div style={{ display: "grid", gap: 8 }}>
           <Button
@@ -4139,12 +4208,12 @@ export function NewCanonScreen() {
             disabled={!worldId || title.trim().length === 0 || statement.trim().length === 0}
             onClick={() => {
               if (!worldId) return;
-              stageEntryMsg(worldId, entryType, title.trim(), statement.trim());
-              navigate(`/w/${worldId}/canon`);
+              creation.track(stageEntryMsg(worldId, entryType, title.trim(), statement.trim()));
             }}
           >
-            Add as proposed · {nextId}
+            Add to canon · {nextId}
           </Button>
+          <SingleActFeedback result={creation.result} undoLabel="Retire entry" onUndo={creation.undo} />
           <Button variant="ghost" onClick={() => navigate(`/w/${worldId}/canon`)}>
             Discard · nothing saved
           </Button>

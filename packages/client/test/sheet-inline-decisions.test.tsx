@@ -280,3 +280,137 @@ describe("the initiating sheet form owns its result", () => {
     }
   });
 });
+
+describe("remaining single-act controls own their result", () => {
+  it("reports a sheet lifecycle refusal, then exposes authoritative ripples and its inverse", async () => {
+    const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest`, stateWith([]));
+    try {
+      await act(async () => button(mounted.container, "Unlock").click());
+      const first = mounted.messages.find(
+        (candidate): candidate is Extract<ClientMessage, { kind: "set-sheet-status" }> =>
+          candidate.kind === "set-sheet-status",
+      );
+      assert.ok(first);
+      await act(async () => {
+        __handleFrameForTest({
+          kind: "event",
+          seq: 12,
+          event: {
+            at: "2026-09-03T12:01:00Z",
+            type: "single-act.result",
+            requestId: first.requestId,
+            worldId: WORLD_ID,
+            operation: "sheet-status",
+            path: SHEET_PATH,
+            disposition: "refused",
+            reason: "The sheet changed underneath this press.",
+          },
+        });
+      });
+      assert.match(mounted.container.textContent ?? "", /The sheet changed underneath this press/);
+      await act(async () => button(mounted.container, "Dismiss").click());
+      assert.doesNotMatch(mounted.container.textContent ?? "", /The sheet changed underneath this press/);
+
+      await act(async () => button(mounted.container, "Unlock").click());
+      const second = mounted.messages.filter(
+        (candidate): candidate is Extract<ClientMessage, { kind: "set-sheet-status" }> =>
+          candidate.kind === "set-sheet-status",
+      )[1];
+      assert.ok(second);
+      await act(async () => {
+        __handleFrameForTest({
+          kind: "event",
+          seq: 13,
+          event: {
+            at: "2026-09-03T12:02:00Z",
+            type: "single-act.result",
+            requestId: second.requestId,
+            worldId: WORLD_ID,
+            operation: "sheet-status",
+            path: SHEET_PATH,
+            disposition: "accepted",
+            ripples: [{ kind: "owning-canon-rules", summary: "Two citations now predate this lock", targets: ["CANON-002"] }],
+            undo: { kind: "set-sheet-status", path: SHEET_PATH, status: "locked" },
+          },
+        });
+      });
+      assert.match(mounted.container.textContent ?? "", /Two citations now predate this lock/);
+      await act(async () => button(mounted.container, "Undo").click());
+      assert.ok(
+        mounted.messages.some(
+          (candidate) =>
+            candidate.kind === "undo-single-act" &&
+            candidate.operation === "sheet-status" &&
+            candidate.undo.kind === "set-sheet-status" &&
+            candidate.undo.status === "locked",
+        ),
+      );
+    } finally {
+      await unmount(mounted.root, mounted.container);
+    }
+  });
+
+  it("shows canon contradiction candidates before a non-blocking submit and preserves refused input", async () => {
+    const mounted = await mount(`/w/${WORLD_ID}/canon/new`, stateWith([]));
+    try {
+      const title = mounted.container.querySelector<HTMLInputElement>('input[placeholder="Tide-calling"]');
+      const statement = mounted.container.querySelector<HTMLTextAreaElement>('textarea[placeholder^="A caller cannot"]');
+      assert.ok(title);
+      assert.ok(statement);
+      await typeInto(title, "The answering bell");
+      await typeInto(statement, "The bell answers only at slack water.");
+
+      const submit = button(mounted.container, "Add to canon · CANON-045");
+      assert.equal(submit.disabled, false, "the advisory lookup never blocks acceptance");
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 175)));
+      const query = mounted.messages.find(
+        (candidate): candidate is Extract<ClientMessage, { kind: "canon-contradictions" }> =>
+          candidate.kind === "canon-contradictions",
+      );
+      assert.ok(query);
+      await act(async () => {
+        __handleFrameForTest({
+          kind: "event",
+          seq: 14,
+          event: {
+            at: "2026-09-03T12:03:00Z",
+            type: "canon.contradictions",
+            requestId: query.requestId,
+            worldId: WORLD_ID,
+            candidates: [{ entryId: "CANON-002", title: "Tide-calling", statement: "A caller must stand in the tide." }],
+          },
+        });
+      });
+      assert.match(mounted.container.textContent ?? "", /CANON-002/);
+      assert.match(mounted.container.textContent ?? "", /A caller must stand in the tide/);
+
+      await act(async () => submit.click());
+      const command = mounted.messages.find(
+        (candidate): candidate is Extract<ClientMessage, { kind: "stage-canon-entry" }> =>
+          candidate.kind === "stage-canon-entry",
+      );
+      assert.ok(command);
+      await act(async () => {
+        __handleFrameForTest({
+          kind: "event",
+          seq: 15,
+          event: {
+            at: "2026-09-03T12:04:00Z",
+            type: "single-act.result",
+            requestId: command.requestId,
+            worldId: WORLD_ID,
+            operation: "canon-create",
+            path: "canon/CANON-045.md",
+            disposition: "refused",
+            reason: "CANON-045 was reserved by another press.",
+          },
+        });
+      });
+      assert.match(mounted.container.textContent ?? "", /CANON-045 was reserved by another press/);
+      assert.equal(title.value, "The answering bell");
+      assert.equal(statement.value, "The bell answers only at slack water.");
+    } finally {
+      await unmount(mounted.root, mounted.container);
+    }
+  });
+});

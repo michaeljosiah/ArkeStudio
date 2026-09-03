@@ -14,6 +14,7 @@ import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
 import { useBlockDigests } from "./storyboard.js";
 import { sceneIsComplete } from "./scene-workspace/completion.js";
@@ -557,6 +558,7 @@ export function EpisodeDetailScreen() {
   const { worldId, prodId, episodeId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const edit = useSingleAct();
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
   if (!production || !episode) {
     return (
@@ -641,10 +643,10 @@ export function EpisodeDetailScreen() {
                 className="fy-linkbtn"
                 onClick={() => {
                   if (!worldId || !prodId) return;
-                  proposeEpisode(worldId, prodId, {
+                  edit.track(proposeEpisode(worldId, prodId, {
                     episodeId: episode.id,
                     scenes: [...episode.scenes, scene.id],
-                  });
+                  }));
                 }}
               >
                 add to this episode
@@ -653,6 +655,7 @@ export function EpisodeDetailScreen() {
           ))}
         </div>
       )}
+      <SingleActFeedback result={edit.result} undoLabel="Restore episode" onUndo={edit.undo} />
     </div>
       <EpisodeDock episode={episode} />
     </div>

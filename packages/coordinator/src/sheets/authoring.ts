@@ -273,8 +273,8 @@ export async function stageSheetStatus(
 ): Promise<Proposal> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
-  const doc = MarkdownFile.parse(live);
-  doc.setData({ status: input.status });
+  const content = sheetStatusContent(live, input.status);
+  const doc = MarkdownFile.parse(content);
   return gate.stage({
     kind: "sheet-edit",
     summary:
@@ -282,7 +282,7 @@ export async function stageSheetStatus(
         ? `Lock ${String(doc.data["name"])} to canon`
         : `Unlock ${String(doc.data["name"])} — everything citing it did so as settled`,
     source: "form",
-    targets: [{ path: input.path, content: doc.serialize() }],
+    targets: [{ path: input.path, content }],
   });
 }
 
@@ -296,12 +296,12 @@ export async function stageSheetRename(
   if (live === null) throw new Error(`${input.path} does not exist`);
   const doc = MarkdownFile.parse(live);
   const oldName = String(doc.data["name"]);
-  doc.setData({ name: input.name });
+  const content = sheetRenameContent(live, input.name);
   return gate.stage({
     kind: "sheet-edit",
     summary: `Rename ${oldName} to ${input.name} — the id and every citation stay`,
     source: "form",
-    targets: [{ path: input.path, content: doc.serialize() }],
+    targets: [{ path: input.path, content }],
   });
 }
 
@@ -332,16 +332,34 @@ export async function stageGuestPromotion(
   }
   // Deleting the key, not setting it empty: absent is what "the world owns this" means, and an
   // empty string would read as a guest of a production with no name everywhere downstream.
-  const next = { ...doc.data };
-  delete next["production"];
-  doc.data = next;
-  doc.setData({});
+  const content = guestPromotionContent(live);
   return gate.stage({
     kind: "sheet-edit",
     summary: `Promote ${String(doc.data["name"])} out of ${owner} and into the world — the id and every citation stay`,
     source: "form",
-    targets: [{ path: input.path, content: doc.serialize() }],
+    targets: [{ path: input.path, content }],
   });
+}
+
+export function sheetStatusContent(content: string, status: "sketch" | "locked"): string {
+  const doc = MarkdownFile.parse(content);
+  doc.setData({ status });
+  return doc.serialize();
+}
+
+export function sheetRenameContent(content: string, name: string): string {
+  const doc = MarkdownFile.parse(content);
+  doc.setData({ name: name.trim() });
+  return doc.serialize();
+}
+
+export function guestPromotionContent(content: string): string {
+  const doc = MarkdownFile.parse(content);
+  const next = { ...doc.data };
+  delete next["production"];
+  doc.data = next;
+  doc.setData({});
+  return doc.serialize();
 }
 
 /** Voice assignment as a gated change (R-15): versions and ripples like any other edit. */

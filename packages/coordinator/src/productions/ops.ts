@@ -270,6 +270,12 @@ export async function proposeStoryOverview(
   return { proposalId: proposal.id, path };
 }
 
+/** Merge only submitted overview fields over an already-present draft. */
+export function storyOverviewFormContent(content: string, overview: Omit<StoryOverview, "version">): string {
+  const current = StoryOverviewSchema.parse(JSON.parse(content));
+  return JSON.stringify(StoryOverviewSchema.parse({ ...current, ...overview }), null, 2) + "\n";
+}
+
 /**
  * Stage the season record as a season-edit proposal (SPEC-023 R-10, issue #397). The draft is
  * merged onto what is live; the gate validates, reviews field by field, and versions on accept.
@@ -297,6 +303,12 @@ export async function proposeSeason(
     targets: [{ path, content }],
   });
   return { proposalId: proposal.id, path };
+}
+
+/** Merge only submitted season fields over an already-present draft. */
+export function seasonFormContent(content: string, season: Omit<Season, "version">): string {
+  const current = SeasonSchema.parse(JSON.parse(content));
+  return JSON.stringify(SeasonSchema.parse({ ...current, ...season }), null, 2) + "\n";
 }
 
 /**
@@ -370,6 +382,15 @@ export async function proposeEpisode(
     targets: [{ path, content }],
   });
   return { proposalId: proposal.id, path };
+}
+
+/** Merge only submitted episode fields over an already-present draft. */
+export function episodeFormContent(
+  content: string,
+  episode: Partial<Omit<Episode, "id" | "version">> & { title?: string },
+): string {
+  const current = EpisodeSchema.parse(JSON.parse(content));
+  return JSON.stringify(EpisodeSchema.parse({ ...current, ...episode }), null, 2) + "\n";
 }
 
 /** Reorder episodes: order fields only — no rename, no version cut (SPEC-023 R-12). */

@@ -68,13 +68,13 @@ export async function stageCanonAmendment(
 ): Promise<Proposal> {
   const path = `canon/${input.entryId}.md`;
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  const doc = MarkdownFile.parse(live);
-  doc.setBody(input.statement.trim());
+  const content = amendCanonContent(live, input.statement);
+  const doc = MarkdownFile.parse(content);
   return gate.stage({
     kind: "canon-edit",
     summary: `Amend ${input.entryId}: ${String(doc.data["title"] ?? "")}`,
     source: "form",
-    targets: [{ path, content: doc.serialize() }],
+    targets: [{ path, content }],
   });
 }
 
@@ -132,13 +132,27 @@ export async function stageThreadSettlement(
 ): Promise<Proposal> {
   const path = `canon/${input.entryId}.md`;
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  const doc = MarkdownFile.parse(live);
-  doc.setData({ type: input.resolvedType, status: "settled" });
-  doc.setBody(input.statement.trim());
+  const content = settleThreadContent(live, input.resolvedType, input.statement);
+  const doc = MarkdownFile.parse(content);
   return gate.stage({
     kind: "canon-settle",
     summary: `Settle ${input.entryId}: ${String(doc.data["title"] ?? "")}`,
     source: "form",
-    targets: [{ path, content: doc.serialize() }],
+    targets: [{ path, content }],
   });
+}
+
+/** Apply only the form-authored amendment to live or already-proposed canon bytes. */
+export function amendCanonContent(content: string, statement: string): string {
+  const doc = MarkdownFile.parse(content);
+  doc.setBody(statement.trim());
+  return doc.serialize();
+}
+
+/** Apply a direct settlement without disturbing any unread title, links, or other draft content. */
+export function settleThreadContent(content: string, resolvedType: string, statement: string): string {
+  const doc = MarkdownFile.parse(content);
+  doc.setData({ type: resolvedType, status: "settled" });
+  doc.setBody(statement.trim());
+  return doc.serialize();
 }
