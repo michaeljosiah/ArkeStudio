@@ -2005,8 +2005,19 @@ function TakesView({
   onContact: (shotId: string | null) => void;
 }) {
   const { world, production } = useProduction(worldId, prodId);
-  const all = production?.scenes.flatMap((s) => orderedShots(s)) ?? [];
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
+  const [showAllScenes, setShowAllScenes] = useState(false);
+  const sceneById = new Map(production?.scenes.map((candidate) => [candidate.id, candidate]) ?? []);
+  const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
+  const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId) ?? null;
+  const scenes = selectedEpisode === null
+    ? production?.scenes ?? []
+    : selectedEpisode.scenes.flatMap((id) => {
+        const candidate = sceneById.get(id);
+        return candidate === undefined ? [] : [candidate];
+      });
+  const all = scenes.flatMap((candidate) => orderedShots(candidate));
   /*
    * The shot the storyboard sent, if it sent one (found by driving: `Generate frame` on shot 14
    * opened the workspace on shot 4, because the press asked for the workspace rather than for a
@@ -2018,15 +2029,10 @@ function TakesView({
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
   const scene = found === null ? null : legacySceneView(found);
   /*
-   * The chips are this scene's shots, not the production's (found by driving: a production with
-   * two scenes drew three chips, two of them reading "Shot 1", because a shot's number is
-   * scene-local and flattening the production makes it ambiguous). "Every shot" means every shot
-   * of the thing you are looking at, which is what the frame draws.
+   * The ordinary row stays scene-local: shot numbers repeat between scenes. `All` is the explicit
+   * exception, scoped first by the episode row when one is selected.
    */
-  const shots = found === null ? [] : orderedShots(found);
-  /* Every scene, one chip away (review 2026-08-22): the first cut could only reach the first
-     scene's shots from the rail, and a three-scene production had no way to its second. */
-  const scenes = production?.scenes ?? [];
+  const shots = showAllScenes ? all : found === null ? [] : orderedShots(found);
   /** Only takes with resolvable pixels, plus anything still in flight. */
   const takes = production && shotId
     ? takesForShot(production, shotId).filter(
@@ -2070,16 +2076,130 @@ function TakesView({
   return (
     <div className="fy-arkewrap">
       <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
-        <div className="fy-h1row">
-          <h1 className="fy-h1">Shot {shot.number}</h1>
-          <span className="fy-h1row__meta">
-            {shot.title} · {seconds(shot.durationSec)}
-          </span>
-          <span className="fy-h1row__push" />
-          <span className="fy-mono">
-            {acceptedCount} of {shots.length} accepted
-          </span>
-        </div>
+        <header className="fy-takes__head">
+          <nav className="fy-takes__filters" aria-label="Take filters">
+            {episodes.length > 0 && (
+              <div className="fy-takes__filter fy-takes__filter--episode">
+                <span className="fy-takes__filter-label">EPISODE</span>
+                <div className="fy-takechips" role="group" aria-label="Episode">
+                  <button
+                    type="button"
+                    disabled={generating}
+                    aria-pressed={selectedEpisodeId === null}
+                    className={cx("fy-takechip", selectedEpisodeId === null && "fy-takechip--on")}
+                    onClick={() => {
+                      setSelectedEpisodeId(null);
+                      setShowAllScenes(false);
+                      setPickedId(null);
+                    }}
+                  >
+                    All
+                  </button>
+                  {episodes.map((episode) => (
+                    <button
+                      key={episode.id}
+                      type="button"
+                      disabled={generating}
+                      aria-pressed={episode.id === selectedEpisodeId}
+                      className={cx("fy-takechip", episode.id === selectedEpisodeId && "fy-takechip--on")}
+                      title={episode.title}
+                      onClick={() => {
+                        const nextScene = episode.scenes
+                          .map((id) => sceneById.get(id))
+                          .find((candidate) => candidate !== undefined && orderedShots(candidate).length > 0);
+                        setSelectedEpisodeId(episode.id);
+                        setShowAllScenes(false);
+                        setSelectedShotId(nextScene === undefined ? null : orderedShots(nextScene)[0]?.id ?? null);
+                        setPickedId(null);
+                      }}
+                    >
+                      {String(episode.order).padStart(2, "0")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {scenes.length > 1 && (
+              <div className="fy-takes__filter">
+                <span className="fy-takes__filter-label">SCENE</span>
+                <div className="fy-takechips" role="group" aria-label="Scene">
+                  <button
+                    type="button"
+                    disabled={generating}
+                    aria-pressed={showAllScenes}
+                    className={cx("fy-takechip", showAllScenes && "fy-takechip--on")}
+                    onClick={() => {
+                      setShowAllScenes(true);
+                      setPickedId(null);
+                    }}
+                  >
+                    All
+                  </button>
+                  {scenes.map((candidate) => (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      disabled={generating}
+                      aria-pressed={!showAllScenes && candidate.id === scene.id}
+                      className={cx(
+                        "fy-takechip",
+                        "fy-takechip--scene",
+                        !showAllScenes && candidate.id === scene.id && "fy-takechip--on",
+                      )}
+                      onClick={() => {
+                        setShowAllScenes(false);
+                        setSelectedShotId(orderedShots(candidate)[0]?.id ?? null);
+                        setPickedId(null);
+                      }}
+                    >
+                      {candidate.number} · {candidate.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="fy-takes__filter">
+              <span className="fy-takes__filter-label">SHOT</span>
+              <div className="fy-takechips" role="group" aria-label="Shot">
+                {shots.map((candidate) => {
+                  const done = acceptedTakeId(production, candidate.id) !== null;
+                  const has = coveredShotIds.has(candidate.id);
+                  return (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      disabled={generating}
+                      aria-pressed={candidate.id === shotId}
+                      className={cx("fy-takechip", candidate.id === shotId && "fy-takechip--on")}
+                      onClick={() => {
+                        setSelectedShotId(candidate.id);
+                        setPickedId(null);
+                      }}
+                    >
+                      <span
+                        className="fy-dot"
+                        style={{
+                          background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)",
+                        }}
+                      />
+                      Shot {candidate.number}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
+          <div className="fy-h1row">
+            <h1 className="fy-h1">Shot {shot.number}</h1>
+            <span className="fy-h1row__meta">
+              {shot.title} · {seconds(shot.durationSec)}
+            </span>
+            <span className="fy-h1row__push" />
+            <span className="fy-mono">
+              {acceptedCount} of {shots.length} accepted
+            </span>
+          </div>
+        </header>
         {takes.length === 0 ? (
           <EmptyState
             title="No takes yet"
@@ -2120,59 +2240,6 @@ function TakesView({
             })}
           </div>
         )}
-        {scenes.length > 1 && (
-          <>
-            <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>
-              SCENES
-            </div>
-            <div className="fy-takechips">
-              {scenes.map((sc) => (
-                <button
-                  key={sc.id}
-                  type="button"
-                  disabled={generating}
-                  className={cx("fy-takechip", sc.id === scene.id && "fy-takechip--on")}
-                  onClick={() => {
-                    setSelectedShotId(orderedShots(sc)[0]?.id ?? null);
-                    setPickedId(null);
-                  }}
-                >
-                  Scene {sc.number}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        {/* Every shot, one chip away — where you are in the scene, said out loud (turn 102). */}
-        <div className="fy-mono" style={{ letterSpacing: ".08em", marginTop: 8 }}>
-          EVERY SHOT
-        </div>
-        <div className="fy-takechips">
-          {shots.map((s) => {
-            const done = acceptedTakeId(production, s.id) !== null;
-            const has = coveredShotIds.has(s.id);
-            return (
-              <button
-                key={s.id}
-                type="button"
-                disabled={generating}
-                className={cx("fy-takechip", s.id === shotId && "fy-takechip--on")}
-                onClick={() => {
-                  setSelectedShotId(s.id);
-                  setPickedId(null);
-                }}
-              >
-                <span
-                  className="fy-dot"
-                  style={{
-                    background: done ? "var(--foreground)" : has ? "var(--warning)" : "var(--neutral-300)",
-                  }}
-                />
-                Shot {s.number}
-              </button>
-            );
-          })}
-        </div>
         <div className="fy-takes__foot">
           {/* The two verdicts and the one thing that spends (review 2026-08-22): the first cut
               of this view had no way to generate and no way to reject, so "Generate frame" from

@@ -48,6 +48,25 @@ function withSaltlight(mutate: (p: Production) => Production): ClientState {
   };
 }
 
+function withSecondScene(p: Production): Production {
+  return {
+    ...p,
+    sceneFiles: { ...p.sceneFiles, sc_05: "05-the-lamps-hold" },
+    scenes: [
+      ...p.scenes,
+      {
+        id: "sc_05",
+        number: 5,
+        slug: "the-lamps-hold",
+        title: "The lamps hold",
+        status: "draft",
+        version: 1,
+        shots: [{ id: "sh_20", number: 20, title: "The lamps hold", description: "They hold." }],
+      },
+    ],
+  };
+}
+
 describe("the takes, watched (turn 102c)", () => {
   it("opens on the takes with the accepted one marked, and the foot can act", () => {
     const html = render(FIXTURE_STATE, GENERATE);
@@ -72,29 +91,32 @@ describe("the takes, watched (turn 102c)", () => {
   });
 
   it("chips are the scene's shots; a second scene is a chip of its own, not a duplicate number", () => {
-    const two = withSaltlight((p) => ({
-      ...p,
-      sceneFiles: { ...p.sceneFiles, sc_05: "05-the-lamps-hold" },
-      scenes: [
-        ...p.scenes,
-        {
-          id: "sc_05",
-          number: 5,
-          slug: "the-lamps-hold",
-          title: "The lamps hold",
-          status: "draft",
-          version: 1,
-          shots: [{ id: "sh_20", number: 20, title: "The lamps hold", description: "They hold." }],
-        },
-      ],
-    }));
+    const two = withSaltlight(withSecondScene);
     const html = render(two, GENERATE);
-    assert.ok(html.includes("SCENES"), "more than one scene, so the scene chips appear");
-    assert.ok(html.includes("Scene 4") && html.includes("Scene 5"), "every scene one chip away");
+    assert.ok(html.includes('aria-label="Scene"'), "more than one scene, so the scene chips appear");
+    assert.ok(html.includes("4 · The verse rises") && html.includes("5 · The lamps hold"), "scene names say what each filter contains");
     assert.ok(!html.includes("Shot 20"), "the shot chips stay scene-local — no flattened duplicates");
 
     const one = render(FIXTURE_STATE, GENERATE);
-    assert.ok(!one.includes("SCENES"), "one scene needs no scene chips");
+    assert.ok(!one.includes('aria-label="Scene"'), "one scene needs no scene chips");
+  });
+
+  it("puts narrowing filters before the current shot and adds episodes only to a series (#734)", () => {
+    const episodic = withSaltlight((p) => ({
+      ...withSecondScene(p),
+      episodes: [
+        { id: "ep_first", version: 1, order: 1, title: "First", scenes: ["sc_04"] },
+        { id: "ep_second", version: 1, order: 2, title: "Second", scenes: ["sc_05"] },
+      ],
+      episodeFiles: { ep_first: "01-first", ep_second: "02-second" },
+    }));
+    const html = render(episodic, GENERATE);
+    const filters = html.indexOf('aria-label="Take filters"');
+    const heading = html.indexOf('<h1 class="fy-h1">');
+    const grid = html.indexOf('class="fy-takegrid"');
+    assert.ok(filters >= 0 && filters < heading && heading < grid, "filters, then current shot, then takes");
+    assert.ok(html.includes('aria-label="Episode"') && html.includes(">01</button>") && html.includes(">02</button>"));
+    assert.ok(!render(FIXTURE_STATE, GENERATE).includes('fy-takes__filter--episode'), "a film has no empty episode row");
   });
 
   it("never guesses the mark (review 2026-08-22): an acceptance on a hidden record marks nothing", () => {
