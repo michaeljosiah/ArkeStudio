@@ -6471,6 +6471,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-takes__episode-empty { padding: 12px; color: var(--muted-foreground); font: 400 10.5px var(--font-sans); }
 .fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .fy-take {
+  position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -6486,6 +6487,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-take:hover { border-color: var(--neutral-400); }
 .fy-take--on { border: 1.5px solid var(--foreground); padding: 8.5px; }
+.fy-take__pick { position: absolute; z-index: 0; inset: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
+.fy-take__pick:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-take__frame {
   position: relative;
   display: block;
@@ -6496,8 +6499,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1;
+  pointer-events: none;
 }
-.fy-take__foot { display: flex; align-items: center; gap: 8px; padding: 0 2px; }
+.fy-take__video { width: 100%; height: 100%; object-fit: contain; background: var(--media-overlay-bg); pointer-events: auto; }
+.fy-take__media-failed { position: absolute; bottom: 7px; left: 8px; padding: 3px 6px; border-radius: 5px; background: color-mix(in srgb, var(--background) 88%, transparent); color: var(--muted-foreground); font: 500 9px var(--font-mono); }
+.fy-take__foot { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 0 2px; pointer-events: none; }
 .fy-take__name { font: 600 12.5px var(--font-sans); }
 .fy-takechips { display: flex; gap: 9px; flex-wrap: wrap; }
 .fy-takechip {

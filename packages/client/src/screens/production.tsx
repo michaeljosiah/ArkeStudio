@@ -130,7 +130,8 @@ import { runtimeSeconds, seconds, usd } from "../lib/format.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
-import { posterize, posterNameFor } from "../lib/poster.js";
+import { isVideoMedia, posterize, posterNameFor } from "../lib/poster.js";
+import { playbackSnapshot, togglePlayback } from "../lib/audio.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
 import { mediaTimeFor, videoTimeFor, spanAt, spineSpans, type PlaybackSpan } from "../lib/cut-playback.js";
@@ -244,14 +245,27 @@ export function Wave({ seed, width = 290, height = 16 }: { seed: string; width?:
   );
 }
 
+/** A take's playable bytes and poster, resolved through a segment's backing pass when needed. */
+export function takeMediaView(
+  production: Pick<ProductionBundle, "meta" | "takes">,
+  take: ProductionBundle["takes"][number],
+): { sourcePath: string; posterPath: string; isVideo: boolean } | null {
+  const mediaTake = mediaTakeFor(production, take);
+  if (mediaTake === null) return null;
+  const root = `productions/${production.meta.id}/takes/${mediaTake.id}`;
+  return {
+    sourcePath: `${root}/${mediaTake.media}`,
+    posterPath: `${root}/${posterNameFor(mediaTake.media)}`,
+    isVideo: isVideoMedia(mediaTake.media),
+  };
+}
+
 /** A take's poster image, on the shared convention (lib/poster.ts). */
 export function takeMediaPath(
   production: Pick<ProductionBundle, "meta" | "takes">,
   take: ProductionBundle["takes"][number],
 ): string | null {
-  const mediaTake = mediaTakeFor(production, take);
-  if (mediaTake === null) return null;
-  return `productions/${production.meta.id}/takes/${mediaTake.id}/${posterNameFor(mediaTake.media)}`;
+  return takeMediaView(production, take)?.posterPath ?? null;
 }
 
 /** The first accepted picture in an episode, derived from its authored scene order. */
@@ -2141,6 +2155,73 @@ function EpisodePicker({
   );
 }
 
+function TakeTileMedia({
+  production,
+  take,
+  number,
+  worldSlug,
+  onPick,
+  onPlay,
+}: {
+  production: ProductionBundle;
+  take: Take;
+  number: number;
+  worldSlug: string | undefined;
+  onPick: () => void;
+  onPlay: (video: HTMLVideoElement) => void;
+}) {
+  const view = takeMediaView(production, take);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [view?.sourcePath]);
+
+  if (view === null) return <span className="fy-mono">running…</span>;
+  if (!view.isVideo || worldSlug === undefined || failed) {
+    return (
+      <>
+        <Portrait worldSlug={worldSlug} path={view.posterPath} label={`Take ${number}`} radius={0} />
+        {failed && <span className="fy-take__media-failed">Could not play video</span>}
+      </>
+    );
+  }
+
+  const keepInsideSegment = (video: HTMLVideoElement) => {
+    const segment = take.segment;
+    if (segment === undefined) return;
+    if (video.currentTime < segment.inSec) {
+      video.currentTime = segment.inSec;
+    } else if (video.currentTime >= segment.outSec) {
+      video.pause();
+      if (video.currentTime !== segment.outSec) video.currentTime = segment.outSec;
+    }
+  };
+  return (
+    <video
+      className="fy-take__video"
+      src={mediaUrl(worldSlug, view.sourcePath)}
+      poster={mediaUrl(worldSlug, view.posterPath)}
+      controls
+      playsInline
+      preload="metadata"
+      aria-label={`Take ${number} video`}
+      onPointerDown={onPick}
+      onLoadedMetadata={(event) => {
+        const segment = take.segment;
+        if (segment !== undefined) event.currentTarget.currentTime = segment.inSec;
+      }}
+      onPlay={(event) => {
+        const segment = take.segment;
+        if (segment !== undefined &&
+            (event.currentTarget.currentTime < segment.inSec || event.currentTarget.currentTime >= segment.outSec)) {
+          event.currentTarget.currentTime = segment.inSec;
+        }
+        onPlay(event.currentTarget);
+      }}
+      onTimeUpdate={(event) => keepInsideSegment(event.currentTarget)}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /**
  * The takes, watched (design turn 102, frame 102c).
  *
@@ -2246,6 +2327,17 @@ function TakesView({
     takes.find((t) => t.id === accepted) ??
     takes[takes.length - 1] ??
     null;
+  const playingTakeVideo = useRef<HTMLVideoElement | null>(null);
+  useEffect(() => () => {
+    playingTakeVideo.current?.pause();
+    playingTakeVideo.current = null;
+  }, [shotId]);
+  const playTake = (video: HTMLVideoElement, takeId: string) => {
+    if (playingTakeVideo.current !== video) playingTakeVideo.current?.pause();
+    playingTakeVideo.current = video;
+    setPickedId(takeId);
+    if (playbackSnapshot().status === "playing") togglePlayback();
+  };
   const acceptedCount = shots.filter(
     (s) => production && acceptedTakeId(production, s.id) !== null,
   ).length;
@@ -2401,25 +2493,27 @@ function TakesView({
         ) : (
           <div className="fy-takegrid">
             {takes.map((t, i) => {
-              const path = takeMediaPath(production, t);
               return (
-                <button
+                <article
                   key={t.id}
-                  type="button"
                   className={cx("fy-take", picked?.id === t.id && "fy-take--on")}
-                  onClick={() => setPickedId(t.id)}
                 >
+                  <button
+                    type="button"
+                    className="fy-take__pick"
+                    aria-label={`Choose Take ${i + 1} for review`}
+                    aria-pressed={picked?.id === t.id}
+                    onClick={() => setPickedId(t.id)}
+                  />
                   <span className="fy-take__frame">
-                    {path ? (
-                      <Portrait worldSlug={world?.meta.slug} path={path} label={`Take ${i + 1}`} radius={0} />
-                    ) : (
-                      <span className="fy-mono">running…</span>
-                    )}
-                    {path && (
-                      <span className="fy-playbtn" aria-hidden style={{ pointerEvents: "none" }}>
-                        <Play size={22} />
-                      </span>
-                    )}
+                    <TakeTileMedia
+                      production={production}
+                      take={t}
+                      number={i + 1}
+                      worldSlug={world?.meta.slug}
+                      onPick={() => setPickedId(t.id)}
+                      onPlay={(video) => playTake(video, t.id)}
+                    />
                   </span>
                   <span className="fy-take__foot">
                     <span className="fy-take__name">Take {i + 1}</span>
@@ -2428,7 +2522,7 @@ function TakesView({
                       {t.id === accepted ? "✓ SELECTED" : seconds(shot.durationSec)}
                     </span>
                   </span>
-                </button>
+                </article>
               );
             })}
           </div>
