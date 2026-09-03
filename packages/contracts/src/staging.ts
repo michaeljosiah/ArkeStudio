@@ -1,4 +1,5 @@
 import type { Shot, ShotStaging, StagingKey } from "./scene.js";
+import { parseAspect } from "./manifest.js";
 
 /**
  * The Stage's pure arithmetic: where a fresh staging puts things, what a key list amounts to in
@@ -10,11 +11,16 @@ import type { Shot, ShotStaging, StagingKey } from "./scene.js";
  * draws (the Stage guide, part 4).
  */
 
-/** Vertical field of view for a lens, on a 24mm-tall frame; the previs cone is the real lens. */
-export function stagingFov(lens: string | undefined): number {
+const SUPER_35_WIDTH_MM = 24.89;
+const SUPER_35_HEIGHT_MM = 18.66;
+
+/** Vertical field of view on a Super 35 gate cropped to the production aspect. */
+export function stagingFov(lens: string | undefined, aspect: string): number {
   const millimetres = Number.parseFloat(/([\d.]+)\s*mm/i.exec(lens ?? "")?.[1] ?? "");
   if (!Number.isFinite(millimetres) || millimetres <= 0) return 34;
-  return Math.max(18, Math.min(82, (2 * Math.atan(12 / millimetres) * 180) / Math.PI));
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  const usedHeight = Math.min(SUPER_35_HEIGHT_MM, SUPER_35_WIDTH_MM / ratio);
+  return (2 * Math.atan(usedHeight / (2 * millimetres)) * 180) / Math.PI;
 }
 
 /** How far back a shot size stands, in metres, measured to the subject. */

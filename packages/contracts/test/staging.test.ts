@@ -53,10 +53,12 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagingMoveWord(truck.keys), "truck");
   });
 
-  it("derives the lens cone from the real lens and never a fixed angle", () => {
-    assert.ok(stagingFov("50mm") < stagingFov("24mm"));
-    assert.equal(stagingFov(undefined), 34);
-    assert.equal(stagingFov("1mm"), 82, "clamped to something the previs can draw");
+  it("derives an unclamped lens cone from a Super 35 gate cropped to the production aspect", () => {
+    const rounded = (lens: string, aspect: string) => Math.round(stagingFov(lens, aspect) * 10) / 10;
+    assert.deepEqual([24, 35, 50, 85, 135].map((mm) => rounded(`${mm}mm`, "16:9")), [32.5, 22.6, 15.9, 9.4, 5.9]);
+    assert.deepEqual([24, 35, 50, 85, 135].map((mm) => rounded(`${mm}mm`, "9:16")), [42.5, 29.9, 21.1, 12.5, 7.9]);
+    assert.equal(stagingFov(undefined, "16:9"), 34);
+    assert.ok(stagingFov("1mm", "16:9") > 160, "a valid extreme lens is not clamped");
   });
 
   it("writes the move as timed beats in metres, with bearings from the subject's own facing", () => {
