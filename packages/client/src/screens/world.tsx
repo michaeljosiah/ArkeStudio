@@ -3711,7 +3711,7 @@ export function CanonEntryScreen() {
   const candidates = useCanonCandidateCheck(worldId, entry?.title ?? "", statement, entry?.id, amending);
   const { talk: talkAbout, starting: talkStarting } = useTalkItThrough(worldId);
   /**
-   * "Propose a change" is the direct route and stays the primary one. This is for the case the
+   * "Amend this entry" is the direct route and stays the primary one. This is for the case the
    * form cannot serve: when what the entry should say is the thing still being worked out.
    */
   const talkThroughEntry = () => {
@@ -3865,8 +3865,10 @@ export function CanonEntryScreen() {
                 </span>
               ))}
             </div>
+            {/* Said as it now happens (issue 747): the amendment is ripple-checked and versioned
+                on the press, so describing a proposal step set up the same wait the button did. */}
             <div className="fy-mono" style={{ marginTop: 10 }}>
-              a change is proposed, ripple-checked, then versioned · same gate as everything else
+              an amendment is ripple-checked, then versioned · the previous version is one undo away
             </div>
           </div>
         )}
@@ -3900,6 +3902,10 @@ export function CanonEntryScreen() {
             </Button>
           ) : (
             <>
+              {/* The door states its act (issue 747, after the same fix on Art direction). What
+                  it opens commits with `Accept amendment` and lands on the press — the coordinator
+                  runs it as a single act, with the previous version one undo away — so "Propose a
+                  change" promised a review step nothing here queues. */}
               <Button
                 variant="primary"
                 onClick={() => {
@@ -3907,7 +3913,7 @@ export function CanonEntryScreen() {
                   setAmending(true);
                 }}
               >
-                Propose a change
+                Amend this entry
               </Button>
               <Button variant="ghost" onClick={talkThroughEntry} disabled={talkStarting}>
                 {talkStarting ? "Starting…" : "Talk it through"}

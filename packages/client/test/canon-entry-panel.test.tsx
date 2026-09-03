@@ -60,3 +60,31 @@ describe("the entry's History panel", () => {
     assert.ok(!render(detail([change("form")], false)).includes("older changes not shown"));
   });
 });
+
+/*
+ * The entry's own controls say what they do (issue 747, after the same fix on Art direction).
+ * `Accept amendment` lands on the press — the coordinator runs it as a single act — so a door
+ * called "Propose a change", and a note promising the change would be proposed first, both set
+ * up a review step nothing here queues.
+ */
+describe("the entry's amendment vocabulary", () => {
+  it("opens the amendment form with a label that matches what committing there does", () => {
+    const html = render(detail([change("form")], false));
+    assert.ok(html.includes("Amend this entry"), "the door says what pressing it does");
+    assert.ok(!html.includes("Propose a change"), "and no longer promises a review that never comes");
+  });
+
+  it("describes the ripple check as the single act it is", () => {
+    const html = render({
+      [ENTRY]: {
+        citedBy: { sheets: [], entries: [], productions: [] },
+        history: [],
+        historyTruncated: false,
+        canonRevision: 4,
+        ripples: [{ kind: "sheet", summary: "Maren Kest cites this", targets: ["sheets/maren-kest.md"] }],
+      },
+    });
+    assert.ok(html.includes("ripple-checked, then versioned"), "the ripple note is still there");
+    assert.ok(!html.includes("a change is proposed"), "but no longer names a step the press skips");
+  });
+});
