@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
-import { frameDispatchFor, PROVIDERS, type ProviderId } from "@arke-studio/contracts";
+import { frameDispatchFor, providerFaultCategory, PROVIDERS, type ProviderId } from "@arke-studio/contracts";
 import { AnthropicClient } from "../src/clients/anthropic.js";
 import { ElevenLabsClient } from "../src/clients/elevenlabs.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
@@ -14,6 +14,7 @@ import { ProviderAuthError, type CommandRunner, type FetchLike, type ProviderTra
 import { KokoroClient } from "../src/clients/kokoro.js";
 import { WhisperCppClient } from "../src/clients/whispercpp.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
+import { jsonRequest } from "../src/clients/http.js";
 
 /** A fetch fake: route → {status, body}. Anything unrouted throws (network unreachable). */
 function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown }>): FetchLike {
@@ -23,6 +24,26 @@ function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown
     return new Response(hit.body !== undefined ? JSON.stringify(hit.body) : "", { status: hit.status });
   };
 }
+
+describe("provider HTTP failures preserve the provider's reason", () => {
+  it("reads a 403 JSON detail before raising the provider fault", async () => {
+    const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";
+    await assert.rejects(
+      jsonRequest(
+        fakeFetch([{ match: /queue\.fal\.run/, status: 403, body: { detail } }]),
+        "fal",
+        "https://queue.fal.run/test",
+        {},
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof ProviderAuthError);
+        assert.equal(error.message, `fal: ${detail} (HTTP 403)`);
+        assert.equal(providerFaultCategory(error.message), "billing");
+        return true;
+      },
+    );
+  });
+});
 
 describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
   it("fal: one key probe answers every gateway capability (R-1)", async () => {
