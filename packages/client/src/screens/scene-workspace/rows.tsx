@@ -16,6 +16,7 @@ import {
   type BenchSessionSummary,
   type ClientMessage,
   type FrameRunState,
+  type Job,
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
@@ -28,8 +29,8 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
 import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./selection.js";
-import { acceptTake, frameRunCommand, importShotFrame } from "../../lib/store.js";
-import { frameRunShotState } from "./frame-run.js";
+import { acceptTake, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
+import { finalizationRetryJobId, frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
 import { Grid2x2, Grip, ImageMark, Lines, More, Plus } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
@@ -106,6 +107,7 @@ export function StoryboardRows({
   onCommand,
   refusalVersion,
   frameRun,
+  jobs,
   worldId,
   onViewBoardSheet,
   onGenerateFrame,
@@ -137,6 +139,7 @@ export function StoryboardRows({
   onCommand: (command: Command) => boolean;
   refusalVersion: number;
   frameRun: FrameRunState | null;
+  jobs: readonly Job[];
   worldId: string;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
   onGenerateFrame: (shotId: string, trigger: HTMLButtonElement) => void;
@@ -265,6 +268,10 @@ export function StoryboardRows({
       >
         {shots.map((shot, index) => {
           const board = boardAt.get(shot.id);
+          const runState = frameRunShotState(frameRun, shot.id);
+          const retryFinalizationId = runState === null || frameRun === null || frameRun.run.mode === "board"
+            ? null
+            : finalizationRetryJobId(frameRun, runState.stepIndex, jobs);
           return (
             <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`}>
               {showBoards && board !== undefined ? (
@@ -357,8 +364,9 @@ export function StoryboardRows({
                   }
                 }}
                 refusalVersion={refusalVersion}
-                runState={frameRunShotState(frameRun, shot.id)}
+                runState={runState}
                 run={frameRun}
+                onRetryFinalization={retryFinalizationId === null ? null : () => retryJobFinalization(retryFinalizationId)}
                 worldId={worldId}
                 onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
                 onEdit={() => onEditShot(shot.id)}
@@ -730,6 +738,7 @@ function Row({
   refusalVersion,
   runState,
   run,
+  onRetryFinalization,
   worldId,
   onGenerateFrame,
   onEdit,
@@ -765,6 +774,7 @@ function Row({
   refusalVersion: number;
   runState: ReturnType<typeof frameRunShotState>;
   run: FrameRunState | null;
+  onRetryFinalization: (() => void) | null;
   worldId: string;
   onGenerateFrame: (trigger: HTMLButtonElement) => void;
   onEdit: () => void;
@@ -1202,6 +1212,7 @@ function Row({
           <FrameState
             state={runState}
             onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)}
+            onRetryFinalization={onRetryFinalization}
           />
         )}
       </div>
@@ -1500,7 +1511,15 @@ function retryForShot(
   return () => frameRunCommand({ kind: "frame-run-retry-step", worldId, productionId, runId: run.run.id, stepIndex: state.stepIndex });
 }
 
-function FrameState({ state, onRetry }: { state: NonNullable<ReturnType<typeof frameRunShotState>>; onRetry: (() => boolean) | null }) {
+function FrameState({
+  state,
+  onRetry,
+  onRetryFinalization,
+}: {
+  state: NonNullable<ReturnType<typeof frameRunShotState>>;
+  onRetry: (() => boolean) | null;
+  onRetryFinalization: (() => void) | null;
+}) {
   if (state.status === "queued" || state.status === "not-enqueued" || state.status === "submitting") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
     return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : "queued"}</div>;
@@ -1513,7 +1532,11 @@ function FrameState({ state, onRetry }: { state: NonNullable<ReturnType<typeof f
     return (
       <div className="fy-swrow__run" data-state="failed" role="status">
         <span>{failureCopy(state)}</span>
-        {onRetry === null ? null : <button type="button" onClick={onRetry}>Retry</button>}
+        {onRetryFinalization !== null
+          ? <button type="button" onClick={onRetryFinalization}>Retry finalization</button>
+          : onRetry === null
+            ? null
+            : <button type="button" onClick={onRetry}>Retry</button>}
       </div>
     );
   }
