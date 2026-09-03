@@ -251,6 +251,74 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     assert.deepEqual(incompatible, { ok: false, reason: "Square Image cannot make the production aspect 16:9." });
   });
 
+  it("attaches a shot's filed storyboard frame and routes it as a start frame where supported", async () => {
+    const { store } = await openWorld();
+    const world = store.getBundle();
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const frameArtifactId = newId("ar");
+    world.artifacts.push({
+      id: frameArtifactId,
+      kind: "image",
+      file: "frame-sh_12.png",
+      hash: "sha256:cafebabecafebabe",
+      origin: { by: "user" },
+      links: ["sh_12"],
+      production: "saltlight",
+      created: CLOCK(),
+    });
+    production.selections["sh_12"] = {
+      ...production.selections["sh_12"],
+      startFrameArtifactId: frameArtifactId,
+      trimInSec: production.selections["sh_12"]?.trimInSec ?? 0,
+    };
+
+    const image = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(image.ok);
+    if (!image.ok) return;
+    const imageFrame = image.prefill.references.find((reference) => reference.subjectRole === "board-frame");
+    assert.ok(imageFrame);
+    assert.deepEqual(imageFrame.source, {
+      source: "artifact",
+      artifactId: frameArtifactId,
+      hash: "sha256:cafebabecafebabe",
+    });
+    assert.equal(imageFrame.label, "Shot 12 · storyboard frame");
+    assert.equal(imageFrame.detail, "the storyboard frame for this shot");
+    assert.equal(image.prefill.composer.activeTokens.includes(imageFrame.token), true);
+
+    const firstFrameVideo = {
+      ...VIDEO_MODEL,
+      id: "first-frame-video",
+      displayName: "First Frame Video",
+      modes: {
+        generate: { locked: [] },
+        "first-frame": { route: "test/image-to-video", locked: ["aspect"] },
+      },
+    } satisfies ManifestModel;
+    const video = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: { ...MANIFEST, models: [IMAGE_MODEL, firstFrameVideo] },
+      sources: sourceReader,
+    });
+    assert.ok(video.ok);
+    if (!video.ok) return;
+    const videoFrame = video.prefill.references.find((reference) => reference.subjectRole === "board-frame");
+    assert.ok(videoFrame);
+    assert.deepEqual(video.prefill.composer.keyframeTokens, [videoFrame.token]);
+    assert.deepEqual(video.prefill.composer.activeTokens, []);
+  });
+
   it("prefills the current board as one exact-duration video and keeps unsupported audio visible", async () => {
     const { store } = await openWorld();
     const world = withVoiceSample(store.getBundle());
