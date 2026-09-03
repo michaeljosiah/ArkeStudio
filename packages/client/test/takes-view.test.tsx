@@ -144,6 +144,18 @@ function episodicState(count = 2): ClientState {
   });
 }
 
+function unassignedState(): ClientState {
+  return withSaltlight((production) => {
+    const withScenes = withSecondScene(production);
+    return {
+      ...withScenes,
+      meta: { ...withScenes.meta, kind: "series" },
+      episodes: [{ id: "ep_empty", version: 1, order: 1, title: "Episode 01", scenes: [] }],
+      episodeFiles: { ep_empty: "01-episode-01" },
+    };
+  });
+}
+
 describe("the takes, watched (turn 102c)", () => {
   it("opens on the takes with the accepted one marked, and the foot can act", () => {
     const html = render(FIXTURE_STATE, GENERATE);
@@ -238,6 +250,31 @@ describe("the takes, watched (turn 102c)", () => {
     input = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Episode"]')!;
     assert.equal(input.value, "03 · Chapter 3", "an unfinished episode keeps the navigator available");
     assert.ok(mounted.container.textContent?.includes("Nothing to review yet"));
+  });
+
+  it("keeps scenes outside every episode reachable as Unassigned (#773)", async () => {
+    const state = unassignedState();
+    const empty = render(state, GENERATE);
+    assert.ok(empty.includes('value="01 · Episode 01"'));
+    assert.ok(empty.includes("2 unassigned scenes are available in the episode picker."));
+    assert.ok(!empty.includes("Shot 12"), "the empty episode does not silently borrow loose scenes");
+
+    const linked = render(state, `${GENERATE}?shot=sh_20`);
+    assert.ok(linked.includes('value="Unassigned"'), "a loose shot deep link resolves to its real scope");
+    assert.ok(linked.includes("Shot 20"));
+
+    const mounted = await mount(state);
+    const input = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Episode"]')!;
+    await act(async () => input.click());
+    const option = [...mounted.container.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((candidate) => candidate.textContent?.includes("Unassigned"))!;
+    assert.ok(option.textContent?.includes("2 scenes"));
+    assert.equal(option.querySelector("img")?.getAttribute("loading"), "lazy", "accepted media labels the loose work");
+    await act(async () => option.click());
+
+    assert.equal(input.value, "Unassigned");
+    assert.ok(mounted.container.textContent?.includes("Shot 12"), "the first loose shot becomes current");
+    assert.ok(mounted.container.textContent?.includes("5 · The lamps hold"), "all loose scenes remain navigable");
   });
 
   it("never guesses the mark (review 2026-08-22): an acceptance on a hidden record marks nothing", () => {
